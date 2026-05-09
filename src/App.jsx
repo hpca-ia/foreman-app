@@ -1,4 +1,9 @@
 import { useState, useRef, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = "https://qxoincfvscvbqvoxamdi.supabase.co";
+const SUPABASE_KEY = "sb_publishable_UXB8WueKrn1zBSXfsTqJ0w_C61L3b77";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const USERS = [
   { id: 1, name: "Hernan",     role: "owner",     pin: "1234", avatar: "HE" },
@@ -41,46 +46,18 @@ const ESTADO = {
   bloqueado:     { label: "Bloqueado",   icon: "🚫" },
 };
 
-const TAREAS_INICIALES = [
-  {
-    id: 4, title: "Comprar carro para transportar materiales", project: 1, assignee: 1, createdBy: 1,
-    type: "Compra", due: "2026-05-09", priority: "urgente", status: "pendiente",
-    notes: "Vehículo para transporte de materiales en BdP Condado. Resolver hoy.",
-    comments: []
-  },
-  {
-    id: 1, title: "Probar inicio de sesión", project: 10, assignee: 2, createdBy: 1,
-    type: "Otro", due: "2026-05-10", priority: "alta", status: "pendiente",
-    notes: "Johanna verifica que puede entrar con su PIN 2345",
-    comments: [
-      { id: 1, userId: 1, text: "Johanna, por favor confirma que pudiste entrar sin problema 👍", timestamp: "2026-05-09T09:00:00" }
-    ]
-  },
-  {
-    id: 2, title: "Johanna crea una tarea para Hernan", project: 10, assignee: 1, createdBy: 2,
-    type: "Otro", due: "2026-05-11", priority: "media", status: "pendiente",
-    notes: "Prueba de flujo: asistente crea tarea para el director",
-    comments: []
-  },
-  {
-    id: 3, title: "Probar recordatorio WhatsApp", project: 10, assignee: 2, createdBy: 1,
-    type: "Llamada", due: "2026-05-12", priority: "media", status: "pendiente",
-    notes: "Enviar mensaje de prueba y confirmar que llega bien",
-    comments: []
-  },
-];
-
 const getProject = id => PROJECTS.find(p => p.id === id);
 const getUser    = id => USERS.find(u => u.id === id);
 const esAdmin    = role => role === "owner" || role === "assistant";
 
 function daysUntil(dateStr) {
-  const today = new Date("2026-05-09");
+  const today = new Date();
+  today.setHours(0,0,0,0);
   return Math.ceil((new Date(dateStr) - today) / 86400000);
 }
 
 function timeAgo(ts) {
-  const now  = new Date("2026-05-09T12:00:00");
+  const now  = new Date();
   const then = new Date(ts);
   const mins = Math.floor((now - then) / 60000);
   if (mins < 1)  return "ahora";
@@ -90,7 +67,6 @@ function timeAgo(ts) {
   return `hace ${Math.floor(hrs/24)}d`;
 }
 
-// ── AVATAR ─────────────────────────────────────────────────────────────────
 function Avatar({ initials, size = 32, color = "#E8622A" }) {
   return (
     <div style={{ width: size, height: size, borderRadius: "50%", background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.34, fontWeight: 700, flexShrink: 0, fontFamily: "'DM Mono', monospace" }}>
@@ -130,8 +106,7 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;600;700&display=swap'); *{box-sizing:border-box}`}</style>
-
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;600;700&display=swap'); *{box-sizing:border-box} @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
       <div style={{ marginBottom: 32, textAlign: "center" }}>
         <div style={{ fontSize: 9, color: "#E8622A", letterSpacing: 3, fontWeight: 700, fontFamily: "'DM Mono', monospace" }}>FOREMAN</div>
         <div style={{ fontSize: 28, color: "#fff", fontWeight: 700, letterSpacing: -1, fontFamily: "'DM Mono', monospace" }}>by NOVA</div>
@@ -180,55 +155,64 @@ function LoginScreen({ onLogin }) {
             ))}
           </div>
           {error && <div style={{ color: "#FF3B30", fontSize: 13, marginTop: 16, fontFamily: "'DM Mono', monospace" }}>{error}</div>}
-          <div style={{ color: "#8E8E93", fontSize: 10, marginTop: 24, fontFamily: "'DM Mono', monospace" }}>Hernan: 1234 · Johanna: 2345 · Equipo: 300X</div>
         </div>
       )}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
     </div>
   );
 }
 
-// ── CHAT DE TAREA ──────────────────────────────────────────────────────────
-function ChatTarea({ task, currentUser, onAddComment, onClose }) {
-  const [texto, setTexto] = useState("");
+// ── CHAT ───────────────────────────────────────────────────────────────────
+function ChatTarea({ task, currentUser, onClose }) {
+  const [texto, setTexto]       = useState("");
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading]   = useState(true);
   const bottomRef = useRef(null);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [task.comments]);
+  useEffect(() => {
+    fetchComments();
+    const channel = supabase.channel(`comments-${task.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "comments", filter: `task_id=eq.${task.id}` },
+        payload => setComments(prev => [...prev, payload.new]))
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [task.id]);
 
-  function enviar() {
-    if (!texto.trim()) return;
-    onAddComment(task.id, texto.trim());
-    setTexto("");
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [comments]);
+
+  async function fetchComments() {
+    const { data } = await supabase.from("comments").select("*").eq("task_id", task.id).order("created_at", { ascending: true });
+    setComments(data || []);
+    setLoading(false);
   }
 
-  const proyecto = getProject(task.project);
+  async function enviar() {
+    if (!texto.trim()) return;
+    const msg = texto.trim();
+    setTexto("");
+    await supabase.from("comments").insert({ task_id: task.id, user_id: currentUser.id, text: msg });
+  }
+
+  const proyecto = getProject(task.project_id);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 200, padding: "0" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 200 }}>
       <div style={{ background: "#111", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 540, maxHeight: "90vh", display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.1)", borderBottom: "none" }}>
-
-        {/* Header */}
         <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 4, height: 36, borderRadius: 2, background: proyecto?.color, flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: "'DM Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{task.title}</div>
-              <div style={{ color: "#8E8E93", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{proyecto?.name} · {task.comments.length} comentario{task.comments.length !== 1 ? "s" : ""}</div>
+              <div style={{ color: "#8E8E93", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{proyecto?.name} · {comments.length} comentario{comments.length !== 1 ? "s" : ""}</div>
             </div>
             <button onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "none", borderRadius: 8, width: 32, height: 32, color: "#8E8E93", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>×</button>
           </div>
         </div>
-
-        {/* Mensajes */}
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-          {task.comments.length === 0 && (
-            <div style={{ textAlign: "center", color: "#8E8E93", fontFamily: "'DM Mono', monospace", fontSize: 12, padding: "30px 0" }}>
-              💬 Sin comentarios aún.<br />Sé el primero en escribir.
-            </div>
-          )}
-          {task.comments.map(c => {
-            const autor = getUser(c.userId);
-            const esMio = c.userId === currentUser.id;
+          {loading && <div style={{ textAlign: "center", color: "#8E8E93", fontFamily: "'DM Mono', monospace", fontSize: 12, padding: "30px 0" }}>Cargando...</div>}
+          {!loading && comments.length === 0 && <div style={{ textAlign: "center", color: "#8E8E93", fontFamily: "'DM Mono', monospace", fontSize: 12, padding: "30px 0" }}>💬 Sin comentarios aún.</div>}
+          {comments.map(c => {
+            const autor = getUser(c.user_id);
+            const esMio = c.user_id === currentUser.id;
             return (
               <div key={c.id} style={{ display: "flex", flexDirection: esMio ? "row-reverse" : "row", gap: 10, alignItems: "flex-end" }}>
                 {!esMio && <Avatar initials={autor?.avatar || "??"} size={30} color={autor?.role==="owner"?"#E8622A":autor?.role==="assistant"?"#AF52DE":"#2A8CE8"} />}
@@ -237,26 +221,18 @@ function ChatTarea({ task, currentUser, onAddComment, onClose }) {
                   <div style={{ background: esMio ? "#E8622A" : "#2C2C2E", borderRadius: esMio ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "10px 14px" }}>
                     <div style={{ color: "#fff", fontSize: 14, lineHeight: 1.5, fontFamily: "Georgia, serif" }}>{c.text}</div>
                   </div>
-                  <div style={{ color: "#8E8E93", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 3, textAlign: esMio ? "right" : "left", paddingLeft: esMio ? 0 : 4 }}>{timeAgo(c.timestamp)}</div>
+                  <div style={{ color: "#8E8E93", fontSize: 10, fontFamily: "'DM Mono', monospace", marginTop: 3, textAlign: esMio ? "right" : "left" }}>{timeAgo(c.created_at)}</div>
                 </div>
               </div>
             );
           })}
           <div ref={bottomRef} />
         </div>
-
-        {/* Input */}
         <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.08)", flexShrink: 0, display: "flex", gap: 10, alignItems: "flex-end" }}>
           <Avatar initials={currentUser.avatar} size={34} color={currentUser.role==="owner"?"#E8622A":currentUser.role==="assistant"?"#AF52DE":"#2A8CE8"} />
-          <textarea
-            value={texto}
-            onChange={e => setTexto(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
-            placeholder="Escribe un comentario..."
-            rows={1}
-            style={{ flex: 1, background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#E8E8E0", fontSize: 14, fontFamily: "Georgia, serif", padding: "10px 14px", resize: "none", outline: "none", lineHeight: 1.5 }}
-          />
-          <button onClick={enviar} disabled={!texto.trim()} style={{ background: texto.trim() ? "#E8622A" : "#2C2C2E", border: "none", borderRadius: 10, width: 40, height: 40, color: texto.trim() ? "#fff" : "#8E8E93", cursor: texto.trim() ? "pointer" : "default", fontSize: 18, flexShrink: 0, transition: "background 0.15s" }}>↑</button>
+          <textarea value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={e => { if (e.key==="Enter"&&!e.shiftKey) { e.preventDefault(); enviar(); } }} placeholder="Escribe un comentario..." rows={1}
+            style={{ flex: 1, background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#E8E8E0", fontSize: 14, fontFamily: "Georgia, serif", padding: "10px 14px", resize: "none", outline: "none", lineHeight: 1.5 }} />
+          <button onClick={enviar} disabled={!texto.trim()} style={{ background: texto.trim() ? "#E8622A" : "#2C2C2E", border: "none", borderRadius: 10, width: 40, height: 40, color: texto.trim() ? "#fff" : "#8E8E93", cursor: texto.trim() ? "pointer" : "default", fontSize: 18, flexShrink: 0 }}>↑</button>
         </div>
       </div>
     </div>
@@ -268,9 +244,9 @@ function WhatsApp({ task }) {
   const [msg, setMsg]     = useState("");
   const [loading, setLoading] = useState(false);
   const [open, setOpen]   = useState(false);
-  const m = task.assignee ? getUser(task.assignee) : null;
-  const p = getProject(task.project);
-  const d = daysUntil(task.due);
+  const m = task.assignee_id ? getUser(task.assignee_id) : null;
+  const p = getProject(task.project_id);
+  const d = daysUntil(task.due_date);
 
   async function generar() {
     setLoading(true); setOpen(true);
@@ -301,8 +277,7 @@ function WhatsApp({ task }) {
               <div><div style={{ color: "#fff", fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 700 }}>Recordatorio WhatsApp</div>{m && <div style={{ color: "#8E8E93", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{m.name}</div>}</div>
               <button onClick={() => setOpen(false)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#8E8E93", cursor: "pointer", fontSize: 20 }}>×</button>
             </div>
-            {loading
-              ? <div style={{ color: "#8E8E93", fontFamily: "'DM Mono', monospace", fontSize: 12, padding: "20px 0", textAlign: "center" }}>✍️ IA redactando...</div>
+            {loading ? <div style={{ color: "#8E8E93", fontFamily: "'DM Mono', monospace", fontSize: 12, padding: "20px 0", textAlign: "center" }}>✍️ NOVA redactando...</div>
               : <>
                   <textarea value={msg} onChange={e => setMsg(e.target.value)} style={{ width: "100%", minHeight: 100, background: "#2C2C2E", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "#E8E8E0", fontSize: 14, fontFamily: "Georgia, serif", padding: 12, resize: "vertical", boxSizing: "border-box", lineHeight: 1.6, outline: "none" }} />
                   <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
@@ -328,16 +303,16 @@ function AIBriefing({ tasks, currentUser }) {
   async function obtener() {
     setLoading(true); setVisible(true);
     const resumen = tasks.map(t => {
-      const d = daysUntil(t.due);
-      return `- [${t.priority.toUpperCase()}] ${t.title} | ${getProject(t.project)?.name} | ${t.assignee?getUser(t.assignee)?.name:"sin asignar"} | ${d<0?`VENCIDA ${Math.abs(d)}d`:d===0?"HOY":`en ${d}d`} | ${t.status} | ${t.comments.length} comentarios`;
+      const d = daysUntil(t.due_date);
+      return `- [${t.priority.toUpperCase()}] ${t.title} | ${getProject(t.project_id)?.name} | ${t.assignee_id?getUser(t.assignee_id)?.name:"sin asignar"} | ${d<0?`VENCIDA ${Math.abs(d)}d`:d===0?"HOY":`en ${d}d`} | ${t.status}`;
     }).join("\n");
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514", max_tokens: 1000,
-          system: `Eres el Jefe de Gabinete de Hernan, director de constructora, usuario de FOREMAN. Briefings directos en español. Máx 4 puntos. Crítico primero. Menciona proyectos y personas. Sin rodeos.`,
-          messages: [{ role: "user", content: `Tareas:\n${resumen}\n\nBriefing matutino para ${currentUser.name}.` }]
+          system: `Eres NOVA, asistente IA de Hernan, director de constructora. Briefings directos en español. Máx 4 puntos. Crítico primero. Sin rodeos.`,
+          messages: [{ role: "user", content: `Tareas:\n${resumen}\n\nBriefing para ${currentUser.name}.` }]
         })
       });
       const data = await res.json();
@@ -348,7 +323,7 @@ function AIBriefing({ tasks, currentUser }) {
 
   if (!visible) return (
     <button onClick={obtener} style={{ background: "linear-gradient(135deg,#E8622A,#FF9500)", border: "none", borderRadius: 12, padding: "13px 18px", color: "#fff", fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", boxShadow: "0 4px 20px rgba(232,98,42,0.3)", marginBottom: 20 }}>
-      <span style={{ fontSize: 18 }}>🤖</span><span>BRIEFING DEL DÍA</span><span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 11 }}>Analizar todo</span>
+      <span style={{ fontSize: 18 }}>🤖</span><span>NOVA — BRIEFING DEL DÍA</span><span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 11 }}>Analizar todo</span>
     </button>
   );
 
@@ -356,7 +331,7 @@ function AIBriefing({ tasks, currentUser }) {
     <div style={{ background: "rgba(232,98,42,0.08)", border: "1px solid rgba(232,98,42,0.25)", borderRadius: 12, padding: 16, marginBottom: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <span>🤖</span>
-        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, fontWeight: 700, color: "#E8622A" }}>BRIEFING IA</span>
+        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, fontWeight: 700, color: "#E8622A" }}>NOVA</span>
         <button onClick={() => setVisible(false)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#8E8E93", cursor: "pointer", fontSize: 18 }}>×</button>
       </div>
       {loading ? <div style={{ color: "#8E8E93", fontFamily: "'DM Mono', monospace", fontSize: 12 }}>Analizando {tasks.length} tareas...</div>
@@ -367,53 +342,41 @@ function AIBriefing({ tasks, currentUser }) {
 }
 
 // ── TARJETA TAREA ──────────────────────────────────────────────────────────
-function TarjetaTarea({ task, currentUser, onCambiarEstado, onEditar, onAbrirChat, unreadCount }) {
-  const proyecto = getProject(task.project);
-  const asignado = task.assignee ? getUser(task.assignee) : null;
-  const creador  = getUser(task.createdBy);
-  const pC = PRIORIDAD[task.priority];
-  const eC = ESTADO[task.status];
-  const admin      = esAdmin(currentUser.role);
-  const esMia      = task.assignee === currentUser.id;
+function TarjetaTarea({ task, currentUser, onCambiarEstado, onEditar, onAbrirChat, commentCount }) {
+  const proyecto = getProject(task.project_id);
+  const asignado = task.assignee_id ? getUser(task.assignee_id) : null;
+  const creador  = getUser(task.created_by);
+  const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;
+  const eC = ESTADO[task.status] || ESTADO.pendiente;
+  const admin = esAdmin(currentUser.role);
+  const esMia = task.assignee_id === currentUser.id;
   const puedeCambiar = admin || esMia;
 
   return (
     <div style={{ background: "#1C1C1E", border: `1px solid rgba(255,255,255,${task.status==="listo"?"0.04":"0.09"})`, borderLeft: `3px solid ${proyecto?.color||"#E8622A"}`, borderRadius: 12, padding: 16, marginBottom: 10, opacity: task.status==="listo"?0.55:1 }}>
       <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 6 }}>
         <span style={{ background: pC.bg, color: pC.color, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, fontFamily: "'DM Mono', monospace" }}>{pC.label}</span>
-        <span style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93", fontSize: 10, padding: "2px 7px", borderRadius: 4, fontFamily: "'DM Mono', monospace" }}>{task.type.toUpperCase()}</span>
+        <span style={{ background: "rgba(255,255,255,0.05)", color: "#8E8E93", fontSize: 10, padding: "2px 7px", borderRadius: 4, fontFamily: "'DM Mono', monospace" }}>{(task.type||"").toUpperCase()}</span>
         <span style={{ color: "#8E8E93", fontSize: 11 }}>{eC.icon} {eC.label}</span>
       </div>
-
       <div style={{ color: "#E8E8E0", fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: "Georgia, serif" }}>{task.title}</div>
       {task.notes && <div style={{ color: "#8E8E93", fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>{task.notes}</div>}
-
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ background: `${proyecto?.color}20`, color: proyecto?.color, fontSize: 11, padding: "2px 8px", borderRadius: 20, fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{proyecto?.name}</span>
-        {asignado
-          ? <div style={{ display:"flex", alignItems:"center", gap:5 }}><Avatar initials={asignado.avatar} size={18} color={proyecto?.color}/><span style={{ color:"#8E8E93", fontSize:12 }}>{asignado.name}</span></div>
+        {asignado ? <div style={{ display:"flex", alignItems:"center", gap:5 }}><Avatar initials={asignado.avatar} size={18} color={proyecto?.color}/><span style={{ color:"#8E8E93", fontSize:12 }}>{asignado.name}</span></div>
           : <span style={{ color:"#FF3B30", fontSize:11, fontFamily:"'DM Mono', monospace" }}>⚠ Sin asignar</span>}
-        <FechaBadge due={task.due} />
+        <FechaBadge due={task.due_date} />
         {creador && <span style={{ color:"#8E8E93", fontSize:10, fontFamily:"'DM Mono', monospace" }}>por {creador.name}</span>}
       </div>
-
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
         {puedeCambiar && (
           <select value={task.status} onChange={e => onCambiarEstado(task.id, e.target.value)} style={{ background:"#2C2C2E", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#E8E8E0", padding:"6px 10px", fontSize:12, fontFamily:"'DM Mono', monospace", cursor:"pointer", outline:"none" }}>
             {Object.entries(ESTADO).map(([k,v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
           </select>
         )}
-
-        {/* CHAT BUTTON */}
-        <button onClick={() => onAbrirChat(task)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:8, padding:"6px 12px", color:"#E8E8E0", fontSize:12, fontFamily:"'DM Mono', monospace", cursor:"pointer", display:"flex", alignItems:"center", gap:6, position:"relative" }}>
-          💬 Chat
-          {task.comments.length > 0 && (
-            <span style={{ background: unreadCount > 0 ? "#E8622A" : "rgba(255,255,255,0.15)", color:"#fff", fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:10, fontFamily:"'DM Mono', monospace" }}>
-              {task.comments.length}
-            </span>
-          )}
+        <button onClick={() => onAbrirChat(task)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:8, padding:"6px 12px", color:"#E8E8E0", fontSize:12, fontFamily:"'DM Mono', monospace", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+          💬 Chat {commentCount > 0 && <span style={{ background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:10 }}>{commentCount}</span>}
         </button>
-
         {admin && <button onClick={() => onEditar(task)} style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, padding:"6px 12px", color:"#8E8E93", fontSize:12, fontFamily:"'DM Mono', monospace", cursor:"pointer" }}>✏️</button>}
         {admin && <WhatsApp task={task} />}
       </div>
@@ -424,7 +387,12 @@ function TarjetaTarea({ task, currentUser, onCambiarEstado, onEditar, onAbrirCha
 // ── MODAL TAREA ────────────────────────────────────────────────────────────
 function ModalTarea({ onCerrar, onGuardar, editTask, currentUser }) {
   const admin = esAdmin(currentUser.role);
-  const [form, setForm] = useState(editTask || { title:"", project:10, assignee:currentUser.id, createdBy:currentUser.id, type:"Llamada", due:"", priority:"media", status:"pendiente", notes:"", comments:[] });
+  const [form, setForm] = useState(editTask ? {
+    title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
+    type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
+    status: editTask.status, notes: editTask.notes || ""
+  } : { title:"", project_id:10, assignee_id:currentUser.id, type:"Llamada", due_date:"", priority:"media", status:"pendiente", notes:"" });
+
   const inp = (f,v) => setForm(p => ({...p,[f]:v}));
   const lS = { color:"#8E8E93", fontSize:11, fontFamily:"'DM Mono', monospace", letterSpacing:0.5, marginBottom:4, display:"block" };
   const iS = { width:"100%", background:"#2C2C2E", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#E8E8E0", padding:"10px 12px", fontSize:14, fontFamily:"Georgia, serif", boxSizing:"border-box", outline:"none" };
@@ -439,17 +407,17 @@ function ModalTarea({ onCerrar, onGuardar, editTask, currentUser }) {
         <div style={{ display:"grid", gap:14 }}>
           <div><label style={lS}>TÍTULO *</label><input value={form.title} onChange={e=>inp("title",e.target.value)} placeholder="¿Qué hay que hacer?" style={iS}/></div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div><label style={lS}>PROYECTO</label><select value={form.project} onChange={e=>inp("project",Number(e.target.value))} style={iS}>{PROJECTS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div><label style={lS}>PROYECTO</label><select value={form.project_id} onChange={e=>inp("project_id",Number(e.target.value))} style={iS}>{PROJECTS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
             <div><label style={lS}>TIPO</label><select value={form.type} onChange={e=>inp("type",e.target.value)} style={iS}>{TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
-            <div><label style={lS}>ASIGNAR A</label><select value={form.assignee||""} onChange={e=>inp("assignee",e.target.value?Number(e.target.value):null)} style={iS}><option value="">Sin asignar</option>{USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+            <div><label style={lS}>ASIGNAR A</label><select value={form.assignee_id||""} onChange={e=>inp("assignee_id",e.target.value?Number(e.target.value):null)} style={iS}><option value="">Sin asignar</option>{USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
             <div><label style={lS}>PRIORIDAD</label><select value={form.priority} onChange={e=>inp("priority",e.target.value)} style={iS} disabled={!admin}>{Object.keys(PRIORIDAD).map(k=><option key={k} value={k}>{k.toUpperCase()}</option>)}</select></div>
           </div>
-          <div><label style={lS}>FECHA LÍMITE *</label><input type="date" value={form.due} onChange={e=>inp("due",e.target.value)} style={iS}/></div>
+          <div><label style={lS}>FECHA LÍMITE *</label><input type="date" value={form.due_date} onChange={e=>inp("due_date",e.target.value)} style={iS}/></div>
           <div><label style={lS}>NOTAS</label><textarea value={form.notes} onChange={e=>inp("notes",e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{...iS,minHeight:70,resize:"vertical"}}/></div>
         </div>
-        {(!form.title||!form.due)
+        {(!form.title||!form.due_date)
           ? <div style={{ color:"#8E8E93", fontSize:11, fontFamily:"'DM Mono', monospace", marginTop:14, textAlign:"center" }}>Completa título y fecha para guardar</div>
-          : <button onClick={()=>{onGuardar({...form,createdBy:form.createdBy||currentUser.id});onCerrar();}} style={{ width:"100%", marginTop:20, background:"linear-gradient(135deg,#E8622A,#FF9500)", border:"none", borderRadius:10, padding:14, color:"#fff", fontFamily:"'DM Mono', monospace", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+          : <button onClick={()=>{ onGuardar(form, editTask?.id); onCerrar(); }} style={{ width:"100%", marginTop:20, background:"linear-gradient(135deg,#E8622A,#FF9500)", border:"none", borderRadius:10, padding:14, color:"#fff", fontFamily:"'DM Mono', monospace", fontSize:14, fontWeight:700, cursor:"pointer" }}>
               {editTask?"GUARDAR CAMBIOS":"AGREGAR TAREA"}
             </button>
         }
@@ -461,7 +429,9 @@ function ModalTarea({ onCerrar, onGuardar, editTask, currentUser }) {
 // ── APP PRINCIPAL ──────────────────────────────────────────────────────────
 export default function App() {
   const [usuario, setUsuario]   = useState(null);
-  const [tareas, setTareas]     = useState(TAREAS_INICIALES);
+  const [tareas, setTareas]     = useState([]);
+  const [commentCounts, setCommentCounts] = useState({});
+  const [cargando, setCargando] = useState(false);
   const [vista, setVista]       = useState("tareas");
   const [filtro, setFiltro]     = useState("todas");
   const [filtroP, setFiltroP]   = useState("all");
@@ -469,45 +439,59 @@ export default function App() {
   const [editTask, setEditTask]   = useState(null);
   const [chatTarea, setChatTarea] = useState(null);
 
+  useEffect(() => {
+    if (!usuario) return;
+    fetchTareas();
+    const channel = supabase.channel("tasks-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => fetchTareas())
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [usuario]);
+
+  async function fetchTareas() {
+    setCargando(true);
+    const { data } = await supabase.from("tasks").select("*").order("created_at", { ascending: false });
+    setTareas(data || []);
+    if (data) {
+      const counts = {};
+      await Promise.all(data.map(async t => {
+        const { count } = await supabase.from("comments").select("*", { count: "exact", head: true }).eq("task_id", t.id);
+        counts[t.id] = count || 0;
+      }));
+      setCommentCounts(counts);
+    }
+    setCargando(false);
+  }
+
+  async function cambiarEstado(id, estado) {
+    await supabase.from("tasks").update({ status: estado }).eq("id", id);
+    setTareas(ts => ts.map(t => t.id===id ? {...t, status:estado} : t));
+  }
+
+  async function guardarTarea(form, id) {
+    if (id) {
+      await supabase.from("tasks").update(form).eq("id", id);
+    } else {
+      await supabase.from("tasks").insert({ ...form, created_by: usuario.id });
+    }
+    fetchTareas();
+    setEditTask(null);
+  }
+
   if (!usuario) return <LoginScreen onLogin={setUsuario} />;
 
   const admin = esAdmin(usuario.role);
 
-  function cambiarEstado(id, estado) {
-    setTareas(ts => ts.map(t => t.id===id ? {...t,status:estado} : t));
-  }
-
-  function guardarTarea(tarea) {
-    if (tarea.id) setTareas(ts => ts.map(t => t.id===tarea.id ? {...tarea, comments: t.comments} : t));
-    else setTareas(ts => [...ts, {...tarea, id:Date.now(), comments:[]}]);
-    setEditTask(null);
-  }
-
-  function agregarComentario(tareaId, texto) {
-    const nuevoComentario = {
-      id: Date.now(),
-      userId: usuario.id,
-      text: texto,
-      timestamp: new Date().toISOString(),
-    };
-    setTareas(ts => ts.map(t => t.id===tareaId ? {...t, comments:[...t.comments, nuevoComentario]} : t));
-    // Update chatTarea to reflect new comment
-    setChatTarea(prev => prev ? {...prev, comments:[...prev.comments, nuevoComentario]} : null);
-  }
-
-  // Sync chatTarea with latest task state
-  const chatTareaActual = chatTarea ? tareas.find(t => t.id===chatTarea.id) : null;
-
-  let visibles = admin ? tareas : tareas.filter(t => t.assignee===usuario.id || t.createdBy===usuario.id);
+  let visibles = admin ? tareas : tareas.filter(t => t.assignee_id===usuario.id || t.created_by===usuario.id);
   if (filtro==="pendiente")  visibles = visibles.filter(t=>t.status==="pendiente");
-  if (filtro==="urgente")    visibles = visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due)<=1));
+  if (filtro==="urgente")    visibles = visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due_date)<=1));
   if (filtro==="listo")      visibles = visibles.filter(t=>t.status==="listo");
-  if (filtroP!=="all")       visibles = visibles.filter(t=>t.project===Number(filtroP));
+  if (filtroP!=="all")       visibles = visibles.filter(t=>t.project_id===Number(filtroP));
 
   const pendientes = tareas.filter(t=>t.status!=="listo");
-  const vencidas   = pendientes.filter(t=>daysUntil(t.due)<0);
-  const urgentes   = pendientes.filter(t=>t.priority==="urgente"||daysUntil(t.due)<=1);
-  const totalComentarios = tareas.reduce((s,t)=>s+t.comments.length,0);
+  const vencidas   = pendientes.filter(t=>daysUntil(t.due_date)<0);
+  const urgentes   = pendientes.filter(t=>t.priority==="urgente"||daysUntil(t.due_date)<=1);
+  const totalComentarios = Object.values(commentCounts).reduce((s,v)=>s+v,0);
 
   const tabS = a => ({ padding:"8px 14px", borderRadius:8, border:"none", cursor:"pointer", fontFamily:"'DM Mono', monospace", fontSize:12, fontWeight:600, background:a?"#E8622A":"rgba(255,255,255,0.05)", color:a?"#fff":"#8E8E93", transition:"all 0.15s" });
 
@@ -567,7 +551,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* CUERPO */}
       <div style={{ padding:"20px 16px" }}>
         {admin&&vista==="tareas"&&<AIBriefing tasks={tareas} currentUser={usuario}/>}
 
@@ -584,10 +567,10 @@ export default function App() {
                 </select>
               )}
             </div>
-            {visibles.length===0
-              ? <div style={{ textAlign:"center", color:"#8E8E93", padding:"40px 0", fontFamily:"'DM Mono', monospace", fontSize:13 }}>Sin tareas aquí. 🏗</div>
-              : visibles.sort((a,b)=>{const o={urgente:0,alta:1,media:2,baja:3};return(o[a.priority]-o[b.priority])||(daysUntil(a.due)-daysUntil(b.due));})
-                  .map(t=><TarjetaTarea key={t.id} task={t} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t=>{setEditTask(t);setShowModal(true);}} onAbrirChat={setChatTarea} unreadCount={t.comments.length}/>)
+            {cargando ? <div style={{ textAlign:"center", color:"#8E8E93", padding:"40px 0", fontFamily:"'DM Mono', monospace", fontSize:13 }}>Cargando tareas...</div>
+              : visibles.length===0 ? <div style={{ textAlign:"center", color:"#8E8E93", padding:"40px 0", fontFamily:"'DM Mono', monospace", fontSize:13 }}>Sin tareas. Toca + para crear una. 🏗</div>
+              : visibles.sort((a,b)=>{ const o={urgente:0,alta:1,media:2,baja:3}; return(o[a.priority]-o[b.priority])||(daysUntil(a.due_date)-daysUntil(b.due_date)); })
+                  .map(t=><TarjetaTarea key={t.id} task={t} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t=>{setEditTask(t);setShowModal(true);}} onAbrirChat={setChatTarea} commentCount={commentCounts[t.id]||0}/>)
             }
           </>
         )}
@@ -595,8 +578,8 @@ export default function App() {
         {admin&&vista==="equipo"&&(
           <div>
             {USERS.map(m=>{
-              const mt=tareas.filter(t=>t.assignee===m.id&&t.status!=="listo");
-              const mo=mt.filter(t=>daysUntil(t.due)<0);
+              const mt=tareas.filter(t=>t.assignee_id===m.id&&t.status!=="listo");
+              const mo=mt.filter(t=>daysUntil(t.due_date)<0);
               return(
                 <div key={m.id} style={{ background:"#1C1C1E", borderRadius:12, padding:16, marginBottom:12, border:"1px solid rgba(255,255,255,0.08)" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
@@ -612,8 +595,8 @@ export default function App() {
                   </div>
                   {mt.length>0?mt.map(t=>(
                     <div key={t.id} style={{ background:"#2C2C2E", borderRadius:8, padding:"8px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                      <div><div style={{ color:"#E8E8E0", fontSize:13 }}>{t.title}</div><div style={{ color:"#8E8E93", fontSize:11, fontFamily:"'DM Mono', monospace" }}>{getProject(t.project)?.name}</div></div>
-                      <FechaBadge due={t.due}/>
+                      <div><div style={{ color:"#E8E8E0", fontSize:13 }}>{t.title}</div><div style={{ color:"#8E8E93", fontSize:11, fontFamily:"'DM Mono', monospace" }}>{getProject(t.project_id)?.name}</div></div>
+                      <FechaBadge due={t.due_date}/>
                     </div>
                   )):<div style={{ color:"#8E8E93", fontSize:12, fontFamily:"'DM Mono', monospace", textAlign:"center", padding:"6px 0" }}>✅ Sin pendientes</div>}
                 </div>
@@ -625,7 +608,7 @@ export default function App() {
         {admin&&vista==="proyectos"&&(
           <div>
             {PROJECTS.map(p=>{
-              const pt=tareas.filter(t=>t.project===p.id);
+              const pt=tareas.filter(t=>t.project_id===p.id);
               const pPen=pt.filter(t=>t.status!=="listo");
               const pOk=pt.filter(t=>t.status==="listo");
               const pct=pt.length>0?Math.round((pOk.length/pt.length)*100):0;
@@ -642,12 +625,6 @@ export default function App() {
                     <span style={{ color:"#8E8E93", fontSize:12, fontFamily:"'DM Mono', monospace" }}><span style={{ color:"#E8622A", fontWeight:700 }}>{pPen.length}</span> abiertas</span>
                     <span style={{ color:"#8E8E93", fontSize:12, fontFamily:"'DM Mono', monospace" }}><span style={{ color:"#34C759", fontWeight:700 }}>{pOk.length}</span> listas</span>
                   </div>
-                  {pPen.filter(t=>daysUntil(t.due)<=2).length>0&&(
-                    <div style={{ marginTop:10, background:"rgba(255,149,0,0.1)", borderRadius:8, padding:"8px 10px" }}>
-                      <div style={{ color:"#FF9500", fontSize:11, fontFamily:"'DM Mono', monospace", fontWeight:700, marginBottom:4 }}>⚠ PRÓXIMAS</div>
-                      {pPen.filter(t=>daysUntil(t.due)<=2).map(t=><div key={t.id} style={{ color:"#E8E8E0", fontSize:12, marginBottom:2 }}>· {t.title}</div>)}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -656,7 +633,7 @@ export default function App() {
       </div>
 
       {showModal&&<ModalTarea editTask={editTask} currentUser={usuario} onCerrar={()=>{setShowModal(false);setEditTask(null);}} onGuardar={guardarTarea}/>}
-      {chatTareaActual&&<ChatTarea task={chatTareaActual} currentUser={usuario} onAddComment={agregarComentario} onClose={()=>setChatTarea(null)}/>}
+      {chatTarea&&<ChatTarea task={chatTarea} currentUser={usuario} onClose={()=>setChatTarea(null)}/>}
     </div>
   );
 }
