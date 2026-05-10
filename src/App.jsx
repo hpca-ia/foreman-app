@@ -396,7 +396,7 @@ function ChatTarea({ task, currentUser, users, projects, onClose }) {
   const [texto, setTexto] = useState("");
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("chat");
+
   const bottomRef = useRef(null);
   const channelRef = useRef(null);
   const gU = id => users.find(u=>u.id===id);
@@ -459,15 +459,13 @@ function ChatTarea({ task, currentUser, users, projects, onClose }) {
             <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:30,height:30,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
           </div>
           <div style={{display:"flex",gap:4,borderBottom:"1px solid #F3F4F6",marginBottom:0}}>
-            {[["chat","💬 Chat"],["archivos","📎 Archivos"]].map(([t,l])=>(
-              <button key={t} onClick={()=>setTab(t)} style={{padding:"7px 14px",border:"none",borderBottom:tab===t?"2px solid #E8622A":"2px solid transparent",background:"transparent",color:tab===t?"#E8622A":"#6B7280",fontSize:12,fontWeight:tab===t?600:400,cursor:"pointer",marginBottom:-1}}>
-                {l}
-              </button>
-            ))}
+            <button style={{padding:"7px 14px",border:"none",borderBottom:"2px solid #E8622A",background:"transparent",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"default",marginBottom:-1}}>
+              💬 Chat en vivo
+            </button>
           </div>
         </div>
 
-        {tab === "chat" && (
+        {true && (
           <>
             <div style={{flex:1,overflowY:"auto",padding:"12px 18px",display:"flex",flexDirection:"column",gap:10,minHeight:200}}>
               {loading && <div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"20px 0"}}>Cargando...</div>}
@@ -499,11 +497,7 @@ function ChatTarea({ task, currentUser, users, projects, onClose }) {
           </>
         )}
 
-        {tab === "archivos" && (
-          <div style={{flex:1,overflowY:"auto",padding:"12px 18px 20px"}}>
-            <FileSection taskId={task.id}/>
-          </div>
-        )}
+
       </div>
     </div>
   );
@@ -568,10 +562,13 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
   const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;
   const eC = ESTADO[task.status] || ESTADO.pendiente;
   const admin = esAdmin(currentUser.role);
-  const puedeCambiar = admin || task.assignee_id === currentUser.id;
+  // Solo el asignado puede cambiar SU tarea. Admins pueden todo. Nadie puede cambiar la tarea de otro miembro.
+  const esMiTarea = task.assignee_id === currentUser.id;
+  const puedeCambiar = admin || esMiTarea;
   const esListo = task.status === "listo";
 
   function handleEstado(nuevoEstado) {
+    if (!puedeCambiar) return;
     onCambiarEstado(task.id, nuevoEstado);
   }
 
@@ -594,6 +591,7 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
         {!esListo && admin && <span style={{color:"#D1D5DB",fontSize:10}}>{task.priority==="urgente"?"c/3h":task.priority==="alta"?"c/6h":"diario"}</span>}
         {crea && <span style={{color:"#D1D5DB",fontSize:10}}>por {crea.name}</span>}
       </div>
+      <FileSection taskId={task.id}/>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",paddingTop:8,borderTop:"1px solid #F9FAFB"}}>
         {puedeCambiar && (
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
