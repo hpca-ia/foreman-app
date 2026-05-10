@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://qxoincfvscvbqvoxamdi.supabase.co";
@@ -46,82 +46,98 @@ const ESTADO = {
 
 const esAdmin = role => role==="owner"||role==="assistant";
 
-function daysUntil(d){
-  const t=new Date(); t.setHours(0,0,0,0);
-  return Math.ceil((new Date(d)-t)/86400000);
+function loadFromStorage(key, fallback) {
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 }
-function timeAgo(ts){
-  const m=Math.floor((new Date()-new Date(ts))/60000);
-  if(m<1)return"ahora"; if(m<60)return`${m}m`;
-  const h=Math.floor(m/60); if(h<24)return`${h}h`;
-  return`${Math.floor(h/24)}d`;
+function saveToStorage(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
 }
 
-function Avatar({initials,size=32,color="#E8622A"}){
-  return <div style={{width:size,height:size,borderRadius:"50%",background:color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.32,fontWeight:700,flexShrink:0}}>{initials}</div>;
+function daysUntil(d) {
+  const t = new Date(); t.setHours(0,0,0,0);
+  return Math.ceil((new Date(d) - t) / 86400000);
+}
+function timeAgo(ts) {
+  const m = Math.floor((new Date() - new Date(ts)) / 60000);
+  if (m < 1) return "ahora"; if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h`;
+  return `${Math.floor(h/24)}d`;
+}
+function initials(name) {
+  return name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
 }
 
-function FechaBadge({due,status}){
-  if(status==="listo") return null;
-  const d=daysUntil(due);
-  const s={fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:20};
-  if(d<0) return <span style={{...s,color:"#DC2626",background:"#FEE2E2"}}>Vencida {Math.abs(d)}d</span>;
-  if(d===0) return <span style={{...s,color:"#D97706",background:"#FEF3C7"}}>Hoy</span>;
-  if(d<=2)  return <span style={{...s,color:"#D97706",background:"#FEF3C7",fontWeight:500}}>en {d}d</span>;
+function Avatar({ name, size=32, color="#E8622A" }) {
+  return <div style={{width:size,height:size,borderRadius:"50%",background:color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.32,fontWeight:700,flexShrink:0}}>{initials(name||"?")}</div>;
+}
+
+function FechaBadge({ due, status }) {
+  if (status === "listo") return null;
+  const d = daysUntil(due);
+  const s = {fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:20};
+  if (d < 0)  return <span style={{...s,color:"#DC2626",background:"#FEE2E2"}}>Vencida {Math.abs(d)}d</span>;
+  if (d === 0) return <span style={{...s,color:"#D97706",background:"#FEF3C7"}}>Hoy</span>;
+  if (d <= 2)  return <span style={{...s,color:"#D97706",background:"#FEF3C7",fontWeight:500}}>en {d}d</span>;
   return <span style={{...s,color:"#6B7280",background:"#F3F4F6",fontWeight:400}}>en {d}d</span>;
 }
 
 // ── LOGIN ──────────────────────────────────────────────────────────────────
-function LoginScreen({onLogin,users}){
-  const [sel,setSel]=useState(null);
-  const [pin,setPin]=useState("");
-  const [err,setErr]=useState("");
-  const [step,setStep]=useState("pick");
+function LoginScreen({ onLogin, users }) {
+  const [sel, setSel] = useState(null);
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+  const [step, setStep] = useState("pick");
 
-  useEffect(()=>{
-    try{
-      const s=localStorage.getItem("foreman_session");
-      if(s){const{userId,expires}=JSON.parse(s);if(new Date(expires)>new Date()){const u=users.find(u=>u.id===userId);if(u)onLogin(u);}}
-    }catch{}
-  },[]);
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("foreman_session");
+      if (s) { const {userId,expires} = JSON.parse(s); if (new Date(expires) > new Date()) { const u = users.find(u=>u.id===userId); if (u) onLogin(u); } }
+    } catch {}
+  }, []);
 
-  function sel2(u){setSel(u);setPin("");setErr("");setStep("pin");}
-  function handlePin(d){
-    if(pin.length>=4)return;
-    const n=pin+d; setPin(n);
-    if(n.length===4){setTimeout(()=>{
-      if(n===sel.pin){
-        const exp=new Date(); exp.setDate(exp.getDate()+7);
-        localStorage.setItem("foreman_session",JSON.stringify({userId:sel.id,expires:exp.toISOString()}));
-        onLogin(sel);
-      }else{setErr("PIN incorrecto");setPin("");}
-    },200);}
+  function selectUser(u) { setSel(u); setPin(""); setErr(""); setStep("pin"); }
+
+  function handlePin(d) {
+    if (pin.length >= 4) return;
+    const n = pin + d; setPin(n);
+    if (n.length === 4) {
+      setTimeout(() => {
+        if (n === sel.pin) {
+          const exp = new Date(); exp.setDate(exp.getDate() + 7);
+          saveToStorage("foreman_session", {userId:sel.id, expires:exp.toISOString()});
+          onLogin(sel);
+        } else { setErr("PIN incorrecto"); setPin(""); }
+      }, 200);
+    }
   }
 
-  return(
+  const btnS = {width:"100%",background:"#fff",border:"1.5px solid #E5E7EB",borderRadius:12,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:14,cursor:"pointer",transition:"all 0.15s",fontFamily:"'Inter',sans-serif"};
+
+  return (
     <div style={{minHeight:"100vh",background:"#F8F9FB",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box}@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
-
-      <div style={{marginBottom:32,textAlign:"center",animation:"fadeUp 0.4s ease"}}>
-        <div style={{display:"inline-flex",alignItems:"center",gap:0,marginBottom:14}}>
-          <div style={{width:12,height:36,background:"#E8622A",borderRadius:"4px 0 0 4px"}}/>
-          <div style={{width:12,height:36,background:"#FF9500"}}/>
-          <div style={{width:12,height:36,background:"#FFD60A",borderRadius:"0 4px 4px 0",marginRight:10}}/>
-          <span style={{color:"#1F2937",fontSize:24,fontWeight:700,fontFamily:"'Inter',sans-serif",letterSpacing:0.5}}>FOREMAN</span>
+      <div style={{marginBottom:32,textAlign:"center"}}>
+        <div style={{display:"inline-flex",alignItems:"center",gap:0,marginBottom:10}}>
+          <div style={{width:10,height:28,background:"#E8622A",borderRadius:"4px 0 0 4px"}}/>
+          <div style={{width:10,height:28,background:"#FF9500"}}/>
+          <div style={{width:10,height:28,background:"#FFD60A",borderRadius:"0 4px 4px 0",marginRight:8}}/>
+          <span style={{color:"#1F2937",fontSize:22,fontWeight:700,fontFamily:"'Inter',sans-serif",letterSpacing:0.5}}>FOREMAN</span>
+          <span style={{background:"#F3F4F6",color:"#9CA3AF",fontSize:9,fontWeight:600,padding:"1px 6px",borderRadius:4,marginLeft:6}}>BETA</span>
         </div>
-        <div style={{fontSize:12,color:"#9CA3AF",fontFamily:"'Inter',sans-serif"}}>Selecciona tu perfil · sesión 7 días</div>
+        <div style={{fontSize:12,color:"#9CA3AF",fontFamily:"'Inter',sans-serif"}}>Sesión guardada por 7 días</div>
       </div>
 
-      {step==="pick"&&(
-        <div style={{width:"100%",maxWidth:400,animation:"fadeUp 0.4s ease 0.1s both"}}>
-          {users.map((u,i)=>(
-            <button key={u.id} onClick={()=>sel2(u)} style={{width:"100%",background:"#fff",border:"1.5px solid #E5E7EB",borderRadius:12,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:14,cursor:"pointer",transition:"all 0.15s",fontFamily:"'Inter',sans-serif",animation:`fadeUp 0.3s ease ${i*0.03}s both`}}
+      {step === "pick" && (
+        <div style={{width:"100%",maxWidth:400}}>
+          <div style={{fontSize:10,color:"#9CA3AF",fontFamily:"'Inter',sans-serif",letterSpacing:1,marginBottom:10,textAlign:"center",fontWeight:600}}>SELECCIONA TU PERFIL</div>
+          {users.map(u => (
+            <button key={u.id} onClick={() => selectUser(u)} style={btnS}
               onMouseEnter={e=>{e.currentTarget.style.borderColor="#E8622A";e.currentTarget.style.boxShadow="0 4px 12px rgba(232,98,42,0.1)";}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.boxShadow="none";}}>
-              <Avatar initials={u.avatar} size={40} color={u.color||"#E8622A"}/>
+              <Avatar name={u.name} size={40} color={u.color||"#2563EB"}/>
               <div style={{textAlign:"left"}}>
-                <div style={{color:"#111",fontSize:15,fontWeight:600}}>{u.name}</div>
-                <div style={{color:"#9CA3AF",fontSize:12}}>{u.role==="owner"?"👑 Director":u.role==="assistant"?"🤝 Asistente":"👷 Equipo"}</div>
+                <div style={{color:"#111",fontSize:15,fontWeight:600,fontFamily:"'Inter',sans-serif"}}>{u.name}</div>
+                <div style={{color:"#9CA3AF",fontSize:12,fontFamily:"'Inter',sans-serif"}}>{u.role==="owner"?"👑 Director":u.role==="assistant"?"🤝 Asistente":"👷 Equipo"}</div>
               </div>
               <div style={{marginLeft:"auto",color:"#D1D5DB",fontSize:18}}>›</div>
             </button>
@@ -129,10 +145,10 @@ function LoginScreen({onLogin,users}){
         </div>
       )}
 
-      {step==="pin"&&sel&&(
-        <div style={{width:"100%",maxWidth:280,textAlign:"center",animation:"fadeUp 0.3s ease",fontFamily:"'Inter',sans-serif"}}>
+      {step === "pin" && sel && (
+        <div style={{width:"100%",maxWidth:280,textAlign:"center",fontFamily:"'Inter',sans-serif"}}>
           <button onClick={()=>{setStep("pick");setErr("");}} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:13,marginBottom:20,display:"flex",alignItems:"center",gap:4,margin:"0 auto 20px"}}>← Volver</button>
-          <Avatar initials={sel.avatar} size={60} color={sel.color||"#E8622A"}/>
+          <Avatar name={sel.name} size={60} color={sel.color||"#E8622A"}/>
           <div style={{color:"#111",fontSize:18,fontWeight:700,marginTop:12}}>{sel.name}</div>
           <div style={{color:"#9CA3AF",fontSize:13,marginBottom:28,marginTop:6}}>Ingresa tu PIN</div>
           <div style={{display:"flex",justifyContent:"center",gap:16,marginBottom:28}}>
@@ -147,7 +163,7 @@ function LoginScreen({onLogin,users}){
               >{d}</button>
             ))}
           </div>
-          {err&&<div style={{color:"#DC2626",fontSize:12,marginTop:14}}>{err}</div>}
+          {err && <div style={{color:"#DC2626",fontSize:12,marginTop:14}}>{err}</div>}
         </div>
       )}
     </div>
@@ -155,172 +171,370 @@ function LoginScreen({onLogin,users}){
 }
 
 // ── NOVA INPUT ─────────────────────────────────────────────────────────────
-function NovaInput({currentUser,projects,users,onTaskCreated}){
-  const [texto,setTexto]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [result,setResult]=useState(null);
-  const [grabando,setGrabando]=useState(false);
+function NovaInput({ currentUser, projects, users, onTaskCreated }) {
+  const [texto, setTexto] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [grabando, setGrabando] = useState(false);
 
-  function startVoice(){
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR){alert("Usa Chrome para dictado por voz.");return;}
-    const r=new SR(); r.lang="es-ES"; r.continuous=false; r.interimResults=false;
-    r.onresult=e=>{setTexto(e.results[0][0].transcript);setGrabando(false);};
-    r.onerror=()=>setGrabando(false); r.onend=()=>setGrabando(false);
+  function startVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Usa Chrome para dictado."); return; }
+    const r = new SR(); r.lang = "es-ES"; r.continuous = false; r.interimResults = false;
+    r.onresult = e => { setTexto(e.results[0][0].transcript); setGrabando(false); };
+    r.onerror = () => setGrabando(false); r.onend = () => setGrabando(false);
     r.start(); setGrabando(true);
   }
 
-  async function procesar(){
-    if(!texto.trim())return;
+  async function procesar() {
+    if (!texto.trim()) return;
     setLoading(true); setResult(null);
-    const proyList=projects.map(p=>`${p.id}=${p.name}`).join(",");
-    const userList=users.map(u=>`${u.id}=${u.name}`).join(",");
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:600,
+    const proyList = projects.map(p=>`${p.id}=${p.name}`).join(",");
+    const userList = users.map(u=>`${u.id}=${u.name}`).join(",");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:500,
           system:`Eres NOVA. Extrae datos y responde SOLO JSON sin markdown:
 {"title":"...","project_id":N,"assignee_id":N_OR_NULL,"type":"...","due_date":"YYYY-MM-DD","priority":"urgente|alta|media|baja","notes":"..."}
-Proyectos: ${proyList}.
-Usuarios: ${userList}.
+Proyectos: ${proyList}. Usuarios: ${userList}.
 Tipos: Llamada,Reunión,Contrato,Compra,Inspección,Aprobación,Visita a obra,Otro.
 Hoy: ${new Date().toISOString().split("T")[0]}.`,
           messages:[{role:"user",content:texto}]
         })
       });
-      const data=await res.json();
-      const t=data.content?.[0]?.text||"{}";
+      const data = await res.json();
+      const t = data.content?.[0]?.text || "{}";
       setResult(JSON.parse(t.replace(/```json|```/g,"").trim()));
-    }catch{setResult({error:"No pude entender. Intenta de nuevo."});}
+    } catch { setResult({error:"No pude entender. Intenta de nuevo."}); }
     setLoading(false);
   }
 
-  async function confirmar(){
-    if(!result||result.error)return;
-    await supabase.from("tasks").insert({...result,created_by:currentUser.id});
+  async function confirmar() {
+    if (!result || result.error) return;
+    await supabase.from("tasks").insert({...result, created_by:currentUser.id});
     setTexto(""); setResult(null); onTaskCreated();
   }
 
-  const getProject=id=>projects.find(p=>p.id===id);
-  const getUser=id=>users.find(u=>u.id===id);
+  const gP = id => projects.find(p=>p.id===id);
+  const gU = id => users.find(u=>u.id===id);
 
-  return(
-    <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:16,boxShadow:"0 1px 4px rgba(232,98,42,0.06)"}}>
+  return (
+    <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:14}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-        <div style={{width:28,height:28,borderRadius:"50%",background:"#E8622A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🤖</div>
-        <span style={{fontSize:13,fontWeight:600,color:"#E8622A",fontFamily:"'Inter',sans-serif"}}>NOVA — Crear tarea por voz o texto</span>
+        <div style={{width:26,height:26,borderRadius:"50%",background:"#E8622A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>🤖</div>
+        <span style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>NOVA — Crear tarea</span>
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:10}}>
+      <div style={{display:"flex",gap:8,marginBottom:8}}>
         <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>e.key==="Enter"&&procesar()} placeholder='"Tarea para Hector, inspección BdP Condado, urgente mañana"'
           style={{flex:1,background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,color:"#111",fontSize:13,fontFamily:"'Inter',sans-serif",padding:"8px 12px",outline:"none"}}/>
-        <button onClick={startVoice} style={{width:38,background:grabando?"#FEE2E2":"#FFF7F0",border:`1.5px solid ${grabando?"#DC2626":"#FED7AA"}`,borderRadius:8,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>🎤</button>
+        <button onClick={startVoice} style={{width:36,background:grabando?"#FEE2E2":"#FFF7F0",border:`1.5px solid ${grabando?"#DC2626":"#FED7AA"}`,borderRadius:8,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,animation:grabando?"pulse 1s infinite":"none"}}>🎤</button>
         <button onClick={procesar} disabled={!texto.trim()||loading} style={{background:texto.trim()&&!loading?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:"8px 14px",color:texto.trim()&&!loading?"#fff":"#9CA3AF",fontSize:12,fontWeight:600,cursor:texto.trim()&&!loading?"pointer":"default",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
           {loading?"...":"Crear →"}
         </button>
       </div>
-      {result&&!result.error&&(
+      {result && !result.error && (
         <div style={{background:"#F0FDF4",border:"1.5px solid #BBF7D0",borderRadius:8,padding:10}}>
-          <div style={{fontSize:11,color:"#059669",fontWeight:600,marginBottom:4,fontFamily:"'Inter',sans-serif"}}>✓ NOVA entendió:</div>
-          <div style={{fontSize:13,fontWeight:600,color:"#111",marginBottom:2,fontFamily:"'Inter',sans-serif"}}>{result.title}</div>
-          <div style={{fontSize:11,color:"#6B7280",fontFamily:"'Inter',sans-serif"}}>{getProject(result.project_id)?.name} · {result.assignee_id?getUser(result.assignee_id)?.name:"Sin asignar"} · {result.due_date} · {result.priority}</div>
+          <div style={{fontSize:11,color:"#059669",fontWeight:600,marginBottom:4}}>✓ NOVA entendió:</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#111",marginBottom:2}}>{result.title}</div>
+          <div style={{fontSize:11,color:"#6B7280"}}>{gP(result.project_id)?.name} · {result.assignee_id?gU(result.assignee_id)?.name:"Sin asignar"} · {result.due_date} · {result.priority}</div>
           <div style={{display:"flex",gap:8,marginTop:8}}>
-            <button onClick={()=>setResult(null)} style={{flex:1,background:"#fff",border:"1.5px solid #E5E7EB",borderRadius:6,padding:6,color:"#6B7280",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Cancelar</button>
-            <button onClick={confirmar} style={{flex:2,background:"#059669",border:"none",borderRadius:6,padding:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>✓ Confirmar</button>
+            <button onClick={()=>setResult(null)} style={{flex:1,background:"#fff",border:"1.5px solid #E5E7EB",borderRadius:6,padding:6,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={confirmar} style={{flex:2,background:"#059669",border:"none",borderRadius:6,padding:6,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>✓ Confirmar</button>
           </div>
         </div>
       )}
-      {result?.error&&<div style={{color:"#DC2626",fontSize:12,fontFamily:"'Inter',sans-serif"}}>{result.error}</div>}
+      {result?.error && <div style={{color:"#DC2626",fontSize:12,marginTop:6}}>{result.error}</div>}
     </div>
   );
 }
 
 // ── BRIEFING ───────────────────────────────────────────────────────────────
-function AIBriefing({tasks,currentUser,users,projects}){
-  const [texto,setTexto]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [visible,setVisible]=useState(false);
+function AIBriefing({ tasks, currentUser, users, projects }) {
+  const [texto, setTexto] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const gP = id => projects.find(p=>p.id===id);
+  const gU = id => users.find(u=>u.id===id);
 
-  const getProject=id=>projects.find(p=>p.id===id);
-  const getUser=id=>users.find(u=>u.id===id);
-
-  async function obtener(){
+  async function obtener() {
     setLoading(true); setVisible(true);
-    const todas=tasks.map(t=>{
-      const d=daysUntil(t.due_date);
-      const estado=t.status==="listo"?"✅ COMPLETA":t.status==="en-progreso"?"🔧 EN PROGRESO":t.status==="bloqueado"?"🚫 BLOQUEADA":"⏳ PENDIENTE";
-      const fecha=t.status==="listo"?"completada":d<0?`vencida ${Math.abs(d)}d`:d===0?"vence HOY":`vence en ${d}d`;
-      return `• ${t.title} | ${getProject(t.project_id)?.name} | ${t.assignee_id?getUser(t.assignee_id)?.name:"sin asignar"} | ${estado} | ${fecha} | prioridad: ${t.priority}`;
-    }).join("\n");
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:800,
-          system:`Eres NOVA, asistente de ${currentUser.name}, director de HCA Studio constructora. Dame un briefing ejecutivo en español con:
-1. RESUMEN GENERAL (1 línea)
-2. URGENTE HOY (lo que necesita atención inmediata)
-3. EN PROGRESO (estado de tareas activas)
-4. COMPLETADAS RECIENTES (logros)
-5. RECOMENDACIÓN (qué hacer primero hoy)
-Sé directo, concreto, menciona nombres y proyectos.`,
-          messages:[{role:"user",content:`Todas las tareas:\n${todas||"Sin tareas registradas."}\n\nBriefing para ${currentUser.name}.`}]
+    const todas = tasks.length ? tasks.map(t => {
+      const d = daysUntil(t.due_date);
+      const estado = t.status==="listo"?"✅ COMPLETA":t.status==="en-progreso"?"🔧 EN PROGRESO":t.status==="bloqueado"?"🚫 BLOQUEADA":"⏳ PENDIENTE";
+      const fecha = t.status==="listo"?"completada":d<0?`vencida ${Math.abs(d)}d`:d===0?"vence HOY":`vence en ${d}d`;
+      return `• ${t.title} | ${gP(t.project_id)?.name} | ${t.assignee_id?gU(t.assignee_id)?.name:"sin asignar"} | ${estado} | ${fecha} | ${t.priority}`;
+    }).join("\n") : "Sin tareas.";
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:700,
+          system:`Eres NOVA, asistente de ${currentUser.name} de HCA Studio. Briefing ejecutivo en español:
+1. RESUMEN (1 línea)
+2. URGENTE HOY
+3. EN PROGRESO
+4. COMPLETADAS
+5. RECOMENDACIÓN
+Directo, menciona nombres y proyectos.`,
+          messages:[{role:"user",content:`Tareas:\n${todas}\n\nBriefing para ${currentUser.name}.`}]
         })
       });
-      const data=await res.json();
-      setTexto(data.content?.[0]?.text||"Todo en orden.");
-    }catch{setTexto("⚠️ Error de conexión. Verifica tu internet e intenta de nuevo.");}
+      const data = await res.json();
+      setTexto(data.content?.[0]?.text || "Todo en orden.");
+    } catch { setTexto("⚠️ Error de conexión. Verifica tu internet."); }
     setLoading(false);
   }
 
-  if(!visible)return(
-    <button onClick={obtener} style={{background:"linear-gradient(135deg,#E8622A,#FF9500)",border:"none",borderRadius:10,padding:"12px 18px",color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,width:"100%",boxShadow:"0 4px 16px rgba(232,98,42,0.2)",marginBottom:16}}>
-      <span style={{fontSize:18}}>🤖</span>
-      <div style={{textAlign:"left"}}><div>NOVA — Briefing del día</div><div style={{fontSize:10,opacity:0.8}}>Resumen completo de todos los proyectos</div></div>
+  if (!visible) return (
+    <button onClick={obtener} style={{background:"linear-gradient(135deg,#E8622A,#FF9500)",border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,width:"100%",boxShadow:"0 4px 12px rgba(232,98,42,0.2)",marginBottom:14}}>
+      <span style={{fontSize:16}}>🤖</span>
+      <div style={{textAlign:"left"}}><div>NOVA — Briefing del día</div><div style={{fontSize:10,opacity:0.8}}>Resumen completo de proyectos y responsables</div></div>
       <span style={{marginLeft:"auto"}}>→</span>
     </button>
   );
 
-  return(
-    <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:16,boxShadow:"0 1px 4px rgba(232,98,42,0.06)"}}>
+  return (
+    <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:14}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-        <div style={{width:28,height:28,borderRadius:"50%",background:"#E8622A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🤖</div>
-        <span style={{fontSize:13,fontWeight:600,color:"#E8622A",fontFamily:"'Inter',sans-serif"}}>NOVA — Briefing del día</span>
+        <div style={{width:26,height:26,borderRadius:"50%",background:"#E8622A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>🤖</div>
+        <span style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>NOVA — Briefing</span>
         <button onClick={()=>setVisible(false)} style={{marginLeft:"auto",background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:18}}>×</button>
       </div>
-      {loading?<div style={{color:"#9CA3AF",fontFamily:"'Inter',sans-serif",fontSize:13}}>Analizando {tasks.length} tareas...</div>
-        :<div style={{color:"#374151",fontFamily:"'Inter',sans-serif",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{texto}</div>}
-      {!loading&&<button onClick={obtener} style={{marginTop:10,background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:6,padding:"5px 12px",color:"#E8622A",fontFamily:"'Inter',sans-serif",fontSize:11,cursor:"pointer",fontWeight:600}}>↺ Actualizar</button>}
+      {loading ? <div style={{color:"#9CA3AF",fontSize:13}}>Analizando {tasks.length} tareas...</div>
+        : <div style={{color:"#374151",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{texto}</div>}
+      {!loading && <button onClick={obtener} style={{marginTop:10,background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:6,padding:"5px 12px",color:"#E8622A",fontSize:11,cursor:"pointer",fontWeight:600}}>↺ Actualizar</button>}
+    </div>
+  );
+}
+
+// ── FILE UPLOAD & VIEWER ───────────────────────────────────────────────────
+function FileSection({ taskId }) {
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  useEffect(() => { fetchFiles(); }, [taskId]);
+
+  async function fetchFiles() {
+    const { data } = await supabase.storage.from("task-files").list(`task-${taskId}/`, { sortBy:{column:"created_at",order:"desc"} });
+    setFiles(data || []);
+  }
+
+  async function uploadFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    const path = `task-${taskId}/${Date.now()}-${file.name}`;
+    await supabase.storage.from("task-files").upload(path, file);
+    await fetchFiles();
+    setUploading(false);
+    e.target.value = "";
+  }
+
+  function getUrl(name) {
+    const { data } = supabase.storage.from("task-files").getPublicUrl(`task-${taskId}/${name}`);
+    return data.publicUrl;
+  }
+
+  function fileIcon(name) {
+    const ext = name.split(".").pop().toLowerCase();
+    if (["jpg","jpeg","png","gif","webp","heic"].includes(ext)) return "🖼";
+    if (["pdf"].includes(ext)) return "📄";
+    if (["doc","docx"].includes(ext)) return "📝";
+    if (["xls","xlsx"].includes(ext)) return "📊";
+    return "📎";
+  }
+
+  function isImage(name) {
+    return ["jpg","jpeg","png","gif","webp","heic"].includes(name.split(".").pop().toLowerCase());
+  }
+
+  async function deleteFile(name) {
+    await supabase.storage.from("task-files").remove([`task-${taskId}/${name}`]);
+    fetchFiles();
+  }
+
+  return (
+    <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #F3F4F6"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontSize:12,fontWeight:600,color:"#6B7280"}}>📎 Archivos ({files.length})</div>
+        <button onClick={()=>fileRef.current?.click()} disabled={uploading} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 10px",color:"#374151",fontSize:11,cursor:"pointer",fontWeight:500}}>
+          {uploading?"Subiendo...":"+ Subir archivo"}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={uploadFile} style={{display:"none"}}/>
+      </div>
+      {files.length > 0 && (
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {files.map(f => (
+            <div key={f.name} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,overflow:"hidden",width:isImage(f.name)?90:160}}>
+              {isImage(f.name) ? (
+                <a href={getUrl(f.name)} target="_blank" rel="noreferrer">
+                  <img src={getUrl(f.name)} alt={f.name} style={{width:"100%",height:70,objectFit:"cover",display:"block"}}/>
+                </a>
+              ) : (
+                <a href={getUrl(f.name)} target="_blank" rel="noreferrer" download style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",textDecoration:"none"}}>
+                  <span style={{fontSize:18}}>{fileIcon(f.name)}</span>
+                  <span style={{fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name.replace(/^\d+-/,"")}</span>
+                </a>
+              )}
+              <div style={{display:"flex",justifyContent:"space-between",padding:"4px 6px",borderTop:"1px solid #F3F4F6"}}>
+                <a href={getUrl(f.name)} download target="_blank" rel="noreferrer" style={{fontSize:10,color:"#2563EB",textDecoration:"none",fontWeight:500}}>⬇ Descargar</a>
+                <button onClick={()=>deleteFile(f.name)} style={{background:"none",border:"none",color:"#DC2626",fontSize:10,cursor:"pointer",padding:0}}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CHAT ───────────────────────────────────────────────────────────────────
+function ChatTarea({ task, currentUser, users, projects, onClose }) {
+  const [texto, setTexto] = useState("");
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("chat");
+  const bottomRef = useRef(null);
+  const channelRef = useRef(null);
+  const gU = id => users.find(u=>u.id===id);
+  const gP = id => projects.find(p=>p.id===id);
+  const proy = gP(task.project_id);
+
+  useEffect(() => {
+    fetchComments();
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+    const chName = `chat-task-${task.id}-${Math.random().toString(36).slice(2)}`;
+    const ch = supabase
+      .channel(chName)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "comments",
+        filter: `task_id=eq.${task.id}`
+      }, payload => {
+        setComments(prev => {
+          if (prev.some(c => c.id === payload.new.id)) return prev;
+          return [...prev, payload.new];
+        });
+      })
+      .subscribe((status) => {
+        console.log("Chat channel status:", status);
+      });
+    channelRef.current = ch;
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [task.id]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [comments]);
+
+  async function fetchComments() {
+    const { data, error } = await supabase.from("comments").select("*").eq("task_id", task.id).order("created_at", {ascending:true});
+    if (!error) setComments(data || []);
+    setLoading(false);
+  }
+
+  async function enviar() {
+    if (!texto.trim()) return;
+    const msg = texto.trim(); setTexto("");
+    const { error } = await supabase.from("comments").insert({ task_id: task.id, user_id: currentUser.id, text: msg });
+    if (error) console.error("Error sending comment:", error);
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
+      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",width:"100%",maxWidth:580,maxHeight:"88vh",display:"flex",flexDirection:"column",boxShadow:"0 -10px 40px rgba(0,0,0,0.1)",fontFamily:"'Inter',sans-serif"}}>
+        <div style={{padding:"12px 18px 0",flexShrink:0}}>
+          <div style={{width:36,height:4,background:"#E5E7EB",borderRadius:2,margin:"0 auto 12px"}}/>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:4,height:32,borderRadius:2,background:proy?.color,flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:600,color:"#111"}}>{task.title}</div>
+              <div style={{fontSize:11,color:"#9CA3AF"}}>{proy?.name} · Chat en vivo</div>
+            </div>
+            <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:30,height:30,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
+          </div>
+          <div style={{display:"flex",gap:4,borderBottom:"1px solid #F3F4F6",marginBottom:0}}>
+            {[["chat","💬 Chat"],["archivos","📎 Archivos"]].map(([t,l])=>(
+              <button key={t} onClick={()=>setTab(t)} style={{padding:"7px 14px",border:"none",borderBottom:tab===t?"2px solid #E8622A":"2px solid transparent",background:"transparent",color:tab===t?"#E8622A":"#6B7280",fontSize:12,fontWeight:tab===t?600:400,cursor:"pointer",marginBottom:-1}}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {tab === "chat" && (
+          <>
+            <div style={{flex:1,overflowY:"auto",padding:"12px 18px",display:"flex",flexDirection:"column",gap:10,minHeight:200}}>
+              {loading && <div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"20px 0"}}>Cargando...</div>}
+              {!loading && comments.length === 0 && <div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"30px 0"}}>💬 Sin mensajes aún. Escribe el primero.</div>}
+              {comments.map(c => {
+                const autor = gU(c.user_id);
+                const esMio = c.user_id === currentUser.id;
+                return (
+                  <div key={c.id} style={{display:"flex",flexDirection:esMio?"row-reverse":"row",gap:8,alignItems:"flex-end"}}>
+                    {!esMio && <Avatar name={autor?.name||"?"} size={26} color={autor?.color||"#2563EB"}/>}
+                    <div style={{maxWidth:"72%"}}>
+                      {!esMio && <div style={{fontSize:10,color:"#9CA3AF",marginBottom:3,paddingLeft:2}}>{autor?.name}</div>}
+                      <div style={{background:esMio?"#E8622A":"#F3F4F6",borderRadius:esMio?"14px 3px 14px 14px":"3px 14px 14px 14px",padding:"8px 12px"}}>
+                        <div style={{color:esMio?"#fff":"#111",fontSize:13,lineHeight:1.5}}>{c.text}</div>
+                      </div>
+                      <div style={{fontSize:10,color:"#D1D5DB",marginTop:2,textAlign:esMio?"right":"left"}}>{timeAgo(c.created_at)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={bottomRef}/>
+            </div>
+            <div style={{padding:"10px 14px 18px",borderTop:"1px solid #F3F4F6",flexShrink:0,display:"flex",gap:8,alignItems:"center"}}>
+              <Avatar name={currentUser.name} size={30} color={currentUser.color||"#E8622A"}/>
+              <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();enviar();}}} placeholder="Escribe un mensaje... (Enter para enviar)"
+                style={{flex:1,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:10,color:"#111",fontSize:13,fontFamily:"'Inter',sans-serif",padding:"9px 12px",outline:"none"}}/>
+              <button onClick={enviar} disabled={!texto.trim()} style={{background:texto.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:10,width:38,height:38,color:texto.trim()?"#fff":"#9CA3AF",cursor:texto.trim()?"pointer":"default",fontSize:16,flexShrink:0}}>↑</button>
+            </div>
+          </>
+        )}
+
+        {tab === "archivos" && (
+          <div style={{flex:1,overflowY:"auto",padding:"12px 18px 20px"}}>
+            <FileSection taskId={task.id}/>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // ── WHATSAPP ───────────────────────────────────────────────────────────────
-function WhatsApp({task,users,projects}){
-  const [msg,setMsg]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [open,setOpen]=useState(false);
-  const getUser=id=>users.find(u=>u.id===id);
-  const getProject=id=>projects.find(p=>p.id===id);
-  const m=task.assignee_id?getUser(task.assignee_id):null;
-  const p=getProject(task.project_id);
-  const d=daysUntil(task.due_date);
-  const followup=task.priority==="urgente"?"cada 3h":task.priority==="alta"?"cada 6h":"diario";
+function WhatsApp({ task, users, projects }) {
+  const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const gU = id => users.find(u=>u.id===id);
+  const gP = id => projects.find(p=>p.id===id);
+  const m = task.assignee_id ? gU(task.assignee_id) : null;
+  const p = gP(task.project_id);
+  const d = daysUntil(task.due_date);
+  const followup = task.priority==="urgente"?"cada 3h":task.priority==="alta"?"cada 6h":"diario";
 
-  async function generar(){
-    setLoading(true);setOpen(true);
-    const vence=task.status==="listo"?"está completada":d<0?`tiene ${Math.abs(d)} días de retraso`:d===0?"vence HOY":`vence en ${d} días`;
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,system:"Recordatorios WhatsApp para director de construcción. Español. Máx 3 oraciones. Directo. Solo el mensaje.",messages:[{role:"user",content:`Para ${m?.name||"equipo"}: "${task.title}" en ${p?.name}. ${vence}. Prioridad: ${task.priority}.`}]})});
-      const data=await res.json();setMsg(data.content?.[0]?.text||"");
-    }catch{setMsg("Error.");}
+  async function generar() {
+    setLoading(true); setOpen(true);
+    const vence = task.status==="listo"?"está completada":d<0?`tiene ${Math.abs(d)} días de retraso`:d===0?"vence HOY":`vence en ${d} días`;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,system:"Recordatorio WhatsApp para director de construcción. Español. Máx 3 oraciones. Directo. Solo el mensaje.",messages:[{role:"user",content:`Para ${m?.name||"equipo"}: "${task.title}" en ${p?.name}. ${vence}. Prioridad: ${task.priority}.`}]})});
+      const data = await res.json(); setMsg(data.content?.[0]?.text||"");
+    } catch { setMsg("Error."); }
     setLoading(false);
   }
 
-  return(
+  return (
     <>
       <button onClick={generar} style={{background:"#22C55E",border:"none",borderRadius:6,padding:"5px 10px",color:"#fff",fontSize:11,fontFamily:"'Inter',sans-serif",fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>📲 WA</button>
-      {open&&(
+      {open && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>setOpen(false)}>
           <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:400,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -328,15 +542,15 @@ function WhatsApp({task,users,projects}){
               <div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>WhatsApp</div>{m&&<div style={{color:"#6B7280",fontSize:12}}>{m.name} · seguimiento {followup}</div>}</div>
               <button onClick={()=>setOpen(false)} style={{marginLeft:"auto",background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:20}}>×</button>
             </div>
-            {loading?<div style={{color:"#9CA3AF",fontSize:12,padding:"16px 0",textAlign:"center"}}>NOVA redactando...</div>
-              :<>
-                <textarea value={msg} onChange={e=>setMsg(e.target.value)} style={{width:"100%",minHeight:90,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:10,color:"#111",fontSize:13,fontFamily:"'Inter',sans-serif",padding:10,resize:"vertical",boxSizing:"border-box",lineHeight:1.5,outline:"none"}}/>
-                <div style={{display:"flex",gap:8,marginTop:10}}>
-                  <button onClick={generar} style={{flex:1,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:8,padding:8,color:"#6B7280",fontSize:12,cursor:"pointer"}}>↺</button>
-                  {m?<button onClick={()=>window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank")} style={{flex:2,background:"#22C55E",border:"none",borderRadius:8,padding:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Abrir WhatsApp →</button>
-                    :<div style={{flex:2,color:"#9CA3AF",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>Sin asignado</div>}
-                </div>
-              </>}
+            {loading ? <div style={{color:"#9CA3AF",fontSize:12,padding:"16px 0",textAlign:"center"}}>NOVA redactando...</div>
+              : <>
+                  <textarea value={msg} onChange={e=>setMsg(e.target.value)} style={{width:"100%",minHeight:90,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:10,color:"#111",fontSize:13,fontFamily:"'Inter',sans-serif",padding:10,resize:"vertical",boxSizing:"border-box",lineHeight:1.5,outline:"none"}}/>
+                  <div style={{display:"flex",gap:8,marginTop:10}}>
+                    <button onClick={generar} style={{flex:1,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:8,padding:8,color:"#6B7280",fontSize:12,cursor:"pointer"}}>↺</button>
+                    {m ? <button onClick={()=>window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank")} style={{flex:2,background:"#22C55E",border:"none",borderRadius:8,padding:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Abrir WhatsApp →</button>
+                      : <div style={{flex:2,color:"#9CA3AF",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>Sin asignado</div>}
+                  </div>
+                </>}
           </div>
         </div>
       )}
@@ -344,148 +558,76 @@ function WhatsApp({task,users,projects}){
   );
 }
 
-// ── CHAT ───────────────────────────────────────────────────────────────────
-function ChatTarea({task,currentUser,users,projects,onClose}){
-  const [texto,setTexto]=useState("");
-  const [comments,setComments]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const bottomRef=useRef(null);
-  const chRef=useRef(null);
-  const getUser=id=>users.find(u=>u.id===id);
-  const getProject=id=>projects.find(p=>p.id===id);
-
-  useEffect(()=>{
-    fetchComments();
-    if(chRef.current)supabase.removeChannel(chRef.current);
-    const ch=supabase.channel(`chat-${task.id}-${Date.now()}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"comments",filter:`task_id=eq.${task.id}`},
-        p=>setComments(prev=>prev.find(c=>c.id===p.new.id)?prev:[...prev,p.new]))
-      .subscribe();
-    chRef.current=ch;
-    return()=>{if(chRef.current)supabase.removeChannel(chRef.current);};
-  },[task.id]);
-
-  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[comments]);
-
-  async function fetchComments(){
-    const{data}=await supabase.from("comments").select("*").eq("task_id",task.id).order("created_at",{ascending:true});
-    setComments(data||[]);setLoading(false);
-  }
-
-  async function enviar(){
-    if(!texto.trim())return;
-    const msg=texto.trim();setTexto("");
-    await supabase.from("comments").insert({task_id:task.id,user_id:currentUser.id,text:msg});
-  }
-
-  const proy=getProject(task.project_id);
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
-      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",width:"100%",maxWidth:560,maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 -10px 40px rgba(0,0,0,0.1)",fontFamily:"'Inter',sans-serif"}}>
-        <div style={{padding:"12px 18px 10px",borderBottom:"1px solid #F3F4F6",flexShrink:0}}>
-          <div style={{width:36,height:4,background:"#E5E7EB",borderRadius:2,margin:"0 auto 12px"}}/>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:4,height:32,borderRadius:2,background:proy?.color,flexShrink:0}}/>
-            <div style={{flex:1}}>
-              <div style={{color:"#111",fontSize:14,fontWeight:600}}>{task.title}</div>
-              <div style={{color:"#9CA3AF",fontSize:11}}>{proy?.name} · {comments.length} mensajes · en vivo</div>
-            </div>
-            <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:30,height:30,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
-          </div>
-        </div>
-        <div style={{flex:1,overflowY:"auto",padding:"12px 18px",display:"flex",flexDirection:"column",gap:10}}>
-          {loading&&<div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"20px 0"}}>Cargando...</div>}
-          {!loading&&comments.length===0&&<div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"30px 0"}}>💬 Sin mensajes aún.</div>}
-          {comments.map(c=>{
-            const autor=getUser(c.user_id);
-            const esMio=c.user_id===currentUser.id;
-            return(
-              <div key={c.id} style={{display:"flex",flexDirection:esMio?"row-reverse":"row",gap:8,alignItems:"flex-end"}}>
-                {!esMio&&<Avatar initials={autor?.avatar||"??"} size={26} color={autor?.color||"#2563EB"}/>}
-                <div style={{maxWidth:"72%"}}>
-                  {!esMio&&<div style={{color:"#9CA3AF",fontSize:10,marginBottom:3,paddingLeft:2}}>{autor?.name}</div>}
-                  <div style={{background:esMio?"#E8622A":"#F3F4F6",borderRadius:esMio?"14px 3px 14px 14px":"3px 14px 14px 14px",padding:"8px 12px"}}>
-                    <div style={{color:esMio?"#fff":"#111",fontSize:13,lineHeight:1.5}}>{c.text}</div>
-                  </div>
-                  <div style={{color:"#D1D5DB",fontSize:10,marginTop:2,textAlign:esMio?"right":"left"}}>{timeAgo(c.created_at)}</div>
-                </div>
-              </div>
-            );
-          })}
-          <div ref={bottomRef}/>
-        </div>
-        <div style={{padding:"10px 14px 18px",borderTop:"1px solid #F3F4F6",flexShrink:0,display:"flex",gap:8,alignItems:"flex-end"}}>
-          <Avatar initials={currentUser.avatar} size={30} color={currentUser.color||"#E8622A"}/>
-          <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();enviar();}}} placeholder="Escribe un mensaje..."
-            style={{flex:1,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:10,color:"#111",fontSize:13,fontFamily:"'Inter',sans-serif",padding:"9px 12px",outline:"none"}}/>
-          <button onClick={enviar} disabled={!texto.trim()} style={{background:texto.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:10,width:38,height:38,color:texto.trim()?"#fff":"#9CA3AF",cursor:texto.trim()?"pointer":"default",fontSize:16,flexShrink:0}}>↑</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── TARJETA TAREA ──────────────────────────────────────────────────────────
-function TarjetaTarea({task,currentUser,users,projects,onCambiarEstado,onEditar,onAbrirChat,commentCount}){
-  const getProject=id=>projects.find(p=>p.id===id);
-  const getUser=id=>users.find(u=>u.id===id);
-  const proy=getProject(task.project_id);
-  const asig=task.assignee_id?getUser(task.assignee_id):null;
-  const crea=getUser(task.created_by);
-  const pC=PRIORIDAD[task.priority]||PRIORIDAD.media;
-  const eC=ESTADO[task.status]||ESTADO.pendiente;
-  const admin=esAdmin(currentUser.role);
-  const puedeCambiar=admin||task.assignee_id===currentUser.id;
-  const esListo=task.status==="listo";
+function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onEditar, onAbrirChat, commentCount }) {
+  const gP = id => projects.find(p=>p.id===id);
+  const gU = id => users.find(u=>u.id===id);
+  const proy = gP(task.project_id);
+  const asig = task.assignee_id ? gU(task.assignee_id) : null;
+  const crea = gU(task.created_by);
+  const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;
+  const eC = ESTADO[task.status] || ESTADO.pendiente;
+  const admin = esAdmin(currentUser.role);
+  const puedeCambiar = admin || task.assignee_id === currentUser.id;
+  const esListo = task.status === "listo";
 
-  return(
-    <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"12px 14px",marginBottom:8,borderLeft:`3px solid ${proy?.color||"#E8622A"}`,opacity:esListo?0.65:1,fontFamily:"'Inter',sans-serif"}}>
+  function handleEstado(nuevoEstado) {
+    onCambiarEstado(task.id, nuevoEstado);
+  }
+
+  return (
+    <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"12px 14px",marginBottom:8,borderLeft:`3px solid ${proy?.color||"#E8622A"}`,opacity:esListo?0.65:1,fontFamily:"'Inter',sans-serif",transition:"opacity 0.2s"}}>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:8}}>
         <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{background:pC.bg,color:pC.color,fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:20}}>{pC.label}</span>
           <span style={{background:"#F3F4F6",color:"#6B7280",fontSize:11,padding:"2px 8px",borderRadius:20}}>{task.type}</span>
-          <span style={{color:eC.color,fontSize:11,display:"flex",alignItems:"center",gap:2}}>{eC.icon} {eC.label}</span>
+          <span style={{color:eC.color,fontSize:11}}>{eC.icon} {eC.label}</span>
         </div>
         <FechaBadge due={task.due_date} status={task.status}/>
       </div>
-
-      <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:task.notes?6:10,lineHeight:1.4}}>{task.title}</div>
-      {task.notes&&<div style={{color:"#6B7280",fontSize:12,marginBottom:10,lineHeight:1.5}}>{task.notes}</div>}
-
+      <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:task.notes?6:8,lineHeight:1.4}}>{task.title}</div>
+      {task.notes && <div style={{color:"#6B7280",fontSize:12,marginBottom:8,lineHeight:1.5}}>{task.notes}</div>}
       <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:10}}>
-        <span style={{background:`${proy?.color}15`,color:proy?.color,fontSize:11,padding:"2px 8px",borderRadius:20,fontWeight:600}}>{proy?.name}</span>
-        {asig?<div style={{display:"flex",alignItems:"center",gap:4}}><Avatar initials={asig.avatar} size={18} color={asig.color||proy?.color}/><span style={{color:"#374151",fontSize:12}}>{asig.name}</span></div>
-          :<span style={{color:"#DC2626",fontSize:11}}>⚠ Sin asignar</span>}
-        {!esListo&&admin&&<span style={{color:"#D1D5DB",fontSize:10}}>{task.priority==="urgente"?"c/3h":task.priority==="alta"?"c/6h":"diario"}</span>}
-        {crea&&<span style={{color:"#D1D5DB",fontSize:10}}>por {crea.name}</span>}
+        <span style={{background:`${proy?.color}18`,color:proy?.color,fontSize:11,padding:"2px 8px",borderRadius:20,fontWeight:600}}>{proy?.name}</span>
+        {asig ? <div style={{display:"flex",alignItems:"center",gap:4}}><Avatar name={asig.name} size={18} color={asig.color||proy?.color}/><span style={{color:"#374151",fontSize:12}}>{asig.name}</span></div>
+          : <span style={{color:"#DC2626",fontSize:11}}>⚠ Sin asignar</span>}
+        {!esListo && admin && <span style={{color:"#D1D5DB",fontSize:10}}>{task.priority==="urgente"?"c/3h":task.priority==="alta"?"c/6h":"diario"}</span>}
+        {crea && <span style={{color:"#D1D5DB",fontSize:10}}>por {crea.name}</span>}
       </div>
-
       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",paddingTop:8,borderTop:"1px solid #F9FAFB"}}>
-        {puedeCambiar&&(
-          <select value={task.status} onChange={e=>onCambiarEstado(task.id,e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,color:"#374151",padding:"5px 8px",fontSize:11,cursor:"pointer",outline:"none",fontFamily:"'Inter',sans-serif"}}>
-            {Object.entries(ESTADO).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
-          </select>
+        {puedeCambiar && (
+          <div style={{display:"flex",gap:4",flexWrap:"wrap"}}>
+            {Object.entries(ESTADO).map(([k,v])=>(
+              <button key={k} onClick={()=>handleEstado(k)}
+                style={{background:task.status===k?v.color:"#F3F4F6",border:`1px solid ${task.status===k?v.color:"#E5E7EB"}`,borderRadius:6,padding:"4px 8px",color:task.status===k?"#fff":"#6B7280",fontSize:10,fontWeight:task.status===k?600:400,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap",transition:"all 0.15s"}}>
+                {v.icon} {v.label}
+              </button>
+            ))}
+          </div>
         )}
         <button onClick={()=>onAbrirChat(task)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#374151",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontFamily:"'Inter',sans-serif"}}>
           💬 {commentCount>0?<span style={{background:"#E8622A",color:"#fff",fontSize:9,fontWeight:700,padding:"0 5px",borderRadius:10}}>{commentCount}</span>:"Chat"}
         </button>
-        {admin&&<button onClick={()=>onEditar(task)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>✏️ Editar</button>}
-        {admin&&<WhatsApp task={task} users={users} projects={projects}/>}
+        {admin && <button onClick={()=>onEditar(task)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️</button>}
+        {admin && <WhatsApp task={task} users={users} projects={projects}/>}
       </div>
     </div>
   );
 }
 
 // ── MODAL TAREA ────────────────────────────────────────────────────────────
-function ModalTarea({onCerrar,onGuardar,editTask,currentUser,users,projects}){
-  const admin=esAdmin(currentUser.role);
-  const [form,setForm]=useState(editTask?{title:editTask.title,project_id:editTask.project_id,assignee_id:editTask.assignee_id,type:editTask.type,due_date:editTask.due_date,priority:editTask.priority,status:editTask.status,notes:editTask.notes||""}:{title:"",project_id:projects[0]?.id||1,assignee_id:currentUser.id,type:"Llamada",due_date:"",priority:"media",status:"pendiente",notes:""});
-  const inp=(f,v)=>setForm(p=>({...p,[f]:v}));
-  const lS={color:"#6B7280",fontSize:11,fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:4,display:"block"};
-  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+function ModalTarea({ onCerrar, onGuardar, editTask, currentUser, users, projects }) {
+  const admin = esAdmin(currentUser.role);
+  const [form, setForm] = useState(editTask ? {
+    title:editTask.title, project_id:editTask.project_id, assignee_id:editTask.assignee_id,
+    type:editTask.type, due_date:editTask.due_date, priority:editTask.priority,
+    status:editTask.status, notes:editTask.notes||""
+  } : { title:"", project_id:projects[0]?.id||1, assignee_id:currentUser.id, type:"Llamada", due_date:"", priority:"media", status:"pendiente", notes:"" });
+  const inp = (f,v) => setForm(p=>({...p,[f]:v}));
+  const lS = {color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"};
+  const iS = {width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
 
-  return(
+  return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:20}} onClick={onCerrar}>
       <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:480,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.12)",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
@@ -503,36 +645,87 @@ function ModalTarea({onCerrar,onGuardar,editTask,currentUser,users,projects}){
           <div><label style={lS}>Fecha límite *</label><input type="date" value={form.due_date} onChange={e=>inp("due_date",e.target.value)} style={iS} onFocus={e=>e.target.style.borderColor="#E8622A"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/></div>
           <div><label style={lS}>Notas</label><textarea value={form.notes} onChange={e=>inp("notes",e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{...iS,minHeight:60,resize:"vertical"}}/></div>
         </div>
-        {(!form.title||!form.due_date)?<div style={{color:"#9CA3AF",fontSize:11,marginTop:12,textAlign:"center"}}>Completa título y fecha</div>
-          :<button onClick={()=>{onGuardar(form,editTask?.id);onCerrar();}} style={{width:"100%",marginTop:16,background:"#E8622A",border:"none",borderRadius:10,padding:12,color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:14,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(232,98,42,0.25)"}}>
-            {editTask?"Guardar cambios":"Agregar tarea"}
-          </button>}
+        {(!form.title||!form.due_date) ? <div style={{color:"#9CA3AF",fontSize:11,marginTop:12,textAlign:"center"}}>Completa título y fecha</div>
+          : <button onClick={()=>{onGuardar(form,editTask?.id);onCerrar();}} style={{width:"100%",marginTop:16,background:"#E8622A",border:"none",borderRadius:10,padding:12,color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:14,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(232,98,42,0.25)"}}>
+              {editTask?"Guardar cambios":"Agregar tarea"}
+            </button>}
       </div>
     </div>
   );
 }
 
 // ── PANEL AJUSTES ──────────────────────────────────────────────────────────
-function PanelAjustes({users,setUsers,projects,setProjects,onClose}){
-  const [tab,setTab]=useState("usuarios");
-  const [editU,setEditU]=useState(null);
-  const [editP,setEditP]=useState(null);
+function PanelAjustes({ users, setUsers, projects, setProjects, onClose }) {
+  const [tab, setTab] = useState("usuarios");
+  const [editU, setEditU] = useState(null);
+  const [editP, setEditP] = useState(null);
+  const [newU, setNewU] = useState(false);
+  const [newP, setNewP] = useState(false);
+  const emptyUser = { id:Date.now(), name:"", role:"member", pin:"", avatar:"", color:"#2563EB" };
+  const emptyProject = { id:Date.now(), name:"", color:"#E8622A" };
 
-  function saveUser(u){
-    setUsers(prev=>prev.map(x=>x.id===u.id?u:x));
-    localStorage.setItem("foreman_users",JSON.stringify(users.map(x=>x.id===u.id?u:x)));
-    setEditU(null);
+  function saveUsers(updated) { setUsers(updated); saveToStorage("foreman_users", updated); }
+  function saveProjects(updated) { setProjects(updated); saveToStorage("foreman_projects", updated); }
+
+  function saveUser(u) {
+    const updated = users.find(x=>x.id===u.id) ? users.map(x=>x.id===u.id?{...u,avatar:initials(u.name)}:x) : [...users,{...u,id:Date.now(),avatar:initials(u.name)}];
+    saveUsers(updated); setEditU(null); setNewU(false);
   }
-  function saveProject(p){
-    setProjects(prev=>prev.map(x=>x.id===p.id?p:x));
-    localStorage.setItem("foreman_projects",JSON.stringify(projects.map(x=>x.id===p.id?p:x)));
-    setEditP(null);
+  function deleteUser(id) { if(window.confirm("¿Eliminar este usuario?")) saveUsers(users.filter(u=>u.id!==id)); }
+  function saveProject(p) {
+    const updated = projects.find(x=>x.id===p.id) ? projects.map(x=>x.id===p.id?p:x) : [...projects,{...p,id:Date.now()}];
+    saveProjects(updated); setEditP(null); setNewP(false);
+  }
+  function deleteProject(id) { if(window.confirm("¿Eliminar este proyecto?")) saveProjects(projects.filter(p=>p.id!==id)); }
+
+  const tabS = a => ({padding:"7px 16px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:12,fontWeight:600,background:a?"#E8622A":"transparent",color:a?"#fff":"#6B7280"});
+  const iS = {width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+
+  function UserForm({ u, onSave, onCancel }) {
+    const [f, setF] = useState({...u});
+    return (
+      <div style={{background:"#F9FAFB",borderRadius:10,padding:12,marginBottom:8,border:"1.5px solid #E8622A"}}>
+        <div style={{display:"grid",gap:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <input value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))} placeholder="Nombre completo" style={iS}/>
+            <input value={f.pin} onChange={e=>setF(p=>({...p,pin:e.target.value}))} placeholder="PIN (4 dígitos)" maxLength={4} style={iS}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center"}}>
+            <select value={f.role} onChange={e=>setF(p=>({...p,role:e.target.value}))} style={iS}>
+              <option value="owner">👑 Director</option>
+              <option value="assistant">🤝 Asistente</option>
+              <option value="member">👷 Equipo</option>
+            </select>
+            <input type="color" value={f.color||"#2563EB"} onChange={e=>setF(p=>({...p,color:e.target.value}))} style={{width:38,height:38,border:"1px solid #E5E7EB",borderRadius:6,cursor:"pointer",padding:2}}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>f.name&&f.pin&&onSave(f)} disabled={!f.name||!f.pin} style={{flex:2,background:f.name&&f.pin?"#E8622A":"#F3F4F6",border:"none",borderRadius:6,padding:"8px",color:f.name&&f.pin?"#fff":"#9CA3AF",fontSize:12,fontWeight:600,cursor:f.name&&f.pin?"pointer":"default"}}>Guardar</button>
+            <button onClick={onCancel} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"8px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  const tabS=a=>({padding:"7px 16px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:12,fontWeight:600,background:a?"#E8622A":"transparent",color:a?"#fff":"#6B7280"});
-  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+  function ProjectForm({ p, onSave, onCancel }) {
+    const [f, setF] = useState({...p});
+    return (
+      <div style={{background:"#F9FAFB",borderRadius:10,padding:12,marginBottom:8,border:"1.5px solid #E8622A"}}>
+        <div style={{display:"grid",gap:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center"}}>
+            <input value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))} placeholder="Nombre del proyecto" style={iS}/>
+            <input type="color" value={f.color||"#E8622A"} onChange={e=>setF(p=>({...p,color:e.target.value}))} style={{width:38,height:38,border:"1px solid #E5E7EB",borderRadius:6,cursor:"pointer",padding:2}}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>f.name&&onSave(f)} disabled={!f.name} style={{flex:2,background:f.name?"#E8622A":"#F3F4F6",border:"none",borderRadius:6,padding:"8px",color:f.name?"#fff":"#9CA3AF",fontSize:12,fontWeight:600,cursor:f.name?"pointer":"default"}}>Guardar</button>
+            <button onClick={onCancel} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"8px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  return(
+  return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:20}} onClick={onClose}>
       <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:500,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.12)",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -540,70 +733,46 @@ function PanelAjustes({users,setUsers,projects,setProjects,onClose}){
           <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
         </div>
         <div style={{display:"flex",gap:4,marginBottom:16,background:"#F3F4F6",borderRadius:8,padding:4}}>
-          <button onClick={()=>setTab("usuarios")} style={tabS(tab==="usuarios")}>Usuarios</button>
-          <button onClick={()=>setTab("proyectos")} style={tabS(tab==="proyectos")}>Proyectos</button>
+          <button onClick={()=>setTab("usuarios")} style={tabS(tab==="usuarios")}>👥 Usuarios</button>
+          <button onClick={()=>setTab("proyectos")} style={tabS(tab==="proyectos")}>🏗 Proyectos</button>
         </div>
 
-        {tab==="usuarios"&&(
+        {tab === "usuarios" && (
           <div>
-            {users.map(u=>(
+            {users.map(u => editU?.id===u.id ? (
+              <UserForm key={u.id} u={editU} onSave={saveUser} onCancel={()=>setEditU(null)}/>
+            ) : (
               <div key={u.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
-                <Avatar initials={u.avatar} size={36} color={u.color||"#2563EB"}/>
-                {editU?.id===u.id?(
-                  <div style={{flex:1,display:"grid",gap:8}}>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <input value={editU.name} onChange={e=>setEditU(p=>({...p,name:e.target.value}))} style={iS} placeholder="Nombre"/>
-                      <input value={editU.pin} onChange={e=>setEditU(p=>({...p,pin:e.target.value}))} style={iS} placeholder="PIN (4 dígitos)" maxLength={4}/>
-                    </div>
-                    <select value={editU.role} onChange={e=>setEditU(p=>({...p,role:e.target.value}))} style={iS}>
-                      <option value="owner">👑 Director</option>
-                      <option value="assistant">🤝 Asistente</option>
-                      <option value="member">👷 Equipo</option>
-                    </select>
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>saveUser(editU)} style={{flex:1,background:"#E8622A",border:"none",borderRadius:6,padding:"7px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
-                      <button onClick={()=>setEditU(null)} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"7px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-                    </div>
-                  </div>
-                ):(
-                  <>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:14,fontWeight:600,color:"#111"}}>{u.name}</div>
-                      <div style={{fontSize:11,color:"#9CA3AF"}}>{u.role==="owner"?"👑 Director":u.role==="assistant"?"🤝 Asistente":"👷 Equipo"} · PIN: {u.pin}</div>
-                    </div>
-                    <button onClick={()=>setEditU({...u})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️ Editar</button>
-                  </>
-                )}
+                <Avatar name={u.name} size={36} color={u.color||"#2563EB"}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color:"#111"}}>{u.name}</div>
+                  <div style={{fontSize:11,color:"#9CA3AF"}}>{u.role==="owner"?"👑 Director":u.role==="assistant"?"🤝 Asistente":"👷 Equipo"} · PIN: {u.pin}</div>
+                </div>
+                <button onClick={()=>setEditU({...u})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#6B7280",fontSize:11,cursor:"pointer",marginRight:4}}>✏️</button>
+                {u.role!=="owner"&&<button onClick={()=>deleteUser(u.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>✕</button>}
               </div>
             ))}
+            {newU ? <UserForm u={emptyUser} onSave={saveUser} onCancel={()=>setNewU(false)}/> : (
+              <button onClick={()=>setNewU(true)} style={{width:"100%",background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px",color:"#6B7280",fontSize:13,cursor:"pointer",fontWeight:500}}>+ Agregar usuario</button>
+            )}
           </div>
         )}
 
-        {tab==="proyectos"&&(
+        {tab === "proyectos" && (
           <div>
-            {projects.map(p=>(
+            {projects.map(p => editP?.id===p.id ? (
+              <ProjectForm key={p.id} p={editP} onSave={saveProject} onCancel={()=>setEditP(null)}/>
+            ) : (
               <div key={p.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10,borderLeft:`3px solid ${p.color}`}}>
-                {editP?.id===p.id?(
-                  <div style={{flex:1,display:"grid",gap:8}}>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center"}}>
-                      <input value={editP.name} onChange={e=>setEditP(prev=>({...prev,name:e.target.value}))} style={iS} placeholder="Nombre del proyecto"/>
-                      <input type="color" value={editP.color} onChange={e=>setEditP(prev=>({...prev,color:e.target.value}))} style={{width:38,height:38,border:"1px solid #E5E7EB",borderRadius:6,cursor:"pointer",padding:2}}/>
-                    </div>
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>saveProject(editP)} style={{flex:1,background:"#E8622A",border:"none",borderRadius:6,padding:"7px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
-                      <button onClick={()=>setEditP(null)} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"7px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-                    </div>
-                  </div>
-                ):(
-                  <>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:14,fontWeight:600,color:"#111"}}>{p.name}</div>
-                    </div>
-                    <button onClick={()=>setEditP({...p})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️ Editar</button>
-                  </>
-                )}
+                <div style={{width:12,height:12,borderRadius:"50%",background:p.color,flexShrink:0}}/>
+                <div style={{flex:1,fontSize:14,fontWeight:600,color:"#111"}}>{p.name}</div>
+                <button onClick={()=>setEditP({...p})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#6B7280",fontSize:11,cursor:"pointer",marginRight:4}}>✏️</button>
+                <button onClick={()=>deleteProject(p.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>✕</button>
               </div>
             ))}
+            {newP ? <ProjectForm p={emptyProject} onSave={saveProject} onCancel={()=>setNewP(false)}/> : (
+              <button onClick={()=>setNewP(true)} style={{width:"100%",background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px",color:"#6B7280",fontSize:13,cursor:"pointer",fontWeight:500}}>+ Agregar proyecto</button>
+            )}
           </div>
         )}
       </div>
@@ -612,169 +781,151 @@ function PanelAjustes({users,setUsers,projects,setProjects,onClose}){
 }
 
 // ── APP PRINCIPAL ──────────────────────────────────────────────────────────
-export default function App(){
-  const [users,setUsers]=useState(()=>{
-    try{const s=localStorage.getItem("foreman_users");return s?JSON.parse(s):USERS_DEFAULT;}catch{return USERS_DEFAULT;}
-  });
-  const [projects,setProjects]=useState(()=>{
-    try{const s=localStorage.getItem("foreman_projects");return s?JSON.parse(s):PROJECTS_DEFAULT;}catch{return PROJECTS_DEFAULT;}
-  });
+export default function App() {
+  const [users, setUsers] = useState(() => loadFromStorage("foreman_users", USERS_DEFAULT));
+  const [projects, setProjects] = useState(() => loadFromStorage("foreman_projects", PROJECTS_DEFAULT));
+  const [usuario, setUsuario] = useState(null);
+  const [tareas, setTareas] = useState([]);
+  const [commentCounts, setCommentCounts] = useState({});
+  const [cargando, setCargando] = useState(false);
+  const [vista, setVista] = useState("tareas");
+  const [filtro, setFiltro] = useState("todas");
+  const [filtroP, setFiltroP] = useState("all");
+  const [showModal, setShowModal] = useState(false);
+  const [editTask, setEditTask] = useState(null);
+  const [chatTarea, setChatTarea] = useState(null);
+  const [showAjustes, setShowAjustes] = useState(false);
+  const gP = id => projects.find(p=>p.id===id);
+  const gU = id => users.find(u=>u.id===id);
 
-  const getProject=id=>projects.find(p=>p.id===id);
-  const getUser=id=>users.find(u=>u.id===id);
-
-  const [usuario,setUsuario]=useState(null);
-  const [tareas,setTareas]=useState([]);
-  const [commentCounts,setCommentCounts]=useState({});
-  const [cargando,setCargando]=useState(false);
-  const [vista,setVista]=useState("tareas");
-  const [filtro,setFiltro]=useState("todas");
-  const [filtroP,setFiltroP]=useState("all");
-  const [showModal,setShowModal]=useState(false);
-  const [editTask,setEditTask]=useState(null);
-  const [chatTarea,setChatTarea]=useState(null);
-  const [showAjustes,setShowAjustes]=useState(false);
-  const [sidebarOpen,setSidebarOpen]=useState(false);
-
-  useEffect(()=>{
-    if(!usuario)return;
+  useEffect(() => {
+    if (!usuario) return;
     fetchTareas();
-    const tCh=supabase.channel(`tasks-${usuario.id}-${Date.now()}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"tasks"},p=>setTareas(prev=>[p.new,...prev]))
-      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"tasks"},p=>setTareas(prev=>prev.map(t=>t.id===p.new.id?p.new:t)))
-      .on("postgres_changes",{event:"DELETE",schema:"public",table:"tasks"},p=>setTareas(prev=>prev.filter(t=>t.id!==p.old.id)))
+    const tCh = supabase.channel(`tasks-main-${usuario.id}-${Date.now()}`)
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"tasks"}, p => setTareas(prev=>[p.new,...prev]))
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"tasks"}, p => setTareas(prev=>prev.map(t=>t.id===p.new.id?p.new:t)))
+      .on("postgres_changes",{event:"DELETE",schema:"public",table:"tasks"}, p => setTareas(prev=>prev.filter(t=>t.id!==p.old.id)))
       .subscribe();
-    const cCh=supabase.channel(`counts-${usuario.id}-${Date.now()}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"comments"},p=>setCommentCounts(prev=>({...prev,[p.new.task_id]:(prev[p.new.task_id]||0)+1})))
+    const cCh = supabase.channel(`counts-main-${usuario.id}-${Date.now()}`)
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"comments"}, p => setCommentCounts(prev=>({...prev,[p.new.task_id]:(prev[p.new.task_id]||0)+1})))
       .subscribe();
-    return()=>{supabase.removeChannel(tCh);supabase.removeChannel(cCh);};
-  },[usuario]);
+    return () => { supabase.removeChannel(tCh); supabase.removeChannel(cCh); };
+  }, [usuario]);
 
-  async function fetchTareas(){
+  async function fetchTareas() {
     setCargando(true);
-    const{data}=await supabase.from("tasks").select("*").order("created_at",{ascending:false});
+    const { data } = await supabase.from("tasks").select("*").order("created_at",{ascending:false});
     setTareas(data||[]);
-    if(data?.length){
-      const counts={};
-      await Promise.all(data.map(async t=>{const{count}=await supabase.from("comments").select("*",{count:"exact",head:true}).eq("task_id",t.id);counts[t.id]=count||0;}));
+    if (data?.length) {
+      const counts = {};
+      await Promise.all(data.map(async t => { const{count}=await supabase.from("comments").select("*",{count:"exact",head:true}).eq("task_id",t.id); counts[t.id]=count||0; }));
       setCommentCounts(counts);
     }
     setCargando(false);
   }
 
-  async function cambiarEstado(id,estado){await supabase.from("tasks").update({status:estado}).eq("id",id);}
+  async function cambiarEstado(id, estado) {
+    setTareas(prev => prev.map(t => t.id===id ? {...t, status:estado} : t));
+    const { error } = await supabase.from("tasks").update({status:estado}).eq("id",id);
+    if (error) { console.error("Error updating status:", error); fetchTareas(); }
+  }
 
-  async function guardarTarea(form,id){
-    if(id)await supabase.from("tasks").update(form).eq("id",id);
-    else await supabase.from("tasks").insert({...form,created_by:usuario.id});
+  async function guardarTarea(form, id) {
+    if (id) await supabase.from("tasks").update(form).eq("id",id);
+    else await supabase.from("tasks").insert({...form, created_by:usuario.id});
     setEditTask(null);
   }
 
-  function logout(){localStorage.removeItem("foreman_session");setUsuario(null);}
+  function logout() { saveToStorage("foreman_session", null); localStorage.removeItem("foreman_session"); setUsuario(null); }
 
-  if(!usuario)return <LoginScreen onLogin={setUsuario} users={users}/>;
+  if (!usuario) return <LoginScreen onLogin={setUsuario} users={users}/>;
 
-  const admin=esAdmin(usuario.role);
-  let visibles=admin?tareas:tareas.filter(t=>t.assignee_id===usuario.id||t.created_by===usuario.id);
-  if(filtro==="pendiente")visibles=visibles.filter(t=>t.status==="pendiente");
-  if(filtro==="urgente")visibles=visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due_date)<=1));
-  if(filtro==="listo")visibles=visibles.filter(t=>t.status==="listo");
-  if(filtroP!=="all")visibles=visibles.filter(t=>t.project_id===Number(filtroP));
+  const admin = esAdmin(usuario.role);
+  let visibles = admin ? tareas : tareas.filter(t=>t.assignee_id===usuario.id||t.created_by===usuario.id);
+  if (filtro==="pendiente") visibles = visibles.filter(t=>t.status==="pendiente");
+  if (filtro==="urgente")   visibles = visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due_date)<=1));
+  if (filtro==="listo")     visibles = visibles.filter(t=>t.status==="listo");
+  if (filtroP!=="all")      visibles = visibles.filter(t=>t.project_id===Number(filtroP));
 
-  const pendientes=tareas.filter(t=>t.status!=="listo");
-  const vencidas=pendientes.filter(t=>daysUntil(t.due_date)<0);
-  const urgentes=pendientes.filter(t=>t.priority==="urgente"||daysUntil(t.due_date)<=1);
-  const totalMsg=Object.values(commentCounts).reduce((s,v)=>s+v,0);
+  const pendientes = tareas.filter(t=>t.status!=="listo");
+  const vencidas   = pendientes.filter(t=>daysUntil(t.due_date)<0);
+  const urgentes   = pendientes.filter(t=>t.priority==="urgente"||daysUntil(t.due_date)<=1);
+  const totalMsg   = Object.values(commentCounts).reduce((s,v)=>s+v,0);
 
-  const navItem=(v,label,icon)=>(
-    <button onClick={()=>{setVista(v);setSidebarOpen(false);}} style={{width:"100%",background:vista===v?"#FFF4F0":"transparent",border:"none",borderRight:vista===v?"3px solid #E8622A":"3px solid transparent",borderRadius:"6px 0 0 6px",padding:"8px 14px",display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:vista===v?600:400,color:vista===v?"#E8622A":"#6B7280",textAlign:"left",transition:"all 0.15s"}}>
-      <span style={{fontSize:15}}>{icon}</span>{label}
+  const navItem = (v,label,icon) => (
+    <button onClick={()=>setVista(v)} style={{width:"100%",background:vista===v?"#FFF4F0":"transparent",border:"none",borderRight:vista===v?"3px solid #E8622A":"3px solid transparent",padding:"9px 14px",display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:vista===v?600:400,color:vista===v?"#E8622A":"#6B7280",textAlign:"left",transition:"all 0.15s"}}>
+      <span style={{fontSize:14}}>{icon}</span>{label}
     </button>
   );
 
-  const filtS=a=>({padding:"6px 14px",borderRadius:20,border:a?"none":"1px solid #E5E7EB",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:12,fontWeight:600,background:a?"#1F2937":"#fff",color:a?"#fff":"#6B7280",flexShrink:0,transition:"all 0.15s"});
+  const filtS = a => ({padding:"6px 14px",borderRadius:20,border:a?"none":"1px solid #E5E7EB",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:12,fontWeight:600,background:a?"#1F2937":"#fff",color:a?"#fff":"#6B7280",flexShrink:0});
 
-  return(
+  return (
     <div style={{minHeight:"100vh",background:"#F8F9FB",fontFamily:"'Inter',sans-serif",display:"flex",flexDirection:"column"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box}select option{background:#fff}input,select,textarea{outline:none}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:2px}@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box}select option{background:#fff}input,select,textarea{outline:none}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:2px}`}</style>
 
-      {/* TOP HEADER */}
+      {/* HEADER */}
       <div style={{background:"#fff",borderBottom:"1.5px solid #F0F1F3",padding:"0 16px",position:"sticky",top:0,zIndex:100,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-        <div style={{display:"flex",alignItems:"center",height:54,gap:12}}>
-          {/* Logo */}
-          <div style={{display:"flex",alignItems:"center",gap:0,flexShrink:0}}>
-            <div style={{width:10,height:28,background:"#E8622A",borderRadius:"4px 0 0 4px"}}/>
-            <div style={{width:10,height:28,background:"#FF9500"}}/>
-            <div style={{width:10,height:28,background:"#FFD60A",borderRadius:"0 4px 4px 0",marginRight:8}}/>
+        <div style={{display:"flex",alignItems:"center",height:54,gap:12,maxWidth:1100,margin:"0 auto",width:"100%"}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:0,flexShrink:0}}>
+            <div style={{width:10,height:26,background:"#E8622A",borderRadius:"4px 0 0 4px"}}/>
+            <div style={{width:10,height:26,background:"#FF9500"}}/>
+            <div style={{width:10,height:26,background:"#FFD60A",borderRadius:"0 4px 4px 0",marginRight:8}}/>
             <span style={{color:"#1F2937",fontSize:16,fontWeight:700,letterSpacing:0.5}}>FOREMAN</span>
             <span style={{background:"#F3F4F6",color:"#9CA3AF",fontSize:9,fontWeight:600,padding:"1px 5px",borderRadius:4,marginLeft:6}}>BETA</span>
           </div>
-
-          {/* Search bar */}
-          <div style={{flex:1,background:"#F3F4F6",borderRadius:8,padding:"7px 12px",display:"flex",alignItems:"center",gap:8,maxWidth:300,cursor:"pointer"}}>
-            <span style={{fontSize:14}}>🔍</span>
-            <span style={{color:"#9CA3AF",fontSize:13}}>Buscar tareas...</span>
+          <div style={{flex:1,background:"#F3F4F6",borderRadius:8,padding:"7px 12px",display:"flex",alignItems:"center",gap:8,maxWidth:280,cursor:"text"}}>
+            <span style={{fontSize:13}}>🔍</span>
+            <span style={{color:"#9CA3AF",fontSize:12}}>Buscar tareas...</span>
           </div>
-
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
             {vencidas.length>0&&admin&&<div style={{background:"#FEE2E2",borderRadius:20,padding:"3px 10px",color:"#DC2626",fontSize:11,fontWeight:600}}>⚠ {vencidas.length}</div>}
-            {admin&&<button onClick={()=>setShowAjustes(true)} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 10px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>⚙️</button>}
-            <Avatar initials={usuario.avatar} size={30} color={usuario.color||"#E8622A"}/>
+            {admin&&<button onClick={()=>setShowAjustes(true)} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 10px",color:"#6B7280",fontSize:12,cursor:"pointer",fontWeight:500}}>⚙️ Ajustes</button>}
+            <Avatar name={usuario.name} size={30} color={usuario.color||"#E8622A"}/>
             <button onClick={logout} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:12}}>salir</button>
-            <button onClick={()=>{setEditTask(null);setShowModal(true);}} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"7px 14px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(232,98,42,0.25)",display:"flex",alignItems:"center",gap:5}}>
+            <button onClick={()=>{setEditTask(null);setShowModal(true);}} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"7px 14px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(232,98,42,0.25)",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
               + Nueva tarea
             </button>
           </div>
         </div>
       </div>
 
-      {/* MAIN LAYOUT */}
-      <div style={{display:"flex",flex:1,maxWidth:1100,margin:"0 auto",width:"100%",padding:"0"}}>
-
+      {/* LAYOUT */}
+      <div style={{display:"flex",flex:1,maxWidth:1100,margin:"0 auto",width:"100%"}}>
         {/* SIDEBAR */}
-        <div style={{width:180,background:"#fff",borderRight:"1px solid #F0F1F3",padding:"16px 0",flexShrink:0,minHeight:"calc(100vh - 54px)"}}>
-          <div style={{padding:"0 14px",marginBottom:16}}>
+        <div style={{width:176,background:"#fff",borderRight:"1px solid #F0F1F3",padding:"16px 0",flexShrink:0,minHeight:"calc(100vh - 54px)"}}>
+          <div style={{padding:"0 12px",marginBottom:14}}>
             <div style={{display:"flex",alignItems:"center",gap:8,background:"#F9FAFB",borderRadius:8,padding:"8px 10px"}}>
-              <Avatar initials={usuario.avatar} size={28} color={usuario.color||"#E8622A"}/>
+              <Avatar name={usuario.name} size={26} color={usuario.color||"#E8622A"}/>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:"#111"}}>{usuario.name}</div>
                 <div style={{fontSize:10,color:"#9CA3AF"}}>{usuario.role==="owner"?"Director":usuario.role==="assistant"?"Asistente":"Equipo"}</div>
               </div>
             </div>
           </div>
-
           {navItem("tareas","Tareas","📋")}
           {admin&&navItem("equipo","Equipo","👷")}
           {admin&&navItem("proyectos","Proyectos","🏗")}
-
           {admin&&(
-            <div style={{margin:"16px 14px 0",paddingTop:16,borderTop:"1px solid #F0F1F3"}}>
-              <div style={{fontSize:10,color:"#9CA3AF",fontWeight:600,letterSpacing:0.5,marginBottom:8}}>RESUMEN</div>
-              <div style={{display:"grid",gap:6}}>
-                {[{l:"Activas",v:pendientes.length,c:"#374151"},{l:"Urgentes",v:urgentes.length,c:"#DC2626"},{l:"Mensajes",v:totalMsg,c:"#2563EB"}].map(s=>(
-                  <div key={s.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:12,color:"#6B7280"}}>{s.l}</span>
-                    <span style={{fontSize:13,fontWeight:700,color:s.c}}>{s.v}</span>
-                  </div>
-                ))}
-              </div>
+            <div style={{margin:"14px 12px 0",paddingTop:14,borderTop:"1px solid #F0F1F3"}}>
+              <div style={{fontSize:10,color:"#9CA3AF",fontWeight:600,letterSpacing:0.5,marginBottom:8}}>HOY</div>
+              {[{l:"Activas",v:pendientes.length,c:"#374151"},{l:"Urgentes",v:urgentes.length,c:"#DC2626"},{l:"Mensajes",v:totalMsg,c:"#2563EB"}].map(s=>(
+                <div key={s.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                  <span style={{fontSize:12,color:"#6B7280"}}>{s.l}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:s.c}}>{s.v}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
 
         {/* CONTENT */}
-        <div style={{flex:1,padding:"20px 20px",overflowY:"auto",minHeight:"calc(100vh - 54px)"}}>
-
-          {admin&&vista==="tareas"&&(
-            <>
-              <NovaInput currentUser={usuario} projects={projects} users={users} onTaskCreated={fetchTareas}/>
-              <AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects}/>
-            </>
-          )}
+        <div style={{flex:1,padding:"18px 20px",overflowY:"auto",minHeight:"calc(100vh - 54px)"}}>
+          {admin&&vista==="tareas"&&<><NovaInput currentUser={usuario} projects={projects} users={users} onTaskCreated={fetchTareas}/><AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects}/></>}
 
           {vista==="tareas"&&(
             <>
-              <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",paddingBottom:4}}>
+              <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:4}}>
                 {[["todas","Todas"],["urgente","Urgentes"],["pendiente","Pendientes"],["listo","Completadas"]].map(([f,l])=>(
                   <button key={f} onClick={()=>setFiltro(f)} style={filtS(filtro===f)}>{l}</button>
                 ))}
@@ -784,9 +935,9 @@ export default function App(){
                 </select>}
               </div>
               {cargando?<div style={{textAlign:"center",color:"#9CA3AF",padding:"40px 0",fontSize:13}}>Cargando...</div>
-                :visibles.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"60px 0",fontSize:13}}><div style={{fontSize:36,marginBottom:10}}>🏗</div>Sin tareas. Toca "Nueva tarea" o dile a NOVA.</div>
+                :visibles.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"60px 0",fontSize:13}}><div style={{fontSize:36,marginBottom:10}}>🏗</div>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                 :visibles.sort((a,b)=>{const o={urgente:0,alta:1,media:2,baja:3};if(a.status==="listo"&&b.status!=="listo")return 1;if(b.status==="listo"&&a.status!=="listo")return -1;return(o[a.priority]-o[b.priority])||(daysUntil(a.due_date)-daysUntil(b.due_date));})
-                    .map((t,i)=><div key={t.id} style={{animation:`fadeUp 0.3s ease ${i*0.02}s both`}}><TarjetaTarea task={t} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t=>{setEditTask(t);setShowModal(true);}} onAbrirChat={setChatTarea} commentCount={commentCounts[t.id]||0}/></div>)}
+                    .map(t=><TarjetaTarea key={t.id} task={t} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t=>{setEditTask(t);setShowModal(true);}} onAbrirChat={setChatTarea} commentCount={commentCounts[t.id]||0}/>)}
             </>
           )}
 
@@ -798,7 +949,7 @@ export default function App(){
                 return(
                   <div key={m.id} style={{background:"#fff",borderRadius:12,padding:14,border:"1px solid #E5E7EB"}}>
                     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:mt.length?12:0}}>
-                      <Avatar initials={m.avatar} size={40} color={mo.length>0?"#DC2626":m.color||"#2563EB"}/>
+                      <Avatar name={m.name} size={40} color={mo.length>0?"#DC2626":m.color||"#2563EB"}/>
                       <div style={{flex:1}}>
                         <div style={{fontWeight:700,fontSize:14,color:"#111"}}>{m.name}</div>
                         <div style={{fontSize:11,color:"#9CA3AF"}}>{m.role==="owner"?"👑 Director":m.role==="assistant"?"🤝 Asistente":"👷 Equipo"}</div>
@@ -810,7 +961,7 @@ export default function App(){
                     </div>
                     {mt.map(t=>(
                       <div key={t.id} style={{background:"#F9FAFB",borderRadius:8,padding:"7px 10px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div><div style={{fontSize:12,fontWeight:500,color:"#111"}}>{t.title}</div><div style={{fontSize:11,color:"#9CA3AF"}}>{getProject(t.project_id)?.name}</div></div>
+                        <div><div style={{fontSize:12,fontWeight:500,color:"#111"}}>{t.title}</div><div style={{fontSize:11,color:"#9CA3AF"}}>{gP(t.project_id)?.name}</div></div>
                         <FechaBadge due={t.due_date} status={t.status}/>
                       </div>
                     ))}
