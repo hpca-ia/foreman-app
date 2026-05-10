@@ -596,7 +596,7 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
       </div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",paddingTop:8,borderTop:"1px solid #F9FAFB"}}>
         {puedeCambiar && (
-          <div style={{display:"flex",gap:4",flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             {Object.entries(ESTADO).map(([k,v])=>(
               <button key={k} onClick={()=>handleEstado(k)}
                 style={{background:task.status===k?v.color:"#F3F4F6",border:`1px solid ${task.status===k?v.color:"#E5E7EB"}`,borderRadius:6,padding:"4px 8px",color:task.status===k?"#fff":"#6B7280",fontSize:10,fontWeight:task.status===k?600:400,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap",transition:"all 0.15s"}}>
