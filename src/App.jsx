@@ -271,19 +271,26 @@ function AIBriefing({ tasks, currentUser, users, projects }) {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:700,
-          system:`Eres NOVA, asistente de ${currentUser.name} de HCA Studio. Briefing ejecutivo en español:
-1. RESUMEN (1 línea)
-2. URGENTE HOY
-3. EN PROGRESO
-4. COMPLETADAS
-5. RECOMENDACIÓN
-Directo, menciona nombres y proyectos.`,
-          messages:[{role:"user",content:`Tareas:\n${todas}\n\nBriefing para ${currentUser.name}.`}]
+          system:`Eres NOVA, asistente de ${currentUser.name} de HCA Studio. Genera un briefing completo en español con estas secciones:
+
+🔴 VENCIDAS Y URGENTES — lista cada tarea vencida con nombre, responsable y días de retraso
+🔧 EN PROGRESO — tareas actualmente en progreso con responsable
+⏳ PENDIENTES — todas las tareas pendientes con responsable y fecha límite  
+✅ COMPLETADAS — tareas terminadas recientemente
+💡 RECOMENDACIÓN — qué hacer primero hoy
+
+Sé específico con nombres de personas y proyectos. Si no hay tareas en alguna categoría, escribe "Ninguna". NUNCA omitas tareas vencidas.`,
+          messages:[{role:"user",content:`Analiza TODAS estas tareas cuidadosamente:\n${todas}\n\nIMPORTANTE: Si hay tareas VENCIDAS o URGENTES, menciónalas explícitamente. NUNCA digas que todo está en orden si hay tareas vencidas o pendientes. Sé específico con nombres y fechas.`}]
         })
       });
       const data = await res.json();
-      setTexto(data.content?.[0]?.text || "Todo en orden.");
-    } catch { setTexto("⚠️ Error de conexión. Verifica tu internet."); }
+      const respuesta = data.content?.[0]?.text;
+      if (!respuesta) {
+        setTexto("⚠️ NOVA no respondió. Verifica que tienes créditos en console.anthropic.com");
+      } else {
+        setTexto(respuesta);
+      }
+    } catch(e) { setTexto("⚠️ Error de conexión: " + (e.message||"intenta de nuevo")); }
     setLoading(false);
   }
 
@@ -807,7 +814,9 @@ export default function App() {
     const cCh = supabase.channel(`counts-main-${usuario.id}-${Date.now()}`)
       .on("postgres_changes",{event:"INSERT",schema:"public",table:"comments"}, p => setCommentCounts(prev=>({...prev,[p.new.task_id]:(prev[p.new.task_id]||0)+1})))
       .subscribe();
-    return () => { supabase.removeChannel(tCh); supabase.removeChannel(cCh); };
+    // Polling cada 10s como respaldo al realtime
+    const poll = setInterval(() => { fetchTareas(); }, 10000);
+    return () => { supabase.removeChannel(tCh); supabase.removeChannel(cCh); clearInterval(poll); };
   }, [usuario]);
 
   async function fetchTareas() {
