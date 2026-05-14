@@ -278,15 +278,31 @@ function AIBriefing({ tasks, currentUser, users, projects }) {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:700,
-          system:`Eres NOVA, asistente de ${currentUser.name} de HCA Studio. Genera un briefing completo en español con estas secciones:
+          system:`Eres NOVA. Responde SOLO con una tabla HTML limpia. Sin markdown, sin asteriscos, sin #. Solo HTML puro.
 
-🔴 VENCIDAS Y URGENTES — lista cada tarea vencida con nombre, responsable y días de retraso
-🔧 EN PROGRESO — tareas actualmente en progreso con responsable
-⏳ PENDIENTES — todas las tareas pendientes con responsable y fecha límite  
-✅ COMPLETADAS — tareas terminadas recientemente
-💡 RECOMENDACIÓN — qué hacer primero hoy
+Formato exacto a seguir:
 
-Sé específico con nombres de personas y proyectos. Si no hay tareas en alguna categoría, escribe "Ninguna". NUNCA omitas tareas vencidas.`,
+<div style="font-family:Inter,sans-serif;font-size:13px">
+<div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+<div style="background:#FEE2E2;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#DC2626">[N]</div><div style="font-size:10px;color:#DC2626;font-weight:600">VENCIDAS</div></div>
+<div style="background:#FEF3C7;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#D97706">[N]</div><div style="font-size:10px;color:#D97706;font-weight:600">URGENTES</div></div>
+<div style="background:#D1FAE5;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#059669">[N]</div><div style="font-size:10px;color:#059669;font-weight:600">LISTAS</div></div>
+<div style="background:#F3F4F6;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#374151">[N]</div><div style="font-size:10px;color:#374151;font-weight:600">TOTAL</div></div>
+</div>
+<table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+<thead><tr style="background:#FFF4F0"><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Tarea</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Proyecto</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Responsable</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Estado</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Fecha</th></tr></thead>
+<tbody>[UNA FILA POR TAREA]</tbody>
+</table>
+<div style="background:#F0FDF4;border-radius:8px;padding:10px 14px;border-left:3px solid #059669">
+<div style="font-size:11px;font-weight:600;color:#059669;margin-bottom:6px">💡 RECOMENDACIONES</div>
+<ol style="margin:0;padding-left:16px;font-size:12px;color:#374151">[ITEMS]</ol>
+</div>
+</div>
+
+Para cada fila de tarea usa este formato exacto:
+<tr style="border-bottom:1px solid #F3F4F6"><td style="padding:5px 10px;font-size:12px;font-weight:500;color:#111">[TITULO]</td><td style="padding:5px 10px;font-size:11px;color:#6B7280">[PROYECTO]</td><td style="padding:5px 10px;font-size:11px;color:#6B7280">[RESPONSABLE]</td><td style="padding:5px 10px;font-size:11px">[ESTADO CON ICON]</td><td style="padding:5px 10px;font-size:11px;font-weight:600;color:[COLOR SEGUN URGENCIA]">[FECHA]</td></tr>
+
+Incluye TODAS las tareas. Para fecha: usa color #DC2626 si vencida, #D97706 si hoy o en 1-2 días, #6B7280 si futura.`,
           messages:[{role:"user",content:`Analiza TODAS estas tareas cuidadosamente:\n${todas}\n\nIMPORTANTE: Si hay tareas VENCIDAS o URGENTES, menciónalas explícitamente. NUNCA digas que todo está en orden si hay tareas vencidas o pendientes. Sé específico con nombres y fechas.`}]
         })
       });
