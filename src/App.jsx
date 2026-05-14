@@ -340,11 +340,42 @@ function FileSection({ taskId }) {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
-    const path = `task-${taskId}/${Date.now()}-${file.name}`;
-    await supabase.storage.from("task-files").upload(path, file);
-    await fetchFiles();
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `task-${taskId}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("task-files").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || "application/octet-stream"
+      });
+      if (error) { console.error("Upload error:", error); alert("Error subiendo: " + error.message); }
+      else { await fetchFiles(); }
+    } catch(err) { console.error(err); alert("Error: " + err.message); }
     setUploading(false);
     e.target.value = "";
+  }
+
+  async function uploadFromClipboard(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) return;
+        setUploading(true);
+        try {
+          const path = `task-${taskId}/${Date.now()}-captura.png`;
+          const { error } = await supabase.storage.from("task-files").upload(path, file, {
+            cacheControl: "3600", upsert: false, contentType: "image/png"
+          });
+          if (error) alert("Error: " + error.message);
+          else { await fetchFiles(); }
+        } catch(err) { alert("Error: " + err.message); }
+        setUploading(false);
+        break;
+      }
+    }
   }
 
   function getUrl(name) {
@@ -378,6 +409,9 @@ function FileSection({ taskId }) {
           {uploading?"Subiendo...":"+ Subir archivo"}
         </button>
         <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={uploadFile} style={{display:"none"}}/>
+      </div>
+      <div onPaste={uploadFromClipboard} tabIndex={0} style={{background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:8,padding:"8px 12px",fontSize:11,color:"#9CA3AF",cursor:"text",outline:"none",marginBottom:8}} title="Pega una captura de pantalla aquí">
+        📋 Click aquí y pega una captura (Cmd+V / Ctrl+V)
       </div>
       {files.length > 0 && (
         <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -807,6 +841,7 @@ export default function App() {
   const [editTask, setEditTask] = useState(null);
   const [chatTarea, setChatTarea] = useState(null);
   const [showAjustes, setShowAjustes] = useState(false);
+  const [showAlerts, setShowAlerts] = useState(false);
   const gP = id => projects.find(p=>p.id===id);
   const gU = id => users.find(u=>u.id===id);
 
@@ -855,6 +890,11 @@ export default function App() {
   if (!usuario) return <LoginScreen onLogin={setUsuario} users={users}/>;
 
   const admin = esAdmin(usuario.role);
+  // Alertas personalizadas por usuario
+  const misAlertasTareas = admin 
+    ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
+    : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
+  const alertCount = misAlertasTareas.length;
   let visibles = admin ? tareas : tareas.filter(t=>t.assignee_id===usuario.id||t.created_by===usuario.id);
   if (filtro==="pendiente") visibles = visibles.filter(t=>t.status==="pendiente");
   if (filtro==="urgente")   visibles = visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due_date)<=1));
@@ -893,7 +933,7 @@ export default function App() {
             <span style={{color:"#9CA3AF",fontSize:12}}>Buscar tareas...</span>
           </div>
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
-            {vencidas.length>0&&admin&&<button onClick={()=>setVista("tareas") || setFiltro("urgente")} style={{background:"#FEE2E2",border:"none",borderRadius:20,padding:"3px 10px",color:"#DC2626",fontSize:11,fontWeight:600,cursor:"pointer"}} title="Ver tareas vencidas">⚠ {vencidas.length} vencidas</button>}
+            {alertCount>0&&<button onClick={()=>{setVista("tareas");setFiltro("urgente");setShowAlerts(true);}} style={{background:"#FEE2E2",border:"none",borderRadius:20,padding:"3px 10px",color:"#DC2626",fontSize:11,fontWeight:600,cursor:"pointer"}}>⚠ {alertCount}</button>}
             {admin&&<button onClick={()=>setShowAjustes(true)} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 10px",color:"#6B7280",fontSize:12,cursor:"pointer",fontWeight:500}}>⚙️ Ajustes</button>}
             <Avatar name={usuario.name} size={30} color={usuario.color||"#E8622A"}/>
             <button onClick={logout} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:12}}>salir</button>
@@ -1014,6 +1054,42 @@ export default function App() {
         </div>
       </div>
 
+      {showAlerts&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",zIndex:200,padding:"60px 16px 0"}} onClick={()=>setShowAlerts(false)}>
+          <div style={{background:"#fff",borderRadius:16,padding:20,width:360,maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{fontSize:14,fontWeight:600,color:"#111"}}>⚠️ Alertas de {usuario.name}</div>
+              <button onClick={()=>setShowAlerts(false)} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
+            </div>
+            {misAlertasTareas.length===0?<div style={{color:"#9CA3AF",fontSize:13,textAlign:"center",padding:"20px 0"}}>✅ Sin alertas pendientes</div>:(
+              <div>
+                {misAlertasTareas.filter(t=>daysUntil(t.due_date)<0).length>0&&(
+                  <div style={{marginBottom:16}}>
+                    <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,marginBottom:8}}>🔴 VENCIDAS</div>
+                    {misAlertasTareas.filter(t=>daysUntil(t.due_date)<0).map(t=>(
+                      <div key={t.id} style={{background:"#FEE2E2",borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:"3px solid #DC2626"}}>
+                        <div style={{fontSize:13,fontWeight:600,color:"#111"}}>{t.title}</div>
+                        <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{projects.find(p=>p.id===t.project_id)?.name} · {users.find(u=>u.id===t.assignee_id)?.name||"Sin asignar"} · Vencida {Math.abs(daysUntil(t.due_date))}d</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {misAlertasTareas.filter(t=>daysUntil(t.due_date)>=0&&daysUntil(t.due_date)<=2).length>0&&(
+                  <div>
+                    <div style={{fontSize:11,fontWeight:600,color:"#D97706",letterSpacing:0.5,marginBottom:8}}>🟠 POR VENCER</div>
+                    {misAlertasTareas.filter(t=>daysUntil(t.due_date)>=0&&daysUntil(t.due_date)<=2).map(t=>(
+                      <div key={t.id} style={{background:"#FEF3C7",borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:"3px solid #D97706"}}>
+                        <div style={{fontSize:13,fontWeight:600,color:"#111"}}>{t.title}</div>
+                        <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{projects.find(p=>p.id===t.project_id)?.name} · {users.find(u=>u.id===t.assignee_id)?.name||"Sin asignar"} · {daysUntil(t.due_date)===0?"Hoy":`en ${daysUntil(t.due_date)}d`}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {showModal&&<ModalTarea editTask={editTask} currentUser={usuario} users={users} projects={projects} onCerrar={()=>{setShowModal(false);setEditTask(null);}} onGuardar={guardarTarea}/>}
       {chatTarea&&<ChatTarea task={chatTarea} currentUser={usuario} users={users} projects={projects} onClose={()=>setChatTarea(null)}/>}
       {showAjustes&&<PanelAjustes users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} onClose={()=>setShowAjustes(false)}/>}
