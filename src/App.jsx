@@ -410,8 +410,16 @@ function FileSection({ taskId }) {
         </button>
         <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={uploadFile} style={{display:"none"}}/>
       </div>
-      <div onPaste={uploadFromClipboard} tabIndex={0} style={{background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:8,padding:"8px 12px",fontSize:11,color:"#9CA3AF",cursor:"text",outline:"none",marginBottom:8}} title="Pega una captura de pantalla aquí">
-        📋 Click aquí y pega una captura (Cmd+V / Ctrl+V)
+      <div 
+        onPaste={uploadFromClipboard} 
+        tabIndex={0}
+        contentEditable={true}
+        suppressContentEditableWarning={true}
+        onKeyDown={e=>{if(e.key!=="v"||!e.metaKey&&!e.ctrlKey)e.preventDefault();}}
+        style={{background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:8,padding:"8px 12px",fontSize:11,color:"#9CA3AF",cursor:"pointer",outline:"none",marginBottom:8,userSelect:"none"}}
+        onClick={e=>e.currentTarget.focus()}
+      >
+        {uploading?"Subiendo captura...":"📋 Click aquí y pega captura (Cmd+V o Ctrl+V)"}
       </div>
       {files.length > 0 && (
         <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
