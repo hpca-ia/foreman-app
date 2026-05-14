@@ -850,6 +850,7 @@ export default function App() {
   const [chatTarea, setChatTarea] = useState(null);
   const [showAjustes, setShowAjustes] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
   const gP = id => projects.find(p=>p.id===id);
   const gU = id => users.find(u=>u.id===id);
 
@@ -864,8 +865,11 @@ export default function App() {
     const cCh = supabase.channel(`counts-main-${usuario.id}-${Date.now()}`)
       .on("postgres_changes",{event:"INSERT",schema:"public",table:"comments"}, p => setCommentCounts(prev=>({...prev,[p.new.task_id]:(prev[p.new.task_id]||0)+1})))
       .subscribe();
-    // Polling cada 10s como respaldo al realtime
-    const poll = setInterval(() => { fetchTareas(); }, 10000);
+    // Polling silencioso cada 15s - sin mostrar loading
+    const poll = setInterval(async () => {
+      const { data } = await supabase.from("tasks").select("*").order("created_at",{ascending:false});
+      if (data) setTareas(data);
+    }, 15000);
     return () => { supabase.removeChannel(tCh); supabase.removeChannel(cCh); clearInterval(poll); };
   }, [usuario]);
 
@@ -904,6 +908,15 @@ export default function App() {
     : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
   const alertCount = misAlertasTareas.length;
   let visibles = admin ? tareas : tareas.filter(t=>t.assignee_id===usuario.id||t.created_by===usuario.id);
+  if (busqueda.trim()) {
+    const q = busqueda.toLowerCase();
+    visibles = visibles.filter(t => 
+      t.title?.toLowerCase().includes(q) ||
+      t.notes?.toLowerCase().includes(q) ||
+      projects.find(p=>p.id===t.project_id)?.name?.toLowerCase().includes(q) ||
+      users.find(u=>u.id===t.assignee_id)?.name?.toLowerCase().includes(q)
+    );
+  }
   if (filtro==="pendiente") visibles = visibles.filter(t=>t.status==="pendiente");
   if (filtro==="urgente")   visibles = visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due_date)<=1));
   if (filtro==="listo")     visibles = visibles.filter(t=>t.status==="listo");
@@ -936,9 +949,10 @@ export default function App() {
             <span style={{color:"#1F2937",fontSize:16,fontWeight:700,letterSpacing:0.5}}>FOREMAN</span>
             <span style={{background:"#F3F4F6",color:"#9CA3AF",fontSize:9,fontWeight:600,padding:"1px 5px",borderRadius:4,marginLeft:6}}>BETA</span>
           </div>
-          <div style={{flex:1,background:"#F3F4F6",borderRadius:8,padding:"7px 12px",display:"flex",alignItems:"center",gap:8,maxWidth:280,cursor:"text"}}>
+          <div style={{flex:1,background:"#F3F4F6",borderRadius:8,padding:"4px 12px",display:"flex",alignItems:"center",gap:8,maxWidth:280}}>
             <span style={{fontSize:13}}>🔍</span>
-            <span style={{color:"#9CA3AF",fontSize:12}}>Buscar tareas...</span>
+            <input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar tareas..." style={{background:"transparent",border:"none",outline:"none",fontSize:12,color:"#374151",width:"100%",fontFamily:"'Inter',sans-serif"}}/>
+            {busqueda&&<button onClick={()=>setBusqueda("")} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:14,padding:0}}>×</button>}
           </div>
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
             {alertCount>0&&<button onClick={()=>{setVista("tareas");setFiltro("urgente");setShowAlerts(true);}} style={{background:"#FEE2E2",border:"none",borderRadius:20,padding:"3px 10px",color:"#DC2626",fontSize:11,fontWeight:600,cursor:"pointer"}}>⚠ {alertCount}</button>}
