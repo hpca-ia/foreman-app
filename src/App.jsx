@@ -115,7 +115,14 @@ function LoginScreen({ onLogin, users }) {
 
   return (
     <div style={{minHeight:"100vh",background:"#F8F9FB",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box}@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box}@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        .nova-briefing-container h3{font-size:13px;font-weight:600;color:#E8622A;margin:12px 0 6px;font-family:Inter,sans-serif}
+        .nova-briefing-container table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:12px}
+        .nova-briefing-container th{background:#FFF4F0;color:#E8622A;padding:6px 10px;text-align:left;font-weight:600;border:1px solid #FED7AA;font-family:Inter,sans-serif}
+        .nova-briefing-container td{padding:5px 10px;border:1px solid #F3F4F6;color:#374151;font-family:Inter,sans-serif}
+        .nova-briefing-container tr:nth-child(even) td{background:#FAFAFA}
+        .nova-briefing-container ol{padding-left:18px;margin:0}
+        .nova-briefing-container li{margin-bottom:4px;color:#374151;font-family:Inter,sans-serif;font-size:12px}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
       <div style={{marginBottom:32,textAlign:"center"}}>
         <div style={{display:"inline-flex",alignItems:"center",gap:0,marginBottom:10}}>
           <div style={{width:10,height:28,background:"#E8622A",borderRadius:"4px 0 0 4px"}}/>
@@ -223,7 +230,7 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
   return (
     <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:14}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-        <div style={{width:26,height:26,borderRadius:"50%",background:"#E8622A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>🤖</div>
+        <div style={{width:26,height:26,flexShrink:0}}><svg width="24" height="24" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
         <span style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>NOVA — Crear tarea</span>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:8}}>
@@ -296,7 +303,7 @@ Sé específico con nombres de personas y proyectos. Si no hay tareas en alguna 
 
   if (!visible) return (
     <button onClick={obtener} style={{background:"linear-gradient(135deg,#E8622A,#FF9500)",border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,width:"100%",boxShadow:"0 4px 12px rgba(232,98,42,0.2)",marginBottom:14}}>
-      <span style={{fontSize:16}}>🤖</span>
+      <div style={{width:22,height:22,flexShrink:0}}><svg width="24" height="24" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
       <div style={{textAlign:"left"}}><div>NOVA — Briefing del día</div><div style={{fontSize:10,opacity:0.8}}>Resumen completo de proyectos y responsables</div></div>
       <span style={{marginLeft:"auto"}}>→</span>
     </button>
@@ -305,12 +312,12 @@ Sé específico con nombres de personas y proyectos. Si no hay tareas en alguna 
   return (
     <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:14}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-        <div style={{width:26,height:26,borderRadius:"50%",background:"#E8622A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>🤖</div>
+        <div style={{width:26,height:26,flexShrink:0}}><svg width="24" height="24" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
         <span style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>NOVA — Briefing</span>
         <button onClick={()=>setVisible(false)} style={{marginLeft:"auto",background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:18}}>×</button>
       </div>
       {loading ? <div style={{color:"#9CA3AF",fontSize:13}}>Analizando {tasks.length} tareas...</div>
-        : <div style={{color:"#374151",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{texto}</div>}
+        : <div dangerouslySetInnerHTML={{__html: texto}} style={{fontSize:13,lineHeight:1.6}} className="nova-briefing-container"/>}
       {!loading && <button onClick={obtener} style={{marginTop:10,background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:6,padding:"5px 12px",color:"#E8622A",fontSize:11,cursor:"pointer",fontWeight:600}}>↺ Actualizar</button>}
     </div>
   );
@@ -886,7 +893,7 @@ export default function App() {
             <span style={{color:"#9CA3AF",fontSize:12}}>Buscar tareas...</span>
           </div>
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
-            {vencidas.length>0&&admin&&<div style={{background:"#FEE2E2",borderRadius:20,padding:"3px 10px",color:"#DC2626",fontSize:11,fontWeight:600}}>⚠ {vencidas.length}</div>}
+            {vencidas.length>0&&admin&&<button onClick={()=>setVista("tareas") || setFiltro("urgente")} style={{background:"#FEE2E2",border:"none",borderRadius:20,padding:"3px 10px",color:"#DC2626",fontSize:11,fontWeight:600,cursor:"pointer"}} title="Ver tareas vencidas">⚠ {vencidas.length} vencidas</button>}
             {admin&&<button onClick={()=>setShowAjustes(true)} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"6px 10px",color:"#6B7280",fontSize:12,cursor:"pointer",fontWeight:500}}>⚙️ Ajustes</button>}
             <Avatar name={usuario.name} size={30} color={usuario.color||"#E8622A"}/>
             <button onClick={logout} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:12}}>salir</button>
