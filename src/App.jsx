@@ -259,7 +259,7 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
 
 // ── BRIEFING ───────────────────────────────────────────────────────────────
 function AIBriefing({ tasks, currentUser, users, projects }) {
-  const [texto, setTexto] = useState("");
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [visible, setVisible] = useState(false);
   const gP = id => projects.find(p=>p.id===id);
@@ -267,313 +267,127 @@ function AIBriefing({ tasks, currentUser, users, projects }) {
 
   async function obtener() {
     setLoading(true); setVisible(true);
-    const todas = tasks.length ? tasks.map(t => {
+    const todas = tasks.map(t => {
       const d = daysUntil(t.due_date);
-      const estado = t.status==="listo"?"✅ COMPLETA":t.status==="en-progreso"?"🔧 EN PROGRESO":t.status==="bloqueado"?"🚫 BLOQUEADA":"⏳ PENDIENTE";
-      const fecha = t.status==="listo"?"completada":d<0?`vencida ${Math.abs(d)}d`:d===0?"vence HOY":`vence en ${d}d`;
-      return `• ${t.title} | ${gP(t.project_id)?.name} | ${t.assignee_id?gU(t.assignee_id)?.name:"sin asignar"} | ${estado} | ${fecha} | ${t.priority}`;
-    }).join("\n") : "Sin tareas.";
+      return {
+        titulo: t.title,
+        proyecto: gP(t.project_id)?.name || "?",
+        responsable: t.assignee_id ? gU(t.assignee_id)?.name : "Sin asignar",
+        estado: t.status,
+        fecha: t.status==="listo" ? "completada" : d<0 ? `vencida ${Math.abs(d)}d` : d===0 ? "HOY" : `en ${d}d`,
+        prioridad: t.priority,
+        vencida: t.status!=="listo" && d<0,
+        urgente: t.status!=="listo" && (t.priority==="urgente" || d<=1)
+      };
+    });
+
+    const resumen = JSON.stringify(todas);
     try {
       const res = await fetch("/api/nova", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:700,
-          system:`Eres NOVA. Responde SOLO con una tabla HTML limpia. Sin markdown, sin asteriscos, sin #. Solo HTML puro.
-
-Formato exacto a seguir:
-
-<div style="font-family:Inter,sans-serif;font-size:13px">
-<div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-<div style="background:#FEE2E2;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#DC2626">[N]</div><div style="font-size:10px;color:#DC2626;font-weight:600">VENCIDAS</div></div>
-<div style="background:#FEF3C7;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#D97706">[N]</div><div style="font-size:10px;color:#D97706;font-weight:600">URGENTES</div></div>
-<div style="background:#D1FAE5;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#059669">[N]</div><div style="font-size:10px;color:#059669;font-weight:600">LISTAS</div></div>
-<div style="background:#F3F4F6;border-radius:8px;padding:8px 14px;text-align:center"><div style="font-size:18px;font-weight:700;color:#374151">[N]</div><div style="font-size:10px;color:#374151;font-weight:600">TOTAL</div></div>
-</div>
-<table style="width:100%;border-collapse:collapse;margin-bottom:14px">
-<thead><tr style="background:#FFF4F0"><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Tarea</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Proyecto</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Responsable</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Estado</th><th style="padding:6px 10px;text-align:left;font-size:11px;color:#E8622A;border-bottom:2px solid #FED7AA">Fecha</th></tr></thead>
-<tbody>[UNA FILA POR TAREA]</tbody>
-</table>
-<div style="background:#F0FDF4;border-radius:8px;padding:10px 14px;border-left:3px solid #059669">
-<div style="font-size:11px;font-weight:600;color:#059669;margin-bottom:6px">💡 RECOMENDACIONES</div>
-<ol style="margin:0;padding-left:16px;font-size:12px;color:#374151">[ITEMS]</ol>
-</div>
-</div>
-
-Para cada fila de tarea usa este formato exacto:
-<tr style="border-bottom:1px solid #F3F4F6"><td style="padding:5px 10px;font-size:12px;font-weight:500;color:#111">[TITULO]</td><td style="padding:5px 10px;font-size:11px;color:#6B7280">[PROYECTO]</td><td style="padding:5px 10px;font-size:11px;color:#6B7280">[RESPONSABLE]</td><td style="padding:5px 10px;font-size:11px">[ESTADO CON ICON]</td><td style="padding:5px 10px;font-size:11px;font-weight:600;color:[COLOR SEGUN URGENCIA]">[FECHA]</td></tr>
-
-Incluye TODAS las tareas. Para fecha: usa color #DC2626 si vencida, #D97706 si hoy o en 1-2 días, #6B7280 si futura.`,
-          messages:[{role:"user",content:`Analiza TODAS estas tareas cuidadosamente:\n${todas}\n\nIMPORTANTE: Si hay tareas VENCIDAS o URGENTES, menciónalas explícitamente. NUNCA digas que todo está en orden si hay tareas vencidas o pendientes. Sé específico con nombres y fechas.`}]
+          model:"claude-sonnet-4-5", max_tokens:600,
+          system:`Eres NOVA. Analiza las tareas y responde SOLO con JSON válido sin markdown:
+{"recomendaciones":["rec1","rec2","rec3"]}
+Máximo 3 recomendaciones específicas y accionables para ${currentUser.name} hoy.`,
+          messages:[{role:"user",content:`Tareas: ${resumen}`}]
         })
       });
-      const data = await res.json();
-      const respuesta = data.content?.[0]?.text;
-      if (!respuesta) {
-        setTexto("⚠️ NOVA no respondió. Verifica que tienes créditos en console.anthropic.com");
-      } else {
-        setTexto(respuesta);
-      }
-    } catch(e) { setTexto("⚠️ Error de conexión: " + (e.message||"intenta de nuevo")); }
+      const resp = await res.json();
+      const text = resp.content?.[0]?.text || "{}";
+      const parsed = JSON.parse(text.replace(/\`\`\`json|\`\`\`/g,"").trim());
+      setData({ tareas: todas, recomendaciones: parsed.recomendaciones || [] });
+    } catch(e) {
+      setData({ tareas: todas, recomendaciones: ["Error al conectar con NOVA"] });
+    }
     setLoading(false);
+  }
+
+  const vencidas = data?.tareas.filter(t=>t.vencida).length || 0;
+  const urgentes = data?.tareas.filter(t=>t.urgente).length || 0;
+  const listas = data?.tareas.filter(t=>t.estado==="listo").length || 0;
+  const total = data?.tareas.length || 0;
+
+  function estadoIcon(e) {
+    if(e==="listo") return "✅";
+    if(e==="en-progreso") return "🔧";
+    if(e==="bloqueado") return "🚫";
+    return "⏳";
+  }
+  function fechaColor(t) {
+    if(t.vencida) return "#DC2626";
+    if(t.fecha==="HOY") return "#D97706";
+    return "#6B7280";
   }
 
   if (!visible) return (
     <button onClick={obtener} style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:10,padding:"10px 16px",color:"#E8622A",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,width:"100%",marginBottom:14}}>
-      <div style={{width:22,height:22,flexShrink:0}}><svg width="24" height="24" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
-      <div style={{textAlign:"left"}}><div>NOVA — Briefing del día</div><div style={{fontSize:10,opacity:0.8}}>Resumen completo de proyectos y responsables</div></div>
+      <div style={{width:22,height:22,flexShrink:0}}><svg width="22" height="22" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
+      <div style={{textAlign:"left"}}><div>NOVA — Briefing del día</div><div style={{fontSize:10,opacity:0.7,fontWeight:400}}>Resumen completo con tabla de tareas</div></div>
       <span style={{marginLeft:"auto"}}>→</span>
     </button>
   );
 
   return (
-    <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:14,marginBottom:14}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-        <div style={{width:26,height:26,flexShrink:0}}><svg width="24" height="24" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
-        <span style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>NOVA — Briefing</span>
+    <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:16,marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <div style={{width:26,height:26,flexShrink:0}}><svg width="26" height="26" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
+        <span style={{fontSize:13,fontWeight:600,color:"#E8622A",fontFamily:"'Inter',sans-serif"}}>NOVA — Briefing</span>
         <button onClick={()=>setVisible(false)} style={{marginLeft:"auto",background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:18}}>×</button>
       </div>
-      {loading ? <div style={{color:"#9CA3AF",fontSize:13}}>Analizando {tasks.length} tareas...</div>
-        : <div dangerouslySetInnerHTML={{__html: texto}} style={{fontSize:13,lineHeight:1.6}} className="nova-briefing-container"/>}
-      {!loading && <button onClick={obtener} style={{marginTop:10,background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:6,padding:"5px 12px",color:"#E8622A",fontSize:11,cursor:"pointer",fontWeight:600}}>↺ Actualizar</button>}
-    </div>
-  );
-}
 
-// ── FILE UPLOAD & VIEWER ───────────────────────────────────────────────────
-function FileSection({ taskId }) {
-  const [files, setFiles] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef(null);
-
-  useEffect(() => { fetchFiles(); }, [taskId]);
-
-  async function fetchFiles() {
-    const { data } = await supabase.storage.from("task-files").list(`task-${taskId}/`, { sortBy:{column:"created_at",order:"desc"} });
-    setFiles(data || []);
-  }
-
-  async function uploadFile(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `task-${taskId}/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from("task-files").upload(path, file, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: file.type || "application/octet-stream"
-      });
-      if (error) { console.error("Upload error:", error); alert("Error subiendo: " + error.message); }
-      else { await fetchFiles(); }
-    } catch(err) { console.error(err); alert("Error: " + err.message); }
-    setUploading(false);
-    e.target.value = "";
-  }
-
-  async function uploadFromClipboard(e) {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) return;
-        setUploading(true);
-        try {
-          const path = `task-${taskId}/${Date.now()}-captura.png`;
-          const { error } = await supabase.storage.from("task-files").upload(path, file, {
-            cacheControl: "3600", upsert: false, contentType: "image/png"
-          });
-          if (error) alert("Error: " + error.message);
-          else { await fetchFiles(); }
-        } catch(err) { alert("Error: " + err.message); }
-        setUploading(false);
-        break;
-      }
-    }
-  }
-
-  function getUrl(name) {
-    const { data } = supabase.storage.from("task-files").getPublicUrl(`task-${taskId}/${name}`);
-    return data.publicUrl;
-  }
-
-  function fileIcon(name) {
-    const ext = name.split(".").pop().toLowerCase();
-    if (["jpg","jpeg","png","gif","webp","heic"].includes(ext)) return "🖼";
-    if (["pdf"].includes(ext)) return "📄";
-    if (["doc","docx"].includes(ext)) return "📝";
-    if (["xls","xlsx"].includes(ext)) return "📊";
-    return "📎";
-  }
-
-  function isImage(name) {
-    return ["jpg","jpeg","png","gif","webp","heic"].includes(name.split(".").pop().toLowerCase());
-  }
-
-  async function deleteFile(name) {
-    await supabase.storage.from("task-files").remove([`task-${taskId}/${name}`]);
-    fetchFiles();
-  }
-
-  return (
-    <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid #F3F4F6"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-        <div style={{fontSize:12,fontWeight:600,color:"#6B7280"}}>📎 Archivos ({files.length})</div>
-        <button onClick={()=>fileRef.current?.click()} disabled={uploading} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 10px",color:"#374151",fontSize:11,cursor:"pointer",fontWeight:500}}>
-          {uploading?"Subiendo...":"+ Subir archivo"}
-        </button>
-        <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={uploadFile} style={{display:"none"}}/>
-      </div>
-      <div 
-        onPaste={uploadFromClipboard} 
-        tabIndex={0}
-        contentEditable={true}
-        suppressContentEditableWarning={true}
-        onKeyDown={e=>{if(e.key!=="v"||!e.metaKey&&!e.ctrlKey)e.preventDefault();}}
-        style={{background:"#F9FAFB",border:"1px dashed #E5E7EB",borderRadius:6,padding:"5px 10px",fontSize:10,color:"#C4C9D4",cursor:"pointer",outline:"none",marginBottom:6,userSelect:"none"}}
-        onClick={e=>e.currentTarget.focus()}
-      >
-        {uploading?"⏳ Subiendo...":"📋 Pegar captura aquí (Cmd+V)"}
-      </div>
-      {files.length > 0 && (
-        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-          {files.map(f => (
-            <div key={f.name} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,overflow:"hidden",width:isImage(f.name)?90:160}}>
-              {isImage(f.name) ? (
-                <a href={getUrl(f.name)} target="_blank" rel="noreferrer">
-                  <img src={getUrl(f.name)} alt={f.name} style={{width:"100%",height:70,objectFit:"cover",display:"block"}}/>
-                </a>
-              ) : (
-                <a href={getUrl(f.name)} target="_blank" rel="noreferrer" download style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",textDecoration:"none"}}>
-                  <span style={{fontSize:18}}>{fileIcon(f.name)}</span>
-                  <span style={{fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name.replace(/^\d+-/,"")}</span>
-                </a>
-              )}
-              <div style={{display:"flex",justifyContent:"space-between",padding:"4px 6px",borderTop:"1px solid #F3F4F6"}}>
-                <a href={getUrl(f.name)} download target="_blank" rel="noreferrer" style={{fontSize:10,color:"#2563EB",textDecoration:"none",fontWeight:500}}>⬇ Descargar</a>
-                <button onClick={()=>deleteFile(f.name)} style={{background:"none",border:"none",color:"#DC2626",fontSize:10,cursor:"pointer",padding:0}}>✕</button>
+      {loading ? <div style={{color:"#9CA3AF",fontFamily:"'Inter',sans-serif",fontSize:13,padding:"10px 0"}}>Analizando {tasks.length} tareas...</div> : data && (
+        <>
+          {/* Resumen */}
+          <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+            {[{l:"VENCIDAS",v:vencidas,c:"#DC2626",bg:"#FEE2E2"},{l:"URGENTES",v:urgentes,c:"#D97706",bg:"#FEF3C7"},{l:"LISTAS",v:listas,c:"#059669",bg:"#D1FAE5"},{l:"TOTAL",v:total,c:"#374151",bg:"#F3F4F6"}].map(s=>(
+              <div key={s.l} style={{background:s.bg,borderRadius:8,padding:"8px 14px",textAlign:"center",minWidth:70}}>
+                <div style={{fontSize:20,fontWeight:700,color:s.c,fontFamily:"'Inter',sans-serif"}}>{s.v}</div>
+                <div style={{fontSize:10,color:s.c,fontWeight:600,fontFamily:"'Inter',sans-serif"}}>{s.l}</div>
               </div>
+            ))}
+          </div>
+
+          {/* Tabla */}
+          <div style={{overflowX:"auto",marginBottom:14}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,fontFamily:"'Inter',sans-serif"}}>
+              <thead>
+                <tr style={{background:"#FFF4F0"}}>
+                  {["Tarea","Proyecto","Responsable","Estado","Fecha"].map(h=>(
+                    <th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:11,color:"#E8622A",fontWeight:600,borderBottom:"2px solid #FED7AA",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.tareas.map((t,i)=>(
+                  <tr key={i} style={{borderBottom:"1px solid #F3F4F6",background:i%2===0?"#fff":"#FAFAFA"}}>
+                    <td style={{padding:"5px 10px",fontWeight:500,color:"#111",maxWidth:200}}>{t.titulo}</td>
+                    <td style={{padding:"5px 10px",color:"#6B7280",whiteSpace:"nowrap"}}>{t.proyecto}</td>
+                    <td style={{padding:"5px 10px",color:"#6B7280",whiteSpace:"nowrap"}}>{t.responsable}</td>
+                    <td style={{padding:"5px 10px",whiteSpace:"nowrap"}}>{estadoIcon(t.estado)} {t.estado}</td>
+                    <td style={{padding:"5px 10px",fontWeight:600,color:fechaColor(t),whiteSpace:"nowrap"}}>{t.fecha}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Recomendaciones */}
+          {data.recomendaciones.length>0&&(
+            <div style={{background:"#F0FDF4",borderRadius:8,padding:"10px 14px",borderLeft:"3px solid #059669"}}>
+              <div style={{fontSize:11,fontWeight:600,color:"#059669",marginBottom:6,fontFamily:"'Inter',sans-serif"}}>💡 RECOMENDACIONES DE NOVA</div>
+              <ol style={{margin:0,paddingLeft:16}}>
+                {data.recomendaciones.map((r,i)=><li key={i} style={{fontSize:12,color:"#374151",marginBottom:3,fontFamily:"'Inter',sans-serif"}}>{r}</li>)}
+              </ol>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
+      {!loading&&<button onClick={obtener} style={{marginTop:10,background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:6,padding:"5px 12px",color:"#E8622A",fontFamily:"'Inter',sans-serif",fontSize:11,cursor:"pointer",fontWeight:600}}>↺ Actualizar</button>}
     </div>
   );
 }
 
-// ── CHAT ───────────────────────────────────────────────────────────────────
-function ChatTarea({ task, currentUser, users, projects, onClose }) {
-  const [texto, setTexto] = useState("");
-  const [comments, setComments] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const bottomRef = useRef(null);
-  const channelRef = useRef(null);
-  const gU = id => users.find(u=>u.id===id);
-  const gP = id => projects.find(p=>p.id===id);
-  const proy = gP(task.project_id);
-
-  useEffect(() => {
-    fetchComments();
-    if (channelRef.current) supabase.removeChannel(channelRef.current);
-    const chName = `chat-task-${task.id}-${Math.random().toString(36).slice(2)}`;
-    const ch = supabase
-      .channel(chName)
-      .on("postgres_changes", {
-        event: "INSERT", schema: "public", table: "comments",
-        filter: `task_id=eq.${task.id}`
-      }, payload => {
-        setComments(prev => {
-          if (prev.some(c => c.id === payload.new.id)) return prev;
-          return [...prev, payload.new];
-        });
-      })
-      .subscribe((status) => {
-        console.log("Chat channel status:", status);
-      });
-    channelRef.current = ch;
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-  }, [task.id]);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({behavior:"smooth"}); }, [comments]);
-
-  async function fetchComments() {
-    const { data, error } = await supabase.from("comments").select("*").eq("task_id", task.id).order("created_at", {ascending:true});
-    if (!error) setComments(data || []);
-    setLoading(false);
-  }
-
-  async function enviar() {
-    if (!texto.trim()) return;
-    const msg = texto.trim(); setTexto("");
-    const { error } = await supabase.from("comments").insert({ task_id: task.id, user_id: currentUser.id, text: msg });
-    if (error) console.error("Error sending comment:", error);
-  }
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
-      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",width:"100%",maxWidth:580,maxHeight:"88vh",display:"flex",flexDirection:"column",boxShadow:"0 -10px 40px rgba(0,0,0,0.1)",fontFamily:"'Inter',sans-serif"}}>
-        <div style={{padding:"12px 18px 0",flexShrink:0}}>
-          <div style={{width:36,height:4,background:"#E5E7EB",borderRadius:2,margin:"0 auto 12px"}}/>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-            <div style={{width:4,height:32,borderRadius:2,background:proy?.color,flexShrink:0}}/>
-            <div style={{flex:1}}>
-              <div style={{fontSize:14,fontWeight:600,color:"#111"}}>{task.title}</div>
-              <div style={{fontSize:11,color:"#9CA3AF"}}>{proy?.name} · Chat en vivo</div>
-            </div>
-            <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:30,height:30,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
-          </div>
-          <div style={{display:"flex",gap:4,borderBottom:"1px solid #F3F4F6",marginBottom:0}}>
-            <button style={{padding:"7px 14px",border:"none",borderBottom:"2px solid #E8622A",background:"transparent",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"default",marginBottom:-1}}>
-              💬 Chat en vivo
-            </button>
-          </div>
-        </div>
-
-        {true && (
-          <>
-            <div style={{flex:1,overflowY:"auto",padding:"12px 18px",display:"flex",flexDirection:"column",gap:10,minHeight:200}}>
-              {loading && <div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"20px 0"}}>Cargando...</div>}
-              {!loading && comments.length === 0 && <div style={{textAlign:"center",color:"#9CA3AF",fontSize:12,padding:"30px 0"}}>💬 Sin mensajes aún. Escribe el primero.</div>}
-              {comments.map(c => {
-                const autor = gU(c.user_id);
-                const esMio = c.user_id === currentUser.id;
-                return (
-                  <div key={c.id} style={{display:"flex",flexDirection:esMio?"row-reverse":"row",gap:8,alignItems:"flex-end"}}>
-                    {!esMio && <Avatar name={autor?.name||"?"} size={26} color={autor?.color||"#2563EB"}/>}
-                    <div style={{maxWidth:"72%"}}>
-                      {!esMio && <div style={{fontSize:10,color:"#9CA3AF",marginBottom:3,paddingLeft:2}}>{autor?.name}</div>}
-                      <div style={{background:esMio?"#E8622A":"#F3F4F6",borderRadius:esMio?"14px 3px 14px 14px":"3px 14px 14px 14px",padding:"8px 12px"}}>
-                        <div style={{color:esMio?"#fff":"#111",fontSize:13,lineHeight:1.5}}>{c.text}</div>
-                      </div>
-                      <div style={{fontSize:10,color:"#D1D5DB",marginTop:2,textAlign:esMio?"right":"left"}}>{timeAgo(c.created_at)}</div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={bottomRef}/>
-            </div>
-            <div style={{padding:"10px 14px 18px",borderTop:"1px solid #F3F4F6",flexShrink:0,display:"flex",gap:8,alignItems:"center"}}>
-              <Avatar name={currentUser.name} size={30} color={currentUser.color||"#E8622A"}/>
-              <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();enviar();}}} placeholder="Escribe un mensaje... (Enter para enviar)"
-                style={{flex:1,background:"#F9FAFB",border:"1.5px solid #E5E7EB",borderRadius:10,color:"#111",fontSize:13,fontFamily:"'Inter',sans-serif",padding:"9px 12px",outline:"none"}}/>
-              <button onClick={enviar} disabled={!texto.trim()} style={{background:texto.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:10,width:38,height:38,color:texto.trim()?"#fff":"#9CA3AF",cursor:texto.trim()?"pointer":"default",fontSize:16,flexShrink:0}}>↑</button>
-            </div>
-          </>
-        )}
-
-
-      </div>
-    </div>
-  );
-}
 
 // ── WHATSAPP ───────────────────────────────────────────────────────────────
 function WhatsApp({ task, users, projects }) {
@@ -725,17 +539,36 @@ function ModalTarea({ onCerrar, onGuardar, editTask, currentUser, users, project
 }
 
 // ── PANEL AJUSTES ──────────────────────────────────────────────────────────
-function PanelAjustes({ users, setUsers, projects, setProjects, onClose }) {
-  const [tab, setTab] = useState("usuarios");
+function PanelAjustes({ users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
+  const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
   const [editP, setEditP] = useState(null);
   const [newU, setNewU] = useState(false);
   const [newP, setNewP] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoRef = useRef(null);
   const emptyUser = { id:Date.now(), name:"", role:"member", pin:"", avatar:"", color:"#2563EB" };
   const emptyProject = { id:Date.now(), name:"", color:"#E8622A" };
 
   function saveUsers(updated) { setUsers(updated); saveToStorage("foreman_users", updated); }
   function saveProjects(updated) { setProjects(updated); saveToStorage("foreman_projects", updated); }
+  function saveEmpresa(updated) { setEmpresa(updated); saveToStorage("foreman_empresa", updated); }
+
+  async function uploadLogo(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadingLogo(true);
+    const ext = file.name.split(".").pop();
+    const path = `empresa/logo.${ext}`;
+    await supabase.storage.from("task-files").remove([path]);
+    const { error } = await supabase.storage.from("task-files").upload(path, file, { upsert: true });
+    if (!error) {
+      const { data } = supabase.storage.from("task-files").getPublicUrl(path);
+      saveEmpresa({ ...empresa, logoUrl: data.publicUrl + "?t=" + Date.now() });
+    }
+    setUploadingLogo(false);
+    e.target.value = "";
+  }
 
   function saveUser(u) {
     const updated = users.find(x=>x.id===u.id) ? users.map(x=>x.id===u.id?{...u,avatar:initials(u.name)}:x) : [...users,{...u,id:Date.now(),avatar:initials(u.name)}];
@@ -803,9 +636,59 @@ function PanelAjustes({ users, setUsers, projects, setProjects, onClose }) {
           <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
         </div>
         <div style={{display:"flex",gap:4,marginBottom:16,background:"#F3F4F6",borderRadius:8,padding:4}}>
+          <button onClick={()=>setTab("empresa")} style={tabS(tab==="empresa")}>🏢 Empresa</button>
           <button onClick={()=>setTab("usuarios")} style={tabS(tab==="usuarios")}>👥 Usuarios</button>
           <button onClick={()=>setTab("proyectos")} style={tabS(tab==="proyectos")}>🏗 Proyectos</button>
         </div>
+
+        {tab === "empresa" && (
+          <div style={{display:"grid",gap:14}}>
+            {/* Logo */}
+            <div style={{background:"#F9FAFB",borderRadius:10,padding:14,border:"1px solid #E5E7EB"}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:10}}>Logo de la empresa</div>
+              <div style={{display:"flex",alignItems:"center",gap:14}}>
+                {empresa.logoUrl ? (
+                  <img src={empresa.logoUrl} alt="Logo" style={{width:64,height:64,objectFit:"contain",borderRadius:8,border:"1px solid #E5E7EB",background:"#fff",padding:4}}/>
+                ) : (
+                  <div style={{width:64,height:64,background:"#F3F4F6",borderRadius:8,border:"1.5px dashed #E5E7EB",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>🏢</div>
+                )}
+                <div>
+                  <button onClick={()=>logoRef.current?.click()} disabled={uploadingLogo} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",display:"block",marginBottom:6}}>
+                    {uploadingLogo?"Subiendo...":"📤 Subir logo"}
+                  </button>
+                  <div style={{fontSize:10,color:"#9CA3AF"}}>PNG, JPG o SVG. Máx 2MB.</div>
+                  <input ref={logoRef} type="file" accept="image/*" onChange={uploadLogo} style={{display:"none"}}/>
+                </div>
+              </div>
+            </div>
+            {/* Info básica */}
+            {[
+              {k:"nombre",l:"Nombre de la empresa",ph:"HCA Studio"},
+              {k:"tipo",l:"Tipo de negocio",ph:"Construcción, Inmobiliaria..."},
+              {k:"email",l:"Email de contacto",ph:"info@empresa.com"},
+              {k:"telefono",l:"Teléfono",ph:"+593 99 999 9999"},
+              {k:"web",l:"Sitio web",ph:"www.empresa.com"},
+              {k:"ciudad",l:"Ciudad",ph:"Quito, Ecuador"},
+              {k:"moneda",l:"Moneda",ph:"USD"},
+            ].map(f=>(
+              <div key={f.k}>
+                <label style={{color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"}}>{f.l}</label>
+                <input value={empresa[f.k]||""} onChange={e=>saveEmpresa({...empresa,[f.k]:e.target.value})} placeholder={f.ph}
+                  style={{width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"}}
+                  onFocus={e=>e.target.style.borderColor="#E8622A"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+              </div>
+            ))}
+            {/* Color principal */}
+            <div>
+              <label style={{color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"}}>Color principal de la marca</label>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <input type="color" value={empresa.color||"#E8622A"} onChange={e=>saveEmpresa({...empresa,color:e.target.value})}
+                  style={{width:48,height:36,border:"1px solid #E5E7EB",borderRadius:8,cursor:"pointer",padding:2}}/>
+                <div style={{fontSize:12,color:"#6B7280"}}>Este color se aplica en toda la app</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {tab === "usuarios" && (
           <div>
@@ -854,6 +737,9 @@ function PanelAjustes({ users, setUsers, projects, setProjects, onClose }) {
 export default function App() {
   const [users, setUsers] = useState(() => loadFromStorage("foreman_users", USERS_DEFAULT));
   const [projects, setProjects] = useState(() => loadFromStorage("foreman_projects", PROJECTS_DEFAULT));
+  const [empresa, setEmpresa] = useState(() => loadFromStorage("foreman_empresa", {
+    nombre:"HCA Studio", tipo:"Construcción", email:"", telefono:"", web:"", ciudad:"Quito", moneda:"USD", color:"#E8622A", logoUrl:""
+  }));
   const [usuario, setUsuario] = useState(null);
   const [tareas, setTareas] = useState([]);
   const [commentCounts, setCommentCounts] = useState({});
@@ -995,6 +881,16 @@ export default function App() {
               </div>
             </div>
           </div>
+          {empresa.logoUrl && (
+            <div style={{padding:"0 12px",marginBottom:12}}>
+              <img src={empresa.logoUrl} alt={empresa.nombre} style={{width:"100%",maxHeight:48,objectFit:"contain",borderRadius:6}}/>
+            </div>
+          )}
+          {!empresa.logoUrl && empresa.nombre && (
+            <div style={{padding:"0 12px",marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textAlign:"center"}}>{empresa.nombre}</div>
+            </div>
+          )}
           {navItem("tareas","Tareas","📋")}
           {admin&&navItem("equipo","Equipo","👷")}
           {admin&&navItem("proyectos","Proyectos","🏗")}
@@ -1130,7 +1026,7 @@ export default function App() {
       )}
       {showModal&&<ModalTarea editTask={editTask} currentUser={usuario} users={users} projects={projects} onCerrar={()=>{setShowModal(false);setEditTask(null);}} onGuardar={guardarTarea}/>}
       {chatTarea&&<ChatTarea task={chatTarea} currentUser={usuario} users={users} projects={projects} onClose={()=>setChatTarea(null)}/>}
-      {showAjustes&&<PanelAjustes users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} onClose={()=>setShowAjustes(false)}/>}
+      {showAjustes&&<PanelAjustes users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={()=>setShowAjustes(false)}/>}
     </div>
   );
 }
