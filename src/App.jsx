@@ -302,7 +302,7 @@ Sé específico con nombres de personas y proyectos. Si no hay tareas en alguna 
   }
 
   if (!visible) return (
-    <button onClick={obtener} style={{background:"linear-gradient(135deg,#E8622A,#FF9500)",border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,width:"100%",boxShadow:"0 4px 12px rgba(232,98,42,0.2)",marginBottom:14}}>
+    <button onClick={obtener} style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:10,padding:"10px 16px",color:"#E8622A",fontFamily:"'Inter',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,width:"100%",marginBottom:14}}>
       <div style={{width:22,height:22,flexShrink:0}}><svg width="24" height="24" viewBox="0 0 80 80"><circle cx="40" cy="40" r="38" fill="#1F2937"/><text x="40" y="55" textAnchor="middle" fontFamily="Inter,sans-serif" fontSize="40" fontWeight="700" fill="#E8622A">N</text><circle cx="58" cy="20" r="10" fill="#E8622A"/></svg></div>
       <div style={{textAlign:"left"}}><div>NOVA — Briefing del día</div><div style={{fontSize:10,opacity:0.8}}>Resumen completo de proyectos y responsables</div></div>
       <span style={{marginLeft:"auto"}}>→</span>
@@ -416,10 +416,10 @@ function FileSection({ taskId }) {
         contentEditable={true}
         suppressContentEditableWarning={true}
         onKeyDown={e=>{if(e.key!=="v"||!e.metaKey&&!e.ctrlKey)e.preventDefault();}}
-        style={{background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:8,padding:"8px 12px",fontSize:11,color:"#9CA3AF",cursor:"pointer",outline:"none",marginBottom:8,userSelect:"none"}}
+        style={{background:"#F9FAFB",border:"1px dashed #E5E7EB",borderRadius:6,padding:"5px 10px",fontSize:10,color:"#C4C9D4",cursor:"pointer",outline:"none",marginBottom:6,userSelect:"none"}}
         onClick={e=>e.currentTarget.focus()}
       >
-        {uploading?"Subiendo captura...":"📋 Click aquí y pega captura (Cmd+V o Ctrl+V)"}
+        {uploading?"⏳ Subiendo...":"📋 Pegar captura aquí (Cmd+V)"}
       </div>
       {files.length > 0 && (
         <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -629,8 +629,8 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
   }
 
   return (
-    <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"12px 14px",marginBottom:8,borderLeft:`3px solid ${proy?.color||"#E8622A"}`,opacity:esListo?0.65:1,fontFamily:"'Inter',sans-serif",transition:"opacity 0.2s"}}>
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:8}}>
+    <div style={{background:"#fff",border:"1px solid #F0F1F3",borderRadius:10,padding:"10px 12px",marginBottom:6,borderLeft:`3px solid ${proy?.color||"#E8622A"}`,opacity:esListo?0.6:1,fontFamily:"'Inter',sans-serif",transition:"opacity 0.2s",boxShadow:"0 1px 2px rgba(0,0,0,0.03)"}}>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:5}}>
         <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{background:pC.bg,color:pC.color,fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:20}}>{pC.label}</span>
           <span style={{background:"#F3F4F6",color:"#6B7280",fontSize:11,padding:"2px 8px",borderRadius:20}}>{task.type}</span>
@@ -638,9 +638,9 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
         </div>
         <FechaBadge due={task.due_date} status={task.status}/>
       </div>
-      <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:task.notes?6:8,lineHeight:1.4}}>{task.title}</div>
+      <div style={{fontSize:13,fontWeight:600,color:"#111",marginBottom:task.notes?4:6,lineHeight:1.3}}>{task.title}</div>
       {task.notes && <div style={{color:"#6B7280",fontSize:12,marginBottom:8,lineHeight:1.5}}>{task.notes}</div>}
-      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap",marginBottom:6}}>
         <span style={{background:`${proy?.color}18`,color:proy?.color,fontSize:11,padding:"2px 8px",borderRadius:20,fontWeight:600}}>{proy?.name}</span>
         {asig ? <div style={{display:"flex",alignItems:"center",gap:4}}><Avatar name={asig.name} size={18} color={asig.color||proy?.color}/><span style={{color:"#374151",fontSize:12}}>{asig.name}</span></div>
           : <span style={{color:"#DC2626",fontSize:11}}>⚠ Sin asignar</span>}
@@ -648,7 +648,7 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
         {crea && <span style={{color:"#D1D5DB",fontSize:10}}>por {crea.name}</span>}
       </div>
       <FileSection taskId={task.id}/>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",paddingTop:8,borderTop:"1px solid #F9FAFB"}}>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center",paddingTop:6,borderTop:"1px solid #F3F4F6",marginTop:4}}>
         {puedeCambiar && (
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             {Object.entries(ESTADO).map(([k,v])=>(
