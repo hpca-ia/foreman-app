@@ -20,7 +20,7 @@ const USERS_DEFAULT = [
 const PROJECTS_DEFAULT = [
   { id: 10, name: "Testing",           color: "#E8622A" },
   { id: 1,  name: "BdP Condado",       color: "#2563EB" },
-  { id: 2,  name: "BdP Urdesa",        color: "#7C3AED" },
+  { id: 2,  name: "BdP Urdesa",        color: "#7C3AED" å},
   { id: 3,  name: "BdP Banca Seguros", color: "#DB2777" },
   { id: 4,  name: "Fowler",            color: "#D97706" },
   { id: 5,  name: "Banderas",          color: "#059669" },
@@ -673,7 +673,7 @@ function PanelAjustes({ users, setUsers, projects, setProjects, empresa, setEmpr
             ].map(f=>(
               <div key={f.k}>
                 <label style={{color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"}}>{f.l}</label>
-                <input value={empresa[f.k]||""} onChange={e=>saveEmpresa({...empresa,[f.k]:e.target.value})} placeholder={f.ph}
+                <input value={empresa?.[f.k]||""} onChange={e=>saveEmpresa({...empresa,[f.k]:e.target.value})} placeholder={f.ph}
                   style={{width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"}}
                   onFocus={e=>e.target.style.borderColor="#E8622A"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
               </div>
@@ -682,7 +682,7 @@ function PanelAjustes({ users, setUsers, projects, setProjects, empresa, setEmpr
             <div>
               <label style={{color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"}}>Color principal de la marca</label>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <input type="color" value={empresa.color||"#E8622A"} onChange={e=>saveEmpresa({...empresa,color:e.target.value})}
+                <input type="color" value={empresa?.color||"#E8622A"} onChange={e=>saveEmpresa({...empresa,color:e.target.value})}
                   style={{width:48,height:36,border:"1px solid #E5E7EB",borderRadius:8,cursor:"pointer",padding:2}}/>
                 <div style={{fontSize:12,color:"#6B7280"}}>Este color se aplica en toda la app</div>
               </div>
@@ -752,6 +752,8 @@ export default function App() {
   const [chatTarea, setChatTarea] = useState(null);
   const [showAjustes, setShowAjustes] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
+  // Reset modal states on mount to prevent stuck overlays
+  useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, []);
   const [busqueda, setBusqueda] = useState("");
   const gP = id => projects.find(p=>p.id===id);
   const gU = id => users.find(u=>u.id===id);
@@ -881,14 +883,14 @@ export default function App() {
               </div>
             </div>
           </div>
-          {empresa.logoUrl && (
+          {empresa?.logoUrl && (
             <div style={{padding:"0 12px",marginBottom:12}}>
-              <img src={empresa.logoUrl} alt={empresa.nombre} style={{width:"100%",maxHeight:48,objectFit:"contain",borderRadius:6}}/>
+              <img src={empresa.logoUrl} alt={empresa?.nombre||"Logo"} style={{width:"100%",maxHeight:48,objectFit:"contain",borderRadius:6}}/>
             </div>
           )}
-          {!empresa.logoUrl && empresa.nombre && (
+          {!empresa?.logoUrl && empresa?.nombre && (
             <div style={{padding:"0 12px",marginBottom:10}}>
-              <div style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textAlign:"center"}}>{empresa.nombre}</div>
+              <div style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textAlign:"center"}}>{empresa?.nombre}</div>
             </div>
           )}
           {navItem("tareas","Tareas","📋")}
@@ -989,7 +991,7 @@ export default function App() {
       </div>
 
       {showAlerts&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",zIndex:200,padding:"60px 16px 0"}} onClick={()=>setShowAlerts(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",zIndex:200,padding:"60px 16px 0",pointerEvents:"all"}} onClick={()=>setShowAlerts(false)}>
           <div style={{background:"#fff",borderRadius:16,padding:20,width:360,maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.15)",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <div style={{fontSize:14,fontWeight:600,color:"#111"}}>⚠️ Alertas de {usuario.name}</div>
