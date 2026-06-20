@@ -439,7 +439,7 @@ function WhatsApp({ task, users, projects }) {
 }
 
 // ── TARJETA TAREA ──────────────────────────────────────────────────────────
-function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onEditar, onAbrirChat, commentCount }) {
+function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onEditar, onAbrirChat, onEliminar, commentCount }) {
   const gP = id => projects.find(p=>p.id===id);
   const gU = id => users.find(u=>u.id===id);
   const proy = gP(task.project_id);
@@ -494,6 +494,7 @@ function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onE
         </button>
         {admin && <button onClick={()=>onEditar(task)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️</button>}
         {admin && <WhatsApp task={task} users={users} projects={projects}/>}
+        {admin && <button onClick={()=>onEliminar(task.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"5px 10px",color:"#DC2626",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif",fontWeight:500}}>🗑 Eliminar</button>}
       </div>
     </div>
   );
@@ -789,6 +790,12 @@ export default function App() {
     setCargando(false);
   }
 
+  async function eliminarTarea(id) {
+    if (!window.confirm("¿Eliminar esta tarea? Esta acción no se puede deshacer.")) return;
+    await supabase.from("tasks").delete().eq("id", id);
+    setTareas(prev => prev.filter(t => t.id !== id));
+  }
+
   async function cambiarEstado(id, estado) {
     setTareas(prev => prev.map(t => t.id===id ? {...t, status:estado} : t));
     const { error } = await supabase.from("tasks").update({status:estado}).eq("id",id);
@@ -927,7 +934,7 @@ export default function App() {
               {cargando?<div style={{textAlign:"center",color:"#9CA3AF",padding:"40px 0",fontSize:13}}>Cargando...</div>
                 :visibles.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"60px 0",fontSize:13}}><div style={{fontSize:36,marginBottom:10}}>🏗</div>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                 :visibles.sort((a,b)=>{const o={urgente:0,alta:1,media:2,baja:3};if(a.status==="listo"&&b.status!=="listo")return 1;if(b.status==="listo"&&a.status!=="listo")return -1;return(o[a.priority]-o[b.priority])||(daysUntil(a.due_date)-daysUntil(b.due_date));})
-                    .map(t=><TarjetaTarea key={t.id} task={t} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t=>{setEditTask(t);setShowModal(true);}} onAbrirChat={setChatTarea} commentCount={commentCounts[t.id]||0}/>)}
+                    .map(t=><TarjetaTarea key={t.id} task={t} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t=>{setEditTask(t);setShowModal(true);}} onAbrirChat={setChatTarea} onEliminar={eliminarTarea} commentCount={commentCounts[t.id]||0}/>)}
             </>
           )}
 
