@@ -20,7 +20,7 @@ const USERS_DEFAULT = [
 const PROJECTS_DEFAULT = [
   { id: 10, name: "Testing",           color: "#E8622A" },
   { id: 1,  name: "BdP Condado",       color: "#2563EB" },
-  { id: 2,  name: "BdP Urdesa",        color: "#7C3AED" å},
+  { id: 2,  name: "BdP Urdesa",        color: "#7C3AED" },
   { id: 3,  name: "BdP Banca Seguros", color: "#DB2777" },
   { id: 4,  name: "Fowler",            color: "#D97706" },
   { id: 5,  name: "Banderas",          color: "#059669" },
@@ -752,11 +752,11 @@ export default function App() {
   const [chatTarea, setChatTarea] = useState(null);
   const [showAjustes, setShowAjustes] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
-  // Reset modal states on mount to prevent stuck overlays
-  useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, []);
   const [busqueda, setBusqueda] = useState("");
   const gP = id => projects.find(p=>p.id===id);
   const gU = id => users.find(u=>u.id===id);
+
+  useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, [usuario]);
 
   useEffect(() => {
     if (!usuario) return;
