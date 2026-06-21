@@ -6,15 +6,15 @@ const SUPABASE_KEY = "sb_publishable_UXB8WueKrn1zBSXfsTqJ0w_C61L3b77";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const USERS_DEFAULT = [
-  { id: 1, name: "Hernan",     role: "owner",     pin: "1234", avatar: "HE", color: "#E8622A" },
-  { id: 2, name: "Johanna",    role: "assistant",  pin: "2345", avatar: "JO", color: "#7C3AED" },
-  { id: 3, name: "Hector",     role: "member",     pin: "3001", avatar: "HC", color: "#2563EB" },
-  { id: 4, name: "Josh",       role: "member",     pin: "3002", avatar: "JS", color: "#2563EB" },
-  { id: 5, name: "Guillermo",  role: "member",     pin: "3003", avatar: "GU", color: "#2563EB" },
-  { id: 6, name: "Camila",     role: "member",     pin: "3004", avatar: "CA", color: "#2563EB" },
-  { id: 7, name: "Santiago",   role: "member",     pin: "3005", avatar: "SA", color: "#2563EB" },
-  { id: 8, name: "Gerardo",    role: "member",     pin: "3006", avatar: "GE", color: "#2563EB" },
-  { id: 9, name: "Luis Guala", role: "member",     pin: "3007", avatar: "LG", color: "#2563EB" },
+  { id: 1, name: "Hernan",     role: "owner",     pin: "1234", avatar: "HE", color: "#E8622A", email: "hc@hcastudio.com",  phone: "" },
+  { id: 2, name: "Johanna",    role: "assistant",  pin: "2345", avatar: "JO", color: "#7C3AED", email: "jt@hcastudio.com",  phone: "+593987157905" },
+  { id: 3, name: "Hector",     role: "member",     pin: "3001", avatar: "HC", color: "#2563EB", email: "", phone: "" },
+  { id: 4, name: "Josh",       role: "member",     pin: "3002", avatar: "JS", color: "#2563EB", email: "", phone: "" },
+  { id: 5, name: "Guillermo",  role: "member",     pin: "3003", avatar: "GU", color: "#2563EB", email: "", phone: "" },
+  { id: 6, name: "Camila",     role: "member",     pin: "3004", avatar: "CA", color: "#2563EB", email: "", phone: "" },
+  { id: 7, name: "Santiago",   role: "member",     pin: "3005", avatar: "SA", color: "#2563EB", email: "", phone: "" },
+  { id: 8, name: "Gerardo",    role: "member",     pin: "3006", avatar: "GE", color: "#2563EB", email: "", phone: "" },
+  { id: 9, name: "Luis Guala", role: "member",     pin: "3007", avatar: "LG", color: "#2563EB", email: "", phone: "" },
 ];
 
 const PROJECTS_DEFAULT = [
@@ -602,6 +602,8 @@ function PanelAjustes({ users, setUsers, projects, setProjects, empresa, setEmpr
             </select>
             <input type="color" value={f.color||"#2563EB"} onChange={e=>setF(p=>({...p,color:e.target.value}))} style={{width:38,height:38,border:"1px solid #E5E7EB",borderRadius:6,cursor:"pointer",padding:2}}/>
           </div>
+          <input value={f.email||""} onChange={e=>setF(p=>({...p,email:e.target.value}))} placeholder="Email (para notificaciones)" style={iS}/>
+          <input value={f.phone||""} onChange={e=>setF(p=>({...p,phone:e.target.value}))} placeholder="WhatsApp (+593...)" style={iS}/>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>f.name&&f.pin&&onSave(f)} disabled={!f.name||!f.pin} style={{flex:2,background:f.name&&f.pin?"#E8622A":"#F3F4F6",border:"none",borderRadius:6,padding:"8px",color:f.name&&f.pin?"#fff":"#9CA3AF",fontSize:12,fontWeight:600,cursor:f.name&&f.pin?"pointer":"default"}}>Guardar</button>
             <button onClick={onCancel} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"8px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
@@ -790,6 +792,17 @@ export default function App() {
     setCargando(false);
   }
 
+  async function sendEmail(to, subject, html) {
+    if (!to) return;
+    try {
+      await fetch("/api/email", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ to, subject, html })
+      });
+    } catch(e) { console.error("Email error:", e); }
+  }
+
   async function eliminarTarea(id) {
     if (!window.confirm("¿Eliminar esta tarea? Esta acción no se puede deshacer.")) return;
     await supabase.from("tasks").delete().eq("id", id);
@@ -803,8 +816,20 @@ export default function App() {
   }
 
   async function guardarTarea(form, id) {
-    if (id) await supabase.from("tasks").update(form).eq("id",id);
-    else await supabase.from("tasks").insert({...form, created_by:usuario.id});
+    if (id) {
+      await supabase.from("tasks").update(form).eq("id", id);
+    } else {
+      await supabase.from("tasks").insert({...form, created_by:usuario.id});
+      if (form.assignee_id) {
+        const asignado = users.find(u => u.id === form.assignee_id);
+        const proyecto = projects.find(p => p.id === form.project_id);
+        if (asignado?.email) {
+          const prioridad = form.priority==="urgente"?"🔴 URGENTE":form.priority==="alta"?"🟠 Alta":form.priority==="media"?"🟡 Media":"⚪ Baja";
+          const html = `<div style="font-family:Inter,sans-serif;max-width:600px;margin:0 auto;padding:20px"><div style="background:#E8622A;border-radius:12px;padding:20px;margin-bottom:20px"><h1 style="color:#fff;margin:0;font-size:22px">FOREMAN</h1><p style="color:rgba(255,255,255,0.8);margin:4px 0 0;font-size:13px">Nueva tarea asignada</p></div><h2 style="color:#111;font-size:18px">Hola ${asignado.name} 👋</h2><p style="color:#374151">${usuario.name} te asignó una nueva tarea:</p><div style="background:#F9FAFB;border-left:4px solid #E8622A;border-radius:8px;padding:16px;margin:16px 0"><h3 style="color:#111;margin:0 0 8px;font-size:16px">${form.title}</h3><p style="color:#6B7280;margin:4px 0;font-size:13px">📁 Proyecto: <strong>${proyecto?.name}</strong></p><p style="color:#6B7280;margin:4px 0;font-size:13px">📅 Fecha límite: <strong>${form.due_date}</strong></p><p style="color:#6B7280;margin:4px 0;font-size:13px">⚡ Prioridad: <strong>${prioridad}</strong></p>${form.notes?`<p style="color:#6B7280;margin:8px 0 0;font-size:13px">📝 ${form.notes}</p>`:""}</div><a href="https://foreman-app-ebon.vercel.app" style="display:inline-block;background:#E8622A;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Ver en FOREMAN →</a><p style="color:#9CA3AF;font-size:11px;margin-top:24px">FOREMAN by HCA Studio</p></div>`;
+          await sendEmail(asignado.email, `Nueva tarea: ${form.title}`, html);
+        }
+      }
+    }
     setEditTask(null);
   }
 
