@@ -893,133 +893,243 @@ function ModuloProyecto({proyectoId,proyectos,currentUser}){
 //  APP PRINCIPAL
 // ============================================================
 
-// PANEL AJUSTES CON CRUD DE PROYECTOS Y ASIGNACION DE USUARIOS
-function PanelAjustes({users,projects,setProjects,empresa,setEmpresa,onClose}){
+// ── COLOR PICKER ─────────────────────────────────────────────
+const COLORS=["#E8622A","#2563EB","#7C3AED","#DB2777","#D97706","#059669","#DC2626","#0891B2","#65A30D","#9333EA","#374151","#B45309"];
+function ColorPicker({value,onChange}){
+  return(
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
+      {COLORS.map(c=>(
+        <div key={c} onClick={()=>onChange(c)} style={{width:24,height:24,borderRadius:"50%",background:c,cursor:"pointer",border:value===c?"3px solid #111":"3px solid transparent",transition:"border 0.1s"}}/>
+      ))}
+    </div>
+  );
+}
+
+// ── FORM PROYECTO (fuera de PanelAjustes para evitar re-mount) ─
+function ProyectoForm({data,onChange,onSave,onCancel,saveLabel,users}){
+  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+  function toggleU(uid){
+    const uids=data.usuarios||[];
+    onChange({...data,usuarios:uids.includes(uid)?uids.filter(x=>x!==uid):[...uids,uid]});
+  }
+  return(
+    <div style={{background:"#F9FAFB",borderRadius:10,padding:14,marginBottom:10,border:"1.5px solid #E8622A",fontFamily:"'Inter',sans-serif"}}>
+      <div style={{display:"grid",gap:10}}>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Nombre del proyecto *</label>
+          <input
+            value={data.name}
+            onChange={e=>onChange({...data,name:e.target.value})}
+            style={iS}
+            placeholder="Ej: BdP Panamericana"
+            autoFocus
+          />
+        </div>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Color</label>
+          <ColorPicker value={data.color} onChange={c=>onChange({...data,color:c})}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Modulo financiero</label>
+          <button
+            type="button"
+            onClick={()=>onChange({...data,tieneFinanzas:!data.tieneFinanzas})}
+            style={{background:data.tieneFinanzas?"#F0FDF4":"#F3F4F6",border:"1px solid "+(data.tieneFinanzas?"#BBF7D0":"#E5E7EB"),borderRadius:20,padding:"5px 14px",color:data.tieneFinanzas?"#059669":"#9CA3AF",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            {data.tieneFinanzas?"Finanzas ON":"Finanzas OFF"}
+          </button>
+        </div>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Equipo asignado</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {users.map(u=>{
+              const sel=(data.usuarios||[]).includes(u.id);
+              return(
+                <button type="button" key={u.id} onClick={()=>toggleU(u.id)}
+                  style={{display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,border:"1.5px solid "+(sel?u.color:"#E5E7EB"),background:sel?u.color+"18":"#fff",cursor:"pointer",fontSize:12,fontWeight:sel?600:400,color:sel?u.color:"#6B7280"}}>
+                  <Avatar name={u.name} size={16} color={u.color}/>{u.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:4}}>
+          <button type="button" onClick={onSave} disabled={!data.name.trim()}
+            style={{flex:2,background:data.name.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:data.name.trim()?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:data.name.trim()?"pointer":"default"}}>
+            {saveLabel}
+          </button>
+          <button type="button" onClick={onCancel}
+            style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── FORM USUARIO ──────────────────────────────────────────────
+function UsuarioForm({data,onChange,onSave,onCancel,saveLabel}){
+  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+  return(
+    <div style={{background:"#F9FAFB",borderRadius:10,padding:14,marginBottom:10,border:"1.5px solid #7C3AED",fontFamily:"'Inter',sans-serif"}}>
+      <div style={{display:"grid",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Nombre *</label>
+            <input value={data.name} onChange={e=>onChange({...data,name:e.target.value})} style={iS} placeholder="Nombre completo" autoFocus/>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>PIN (4 digitos) *</label>
+            <input value={data.pin} onChange={e=>onChange({...data,pin:e.target.value.slice(0,4)})} style={iS} placeholder="0000" maxLength={4} type="password"/>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Rol</label>
+            <select value={data.role} onChange={e=>onChange({...data,role:e.target.value})} style={iS}>
+              <option value="owner">Director (Nivel 1)</option>
+              <option value="assistant">Asistente (Nivel 2)</option>
+              <option value="member">Equipo (Nivel 3)</option>
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Email</label>
+            <input value={data.email||""} onChange={e=>onChange({...data,email:e.target.value})} style={iS} placeholder="email@empresa.com"/>
+          </div>
+        </div>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Color</label>
+          <ColorPicker value={data.color} onChange={c=>onChange({...data,color:c})}/>
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:4}}>
+          <button type="button" onClick={onSave} disabled={!data.name.trim()||!data.pin}
+            style={{flex:2,background:data.name.trim()&&data.pin?"#7C3AED":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:data.name.trim()&&data.pin?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:data.name.trim()&&data.pin?"pointer":"default"}}>
+            {saveLabel}
+          </button>
+          <button type="button" onClick={onCancel}
+            style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── PANEL AJUSTES ─────────────────────────────────────────────
+function PanelAjustes({users,setUsers,projects,setProjects,empresa,setEmpresa,onClose}){
   const [tab,setTab]=useState("proyectos");
   const [editP,setEditP]=useState(null);
-  const [showNew,setShowNew]=useState(false);
+  const [showNewP,setShowNewP]=useState(false);
   const [newP,setNewP]=useState({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});
-  const COLORS=["#E8622A","#2563EB","#7C3AED","#DB2777","#D97706","#059669","#DC2626","#0891B2","#65A30D","#9333EA","#374151","#B45309"];
-  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
-  const tabS=a=>({padding:"7px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:a?"#E8622A":"transparent",color:a?"#fff":"#6B7280"});
+  const [editU,setEditU]=useState(null);
+  const [showNewU,setShowNewU]=useState(false);
+  const [newU,setNewU]=useState({name:"",pin:"",role:"member",color:"#2563EB",email:""});
+  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+  const tabS=a=>({padding:"7px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontSize:12,fontWeight:600,background:a?"#E8622A":"transparent",color:a?"#fff":"#6B7280"});
 
   function saveProjects(p){setProjects(p);saveLS("foreman_projects",p);}
+  function saveUsers(u){setUsers(u);saveLS("foreman_users",u);}
   function saveEmpresa(e){setEmpresa(e);saveLS("foreman_empresa",e);}
-  function toggleFinanzas(pid){saveProjects(projects.map(p=>p.id===pid?{...p,tieneFinanzas:p.tieneFinanzas===false}:p));}
-  function deleteProject(pid){if(window.confirm("Eliminar este proyecto?"))saveProjects(projects.filter(p=>p.id!==pid));}
 
   function crearProyecto(){
     if(!newP.name.trim())return;
-    const p={...newP,id:Date.now(),name:newP.name.trim()};
-    saveProjects([...projects,p]);
+    saveProjects([...projects,{...newP,id:Date.now(),name:newP.name.trim()}]);
     setNewP({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});
-    setShowNew(false);
+    setShowNewP(false);
   }
-
-  function guardarEdicion(){
-    if(!editP.name.trim())return;
+  function guardarEdicionP(){
+    if(!editP||!editP.name.trim())return;
     saveProjects(projects.map(p=>p.id===editP.id?editP:p));
     setEditP(null);
   }
+  function eliminarP(pid){if(window.confirm("Eliminar proyecto?"))saveProjects(projects.filter(p=>p.id!==pid));}
 
-  function toggleUsuarioEnProy(pObj,uid,setter){
-    const uids=pObj.usuarios||[];
-    const updated=uids.includes(uid)?uids.filter(x=>x!==uid):[...uids,uid];
-    setter(p=>({...p,usuarios:updated}));
+  function crearUsuario(){
+    if(!newU.name.trim()||!newU.pin)return;
+    saveUsers([...users,{...newU,id:Date.now(),name:newU.name.trim()}]);
+    setNewU({name:"",pin:"",role:"member",color:"#2563EB",email:""});
+    setShowNewU(false);
   }
-
-  function ColorPicker({value,onChange}){
-    return(
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
-        {COLORS.map(c=>(
-          <div key={c} onClick={()=>onChange(c)} style={{width:22,height:22,borderRadius:"50%",background:c,cursor:"pointer",border:value===c?"3px solid #111":"3px solid transparent",transition:"border 0.1s"}}/>
-        ))}
-      </div>
-    );
+  function guardarEdicionU(){
+    if(!editU||!editU.name.trim()||!editU.pin)return;
+    saveUsers(users.map(u=>u.id===editU.id?editU:u));
+    setEditU(null);
   }
-
-  function ProyectoForm({data,setData,onSave,onCancel,saveLabel}){
-    return(
-      <div style={{background:"#F9FAFB",borderRadius:10,padding:14,marginBottom:10,border:"1.5px solid #E8622A"}}>
-        <div style={{display:"grid",gap:10}}>
-          <div>
-            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Nombre del proyecto *</label>
-            <input value={data.name} onChange={e=>setData(p=>({...p,name:e.target.value}))} style={iS} placeholder="Ej: BdP Panamericana"/>
-          </div>
-          <div>
-            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Color</label>
-            <ColorPicker value={data.color} onChange={c=>setData(p=>({...p,color:c}))}/>
-          </div>
-          <div>
-            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Modulo financiero</label>
-            <button onClick={()=>setData(p=>({...p,tieneFinanzas:!p.tieneFinanzas}))} style={{background:data.tieneFinanzas?"#F0FDF4":"#F3F4F6",border:"1px solid "+(data.tieneFinanzas?"#BBF7D0":"#E5E7EB"),borderRadius:20,padding:"5px 14px",color:data.tieneFinanzas?"#059669":"#9CA3AF",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-              {data.tieneFinanzas?"Finanzas ON":"Finanzas OFF"}
-            </button>
-          </div>
-          <div>
-            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Usuarios asignados</label>
-            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-              {users.map(u=>{
-                const sel=(data.usuarios||[]).includes(u.id);
-                return(
-                  <button key={u.id} onClick={()=>toggleUsuarioEnProy(data,u.id,setData)}
-                    style={{display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,border:"1.5px solid "+(sel?u.color:"#E5E7EB"),background:sel?u.color+"18":"#fff",cursor:"pointer",fontSize:12,fontWeight:sel?600:400,color:sel?u.color:"#6B7280"}}>
-                    <Avatar name={u.name} size={16} color={u.color}/>{u.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div style={{display:"flex",gap:8,marginTop:4}}>
-            <button onClick={onSave} disabled={!data.name.trim()} style={{flex:2,background:data.name.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:data.name.trim()?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:data.name.trim()?"pointer":"default"}}>{saveLabel}</button>
-            <button onClick={onCancel} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  function eliminarU(uid){if(window.confirm("Eliminar usuario?"))saveUsers(users.filter(u=>u.id!==uid));}
 
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:20}} onClick={onClose}>
-      <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:480,width:"100%",maxHeight:"92vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:500,width:"100%",maxHeight:"92vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div style={{fontSize:15,fontWeight:700}}>Ajustes</div>
-          <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>x</button>
+          <button type="button" onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>x</button>
         </div>
         <div style={{display:"flex",gap:4,marginBottom:16,background:"#F3F4F6",borderRadius:8,padding:4}}>
-          <button onClick={()=>setTab("proyectos")} style={tabS(tab==="proyectos")}>Proyectos</button>
-          <button onClick={()=>setTab("empresa")} style={tabS(tab==="empresa")}>Empresa</button>
-          <button onClick={()=>setTab("usuarios")} style={tabS(tab==="usuarios")}>Usuarios</button>
+          <button type="button" onClick={()=>setTab("proyectos")} style={tabS(tab==="proyectos")}>Proyectos</button>
+          <button type="button" onClick={()=>setTab("usuarios")} style={tabS(tab==="usuarios")}>Usuarios</button>
+          <button type="button" onClick={()=>setTab("empresa")} style={tabS(tab==="empresa")}>Empresa</button>
         </div>
 
         {tab==="proyectos"&&(
           <div>
             {projects.map(p=>(
               editP?.id===p.id?(
-                <ProyectoForm key={p.id} data={editP} setData={setEditP} onSave={guardarEdicion} onCancel={()=>setEditP(null)} saveLabel="Guardar cambios"/>
+                <ProyectoForm key={p.id} data={editP} onChange={setEditP} onSave={guardarEdicionP} onCancel={()=>setEditP(null)} saveLabel="Guardar cambios" users={users}/>
               ):(
                 <div key={p.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,borderLeft:"3px solid "+p.color}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{width:10,height:10,borderRadius:"50%",background:p.color,flexShrink:0}}/>
                     <div style={{flex:1}}>
                       <div style={{fontSize:13,fontWeight:600,color:"#111"}}>{p.name}</div>
-                      <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
-                        <span style={{background:p.tieneFinanzas!==false?"#F0FDF4":"#F3F4F6",color:p.tieneFinanzas!==false?"#059669":"#9CA3AF",fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:10}}>{p.tieneFinanzas!==false?"Finanzas ON":"Finanzas OFF"}</span>
-                        {(p.usuarios||[]).map(uid=>{const u=users.find(u=>u.id===uid);return u?<Avatar key={uid} name={u.name} size={18} color={u.color}/>:null;})}
+                      <div style={{display:"flex",gap:5,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{background:p.tieneFinanzas!==false?"#F0FDF4":"#F3F4F6",color:p.tieneFinanzas!==false?"#059669":"#9CA3AF",fontSize:10,fontWeight:600,padding:"1px 7px",borderRadius:10}}>{p.tieneFinanzas!==false?"Finanzas ON":"Finanzas OFF"}</span>
+                        {(p.usuarios||[]).slice(0,5).map(uid=>{const u=users.find(u=>u.id===uid);return u?<Avatar key={uid} name={u.name} size={18} color={u.color}/>:null;})}
+                        {(p.usuarios||[]).length>5&&<span style={{fontSize:10,color:"#9CA3AF"}}>+{(p.usuarios||[]).length-5}</span>}
                       </div>
                     </div>
                     <div style={{display:"flex",gap:4}}>
-                      <button onClick={()=>setEditP({...p,usuarios:p.usuarios||[]})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️</button>
-                      <button onClick={()=>deleteProject(p.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>🗑</button>
+                      <button type="button" onClick={()=>setEditP({...p,usuarios:p.usuarios||[]})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️</button>
+                      <button type="button" onClick={()=>eliminarP(p.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>🗑</button>
                     </div>
                   </div>
                 </div>
               )
             ))}
-            {showNew?(
-              <ProyectoForm data={newP} setData={setNewP} onSave={crearProyecto} onCancel={()=>{setShowNew(false);setNewP({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});}} saveLabel="Crear proyecto"/>
+            {showNewP?(
+              <ProyectoForm data={newP} onChange={setNewP} onSave={crearProyecto} onCancel={()=>{setShowNewP(false);setNewP({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});}} saveLabel="Crear proyecto" users={users}/>
             ):(
-              <button onClick={()=>setShowNew(true)} style={{width:"100%",background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:12,color:"#E8622A",fontSize:13,fontWeight:600,cursor:"pointer",marginTop:4}}>+ Nuevo proyecto</button>
+              <button type="button" onClick={()=>setShowNewP(true)} style={{width:"100%",background:"#F9FAFB",border:"1.5px dashed #E8622A",borderRadius:10,padding:12,color:"#E8622A",fontSize:13,fontWeight:600,cursor:"pointer",marginTop:4}}>+ Nuevo proyecto</button>
+            )}
+          </div>
+        )}
+
+        {tab==="usuarios"&&(
+          <div>
+            {users.map(u=>(
+              editU?.id===u.id?(
+                <UsuarioForm key={u.id} data={editU} onChange={setEditU} onSave={guardarEdicionU} onCancel={()=>setEditU(null)} saveLabel="Guardar cambios"/>
+              ):(
+                <div key={u.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+                  <Avatar name={u.name} size={36} color={u.color}/>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                      <div style={{fontSize:13,fontWeight:600}}>{u.name}</div>
+                      {(()=>{const b=rolBadge(u.role);return <span style={{background:b.bg,color:b.color,fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10}}>{b.label}</span>;})()}
+                    </div>
+                    <div style={{fontSize:10,color:"#9CA3AF"}}>{u.email||"Sin email"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button type="button" onClick={()=>setEditU({...u})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    {u.role!=="owner"&&<button type="button" onClick={()=>eliminarU(u.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>🗑</button>}
+                  </div>
+                </div>
+              )
+            ))}
+            {showNewU?(
+              <UsuarioForm data={newU} onChange={setNewU} onSave={crearUsuario} onCancel={()=>{setShowNewU(false);setNewU({name:"",pin:"",role:"member",color:"#2563EB",email:""});}} saveLabel="Crear usuario"/>
+            ):(
+              <button type="button" onClick={()=>setShowNewU(true)} style={{width:"100%",background:"#F9FAFB",border:"1.5px dashed #7C3AED",borderRadius:10,padding:12,color:"#7C3AED",fontSize:13,fontWeight:600,cursor:"pointer",marginTop:4}}>+ Nuevo usuario</button>
             )}
           </div>
         )}
@@ -1035,38 +1145,14 @@ function PanelAjustes({users,projects,setProjects,empresa,setEmpresa,onClose}){
           </div>
         )}
 
-        {tab==="usuarios"&&(
-          <div>
-            {users.map(u=>{
-              const ub=rolBadge(u.role);
-              const misProyectos=projects.filter(p=>(p.usuarios||[]).includes(u.id));
-              return(
-                <div key={u.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"flex-start",gap:10}}>
-                  <Avatar name={u.name} size={36} color={u.color}/>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-                      <div style={{fontSize:13,fontWeight:600}}>{u.name}</div>
-                      <span style={{background:ub.bg,color:ub.color,fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10}}>{ub.label}</span>
-                    </div>
-                    <div style={{fontSize:10,color:"#9CA3AF",marginBottom:4}}>PIN: {u.pin}</div>
-                    {misProyectos.length>0&&(
-                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                        {misProyectos.map(p=><span key={p.id} style={{background:p.color+"18",color:p.color,fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10}}>{p.name}</span>)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
+
 export default function App(){
-  const [users]=useState(()=>loadLS("foreman_users",USERS_DEFAULT));
+  const [users,setUsers]=useState(()=>loadLS("foreman_users",USERS_DEFAULT));
   const [projects,setProjects]=useState(()=>loadLS("foreman_projects",PROJECTS_DEFAULT));
   const [empresa,setEmpresa]=useState(()=>loadLS("foreman_empresa",{nombre:"HCA Studio",ciudad:"Quito",moneda:"USD"}));
   const [usuario,setUsuario]=useState(null);
@@ -1098,7 +1184,7 @@ export default function App(){
   const urgentes=pendientes.filter(t=>t.priority==="urgente"||daysUntil(t.due_date)<=1);
   const b=rolBadge(usuario.role);
 
-  let visibles=perms.verTodasTareas?tareas:tareas.filter(t=>t.assignee_id===usuario.id||t.created_by===usuario.id);
+  let visibles=tareas;
   if(busqueda.trim()){const q=busqueda.toLowerCase();visibles=visibles.filter(t=>t.title?.toLowerCase().includes(q)||t.notes?.toLowerCase().includes(q)||projects.find(p=>p.id===t.project_id)?.name?.toLowerCase().includes(q));}
   if(filtro==="pendiente")visibles=visibles.filter(t=>t.status==="pendiente");
   if(filtro==="urgente")visibles=visibles.filter(t=>t.status!=="listo"&&(t.priority==="urgente"||daysUntil(t.due_date)<=1));
@@ -1280,7 +1366,7 @@ export default function App(){
 
       {showModal&&<ModalTarea editTask={editTask} currentUser={usuario} users={users} projects={projects} onCerrar={()=>{setShowModal(false);setEditTask(null);}} onGuardar={guardarTarea}/>}
 
-      {showAjustes&&perms.verAjustes&&<PanelAjustes users={users} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={()=>setShowAjustes(false)}/>}
+      {showAjustes&&perms.verAjustes&&<PanelAjustes users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={()=>setShowAjustes(false)}/>}
     </div>
   );
 }
