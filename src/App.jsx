@@ -892,6 +892,179 @@ function ModuloProyecto({proyectoId,proyectos,currentUser}){
 // ============================================================
 //  APP PRINCIPAL
 // ============================================================
+
+// PANEL AJUSTES CON CRUD DE PROYECTOS Y ASIGNACION DE USUARIOS
+function PanelAjustes({users,projects,setProjects,empresa,setEmpresa,onClose}){
+  const [tab,setTab]=useState("proyectos");
+  const [editP,setEditP]=useState(null);
+  const [showNew,setShowNew]=useState(false);
+  const [newP,setNewP]=useState({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});
+  const COLORS=["#E8622A","#2563EB","#7C3AED","#DB2777","#D97706","#059669","#DC2626","#0891B2","#65A30D","#9333EA","#374151","#B45309"];
+  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
+  const tabS=a=>({padding:"7px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:a?"#E8622A":"transparent",color:a?"#fff":"#6B7280"});
+
+  function saveProjects(p){setProjects(p);saveLS("foreman_projects",p);}
+  function saveEmpresa(e){setEmpresa(e);saveLS("foreman_empresa",e);}
+  function toggleFinanzas(pid){saveProjects(projects.map(p=>p.id===pid?{...p,tieneFinanzas:p.tieneFinanzas===false}:p));}
+  function deleteProject(pid){if(window.confirm("Eliminar este proyecto?"))saveProjects(projects.filter(p=>p.id!==pid));}
+
+  function crearProyecto(){
+    if(!newP.name.trim())return;
+    const p={...newP,id:Date.now(),name:newP.name.trim()};
+    saveProjects([...projects,p]);
+    setNewP({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});
+    setShowNew(false);
+  }
+
+  function guardarEdicion(){
+    if(!editP.name.trim())return;
+    saveProjects(projects.map(p=>p.id===editP.id?editP:p));
+    setEditP(null);
+  }
+
+  function toggleUsuarioEnProy(pObj,uid,setter){
+    const uids=pObj.usuarios||[];
+    const updated=uids.includes(uid)?uids.filter(x=>x!==uid):[...uids,uid];
+    setter(p=>({...p,usuarios:updated}));
+  }
+
+  function ColorPicker({value,onChange}){
+    return(
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
+        {COLORS.map(c=>(
+          <div key={c} onClick={()=>onChange(c)} style={{width:22,height:22,borderRadius:"50%",background:c,cursor:"pointer",border:value===c?"3px solid #111":"3px solid transparent",transition:"border 0.1s"}}/>
+        ))}
+      </div>
+    );
+  }
+
+  function ProyectoForm({data,setData,onSave,onCancel,saveLabel}){
+    return(
+      <div style={{background:"#F9FAFB",borderRadius:10,padding:14,marginBottom:10,border:"1.5px solid #E8622A"}}>
+        <div style={{display:"grid",gap:10}}>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Nombre del proyecto *</label>
+            <input value={data.name} onChange={e=>setData(p=>({...p,name:e.target.value}))} style={iS} placeholder="Ej: BdP Panamericana"/>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Color</label>
+            <ColorPicker value={data.color} onChange={c=>setData(p=>({...p,color:c}))}/>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Modulo financiero</label>
+            <button onClick={()=>setData(p=>({...p,tieneFinanzas:!p.tieneFinanzas}))} style={{background:data.tieneFinanzas?"#F0FDF4":"#F3F4F6",border:"1px solid "+(data.tieneFinanzas?"#BBF7D0":"#E5E7EB"),borderRadius:20,padding:"5px 14px",color:data.tieneFinanzas?"#059669":"#9CA3AF",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              {data.tieneFinanzas?"Finanzas ON":"Finanzas OFF"}
+            </button>
+          </div>
+          <div>
+            <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Usuarios asignados</label>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {users.map(u=>{
+                const sel=(data.usuarios||[]).includes(u.id);
+                return(
+                  <button key={u.id} onClick={()=>toggleUsuarioEnProy(data,u.id,setData)}
+                    style={{display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,border:"1.5px solid "+(sel?u.color:"#E5E7EB"),background:sel?u.color+"18":"#fff",cursor:"pointer",fontSize:12,fontWeight:sel?600:400,color:sel?u.color:"#6B7280"}}>
+                    <Avatar name={u.name} size={16} color={u.color}/>{u.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:4}}>
+            <button onClick={onSave} disabled={!data.name.trim()} style={{flex:2,background:data.name.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:data.name.trim()?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:data.name.trim()?"pointer":"default"}}>{saveLabel}</button>
+            <button onClick={onCancel} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:20}} onClick={onClose}>
+      <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:480,width:"100%",maxHeight:"92vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontSize:15,fontWeight:700}}>Ajustes</div>
+          <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>x</button>
+        </div>
+        <div style={{display:"flex",gap:4,marginBottom:16,background:"#F3F4F6",borderRadius:8,padding:4}}>
+          <button onClick={()=>setTab("proyectos")} style={tabS(tab==="proyectos")}>Proyectos</button>
+          <button onClick={()=>setTab("empresa")} style={tabS(tab==="empresa")}>Empresa</button>
+          <button onClick={()=>setTab("usuarios")} style={tabS(tab==="usuarios")}>Usuarios</button>
+        </div>
+
+        {tab==="proyectos"&&(
+          <div>
+            {projects.map(p=>(
+              editP?.id===p.id?(
+                <ProyectoForm key={p.id} data={editP} setData={setEditP} onSave={guardarEdicion} onCancel={()=>setEditP(null)} saveLabel="Guardar cambios"/>
+              ):(
+                <div key={p.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,borderLeft:"3px solid "+p.color}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:p.color,flexShrink:0}}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"#111"}}>{p.name}</div>
+                      <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{background:p.tieneFinanzas!==false?"#F0FDF4":"#F3F4F6",color:p.tieneFinanzas!==false?"#059669":"#9CA3AF",fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:10}}>{p.tieneFinanzas!==false?"Finanzas ON":"Finanzas OFF"}</span>
+                        {(p.usuarios||[]).map(uid=>{const u=users.find(u=>u.id===uid);return u?<Avatar key={uid} name={u.name} size={18} color={u.color}/>:null;})}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:4}}>
+                      <button onClick={()=>setEditP({...p,usuarios:p.usuarios||[]})} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>✏️</button>
+                      <button onClick={()=>deleteProject(p.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>🗑</button>
+                    </div>
+                  </div>
+                </div>
+              )
+            ))}
+            {showNew?(
+              <ProyectoForm data={newP} setData={setNewP} onSave={crearProyecto} onCancel={()=>{setShowNew(false);setNewP({name:"",color:"#2563EB",tieneFinanzas:true,usuarios:[]});}} saveLabel="Crear proyecto"/>
+            ):(
+              <button onClick={()=>setShowNew(true)} style={{width:"100%",background:"#F9FAFB",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:12,color:"#E8622A",fontSize:13,fontWeight:600,cursor:"pointer",marginTop:4}}>+ Nuevo proyecto</button>
+            )}
+          </div>
+        )}
+
+        {tab==="empresa"&&(
+          <div>
+            {[{k:"nombre",l:"Empresa",ph:"HCA Studio"},{k:"email",l:"Email",ph:"info@hcastudio.com"},{k:"ciudad",l:"Ciudad",ph:"Quito"},{k:"moneda",l:"Moneda",ph:"USD"}].map(f=>(
+              <div key={f.k} style={{marginBottom:10}}>
+                <label style={{color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"}}>{f.l}</label>
+                <input value={empresa?.[f.k]||""} onChange={e=>saveEmpresa({...empresa,[f.k]:e.target.value})} placeholder={f.ph} style={iS}/>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab==="usuarios"&&(
+          <div>
+            {users.map(u=>{
+              const ub=rolBadge(u.role);
+              const misProyectos=projects.filter(p=>(p.usuarios||[]).includes(u.id));
+              return(
+                <div key={u.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"flex-start",gap:10}}>
+                  <Avatar name={u.name} size={36} color={u.color}/>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                      <div style={{fontSize:13,fontWeight:600}}>{u.name}</div>
+                      <span style={{background:ub.bg,color:ub.color,fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10}}>{ub.label}</span>
+                    </div>
+                    <div style={{fontSize:10,color:"#9CA3AF",marginBottom:4}}>PIN: {u.pin}</div>
+                    {misProyectos.length>0&&(
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {misProyectos.map(p=><span key={p.id} style={{background:p.color+"18",color:p.color,fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10}}>{p.name}</span>)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [users]=useState(()=>loadLS("foreman_users",USERS_DEFAULT));
   const [projects,setProjects]=useState(()=>loadLS("foreman_projects",PROJECTS_DEFAULT));
@@ -1107,35 +1280,7 @@ export default function App(){
 
       {showModal&&<ModalTarea editTask={editTask} currentUser={usuario} users={users} projects={projects} onCerrar={()=>{setShowModal(false);setEditTask(null);}} onGuardar={guardarTarea}/>}
 
-      {showAjustes&&perms.verAjustes&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:20}} onClick={()=>setShowAjustes(false)}>
-          <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:440,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div style={{fontSize:15,fontWeight:700}}>Ajustes</div>
-              <button onClick={()=>setShowAjustes(false)} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>x</button>
-            </div>
-            {[{k:"nombre",l:"Empresa",ph:"HCA Studio"},{k:"email",l:"Email",ph:"info@hcastudio.com"},{k:"ciudad",l:"Ciudad",ph:"Quito"},{k:"moneda",l:"Moneda",ph:"USD"}].map(f=>(
-              <div key={f.k} style={{marginBottom:10}}>
-                <label style={{color:"#6B7280",fontSize:11,fontWeight:500,marginBottom:4,display:"block"}}>{f.l}</label>
-                <input value={empresa?.[f.k]||""} onChange={e=>{const ne={...empresa,[f.k]:e.target.value};setEmpresa(ne);saveLS("foreman_empresa",ne);}} placeholder={f.ph} style={{width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"9px 12px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-              </div>
-            ))}
-            <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #F3F4F6"}}>
-              <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:10}}>Proyectos — Modulo Financiero</div>
-              {projects.map(p=>(
-                <div key={p.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #F3F4F6"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:10,height:10,borderRadius:"50%",background:p.color}}/><span style={{fontSize:13,fontWeight:500}}>{p.name}</span></div>
-                  <button onClick={()=>toggleFinanzas(p.id)} style={{background:p.tieneFinanzas!==false?"#F0FDF4":"#F3F4F6",border:"1px solid "+(p.tieneFinanzas!==false?"#BBF7D0":"#E5E7EB"),borderRadius:20,padding:"4px 12px",color:p.tieneFinanzas!==false?"#059669":"#9CA3AF",fontSize:11,fontWeight:600,cursor:"pointer"}}>{p.tieneFinanzas!==false?"Finanzas ON":"Finanzas OFF"}</button>
-                </div>
-              ))}
-            </div>
-            <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #F3F4F6"}}>
-              <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:10}}>Usuarios</div>
-              {users.map(u=>{const ub=rolBadge(u.role);return(<div key={u.id} style={{background:"#F9FAFB",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}><Avatar name={u.name} size={32} color={u.color}/><div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{u.name}</div><div style={{fontSize:11,color:"#9CA3AF"}}>PIN: {u.pin}</div></div><span style={{background:ub.bg,color:ub.color,fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:10}}>{ub.label}</span></div>);})}
-            </div>
-          </div>
-        </div>
-      )}
+      {showAjustes&&perms.verAjustes&&<PanelAjustes users={users} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={()=>setShowAjustes(false)}/>}
     </div>
   );
 }
