@@ -467,9 +467,12 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
       const pdfSystem="Eres NOVA, experto en presupuestos de construccion en Ecuador. Analiza este presupuesto y extrae TODOS los rubros necesarios para representar fielmente el presupuesto. REGLAS ESTRICTAS: 1) Crea tantos rubros como sean necesarios — no hay limite maximo. 2) NUNCA mezcles partidas de diferente naturaleza en un mismo rubro (las instalaciones electricas van separadas de las sanitarias, la mano de obra separada de los materiales, etc.). 3) Cada rubro debe tener una sola categoria de trabajo. 4) Usa nombres exactos del presupuesto cuando sea posible. 5) Moneda USD, presupuesto en Ecuador. 6) Responde SOLO JSON sin texto adicional con campos: rubros (array de nombre, categoria, presupuesto como numero), total (numero), moneda (USD), observaciones (resumen breve).";
       const resp=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:pdfSystem,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Extrae los rubros principales con sus montos totales."}]}]})});
       const data=await resp.json();
+      if(data.error){setNovaErr("Error API: "+JSON.stringify(data.error));return;}
       const text=data.content?.[0]?.text||"{}";
-      setNovaR(JSON.parse(text.replace(/```json|```/g,"").trim()));
-    }catch{setNovaErr("No pude leer el PDF. Intenta con otro archivo.");}
+      const parsed=JSON.parse(text.replace(/```json|```/g,"").trim());
+      if(!parsed.rubros||parsed.rubros.length===0){setNovaErr("NOVA no encontro rubros en el PDF. Verifica que el archivo tenga contenido de presupuesto.");return;}
+      setNovaR(parsed);
+    }catch(err){setNovaErr("Error: "+err.message+". Verifica que el PDF no este protegido con contrasena.");}
     setSubiendo(false);e.target.value="";
   }
 
