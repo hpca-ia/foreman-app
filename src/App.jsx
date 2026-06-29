@@ -186,7 +186,7 @@ function NovaInput({currentUser,projects,users,onTaskCreated}){
     const userList=users.map(u=>u.id+"="+u.name).join(",");
     try{
             const novaSystem="Eres NOVA. Extrae tarea y responde SOLO JSON. Campos: title(str), project_id(num), assignee_id(num o null), type(str), due_date(YYYY-MM-DD), priority(urgente/alta/media/baja), notes(str). Proyectos: "+proyList+". Usuarios: "+userList+". Tipos: Llamada,Reunion,Contrato,Compra,Inspeccion,Aprobacion,Visita a obra,Otro. Hoy: "+new Date().toISOString().split("T")[0]+".";
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:novaSystem,messages:[{role:"user",content:texto}]})});
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:novaSystem,messages:[{role:"user",content:texto}]})});
       const data=await res.json();
       setResult(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
     }catch{setResult({error:"No pude entender."});}
@@ -229,7 +229,7 @@ function WhatsApp({task,users,projects}){
   async function generar(){
     setLoading(true);setOpen(true);
     const vence=task.status==="listo"?"esta completada":d<0?Math.abs(d)+" dias de retraso":d===0?"vence HOY":"vence en "+d+" dias";
-    try{const waMsg=task.title.replace(/"/g,"");const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Recordatorio WhatsApp construccion. Espanol. Max 3 oraciones. Directo. Solo el mensaje.",messages:[{role:"user",content:"Para "+(m?.name||"equipo")+": "+waMsg+" en "+p?.name+". "+vence+". Prioridad: "+task.priority+"."}]})});const data=await res.json();setMsg(data.content?.[0]?.text||"");}catch{setMsg("Error.");}
+    try{const waMsg=task.title.replace(/"/g,"");const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Recordatorio WhatsApp construccion. Espanol. Max 3 oraciones. Directo. Solo el mensaje.",messages:[{role:"user",content:"Para "+(m?.name||"equipo")+": "+waMsg+" en "+p?.name+". "+vence+". Prioridad: "+task.priority+"."}]})});const data=await res.json();setMsg(data.content?.[0]?.text||"");}catch{setMsg("Error.");}
     setLoading(false);
   }
   return(
@@ -357,7 +357,7 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
     try{
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       const pdfSystem="Eres NOVA experto en presupuestos de construccion. Analiza el presupuesto adjunto y extrae los rubros principales con sus montos totales. Agrupa partidas similares en categorias generales. Responde SOLO JSON con esta estructura: rubros (array con nombre, categoria, presupuesto como numero), total (numero), observaciones (texto). Maximo 12 rubros.";
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:pdfSystem,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Extrae los rubros principales con sus montos totales."}]}]})});
+      const resp=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:pdfSystem,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Extrae los rubros principales con sus montos totales."}]}]})});
       const data=await resp.json();
       const text=data.content?.[0]?.text||"{}";
       setNovaR(JSON.parse(text.replace(/```json|```/g,"").trim()));
@@ -482,7 +482,7 @@ function ModuloFacturas({proyectoId,perms}){
   function save(u){setFacturas(u);saveLS("fin_facturas_"+proyectoId,u);}
   async function clasificar(){
     if(!form.descripcion)return;setClas(true);setSug(null);
-    try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Clasifica en rubro de construccion. Solo JSON con campos rubroId y razon. Rubros disponibles: "+rubros.map(r=>r.id+"="+r.nombre).join(", "),messages:[{role:"user",content:form.descripcion}]})});const data=await res.json();setSug(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));}catch{}
+    try{const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Clasifica en rubro de construccion. Solo JSON con campos rubroId y razon. Rubros disponibles: "+rubros.map(r=>r.id+"="+r.nombre).join(", "),messages:[{role:"user",content:form.descripcion}]})});const data=await res.json();setSug(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));}catch{}
     setClas(false);
   }
   function agregar(){
@@ -553,7 +553,7 @@ function ModuloCotizaciones({proyectoId}){
     const facts=loadLS("fin_facturas_"+proyectoId,[]);
     const e=facts.filter(f=>f.rubroId===c.rubroId).reduce((s,f)=>s+Number(f.monto),0);
     const disp=Number(rubro?.presupuesto||0)-e;
-    try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Analiza cotizacion vs presupuesto disponible. Solo JSON con campos: tiene_ganancia (bool), margen_usd (numero), margen_pct (numero), alerta (texto corto), recomendacion (texto corto).",messages:[{role:"user",content:"Rubro: "+rubro?.nombre+". Disponible: "+disp+". Cotizacion: "+c.monto+" de "+c.proveedor+"."}]})});const data=await res.json();const a=JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());save(cotiz.map(x=>x.id===c.id?{...x,analisis:a}:x));}catch{}
+    try{const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Analiza cotizacion vs presupuesto disponible. Solo JSON con campos: tiene_ganancia (bool), margen_usd (numero), margen_pct (numero), alerta (texto corto), recomendacion (texto corto).",messages:[{role:"user",content:"Rubro: "+rubro?.nombre+". Disponible: "+disp+". Cotizacion: "+c.monto+" de "+c.proveedor+"."}]})});const data=await res.json();const a=JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());save(cotiz.map(x=>x.id===c.id?{...x,analisis:a}:x));}catch{}
     setAnal(null);
   }
   function agregar(){
@@ -670,7 +670,7 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
     const resumen=resumenPorResponsable();
     const sysPrompt="Reporte caja chica construccion. Solo JSON sin markdown: {resumen:str,por_persona:[{nombre:str,recibio:num,gasto:num,devuelve:num}],sin_factura:num,observaciones:[str],estado:ok|revisar|urgente}";
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:sysPrompt,messages:[{role:"user",content:"Total entregado: "+totalEntregado+". Total gastado: "+totalGastado+". Saldo: "+saldoGlobal+". Por persona: "+JSON.stringify(resumen)+". Gastos sin factura: "+gastos.filter(g=>!g.tieneFactura).length+"."}]})});
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:sysPrompt,messages:[{role:"user",content:"Total entregado: "+totalEntregado+". Total gastado: "+totalGastado+". Saldo: "+saldoGlobal+". Por persona: "+JSON.stringify(resumen)+". Gastos sin factura: "+gastos.filter(g=>!g.tieneFactura).length+"."}]})});
       const data=await res.json();
       setRep(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
     }catch{setRep({error:"Error."});}
