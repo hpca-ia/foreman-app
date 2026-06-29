@@ -356,7 +356,8 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
     setSubiendo(true);setNovaR(null);setNovaErr("");
     try{
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:"Eres NOVA experto en presupuestos de construccion. Analiza el presupuesto y extrae rubros principales con montos totales. Agrupa partidas similares. Responde SOLO JSON sin markdown con campos: rubros (array de nombre, categoria, presupuesto), total, observaciones. Maximo 12 rubros.". Maximo 12 rubros.",messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Extrae los rubros principales con sus montos totales."}]}]})});
+      const pdfSystem="Eres NOVA experto en presupuestos de construccion. Analiza el presupuesto adjunto y extrae los rubros principales con sus montos totales. Agrupa partidas similares en categorias generales. Responde SOLO JSON con esta estructura: rubros (array con nombre, categoria, presupuesto como numero), total (numero), observaciones (texto). Maximo 12 rubros.";
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:pdfSystem,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Extrae los rubros principales con sus montos totales."}]}]})});
       const data=await resp.json();
       const text=data.content?.[0]?.text||"{}";
       setNovaR(JSON.parse(text.replace(/```json|```/g,"").trim()));
