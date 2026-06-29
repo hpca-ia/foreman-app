@@ -332,6 +332,64 @@ function ModalTarea({onCerrar,onGuardar,editTask,currentUser,users,projects}){
 //  MODULOS FINANCIEROS
 // ============================================================
 
+// NOVA RUBROS EDITOR — editar antes de confirmar
+function NovaRubrosEditor({novaR,onConfirmar,onCancelar}){
+  const [rubros,setRubros]=useState(()=>(novaR.rubros||[]).map((r,i)=>({...r,_id:i})));
+  const iS={background:"#0F172A",border:"1px solid #374151",borderRadius:6,color:"#F9FAFB",padding:"5px 8px",fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none"};
+  const total=rubros.reduce((s,r)=>s+Number(r.presupuesto||0),0);
+
+  function update(id,field,val){setRubros(prev=>prev.map(r=>r._id===id?{...r,[field]:val}:r));}
+  function eliminar(id){setRubros(prev=>prev.filter(r=>r._id!==id));}
+  function agregar(){setRubros(prev=>[...prev,{_id:Date.now(),nombre:"Nuevo rubro",categoria:"General",presupuesto:0}]);}
+
+  return(
+    <div style={{marginTop:12,background:"#111827",borderRadius:10,padding:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <div style={{fontSize:12,fontWeight:600,color:"#E8622A"}}>
+          NOVA encontro {novaR.rubros?.length} rubros
+        </div>
+        <div style={{fontSize:12,color:"#9CA3AF"}}>Total: <strong style={{color:"#E8622A"}}>{fmt(total)}</strong></div>
+      </div>
+      {novaR.observaciones&&<div style={{fontSize:11,color:"#6B7280",marginBottom:10,fontStyle:"italic",borderLeft:"2px solid #374151",paddingLeft:8}}>{novaR.observaciones}</div>}
+      <div style={{fontSize:10,color:"#6B7280",marginBottom:8}}>✏️ Edita los rubros antes de confirmar — puedes cambiar nombre, categoria, monto o eliminar filas</div>
+
+      <div style={{maxHeight:320,overflowY:"auto",marginBottom:10}}>
+        {rubros.map(r=>(
+          <div key={r._id} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto auto",gap:6,alignItems:"center",padding:"6px 0",borderBottom:"1px solid #1F2937"}}>
+            <input
+              value={r.nombre}
+              onChange={e=>update(r._id,"nombre",e.target.value)}
+              style={{...iS,gridColumn:"1/3"}}
+              placeholder="Nombre del rubro"
+            />
+            <input
+              value={r.categoria}
+              onChange={e=>update(r._id,"categoria",e.target.value)}
+              style={iS}
+              placeholder="Categoria"
+            />
+            <input
+              type="number"
+              value={r.presupuesto}
+              onChange={e=>update(r._id,"presupuesto",e.target.value)}
+              style={{...iS,textAlign:"right"}}
+              placeholder="USD"
+            />
+            <button onClick={()=>eliminar(r._id)} style={{background:"#DC2626",border:"none",borderRadius:4,width:22,height:22,color:"#fff",cursor:"pointer",fontSize:12,flexShrink:0}}>x</button>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={agregar} style={{width:"100%",background:"transparent",border:"1px dashed #374151",borderRadius:6,padding:"5px",color:"#9CA3AF",fontSize:11,cursor:"pointer",marginBottom:10}}>+ Agregar rubro</button>
+
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onCancelar} style={{flex:1,background:"#374151",border:"none",borderRadius:6,padding:8,color:"#9CA3AF",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={()=>onConfirmar(rubros)} style={{flex:2,background:"#059669",border:"none",borderRadius:8,padding:8,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Confirmar y cargar {rubros.length} rubros</button>
+      </div>
+    </div>
+  );
+}
+
 // PRESUPUESTO CON PDF NOVA
 function ModuloPresupuesto({proyectoId,proyectos,perms}){
   const KEY="fin_rubros_"+proyectoId;
@@ -365,9 +423,9 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
     setSubiendo(false);e.target.value="";
   }
 
-  function confirmarNova(){
-    if(!novaR?.rubros)return;
-    saveR(novaR.rubros.map((r,i)=>({id:"r"+Date.now()+i,nombre:r.nombre,categoria:r.categoria||"General",presupuesto:Number(r.presupuesto)||0})));
+  function confirmarNova(rubrosEditados){
+    const lista=rubrosEditados||novaR?.rubros||[];
+    saveR(lista.map((r,i)=>({id:"r"+Date.now()+i,nombre:r.nombre,categoria:r.categoria||"General",presupuesto:Number(r.presupuesto)||0})));
     setNovaR(null);
   }
 
@@ -396,22 +454,11 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
           </button>
           {novaErr&&<div style={{color:"#F87171",fontSize:12,marginTop:8}}>{novaErr}</div>}
           {novaR&&(
-            <div style={{marginTop:12,background:"#111827",borderRadius:10,padding:12}}>
-              <div style={{fontSize:12,fontWeight:600,color:"#E8622A",marginBottom:8}}>NOVA encontro {novaR.rubros?.length} rubros - Total: {fmt(novaR.total)}</div>
-              {novaR.observaciones&&<div style={{fontSize:11,color:"#9CA3AF",marginBottom:10,fontStyle:"italic"}}>{novaR.observaciones}</div>}
-              <div style={{maxHeight:220,overflowY:"auto",marginBottom:10}}>
-                {novaR.rubros?.map((r,i)=>(
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #1F2937"}}>
-                    <div><div style={{fontSize:12,fontWeight:600,color:"#F9FAFB"}}>{r.nombre}</div><div style={{fontSize:10,color:"#6B7280"}}>{r.categoria}</div></div>
-                    <div style={{fontSize:13,fontWeight:700,color:"#E8622A"}}>{fmt(r.presupuesto)}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>setNovaR(null)} style={{flex:1,background:"#374151",border:"none",borderRadius:6,padding:8,color:"#9CA3AF",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-                <button onClick={confirmarNova} style={{flex:2,background:"#059669",border:"none",borderRadius:8,padding:8,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Confirmar y cargar rubros</button>
-              </div>
-            </div>
+            <NovaRubrosEditor
+              novaR={novaR}
+              onConfirmar={rubrosEditados=>{confirmarNova(rubrosEditados);}}
+              onCancelar={()=>setNovaR(null)}
+            />
           )}
         </div>
       )}
