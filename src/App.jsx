@@ -332,108 +332,162 @@ function ModalTarea({onCerrar,onGuardar,editTask,currentUser,users,projects}){
 //  MODULOS FINANCIEROS
 // ============================================================
 
-// NOVA RUBROS EDITOR — editar, reordenar, fusionar antes de confirmar
+// NOVA RUBROS EDITOR — con subgrupos movibles entre rubros
 function NovaRubrosEditor({novaR,onConfirmar,onCancelar}){
-  const [rubros,setRubros]=useState(()=>(novaR.rubros||[]).map((r,i)=>({...r,_id:Date.now()+i})));
-  const [fusionando,setFusionando]=useState(null); // id del rubro origen de fusion
-  const iS={background:"#0F172A",border:"1px solid #374151",borderRadius:6,color:"#F9FAFB",padding:"5px 8px",fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none",width:"100%",boxSizing:"border-box"};
-  const total=rubros.reduce((s,r)=>s+Number(r.presupuesto||0),0);
+  // Estado: rubros con sus subgrupos. Los montos se calculan solos de los subgrupos.
+  const [rubros,setRubros]=useState(()=>{
+    return (novaR.rubros||[]).map((r,i)=>({
+      _id:Date.now()+i,
+      nombre:r.nombre||r.nm||"Rubro",
+      categoria:r.categoria||r.ct||"General",
+      subgrupos:(r.subgrupos||[]).map((sg,j)=>({_sid:Date.now()+i*1000+j,nombre:sg.nombre||sg.n||"",monto:Number(sg.monto||sg.v||0)}))
+    }));
+  });
+  const [moviendo,setMoviendo]=useState(null); // {rubroId, sgId}
+  const [expandido,setExpandido]=useState(null); // rubro _id expandido
+  const [nuevoRubro,setNuevoRubro]=useState(false);
+  const [nuevoNombre,setNuevoNombre]=useState("");
 
-  function update(id,field,val){setRubros(prev=>prev.map(r=>r._id===id?{...r,[field]:val}:r));}
-  function eliminar(id){setRubros(prev=>prev.filter(r=>r._id!==id)); if(fusionando===id)setFusionando(null);}
-  function agregar(){setRubros(prev=>[...prev,{_id:Date.now(),nombre:"Nuevo rubro",categoria:"General",presupuesto:0}]);}
+  const calcTotal=r=>Math.round(r.subgrupos.reduce((s,sg)=>s+sg.monto,0)*100)/100;
+  const totalGlobal=Math.round(rubros.reduce((s,r)=>s+calcTotal(r),0)*100)/100;
+  const totalOriginal=novaR.total||0;
+  const diff=Math.round((totalGlobal-totalOriginal)*100)/100;
 
-  function moverArriba(idx){
-    if(idx===0)return;
-    setRubros(prev=>{const a=[...prev];[a[idx-1],a[idx]]=[a[idx],a[idx-1]];return a;});
-  }
-  function moverAbajo(idx){
-    setRubros(prev=>{if(idx>=prev.length-1)return prev;const a=[...prev];[a[idx],a[idx+1]]=[a[idx+1],a[idx]];return a;});
-  }
-
-  function fusionar(origenId,destinoId){
-    // Suma el monto del origen al destino y elimina el origen
+  function moverSubgrupo(fromRubroId,sgId,toRubroId){
+    if(fromRubroId===toRubroId){setMoviendo(null);return;}
     setRubros(prev=>{
-      const origen=prev.find(r=>r._id===origenId);
-      const destino=prev.find(r=>r._id===destinoId);
-      if(!origen||!destino||origenId===destinoId)return prev;
-      return prev
-        .map(r=>r._id===destinoId?{...r,presupuesto:Number(r.presupuesto||0)+Number(origen.presupuesto||0)}:r)
-        .filter(r=>r._id!==origenId);
+      const sg=prev.find(r=>r._id===fromRubroId)?.subgrupos.find(s=>s._sid===sgId);
+      if(!sg)return prev;
+      return prev.map(r=>{
+        if(r._id===fromRubroId)return{...r,subgrupos:r.subgrupos.filter(s=>s._sid!==sgId)};
+        if(r._id===toRubroId)return{...r,subgrupos:[...r.subgrupos,sg]};
+        return r;
+      });
     });
-    setFusionando(null);
+    setMoviendo(null);
   }
+
+  function eliminarRubro(id){
+    if(!window.confirm("Eliminar este rubro? Sus subgrupos se perderan."))return;
+    setRubros(prev=>prev.filter(r=>r._id!==id));
+  }
+
+  function renombrarRubro(id,val){setRubros(prev=>prev.map(r=>r._id===id?{...r,nombre:val}:r));}
+  function renombrarCategoria(id,val){setRubros(prev=>prev.map(r=>r._id===id?{...r,categoria:val}:r));}
+
+  function agregarRubro(){
+    if(!nuevoNombre.trim())return;
+    setRubros(prev=>[...prev,{_id:Date.now(),nombre:nuevoNombre.trim(),categoria:"General",subgrupos:[]}]);
+    setNuevoNombre("");setNuevoRubro(false);
+  }
+
+  function moverRubroArriba(idx){if(idx===0)return;setRubros(prev=>{const a=[...prev];[a[idx-1],a[idx]]=[a[idx],a[idx-1]];return a;});}
+  function moverRubroAbajo(idx){setRubros(prev=>{if(idx>=prev.length-1)return prev;const a=[...prev];[a[idx],a[idx+1]]=[a[idx+1],a[idx]];return a;});}
+
+  const iS={background:"#0F172A",border:"1px solid #374151",borderRadius:5,color:"#F9FAFB",padding:"4px 7px",fontSize:11,fontFamily:"'Inter',sans-serif",outline:"none",boxSizing:"border-box"};
 
   return(
     <div style={{marginTop:12,background:"#111827",borderRadius:10,padding:14}}>
-      {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-        <div style={{fontSize:12,fontWeight:600,color:"#E8622A"}}>NOVA — {rubros.length} rubros detectados</div>
-        <div style={{fontSize:12,color:"#9CA3AF"}}>Total: <strong style={{color:"#E8622A"}}>{fmt(total)}</strong></div>
-      </div>
-      {novaR.observaciones&&(
-        <div style={{fontSize:11,color:"#6B7280",marginBottom:10,fontStyle:"italic",borderLeft:"2px solid #374151",paddingLeft:8}}>{novaR.observaciones}</div>
-      )}
-      <div style={{fontSize:10,color:"#6B7280",marginBottom:10,lineHeight:1.5}}>
-        ✏️ Edita nombre y monto · ↑↓ Reordena · 🔗 Fusiona dos rubros en uno · 🗑 Elimina
+        <div style={{fontSize:12,fontWeight:600,color:"#E8622A"}}>NOVA — {rubros.length} rubros | {novaR.secciones_detectadas||"?"} secciones</div>
+        <div style={{fontSize:12,color:"#9CA3AF"}}>Total: <strong style={{color:Math.abs(diff)<1?"#34D399":"#FBBF24"}}>{fmt(totalGlobal)}</strong></div>
       </div>
 
-      {fusionando&&(
-        <div style={{background:"#1E3A2F",border:"1px solid #059669",borderRadius:8,padding:"8px 10px",marginBottom:10}}>
-          <div style={{fontSize:11,color:"#34D399",fontWeight:600,marginBottom:4}}>
-            Fusionando: <strong>{rubros.find(r=>r._id===fusionando)?.nombre}</strong>
-          </div>
-          <div style={{fontSize:10,color:"#6B7280",marginBottom:6}}>Haz clic en el rubro destino para sumar el monto y eliminar este</div>
-          <button onClick={()=>setFusionando(null)} style={{background:"#374151",border:"none",borderRadius:6,padding:"4px 10px",color:"#9CA3AF",fontSize:11,cursor:"pointer"}}>Cancelar fusion</button>
+      {novaR.observaciones&&<div style={{fontSize:10,color:"#6B7280",marginBottom:8,borderLeft:"2px solid #374151",paddingLeft:8}}>{novaR.observaciones}</div>}
+
+      {Math.abs(diff)>1&&(
+        <div style={{background:"#1C1917",borderRadius:6,padding:"5px 10px",marginBottom:8,fontSize:10,color:"#FBBF24"}}>
+          Diferencia con total PDF ({fmt(totalOriginal)}): {diff>0?"+":""}{fmt(diff)} {diff<0?"(faltan secciones)":"(secciones de mas)"}
         </div>
       )}
 
-      {/* Lista editable */}
-      <div style={{maxHeight:360,overflowY:"auto",marginBottom:10}}>
+      <div style={{fontSize:10,color:"#6B7280",marginBottom:8}}>
+        Haz clic en un subgrupo para moverlo a otro rubro. Los montos se recalculan solos.
+      </div>
+
+      {moviendo&&(
+        <div style={{background:"#1E3A2F",border:"1px solid #059669",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+          <div style={{fontSize:11,color:"#34D399",fontWeight:600,marginBottom:3}}>
+            Moviendo: <strong>{rubros.flatMap(r=>r.subgrupos).find(s=>s._sid===moviendo.sgId)?.nombre}</strong>
+          </div>
+          <div style={{fontSize:10,color:"#9CA3AF",marginBottom:6}}>Haz clic en el rubro destino para moverlo</div>
+          <button onClick={()=>setMoviendo(null)} style={{background:"#374151",border:"none",borderRadius:5,padding:"3px 10px",color:"#9CA3AF",fontSize:10,cursor:"pointer"}}>Cancelar</button>
+        </div>
+      )}
+
+      <div style={{maxHeight:420,overflowY:"auto",marginBottom:10}}>
         {rubros.map((r,idx)=>{
-          const esFusionDestino=fusionando&&fusionando!==r._id;
-          const esFusionOrigen=fusionando===r._id;
+          const total=calcTotal(r);
+          const esDestino=moviendo&&moviendo.rubroId!==r._id;
+          const esFuente=moviendo&&moviendo.rubroId===r._id;
           return(
-            <div key={r._id} style={{background:esFusionOrigen?"#1E3A2F":esFusionDestino?"#1E2A3A":"#0F172A",border:"1px solid "+(esFusionDestino?"#2563EB":esFusionOrigen?"#059669":"#374151"),borderRadius:8,padding:"8px 10px",marginBottom:6,cursor:esFusionDestino?"pointer":"default",transition:"all 0.15s"}}
-              onClick={esFusionDestino?()=>fusionar(fusionando,r._id):undefined}>
-              {esFusionDestino&&<div style={{fontSize:10,color:"#60A5FA",fontWeight:600,marginBottom:4}}>Clic para fusionar aqui →</div>}
-              <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto",gap:6,alignItems:"start"}}>
-                {/* Controles orden */}
-                <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:2}}>
-                  <button onClick={e=>{e.stopPropagation();moverArriba(idx);}} disabled={idx===0} style={{background:"none",border:"none",color:idx===0?"#374151":"#9CA3AF",cursor:idx===0?"default":"pointer",fontSize:10,padding:"1px 3px",lineHeight:1}}>▲</button>
-                  <button onClick={e=>{e.stopPropagation();moverAbajo(idx);}} disabled={idx===rubros.length-1} style={{background:"none",border:"none",color:idx===rubros.length-1?"#374151":"#9CA3AF",cursor:idx===rubros.length-1?"default":"pointer",fontSize:10,padding:"1px 3px",lineHeight:1}}>▼</button>
+            <div key={r._id}
+              style={{background:esDestino?"#1E2A3A":esFuente?"#1E3A2F":"#0F172A",border:"1px solid "+(esDestino?"#2563EB":esFuente?"#059669":"#374151"),borderRadius:8,marginBottom:6,overflow:"hidden",cursor:esDestino?"pointer":"default"}}
+              onClick={esDestino?()=>moverSubgrupo(moviendo.rubroId,moviendo.sgId,r._id):undefined}>
+              {/* Header del rubro */}
+              <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",borderBottom:"1px solid #1F2937"}}>
+                <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                  <button onClick={e=>{e.stopPropagation();moverRubroArriba(idx);}} disabled={idx===0} style={{background:"none",border:"none",color:idx===0?"#374151":"#6B7280",cursor:idx===0?"default":"pointer",fontSize:9,padding:0,lineHeight:1}}>▲</button>
+                  <button onClick={e=>{e.stopPropagation();moverRubroAbajo(idx);}} disabled={idx===rubros.length-1} style={{background:"none",border:"none",color:idx===rubros.length-1?"#374151":"#6B7280",cursor:idx===rubros.length-1?"default":"pointer",fontSize:9,padding:0,lineHeight:1}}>▼</button>
                 </div>
-                {/* Campos */}
-                <div style={{display:"grid",gap:4}}>
-                  <input value={r.nombre} onChange={e=>{e.stopPropagation();update(r._id,"nombre",e.target.value);}} onClick={e=>e.stopPropagation()} style={iS} placeholder="Nombre del rubro"/>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-                    <input value={r.categoria} onChange={e=>{e.stopPropagation();update(r._id,"categoria",e.target.value);}} onClick={e=>e.stopPropagation()} style={iS} placeholder="Categoria"/>
-                    <input type="number" value={r.presupuesto} onChange={e=>{e.stopPropagation();update(r._id,"presupuesto",e.target.value);}} onClick={e=>e.stopPropagation()} style={{...iS,textAlign:"right"}} placeholder="USD"/>
+                <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr auto",gap:6,alignItems:"center"}}>
+                  <div>
+                    <input value={r.nombre} onChange={e=>{e.stopPropagation();renombrarRubro(r._id,e.target.value);}} onClick={e=>e.stopPropagation()} style={{...iS,width:"100%",fontSize:12,fontWeight:600}} placeholder="Nombre rubro"/>
+                    <input value={r.categoria} onChange={e=>{e.stopPropagation();renombrarCategoria(r._id,e.target.value);}} onClick={e=>e.stopPropagation()} style={{...iS,width:"100%",marginTop:3,color:"#9CA3AF"}} placeholder="Categoria"/>
+                  </div>
+                  <div style={{textAlign:"right",minWidth:80}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#E8622A"}}>{fmt(total)}</div>
+                    <div style={{fontSize:9,color:"#6B7280"}}>{r.subgrupos.length} secciones</div>
                   </div>
                 </div>
-                {/* Acciones */}
-                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {!fusionando&&<button title="Fusionar con otro rubro" onClick={e=>{e.stopPropagation();setFusionando(r._id);}} style={{background:"#1D4ED8",border:"none",borderRadius:4,padding:"3px 6px",color:"#fff",fontSize:10,cursor:"pointer"}}>🔗</button>}
-                  <button title="Eliminar" onClick={e=>{e.stopPropagation();eliminar(r._id);}} style={{background:"#7F1D1D",border:"none",borderRadius:4,padding:"3px 6px",color:"#FCA5A5",fontSize:10,cursor:"pointer"}}>🗑</button>
+                <div style={{display:"flex",gap:4}}>
+                  {esDestino&&<span style={{fontSize:10,color:"#60A5FA",fontWeight:700}}>→ Mover aqui</span>}
+                  {!esDestino&&<button onClick={e=>{e.stopPropagation();setExpandido(expandido===r._id?null:r._id);}} style={{background:"#1F2937",border:"none",borderRadius:4,padding:"3px 7px",color:"#9CA3AF",fontSize:10,cursor:"pointer"}}>{expandido===r._id?"▲":"▼"}</button>}
+                  {!esDestino&&<button onClick={e=>{e.stopPropagation();eliminarRubro(r._id);}} style={{background:"#7F1D1D",border:"none",borderRadius:4,padding:"3px 6px",color:"#FCA5A5",fontSize:10,cursor:"pointer"}}>🗑</button>}
                 </div>
               </div>
+              {/* Subgrupos — visible si expandido o si hay pocos */}
+              {(expandido===r._id||r.subgrupos.length<=3)&&!esDestino&&(
+                <div style={{padding:"6px 10px"}}>
+                  {r.subgrupos.length===0&&<div style={{fontSize:10,color:"#6B7280",fontStyle:"italic"}}>Sin secciones asignadas</div>}
+                  {r.subgrupos.map(sg=>(
+                    <div key={sg._sid}
+                      onClick={e=>{e.stopPropagation();if(moviendo)return;setMoviendo({rubroId:r._id,sgId:sg._sid});}}
+                      style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 6px",marginBottom:3,borderRadius:5,background:moviendo?.sgId===sg._sid?"#1E3A2F":"#1F2937",border:"1px solid "+(moviendo?.sgId===sg._sid?"#059669":"#374151"),cursor:"pointer",transition:"all 0.1s"}}>
+                      <span style={{fontSize:11,color:"#D1D5DB"}}>{sg.nombre}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:11,color:"#E8622A",fontWeight:600}}>{fmt(sg.monto)}</span>
+                        {!moviendo&&<span style={{fontSize:9,color:"#6B7280"}}>clic para mover</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {expandido!==r._id&&r.subgrupos.length>3&&!esDestino&&(
+                <div style={{padding:"4px 10px",fontSize:10,color:"#6B7280"}}>
+                  {r.subgrupos.slice(0,3).map(sg=>sg.nombre).join(", ")}... y {r.subgrupos.length-3} mas
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      <button onClick={agregar} style={{width:"100%",background:"transparent",border:"1px dashed #374151",borderRadius:6,padding:"6px",color:"#9CA3AF",fontSize:11,cursor:"pointer",marginBottom:10}}>+ Agregar rubro manualmente</button>
-
-      {/* Total vs suma */}
-      {novaR.total>0&&Math.abs(total-novaR.total)>1&&(
-        <div style={{background:"#1C1917",borderRadius:6,padding:"6px 10px",marginBottom:10,fontSize:11,color:"#D97706"}}>
-          Diferencia con total original: {fmt(Math.abs(total-novaR.total))} {total<novaR.total?"(faltan rubros)":"(rubros de mas)"}
+      {nuevoRubro?(
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          <input value={nuevoNombre} onChange={e=>setNuevoNombre(e.target.value)} style={{...iS,flex:1,fontSize:12}} placeholder="Nombre del nuevo rubro" autoFocus onKeyDown={e=>e.key==="Enter"&&agregarRubro()}/>
+          <button onClick={agregarRubro} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"5px 12px",color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer"}}>Crear</button>
+          <button onClick={()=>{setNuevoRubro(false);setNuevoNombre("");}} style={{background:"#374151",border:"none",borderRadius:6,padding:"5px 10px",color:"#9CA3AF",fontSize:11,cursor:"pointer"}}>Cancelar</button>
         </div>
+      ):(
+        <button onClick={()=>setNuevoRubro(true)} style={{width:"100%",background:"transparent",border:"1px dashed #374151",borderRadius:6,padding:"5px",color:"#9CA3AF",fontSize:11,cursor:"pointer",marginBottom:10}}>+ Nuevo rubro</button>
       )}
 
       <div style={{display:"flex",gap:8}}>
         <button onClick={onCancelar} style={{flex:1,background:"#374151",border:"none",borderRadius:6,padding:8,color:"#9CA3AF",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-        <button onClick={()=>onConfirmar(rubros)} style={{flex:2,background:"#059669",border:"none",borderRadius:8,padding:8,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Confirmar {rubros.length} rubros → {fmt(total)}</button>
+        <button onClick={()=>onConfirmar(rubros.map(r=>({...r,presupuesto:calcTotal(r)})))} style={{flex:2,background:"#059669",border:"none",borderRadius:8,padding:8,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+          Confirmar {rubros.length} rubros → {fmt(totalGlobal)}
+        </button>
       </div>
     </div>
   );
@@ -468,14 +522,19 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
       const data=await resp.json();
       if(data.error){setNovaErr("Error: "+data.error);return;}
       if(!data.rubros?.length){setNovaErr("No se encontraron rubros. Intenta de nuevo.");return;}
-      setNovaR({rubros:data.rubros,total:data.total,observaciones:data.observaciones+(data.total_con_iva>0?" | Con IVA: "+fmt(data.total_con_iva):"")});
+      setNovaR({rubros:data.rubros,secciones:data.secciones||[],total:data.total,total_con_iva:data.total_con_iva||0,secciones_detectadas:data.secciones_detectadas||0,observaciones:data.observaciones+(data.total_con_iva>0?" | Con IVA: "+fmt(data.total_con_iva):"")});
     }catch(err){setNovaErr("Error: "+err.message);}
     setSubiendo(false);e.target.value="";
   }
 
   function confirmarNova(rubrosEditados){
     const lista=rubrosEditados||novaR?.rubros||[];
-    saveR(lista.map((r,i)=>({id:"r"+Date.now()+i,nombre:r.nombre,categoria:r.categoria||"General",presupuesto:Number(r.presupuesto)||0})));
+    saveR(lista.filter(r=>(r.presupuesto||0)>0||r.subgrupos?.length>0).map((r,i)=>({
+      id:"r"+Date.now()+i,
+      nombre:r.nombre,
+      categoria:r.categoria||"General",
+      presupuesto:r.presupuesto!=null?Number(r.presupuesto):Math.round((r.subgrupos||[]).reduce((s,sg)=>s+Number(sg.monto||0),0)*100)/100
+    })));
     setNovaR(null);
   }
 
