@@ -463,49 +463,14 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
     setSubiendo(true);setNovaR(null);setNovaErr("");
     try{
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
-
-      // Pedir SOLO los subtotales — respuesta muy corta, no se corta nunca
-      const sys1="Eres NOVA. Analiza este presupuesto y lista SOLO las lineas de SUBTOTAL de cada seccion con su monto. Responde SOLO este JSON exacto sin ningun texto adicional: {\"secciones\":[{\"nombre\":\"NOMBRE SECCION\",\"subtotal\":1234.56}],\"total_general\":9999.99}. Cada objeto tiene solo nombre y subtotal como numero. Nada mas.";
-      const r1=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1500,system:sys1,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Lista los SUBTOTALES. Solo JSON."}]}]})});
-      const d1=await r1.json();
-      if(d1.error){setNovaErr("Error: "+JSON.stringify(d1.error));return;}
-      let t1=(d1.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
-
-      // Reparar JSON cortado
-      if(!t1.includes('"secciones"')){setNovaErr("NOVA no pudo leer los subtotales del PDF. Intenta con un PDF de menos paginas.");return;}
-      if(!t1.endsWith("}")){
-        // Cerrar el JSON truncado correctamente
-        const li=t1.lastIndexOf("{\"nombre\"");
-        if(li>0) t1=t1.slice(0,li).trimEnd();
-        if(t1.endsWith(",")) t1=t1.slice(0,-1);
-        if(!t1.includes('"total_general"')) t1+="],\"total_general\":0}";
-        else if(!t1.endsWith("}")) t1+="}";
-      }
-
-      let paso1;
-      try{paso1=JSON.parse(t1);}
-      catch{setNovaErr("Error al leer respuesta de NOVA. Intenta de nuevo.");return;}
-      if(!paso1.secciones?.length){setNovaErr("No se encontraron subtotales. Verifica que el PDF tenga secciones con SUBTOTAL.");return;}
-
-      // Paso 2: agrupar — solo texto, sin PDF, respuesta garantizada
-      await agruparSecciones(paso1.secciones,paso1.total_general||0);
+      // El servidor procesa el PDF completo en 2 pasos internamente
+      const resp=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({_modo:"presupuesto_pdf",pdfBase64:base64})});
+      const data=await resp.json();
+      if(data.error){setNovaErr("Error: "+data.error);return;}
+      if(!data.rubros?.length){setNovaErr("No se encontraron rubros. Intenta de nuevo.");return;}
+      setNovaR({rubros:data.rubros,total:data.total,observaciones:data.observaciones+(data.total_con_iva>0?" | Con IVA: "+fmt(data.total_con_iva):"")});
     }catch(err){setNovaErr("Error: "+err.message);}
     setSubiendo(false);e.target.value="";
-  }
-
-  async function agruparSecciones(secciones,totalGeneral){
-    const seccText=secciones.map(s=>s.nombre+" = $"+s.subtotal).join("\n");
-    const sys2="Eres NOVA experto en presupuestos de construccion en Ecuador. Tienes una lista de secciones con sus subtotales. AGRUPA las secciones de la misma naturaleza en rubros principales sumando sus montos. Reglas: nunca juntes electricas con sanitarias, ni mobiliario con acabados. Da nombres claros. Responde SOLO JSON: {\"rubros\":[{\"nombre\":\"...\",\"categoria\":\"...\",\"presupuesto\":123.45}],\"total\":0}";
-    const r2=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1500,system:sys2,messages:[{role:"user",content:"Agrupa estas secciones en rubros principales:\n\n"+seccText+(totalGeneral>0?"\n\nTotal del presupuesto: $"+totalGeneral:"")}]})});
-    const d2=await r2.json();
-    if(d2.error){setNovaErr("Error agrupando: "+JSON.stringify(d2.error));return;}
-    let t2=(d2.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
-    if(!t2.endsWith("}")){t2=t2.slice(0,t2.lastIndexOf("}")+1)+"}";}
-    let paso2;
-    try{paso2=JSON.parse(t2);}
-    catch{setNovaErr("Error al leer agrupacion. Intenta de nuevo.");return;}
-    if(!paso2.rubros?.length){setNovaErr("NOVA no pudo agrupar los rubros.");return;}
-    setNovaR({rubros:paso2.rubros,total:paso2.total||totalGeneral,observaciones:secciones.length+" secciones → "+paso2.rubros.length+" rubros"});
   }
 
   function confirmarNova(rubrosEditados){
