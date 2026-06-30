@@ -70,7 +70,8 @@ function can(role) {
     verDashboard:a, verPresupuesto:a, editarPresupuesto:o,
     verFacturas:a, registrarFacturas:a, verCotizaciones:a,
     verCajaChica:true, registrarGasto:true, verReporteCaja:a,
-    gestionarEntregas:a, verAjustes:o,
+    abonarCaja:a, gestionarEntregas:a, verAjustes:o,
+    verTodasCajas:a,
   };
 }
 function rolBadge(role) {
@@ -506,9 +507,19 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
   const [novaErr,setNovaErr]=useState("");
   const fileRef=useRef(null);
   function saveR(r){setRubros(r);saveLS(KEY,r);}
-  const ejec=id=>facturas.filter(f=>f.rubroId===id).reduce((s,f)=>s+Number(f.monto||0),0);
+  // ejec usa subtotal neto (sin IVA) para comparar vs presupuesto
+  const ejec=id=>facturas.filter(f=>f.partidas?.some(p=>p.rubroId===id))
+    .reduce((s,f)=>{
+      // sumar solo las partidas de este rubro
+      const parteF=f.partidas?.filter(p=>p.rubroId===id).reduce((a,p)=>a+Number(p.monto||0),0)||0;
+      return s+parteF;
+    },0);
+  const totalIvaPagado=facturas.reduce((s,f)=>s+Number(f.montoIva||0),0);
   const totalP=rubros.reduce((s,r)=>s+Number(r.presupuesto||0),0);
   const totalE=rubros.reduce((s,r)=>s+ejec(r.id),0);
+  // Rubros especiales: honorarios e imprevistos (definidos en rubros con categoria especial)
+  const rubrosObra=rubros.filter(r=>r.categoria!=="Honorarios"&&r.categoria!=="Imprevistos"&&r.categoria!=="IVA");
+  const totalObra=rubrosObra.reduce((s,r)=>s+Number(r.presupuesto||0),0);
   const proy=proyectos.find(p=>p.id===proyectoId);
   const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
 
@@ -529,12 +540,29 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
 
   function confirmarNova(rubrosEditados){
     const lista=rubrosEditados||novaR?.rubros||[];
-    saveR(lista.filter(r=>(r.presupuesto||0)>0||r.subgrupos?.length>0).map((r,i)=>({
+    const rubrosBase=lista.filter(r=>(r.presupuesto||0)>0||r.subgrupos?.length>0).map((r,i)=>({
       id:"r"+Date.now()+i,
       nombre:r.nombre,
       categoria:r.categoria||"General",
       presupuesto:r.presupuesto!=null?Number(r.presupuesto):Math.round((r.subgrupos||[]).reduce((s,sg)=>s+Number(sg.monto||0),0)*100)/100
-    })));
+    }));
+    // Agregar honorarios, imprevistos e IVA si los detectó NOVA
+    const extras=[];
+    const th=novaR?.total_honorarios||0;
+    const ti=novaR?.total_con_iva||0;
+    const tg=novaR?.total||0;
+    if(th>tg&&th>0){
+      const honorarios=Math.round((th-tg)*100)/100;
+      const imprev=Math.round(honorarios*0.1*100)/100;
+      const honProf=Math.round((honorarios-imprev)*100)/100;
+      if(honProf>0)extras.push({id:"r_hon_"+Date.now(),nombre:"Honorarios Profesionales",categoria:"Honorarios",presupuesto:honProf});
+      if(imprev>0)extras.push({id:"r_imp_"+Date.now(),nombre:"Imprevistos",categoria:"Imprevistos",presupuesto:imprev});
+    }
+    if(ti>0&&th>0){
+      const iva=Math.round((ti-th)*100)/100;
+      if(iva>0)extras.push({id:"r_iva_"+Date.now(),nombre:"IVA 15%",categoria:"IVA",presupuesto:iva});
+    }
+    saveR([...rubrosBase,...extras]);
     setNovaR(null);
   }
 
@@ -543,14 +571,31 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
       <div style={{background:"#fff",borderRadius:12,padding:"14px 16px",marginBottom:14,border:"1px solid #F0F1F3",borderLeft:"4px solid "+(proy?.color||"#E8622A")}}>
         <div style={{fontSize:16,fontWeight:700,color:"#111",marginBottom:12}}>{proy?.name}</div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          {[{l:"Presupuesto",v:fmt(totalP),c:"#374151"},{l:"Ejecutado",v:fmt(totalE),c:totalE>totalP?"#DC2626":"#D97706"},{l:"Disponible",v:fmt(totalP-totalE),c:(totalP-totalE)<0?"#DC2626":"#059669"},{l:"Avance",v:pct(totalE,totalP)+"%",c:proy?.color||"#E8622A"}].map(s=>(
+          {[{l:"Presupuesto obra",v:fmt(totalObra||totalP),c:"#374151"},{l:"Ejecutado",v:fmt(totalE),c:totalE>totalP?"#DC2626":"#D97706"},{l:"Disponible",v:fmt((totalObra||totalP)-totalE),c:((totalObra||totalP)-totalE)<0?"#DC2626":"#059669"},{l:"Avance",v:pct(totalE,totalObra||totalP)+"%",c:proy?.color||"#E8622A"}].map(s=>(
             <div key={s.l} style={{background:"#F9FAFB",borderRadius:8,padding:"8px 14px",textAlign:"center",flex:1,minWidth:70}}>
               <div style={{fontSize:16,fontWeight:700,color:s.c}}>{s.v}</div>
               <div style={{fontSize:10,color:"#9CA3AF",fontWeight:600}}>{s.l}</div>
             </div>
           ))}
         </div>
-        {totalP>0&&<div style={{marginTop:10,background:"#F3F4F6",borderRadius:4,height:6}}><div style={{background:totalE>totalP?"#DC2626":proy?.color||"#E8622A",height:6,borderRadius:4,width:Math.min(100,pct(totalE,totalP))+"%",transition:"width 0.5s"}}/></div>}
+        {(rubros.some(r=>r.categoria==="Honorarios"||r.categoria==="Imprevistos"||r.categoria==="IVA")||totalIvaPagado>0)&&(
+          <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap",alignItems:"center"}}>
+            {rubros.filter(r=>r.categoria==="Honorarios"||r.categoria==="Imprevistos"||r.categoria==="IVA").map(r=>(
+              <div key={r.id} style={{background:r.categoria==="IVA"?"#EFF6FF":r.categoria==="Honorarios"?"#FFF4F0":"#F9FAFB",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,color:r.categoria==="IVA"?"#2563EB":r.categoria==="Honorarios"?"#E8622A":"#6B7280",border:"1px solid "+(r.categoria==="IVA"?"#BFDBFE":r.categoria==="Honorarios"?"#FED7AA":"#E5E7EB")}}>
+                {r.nombre}: {fmt(r.presupuesto)}
+              </div>
+            ))}
+            {totalIvaPagado>0&&(
+              <div style={{background:"#EFF6FF",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,color:"#2563EB",border:"1px solid #BFDBFE"}}>
+                IVA pagado facturas: {fmt(totalIvaPagado)}
+              </div>
+            )}
+            <div style={{background:"#1F2937",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,color:"#E8622A"}}>
+              Total c/IVA: {fmt(rubros.reduce((s,r)=>s+Number(r.presupuesto||0),0))}
+            </div>
+          </div>
+        )}
+        {totalP>0&&<div style={{marginTop:10,background:"#F3F4F6",borderRadius:4,height:6}}><div style={{background:totalE>totalP?"#DC2626":proy?.color||"#E8622A",height:6,borderRadius:4,width:Math.min(100,pct(totalE,totalObra||totalP))+"%",transition:"width 0.5s"}}/></div>}
       </div>
 
       {perms.editarPresupuesto&&(
@@ -628,67 +673,155 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
   );
 }
 
-// FACTURAS
+// FACTURAS — multi-rubro + IVA Ecuador
 function ModuloFacturas({proyectoId,perms}){
   const rubros=loadLS("fin_rubros_"+proyectoId,RUBROS_DEFAULT);
   const [facturas,setFacturas]=useState(()=>loadLS("fin_facturas_"+proyectoId,[]));
-  const [form,setForm]=useState({proveedor:"",numero:"",monto:"",fecha:new Date().toISOString().split("T")[0],rubroId:"",descripcion:""});
-  const [clas,setClas]=useState(false);const [sug,setSug]=useState(null);
+  const emptyF={proveedor:"",numero:"",fecha:new Date().toISOString().split("T")[0],descripcion:"",subtotal:"",pctIva:15,montoIva:"",total:"",partidas:[{rubroId:"",monto:""}]};
+  const [form,setForm]=useState(emptyF);
+  const [clas,setClas]=useState(false);
   const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
+  const lS={fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3};
+
   function save(u){setFacturas(u);saveLS("fin_facturas_"+proyectoId,u);}
+
+  // Calcular IVA automaticamente
+  function calcIva(subtotal,pct){return Math.round(Number(subtotal||0)*Number(pct||0)/100*100)/100;}
+  function calcTotal(subtotal,iva){return Math.round((Number(subtotal||0)+Number(iva||0))*100)/100;}
+
+  function setSubtotal(v){
+    const iva=calcIva(v,form.pctIva);
+    const tot=calcTotal(v,iva);
+    setForm(p=>({...p,subtotal:v,montoIva:iva,total:tot}));
+  }
+  function setPctIva(pct){
+    const iva=calcIva(form.subtotal,pct);
+    const tot=calcTotal(form.subtotal,iva);
+    setForm(p=>({...p,pctIva:pct,montoIva:iva,total:tot}));
+  }
+  function setIvaManual(v){
+    setForm(p=>({...p,montoIva:v,total:calcTotal(p.subtotal,v),pctIva:"manual"}));
+  }
+
+  function addPartida(){setForm(p=>({...p,partidas:[...p.partidas,{rubroId:"",monto:""}]}));}
+  function updPartida(i,f2,v){setForm(p=>{const pts=[...p.partidas];pts[i]={...pts[i],[f2]:v};return{...p,partidas:pts};});}
+  function remPartida(i){setForm(p=>({...p,partidas:p.partidas.filter((_,idx)=>idx!==i)}));}
+  const sumaPartidas=form.partidas.reduce((s,p)=>s+Number(p.monto||0),0);
+  const totalF=Number(form.subtotal||0)+Number(form.montoIva||0);
+  const difPartidas=Math.round((totalF-sumaPartidas)*100)/100;
+
   async function clasificar(){
-    if(!form.descripcion)return;setClas(true);setSug(null);
-    try{const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Clasifica en rubro de construccion. Solo JSON con campos rubroId y razon. Rubros disponibles: "+rubros.map(r=>r.id+"="+r.nombre).join(", "),messages:[{role:"user",content:form.descripcion}]})});const data=await res.json();setSug(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));}catch{}
+    if(!form.descripcion)return;setClas(true);
+    try{const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,system:"Clasifica descripcion en rubro de construccion. Solo JSON: {rubroId:string,razon:string}. Rubros: "+rubros.map(r=>r.id+"="+r.nombre).join(", "),messages:[{role:"user",content:form.descripcion}]})});
+    const data=await res.json();const sg=JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
+    if(sg.rubroId)setForm(p=>({...p,partidas:[{rubroId:sg.rubroId,monto:p.subtotal||""},...p.partidas.slice(1)]}));}catch{}
     setClas(false);
   }
+
   function agregar(){
-    if(!form.proveedor||!form.monto||!form.rubroId)return;
-    save([{...form,id:Date.now(),monto:Number(form.monto),creadaEn:new Date().toISOString()},...facturas]);
-    setForm({proveedor:"",numero:"",monto:"",fecha:new Date().toISOString().split("T")[0],rubroId:"",descripcion:""});setSug(null);
+    if(!form.proveedor||!form.subtotal)return;
+    const f2={...form,id:Date.now(),subtotal:Number(form.subtotal),montoIva:Number(form.montoIva||0),total:Number(form.total||form.subtotal),partidas:form.partidas.filter(p=>p.monto&&p.rubroId),creadaEn:new Date().toISOString()};
+    save([f2,...facturas]);setForm(emptyF);
   }
+
+  const totalEjec=facturas.reduce((s,f)=>s+Number(f.subtotal||f.monto||0),0);
+  const totalIvaFacturas=facturas.reduce((s,f)=>s+Number(f.montoIva||0),0);
+
   return(
     <div>
       {perms.registrarFacturas&&(
         <div style={{background:"#fff",border:"1.5px solid #E5E7EB",borderRadius:12,padding:14,marginBottom:14}}>
           <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>🧾 Registrar factura</div>
-          <div style={{display:"grid",gap:8}}>
+          <div style={{display:"grid",gap:10}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Proveedor *</label><input value={form.proveedor} onChange={e=>setForm(p=>({...p,proveedor:e.target.value}))} style={iS} placeholder="Proveedor"/></div>
-              <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Monto USD *</label><input type="number" value={form.monto} onChange={e=>setForm(p=>({...p,monto:e.target.value}))} style={iS} placeholder="0.00"/></div>
+              <div><label style={lS}>Proveedor *</label><input value={form.proveedor} onChange={e=>setForm(p=>({...p,proveedor:e.target.value}))} style={iS} placeholder="Nombre proveedor"/></div>
+              <div><label style={lS}>N° Factura</label><input value={form.numero} onChange={e=>setForm(p=>({...p,numero:e.target.value}))} style={iS} placeholder="001-001-000123"/></div>
             </div>
-            <div>
-              <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Descripcion</label>
-              <div style={{display:"flex",gap:8}}>
-                <input value={form.descripcion} onChange={e=>setForm(p=>({...p,descripcion:e.target.value}))} style={{...iS,flex:1}} placeholder="Que incluye?"/>
-                <button onClick={clasificar} disabled={clas} style={{background:"#1F2937",border:"none",borderRadius:6,padding:"8px 12px",color:"#E8622A",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><NovaIcon size={14}/>{clas?"...":"Clasificar"}</button>
-              </div>
-              {sug&&!sug.error&&(
-                <div style={{background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px",marginTop:6}}>
-                  <div style={{fontSize:11,color:"#059669",fontWeight:600}}>NOVA: {rubros.find(r=>r.id===sug.rubroId)?.nombre}</div>
-                  <div style={{fontSize:10,color:"#6B7280",marginTop:2}}>{sug.razon}</div>
-                  <button onClick={()=>setForm(p=>({...p,rubroId:sug.rubroId}))} style={{marginTop:6,background:"#059669",border:"none",borderRadius:6,padding:"4px 10px",color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer"}}>Usar</button>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div><label style={lS}>Fecha</label><input type="date" value={form.fecha} onChange={e=>setForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
+              <div>
+                <label style={lS}>Descripcion</label>
+                <div style={{display:"flex",gap:6}}>
+                  <input value={form.descripcion} onChange={e=>setForm(p=>({...p,descripcion:e.target.value}))} style={{...iS,flex:1}} placeholder="Que incluye?"/>
+                  <button onClick={clasificar} disabled={clas||!form.descripcion} style={{background:"#1F2937",border:"none",borderRadius:6,padding:"0 10px",color:"#E8622A",fontSize:10,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>{clas?"...":"NOVA"}</button>
                 </div>
-              )}
+              </div>
             </div>
-            <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Rubro *</label>
-              <select value={form.rubroId} onChange={e=>setForm(p=>({...p,rubroId:e.target.value}))} style={iS}><option value="">Seleccionar rubro...</option>{rubros.map(r=><option key={r.id} value={r.id}>{r.nombre}</option>)}</select>
+
+            {/* IVA Ecuador */}
+            <div style={{background:"#F9FAFB",borderRadius:8,padding:"10px 12px",border:"1px solid #E5E7EB"}}>
+              <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:8}}>Valores de la factura</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                <div><label style={lS}>Subtotal (sin IVA) *</label><input type="number" value={form.subtotal} onChange={e=>setSubtotal(e.target.value)} style={iS} placeholder="0.00"/></div>
+                <div>
+                  <label style={lS}>IVA Ecuador</label>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}}>
+                    {[0,5,15].map(p=><button key={p} type="button" onClick={()=>setPctIva(p)} style={{background:form.pctIva===p?"#E8622A":"#fff",border:"1px solid "+(form.pctIva===p?"#E8622A":"#E5E7EB"),borderRadius:5,padding:"3px 8px",color:form.pctIva===p?"#fff":"#6B7280",fontSize:11,cursor:"pointer",fontWeight:600}}>{p}%</button>)}
+                    <button type="button" onClick={()=>setPctIva("manual")} style={{background:form.pctIva==="manual"?"#7C3AED":"#fff",border:"1px solid "+(form.pctIva==="manual"?"#7C3AED":"#E5E7EB"),borderRadius:5,padding:"3px 8px",color:form.pctIva==="manual"?"#fff":"#6B7280",fontSize:11,cursor:"pointer"}}>Manual</button>
+                  </div>
+                  <input type="number" value={form.montoIva} onChange={e=>setIvaManual(e.target.value)} style={iS} placeholder="Monto IVA"/>
+                </div>
+                <div><label style={lS}>Total factura</label><input type="number" value={form.total} onChange={e=>setForm(p=>({...p,total:e.target.value}))} style={{...iS,fontWeight:700,color:"#E8622A"}} placeholder="0.00"/></div>
+              </div>
             </div>
-            <button onClick={agregar} disabled={!form.proveedor||!form.monto||!form.rubroId} style={{background:form.proveedor&&form.monto&&form.rubroId?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:form.proveedor&&form.monto&&form.rubroId?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:"pointer"}}>Registrar factura</button>
+
+            {/* Distribucion por rubros */}
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <label style={lS}>Distribuir en rubros (sin IVA)</label>
+                {Number(form.subtotal)>0&&<span style={{fontSize:11,color:Math.abs(difPartidas)<0.01?"#059669":difPartidas>0?"#D97706":"#DC2626",fontWeight:600}}>{Math.abs(difPartidas)<0.01?"Completo":difPartidas>0?"Falta: "+fmt(difPartidas):"Excede: "+fmt(Math.abs(difPartidas))}</span>}
+              </div>
+              {form.partidas.map((p2,i)=>(
+                <div key={i} style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
+                  <select value={p2.rubroId} onChange={e=>updPartida(i,"rubroId",e.target.value)} style={{...iS,flex:2}}><option value="">Rubro...</option>{rubros.map(r=><option key={r.id} value={r.id}>{r.nombre}</option>)}</select>
+                  <input type="number" value={p2.monto} onChange={e=>updPartida(i,"monto",e.target.value)} style={{...iS,flex:1}} placeholder="USD"/>
+                  {form.partidas.length>1&&<button onClick={()=>remPartida(i)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:16}}>x</button>}
+                </div>
+              ))}
+              <button onClick={addPartida} style={{background:"#F9FAFB",border:"1px dashed #E5E7EB",borderRadius:6,padding:"5px 12px",color:"#6B7280",fontSize:11,cursor:"pointer",width:"100%"}}>+ Agregar rubro</button>
+            </div>
+
+            <button onClick={agregar} disabled={!form.proveedor||!form.subtotal} style={{background:form.proveedor&&form.subtotal?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:form.proveedor&&form.subtotal?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:"pointer"}}>Registrar factura</button>
           </div>
         </div>
       )}
+      {facturas.length>0&&(
+        <div style={{background:"#F9FAFB",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <span style={{fontSize:12,color:"#6B7280"}}>Subtotal neto (vs presupuesto)</span>
+            <span style={{fontSize:13,fontWeight:700,color:"#E8622A"}}>{fmt(totalEjec)}</span>
+          </div>
+          {totalIvaFacturas>0&&<div style={{display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontSize:11,color:"#6B7280"}}>IVA acumulado</span>
+            <span style={{fontSize:12,fontWeight:600,color:"#2563EB"}}>{fmt(totalIvaFacturas)}</span>
+          </div>}
+          {totalIvaFacturas>0&&<div style={{display:"flex",justifyContent:"space-between",paddingTop:4,borderTop:"1px solid #E5E7EB",marginTop:4}}>
+            <span style={{fontSize:11,color:"#6B7280"}}>Total con IVA</span>
+            <span style={{fontSize:12,fontWeight:700,color:"#374151"}}>{fmt(totalEjec+totalIvaFacturas)}</span>
+          </div>}
+        </div>
+      )}
       {facturas.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"40px 0"}}><div style={{fontSize:32,marginBottom:8}}>🧾</div>Sin facturas</div>
-        :facturas.map(f=>{const rubro=rubros.find(r=>r.id===f.rubroId);return(
-          <div key={f.id} style={{background:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid #F0F1F3",display:"flex",justifyContent:"space-between",gap:10}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:600}}>{f.proveedor}</div>
-              <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{f.fecha}{f.descripcion?" - "+f.descripcion:""}</div>
-              {rubro&&<span style={{background:"#F0FDF4",color:"#059669",fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10,marginTop:4,display:"inline-block"}}>{rubro.nombre}</span>}
+        :facturas.map(f=>{
+          const partsConRubro=f.partidas?.filter(p=>p.monto&&p.rubroId)||[];
+          return(
+          <div key={f.id} style={{background:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid #F0F1F3"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:4}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:600}}>{f.proveedor}{f.numero?" #"+f.numero:""}</div>
+                <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{f.fecha}{f.descripcion?" — "+f.descripcion:""}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:14,fontWeight:700}}>{fmt(f.total||f.subtotal||f.monto||0)}</div>
+                {Number(f.montoIva)>0&&<div style={{fontSize:10,color:"#6B7280"}}>IVA: {fmt(f.montoIva)}</div>}
+                {perms.editarPresupuesto&&<button onClick={()=>save(facturas.filter(x=>x.id!==f.id))} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11}}>🗑</button>}
+              </div>
             </div>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:15,fontWeight:700}}>{fmt(f.monto)}</div>
-              {perms.editarEliminarTareas&&<button onClick={()=>save(facturas.filter(x=>x.id!==f.id))} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,marginTop:4}}>🗑</button>}
-            </div>
+            {partsConRubro.length>0&&(
+              <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+                {partsConRubro.map((p2,i)=>{const r=rubros.find(r=>r.id===p2.rubroId);return r?<span key={i} style={{background:"#F0FDF4",color:"#059669",fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10}}>{r.nombre}: {fmt(p2.monto)}</span>:null;})}
+              </div>
+            )}
           </div>
         );})}
     </div>
@@ -757,8 +890,8 @@ function ModuloCotizaciones({proyectoId}){
 }
 
 
-// CAJA CHICA — con entregas, multi-rubro, foto de factura
-function ModuloCajaChica({proyectoId,currentUser,perms}){
+// CAJA CHICA — Rediseño completo
+function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
   const rubros=loadLS("fin_rubros_"+proyectoId,RUBROS_DEFAULT);
   const [gastos,setGastos]=useState(()=>loadLS("fin_caja_gastos_"+proyectoId,[]));
   const [entregas,setEntregas]=useState(()=>loadLS("fin_caja_entregas_"+proyectoId,[]));
@@ -768,36 +901,48 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
   const [rep,setRep]=useState(null);
   const fotoRef=useRef(null);
   const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
+  const lS={fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3};
 
-  // Form gasto con multi-rubro
-  const emptyGasto={descripcion:"",montoTotal:"",responsable:"",fecha:new Date().toISOString().split("T")[0],tieneFactura:false,fotoUrl:"",partidas:[{rubroId:"",monto:""}]};
+  // Solo members del proyecto ven su propia caja
+  // Owner/assistant ven todas
+  const miembrosProyecto=users.filter(u=>u.role==="member"&&(proyectos.find(p=>p.id===proyectoId)?.usuarios||[]).includes(u.id));
+
+  const emptyGasto={descripcion:"",montoTotal:"",responsable:currentUser.role==="member"?currentUser.name:"",fecha:new Date().toISOString().split("T")[0],tieneFactura:false,fotoUrl:"",partidas:[{rubroId:"",monto:""}]};
   const [gForm,setGForm]=useState(emptyGasto);
-  // Form entrega
   const [eForm,setEForm]=useState({responsable:"",monto:"",fecha:new Date().toISOString().split("T")[0],nota:""});
 
   function saveG(g){setGastos(g);saveLS("fin_caja_gastos_"+proyectoId,g);}
   function saveE(e){setEntregas(e);saveLS("fin_caja_entregas_"+proyectoId,e);}
 
-  // Totales por responsable
-  function resumenPorResponsable(){
-    const personas={};
-    entregas.forEach(e=>{if(!personas[e.responsable])personas[e.responsable]={recibido:0,gastado:0};personas[e.responsable].recibido+=Number(e.monto||0);});
-    gastos.forEach(g=>{if(!personas[g.responsable])personas[g.responsable]={recibido:0,gastado:0};personas[g.responsable].gastado+=Number(g.montoTotal||0);});
-    return personas;
+  // Solo ver gastos propios si es member
+  const gastosVisibles=perms.verTodasCajas?gastos:gastos.filter(g=>g.responsable===currentUser.name);
+  const entregasPropias=perms.verTodasCajas?entregas:entregas.filter(e=>e.responsable===currentUser.name);
+
+  // Calculos por responsable
+  function resumenPorPersona(){
+    const p={};
+    entregas.forEach(e=>{if(!p[e.responsable])p[e.responsable]={recibido:0,gastado:0};p[e.responsable].recibido+=Number(e.monto||0);});
+    gastos.forEach(g=>{if(!p[g.responsable])p[g.responsable]={recibido:0,gastado:0};p[g.responsable].gastado+=Number(g.montoTotal||0);});
+    return p;
   }
 
-  const totalEntregado=entregas.reduce((s,e)=>s+Number(e.monto||0),0);
-  const totalGastado=gastos.reduce((s,g)=>s+Number(g.montoTotal||0),0);
-  const saldoGlobal=totalEntregado-totalGastado;
+  const totalEntregado=perms.verTodasCajas?entregas.reduce((s,e)=>s+Number(e.monto||0),0):entregasPropias.reduce((s,e)=>s+Number(e.monto||0),0);
+  const totalGastado=perms.verTodasCajas?gastos.reduce((s,g)=>s+Number(g.montoTotal||0),0):gastosVisibles.reduce((s,g)=>s+Number(g.montoTotal||0),0);
+  const saldo=totalEntregado-totalGastado;
 
-  // Sumar partidas del form
+  // Saldo propio para member
+  const entregasMias=entregas.filter(e=>e.responsable===currentUser.name).reduce((s,e)=>s+Number(e.monto||0),0);
+  const gastosMios=gastos.filter(g=>g.responsable===currentUser.name).reduce((s,g)=>s+Number(g.montoTotal||0),0);
+  const saldoMio=entregasMias-gastosMios;
+  const alertaBaja=saldoMio<50&&saldoMio>=0&&entregasMias>0;
+
   const sumaPartidas=gForm.partidas.reduce((s,p)=>s+Number(p.monto||0),0);
-  const montoTotal=Number(gForm.montoTotal||0);
-  const diferencia=montoTotal-sumaPartidas;
+  const montoT=Number(gForm.montoTotal||0);
+  const difP=montoT-sumaPartidas;
 
-  function addPartida(){setGForm(p=>({...p,partidas:[...p.partidas,{rubroId:"",monto:""}]}));}
-  function updatePartida(i,field,val){setGForm(p=>{const pts=[...p.partidas];pts[i]={...pts[i],[field]:val};return{...p,partidas:pts};});}
-  function removePartida(i){setGForm(p=>({...p,partidas:p.partidas.filter((_,idx)=>idx!==i)}));}
+  function addP(){setGForm(p=>({...p,partidas:[...p.partidas,{rubroId:"",monto:""}]}));}
+  function updP(i,f,v){setGForm(p=>{const pts=[...p.partidas];pts[i]={...pts[i],[f]:v};return{...p,partidas:pts};});}
+  function remP(i){setGForm(p=>({...p,partidas:p.partidas.filter((_,idx)=>idx!==i)}));}
 
   async function subirFoto(e){
     const file=e.target.files[0];if(!file)return;
@@ -810,9 +955,9 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
 
   function agregarGasto(){
     if(!gForm.descripcion||!gForm.montoTotal)return;
-    const resp=perms.verReporteCaja?(gForm.responsable||currentUser.name):currentUser.name;
+    const resp=currentUser.role==="member"?currentUser.name:(gForm.responsable||currentUser.name);
     saveG([{...gForm,responsable:resp,id:Date.now(),montoTotal:Number(gForm.montoTotal),partidas:gForm.partidas.filter(p=>p.monto),creadoEn:new Date().toISOString()},...gastos]);
-    setGForm(emptyGasto);
+    setGForm({...emptyGasto,responsable:currentUser.role==="member"?currentUser.name:""});
   }
 
   function agregarEntrega(){
@@ -823,61 +968,115 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
 
   async function generarReporte(){
     setGen(true);setModal(true);
-    const resumen=resumenPorResponsable();
-    const sysPrompt="Reporte caja chica construccion. Solo JSON sin markdown: {resumen:str,por_persona:[{nombre:str,recibio:num,gasto:num,devuelve:num}],sin_factura:num,observaciones:[str],estado:ok|revisar|urgente}";
+    const resumen=resumenPorPersona();
     try{
-      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:sysPrompt,messages:[{role:"user",content:"Total entregado: "+totalEntregado+". Total gastado: "+totalGastado+". Saldo: "+saldoGlobal+". Por persona: "+JSON.stringify(resumen)+". Gastos sin factura: "+gastos.filter(g=>!g.tieneFactura).length+"."}]})});
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:"Reporte caja chica obra. Solo JSON: {resumen:str,por_persona:[{nombre:str,recibio:num,gasto:num,devuelve:num}],sin_factura:num,observaciones:[str],estado:"ok"|"revisar"|"urgente"}",messages:[{role:"user",content:"Entregado: "+totalEntregado+" | Gastado: "+totalGastado+" | Saldo: "+saldo+" | Por persona: "+JSON.stringify(resumen)+" | Sin factura: "+gastos.filter(g=>!g.tieneFactura).length}]})});
       const data=await res.json();
       setRep(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
     }catch{setRep({error:"Error."});}
     setGen(false);
   }
 
-  const gastosVisibles=perms.verReporteCaja?gastos:gastos.filter(g=>g.responsable===currentUser.name);
+  const [enviando,setEnviando]=useState(false);
+  const [enviado,setEnviado]=useState(false);
+  const [errEnvio,setErrEnvio]=useState("");
+
+  async function enviarReporte(){
+    const asistente=users.find(u=>u.role==="assistant");
+    const emailAsistente=asistente?.email||"";
+    if(!emailAsistente){setErrEnvio("El Asistente no tiene email configurado. Agrega el email en Ajustes -> Usuarios.");return;}
+    const emailMio=users.find(u=>u.id===currentUser.id)?.email||"";
+    const resumen=resumenPorPersona();
+    const miData=resumen[currentUser.name]||{recibido:0,gastado:0};
+    const proy=proyectos.find(p=>p.id===proyectoId);
+    setEnviando(true);setErrEnvio("");
+    try{
+      const resp=await fetch("/api/email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        tipo:"reporte_caja_chica",
+        datos:{nombre:currentUser.name,proyecto:proy?.name||"Proyecto",gastos:gastosVisibles,recibido:miData.recibido,gastado:miData.gastado,saldo:miData.recibido-miData.gastado,emailAsistente,emailResponsable:emailMio}
+      })});
+      const data=await resp.json();
+      if(data.ok){setEnviado(true);setTimeout(()=>setEnviado(false),5000);}
+      else setErrEnvio("Error: "+(data.error||"desconocido"));
+    }catch(e){setErrEnvio("Error de red: "+e.message);}
+    setEnviando(false);
+  }
+
+  async function alertarSaldoBajo(){
+    // Alerta va al RESIDENTE mismo, no al asistente
+    const emailMio=users.find(u=>u.id===currentUser.id)?.email||"";
+    if(!emailMio)return; // si no tiene email, silencioso
+    const resumen=resumenPorPersona();
+    const miData=resumen[currentUser.name]||{recibido:0,gastado:0};
+    const miSaldo=miData.recibido-miData.gastado;
+    if(miSaldo>=50||miData.recibido===0)return; // solo si saldo bajo y ya recibio
+    try{
+      await fetch("/api/email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        tipo:"alerta_saldo_bajo",
+        datos:{nombre:currentUser.name,saldo:miSaldo,recibido:miData.recibido,gastado:miData.gastado,emailResponsable:emailMio}
+      })});
+    }catch{}
+  }
+
+  async function agregarGastoConAlerta(){
+    agregarGasto();
+    setTimeout(()=>alertarSaldoBajo(),600);
+  }
+
   const tabS=a=>({padding:"6px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:a?"#E8622A":"transparent",color:a?"#fff":"#6B7280"});
 
   return(
     <div>
-      {perms.verReporteCaja&&(
+      {/* Panel resumen */}
+      {perms.verTodasCajas&&(
         <div style={{background:"#fff",borderRadius:12,padding:"12px 14px",marginBottom:12,border:"1px solid #F0F1F3"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontSize:13,fontWeight:600}}>Caja Chica</div>
-            <button onClick={generarReporte} style={{background:"#1F2937",border:"none",borderRadius:6,padding:"6px 12px",color:"#E8622A",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><NovaIcon size={14}/>Reporte</button>
+            <div style={{fontSize:13,fontWeight:600}}>Caja Chica — Resumen</div>
+            <button onClick={generarReporte} style={{background:"#1F2937",border:"none",borderRadius:6,padding:"6px 12px",color:"#E8622A",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><NovaIcon size={14}/>Reporte NOVA</button>
           </div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {[{l:"Total entregado",v:fmt(totalEntregado),c:"#374151"},{l:"Total gastado",v:fmt(totalGastado),c:"#D97706"},{l:"Saldo global",v:fmt(saldoGlobal),c:saldoGlobal<0?"#DC2626":"#059669"}].map(s=>(
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:10}}>
+            {[{l:"Entregado",v:fmt(totalEntregado),c:"#374151"},{l:"Gastado",v:fmt(totalGastado),c:"#D97706"},{l:"Saldo",v:fmt(saldo),c:saldo<0?"#DC2626":"#059669"}].map(s=>(
               <div key={s.l} style={{background:"#F9FAFB",borderRadius:8,padding:"8px 14px",textAlign:"center",flex:1,minWidth:80}}>
                 <div style={{fontSize:15,fontWeight:700,color:s.c}}>{s.v}</div>
                 <div style={{fontSize:10,color:"#9CA3AF",fontWeight:600}}>{s.l}</div>
               </div>
             ))}
           </div>
-          {Object.keys(resumenPorResponsable()).length>0&&(
-            <div style={{marginTop:10}}>
-              {Object.entries(resumenPorResponsable()).map(([nombre,d])=>(
-                <div key={nombre} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderTop:"1px solid #F3F4F6"}}>
-                  <span style={{fontSize:12,color:"#374151",fontWeight:500}}>{nombre}</span>
-                  <div style={{display:"flex",gap:12}}>
-                    <span style={{fontSize:11,color:"#6B7280"}}>Recibio: <strong>{fmt(d.recibido)}</strong></span>
-                    <span style={{fontSize:11,color:"#6B7280"}}>Gasto: <strong style={{color:"#D97706"}}>{fmt(d.gastado)}</strong></span>
-                    <span style={{fontSize:11,fontWeight:700,color:d.recibido-d.gastado<0?"#DC2626":"#059669"}}>Dev: {fmt(d.recibido-d.gastado)}</span>
-                  </div>
-                </div>
-              ))}
+          {Object.entries(resumenPorPersona()).map(([nombre,d])=>(
+            <div key={nombre} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderTop:"1px solid #F3F4F6"}}>
+              <span style={{fontSize:12,color:"#374151",fontWeight:500}}>{nombre}</span>
+              <div style={{display:"flex",gap:10}}>
+                <span style={{fontSize:11,color:"#6B7280"}}>Recibio: <strong>{fmt(d.recibido)}</strong></span>
+                <span style={{fontSize:11,color:"#6B7280"}}>Gasto: <strong style={{color:"#D97706"}}>{fmt(d.gastado)}</strong></span>
+                <span style={{fontSize:11,fontWeight:700,color:(d.recibido-d.gastado)<0?"#DC2626":"#059669"}}>{(d.recibido-d.gastado)>=0?"Dev: "+fmt(d.recibido-d.gastado):"Debe: "+fmt(Math.abs(d.recibido-d.gastado))}</span>
+              </div>
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* Saldo propio para member */}
+      {currentUser.role==="member"&&(
+        <div style={{background:alertaBaja?"#FEF3C7":saldoMio<0?"#FEF2F2":"#F0FDF4",borderRadius:10,padding:"10px 14px",marginBottom:12,border:"1px solid "+(alertaBaja?"#FDE68A":saldoMio<0?"#FECACA":"#BBF7D0")}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:alertaBaja?"#D97706":saldoMio<0?"#DC2626":"#059669"}}>{alertaBaja?"⚠️ Saldo bajo":saldoMio<0?"❌ Saldo negativo":"✓ Mi saldo"}</div>
+              <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>Recibido: {fmt(entregasMias)} | Gastado: {fmt(gastosMios)}</div>
+            </div>
+            <div style={{fontSize:20,fontWeight:700,color:alertaBaja?"#D97706":saldoMio<0?"#DC2626":"#059669"}}>{fmt(saldoMio)}</div>
+          </div>
+          {(alertaBaja||saldoMio<0)&&(
+            <button onClick={enviarReporte} disabled={enviando} style={{marginTop:8,width:"100%",background:enviado?"#059669":enviando?"#6B7280":"#E8622A",border:"none",borderRadius:6,padding:"7px",color:"#fff",fontSize:12,fontWeight:600,cursor:enviando?"default":"pointer"}}>
+              {enviado?"✓ Solicitud enviada":enviando?"Enviando...":"📧 Solicitar recarga a Asistente"}
+            </button>
           )}
         </div>
       )}
 
-      {!perms.verReporteCaja&&(
-        <div style={{background:"#EFF6FF",borderRadius:8,padding:"10px 14px",marginBottom:12,border:"1px solid #BFDBFE"}}>
-          <div style={{fontSize:12,color:"#2563EB",fontWeight:600}}>Registra tus gastos del dia. El Asistente y Director revisan el saldo y hacen el cierre.</div>
-        </div>
-      )}
-
+      {/* Tabs */}
       <div style={{display:"flex",gap:4,marginBottom:14,background:"#F3F4F6",borderRadius:8,padding:4}}>
         <button onClick={()=>setTabCC("gastos")} style={tabS(tabCC==="gastos")}>💳 Gastos</button>
-        {perms.gestionarEntregas&&<button onClick={()=>setTabCC("entregas")} style={tabS(tabCC==="entregas")}>💵 Entregas</button>}
+        {perms.abonarCaja&&<button onClick={()=>setTabCC("entregas")} style={tabS(tabCC==="entregas")}>💵 Abonos</button>}
       </div>
 
       {tabCC==="gastos"&&(
@@ -886,29 +1085,34 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
             <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>+ Registrar gasto</div>
             <div style={{display:"grid",gap:8}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Descripcion *</label><input value={gForm.descripcion} onChange={e=>setGForm(p=>({...p,descripcion:e.target.value}))} style={iS} placeholder="En que se gasto?"/></div>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Monto total *</label><input type="number" value={gForm.montoTotal} onChange={e=>setGForm(p=>({...p,montoTotal:e.target.value}))} style={iS} placeholder="0.00"/></div>
+                <div><label style={lS}>Descripcion *</label><input value={gForm.descripcion} onChange={e=>setGForm(p=>({...p,descripcion:e.target.value}))} style={iS} placeholder="En que se gasto?"/></div>
+                <div><label style={lS}>Monto total *</label><input type="number" value={gForm.montoTotal} onChange={e=>setGForm(p=>({...p,montoTotal:e.target.value}))} style={iS} placeholder="0.00"/></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Responsable</label>
-                  {perms.verReporteCaja?<input value={gForm.responsable} onChange={e=>setGForm(p=>({...p,responsable:e.target.value}))} style={iS} placeholder="Nombre"/>:<input value={currentUser.name} disabled style={{...iS,background:"#F3F4F6",color:"#9CA3AF"}}/>}
-                </div>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Fecha</label><input type="date" value={gForm.fecha} onChange={e=>setGForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
+                {perms.verTodasCajas&&(
+                  <div><label style={lS}>Responsable</label>
+                    <select value={gForm.responsable} onChange={e=>setGForm(p=>({...p,responsable:e.target.value}))} style={iS}>
+                      <option value="">Seleccionar...</option>
+                      {users.filter(u=>u.role==="member").map(u=><option key={u.id} value={u.name}>{u.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div><label style={lS}>Fecha</label><input type="date" value={gForm.fecha} onChange={e=>setGForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
               </div>
 
               <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <label style={{fontSize:11,color:"#6B7280",fontWeight:500}}>Distribuir por rubros</label>
-                  {montoTotal>0&&<span style={{fontSize:11,color:Math.abs(diferencia)<0.01?"#059669":diferencia>0?"#D97706":"#DC2626",fontWeight:600}}>{Math.abs(diferencia)<0.01?"Completo":diferencia>0?"Falta: "+fmt(diferencia):"Excede: "+fmt(Math.abs(diferencia))}</span>}
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <label style={lS}>Asignar a rubros del presupuesto</label>
+                  {montoT>0&&<span style={{fontSize:11,color:Math.abs(difP)<0.01?"#059669":difP>0?"#D97706":"#DC2626",fontWeight:600}}>{Math.abs(difP)<0.01?"Completo":difP>0?"Falta: "+fmt(difP):"Excede: "+fmt(Math.abs(difP))}</span>}
                 </div>
                 {gForm.partidas.map((p2,i)=>(
                   <div key={i} style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
-                    <select value={p2.rubroId} onChange={e=>updatePartida(i,"rubroId",e.target.value)} style={{...iS,flex:2}}><option value="">Rubro...</option>{rubros.map(r=><option key={r.id} value={r.id}>{r.nombre}</option>)}</select>
-                    <input type="number" value={p2.monto} onChange={e=>updatePartida(i,"monto",e.target.value)} style={{...iS,flex:1}} placeholder="USD"/>
-                    {gForm.partidas.length>1&&<button onClick={()=>removePartida(i)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:16,flexShrink:0}}>x</button>}
+                    <select value={p2.rubroId} onChange={e=>updP(i,"rubroId",e.target.value)} style={{...iS,flex:2}}><option value="">Rubro (opcional)...</option>{rubros.map(r=><option key={r.id} value={r.id}>{r.nombre}</option>)}</select>
+                    <input type="number" value={p2.monto} onChange={e=>updP(i,"monto",e.target.value)} style={{...iS,flex:1}} placeholder="USD"/>
+                    {gForm.partidas.length>1&&<button onClick={()=>remP(i)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:16,flexShrink:0}}>x</button>}
                   </div>
                 ))}
-                <button onClick={addPartida} style={{background:"#F9FAFB",border:"1px dashed #E5E7EB",borderRadius:6,padding:"5px 12px",color:"#6B7280",fontSize:11,cursor:"pointer",width:"100%"}}>+ Agregar rubro</button>
+                <button onClick={addP} style={{background:"#F9FAFB",border:"1px dashed #E5E7EB",borderRadius:6,padding:"5px 12px",color:"#6B7280",fontSize:11,cursor:"pointer",width:"100%"}}>+ Otro rubro</button>
               </div>
 
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
@@ -917,30 +1121,39 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
                   Tiene factura/recibo
                 </label>
                 <input ref={fotoRef} type="file" accept="image/*" onChange={subirFoto} style={{display:"none"}}/>
-                <button onClick={()=>fotoRef.current?.click()} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>📷 Foto factura</button>
-                {gForm.fotoUrl&&<span style={{fontSize:11,color:"#059669"}}>✓ Foto adjunta</span>}
+                <button onClick={()=>fotoRef.current?.click()} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"5px 10px",color:"#6B7280",fontSize:11,cursor:"pointer"}}>📷 Foto</button>
+                {gForm.fotoUrl&&<span style={{fontSize:11,color:"#059669"}}>✓ Adjunta</span>}
               </div>
 
-              <button onClick={agregarGasto} disabled={!gForm.descripcion||!gForm.montoTotal} style={{background:gForm.descripcion&&gForm.montoTotal?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:gForm.descripcion&&gForm.montoTotal?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:"pointer"}}>Registrar gasto</button>
+              <button onClick={agregarGastoConAlerta} disabled={!gForm.descripcion||!gForm.montoTotal} style={{background:gForm.descripcion&&gForm.montoTotal?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:gForm.descripcion&&gForm.montoTotal?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:"pointer"}}>Registrar gasto</button>
             </div>
           </div>
 
-          {gastosVisibles.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"30px 0"}}><div style={{fontSize:32,marginBottom:8}}>💳</div>Sin gastos registrados</div>
+          {currentUser.role==="member"&&gastosVisibles.length>0&&(
+            <div style={{marginBottom:10}}>
+            <button onClick={enviarReporte} disabled={enviando} style={{width:"100%",background:enviado?"#059669":enviando?"#374151":"#1F2937",border:"none",borderRadius:8,padding:9,color:enviado?"#fff":"#E8622A",fontSize:12,fontWeight:600,cursor:enviando?"default":"pointer"}}>
+              {enviado?"✓ Reporte enviado correctamente":enviando?"⏳ Enviando...":"📧 Enviar reporte al Asistente"}
+            </button>
+            {errEnvio&&<div style={{fontSize:11,color:"#DC2626",marginTop:4}}>{errEnvio}</div>}
+          </div>
+          )}
+
+          {gastosVisibles.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"30px 0"}}><div style={{fontSize:32,marginBottom:8}}>💳</div>Sin gastos</div>
             :gastosVisibles.map(g=>(
               <div key={g.id} style={{background:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid #F0F1F3"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:10}}>
                   <div style={{flex:1}}>
                     <div style={{fontSize:13,fontWeight:600}}>{g.descripcion}</div>
-                    <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{g.fecha}{g.responsable?" - "+g.responsable:""}</div>
+                    <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{g.fecha}{g.responsable&&perms.verTodasCajas?" — "+g.responsable:""}</div>
                     <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
                       <span style={{background:g.tieneFactura?"#F0FDF4":"#FEF3C7",color:g.tieneFactura?"#059669":"#D97706",fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10}}>{g.tieneFactura?"Con factura":"Sin factura"}</span>
-                      {g.fotoUrl&&<a href={g.fotoUrl} target="_blank" rel="noreferrer" style={{background:"#EFF6FF",color:"#2563EB",fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10,textDecoration:"none"}}>📷 Ver foto</a>}
+                      {g.fotoUrl&&<a href={g.fotoUrl} target="_blank" rel="noreferrer" style={{background:"#EFF6FF",color:"#2563EB",fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:10,textDecoration:"none"}}>📷 Ver</a>}
                     </div>
-                    {g.partidas?.filter(p=>p.monto).map((p2,i)=>{const r=rubros.find(r=>r.id===p2.rubroId);return r?<div key={i} style={{fontSize:10,color:"#9CA3AF",marginTop:2}}>{r.nombre}: {fmt(p2.monto)}</div>:null;})}
+                    {g.partidas?.filter(p=>p.monto&&p.rubroId).map((p2,i)=>{const r=rubros.find(r=>r.id===p2.rubroId);return r?<div key={i} style={{fontSize:10,color:"#9CA3AF",marginTop:2}}>{r.nombre}: {fmt(p2.monto)}</div>:null;})}
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:14,fontWeight:700,color:"#DC2626"}}>-{fmt(g.montoTotal)}</div>
-                    {perms.verReporteCaja&&<button onClick={()=>saveG(gastos.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,marginTop:4}}>🗑</button>}
+                    {perms.verTodasCajas&&<button onClick={()=>saveG(gastos.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,marginTop:4}}>🗑</button>}
                   </div>
                 </div>
               </div>
@@ -948,31 +1161,31 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
         </>
       )}
 
-      {tabCC==="entregas"&&perms.gestionarEntregas&&(
+      {tabCC==="entregas"&&perms.abonarCaja&&(
         <>
           <div style={{background:"#fff",border:"1.5px solid #E5E7EB",borderRadius:12,padding:14,marginBottom:14}}>
-            <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>💵 Registrar entrega de efectivo</div>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>💵 Abonar caja chica</div>
             <div style={{display:"grid",gap:8}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Responsable *</label>
-                  <select value={eForm.responsable} onChange={e=>setEForm(p=>({...p,responsable:e.target.value}))} style={iS}><option value="">Seleccionar...</option><option>Hector</option><option>Josh</option><option>Guillermo</option><option>Camila</option><option>Santiago</option><option>Gerardo</option><option>Luis Guala</option></select>
+                <div><label style={lS}>Responsable *</label>
+                  <select value={eForm.responsable} onChange={e=>setEForm(p=>({...p,responsable:e.target.value}))} style={iS}>
+                    <option value="">Seleccionar...</option>
+                    {users.filter(u=>u.role==="member").map(u=><option key={u.id} value={u.name}>{u.name}</option>)}
+                  </select>
                 </div>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Monto USD *</label><input type="number" value={eForm.monto} onChange={e=>setEForm(p=>({...p,monto:e.target.value}))} style={iS} placeholder="0.00"/></div>
+                <div><label style={lS}>Monto USD *</label><input type="number" value={eForm.monto} onChange={e=>setEForm(p=>({...p,monto:e.target.value}))} style={iS} placeholder="0.00"/></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Fecha</label><input type="date" value={eForm.fecha} onChange={e=>setEForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
-                <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:3}}>Nota</label><input value={eForm.nota} onChange={e=>setEForm(p=>({...p,nota:e.target.value}))} style={iS} placeholder="Opcional"/></div>
+                <div><label style={lS}>Fecha</label><input type="date" value={eForm.fecha} onChange={e=>setEForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
+                <div><label style={lS}>Nota</label><input value={eForm.nota} onChange={e=>setEForm(p=>({...p,nota:e.target.value}))} style={iS} placeholder="Opcional"/></div>
               </div>
-              <button onClick={agregarEntrega} disabled={!eForm.responsable||!eForm.monto} style={{background:eForm.responsable&&eForm.monto?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:eForm.responsable&&eForm.monto?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:"pointer"}}>Registrar entrega</button>
+              <button onClick={agregarEntrega} disabled={!eForm.responsable||!eForm.monto} style={{background:eForm.responsable&&eForm.monto?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:eForm.responsable&&eForm.monto?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:"pointer"}}>Registrar abono</button>
             </div>
           </div>
-          {entregas.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"30px 0"}}><div style={{fontSize:32,marginBottom:8}}>💵</div>Sin entregas registradas</div>
+          {entregas.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"30px 0"}}><div style={{fontSize:32,marginBottom:8}}>💵</div>Sin abonos</div>
             :entregas.map(e2=>(
               <div key={e2.id} style={{background:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid #F0F1F3",display:"flex",justifyContent:"space-between",gap:10}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600}}>{e2.responsable}</div>
-                  <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{e2.fecha}{e2.nota?" - "+e2.nota:""}</div>
-                </div>
+                <div><div style={{fontSize:13,fontWeight:600}}>{e2.responsable}</div><div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{e2.fecha}{e2.nota?" — "+e2.nota:""}</div></div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:14,fontWeight:700,color:"#059669"}}>+{fmt(e2.monto)}</div>
                   <button onClick={()=>saveE(entregas.filter(x=>x.id!==e2.id))} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,marginTop:4}}>🗑</button>
@@ -985,18 +1198,18 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
       {modal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>setModal(false)}>
           <div style={{background:"#fff",borderRadius:16,padding:22,maxWidth:480,width:"100%",maxHeight:"85vh",overflowY:"auto",fontFamily:"'Inter',sans-serif"}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><NovaIcon size={24}/><div style={{fontSize:14,fontWeight:700}}>Reporte de Caja Chica</div><button onClick={()=>setModal(false)} style={{marginLeft:"auto",background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:20}}>x</button></div>
-            {gen?<div style={{color:"#9CA3AF",fontSize:13,padding:"20px 0",textAlign:"center"}}>Generando reporte...</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><NovaIcon size={24}/><div style={{fontSize:14,fontWeight:700}}>Reporte Caja Chica</div><button onClick={()=>setModal(false)} style={{marginLeft:"auto",background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:20}}>x</button></div>
+            {gen?<div style={{color:"#9CA3AF",fontSize:13,padding:"20px 0",textAlign:"center"}}>Generando...</div>
               :rep&&!rep.error&&(
                 <div>
                   <div style={{background:rep.estado==="ok"?"#F0FDF4":rep.estado==="revisar"?"#FEF3C7":"#FEF2F2",borderRadius:8,padding:"10px 14px",marginBottom:14,border:"1px solid "+(rep.estado==="ok"?"#BBF7D0":rep.estado==="revisar"?"#FDE68A":"#FECACA")}}>
-                    <div style={{fontSize:12,fontWeight:700,color:rep.estado==="ok"?"#059669":rep.estado==="revisar"?"#D97706":"#DC2626",marginBottom:4}}>{rep.estado==="ok"?"OK":rep.estado==="revisar"?"Requiere revision":"Urgente"}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:rep.estado==="ok"?"#059669":rep.estado==="revisar"?"#D97706":"#DC2626",marginBottom:4}}>{rep.estado==="ok"?"OK - Caja en orden":rep.estado==="revisar"?"Revisar caja":"URGENTE"}</div>
                     <div style={{fontSize:12,color:"#374151"}}>{rep.resumen}</div>
                   </div>
                   {rep.por_persona?.map((p3,i)=>(
                     <div key={i} style={{background:"#F9FAFB",borderRadius:8,padding:"8px 12px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div style={{fontSize:13,fontWeight:600}}>{p3.nombre}</div>
-                      <div style={{display:"flex",gap:12}}>
+                      <div style={{display:"flex",gap:10}}>
                         <span style={{fontSize:11,color:"#6B7280"}}>Recibio: <strong>{fmt(p3.recibio)}</strong></span>
                         <span style={{fontSize:11,color:"#6B7280"}}>Gasto: <strong style={{color:"#D97706"}}>{fmt(p3.gasto)}</strong></span>
                         <span style={{fontSize:11,fontWeight:700,color:p3.devuelve>0?"#059669":"#DC2626"}}>Dev: {fmt(Math.abs(p3.devuelve))}</span>
@@ -1004,7 +1217,7 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
                     </div>
                   ))}
                   {rep.observaciones?.length>0&&<div style={{marginTop:10}}>{rep.observaciones.map((o,i)=><div key={i} style={{fontSize:12,color:"#6B7280",marginBottom:4,paddingLeft:12,borderLeft:"2px solid #E5E7EB"}}>{o}</div>)}</div>}
-                  <button onClick={()=>window.print()} style={{width:"100%",marginTop:14,background:"#1F2937",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>Imprimir / Enviar</button>
+                  <button onClick={()=>window.print()} style={{width:"100%",marginTop:14,background:"#1F2937",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>Imprimir / Exportar</button>
                 </div>
               )}
           </div>
@@ -1015,7 +1228,7 @@ function ModuloCajaChica({proyectoId,currentUser,perms}){
 }
 
 // MODULO PROYECTO (router de tabs)
-function ModuloProyecto({proyectoId,proyectos,currentUser}){
+function ModuloProyecto({proyectoId,proyectos,currentUser,users}){
   const perms=can(currentUser.role);
   const [tab,setTab]=useState(perms.verPresupuesto?"presupuesto":"cajachica");
   const proy=proyectos.find(p=>p.id===proyectoId);
@@ -1039,7 +1252,7 @@ function ModuloProyecto({proyectoId,proyectos,currentUser}){
       {tab==="presupuesto"&&<ModuloPresupuesto proyectoId={proyectoId} proyectos={proyectos} perms={perms}/>}
       {tab==="facturas"&&<ModuloFacturas proyectoId={proyectoId} perms={perms}/>}
       {tab==="cotizaciones"&&<ModuloCotizaciones proyectoId={proyectoId}/>}
-      {tab==="cajachica"&&<ModuloCajaChica proyectoId={proyectoId} currentUser={currentUser} perms={perms}/>}
+      {tab==="cajachica"&&<ModuloCajaChica proyectoId={proyectoId} proyectos={proyectos} currentUser={currentUser} perms={perms} users={users}/>}
     </div>
   );
 }
@@ -1514,7 +1727,7 @@ export default function App(){
           ):<AccesoDenegado/>)}
 
           {vista==="finanzas-proyecto"&&proyFin&&(
-            <ModuloProyecto proyectoId={proyFin} proyectos={projects} currentUser={usuario}/>
+            <ModuloProyecto proyectoId={proyFin} proyectos={projects} currentUser={usuario} users={users}/>
           )}
 
         </div>
