@@ -21,22 +21,16 @@ async function claude(body) {
   return r.json();
 }
 
-function repairJSON(t) {
-  t = t.replace(/```json|```/g, "").trim();
-  if (t.endsWith("}")) return t;
-  // Remove last incomplete object (cut mid-way)
-  const lastGood = t.lastIndexOf("},");
-  const lastClose = t.lastIndexOf("}");
-  const cutAt = Math.max(lastGood, lastClose);
-  if (cutAt > 0) t = t.slice(0, cutAt + 1);
-  // Close open structures
-  if (!t.includes('"tg"') && !t.includes('"total_general"')) {
-    if (t.includes('"s":[') || t.includes('"secciones":[')) t += '],"tg":0,"th":0,"ti":0}';
-    else t += '}';
-  } else {
-    t += '}';
+function parseJSONSafe(text) {
+  text = text.replace(/```json|```/g, "").trim();
+  try { return JSON.parse(text); } catch {}
+  // Intento 1: cortar en ultimo } completo
+  const cut = text.lastIndexOf("}");
+  if (cut > 0) {
+    try { return JSON.parse(text.slice(0, cut + 1)); } catch {}
   }
-  return t;
+  // Intento 2: extraer con regex clave:valor numericos
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -54,12 +48,8 @@ export default async function handler(req, res) {
 async function pdfHandler(req, res, body) {
   const { pdfBase64 } = body;
 
-  // PASO 1a — primera mitad del presupuesto (paginas 1-8)
-  // PASO 1b — segunda mitad (paginas 9-fin)
-  // Luego combinar y agrupar
-
-  // Intentar extraer todos los subtotales en una sola llamada con tokens altos
-  const sys1 = "Eres NOVA. Analiza este presupuesto y extrae TODOS los subtotales. Usa formato MINIMO. Responde SOLO JSON: {\"s\":[{\"n\":\"SECCION\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0} donde n=nombre seccion (maximo 4 palabras), v=monto subtotal numerico. Incluye ABSOLUTAMENTE TODOS los subtotales del documento completo sin omitir ninguno. Los totales finales van en tg=subtotal general obra, th=con honorarios, ti=con IVA.";
+  // PASO 1 — extraer subtotales en formato minimo
+  const sys1 = "Analiza este presupuesto. Extrae TODOS los subtotales. Responde SOLO JSON minimo: {\"s\":[{\"n\":\"NOMBRE\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0}. n=nombre seccion maximo 3 palabras, v=monto. tg=subtotal general, th=con honorarios, ti=total con IVA. Sin texto adicional.";
 
   const d1 = await claude({
     model: "claude-sonnet-4-6",
@@ -69,78 +59,79 @@ async function pdfHandler(req, res, body) {
       role: "user",
       content: [
         { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
-        { type: "text", text: "Lista TODOS los subtotales. Formato minimo. Solo JSON. No omitas ninguno." }
+        { type: "text", text: "TODOS los subtotales. Solo JSON compacto." }
       ]
     }]
   });
 
-  if (d1.error) return res.status(200).json({ error: "API paso1: " + JSON.stringify(d1.error) });
+  if (d1.error) return res.status(200).json({ error: "API: " + JSON.stringify(d1.error) });
 
-  let t1 = repairJSON(d1.content?.[0]?.text || "{}");
-  let p1;
-  try {
-    p1 = JSON.parse(t1);
-  } catch (e) {
-    // Si sigue fallando, intentar extraer lo que se pueda con regex
-    const raw = d1.content?.[0]?.text || "";
-    const matches = [...raw.matchAll(/"n"\s*:\s*"([^"]+)"\s*,\s*"v"\s*:\s*([\d.]+)/g)];
-    if (matches.length > 0) {
-      p1 = { s: matches.map(m => ({ n: m[1], v: parseFloat(m[2]) })), tg: 0, th: 0, ti: 0 };
-      // Intentar extraer totales
-      const tgMatch = raw.match(/"tg"\s*:\s*([\d.]+)/);
-      const thMatch = raw.match(/"th"\s*:\s*([\d.]+)/);
-      const tiMatch = raw.match(/"ti"\s*:\s*([\d.]+)/);
-      if (tgMatch) p1.tg = parseFloat(tgMatch[1]);
-      if (thMatch) p1.th = parseFloat(thMatch[1]);
-      if (tiMatch) p1.ti = parseFloat(tiMatch[1]);
-    } else {
-      return res.status(200).json({ error: "No se pudieron extraer subtotales: " + e.message });
-    }
+  const raw1 = d1.content?.[0]?.text || "";
+  let p1 = parseJSONSafe(raw1);
+
+  // Fallback regex si el JSON esta cortado
+  if (!p1 || !p1.s) {
+    const matches = [...raw1.matchAll(/"n"\s*:\s*"([^"]{1,50})"\s*,\s*"v"\s*:\s*([\d.]+)/g)];
+    if (!matches.length) return res.status(200).json({ error: "No se pudieron extraer subtotales del PDF." });
+    p1 = { s: matches.map(m => ({ n: m[1], v: parseFloat(m[2]) })), tg: 0, th: 0, ti: 0 };
+    const tgM = raw1.match(/"tg"\s*:\s*([\d.]+)/);
+    const thM = raw1.match(/"th"\s*:\s*([\d.]+)/);
+    const tiM = raw1.match(/"ti"\s*:\s*([\d.]+)/);
+    if (tgM) p1.tg = parseFloat(tgM[1]);
+    if (thM) p1.th = parseFloat(thM[1]);
+    if (tiM) p1.ti = parseFloat(tiM[1]);
   }
 
   const secciones = p1.s || [];
-  if (!secciones.length) return res.status(200).json({ error: "No se encontraron subtotales en el PDF." });
+  if (!secciones.length) return res.status(200).json({ error: "Sin subtotales en el PDF." });
 
-  // Calcular suma de lo que tenemos
-  const sumaDetectada = secciones.reduce((s, x) => s + (x.v || 0), 0);
+  const sumaDetectada = Math.round(secciones.reduce((s, x) => s + (x.v || 0), 0) * 100) / 100;
+  const totalObra = p1.tg || sumaDetectada;
 
-  // PASO 2 — agrupar en rubros
-  const lista = secciones.map(s => s.n + " = $" + s.v).join("\n");
+  // PASO 2 — agrupar. Mandamos lista compacta y pedimos respuesta compacta
+  const lista = secciones.map(s => s.n + "=" + s.v).join("|");
 
-  const sys2 = "Eres NOVA experto en presupuestos de construccion Ecuador. Agrupa secciones de igual naturaleza en rubros principales SUMANDO montos exactamente. Reglas: no juntes electricas+sanitarias, mobiliario+acabados, seguridad+climatizacion. Nombres profesionales. Responde SOLO JSON: {\"rubros\":[{\"nombre\":\"...\",\"categoria\":\"...\",\"presupuesto\":0,\"incluye\":\"...\"}],\"total\":0}";
+  const sys2 = "Eres experto en presupuestos de construccion Ecuador. Recibiras secciones separadas por | con formato NOMBRE=MONTO. Agrupa las de igual naturaleza en rubros sumando montos. No mezcles: electricas, sanitarias, mobiliario, acabados, seguridad y climatizacion van separados. Responde SOLO JSON compacto: {\"r\":[{\"nm\":\"Nombre Rubro\",\"ct\":\"Categoria\",\"pp\":123.45}],\"tt\":0}";
 
   const d2 = await claude({
     model: "claude-sonnet-4-6",
-    max_tokens: 2000,
+    max_tokens: 3000,
     system: sys2,
     messages: [{
       role: "user",
-      content: "Agrupa estas " + secciones.length + " secciones en rubros (suma exacta = $" + sumaDetectada.toFixed(2) + "):\n\n" + lista +
-        "\n\nTotales presupuesto: subtotal obra=$" + (p1.tg || sumaDetectada).toFixed(2) +
-        " | con honorarios=$" + (p1.th || 0) +
-        " | con IVA=$" + (p1.ti || 0) +
-        "\nEl campo total del JSON debe ser $" + (p1.tg || sumaDetectada).toFixed(2)
+      content: lista + "\n\nTotal obra=$" + totalObra
     }]
   });
 
   if (d2.error) return res.status(200).json({ error: "Paso2: " + JSON.stringify(d2.error) });
 
-  let t2 = repairJSON(d2.content?.[0]?.text || "{}");
-  let p2;
-  try { p2 = JSON.parse(t2); }
-  catch (e) { return res.status(200).json({ error: "Parse paso2: " + e.message }); }
+  const raw2 = d2.content?.[0]?.text || "";
+  let p2 = parseJSONSafe(raw2);
 
-  if (!p2.rubros?.length) return res.status(200).json({ error: "NOVA no pudo agrupar los rubros." });
+  // Fallback regex paso 2
+  if (!p2 || !p2.r) {
+    const matches2 = [...raw2.matchAll(/"nm"\s*:\s*"([^"]+)"\s*,\s*"ct"\s*:\s*"([^"]+)"\s*,\s*"pp"\s*:\s*([\d.]+)/g)];
+    if (!matches2.length) return res.status(200).json({ error: "NOVA no pudo agrupar. Intenta de nuevo." });
+    p2 = { r: matches2.map(m => ({ nm: m[1], ct: m[2], pp: parseFloat(m[3]) })), tt: totalObra };
+  }
 
-  const totalObra = p1.tg || sumaDetectada;
+  // Convertir formato compacto a formato completo
+  const rubros = (p2.r || []).map(r => ({
+    nombre: r.nm || r.nombre || "Rubro",
+    categoria: r.ct || r.categoria || "General",
+    presupuesto: r.pp || r.presupuesto || 0,
+    incluye: r.inc || r.incluye || ""
+  }));
+
+  if (!rubros.length) return res.status(200).json({ error: "Sin rubros detectados." });
 
   return res.status(200).json({
-    rubros: p2.rubros,
+    rubros,
     total: totalObra,
     total_con_iva: p1.ti || 0,
     total_honorarios: p1.th || 0,
     secciones_detectadas: secciones.length,
     suma_detectada: sumaDetectada,
-    observaciones: secciones.length + " secciones → " + p2.rubros.length + " rubros | Subtotal obra: $" + totalObra.toFixed(2)
+    observaciones: secciones.length + " secciones → " + rubros.length + " rubros | Subtotal: $" + totalObra
   });
 }
