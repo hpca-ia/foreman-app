@@ -970,7 +970,8 @@ function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
     setGen(true);setModal(true);
     const resumen=resumenPorPersona();
     try{
-      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:"Reporte caja chica obra. Solo JSON: {resumen:str,por_persona:[{nombre:str,recibio:num,gasto:num,devuelve:num}],sin_factura:num,observaciones:[str],estado:"ok"|"revisar"|"urgente"}",messages:[{role:"user",content:"Entregado: "+totalEntregado+" | Gastado: "+totalGastado+" | Saldo: "+saldo+" | Por persona: "+JSON.stringify(resumen)+" | Sin factura: "+gastos.filter(g=>!g.tieneFactura).length}]})});
+      const sysRep="Reporte caja chica construccion. Solo JSON sin texto extra. Campos: resumen (string), por_persona (array con nombre/recibio/gasto/devuelve), sin_factura (number), observaciones (array strings), estado (ok o revisar o urgente).";
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,system:sysRep,messages:[{role:"user",content:"Entregado: "+totalEntregado+" | Gastado: "+totalGastado+" | Saldo: "+saldo+" | Por persona: "+JSON.stringify(resumen)+" | Sin factura: "+gastos.filter(g=>!g.tieneFactura).length}]})});
       const data=await res.json();
       setRep(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
     }catch{setRep({error:"Error."});}
