@@ -505,6 +505,8 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
   const [subiendo,setSubiendo]=useState(false);
   const [novaR,setNovaR]=useState(null);
   const [novaErr,setNovaErr]=useState("");
+  const [expandSg,setExpandSg]=useState(null); // rubro id con subgrupos visibles
+  const pdfUrl=loadLS("fin_pdf_"+proyectoId,"");
   const fileRef=useRef(null);
   function saveR(r){setRubros(r);saveLS(KEY,r);}
   // ejec usa subtotal neto (sin IVA) para comparar vs presupuesto
@@ -533,43 +535,60 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
       const data=await resp.json();
       if(data.error){setNovaErr("Error: "+data.error);return;}
       if(!data.rubros?.length){setNovaErr("No se encontraron rubros. Intenta de nuevo.");return;}
-      setNovaR({rubros:data.rubros,secciones:data.secciones||[],total:data.total,total_con_iva:data.total_con_iva||0,secciones_detectadas:data.secciones_detectadas||0,observaciones:data.observaciones+(data.total_con_iva>0?" | Con IVA: "+fmt(data.total_con_iva):"")});
+      // Subir PDF a Supabase Storage para poder verlo desde la app
+      let pdfUrl="";
+      try{
+        const pdfPath="presupuestos/"+proyectoId+"/"+Date.now()+".pdf";
+        const{error:upErr}=await supabase.storage.from("task-files").upload(pdfPath,file,{upsert:true,contentType:"application/pdf"});
+        if(!upErr){const{data:pu}=supabase.storage.from("task-files").getPublicUrl(pdfPath);pdfUrl=pu.publicUrl;}
+      }catch{}
+      setNovaR({rubros:data.rubros,secciones:data.secciones||[],total:data.total,total_honorarios:data.total_honorarios||0,total_con_iva:data.total_con_iva||0,secciones_detectadas:data.secciones_detectadas||0,pdfUrl,observaciones:data.observaciones+(data.total_con_iva>0?" | Con IVA: "+fmt(data.total_con_iva):"")});
     }catch(err){setNovaErr("Error: "+err.message);}
     setSubiendo(false);e.target.value="";
   }
 
   function confirmarNova(rubrosEditados){
     const lista=rubrosEditados||novaR?.rubros||[];
+    const ts=Date.now();
     const rubrosBase=lista.filter(r=>(r.presupuesto||0)>0||r.subgrupos?.length>0).map((r,i)=>({
-      id:"r"+Date.now()+i,
+      id:"r"+ts+i,
       nombre:r.nombre,
       categoria:r.categoria||"General",
-      presupuesto:r.presupuesto!=null?Number(r.presupuesto):Math.round((r.subgrupos||[]).reduce((s,sg)=>s+Number(sg.monto||0),0)*100)/100
+      presupuesto:r.presupuesto!=null?Number(r.presupuesto):Math.round((r.subgrupos||[]).reduce((s,sg)=>s+Number(sg.monto||0),0)*100)/100,
+      subgrupos:r.subgrupos||[]
     }));
-    // Agregar honorarios, imprevistos e IVA si los detectó NOVA
+    // Rubros de honorarios / imprevistos / IVA desde los totales del PDF
     const extras=[];
-    const th=novaR?.total_honorarios||0;
-    const ti=novaR?.total_con_iva||0;
-    const tg=novaR?.total||0;
+    const tg=Number(novaR?.total||0);           // subtotal obra
+    const th=Number(novaR?.total_honorarios||0); // con honorarios e imprevistos
+    const ti=Number(novaR?.total_con_iva||0);    // total final con IVA
     if(th>tg&&th>0){
-      const honorarios=Math.round((th-tg)*100)/100;
-      const imprev=Math.round(honorarios*0.1*100)/100;
-      const honProf=Math.round((honorarios-imprev)*100)/100;
-      if(honProf>0)extras.push({id:"r_hon_"+Date.now(),nombre:"Honorarios Profesionales",categoria:"Honorarios",presupuesto:honProf});
-      if(imprev>0)extras.push({id:"r_imp_"+Date.now(),nombre:"Imprevistos",categoria:"Imprevistos",presupuesto:imprev});
+      // Diferencia entre total c/honorarios y subtotal = honorarios + imprevistos
+      const bloque=Math.round((th-tg)*100)/100;
+      // Aproximar: honorarios ~9%, imprevistos ~1% (del subtotal)
+      const imprev=Math.round(tg*0.1*100)/100;
+      const honProf=Math.round((bloque-imprev)*100)/100;
+      if(honProf>0)extras.push({id:"r_hon_"+ts,nombre:"Honorarios Profesionales",categoria:"Honorarios",presupuesto:honProf,subgrupos:[]});
+      if(imprev>0)extras.push({id:"r_imp_"+ts,nombre:"Imprevistos 10%",categoria:"Imprevistos",presupuesto:imprev,subgrupos:[]});
     }
-    if(ti>0&&th>0){
-      const iva=Math.round((ti-th)*100)/100;
-      if(iva>0)extras.push({id:"r_iva_"+Date.now(),nombre:"IVA 15%",categoria:"IVA",presupuesto:iva});
+    if(ti>0){
+      const base=th>0?th:tg;
+      const iva=Math.round((ti-base)*100)/100;
+      if(iva>0)extras.push({id:"r_iva_"+ts,nombre:"IVA",categoria:"IVA",presupuesto:iva,subgrupos:[]});
     }
     saveR([...rubrosBase,...extras]);
+    // Guardar también la URL del PDF si existe
+    if(novaR?.pdfUrl)saveLS("fin_pdf_"+proyectoId,novaR.pdfUrl);
     setNovaR(null);
   }
 
   return(
     <div>
       <div style={{background:"#fff",borderRadius:12,padding:"14px 16px",marginBottom:14,border:"1px solid #F0F1F3",borderLeft:"4px solid "+(proy?.color||"#E8622A")}}>
-        <div style={{fontSize:16,fontWeight:700,color:"#111",marginBottom:12}}>{proy?.name}</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontSize:16,fontWeight:700,color:"#111"}}>{proy?.name}</div>
+          {pdfUrl&&<a href={pdfUrl} target="_blank" rel="noreferrer" style={{background:"#FFF4F0",border:"1px solid #FED7AA",borderRadius:6,padding:"4px 10px",color:"#E8622A",fontSize:11,fontWeight:600,textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>📄 Ver PDF</a>}
+        </div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
           {[{l:"Presupuesto obra",v:fmt(totalObra||totalP),c:"#374151"},{l:"Ejecutado",v:fmt(totalE),c:totalE>totalP?"#DC2626":"#D97706"},{l:"Disponible",v:fmt((totalObra||totalP)-totalE),c:((totalObra||totalP)-totalE)<0?"#DC2626":"#059669"},{l:"Avance",v:pct(totalE,totalObra||totalP)+"%",c:proy?.color||"#E8622A"}].map(s=>(
             <div key={s.l} style={{background:"#F9FAFB",borderRadius:8,padding:"8px 14px",textAlign:"center",flex:1,minWidth:70}}>
@@ -646,6 +665,23 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
                 </div>
                 {Number(r.presupuesto)>0&&<div style={{background:"#F3F4F6",borderRadius:4,height:4}}><div style={{background:rojo?"#DC2626":"#059669",height:4,borderRadius:4,width:Math.min(100,pct(e,Number(r.presupuesto)))+"%"}}/></div>}
                 {rojo&&<div style={{fontSize:10,color:"#DC2626",marginTop:4,fontWeight:600}}>Excedido en {fmt(Math.abs(s))}</div>}
+                {r.subgrupos?.length>0&&(
+                  <div style={{marginTop:6}}>
+                    <button onClick={()=>setExpandSg(expandSg===r.id?null:r.id)} style={{background:"none",border:"none",color:"#9CA3AF",fontSize:10,cursor:"pointer",padding:0,display:"flex",alignItems:"center",gap:4}}>
+                      {expandSg===r.id?"▲ Ocultar":"▼ Ver"} {r.subgrupos.length} secciones
+                    </button>
+                    {expandSg===r.id&&(
+                      <div style={{marginTop:6,paddingLeft:8,borderLeft:"2px solid #E5E7EB"}}>
+                        {r.subgrupos.map((sg,si)=>(
+                          <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderBottom:"1px solid #F9FAFB"}}>
+                            <span style={{fontSize:11,color:"#6B7280"}}>{sg.nombre||sg.n}</span>
+                            <span style={{fontSize:11,fontWeight:600,color:"#374151"}}>{fmt(sg.monto||sg.v||0)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -909,7 +945,7 @@ function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
 
   const emptyGasto={descripcion:"",montoTotal:"",responsable:currentUser.role==="member"?currentUser.name:"",fecha:new Date().toISOString().split("T")[0],tieneFactura:false,fotoUrl:"",partidas:[{rubroId:"",monto:""}]};
   const [gForm,setGForm]=useState(emptyGasto);
-  const [eForm,setEForm]=useState({responsable:"",monto:"",fecha:new Date().toISOString().split("T")[0],nota:""});
+  const [eForm,setEForm]=useState({responsable:"",proyectoId:"",monto:"",fecha:new Date().toISOString().split("T")[0],nota:""});
 
   function saveG(g){setGastos(g);saveLS("fin_caja_gastos_"+proyectoId,g);}
   function saveE(e){setEntregas(e);saveLS("fin_caja_entregas_"+proyectoId,e);}
@@ -921,8 +957,8 @@ function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
   // Calculos por responsable
   function resumenPorPersona(){
     const p={};
-    entregas.forEach(e=>{if(!p[e.responsable])p[e.responsable]={recibido:0,gastado:0};p[e.responsable].recibido+=Number(e.monto||0);});
-    gastos.forEach(g=>{if(!p[g.responsable])p[g.responsable]={recibido:0,gastado:0};p[g.responsable].gastado+=Number(g.montoTotal||0);});
+    entregas.forEach(e=>{if(!p[e.responsable])p[e.responsable]={recibido:0,gastado:0,proyectos:[]};p[e.responsable].recibido+=Number(e.monto||0);if(e.proyectoId&&!p[e.responsable].proyectos.includes(e.proyectoId))p[e.responsable].proyectos.push(e.proyectoId);});
+    gastos.forEach(g=>{if(!p[g.responsable])p[g.responsable]={recibido:0,gastado:0,proyectos:[]};p[g.responsable].gastado+=Number(g.montoTotal||0);});
     return p;
   }
 
@@ -963,7 +999,7 @@ function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
   function agregarEntrega(){
     if(!eForm.responsable||!eForm.monto)return;
     saveE([{...eForm,id:Date.now(),monto:Number(eForm.monto),creadaEn:new Date().toISOString()},...entregas]);
-    setEForm({responsable:"",monto:"",fecha:new Date().toISOString().split("T")[0],nota:""});
+    setEForm({responsable:"",proyectoId:"",monto:"",fecha:new Date().toISOString().split("T")[0],nota:""});
   }
 
   async function generarReporte(){
@@ -1169,13 +1205,29 @@ function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
             <div style={{display:"grid",gap:8}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                 <div><label style={lS}>Responsable *</label>
-                  <select value={eForm.responsable} onChange={e=>setEForm(p=>({...p,responsable:e.target.value}))} style={iS}>
+                  <select value={eForm.responsable} onChange={e=>{
+                    const u=users.find(u2=>u2.name===e.target.value);
+                    const uProys=(u&&proyectos.filter(p=>( p.usuarios||[]).includes(u.id)))||[];
+                    setEForm(p=>({...p,responsable:e.target.value,proyectoId:uProys.length===1?String(uProys[0].id):""}));
+                  }} style={iS}>
                     <option value="">Seleccionar...</option>
                     {users.filter(u=>u.role==="member").map(u=><option key={u.id} value={u.name}>{u.name}</option>)}
                   </select>
                 </div>
                 <div><label style={lS}>Monto USD *</label><input type="number" value={eForm.monto} onChange={e=>setEForm(p=>({...p,monto:e.target.value}))} style={iS} placeholder="0.00"/></div>
               </div>
+              {eForm.responsable&&(()=>{
+                const u=users.find(u2=>u2.name===eForm.responsable);
+                const uProys=u?proyectos.filter(p=>(p.usuarios||[]).includes(u.id)):[];
+                return uProys.length>0?(
+                  <div><label style={lS}>Proyecto *</label>
+                    <select value={eForm.proyectoId} onChange={e=>setEForm(p=>({...p,proyectoId:e.target.value}))} style={iS}>
+                      <option value="">Seleccionar proyecto...</option>
+                      {uProys.map(p=><option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                    </select>
+                  </div>
+                ):null;
+              })()}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                 <div><label style={lS}>Fecha</label><input type="date" value={eForm.fecha} onChange={e=>setEForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
                 <div><label style={lS}>Nota</label><input value={eForm.nota} onChange={e=>setEForm(p=>({...p,nota:e.target.value}))} style={iS} placeholder="Opcional"/></div>
@@ -1186,7 +1238,11 @@ function ModuloCajaChica({proyectoId,proyectos,currentUser,perms,users}){
           {entregas.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"30px 0"}}><div style={{fontSize:32,marginBottom:8}}>💵</div>Sin abonos</div>
             :entregas.map(e2=>(
               <div key={e2.id} style={{background:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:6,border:"1px solid #F0F1F3",display:"flex",justifyContent:"space-between",gap:10}}>
-                <div><div style={{fontSize:13,fontWeight:600}}>{e2.responsable}</div><div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{e2.fecha}{e2.nota?" — "+e2.nota:""}</div></div>
+                <div>
+                <div style={{fontSize:13,fontWeight:600}}>{e2.responsable}</div>
+                {e2.proyectoId&&<div style={{fontSize:10,color:"#E8622A",fontWeight:600,marginTop:2}}>{proyectos.find(p=>String(p.id)===String(e2.proyectoId))?.name||""}</div>}
+                <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{e2.fecha}{e2.nota?" — "+e2.nota:""}</div>
+              </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:14,fontWeight:700,color:"#059669"}}>+{fmt(e2.monto)}</div>
                   <button onClick={()=>saveE(entregas.filter(x=>x.id!==e2.id))} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:11,marginTop:4}}>🗑</button>
