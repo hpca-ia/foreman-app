@@ -463,33 +463,28 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
     setSubiendo(true);setNovaR(null);setNovaErr("");
     try{
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
-      const tipoObra=proy?.nombre||"construccion";
-      const pdfSystem="Eres NOVA, experto en presupuestos de construccion en Ecuador. Analiza este presupuesto y extrae TODOS los rubros necesarios para representar fielmente el presupuesto. REGLAS ESTRICTAS: 1) Crea tantos rubros como sean necesarios — no hay limite maximo. 2) NUNCA mezcles partidas de diferente naturaleza en un mismo rubro (las instalaciones electricas van separadas de las sanitarias, la mano de obra separada de los materiales, etc.). 3) Cada rubro debe tener una sola categoria de trabajo. 4) Usa nombres exactos del presupuesto cuando sea posible. 5) Moneda USD, presupuesto en Ecuador. 6) Responde SOLO JSON sin texto adicional con campos: rubros (array de nombre, categoria, presupuesto como numero), total (numero), moneda (USD), observaciones (resumen breve).";
-      const resp=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:4000,system:pdfSystem,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Extrae todos los rubros con sus montos totales. Responde solo el JSON."}]}]})});
-      const data=await resp.json();
-      if(data.error){setNovaErr("Error API: "+JSON.stringify(data.error));return;}
-      let text=data.content?.[0]?.text||"{}";
-      text=text.replace(/```json|```/g,"").trim();
-      // Si el JSON esta cortado, intentar repararlo
-      if(!text.endsWith("}")){
-        const lastBracket=text.lastIndexOf("}");
-        if(lastBracket>0) text=text.slice(0,lastBracket+1)+"]}}";
-      }
-      let parsed;
-      try{ parsed=JSON.parse(text); }
-      catch{
-        // Intentar extraer rubros parciales con regex
-        const matches=[...text.matchAll(/"nombre"\s*:\s*"([^"]+)"[^}]*"categoria"\s*:\s*"([^"]+)"[^}]*"presupuesto"\s*:\s*([\d.]+)/g)];
-        if(matches.length>0){
-          parsed={rubros:matches.map(m=>({nombre:m[1],categoria:m[2],presupuesto:Number(m[3])})),total:matches.reduce((s,m)=>s+Number(m[3]),0),observaciones:"Analisis parcial — algunos rubros pueden faltar por el tamano del PDF"};
-        } else {
-          setNovaErr("El presupuesto es muy extenso. Intenta subir solo las primeras paginas con los totales por rubro.");
-          return;
-        }
-      }
-      if(!parsed.rubros||parsed.rubros.length===0){setNovaErr("NOVA no encontro rubros. Verifica que el PDF tenga tablas de presupuesto visibles.");return;}
-      setNovaR(parsed);
-    }catch(err){setNovaErr("Error: "+err.message+". Verifica que el PDF no este protegido con contrasena.");}
+
+      // PASO 1: extraer los SUBTOTALES por seccion — respuesta corta, nunca se corta
+      const sys1="Eres NOVA. Analiza este presupuesto de construccion y extrae UNICAMENTE las lineas de SUBTOTAL de cada seccion. Cada SUBTOTAL representa una categoria de trabajo. Responde SOLO JSON sin texto extra: {\"secciones\":[{\"nombre\":\"nombre de la seccion\",\"subtotal\":123.45}],\"total_general\":123.45}. Usa los nombres exactos de cada seccion del presupuesto. No inventes ni combines secciones.";
+      const r1=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:3000,system:sys1,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:"Lista todos los SUBTOTALES del presupuesto con el nombre de su seccion y el monto."}]}]})});
+      const d1=await r1.json();
+      if(d1.error){setNovaErr("Error API paso 1: "+JSON.stringify(d1.error));return;}
+      let t1=(d1.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
+      const paso1=JSON.parse(t1);
+      if(!paso1.secciones||paso1.secciones.length===0){setNovaErr("NOVA no encontro secciones con subtotales en el PDF.");return;}
+
+      // PASO 2: agrupar secciones en rubros principales — NOVA solo recibe texto, no el PDF
+      const seccText=paso1.secciones.map(s=>s.nombre+" = $"+s.subtotal).join("\n");
+      const sys2="Eres NOVA experto en presupuestos de construccion. Te doy una lista de secciones con sus subtotales. AGRUPA las que son de la misma naturaleza en rubros principales. REGLAS: nunca mezcles categorias distintas (electricas con sanitarias no, mobiliario con acabados no). Suma los subtotales de cada grupo. Responde SOLO JSON: {\"rubros\":[{\"nombre\":\"...\",\"categoria\":\"...\",\"presupuesto\":123.45,\"incluye\":\"lista de secciones agrupadas\"}],\"total\":123.45}";
+      const r2=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:sys2,messages:[{role:"user",content:"Agrupa estas secciones en rubros principales sumando sus montos:\n\n"+seccText+"\n\nTotal general del presupuesto: $"+paso1.total_general}]})});
+      const d2=await r2.json();
+      if(d2.error){setNovaErr("Error API paso 2: "+JSON.stringify(d2.error));return;}
+      let t2=(d2.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
+      const paso2=JSON.parse(t2);
+      if(!paso2.rubros||paso2.rubros.length===0){setNovaErr("NOVA no pudo agrupar los rubros.");return;}
+
+      setNovaR({rubros:paso2.rubros,total:paso2.total||paso1.total_general,observaciones:"Analisis en 2 pasos: "+paso1.secciones.length+" secciones agrupadas en "+paso2.rubros.length+" rubros"});
+    }catch(err){setNovaErr("Error: "+err.message);}
     setSubiendo(false);e.target.value="";
   }
 
@@ -520,7 +515,7 @@ function ModuloPresupuesto({proyectoId,proyectos,perms}){
           <div style={{fontSize:12,color:"#9CA3AF",marginBottom:10}}>Sube el PDF del presupuesto y NOVA extrae los rubros con sus montos automaticamente.</div>
           <input ref={fileRef} type="file" accept="application/pdf" onChange={procesarPDF} style={{display:"none"}}/>
           <button onClick={()=>fileRef.current?.click()} disabled={subiendo} style={{width:"100%",background:subiendo?"#374151":"#E8622A",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:subiendo?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            {subiendo?<><span style={{animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</span>Analizando PDF...</>:"📄 Subir presupuesto PDF"}
+            {subiendo?<><span style={{animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</span>Analizando... paso 1 de 2</>:"📄 Subir presupuesto PDF"}
           </button>
           {novaErr&&<div style={{color:"#F87171",fontSize:12,marginTop:8}}>{novaErr}</div>}
           {novaR&&(
