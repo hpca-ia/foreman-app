@@ -24,12 +24,10 @@ async function claude(body) {
 function parseJSONSafe(text) {
   text = text.replace(/```json|```/g, "").trim();
   try { return JSON.parse(text); } catch {}
-  // Intento 1: cortar en ultimo } completo
   const cut = text.lastIndexOf("}");
   if (cut > 0) {
     try { return JSON.parse(text.slice(0, cut + 1)); } catch {}
   }
-  // Intento 2: extraer con regex clave:valor numericos
   return null;
 }
 
@@ -49,7 +47,7 @@ async function pdfHandler(req, res, body) {
   const { pdfBase64 } = body;
 
   // PASO 1 — extraer subtotales en formato minimo
-  const sys1 = "Analiza este presupuesto. Extrae TODOS los subtotales. Responde SOLO JSON minimo: {\"s\":[{\"n\":\"NOMBRE\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0}. n=nombre seccion maximo 3 palabras, v=monto. tg=subtotal general, th=con honorarios, ti=total con IVA. Sin texto adicional.";
+  const sys1 = "Analiza este presupuesto. Extrae TODOS los subtotales. Responde SOLO JSON: {\"s\":[{\"n\":\"NOMBRE\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0}. n=nombre seccion max 4 palabras, v=monto subtotal. tg=subtotal general obra, th=con honorarios, ti=total con IVA. Sin texto extra.";
 
   const d1 = await claude({
     model: "claude-sonnet-4-6",
@@ -69,17 +67,14 @@ async function pdfHandler(req, res, body) {
   const raw1 = d1.content?.[0]?.text || "";
   let p1 = parseJSONSafe(raw1);
 
-  // Fallback regex si el JSON esta cortado
+  // Fallback regex
   if (!p1 || !p1.s) {
-    const matches = [...raw1.matchAll(/"n"\s*:\s*"([^"]{1,50})"\s*,\s*"v"\s*:\s*([\d.]+)/g)];
-    if (!matches.length) return res.status(200).json({ error: "No se pudieron extraer subtotales del PDF." });
+    const matches = [...raw1.matchAll(/"n"\s*:\s*"([^"]{1,60})"\s*,\s*"v"\s*:\s*([\d.]+)/g)];
+    if (!matches.length) return res.status(200).json({ error: "No se pudieron extraer subtotales." });
     p1 = { s: matches.map(m => ({ n: m[1], v: parseFloat(m[2]) })), tg: 0, th: 0, ti: 0 };
-    const tgM = raw1.match(/"tg"\s*:\s*([\d.]+)/);
-    const thM = raw1.match(/"th"\s*:\s*([\d.]+)/);
-    const tiM = raw1.match(/"ti"\s*:\s*([\d.]+)/);
-    if (tgM) p1.tg = parseFloat(tgM[1]);
-    if (thM) p1.th = parseFloat(thM[1]);
-    if (tiM) p1.ti = parseFloat(tiM[1]);
+    const tgM = raw1.match(/"tg"\s*:\s*([\d.]+)/); if (tgM) p1.tg = parseFloat(tgM[1]);
+    const thM = raw1.match(/"th"\s*:\s*([\d.]+)/); if (thM) p1.th = parseFloat(thM[1]);
+    const tiM = raw1.match(/"ti"\s*:\s*([\d.]+)/); if (tiM) p1.ti = parseFloat(tiM[1]);
   }
 
   const secciones = p1.s || [];
@@ -88,10 +83,10 @@ async function pdfHandler(req, res, body) {
   const sumaDetectada = Math.round(secciones.reduce((s, x) => s + (x.v || 0), 0) * 100) / 100;
   const totalObra = p1.tg || sumaDetectada;
 
-  // PASO 2 — agrupar. Mandamos lista compacta y pedimos respuesta compacta
-  const lista = secciones.map(s => s.n + "=" + s.v).join("|");
+  // PASO 2 — agrupar devolviendo los subgrupos de cada rubro
+  const lista = secciones.map((s, i) => i + ":" + s.n + "=" + s.v).join("|");
 
-  const sys2 = "Eres experto en presupuestos de construccion Ecuador. Recibiras secciones separadas por | con formato NOMBRE=MONTO. Agrupa las de igual naturaleza en rubros sumando montos. No mezcles: electricas, sanitarias, mobiliario, acabados, seguridad y climatizacion van separados. Responde SOLO JSON compacto: {\"r\":[{\"nm\":\"Nombre Rubro\",\"ct\":\"Categoria\",\"pp\":123.45}],\"tt\":0}";
+  const sys2 = "Eres experto en presupuestos de construccion Ecuador. Recibiras secciones con formato INDICE:NOMBRE=MONTO separadas por |. Agrupa las de igual naturaleza en rubros sumando montos. No mezcles: electricas, sanitarias, mobiliario, acabados, seguridad, climatizacion van separados. IMPORTANTE: en el campo ids incluye los indices de las secciones que pertenecen a ese rubro. Responde SOLO JSON: {\"r\":[{\"nm\":\"Nombre\",\"ct\":\"Categoria\",\"ids\":[0,1,2]}],\"tt\":0}";
 
   const d2 = await claude({
     model: "claude-sonnet-4-6",
@@ -108,30 +103,52 @@ async function pdfHandler(req, res, body) {
   const raw2 = d2.content?.[0]?.text || "";
   let p2 = parseJSONSafe(raw2);
 
-  // Fallback regex paso 2
-  if (!p2 || !p2.r) {
-    const matches2 = [...raw2.matchAll(/"nm"\s*:\s*"([^"]+)"\s*,\s*"ct"\s*:\s*"([^"]+)"\s*,\s*"pp"\s*:\s*([\d.]+)/g)];
-    if (!matches2.length) return res.status(200).json({ error: "NOVA no pudo agrupar. Intenta de nuevo." });
-    p2 = { r: matches2.map(m => ({ nm: m[1], ct: m[2], pp: parseFloat(m[3]) })), tt: totalObra };
+  if (!p2 || !p2.r || !p2.r.length) {
+    return res.status(200).json({ error: "NOVA no pudo agrupar. Intenta de nuevo." });
   }
 
-  // Convertir formato compacto a formato completo
-  const rubros = (p2.r || []).map(r => ({
-    nombre: r.nm || r.nombre || "Rubro",
-    categoria: r.ct || r.categoria || "General",
-    presupuesto: r.pp || r.presupuesto || 0,
-    incluye: r.inc || r.incluye || ""
-  }));
+  // Construir rubros con subgrupos y montos calculados exactamente
+  const rubros = p2.r.map(r => {
+    const ids = r.ids || [];
+    const subgrupos = ids
+      .filter(i => i >= 0 && i < secciones.length)
+      .map(i => ({ nombre: secciones[i].n, monto: secciones[i].v, idx: i }));
+    const presupuesto = Math.round(subgrupos.reduce((s, sg) => s + sg.monto, 0) * 100) / 100;
+    return {
+      nombre: r.nm || "Rubro",
+      categoria: r.ct || "General",
+      presupuesto,
+      subgrupos,
+      incluye: subgrupos.map(sg => sg.nombre).join(", ")
+    };
+  });
 
-  if (!rubros.length) return res.status(200).json({ error: "Sin rubros detectados." });
+  // Verificar secciones huerfanas (no asignadas a ningun rubro)
+  const asignados = new Set(rubros.flatMap(r => r.subgrupos.map(sg => sg.idx)));
+  const huerfanos = secciones
+    .map((s, i) => ({ ...s, idx: i }))
+    .filter(s => !asignados.has(s.idx));
+
+  if (huerfanos.length > 0) {
+    rubros.push({
+      nombre: "Sin clasificar",
+      categoria: "Varios",
+      presupuesto: Math.round(huerfanos.reduce((s, h) => s + h.v, 0) * 100) / 100,
+      subgrupos: huerfanos.map(h => ({ nombre: h.n, monto: h.v, idx: h.idx })),
+      incluye: huerfanos.map(h => h.n).join(", ")
+    });
+  }
+
+  const totalCalculado = Math.round(rubros.reduce((s, r) => s + r.presupuesto, 0) * 100) / 100;
 
   return res.status(200).json({
     rubros,
+    secciones,
     total: totalObra,
+    total_calculado: totalCalculado,
     total_con_iva: p1.ti || 0,
     total_honorarios: p1.th || 0,
     secciones_detectadas: secciones.length,
-    suma_detectada: sumaDetectada,
-    observaciones: secciones.length + " secciones → " + rubros.length + " rubros | Subtotal: $" + totalObra
+    observaciones: secciones.length + " secciones → " + rubros.length + " rubros | $" + totalCalculado
   });
 }
