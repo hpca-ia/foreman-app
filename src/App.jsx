@@ -1169,249 +1169,243 @@ export default function App() {
 }
 
 // ── MÓDULO PRESUPUESTOS ────────────────────────────────────────────────────
+const CAPITULOS_DEFAULT = [
+  "OBRAS PRELIMINARES Y VARIOS","ESTRUCTURA","CISTERNA Y OBRAS ESPECIALES",
+  "ALBAÑILERÍA Y TABIQUERÍA","REVESTIMIENTOS","TUMBADOS Y PINTURAS",
+  "CARPINTERÍA, METAL Y VIDRIO","CERRAJERÍA Y PASAMANOS","MOBILIARIO",
+  "INSTALACIONES HIDROSANITARIAS","INSTALACIONES ELÉCTRICAS","CLIMATIZACIÓN",
+  "LETREROS Y ARTES","OBRAS EXTERIORES","EQUIPAMIENTO","VARIOS"
+];
+
 function ModuloPresupuestos({ currentUser }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
   const [presupuestoActivo, setPresupuestoActivo] = useState(null);
   const [clientes, setClientes] = useState([]);
-  const [capitulos, setCapitulos] = useState([]);
-  const [rubros, setRubros] = useState([]);
+  const [capitulosDB, setCapitulosDB] = useState([]);
   const [items, setItems] = useState([]);
-  const [busquedaRubro, setBusquedaRubro] = useState("");
-  const [capituloFiltro, setCapituloFiltro] = useState("");
+  const [exportando, setExportando] = useState(false);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
   const [uploadingBD, setUploadingBD] = useState(false);
   const [bdResult, setBdResult] = useState(null);
-  const [duplicados, setDuplicados] = useState([]);
-  const [exportando, setExportando] = useState(false);
+
+  // Para agregar rubro
+  const [modalRubro, setModalRubro] = useState(null); // {capitulo, modo} modo: "bd" | "manual"
+  const [busquedaRubro, setBusquedaRubro] = useState("");
+  const [rubrosDB, setRubrosDB] = useState([]);
+  const [nuevoCapitulo, setNuevoCapitulo] = useState("");
+
+  // Form presupuesto
   const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", honorarios_pct:0, iva_pct:12, notas:"" });
+  const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
+
   const fileRef = useRef(null);
   const fileBDRef = useRef(null);
 
-  useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchCapitulos(); }, []);
+  useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchCapitulosDB(); }, []);
 
   async function fetchPresupuestos() {
-    const { data } = await supabase.from("presupuestos").select("*").order("created_at", { ascending: false });
-    setPresupuestos(data || []);
+    const { data } = await supabase.from("presupuestos").select("*").order("created_at",{ascending:false});
+    setPresupuestos(data||[]);
   }
   async function fetchClientes() {
     const { data } = await supabase.from("clientes").select("*").order("nombre");
-    setClientes(data || []);
+    setClientes(data||[]);
   }
-  async function fetchCapitulos() {
+  async function fetchCapitulosDB() {
     const { data } = await supabase.from("capitulos").select("*").order("orden");
-    setCapitulos(data || []);
-  }
-  async function fetchRubros(busq, capId) {
-    let q = supabase.from("rubros").select("*, capitulos(nombre)").eq("activo", true);
-    if (busq) q = q.ilike("descripcion", `%${busq}%`);
-    if (capId) q = q.eq("capitulo_id", capId);
-    const { data } = await q.order("descripcion").limit(60);
-    setRubros(data || []);
+    setCapitulosDB(data||[]);
   }
   async function fetchItems(pid) {
-    const { data } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id", pid).order("orden");
-    setItems(data || []);
+    const { data } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id",pid).order("orden");
+    setItems(data||[]);
+  }
+  async function buscarRubros(q, capId) {
+    let query = supabase.from("rubros").select("*, capitulos(nombre)").eq("activo",true);
+    if (q) query = query.ilike("descripcion",`%${q}%`);
+    if (capId) query = query.eq("capitulo_id", capId);
+    const { data } = await query.order("descripcion").limit(50);
+    setRubrosDB(data||[]);
   }
 
   async function crearPresupuesto() {
     if (!form.nombre || !form.cliente_nombre) return;
-    // If new client, save it
     let cliente_id = form.cliente_id;
     if (form.cliente_id === "nuevo" && form.cliente_nombre) {
-      const { data: newCl } = await supabase.from("clientes").insert({ nombre: form.cliente_nombre }).select().single();
-      if (newCl) { cliente_id = newCl.id; setClientes(prev => [...prev, newCl]); }
+      const { data: nc } = await supabase.from("clientes").insert({ nombre:form.cliente_nombre }).select().single();
+      if (nc) { cliente_id = nc.id; setClientes(prev=>[...prev,nc]); }
     }
     const { data, error } = await supabase.from("presupuestos").insert({
-      nombre: form.nombre, cliente_id: cliente_id || null,
-      cliente_nombre: form.cliente_nombre,
-      honorarios_pct: Number(form.honorarios_pct),
-      iva_pct: Number(form.iva_pct),
-      notas: form.notas, created_by: currentUser.id
+      nombre:form.nombre, cliente_id:cliente_id||null,
+      cliente_nombre:form.cliente_nombre,
+      honorarios_pct:Number(form.honorarios_pct),
+      iva_pct:Number(form.iva_pct),
+      notas:form.notas, created_by:currentUser.id
     }).select().single();
     if (!error && data) {
       setPresupuestoActivo(data); setItems([]); setSubVista("detalle"); fetchPresupuestos();
     }
   }
 
-  async function agregarItem(rubro) {
+  async function agregarItem(capitulo, rubro) {
     if (!presupuestoActivo) return;
+    const orden = items.filter(i=>i.capitulo===capitulo).length;
     const { data } = await supabase.from("presupuesto_items").insert({
-      presupuesto_id: presupuestoActivo.id,
-      capitulo: rubro.capitulos?.nombre || "SIN CLASIFICAR",
-      rubro_id: rubro.id, descripcion: rubro.descripcion,
-      unidad: rubro.unidad || "", cantidad: 1,
-      precio_unitario: rubro.precio_referencia || 0,
-      total: rubro.precio_referencia || 0, orden: items.length
+      presupuesto_id:presupuestoActivo.id,
+      capitulo, rubro_id:rubro.id||null,
+      descripcion:rubro.descripcion,
+      unidad:rubro.unidad||"",
+      cantidad:rubro.cantidad||1,
+      precio_unitario:rubro.precio_unitario||rubro.precio_referencia||0,
+      total:(rubro.cantidad||1)*(rubro.precio_unitario||rubro.precio_referencia||0),
+      orden
     }).select().single();
-    if (data) { const newItems = [...items, data]; setItems(newItems); recalcTotales(newItems); }
+    if (data) { const ni=[...items,data]; setItems(ni); recalcTotales(ni); }
+    setModalRubro(null); setBusquedaRubro(""); setRubrosDB([]);
+    setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});
   }
 
   async function actualizarItem(id, campo, valor) {
     const updated = items.map(i => {
-      if (i.id !== id) return i;
-      const u = { ...i, [campo]: valor };
-      u.total = (Number(u.cantidad)||0) * (Number(u.precio_unitario)||0);
+      if (i.id!==id) return i;
+      const u={...i,[campo]:valor};
+      u.total=(Number(u.cantidad)||0)*(Number(u.precio_unitario)||0);
       return u;
     });
     setItems(updated);
-    const item = updated.find(i => i.id === id);
-    await supabase.from("presupuesto_items").update({ [campo]: valor, total: item.total }).eq("id", id);
+    const item=updated.find(i=>i.id===id);
+    await supabase.from("presupuesto_items").update({[campo]:valor,total:item.total}).eq("id",id);
     recalcTotales(updated);
   }
 
   async function eliminarItem(id) {
-    await supabase.from("presupuesto_items").delete().eq("id", id);
-    const updated = items.filter(i => i.id !== id);
-    setItems(updated); recalcTotales(updated);
+    await supabase.from("presupuesto_items").delete().eq("id",id);
+    const u=items.filter(i=>i.id!==id); setItems(u); recalcTotales(u);
   }
 
   async function recalcTotales(itemsList) {
     if (!presupuestoActivo) return;
-    const subtotal = itemsList.reduce((s,i) => s + (Number(i.total)||0), 0);
-    const honorarios_monto = subtotal * (Number(presupuestoActivo.honorarios_pct)||0) / 100;
-    const base_iva = subtotal + honorarios_monto;
-    const iva_monto = base_iva * (Number(presupuestoActivo.iva_pct)||0) / 100;
-    const total = base_iva + iva_monto;
-    const upd = { ...presupuestoActivo, subtotal, honorarios_monto, iva_monto, total };
+    const subtotal=itemsList.reduce((s,i)=>s+(Number(i.total)||0),0);
+    const honorarios_monto=subtotal*(Number(presupuestoActivo.honorarios_pct)||0)/100;
+    const base_iva=subtotal+honorarios_monto;
+    const iva_monto=base_iva*(Number(presupuestoActivo.iva_pct)||0)/100;
+    const total=base_iva+iva_monto;
+    const upd={...presupuestoActivo,subtotal,honorarios_monto,iva_monto,total};
     setPresupuestoActivo(upd);
-    await supabase.from("presupuestos").update({ subtotal, honorarios_monto, iva_monto, total }).eq("id", presupuestoActivo.id);
+    await supabase.from("presupuestos").update({subtotal,honorarios_monto,iva_monto,total}).eq("id",presupuestoActivo.id);
   }
 
-  // ── LEER COTIZACIÓN PARA PRESUPUESTO ──────────────────────────────────
+  // Capítulos activos en este presupuesto + todos los default
+  const capitulosActivos = () => {
+    const enItems = [...new Set(items.map(i=>i.capitulo))];
+    const todos = [...new Set([...CAPITULOS_DEFAULT, ...enItems])];
+    return todos;
+  };
+
+  function agregarCapituloNuevo() {
+    if (!nuevoCapitulo.trim()) return;
+    // Just adding a rubro to new capitulo will create it
+    setModalRubro({ capitulo: nuevoCapitulo.trim(), modo:"manual" });
+    setNuevoCapitulo("");
+  }
+
+  // Leer cotización de proveedor
   async function leerCotizacion(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file=e.target.files[0]; if(!file) return;
     setUploadingCotizacion(true); setCotizacionResult(null);
     try {
-      const base64 = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
-      const content = file.type.startsWith("image/") ? [
-        { type:"image", source:{ type:"base64", media_type:file.type, data:base64 } },
-        { type:"text", text:'Lee esta cotización y extrae rubros. Responde SOLO JSON: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}' }
-      ] : [{ type:"text", text:'Extrae rubros de esta cotización. SOLO JSON: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}' }];
-      const res = await fetch("/api/nova", { method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:2000, messages:[{role:"user",content}] }) });
-      const data = await res.json();
-      const parsed = JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
-      setCotizacionResult(parsed);
-    } catch { setCotizacionResult({ error:"No pude leer el archivo. Intenta con una imagen clara." }); }
-    setUploadingCotizacion(false); e.target.value = "";
+      const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
+      const msgContent=file.type.startsWith("image/")?[
+        {type:"image",source:{type:"base64",media_type:file.type,data:base64}},
+        {type:"text",text:'Extrae todos los rubros de esta cotización. SOLO JSON: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}
+      ]:[{type:"text",text:'Extrae rubros. SOLO JSON: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}];
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:2000,messages:[{role:"user",content:msgContent}]})});
+      const data=await res.json();
+      setCotizacionResult(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
+    } catch { setCotizacionResult({error:"Error leyendo archivo."}); }
+    setUploadingCotizacion(false); e.target.value="";
   }
 
   async function importarCotizacion() {
-    if (!cotizacionResult?.rubros || !presupuestoActivo) return;
-    const newItems = [];
+    if (!cotizacionResult?.rubros||!presupuestoActivo) return;
+    const newItems=[];
     for (const r of cotizacionResult.rubros) {
-      const { data } = await supabase.from("presupuesto_items").insert({
-        presupuesto_id: presupuestoActivo.id, capitulo: "COTIZACIÓN PROVEEDOR",
-        descripcion: r.descripcion, unidad: r.unidad||"",
-        cantidad: r.cantidad||1, precio_unitario: r.precio_unitario||0,
-        total: (r.cantidad||1)*(r.precio_unitario||0), orden: items.length+newItems.length
+      const {data}=await supabase.from("presupuesto_items").insert({
+        presupuesto_id:presupuestoActivo.id, capitulo:"COTIZACIÓN PROVEEDOR",
+        descripcion:r.descripcion, unidad:r.unidad||"",
+        cantidad:r.cantidad||1, precio_unitario:r.precio_unitario||0,
+        total:(r.cantidad||1)*(r.precio_unitario||0), orden:items.length+newItems.length
       }).select().single();
       if (data) newItems.push(data);
     }
-    const allItems = [...items, ...newItems];
-    setItems(allItems); setCotizacionResult(null); recalcTotales(allItems);
+    const all=[...items,...newItems]; setItems(all); setCotizacionResult(null); recalcTotales(all);
   }
 
-  // ── ALIMENTAR BASE DE DATOS ────────────────────────────────────────────
+  // Alimentar BD
   async function leerParaBD(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploadingBD(true); setBdResult(null); setDuplicados([]);
+    const file=e.target.files[0]; if(!file) return;
+    setUploadingBD(true); setBdResult(null);
     try {
-      const base64 = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
-      const content = file.type.startsWith("image/") ? [
-        { type:"image", source:{ type:"base64", media_type:file.type, data:base64 } },
-        { type:"text", text:'Lee este presupuesto/cotización. Responde SOLO JSON: {"proveedor":"","cliente":"","fecha":"","rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}' }
-      ] : [{ type:"text", text:'Extrae todos los rubros. SOLO JSON: {"proveedor":"","cliente":"","fecha":"","rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}' }];
-      const res = await fetch("/api/nova", { method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:3000, messages:[{role:"user",content}] }) });
-      const data = await res.json();
-      const parsed = JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
-      setBdResult(parsed);
-    } catch { setBdResult({ error:"No pude leer el archivo." }); }
-    setUploadingBD(false); e.target.value = "";
+      const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
+      const msgContent=file.type.startsWith("image/")?[
+        {type:"image",source:{type:"base64",media_type:file.type,data:base64}},
+        {type:"text",text:'Lee este presupuesto. SOLO JSON: {"proveedor":"","cliente":"","fecha":"","rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}
+      ]:[{type:"text",text:'Extrae rubros. SOLO JSON: {"proveedor":"","cliente":"","fecha":"","rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}];
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:3000,messages:[{role:"user",content:msgContent}]})});
+      const data=await res.json();
+      setBdResult(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
+    } catch { setBdResult({error:"Error leyendo archivo."}); }
+    setUploadingBD(false); e.target.value="";
   }
 
   async function guardarEnBD(proveedor, cliente) {
     if (!bdResult?.rubros) return;
-    let guardados=0, duplics=[];
+    let nuevos=0, dups=0;
     for (const r of bdResult.rubros) {
-      if (!r.descripcion || !r.precio_unitario) continue;
-      // Check if rubro exists
-      const { data: existe } = await supabase.from("rubros").select("id,descripcion,precio_referencia").ilike("descripcion", r.descripcion).limit(1);
-      if (existe && existe.length > 0) {
-        duplics.push({ nuevo: r, existente: existe[0] });
-        // Just add to historial
-        await supabase.from("precios_historial").insert({
-          rubro_id: existe[0].id, cliente_nombre: cliente||bdResult.cliente||"",
-          precio_unitario: r.precio_unitario, proyecto_ref: proveedor||bdResult.proveedor||"",
-          fecha: bdResult.fecha || new Date().getFullYear().toString()
-        });
+      if (!r.descripcion||!r.precio_unitario) continue;
+      const {data:existe}=await supabase.from("rubros").select("id").ilike("descripcion",r.descripcion).limit(1);
+      if (existe&&existe.length>0) {
+        dups++;
+        await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:bdResult.fecha||new Date().getFullYear().toString()});
       } else {
-        // Find or create capitulo
-        let capId = null;
-        if (r.capitulo) {
-          const { data: cap } = await supabase.from("capitulos").select("id").ilike("nombre",`%${r.capitulo}%`).limit(1);
-          if (cap && cap.length > 0) capId = cap[0].id;
-        }
-        const { data: newRubro } = await supabase.from("rubros").insert({
-          capitulo_id: capId, descripcion: r.descripcion,
-          unidad: r.unidad||"", precio_referencia: r.precio_unitario, activo: true
-        }).select().single();
-        if (newRubro) {
-          await supabase.from("precios_historial").insert({
-            rubro_id: newRubro.id, cliente_nombre: cliente||bdResult.cliente||"",
-            precio_unitario: r.precio_unitario, proyecto_ref: proveedor||bdResult.proveedor||"",
-            fecha: bdResult.fecha || new Date().getFullYear().toString()
-          });
-          guardados++;
-        }
+        let capId=null;
+        if (r.capitulo) { const {data:cap}=await supabase.from("capitulos").select("id").ilike("nombre",`%${r.capitulo}%`).limit(1); if(cap&&cap.length>0)capId=cap[0].id; }
+        const {data:nr}=await supabase.from("rubros").insert({capitulo_id:capId,descripcion:r.descripcion,unidad:r.unidad||"",precio_referencia:r.precio_unitario,activo:true}).select().single();
+        if (nr) { nuevos++; await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:bdResult.fecha||new Date().getFullYear().toString()}); }
       }
     }
-    setDuplicados(duplics);
-    alert(`✅ ${guardados} rubros nuevos guardados.\n${duplics.length} duplicados detectados — solo se actualizó el historial.`);
+    alert(`✅ ${nuevos} rubros nuevos guardados.\n${dups} duplicados — historial actualizado.`);
     setBdResult(null);
   }
 
-  // ── EXPORTAR A EXCEL ───────────────────────────────────────────────────
+  // Exportar Excel
   async function exportarExcel() {
-    if (!presupuestoActivo || items.length === 0) return;
+    if (!presupuestoActivo||items.length===0) return;
     setExportando(true);
-    try {
-      // Build CSV-like data and send to a simple download
-      const caps = [...new Set(items.map(i => i.capitulo || "VARIOS"))];
-      let csv = `PRESUPUESTO: ${presupuestoActivo.nombre}\n`;
-      csv += `CLIENTE: ${presupuestoActivo.cliente_nombre}\n`;
-      csv += `FECHA: ${new Date().toLocaleDateString("es-EC")}\n\n`;
-      csv += `CAPÍTULO\tDESCRIPCIÓN\tUNIDAD\tCANTIDAD\tP.UNITARIO\tTOTAL\n`;
-      for (const cap of caps) {
-        const capItems = items.filter(i => (i.capitulo||"VARIOS") === cap);
-        csv += `\n${cap}\n`;
-        for (const it of capItems) {
-          csv += `\t${it.descripcion}\t${it.unidad}\t${it.cantidad}\t${it.precio_unitario}\t${it.total}\n`;
-        }
-        const capTotal = capItems.reduce((s,i) => s+(Number(i.total)||0), 0);
-        csv += `\t\t\t\tSUBTOTAL ${cap}\t${capTotal.toFixed(2)}\n`;
-      }
-      csv += `\n\t\t\t\tSUBTOTAL\t${(presupuestoActivo.subtotal||0).toFixed(2)}\n`;
-      csv += `\t\t\t\tHONORARIOS (${presupuestoActivo.honorarios_pct}%)\t${(presupuestoActivo.honorarios_monto||0).toFixed(2)}\n`;
-      csv += `\t\t\t\tIVA (${presupuestoActivo.iva_pct}%)\t${(presupuestoActivo.iva_monto||0).toFixed(2)}\n`;
-      csv += `\t\t\t\tTOTAL\t${(presupuestoActivo.total||0).toFixed(2)}\n`;
-      const blob = new Blob(["\uFEFF"+csv], { type:"text/tab-separated-values;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `${presupuestoActivo.nombre.replace(/\s+/g,"_")}.xls`;
-      a.click(); URL.revokeObjectURL(url);
-    } catch(err) { alert("Error al exportar: "+err.message); }
+    const caps=[...new Set(items.map(i=>i.capitulo||"VARIOS"))];
+    let csv=`PRESUPUESTO: ${presupuestoActivo.nombre}\nCLIENTE: ${presupuestoActivo.cliente_nombre}\nFECHA: ${new Date().toLocaleDateString("es-EC")}\n\n`;
+    csv+=`CAPÍTULO\tDESCRIPCIÓN\tUNIDAD\tCANTIDAD\tP.UNITARIO\tTOTAL\n`;
+    for (const cap of caps) {
+      const ci=items.filter(i=>(i.capitulo||"VARIOS")===cap);
+      csv+=`\n${cap}\n`;
+      for (const it of ci) csv+=`\t${it.descripcion}\t${it.unidad}\t${it.cantidad}\t${it.precio_unitario}\t${it.total}\n`;
+      csv+=`\t\t\t\tSUBTOTAL ${cap}\t${ci.reduce((s,i)=>s+(Number(i.total)||0),0).toFixed(2)}\n`;
+    }
+    csv+=`\n\t\t\t\tSUBTOTAL\t${(presupuestoActivo.subtotal||0).toFixed(2)}\n`;
+    csv+=`\t\t\t\tHONORARIOS (${presupuestoActivo.honorarios_pct}%)\t${(presupuestoActivo.honorarios_monto||0).toFixed(2)}\n`;
+    csv+=`\t\t\t\tIVA (${presupuestoActivo.iva_pct}%)\t${(presupuestoActivo.iva_monto||0).toFixed(2)}\n`;
+    csv+=`\t\t\t\tTOTAL\t${(presupuestoActivo.total||0).toFixed(2)}\n`;
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/tab-separated-values;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=`${presupuestoActivo.nombre.replace(/\s+/g,"_")}.xls`; a.click(); URL.revokeObjectURL(url);
     setExportando(false);
   }
 
-  const fmt = n => (Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const iS = { width:"100%", background:"#F9FAFB", border:"1px solid #E5E7EB", borderRadius:8, color:"#111", padding:"9px 12px", fontSize:13, fontFamily:"'Inter',sans-serif", boxSizing:"border-box", outline:"none" };
-  const itemsPorCap = items.reduce((acc,i) => { const c=i.capitulo||"SIN CLASIFICAR"; if(!acc[c])acc[c]=[]; acc[c].push(i); return acc; }, {});
+  const fmt=n=>(Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const iS={width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif"}}>
@@ -1419,46 +1413,32 @@ function ModuloPresupuestos({ currentUser }) {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
         <div>
           <div style={{fontSize:17,fontWeight:700,color:"#111"}}>
-            {subVista==="lista"?"💼 Presupuestos":
-             subVista==="nuevo"?"💼 Nuevo presupuesto":
-             subVista==="detalle"?`💼 ${presupuestoActivo?.nombre}`:
-             subVista==="agregarRubro"?"🔍 Agregar rubro":
-             subVista==="baseDatos"?"📊 Base de datos de rubros":
-             "📥 Alimentar base de datos"}
+            {subVista==="lista"?"💼 Presupuestos":subVista==="nuevo"?"💼 Nuevo presupuesto":subVista==="detalle"?`💼 ${presupuestoActivo?.nombre}`:subVista==="baseDatos"?"📊 Base de rubros":"📥 Alimentar BD"}
           </div>
-          {subVista==="detalle"&&presupuestoActivo&&(
-            <div style={{fontSize:12,color:"#6B7280",marginTop:2}}>{presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</div>
-          )}
+          {subVista==="detalle"&&presupuestoActivo&&<div style={{fontSize:12,color:"#6B7280",marginTop:2}}>{presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</div>}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>setSubVista("lista")} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&<>
-            <button onClick={()=>{setBusquedaRubro("");fetchRubros("","");setSubVista("baseDatos");}} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>📊 Base de rubros</button>
+            <button onClick={()=>setSubVista("baseDatos")} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>📊 Base de rubros</button>
             <button onClick={()=>setSubVista("alimentarBD")} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>📥 Alimentar BD</button>
             <button onClick={()=>setSubVista("nuevo")} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
-            <button onClick={()=>{fetchRubros("","");setSubVista("agregarRubro");}} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#374151",fontSize:12,cursor:"pointer"}}>+ Rubro de BD</button>
             <button onClick={()=>fileRef.current?.click()} style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,padding:"7px 12px",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
             <input ref={fileRef} type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
-            <button onClick={exportarExcel} disabled={exportando||items.length===0} style={{background:"#059669",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-              {exportando?"Exportando...":"📥 Exportar Excel"}
-            </button>
+            <button onClick={exportarExcel} disabled={exportando||items.length===0} style={{background:"#059669",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{exportando?"Exportando...":"📥 Exportar Excel"}</button>
           </>}
         </div>
       </div>
 
-      {/* COTIZACIÓN LEÍDA — resultado */}
+      {/* COTIZACIÓN LEÍDA */}
       {subVista==="detalle"&&uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
       {subVista==="detalle"&&cotizacionResult&&!cotizacionResult.error&&(
         <div style={{background:"#F0FDF4",border:"1.5px solid #BBF7D0",borderRadius:10,padding:14,marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#059669",marginBottom:8}}>✓ NOVA encontró {cotizacionResult.rubros?.length} rubros {cotizacionResult.proveedor?`— Proveedor: ${cotizacionResult.proveedor}`:""}</div>
-          <div style={{maxHeight:140,overflowY:"auto",marginBottom:10}}>
-            {cotizacionResult.rubros?.map((r,i)=>(
-              <div key={i} style={{fontSize:11,color:"#374151",padding:"3px 0",borderBottom:"1px solid #E5E7EB"}}>
-                {r.descripcion} · {r.unidad} · x{r.cantidad} · ${fmt(r.precio_unitario)}
-              </div>
-            ))}
+          <div style={{fontSize:13,fontWeight:600,color:"#059669",marginBottom:8}}>✓ {cotizacionResult.rubros?.length} rubros encontrados {cotizacionResult.proveedor?`— ${cotizacionResult.proveedor}`:""}</div>
+          <div style={{maxHeight:130,overflowY:"auto",marginBottom:10}}>
+            {cotizacionResult.rubros?.map((r,i)=><div key={i} style={{fontSize:11,color:"#374151",padding:"2px 0",borderBottom:"1px solid #E5E7EB"}}>{r.descripcion} · {r.unidad} · x{r.cantidad} · ${fmt(r.precio_unitario)}</div>)}
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>setCotizacionResult(null)} style={{flex:1,background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:8,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
@@ -1470,23 +1450,18 @@ function ModuloPresupuestos({ currentUser }) {
       {/* LISTA */}
       {subVista==="lista"&&(
         <div>
-          {presupuestos.length===0?(
-            <div style={{textAlign:"center",padding:"60px 0",color:"#9CA3AF"}}>
-              <div style={{fontSize:40,marginBottom:12}}>💼</div>
-              <div>Sin presupuestos. Crea el primero.</div>
-            </div>
-          ):presupuestos.map(p=>(
+          {presupuestos.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"#9CA3AF"}}><div style={{fontSize:40,marginBottom:12}}>💼</div>Sin presupuestos aún.</div>
+          :presupuestos.map(p=>(
             <div key={p.id} onClick={()=>{setPresupuestoActivo(p);fetchItems(p.id);setSubVista("detalle");}}
               style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor="#E8622A"}
-              onMouseLeave={e=>e.currentTarget.style.borderColor="#E5E7EB"}>
+              onMouseEnter={e=>e.currentTarget.style.borderColor="#E8622A"} onMouseLeave={e=>e.currentTarget.style.borderColor="#E5E7EB"}>
               <div>
                 <div style={{fontWeight:600,color:"#111",fontSize:14}}>{p.nombre}</div>
                 <div style={{fontSize:12,color:"#6B7280",marginTop:2}}>{p.cliente_nombre} · {new Date(p.created_at).toLocaleDateString("es-EC")}</div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontWeight:700,color:"#E8622A",fontSize:16}}>${fmt(p.total)}</div>
-                <div style={{fontSize:10,color:"#9CA3AF",background:p.estado==="aprobado"?"#D1FAE5":p.estado==="enviado"?"#DBEAFE":"#F3F4F6",borderRadius:20,padding:"1px 8px",display:"inline-block",marginTop:2}}>{p.estado}</div>
+                <div style={{fontSize:10,color:"#9CA3AF",background:"#F3F4F6",borderRadius:20,padding:"1px 8px",display:"inline-block",marginTop:2}}>{p.estado}</div>
               </div>
             </div>
           ))}
@@ -1498,7 +1473,7 @@ function ModuloPresupuestos({ currentUser }) {
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid #E5E7EB"}}>
           <div style={{display:"grid",gap:14}}>
             <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Nombre del presupuesto *</label>
-              <input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej: Remodelación Oficinas BdP Condado" style={iS}/></div>
+              <input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej: Remodelación BdP Condado" style={iS}/></div>
             <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Cliente *</label>
               <select value={form.cliente_id} onChange={e=>{const cl=clientes.find(c=>c.id===Number(e.target.value));setForm(p=>({...p,cliente_id:e.target.value,cliente_nombre:cl?.nombre||""}));}} style={iS}>
                 <option value="">Selecciona cliente...</option>
@@ -1514,7 +1489,7 @@ function ModuloPresupuestos({ currentUser }) {
                 <input type="number" value={form.iva_pct} onChange={e=>setForm(p=>({...p,iva_pct:e.target.value}))} style={iS}/></div>
             </div>
             <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Notas</label>
-              <textarea value={form.notas} onChange={e=>setForm(p=>({...p,notas:e.target.value}))} style={{...iS,minHeight:60,resize:"vertical"}} placeholder="Observaciones, versión, etc."/></div>
+              <textarea value={form.notas} onChange={e=>setForm(p=>({...p,notas:e.target.value}))} style={{...iS,minHeight:60,resize:"vertical"}} placeholder="Observaciones..."/></div>
           </div>
           <button onClick={crearPresupuesto} disabled={!form.nombre||!form.cliente_nombre}
             style={{width:"100%",marginTop:16,background:form.nombre&&form.cliente_nombre?"#E8622A":"#F3F4F6",border:"none",borderRadius:10,padding:12,color:form.nombre&&form.cliente_nombre?"#fff":"#9CA3AF",fontSize:14,fontWeight:600,cursor:form.nombre&&form.cliente_nombre?"pointer":"default"}}>
@@ -1523,51 +1498,68 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* DETALLE PRESUPUESTO */}
+      {/* DETALLE — capítulos y rubros */}
       {subVista==="detalle"&&presupuestoActivo&&(
         <div>
-          {items.length===0?(
-            <div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF",fontSize:13}}>
-              <div style={{fontSize:32,marginBottom:10}}>📋</div>
-              Sin rubros. Usa "+ Rubro de BD" o "🤖 Subir cotización".
-            </div>
-          ):Object.entries(itemsPorCap).map(([cap,capItems])=>(
-            <div key={cap} style={{marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#E8622A",letterSpacing:0.5,marginBottom:6,padding:"4px 8px",background:"#FFF4F0",borderRadius:6,display:"flex",justifyContent:"space-between"}}>
-                <span>{cap.toUpperCase()}</span>
-                <span>${fmt(capItems.reduce((s,i)=>s+(Number(i.total)||0),0))}</span>
+          {capitulosActivos().map(cap=>{
+            const capItems=items.filter(i=>i.capitulo===cap);
+            const capTotal=capItems.reduce((s,i)=>s+(Number(i.total)||0),0);
+            return(
+              <div key={cap} style={{marginBottom:12,background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,overflow:"hidden"}}>
+                {/* Capítulo header */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",background:"#FFF4F0",borderBottom:capItems.length>0?"1px solid #FED7AA":"none"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"#E8622A",letterSpacing:0.5}}>{cap}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"#374151"}}>${fmt(capTotal)}</span>}
+                    <button onClick={()=>{setModalRubro({capitulo:cap,modo:"bd"});buscarRubros("","");}} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
+                    <button onClick={()=>{setModalRubro({capitulo:cap,modo:"manual"});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 10px",color:"#374151",fontSize:11,cursor:"pointer"}}>+ Manual</button>
+                  </div>
+                </div>
+
+                {/* Items del capítulo */}
+                {capItems.length>0&&(
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead><tr style={{background:"#F9FAFB"}}>
+                      {["Descripción","Unidad","Cantidad","P.Unit","Total",""].map(h=>(
+                        <th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:11,color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {capItems.map(item=>(
+                        <tr key={item.id} style={{borderBottom:"1px solid #F3F4F6"}}>
+                          <td style={{padding:"5px 10px",color:"#111",maxWidth:220}}>{item.descripcion}</td>
+                          <td style={{padding:"5px 10px",color:"#6B7280",whiteSpace:"nowrap"}}>{item.unidad}</td>
+                          <td style={{padding:"5px 10px"}}>
+                            <input type="number" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
+                              style={{width:65,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                          </td>
+                          <td style={{padding:"5px 10px"}}>
+                            <input type="number" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
+                              style={{width:85,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                          </td>
+                          <td style={{padding:"5px 10px",fontWeight:600,color:"#111",whiteSpace:"nowrap"}}>${fmt(item.total)}</td>
+                          <td style={{padding:"5px 10px"}}>
+                            <button onClick={()=>eliminarItem(item.id)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
-              <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,overflow:"hidden"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead><tr style={{background:"#F9FAFB"}}>
-                    {["Descripción","Unidad","Cantidad","P.Unit","Total",""].map(h=>(
-                      <th key={h} style={{padding:"7px 10px",textAlign:"left",fontSize:11,color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody>
-                    {capItems.map(item=>(
-                      <tr key={item.id} style={{borderBottom:"1px solid #F3F4F6"}}>
-                        <td style={{padding:"6px 10px",color:"#111",maxWidth:220,fontSize:12}}>{item.descripcion}</td>
-                        <td style={{padding:"6px 10px",color:"#6B7280",whiteSpace:"nowrap"}}>{item.unidad}</td>
-                        <td style={{padding:"6px 10px"}}>
-                          <input type="number" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
-                            style={{width:65,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
-                        </td>
-                        <td style={{padding:"6px 10px"}}>
-                          <input type="number" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
-                            style={{width:85,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
-                        </td>
-                        <td style={{padding:"6px 10px",fontWeight:600,color:"#111",whiteSpace:"nowrap"}}>${fmt(item.total)}</td>
-                        <td style={{padding:"6px 10px"}}>
-                          <button onClick={()=>eliminarItem(item.id)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+            );
+          })}
+
+          {/* Agregar capítulo nuevo */}
+          <div style={{background:"#fff",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",gap:8,alignItems:"center"}}>
+            <input value={nuevoCapitulo} onChange={e=>setNuevoCapitulo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&agregarCapituloNuevo()}
+              placeholder="+ Agregar capítulo nuevo (ej: Piscina, Generador...)" style={{...iS,flex:1,background:"transparent",border:"none",padding:"0"}}/>
+            <button onClick={agregarCapituloNuevo} disabled={!nuevoCapitulo.trim()} style={{background:nuevoCapitulo.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:6,padding:"6px 12px",color:nuevoCapitulo.trim()?"#fff":"#9CA3AF",fontSize:12,cursor:nuevoCapitulo.trim()?"pointer":"default",fontWeight:600,whiteSpace:"nowrap"}}>
+              Agregar →
+            </button>
+          </div>
+
+          {/* Totales */}
           {items.length>0&&(
             <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:16}}>
               {[["Subtotal",presupuestoActivo.subtotal],[`Honorarios (${presupuestoActivo.honorarios_pct}%)`,presupuestoActivo.honorarios_monto],[`IVA (${presupuestoActivo.iva_pct}%)`,presupuestoActivo.iva_monto]].map(([l,v])=>(
@@ -1583,52 +1575,18 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* AGREGAR RUBRO DESDE BD */}
-      {subVista==="agregarRubro"&&(
-        <div>
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);fetchRubros(e.target.value,capituloFiltro);}}
-              placeholder="Buscar rubro..." style={{...iS,flex:1}}/>
-            <select value={capituloFiltro} onChange={e=>{setCapituloFiltro(e.target.value);fetchRubros(busquedaRubro,e.target.value);}} style={{...iS,width:"auto",flexShrink:0}}>
-              <option value="">Todos los capítulos</option>
-              {capitulos.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-          </div>
-          {rubros.length===0?<div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF",fontSize:13}}>Escribe para buscar rubros en la base de datos</div>
-          :rubros.map(r=>(
-            <div key={r.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
-                <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{r.capitulos?.nombre} · {r.unidad} · Ref: ${fmt(r.precio_referencia)}</div>
-              </div>
-              <button onClick={()=>{agregarItem(r);setSubVista("detalle");}}
-                style={{background:"#E8622A",border:"none",borderRadius:6,padding:"6px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",marginLeft:10}}>
-                + Agregar
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* BASE DE DATOS DE RUBROS */}
+      {/* BASE DE DATOS */}
       {subVista==="baseDatos"&&(
         <div>
           <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);fetchRubros(e.target.value,capituloFiltro);}}
-              placeholder="Buscar en base de rubros..." style={{...iS,flex:1}}
-              onFocus={()=>fetchRubros(busquedaRubro,capituloFiltro)}/>
-            <select value={capituloFiltro} onChange={e=>{setCapituloFiltro(e.target.value);fetchRubros(busquedaRubro,e.target.value);}} style={{...iS,width:"auto",flexShrink:0}}>
-              <option value="">Todos los capítulos</option>
-              {capitulos.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
+            <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value,"");}}
+              placeholder="Buscar en base de rubros..." style={{...iS,flex:1}} onFocus={()=>buscarRubros(busquedaRubro,"")}/>
           </div>
-          <div style={{fontSize:11,color:"#9CA3AF",marginBottom:10}}>Base de datos: 1,151+ rubros · Mostrando primeros 60 resultados</div>
-          {rubros.map(r=>(
+          <div style={{fontSize:11,color:"#9CA3AF",marginBottom:10}}>Base: 1,151+ rubros · Primeros 50 resultados</div>
+          {rubrosDB.map(r=>(
             <div key={r.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"10px 14px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
-                <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{r.capitulos?.nombre} · {r.unidad}</div>
-              </div>
+              <div><div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{r.capitulos?.nombre} · {r.unidad}</div></div>
               <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
                 <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
                 <div style={{fontSize:10,color:"#9CA3AF"}}>precio ref.</div>
@@ -1638,71 +1596,112 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* ALIMENTAR BASE DE DATOS */}
+      {/* ALIMENTAR BD */}
       {subVista==="alimentarBD"&&(
         <div>
           <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:18,marginBottom:16}}>
             <div style={{fontSize:14,fontWeight:600,color:"#E8622A",marginBottom:6}}>🤖 NOVA — Alimentar base de datos</div>
-            <div style={{fontSize:12,color:"#6B7280",marginBottom:14}}>Sube un presupuesto anterior, cotización de proveedor o cualquier lista de precios. NOVA extrae los rubros y los agrega a la base de datos. Si ya existe el rubro, actualiza el historial de precios.</div>
+            <div style={{fontSize:12,color:"#6B7280",marginBottom:14}}>Sube un presupuesto anterior, cotización de proveedor o cualquier lista de precios. NOVA extrae los rubros y los agrega a la base de datos.</div>
             <button onClick={()=>fileBDRef.current?.click()} disabled={uploadingBD}
               style={{background:"#E8622A",border:"none",borderRadius:8,padding:"10px 18px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              {uploadingBD?"🤖 NOVA leyendo...":"📤 Subir archivo (imagen, PDF, Excel)"}
+              {uploadingBD?"🤖 NOVA leyendo...":"📤 Subir archivo"}
             </button>
             <input ref={fileBDRef} type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerParaBD} style={{display:"none"}}/>
           </div>
-
           {bdResult&&!bdResult.error&&(
             <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,padding:18}}>
-              <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:4}}>✓ NOVA encontró {bdResult.rubros?.length} rubros</div>
-              {bdResult.proveedor&&<div style={{fontSize:12,color:"#6B7280",marginBottom:4}}>Proveedor: {bdResult.proveedor}</div>}
-              {bdResult.cliente&&<div style={{fontSize:12,color:"#6B7280",marginBottom:12}}>Cliente: {bdResult.cliente}</div>}
-              
-              {/* Proveedor y cliente inputs */}
+              <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:8}}>✓ {bdResult.rubros?.length} rubros encontrados</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                <div>
-                  <label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
-                  <input defaultValue={bdResult.proveedor||""} id="bd-proveedor" placeholder="Nombre del proveedor" style={iS}/>
-                </div>
-                <div>
-                  <label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Cliente de referencia</label>
-                  <select id="bd-cliente" style={iS}>
-                    <option value="">Sin cliente específico</option>
-                    {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-                  </select>
-                </div>
+                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
+                  <input defaultValue={bdResult.proveedor||""} id="bd-prov" placeholder="Nombre del proveedor" style={iS}/></div>
+                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Cliente de referencia</label>
+                  <select id="bd-cli" style={iS}><option value="">Sin cliente</option>
+                    {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}</select></div>
               </div>
-
-              {/* Preview rubros */}
-              <div style={{maxHeight:200,overflowY:"auto",marginBottom:12,border:"1px solid #F3F4F6",borderRadius:8}}>
+              <div style={{maxHeight:180,overflowY:"auto",marginBottom:12,border:"1px solid #F3F4F6",borderRadius:8}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead><tr style={{background:"#F9FAFB"}}>
-                    {["Capítulo","Descripción","Unidad","P.Unit"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {bdResult.rubros?.map((r,i)=>(
-                      <tr key={i} style={{borderBottom:"1px solid #F9FAFB"}}>
-                        <td style={{padding:"4px 8px",color:"#9CA3AF"}}>{r.capitulo||"-"}</td>
-                        <td style={{padding:"4px 8px",color:"#111"}}>{r.descripcion}</td>
-                        <td style={{padding:"4px 8px",color:"#6B7280"}}>{r.unidad}</td>
-                        <td style={{padding:"4px 8px",color:"#E8622A",fontWeight:600}}>${fmt(r.precio_unitario)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  <thead><tr style={{background:"#F9FAFB"}}>{["Capítulo","Descripción","Unidad","P.Unit"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>)}</tr></thead>
+                  <tbody>{bdResult.rubros?.map((r,i)=>(
+                    <tr key={i} style={{borderBottom:"1px solid #F9FAFB"}}>
+                      <td style={{padding:"4px 8px",color:"#9CA3AF"}}>{r.capitulo||"-"}</td>
+                      <td style={{padding:"4px 8px",color:"#111"}}>{r.descripcion}</td>
+                      <td style={{padding:"4px 8px",color:"#6B7280"}}>{r.unidad}</td>
+                      <td style={{padding:"4px 8px",color:"#E8622A",fontWeight:600}}>${fmt(r.precio_unitario)}</td>
+                    </tr>
+                  ))}</tbody>
                 </table>
               </div>
-
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>setBdResult(null)} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-                <button onClick={()=>guardarEnBD(
-                  document.getElementById("bd-proveedor")?.value||"",
-                  document.getElementById("bd-cliente")?.value||""
-                )} style={{flex:2,background:"#E8622A",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                  ✓ Guardar en base de datos
-                </button>
+                <button onClick={()=>guardarEnBD(document.getElementById("bd-prov")?.value||"",document.getElementById("bd-cli")?.value||"")}
+                  style={{flex:2,background:"#E8622A",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>✓ Guardar en base de datos</button>
               </div>
             </div>
           )}
           {bdResult?.error&&<div style={{color:"#DC2626",fontSize:13,padding:12,background:"#FEE2E2",borderRadius:8}}>{bdResult.error}</div>}
+        </div>
+      )}
+
+      {/* MODAL — Agregar rubro */}
+      {modalRubro&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>setModalRubro(null)}>
+          <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:520,width:"100%",maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.15)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{modalRubro.modo==="bd"?"Agregar desde base de datos":"Agregar rubro manual"}</div>
+                <div style={{fontSize:12,color:"#E8622A",marginTop:2}}>📂 {modalRubro.capitulo}</div></div>
+              <button onClick={()=>setModalRubro(null)} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
+            </div>
+
+            {/* Tabs */}
+            <div style={{display:"flex",gap:4,marginBottom:14,background:"#F3F4F6",borderRadius:8,padding:4}}>
+              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));buscarRubros("","");}} style={{flex:1,background:modalRubro.modo==="bd"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔍 De la BD</button>
+              <button onClick={()=>setModalRubro(p=>({...p,modo:"manual"}))} style={{flex:1,background:modalRubro.modo==="manual"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="manual"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>✏️ Manual</button>
+            </div>
+
+            {modalRubro.modo==="bd"&&(
+              <div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden"}}>
+                <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value,"");}}
+                  placeholder="Buscar rubro..." style={{...iS,marginBottom:10}}/>
+                <div style={{overflowY:"auto",flex:1}}>
+                  {rubrosDB.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"20px 0",fontSize:13}}>Escribe para buscar</div>
+                  :rubrosDB.map(r=>(
+                    <div key={r.id} onClick={()=>agregarItem(modalRubro.capitulo,r)}
+                      style={{padding:"10px 12px",borderBottom:"1px solid #F3F4F6",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#FFF4F0"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                      <div><div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                        <div style={{fontSize:11,color:"#9CA3AF"}}>{r.capitulos?.nombre} · {r.unidad}</div></div>
+                      <div style={{textAlign:"right",marginLeft:10,flexShrink:0}}>
+                        <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
+                        <div style={{fontSize:10,color:"#9CA3AF"}}>ref.</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {modalRubro.modo==="manual"&&(
+              <div style={{display:"grid",gap:12}}>
+                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Descripción *</label>
+                  <input value={manualRubro.descripcion} onChange={e=>setManualRubro(p=>({...p,descripcion:e.target.value}))} placeholder="Descripción del rubro" style={iS}/></div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                  <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Unidad</label>
+                    <input value={manualRubro.unidad} onChange={e=>setManualRubro(p=>({...p,unidad:e.target.value}))} placeholder="m², ml, glb..." style={iS}/></div>
+                  <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Cantidad</label>
+                    <input type="number" value={manualRubro.cantidad} onChange={e=>setManualRubro(p=>({...p,cantidad:e.target.value}))} style={iS}/></div>
+                  <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Precio unit.</label>
+                    <input type="number" value={manualRubro.precio_unitario} onChange={e=>setManualRubro(p=>({...p,precio_unitario:e.target.value}))} style={iS}/></div>
+                </div>
+                <div style={{background:"#F9FAFB",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#374151",display:"flex",justifyContent:"space-between"}}>
+                  <span>Total:</span><span style={{fontWeight:700,color:"#E8622A"}}>${fmt((Number(manualRubro.cantidad)||0)*(Number(manualRubro.precio_unitario)||0))}</span>
+                </div>
+                <button onClick={()=>agregarItem(modalRubro.capitulo,{...manualRubro,precio_referencia:manualRubro.precio_unitario})} disabled={!manualRubro.descripcion}
+                  style={{background:manualRubro.descripcion?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:"10px",color:manualRubro.descripcion?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:manualRubro.descripcion?"pointer":"default"}}>
+                  + Agregar al presupuesto
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
