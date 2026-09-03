@@ -1698,7 +1698,6 @@ function ModuloPresupuestos({ currentUser }) {
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)}/>}
-      {showAdminBD&&null}
       {!showAdminBD&&<>
       {/* COTIZACIÓN LEÍDA */}
       {subVista==="detalle"&&uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
@@ -2024,6 +2023,7 @@ function ModuloPresupuestos({ currentUser }) {
           </div>
         </div>
       )}
+      </>}
     </div>
   );
 }
