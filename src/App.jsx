@@ -1168,38 +1168,254 @@ export default function App() {
   );
 }
 
-// ── MÓDULO PRESUPUESTOS ────────────────────────────────────────────────────
-const CAPITULOS_DEFAULT = [
-  "OBRAS PRELIMINARES Y VARIOS","ESTRUCTURA","CISTERNA Y OBRAS ESPECIALES",
-  "ALBAÑILERÍA Y TABIQUERÍA","REVESTIMIENTOS","TUMBADOS Y PINTURAS",
-  "CARPINTERÍA, METAL Y VIDRIO","CERRAJERÍA Y PASAMANOS","MOBILIARIO",
-  "INSTALACIONES HIDROSANITARIAS","INSTALACIONES ELÉCTRICAS","CLIMATIZACIÓN",
-  "LETREROS Y ARTES","OBRAS EXTERIORES","EQUIPAMIENTO","VARIOS"
-];
+// ── ADMIN BASE DE DATOS ───────────────────────────────────────────────────
+function AdminBD({ onVolver }) {
+  const [tab, setTab] = useState("rubros"); // rubros | capitulos | duplicados
+  const [capitulos, setCapitulos] = useState([]);
+  const [rubros, setRubros] = useState([]);
+  const [duplicados, setDuplicados] = useState([]);
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroCapitulo, setFiltroCapitulo] = useState("");
+  const [editRubro, setEditRubro] = useState(null);
+  const [editCapitulo, setEditCapitulo] = useState(null);
+  const [nuevoCapNombre, setNuevoCapNombre] = useState("");
+  const [loadingDups, setLoadingDups] = useState(false);
+  const [page, setPage] = useState(0);
+  const PER_PAGE = 40;
 
+  useEffect(() => { fetchCapitulos(); }, []);
+  useEffect(() => { fetchRubros(); setPage(0); }, [busqueda, filtroCapitulo]);
+
+  async function fetchCapitulos() {
+    const { data } = await supabase.from("capitulos").select("*, rubros(count)").order("nombre");
+    setCapitulos(data||[]);
+  }
+  async function fetchRubros() {
+    let q = supabase.from("rubros").select("*, capitulos(nombre,id)").eq("activo",true);
+    if (busqueda) q = q.ilike("descripcion",`%${busqueda}%`);
+    if (filtroCapitulo) q = q.eq("capitulo_id", filtroCapitulo);
+    const { data } = await q.order("descripcion").range(page*PER_PAGE, (page+1)*PER_PAGE-1);
+    setRubros(data||[]);
+  }
+  async function buscarDuplicados() {
+    setLoadingDups(true);
+    const { data: todos } = await supabase.from("rubros").select("id,descripcion,unidad,precio_referencia,capitulos(nombre)").eq("activo",true).order("descripcion");
+    if (!todos) { setLoadingDups(false); return; }
+    // Find similar rubros (same first 20 chars)
+    const groups = {};
+    todos.forEach(r => {
+      const key = r.descripcion.toLowerCase().trim().slice(0,25);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    const dups = Object.values(groups).filter(g=>g.length>1);
+    setDuplicados(dups);
+    setLoadingDups(false);
+  }
+
+  // CAPITULOS actions
+  async function saveCapitulo(cap) {
+    await supabase.from("capitulos").update({ nombre:cap.nombre, orden:cap.orden }).eq("id",cap.id);
+    setEditCapitulo(null); fetchCapitulos();
+  }
+  async function deleteCapitulo(id) {
+    if (!window.confirm("¿Eliminar este capítulo? Los rubros asociados quedarán sin capítulo.")) return;
+    await supabase.from("capitulos").delete().eq("id",id);
+    fetchCapitulos();
+  }
+  async function addCapitulo() {
+    if (!nuevoCapNombre.trim()) return;
+    await supabase.from("capitulos").insert({ nombre:nuevoCapNombre.trim(), orden:capitulos.length+1 });
+    setNuevoCapNombre(""); fetchCapitulos();
+  }
+
+  // RUBROS actions
+  async function saveRubro(r) {
+    await supabase.from("rubros").update({
+      descripcion:r.descripcion, unidad:r.unidad,
+      precio_referencia:Number(r.precio_referencia),
+      capitulo_id:r.capitulo_id||null
+    }).eq("id",r.id);
+    setEditRubro(null); fetchRubros();
+  }
+  async function deleteRubro(id) {
+    if (!window.confirm("¿Eliminar este rubro de la base de datos?")) return;
+    await supabase.from("rubros").update({activo:false}).eq("id",id);
+    fetchRubros();
+  }
+  async function mergeDuplicados(keep, deleteIds) {
+    for (const id of deleteIds) {
+      // Move historial to kept rubro
+      await supabase.from("precios_historial").update({rubro_id:keep}).eq("rubro_id",id);
+      await supabase.from("rubros").update({activo:false}).eq("id",id);
+    }
+    fetchRubros(); buscarDuplicados();
+  }
+
+  const fmt = n => (Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const iS = {width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,color:"#111",padding:"8px 10px",fontSize:12,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",outline:"none"};
+  const tabS = a => ({padding:"7px 16px",border:"none",borderBottom:a?"2px solid #E8622A":"2px solid transparent",background:"transparent",color:a?"#E8622A":"#6B7280",fontSize:12,fontWeight:a?600:400,cursor:"pointer",fontFamily:"'Inter',sans-serif"});
+
+  return (
+    <div style={{fontFamily:"'Inter',sans-serif"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+        <button onClick={onVolver} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>← Volver</button>
+        <div style={{fontSize:16,fontWeight:700,color:"#111"}}>🗄️ Administrar base de datos</div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",borderBottom:"1px solid #E5E7EB",marginBottom:16}}>
+        <button onClick={()=>setTab("rubros")} style={tabS(tab==="rubros")}>📋 Rubros</button>
+        <button onClick={()=>setTab("capitulos")} style={tabS(tab==="capitulos")}>📂 Capítulos</button>
+        <button onClick={()=>{setTab("duplicados");buscarDuplicados();}} style={tabS(tab==="duplicados")}>🔍 Duplicados</button>
+      </div>
+
+      {/* ── RUBROS ── */}
+      {tab==="rubros"&&(
+        <div>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar rubro..." style={{...iS,flex:1}}/>
+            <select value={filtroCapitulo} onChange={e=>setFiltroCapitulo(e.target.value)} style={{...iS,width:"auto",flexShrink:0}}>
+              <option value="">Todos los capítulos</option>
+              {capitulos.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          </div>
+          <div style={{fontSize:11,color:"#9CA3AF",marginBottom:8}}>Mostrando {rubros.length} rubros · <button onClick={()=>{setPage(p=>Math.max(0,p-1));fetchRubros();}} style={{background:"none",border:"none",color:"#E8622A",cursor:"pointer",fontSize:11}}>◀ Ant</button> pág {page+1} <button onClick={()=>{setPage(p=>p+1);fetchRubros();}} style={{background:"none",border:"none",color:"#E8622A",cursor:"pointer",fontSize:11}}>Sig ▶</button></div>
+
+          {rubros.map(r=>(
+            <div key={r.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"10px 12px",marginBottom:6}}>
+              {editRubro?.id===r.id?(
+                <div style={{display:"grid",gap:8}}>
+                  <input value={editRubro.descripcion} onChange={e=>setEditRubro(p=>({...p,descripcion:e.target.value}))} style={iS} placeholder="Descripción"/>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                    <input value={editRubro.unidad||""} onChange={e=>setEditRubro(p=>({...p,unidad:e.target.value}))} style={iS} placeholder="Unidad"/>
+                    <input type="number" value={editRubro.precio_referencia||""} onChange={e=>setEditRubro(p=>({...p,precio_referencia:e.target.value}))} style={iS} placeholder="Precio ref."/>
+                    <select value={editRubro.capitulo_id||""} onChange={e=>setEditRubro(p=>({...p,capitulo_id:e.target.value}))} style={iS}>
+                      <option value="">Sin capítulo</option>
+                      {capitulos.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+                    </select>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>saveRubro(editRubro)} style={{flex:2,background:"#E8622A",border:"none",borderRadius:6,padding:"7px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
+                    <button onClick={()=>setEditRubro(null)} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"7px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+                  </div>
+                </div>
+              ):(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                    <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{r.capitulos?.nombre||"Sin capítulo"} · {r.unidad}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0,marginRight:12}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
+                  </div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>setEditRubro({...r,capitulo_id:r.capitulos?.id||""})} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#374151",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>deleteRubro(r.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>🗑</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── CAPÍTULOS ── */}
+      {tab==="capitulos"&&(
+        <div>
+          {/* Agregar nuevo */}
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            <input value={nuevoCapNombre} onChange={e=>setNuevoCapNombre(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&addCapitulo()}
+              placeholder="Nuevo capítulo..." style={{...iS,flex:1}}/>
+            <button onClick={addCapitulo} disabled={!nuevoCapNombre.trim()} style={{background:nuevoCapNombre.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:"8px 16px",color:nuevoCapNombre.trim()?"#fff":"#9CA3AF",fontSize:12,fontWeight:600,cursor:nuevoCapNombre.trim()?"pointer":"default",whiteSpace:"nowrap"}}>+ Agregar</button>
+          </div>
+
+          {capitulos.map(c=>(
+            <div key={c.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"10px 12px",marginBottom:6}}>
+              {editCapitulo?.id===c.id?(
+                <div style={{display:"grid",gap:8}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
+                    <input value={editCapitulo.nombre} onChange={e=>setEditCapitulo(p=>({...p,nombre:e.target.value}))} style={iS}/>
+                    <input type="number" value={editCapitulo.orden} onChange={e=>setEditCapitulo(p=>({...p,orden:e.target.value}))} style={{...iS,width:60}} placeholder="Orden"/>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>saveCapitulo(editCapitulo)} style={{flex:2,background:"#E8622A",border:"none",borderRadius:6,padding:"7px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
+                    <button onClick={()=>setEditCapitulo(null)} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:6,padding:"7px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+                  </div>
+                </div>
+              ):(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{c.orden}. {c.nombre}</div>
+                    <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{c.rubros?.[0]?.count||0} rubros</div>
+                  </div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>setEditCapitulo({...c})} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 8px",color:"#374151",fontSize:11,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>deleteCapitulo(c.id)} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer"}}>🗑</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── DUPLICADOS ── */}
+      {tab==="duplicados"&&(
+        <div>
+          {loadingDups?<div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF",fontSize:13}}>🔍 Analizando duplicados...</div>
+          :duplicados.length===0?<div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF",fontSize:13}}><div style={{fontSize:32,marginBottom:10}}>✅</div>Sin duplicados detectados.</div>
+          :<div>
+            <div style={{fontSize:12,color:"#6B7280",marginBottom:12}}>Se encontraron <strong>{duplicados.length}</strong> grupos con rubros similares. Selecciona cuál conservar y cuál eliminar.</div>
+            {duplicados.map((grupo,gi)=>(
+              <div key={gi} style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:10,padding:14,marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:600,color:"#E8622A",marginBottom:10}}>Grupo {gi+1} — {grupo.length} rubros similares</div>
+                {grupo.map((r,ri)=>(
+                  <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:ri===0?"#F0FDF4":"#FFF7F0",borderRadius:8,marginBottom:6,border:`1px solid ${ri===0?"#BBF7D0":"#FED7AA"}`}}>
+                    <div style={{flex:1}}>
+                      {ri===0&&<div style={{fontSize:9,fontWeight:700,color:"#059669",letterSpacing:1,marginBottom:2}}>CONSERVAR</div>}
+                      <div style={{fontSize:12,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                      <div style={{fontSize:10,color:"#9CA3AF"}}>{r.capitulos?.nombre} · {r.unidad} · ${fmt(r.precio_referencia)}</div>
+                    </div>
+                    <div style={{display:"flex",gap:4,marginLeft:8}}>
+                      {ri!==0&&<button onClick={()=>mergeDuplicados(grupo[0].id,[r.id])} style={{background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 8px",color:"#DC2626",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>🗑 Eliminar</button>}
+                      {ri===0&&grupo.length>1&&<button onClick={()=>mergeDuplicados(grupo[0].id,grupo.slice(1).map(x=>x.id))} style={{background:"#059669",border:"none",borderRadius:6,padding:"4px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>✓ Fusionar todos</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── MÓDULO PRESUPUESTOS ────────────────────────────────────────────────────
 function ModuloPresupuestos({ currentUser }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
   const [presupuestoActivo, setPresupuestoActivo] = useState(null);
   const [clientes, setClientes] = useState([]);
   const [capitulosDB, setCapitulosDB] = useState([]);
+  // capitulosActivos: [{nombre, orden}] ordenados
+  const [capitulosActivos, setCapitulosActivos] = useState([]);
   const [items, setItems] = useState([]);
   const [exportando, setExportando] = useState(false);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
   const [uploadingBD, setUploadingBD] = useState(false);
   const [bdResult, setBdResult] = useState(null);
-
-  // Para agregar rubro
-  const [modalRubro, setModalRubro] = useState(null); // {capitulo, modo} modo: "bd" | "manual"
+  const [modalRubro, setModalRubro] = useState(null);
   const [busquedaRubro, setBusquedaRubro] = useState("");
   const [rubrosDB, setRubrosDB] = useState([]);
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
-
-  // Form presupuesto
+  const [showAddCap, setShowAddCap] = useState(false);
+  const [showAdminBD, setShowAdminBD] = useState(false);
   const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", honorarios_pct:0, iva_pct:12, notas:"" });
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
-
   const fileRef = useRef(null);
   const fileBDRef = useRef(null);
 
@@ -1214,19 +1430,37 @@ function ModuloPresupuestos({ currentUser }) {
     setClientes(data||[]);
   }
   async function fetchCapitulosDB() {
-    const { data } = await supabase.from("capitulos").select("*").order("orden");
-    setCapitulosDB(data||[]);
+    const { data } = await supabase.from("capitulos").select("*").order("nombre");
+    setCapitulosDB((data||[]).map(c=>c.nombre));
   }
   async function fetchItems(pid) {
     const { data } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id",pid).order("orden");
     setItems(data||[]);
+    // Rebuild capitulos with order from items
+    const caps = [];
+    (data||[]).forEach(i => {
+      if (i.capitulo && !caps.find(c=>c.nombre===i.capitulo)) {
+        caps.push({ nombre: i.capitulo, orden: Math.floor(i.orden/1000)||caps.length+1 });
+      }
+    });
+    setCapitulosActivos(caps.sort((a,b)=>a.orden-b.orden));
   }
-  async function buscarRubros(q, capId) {
+  async function buscarRubros(q) {
     let query = supabase.from("rubros").select("*, capitulos(nombre)").eq("activo",true);
     if (q) query = query.ilike("descripcion",`%${q}%`);
-    if (capId) query = query.eq("capitulo_id", capId);
-    const { data } = await query.order("descripcion").limit(50);
+    const { data } = await query.order("descripcion").limit(60);
     setRubrosDB(data||[]);
+  }
+  async function saveCapituloToDB(nombre) {
+    if (!capitulosDB.includes(nombre)) {
+      await supabase.from("capitulos").insert({ nombre, orden: capitulosDB.length+1 });
+      setCapitulosDB(prev=>[...prev, nombre]);
+    }
+  }
+
+  // Get item number within capitulo: capIdx.itemIdx (e.g. 2.3)
+  function getItemNum(capOrden, itemsEnCap, itemIdx) {
+    return `${capOrden}.${itemIdx+1}`;
   }
 
   async function crearPresupuesto() {
@@ -1244,21 +1478,52 @@ function ModuloPresupuestos({ currentUser }) {
       notas:form.notas, created_by:currentUser.id
     }).select().single();
     if (!error && data) {
-      setPresupuestoActivo(data); setItems([]); setSubVista("detalle"); fetchPresupuestos();
+      setPresupuestoActivo(data); setItems([]); setCapitulosActivos([]);
+      setSubVista("detalle"); fetchPresupuestos();
     }
+  }
+
+  function agregarCapitulo(nombre) {
+    const trimmed = nombre.trim();
+    if (!trimmed || capitulosActivos.find(c=>c.nombre===trimmed)) return;
+    const nuevoOrden = capitulosActivos.length + 1;
+    setCapitulosActivos(prev=>[...prev, { nombre:trimmed, orden:nuevoOrden }]);
+    saveCapituloToDB(trimmed);
+    setNuevoCapitulo(""); setShowAddCap(false);
+  }
+
+  function eliminarCapitulo(nombre) {
+    if (items.some(i=>i.capitulo===nombre)) { alert(`Elimina primero los rubros de "${nombre}".`); return; }
+    const updated = capitulosActivos.filter(c=>c.nombre!==nombre)
+      .map((c,i)=>({...c, orden:i+1}));
+    setCapitulosActivos(updated);
+  }
+
+  function moverCapitulo(nombre, direccion) {
+    const idx = capitulosActivos.findIndex(c=>c.nombre===nombre);
+    if (idx<0) return;
+    const newIdx = idx+direccion;
+    if (newIdx<0||newIdx>=capitulosActivos.length) return;
+    const updated = [...capitulosActivos];
+    [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
+    const reordered = updated.map((c,i)=>({...c,orden:i+1}));
+    setCapitulosActivos(reordered);
   }
 
   async function agregarItem(capitulo, rubro) {
     if (!presupuestoActivo) return;
-    const orden = items.filter(i=>i.capitulo===capitulo).length;
+    const capOrden = capitulosActivos.find(c=>c.nombre===capitulo)?.orden || 1;
+    const itemsEnCap = items.filter(i=>i.capitulo===capitulo).length;
+    // orden = capOrden*1000 + itemIdx para mantener orden por capítulo
+    const orden = capOrden * 1000 + itemsEnCap;
     const { data } = await supabase.from("presupuesto_items").insert({
       presupuesto_id:presupuestoActivo.id,
       capitulo, rubro_id:rubro.id||null,
       descripcion:rubro.descripcion,
       unidad:rubro.unidad||"",
-      cantidad:rubro.cantidad||1,
-      precio_unitario:rubro.precio_unitario||rubro.precio_referencia||0,
-      total:(rubro.cantidad||1)*(rubro.precio_unitario||rubro.precio_referencia||0),
+      cantidad:Number(rubro.cantidad)||1,
+      precio_unitario:Number(rubro.precio_unitario||rubro.precio_referencia)||0,
+      total:(Number(rubro.cantidad)||1)*(Number(rubro.precio_unitario||rubro.precio_referencia)||0),
       orden
     }).select().single();
     if (data) { const ni=[...items,data]; setItems(ni); recalcTotales(ni); }
@@ -1296,21 +1561,6 @@ function ModuloPresupuestos({ currentUser }) {
     await supabase.from("presupuestos").update({subtotal,honorarios_monto,iva_monto,total}).eq("id",presupuestoActivo.id);
   }
 
-  // Capítulos activos en este presupuesto + todos los default
-  const capitulosActivos = () => {
-    const enItems = [...new Set(items.map(i=>i.capitulo))];
-    const todos = [...new Set([...CAPITULOS_DEFAULT, ...enItems])];
-    return todos;
-  };
-
-  function agregarCapituloNuevo() {
-    if (!nuevoCapitulo.trim()) return;
-    // Just adding a rubro to new capitulo will create it
-    setModalRubro({ capitulo: nuevoCapitulo.trim(), modo:"manual" });
-    setNuevoCapitulo("");
-  }
-
-  // Leer cotización de proveedor
   async function leerCotizacion(e) {
     const file=e.target.files[0]; if(!file) return;
     setUploadingCotizacion(true); setCotizacionResult(null);
@@ -1318,8 +1568,8 @@ function ModuloPresupuestos({ currentUser }) {
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       const msgContent=file.type.startsWith("image/")?[
         {type:"image",source:{type:"base64",media_type:file.type,data:base64}},
-        {type:"text",text:'Extrae todos los rubros de esta cotización. SOLO JSON: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}
-      ]:[{type:"text",text:'Extrae rubros. SOLO JSON: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}];
+        {type:"text",text:'Extrae todos los rubros. SOLO JSON sin markdown: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}
+      ]:[{type:"text",text:'Extrae rubros. SOLO JSON sin markdown: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}];
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:2000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
@@ -1330,20 +1580,25 @@ function ModuloPresupuestos({ currentUser }) {
 
   async function importarCotizacion() {
     if (!cotizacionResult?.rubros||!presupuestoActivo) return;
+    const capNombre = "COTIZACIÓN PROVEEDOR";
+    if (!capitulosActivos.find(c=>c.nombre===capNombre)) {
+      setCapitulosActivos(prev=>[...prev,{nombre:capNombre,orden:prev.length+1}]);
+    }
     const newItems=[];
     for (const r of cotizacionResult.rubros) {
+      const capOrden = capitulosActivos.length + 1;
       const {data}=await supabase.from("presupuesto_items").insert({
-        presupuesto_id:presupuestoActivo.id, capitulo:"COTIZACIÓN PROVEEDOR",
+        presupuesto_id:presupuestoActivo.id, capitulo:capNombre,
         descripcion:r.descripcion, unidad:r.unidad||"",
         cantidad:r.cantidad||1, precio_unitario:r.precio_unitario||0,
-        total:(r.cantidad||1)*(r.precio_unitario||0), orden:items.length+newItems.length
+        total:(r.cantidad||1)*(r.precio_unitario||0),
+        orden:capOrden*1000+newItems.length
       }).select().single();
       if (data) newItems.push(data);
     }
     const all=[...items,...newItems]; setItems(all); setCotizacionResult(null); recalcTotales(all);
   }
 
-  // Alimentar BD
   async function leerParaBD(e) {
     const file=e.target.files[0]; if(!file) return;
     setUploadingBD(true); setBdResult(null);
@@ -1351,10 +1606,10 @@ function ModuloPresupuestos({ currentUser }) {
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       const msgContent=file.type.startsWith("image/")?[
         {type:"image",source:{type:"base64",media_type:file.type,data:base64}},
-        {type:"text",text:'Lee este presupuesto. SOLO JSON: {"proveedor":"","cliente":"","fecha":"","rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}
-      ]:[{type:"text",text:'Extrae rubros. SOLO JSON: {"proveedor":"","cliente":"","fecha":"","rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}];
+        {type:"text",text:'Lee este presupuesto. SOLO JSON sin markdown: {"proveedor":"","cliente":"","tipo":"residencial|oficinas|banca|otro","capitulos":["nombre1","nombre2"],"rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}
+      ]:[{type:"text",text:'Lee este presupuesto. SOLO JSON sin markdown: {"proveedor":"","cliente":"","tipo":"residencial|oficinas|banca|otro","capitulos":["nombre1"],"rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}'}];
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:3000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       setBdResult(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
     } catch { setBdResult({error:"Error leyendo archivo."}); }
@@ -1363,44 +1618,53 @@ function ModuloPresupuestos({ currentUser }) {
 
   async function guardarEnBD(proveedor, cliente) {
     if (!bdResult?.rubros) return;
+    let capsSaved=0;
+    for (const cap of (bdResult.capitulos||[])) {
+      if (cap && !capitulosDB.includes(cap)) {
+        await supabase.from("capitulos").insert({nombre:cap,orden:capitulosDB.length+capsSaved+1});
+        capsSaved++;
+      }
+    }
+    if (capsSaved>0) fetchCapitulosDB();
     let nuevos=0, dups=0;
     for (const r of bdResult.rubros) {
       if (!r.descripcion||!r.precio_unitario) continue;
       const {data:existe}=await supabase.from("rubros").select("id").ilike("descripcion",r.descripcion).limit(1);
       if (existe&&existe.length>0) {
         dups++;
-        await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:bdResult.fecha||new Date().getFullYear().toString()});
+        await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:new Date().getFullYear().toString()});
       } else {
         let capId=null;
         if (r.capitulo) { const {data:cap}=await supabase.from("capitulos").select("id").ilike("nombre",`%${r.capitulo}%`).limit(1); if(cap&&cap.length>0)capId=cap[0].id; }
         const {data:nr}=await supabase.from("rubros").insert({capitulo_id:capId,descripcion:r.descripcion,unidad:r.unidad||"",precio_referencia:r.precio_unitario,activo:true}).select().single();
-        if (nr) { nuevos++; await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:bdResult.fecha||new Date().getFullYear().toString()}); }
+        if (nr) { nuevos++; await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:new Date().getFullYear().toString()}); }
       }
     }
-    alert(`✅ ${nuevos} rubros nuevos guardados.\n${dups} duplicados — historial actualizado.`);
+    alert(`✅ ${capsSaved} capítulos nuevos · ${nuevos} rubros nuevos · ${dups} historial actualizado.`);
     setBdResult(null);
   }
 
-  // Exportar Excel
   async function exportarExcel() {
     if (!presupuestoActivo||items.length===0) return;
     setExportando(true);
-    const caps=[...new Set(items.map(i=>i.capitulo||"VARIOS"))];
     let csv=`PRESUPUESTO: ${presupuestoActivo.nombre}\nCLIENTE: ${presupuestoActivo.cliente_nombre}\nFECHA: ${new Date().toLocaleDateString("es-EC")}\n\n`;
-    csv+=`CAPÍTULO\tDESCRIPCIÓN\tUNIDAD\tCANTIDAD\tP.UNITARIO\tTOTAL\n`;
-    for (const cap of caps) {
-      const ci=items.filter(i=>(i.capitulo||"VARIOS")===cap);
-      csv+=`\n${cap}\n`;
-      for (const it of ci) csv+=`\t${it.descripcion}\t${it.unidad}\t${it.cantidad}\t${it.precio_unitario}\t${it.total}\n`;
-      csv+=`\t\t\t\tSUBTOTAL ${cap}\t${ci.reduce((s,i)=>s+(Number(i.total)||0),0).toFixed(2)}\n`;
+    csv+=`N°\tDESCRIPCIÓN\tUNIDAD\tCANTIDAD\tP.UNITARIO\tTOTAL\n`;
+    for (const cap of capitulosActivos) {
+      const ci=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>a.orden-b.orden);
+      if (ci.length===0) continue;
+      csv+=`\n${cap.orden}. ${cap.nombre}\n`;
+      ci.forEach((it,idx)=>{
+        csv+=`${cap.orden}.${idx+1}\t${it.descripcion}\t${it.unidad}\t${it.cantidad}\t${it.precio_unitario}\t${it.total}\n`;
+      });
+      csv+=`\t\t\t\tSUBTOTAL ${cap.orden}. ${cap.nombre}\t${ci.reduce((s,i)=>s+(Number(i.total)||0),0).toFixed(2)}\n`;
     }
     csv+=`\n\t\t\t\tSUBTOTAL\t${(presupuestoActivo.subtotal||0).toFixed(2)}\n`;
     csv+=`\t\t\t\tHONORARIOS (${presupuestoActivo.honorarios_pct}%)\t${(presupuestoActivo.honorarios_monto||0).toFixed(2)}\n`;
     csv+=`\t\t\t\tIVA (${presupuestoActivo.iva_pct}%)\t${(presupuestoActivo.iva_monto||0).toFixed(2)}\n`;
     csv+=`\t\t\t\tTOTAL\t${(presupuestoActivo.total||0).toFixed(2)}\n`;
     const blob=new Blob(["\uFEFF"+csv],{type:"text/tab-separated-values;charset=utf-8"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download=`${presupuestoActivo.nombre.replace(/\s+/g,"_")}.xls`; a.click(); URL.revokeObjectURL(url);
+    const url=URL.createObjectURL(blob); const a=document.createElement("a");
+    a.href=url; a.download=`${presupuestoActivo.nombre.replace(/\s+/g,"_")}.xls`; a.click(); URL.revokeObjectURL(url);
     setExportando(false);
   }
 
@@ -1420,8 +1684,9 @@ function ModuloPresupuestos({ currentUser }) {
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>setSubVista("lista")} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&<>
-            <button onClick={()=>setSubVista("baseDatos")} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>📊 Base de rubros</button>
+            <button onClick={()=>{setSubVista("baseDatos");buscarRubros("");}} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>📊 Base de rubros</button>
             <button onClick={()=>setSubVista("alimentarBD")} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>📥 Alimentar BD</button>
+            <button onClick={()=>setShowAdminBD(true)} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"7px 12px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>🗄️ Admin BD</button>
             <button onClick={()=>setSubVista("nuevo")} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
@@ -1432,12 +1697,15 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       </div>
 
+      {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)}/>}
+      {showAdminBD&&null}
+      {!showAdminBD&&<>
       {/* COTIZACIÓN LEÍDA */}
       {subVista==="detalle"&&uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
       {subVista==="detalle"&&cotizacionResult&&!cotizacionResult.error&&(
         <div style={{background:"#F0FDF4",border:"1.5px solid #BBF7D0",borderRadius:10,padding:14,marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#059669",marginBottom:8}}>✓ {cotizacionResult.rubros?.length} rubros encontrados {cotizacionResult.proveedor?`— ${cotizacionResult.proveedor}`:""}</div>
-          <div style={{maxHeight:130,overflowY:"auto",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#059669",marginBottom:8}}>✓ {cotizacionResult.rubros?.length} rubros {cotizacionResult.proveedor?`— ${cotizacionResult.proveedor}`:""}</div>
+          <div style={{maxHeight:120,overflowY:"auto",marginBottom:10}}>
             {cotizacionResult.rubros?.map((r,i)=><div key={i} style={{fontSize:11,color:"#374151",padding:"2px 0",borderBottom:"1px solid #E5E7EB"}}>{r.descripcion} · {r.unidad} · x{r.cantidad} · ${fmt(r.precio_unitario)}</div>)}
           </div>
           <div style={{display:"flex",gap:8}}>
@@ -1468,11 +1736,11 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* NUEVO PRESUPUESTO */}
+      {/* NUEVO */}
       {subVista==="nuevo"&&(
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid #E5E7EB"}}>
           <div style={{display:"grid",gap:14}}>
-            <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Nombre del presupuesto *</label>
+            <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Nombre *</label>
               <input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej: Remodelación BdP Condado" style={iS}/></div>
             <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Cliente *</label>
               <select value={form.cliente_id} onChange={e=>{const cl=clientes.find(c=>c.id===Number(e.target.value));setForm(p=>({...p,cliente_id:e.target.value,cliente_nombre:cl?.nombre||""}));}} style={iS}>
@@ -1498,47 +1766,62 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* DETALLE — capítulos y rubros */}
+      {/* DETALLE */}
       {subVista==="detalle"&&presupuestoActivo&&(
         <div>
-          {capitulosActivos().map(cap=>{
-            const capItems=items.filter(i=>i.capitulo===cap);
+          {capitulosActivos.length===0&&(
+            <div style={{textAlign:"center",padding:"30px 0",color:"#9CA3AF",fontSize:13}}>
+              <div style={{fontSize:28,marginBottom:8}}>📋</div>Sin capítulos aún. Agrega el primero abajo.
+            </div>
+          )}
+
+          {capitulosActivos.map((cap,capIdx)=>{
+            const capItems=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>a.orden-b.orden);
             const capTotal=capItems.reduce((s,i)=>s+(Number(i.total)||0),0);
             return(
-              <div key={cap} style={{marginBottom:12,background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,overflow:"hidden"}}>
+              <div key={cap.nombre} style={{marginBottom:10,background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,overflow:"hidden"}}>
                 {/* Capítulo header */}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",background:"#FFF4F0",borderBottom:capItems.length>0?"1px solid #FED7AA":"none"}}>
-                  <span style={{fontSize:12,fontWeight:700,color:"#E8622A",letterSpacing:0.5}}>{cap}</span>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",background:"#FFF4F0"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {/* Orden buttons */}
+                    <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                      <button onClick={()=>moverCapitulo(cap.nombre,-1)} disabled={capIdx===0}
+                        style={{background:"none",border:"none",color:capIdx===0?"#E5E7EB":"#9CA3AF",cursor:capIdx===0?"default":"pointer",fontSize:10,padding:"0 2px",lineHeight:1}}>▲</button>
+                      <button onClick={()=>moverCapitulo(cap.nombre,1)} disabled={capIdx===capitulosActivos.length-1}
+                        style={{background:"none",border:"none",color:capIdx===capitulosActivos.length-1?"#E5E7EB":"#9CA3AF",cursor:capIdx===capitulosActivos.length-1?"default":"pointer",fontSize:10,padding:"0 2px",lineHeight:1}}>▼</button>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:700,color:"#E8622A"}}>{cap.orden}. {cap.nombre}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
                     {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"#374151"}}>${fmt(capTotal)}</span>}
-                    <button onClick={()=>{setModalRubro({capitulo:cap,modo:"bd"});buscarRubros("","");}} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
-                    <button onClick={()=>{setModalRubro({capitulo:cap,modo:"manual"});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 10px",color:"#374151",fontSize:11,cursor:"pointer"}}>+ Manual</button>
+                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"bd"});setBusquedaRubro("");buscarRubros("");}} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
+                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"manual"});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 10px",color:"#374151",fontSize:11,cursor:"pointer"}}>+ Manual</button>
+                    <button onClick={()=>eliminarCapitulo(cap.nombre)} style={{background:"none",border:"none",color:"#DC2626",fontSize:14,cursor:"pointer",padding:"0 2px"}}>✕</button>
                   </div>
                 </div>
-
-                {/* Items del capítulo */}
                 {capItems.length>0&&(
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead><tr style={{background:"#F9FAFB"}}>
-                      {["Descripción","Unidad","Cantidad","P.Unit","Total",""].map(h=>(
-                        <th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:11,color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>
+                      {["N°","Descripción","Unidad","Cantidad","P.Unit","Total",""].map(h=>(
+                        <th key={h} style={{padding:"6px 8px",textAlign:"left",fontSize:10,color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>
                       ))}
                     </tr></thead>
                     <tbody>
-                      {capItems.map(item=>(
+                      {capItems.map((item,itemIdx)=>(
                         <tr key={item.id} style={{borderBottom:"1px solid #F3F4F6"}}>
-                          <td style={{padding:"5px 10px",color:"#111",maxWidth:220}}>{item.descripcion}</td>
-                          <td style={{padding:"5px 10px",color:"#6B7280",whiteSpace:"nowrap"}}>{item.unidad}</td>
-                          <td style={{padding:"5px 10px"}}>
+                          <td style={{padding:"5px 8px",color:"#9CA3AF",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>{cap.orden}.{itemIdx+1}</td>
+                          <td style={{padding:"5px 8px",color:"#111",maxWidth:200,fontSize:12}}>{item.descripcion}</td>
+                          <td style={{padding:"5px 8px",color:"#6B7280",whiteSpace:"nowrap"}}>{item.unidad}</td>
+                          <td style={{padding:"5px 8px"}}>
                             <input type="number" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
-                              style={{width:65,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                              style={{width:60,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
-                          <td style={{padding:"5px 10px"}}>
+                          <td style={{padding:"5px 8px"}}>
                             <input type="number" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
-                              style={{width:85,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                              style={{width:80,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
-                          <td style={{padding:"5px 10px",fontWeight:600,color:"#111",whiteSpace:"nowrap"}}>${fmt(item.total)}</td>
-                          <td style={{padding:"5px 10px"}}>
+                          <td style={{padding:"5px 8px",fontWeight:600,color:"#111",whiteSpace:"nowrap"}}>${fmt(item.total)}</td>
+                          <td style={{padding:"5px 8px"}}>
                             <button onClick={()=>eliminarItem(item.id)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
                           </td>
                         </tr>
@@ -1550,13 +1833,35 @@ function ModuloPresupuestos({ currentUser }) {
             );
           })}
 
-          {/* Agregar capítulo nuevo */}
-          <div style={{background:"#fff",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",gap:8,alignItems:"center"}}>
-            <input value={nuevoCapitulo} onChange={e=>setNuevoCapitulo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&agregarCapituloNuevo()}
-              placeholder="+ Agregar capítulo nuevo (ej: Piscina, Generador...)" style={{...iS,flex:1,background:"transparent",border:"none",padding:"0"}}/>
-            <button onClick={agregarCapituloNuevo} disabled={!nuevoCapitulo.trim()} style={{background:nuevoCapitulo.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:6,padding:"6px 12px",color:nuevoCapitulo.trim()?"#fff":"#9CA3AF",fontSize:12,cursor:nuevoCapitulo.trim()?"pointer":"default",fontWeight:600,whiteSpace:"nowrap"}}>
-              Agregar →
-            </button>
+          {/* Agregar capítulo */}
+          <div style={{marginBottom:16}}>
+            {!showAddCap?(
+              <button onClick={()=>setShowAddCap(true)} style={{width:"100%",background:"#fff",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px",color:"#9CA3AF",fontSize:13,cursor:"pointer"}}>
+                + Agregar capítulo
+              </button>
+            ):(
+              <div style={{background:"#fff",border:"1.5px solid #E8622A",borderRadius:10,padding:14}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:8}}>Selecciona de la base de datos o escribe uno nuevo:</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12,maxHeight:120,overflowY:"auto"}}>
+                  {capitulosDB.filter(c=>!capitulosActivos.find(ca=>ca.nombre===c)).map(c=>(
+                    <button key={c} onClick={()=>agregarCapitulo(c)}
+                      style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:20,padding:"4px 12px",fontSize:11,color:"#374151",cursor:"pointer"}}
+                      onMouseEnter={e=>{e.currentTarget.style.background="#FFF4F0";e.currentTarget.style.borderColor="#E8622A";e.currentTarget.style.color="#E8622A";}}
+                      onMouseLeave={e=>{e.currentTarget.style.background="#F9FAFB";e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#374151";}}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <input value={nuevoCapitulo} onChange={e=>setNuevoCapitulo(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&agregarCapitulo(nuevoCapitulo)}
+                    placeholder="O escribe capítulo nuevo (ej: Piscina, Generador...)" style={{...iS,flex:1}}/>
+                  <button onClick={()=>agregarCapitulo(nuevoCapitulo)} disabled={!nuevoCapitulo.trim()}
+                    style={{background:nuevoCapitulo.trim()?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:"9px 14px",color:nuevoCapitulo.trim()?"#fff":"#9CA3AF",fontSize:12,fontWeight:600,cursor:nuevoCapitulo.trim()?"pointer":"default",whiteSpace:"nowrap"}}>Agregar</button>
+                  <button onClick={()=>{setShowAddCap(false);setNuevoCapitulo("");}} style={{background:"#F3F4F6",border:"none",borderRadius:8,padding:"9px 10px",color:"#6B7280",fontSize:12,cursor:"pointer"}}>×</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Totales */}
@@ -1575,14 +1880,13 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* BASE DE DATOS */}
+      {/* BASE DE RUBROS */}
       {subVista==="baseDatos"&&(
         <div>
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value,"");}}
-              placeholder="Buscar en base de rubros..." style={{...iS,flex:1}} onFocus={()=>buscarRubros(busquedaRubro,"")}/>
-          </div>
-          <div style={{fontSize:11,color:"#9CA3AF",marginBottom:10}}>Base: 1,151+ rubros · Primeros 50 resultados</div>
+          <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value);}}
+            placeholder="Buscar en base de rubros..." style={{...iS,marginBottom:12}}
+            onFocus={()=>{if(!rubrosDB.length)buscarRubros("");}}/>
+          <div style={{fontSize:11,color:"#9CA3AF",marginBottom:10}}>Base: 1,151+ rubros · Primeros 60 resultados</div>
           {rubrosDB.map(r=>(
             <div key={r.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"10px 14px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div><div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
@@ -1601,16 +1905,33 @@ function ModuloPresupuestos({ currentUser }) {
         <div>
           <div style={{background:"#fff",border:"1.5px solid #FED7AA",borderRadius:12,padding:18,marginBottom:16}}>
             <div style={{fontSize:14,fontWeight:600,color:"#E8622A",marginBottom:6}}>🤖 NOVA — Alimentar base de datos</div>
-            <div style={{fontSize:12,color:"#6B7280",marginBottom:14}}>Sube un presupuesto anterior, cotización de proveedor o cualquier lista de precios. NOVA extrae los rubros y los agrega a la base de datos.</div>
+            <div style={{fontSize:12,color:"#6B7280",marginBottom:14}}>Sube presupuestos anteriores o cotizaciones. NOVA extrae capítulos y rubros. Los capítulos nuevos quedan disponibles para futuros presupuestos.</div>
             <button onClick={()=>fileBDRef.current?.click()} disabled={uploadingBD}
               style={{background:"#E8622A",border:"none",borderRadius:8,padding:"10px 18px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              {uploadingBD?"🤖 NOVA leyendo...":"📤 Subir archivo"}
+              {uploadingBD?"🤖 NOVA analizando...":"📤 Subir archivo"}
             </button>
             <input ref={fileBDRef} type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerParaBD} style={{display:"none"}}/>
           </div>
           {bdResult&&!bdResult.error&&(
             <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,padding:18}}>
-              <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:8}}>✓ {bdResult.rubros?.length} rubros encontrados</div>
+              <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:8}}>✓ NOVA analizó el archivo</div>
+              <div style={{display:"flex",gap:16,marginBottom:12,flexWrap:"wrap"}}>
+                <div style={{fontSize:12,color:"#6B7280"}}>📋 <strong>{bdResult.rubros?.length}</strong> rubros</div>
+                <div style={{fontSize:12,color:"#6B7280"}}>📂 <strong>{bdResult.capitulos?.length}</strong> capítulos</div>
+                {bdResult.tipo&&<div style={{fontSize:12,color:"#6B7280"}}>🏗 <strong>{bdResult.tipo}</strong></div>}
+              </div>
+              {bdResult.capitulos?.length>0&&(
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:6}}>Capítulos detectados:</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                    {bdResult.capitulos.map((c,i)=>(
+                      <span key={i} style={{background:capitulosDB.includes(c)?"#F3F4F6":"#FFF4F0",border:`1px solid ${capitulosDB.includes(c)?"#E5E7EB":"#FED7AA"}`,borderRadius:20,padding:"2px 10px",fontSize:11,color:capitulosDB.includes(c)?"#6B7280":"#E8622A"}}>
+                        {c} {!capitulosDB.includes(c)&&"✨ nuevo"}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                 <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
                   <input defaultValue={bdResult.proveedor||""} id="bd-prov" placeholder="Nombre del proveedor" style={iS}/></div>
@@ -1623,7 +1944,7 @@ function ModuloPresupuestos({ currentUser }) {
                   <thead><tr style={{background:"#F9FAFB"}}>{["Capítulo","Descripción","Unidad","P.Unit"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>)}</tr></thead>
                   <tbody>{bdResult.rubros?.map((r,i)=>(
                     <tr key={i} style={{borderBottom:"1px solid #F9FAFB"}}>
-                      <td style={{padding:"4px 8px",color:"#9CA3AF"}}>{r.capitulo||"-"}</td>
+                      <td style={{padding:"4px 8px",color:"#9CA3AF",fontSize:10}}>{r.capitulo||"-"}</td>
                       <td style={{padding:"4px 8px",color:"#111"}}>{r.descripcion}</td>
                       <td style={{padding:"4px 8px",color:"#6B7280"}}>{r.unidad}</td>
                       <td style={{padding:"4px 8px",color:"#E8622A",fontWeight:600}}>${fmt(r.precio_unitario)}</td>
@@ -1642,34 +1963,34 @@ function ModuloPresupuestos({ currentUser }) {
         </div>
       )}
 
-      {/* MODAL — Agregar rubro */}
-      {modalRubro&&(
+      {/* MODAL AGREGAR RUBRO */}
+      {!showAdminBD&&modalRubro&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>setModalRubro(null)}>
           <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:520,width:"100%",maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.15)"}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{modalRubro.modo==="bd"?"Agregar desde base de datos":"Agregar rubro manual"}</div>
-                <div style={{fontSize:12,color:"#E8622A",marginTop:2}}>📂 {modalRubro.capitulo}</div></div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:"#111"}}>Agregar rubro</div>
+                <div style={{fontSize:12,color:"#E8622A",marginTop:2}}>📂 {capitulosActivos.find(c=>c.nombre===modalRubro.capitulo)?.orden}. {modalRubro.capitulo}</div>
+              </div>
               <button onClick={()=>setModalRubro(null)} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
             </div>
-
-            {/* Tabs */}
-            <div style={{display:"flex",gap:4,marginBottom:14,background:"#F3F4F6",borderRadius:8,padding:4}}>
-              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));buscarRubros("","");}} style={{flex:1,background:modalRubro.modo==="bd"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔍 De la BD</button>
+            <div style={{display:"flex",gap:4,marginBottom:12,background:"#F3F4F6",borderRadius:8,padding:4}}>
+              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));buscarRubros("");}} style={{flex:1,background:modalRubro.modo==="bd"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔍 De la BD</button>
               <button onClick={()=>setModalRubro(p=>({...p,modo:"manual"}))} style={{flex:1,background:modalRubro.modo==="manual"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="manual"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>✏️ Manual</button>
             </div>
-
             {modalRubro.modo==="bd"&&(
               <div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden"}}>
-                <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value,"");}}
-                  placeholder="Buscar rubro..." style={{...iS,marginBottom:10}}/>
-                <div style={{overflowY:"auto",flex:1}}>
-                  {rubrosDB.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"20px 0",fontSize:13}}>Escribe para buscar</div>
+                <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value);}} placeholder="Buscar rubro..." style={{...iS,marginBottom:10}}/>
+                <div style={{overflowY:"auto",flex:1,border:"1px solid #F3F4F6",borderRadius:8}}>
+                  {rubrosDB.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"20px 0",fontSize:13}}>Escribe para buscar en la base de datos</div>
                   :rubrosDB.map(r=>(
-                    <div key={r.id} onClick={()=>agregarItem(modalRubro.capitulo,r)}
+                    <div key={r.id} onClick={()=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:r.precio_referencia})}
                       style={{padding:"10px 12px",borderBottom:"1px solid #F3F4F6",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
                       onMouseEnter={e=>e.currentTarget.style.background="#FFF4F0"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                      <div><div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
-                        <div style={{fontSize:11,color:"#9CA3AF"}}>{r.capitulos?.nombre} · {r.unidad}</div></div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                        <div style={{fontSize:11,color:"#9CA3AF"}}>{r.capitulos?.nombre} · {r.unidad}</div>
+                      </div>
                       <div style={{textAlign:"right",marginLeft:10,flexShrink:0}}>
                         <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
                         <div style={{fontSize:10,color:"#9CA3AF"}}>ref.</div>
@@ -1679,7 +2000,6 @@ function ModuloPresupuestos({ currentUser }) {
                 </div>
               </div>
             )}
-
             {modalRubro.modo==="manual"&&(
               <div style={{display:"grid",gap:12}}>
                 <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Descripción *</label>
