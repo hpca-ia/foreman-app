@@ -1793,7 +1793,7 @@ function ModuloPresupuestos({ currentUser }) {
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"#374151"}}>${fmt(capTotal)}</span>}
-                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"bd"});setBusquedaRubro("");buscarRubros("");}} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
+                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"bd"});setBusquedaRubro("");buscarRubros("");fetchCapitulosDB();}} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
                     <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"manual"});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 10px",color:"#374151",fontSize:11,cursor:"pointer"}}>+ Manual</button>
                     <button onClick={()=>eliminarCapitulo(cap.nombre)} style={{background:"none",border:"none",color:"#DC2626",fontSize:14,cursor:"pointer",padding:"0 2px"}}>✕</button>
                   </div>
@@ -1835,7 +1835,7 @@ function ModuloPresupuestos({ currentUser }) {
           {/* Agregar capítulo */}
           <div style={{marginBottom:16}}>
             {!showAddCap?(
-              <button onClick={()=>setShowAddCap(true)} style={{width:"100%",background:"#fff",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px",color:"#9CA3AF",fontSize:13,cursor:"pointer"}}>
+              <button onClick={()=>{setShowAddCap(true);fetchCapitulosDB();}} style={{width:"100%",background:"#fff",border:"1.5px dashed #E5E7EB",borderRadius:10,padding:"10px",color:"#9CA3AF",fontSize:13,cursor:"pointer"}}>
                 + Agregar capítulo
               </button>
             ):(
@@ -1974,7 +1974,7 @@ function ModuloPresupuestos({ currentUser }) {
               <button onClick={()=>setModalRubro(null)} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,color:"#6B7280",cursor:"pointer",fontSize:15}}>×</button>
             </div>
             <div style={{display:"flex",gap:4,marginBottom:12,background:"#F3F4F6",borderRadius:8,padding:4}}>
-              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));buscarRubros("");}} style={{flex:1,background:modalRubro.modo==="bd"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔍 De la BD</button>
+              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));setBusquedaRubro("");buscarRubros("");fetchCapitulosDB();}} style={{flex:1,background:modalRubro.modo==="bd"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔍 De la BD</button>
               <button onClick={()=>setModalRubro(p=>({...p,modo:"manual"}))} style={{flex:1,background:modalRubro.modo==="manual"?"#E8622A":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="manual"?"#fff":"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>✏️ Manual</button>
             </div>
             {modalRubro.modo==="bd"&&(
