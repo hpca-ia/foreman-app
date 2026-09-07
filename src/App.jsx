@@ -15,11 +15,11 @@ const PROJECTS_DEFAULT = [
   { id: 1,  name: "BdP Condado",       color: "#2563EB" },
   { id: 2,  name: "BdP Urdesa",        color: "#7C3AED" },
   { id: 3,  name: "BdP Banca Seguros", color: "#DB2777" },
-  { id: 4,  name: "Fowåler",            color: "#D97706" },
+  { id: 4,  name: "Fowler",            color: "#D97706" },
   { id: 5,  name: "Banderas",          color: "#059669" },
   { id: 6,  name: "Servipagos",        color: "#DC2626" },
-  { id: 7,  name: "Zuleta",            color: "#0891B2" },
-  { id: 8,  name: "La Quinta",         color: "#65A30D" },
+  { id: 7,  name: "Zuleta",            color: "#ÅΩ0891B2" },
+  { id: 8,  name: "La Quinta",         color: "#6Å5A30D" },
   { id: 9,  name: "ManEugenia",        color: "#9333EA" },
 ];
 
@@ -1423,7 +1423,10 @@ function ModuloPresupuestos({ currentUser }) {
   const [cotizacionResult, setCotizacionResult] = useState(null);
   const [uploadingBD, setUploadingBD] = useState(false);
   const [bdResult, setBdResult] = useState(null);
+  const [bdRubros, setBdRubros] = useState([]); // editable rubros list
+  const [bdMeta, setBdMeta] = useState({ proveedor:"", cliente:"", fecha:new Date().getFullYear().toString() });
   const [modalRubro, setModalRubro] = useState(null);
+  const [rubroSeleccionado, setRubroSeleccionado] = useState(null); // rubro with historial expanded
   const [busquedaRubro, setBusquedaRubro] = useState("");
   const [rubrosDB, setRubrosDB] = useState([]);
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
@@ -1461,7 +1464,7 @@ function ModuloPresupuestos({ currentUser }) {
     setCapitulosActivos(caps.sort((a,b)=>a.orden-b.orden));
   }
   async function buscarRubros(q) {
-    let query = supabase.from("rubros").select("*, capitulos(nombre)").eq("activo",true);
+    let query = supabase.from("rubros").select("*, capitulos(nombre), precios_historial(precio_unitario,cliente_nombre,fecha)").eq("activo",true);
     if (q) query = query.ilike("descripcion",`%${q}%`);
     const { data } = await query.order("descripcion").limit(60);
     setRubrosDB(data||[]);
@@ -1640,13 +1643,19 @@ function ModuloPresupuestos({ currentUser }) {
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
-      setBdResult(JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim()));
+      const parsed = JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
+      setBdResult(parsed);
+      setBdRubros(parsed.rubros||[]);
+      setBdMeta({ proveedor:parsed.proveedor||"", cliente:parsed.cliente||"", fecha:new Date().getFullYear().toString() });
     } catch(err) { setBdResult({error:"Error leyendo: "+err.message}); }
     setUploadingBD(false); e.target.value="";
   }
 
-  async function guardarEnBD(proveedor, cliente) {
-    if (!bdResult?.rubros) return;
+  async function guardarEnBD() {
+    if (!bdRubros.length) return;
+    const proveedor = bdMeta.proveedor;
+    const cliente = bdMeta.cliente;
+    const fecha = bdMeta.fecha;
     let capsSaved=0;
     for (const cap of (bdResult.capitulos||[])) {
       if (cap && !capitulosDB.includes(cap)) {
@@ -1656,17 +1665,17 @@ function ModuloPresupuestos({ currentUser }) {
     }
     if (capsSaved>0) fetchCapitulosDB();
     let nuevos=0, dups=0;
-    for (const r of bdResult.rubros) {
+    for (const r of bdRubros) {
       if (!r.descripcion||!r.precio_unitario) continue;
       const {data:existe}=await supabase.from("rubros").select("id").ilike("descripcion",r.descripcion).limit(1);
       if (existe&&existe.length>0) {
         dups++;
-        await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:new Date().getFullYear().toString()});
+        await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:fecha});
       } else {
         let capId=null;
         if (r.capitulo) { const {data:cap}=await supabase.from("capitulos").select("id").ilike("nombre",`%${r.capitulo}%`).limit(1); if(cap&&cap.length>0)capId=cap[0].id; }
         const {data:nr}=await supabase.from("rubros").insert({capitulo_id:capId,descripcion:r.descripcion,unidad:r.unidad||"",precio_referencia:r.precio_unitario,activo:true}).select().single();
-        if (nr) { nuevos++; await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:new Date().getFullYear().toString()}); }
+        if (nr) { nuevos++; await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:fecha}); }
       }
     }
     alert(`✅ ${capsSaved} capítulos nuevos · ${nuevos} rubros nuevos · ${dups} historial actualizado.`);
@@ -1913,16 +1922,34 @@ function ModuloPresupuestos({ currentUser }) {
         <div>
           <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value);}}
             placeholder="Buscar en base de rubros..." style={{...iS,marginBottom:12}}
-            onFocus={()=>{if(!rubrosDB.length)buscarRubros("");}}/>
+            onFocus={()=>buscarRubros(busquedaRubro)}/>
           <div style={{fontSize:11,color:"#9CA3AF",marginBottom:10}}>Base: 1,151+ rubros · Primeros 60 resultados</div>
           {rubrosDB.map(r=>(
-            <div key={r.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"10px 14px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
-                <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{r.capitulos?.nombre} · {r.unidad}</div></div>
-              <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
-                <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
-                <div style={{fontSize:10,color:"#9CA3AF"}}>precio ref.</div>
+            <div key={r.id} style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,marginBottom:6,overflow:"hidden"}}>
+              <div onClick={()=>setRubroSeleccionado(rubroSeleccionado?.id===r.id?null:r)}
+                style={{padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}
+                onMouseEnter={e=>e.currentTarget.style.background="#FAFAFA"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{r.capitulos?.nombre} · {r.unidad}</div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
+                  <div style={{fontSize:10,color:"#9CA3AF"}}>{r.precios_historial?.length||0} clientes · {rubroSeleccionado?.id===r.id?"▲":"▼"}</div>
+                </div>
               </div>
+              {rubroSeleccionado?.id===r.id&&(
+                <div style={{background:"#F9FAFB",borderTop:"1px solid #F3F4F6",padding:"8px 14px"}}>
+                  <div style={{fontSize:10,fontWeight:600,color:"#6B7280",marginBottom:6,letterSpacing:0.5}}>HISTORIAL POR CLIENTE</div>
+                  {r.precios_historial?.length===0&&<div style={{fontSize:11,color:"#9CA3AF"}}>Sin historial.</div>}
+                  {[...new Map(r.precios_historial?.map(h=>[h.cliente_nombre,h])).values()].map((h,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",background:"#fff",borderRadius:6,marginBottom:3,border:"1px solid #E5E7EB"}}>
+                      <div style={{fontSize:11,color:"#374151"}}>{h.cliente_nombre||"Sin cliente"} <span style={{color:"#9CA3AF"}}>({h.fecha})</span></div>
+                      <div style={{fontWeight:600,color:"#E8622A",fontSize:12}}>${fmt(h.precio_unitario)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -1942,48 +1969,64 @@ function ModuloPresupuestos({ currentUser }) {
           </div>
           {bdResult&&!bdResult.error&&(
             <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,padding:18}}>
-              <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:8}}>✓ NOVA analizó el archivo</div>
-              <div style={{display:"flex",gap:16,marginBottom:12,flexWrap:"wrap"}}>
-                <div style={{fontSize:12,color:"#6B7280"}}>📋 <strong>{bdResult.rubros?.length}</strong> rubros</div>
-                <div style={{fontSize:12,color:"#6B7280"}}>📂 <strong>{bdResult.capitulos?.length}</strong> capítulos</div>
-                {bdResult.tipo&&<div style={{fontSize:12,color:"#6B7280"}}>🏗 <strong>{bdResult.tipo}</strong></div>}
+              <div style={{fontSize:14,fontWeight:600,color:"#111",marginBottom:12}}>✓ NOVA analizó el archivo — revisa y edita antes de guardar</div>
+
+              {/* Metadata */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
+                  <input value={bdMeta.proveedor} onChange={e=>setBdMeta(p=>({...p,proveedor:e.target.value}))} placeholder="Nombre del proveedor" style={iS}/></div>
+                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Cliente de referencia</label>
+                  <select value={bdMeta.cliente} onChange={e=>setBdMeta(p=>({...p,cliente:e.target.value}))} style={iS}>
+                    <option value="">Sin cliente</option>
+                    {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                  </select></div>
+                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Año del presupuesto</label>
+                  <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
+
+              {/* Capítulos detectados */}
               {bdResult.capitulos?.length>0&&(
                 <div style={{marginBottom:12}}>
                   <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:6}}>Capítulos detectados:</div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
                     {bdResult.capitulos.map((c,i)=>(
                       <span key={i} style={{background:capitulosDB.includes(c)?"#F3F4F6":"#FFF4F0",border:`1px solid ${capitulosDB.includes(c)?"#E5E7EB":"#FED7AA"}`,borderRadius:20,padding:"2px 10px",fontSize:11,color:capitulosDB.includes(c)?"#6B7280":"#E8622A"}}>
-                        {c} {!capitulosDB.includes(c)&&"✨ nuevo"}
+                        {c}{!capitulosDB.includes(c)&&" ✨ nuevo"}
                       </span>
                     ))}
                   </div>
                 </div>
               )}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
-                  <input defaultValue={bdResult.proveedor||""} id="bd-prov" placeholder="Nombre del proveedor" style={iS}/></div>
-                <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Cliente de referencia</label>
-                  <select id="bd-cli" style={iS}><option value="">Sin cliente</option>
-                    {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}</select></div>
+
+              {/* Rubros editables */}
+              <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:6}}>{bdRubros.length} rubros — edita o elimina antes de guardar:</div>
+              <div style={{maxHeight:300,overflowY:"auto",marginBottom:12,border:"1px solid #F3F4F6",borderRadius:8}}>
+                {bdRubros.map((r,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1.5fr 0.7fr 0.8fr auto",gap:6,padding:"6px 8px",borderBottom:"1px solid #F9FAFB",alignItems:"center"}}>
+                    <input value={r.descripcion} onChange={e=>setBdRubros(prev=>prev.map((x,j)=>j===i?{...x,descripcion:e.target.value}:x))}
+                      style={{fontSize:11,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 6px",color:"#111",background:"#FAFAFA",outline:"none"}}/>
+                    <input value={r.capitulo||""} onChange={e=>setBdRubros(prev=>prev.map((x,j)=>j===i?{...x,capitulo:e.target.value}:x))}
+                      style={{fontSize:11,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 6px",color:"#6B7280",background:"#FAFAFA",outline:"none"}} placeholder="Capítulo"/>
+                    <input value={r.unidad||""} onChange={e=>setBdRubros(prev=>prev.map((x,j)=>j===i?{...x,unidad:e.target.value}:x))}
+                      style={{fontSize:11,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 6px",color:"#6B7280",background:"#FAFAFA",outline:"none"}} placeholder="m²"/>
+                    <input type="number" value={r.precio_unitario||""} onChange={e=>setBdRubros(prev=>prev.map((x,j)=>j===i?{...x,precio_unitario:e.target.value}:x))}
+                      style={{fontSize:11,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 6px",color:"#E8622A",fontWeight:600,background:"#FAFAFA",outline:"none",textAlign:"right"}}/>
+                    <button onClick={()=>setBdRubros(prev=>prev.filter((_,j)=>j!==i))}
+                      style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:14,padding:"0 4px"}}>✕</button>
+                  </div>
+                ))}
               </div>
-              <div style={{maxHeight:180,overflowY:"auto",marginBottom:12,border:"1px solid #F3F4F6",borderRadius:8}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead><tr style={{background:"#F9FAFB"}}>{["Capítulo","Descripción","Unidad","P.Unit"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>)}</tr></thead>
-                  <tbody>{bdResult.rubros?.map((r,i)=>(
-                    <tr key={i} style={{borderBottom:"1px solid #F9FAFB"}}>
-                      <td style={{padding:"4px 8px",color:"#9CA3AF",fontSize:10}}>{r.capitulo||"-"}</td>
-                      <td style={{padding:"4px 8px",color:"#111"}}>{r.descripcion}</td>
-                      <td style={{padding:"4px 8px",color:"#6B7280"}}>{r.unidad}</td>
-                      <td style={{padding:"4px 8px",color:"#E8622A",fontWeight:600}}>${fmt(r.precio_unitario)}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
+
+              <div style={{fontSize:11,color:"#9CA3AF",marginBottom:12}}>
+                Columnas: Descripción · Capítulo · Unidad · Precio unitario · Eliminar
               </div>
+
               <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>setBdResult(null)} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-                <button onClick={()=>guardarEnBD(document.getElementById("bd-prov")?.value||"",document.getElementById("bd-cli")?.value||"")}
-                  style={{flex:2,background:"#E8622A",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>✓ Guardar en base de datos</button>
+                <button onClick={()=>{setBdResult(null);setBdRubros([]);}} style={{flex:1,background:"#F3F4F6",border:"none",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+                <button onClick={guardarEnBD} disabled={!bdRubros.length}
+                  style={{flex:2,background:bdRubros.length?"#E8622A":"#F3F4F6",border:"none",borderRadius:8,padding:10,color:bdRubros.length?"#fff":"#9CA3AF",fontSize:13,fontWeight:600,cursor:bdRubros.length?"pointer":"default"}}>
+                  ✓ Guardar {bdRubros.length} rubros en base de datos
+                </button>
               </div>
             </div>
           )}
@@ -2012,17 +2055,38 @@ function ModuloPresupuestos({ currentUser }) {
                 <div style={{overflowY:"auto",flex:1,border:"1px solid #F3F4F6",borderRadius:8}}>
                   {rubrosDB.length===0?<div style={{textAlign:"center",color:"#9CA3AF",padding:"20px 0",fontSize:13}}>Escribe para buscar en la base de datos</div>
                   :rubrosDB.map(r=>(
-                    <div key={r.id} onClick={()=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:r.precio_referencia})}
-                      style={{padding:"10px 12px",borderBottom:"1px solid #F3F4F6",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
-                      onMouseEnter={e=>e.currentTarget.style.background="#FFF4F0"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                      <div>
-                        <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
-                        <div style={{fontSize:11,color:"#9CA3AF"}}>{r.capitulos?.nombre} · {r.unidad}</div>
+                    <div key={r.id} style={{borderBottom:"1px solid #F3F4F6"}}>
+                      <div onClick={()=>setRubroSeleccionado(rubroSeleccionado?.id===r.id?null:r)}
+                        style={{padding:"10px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#FFF4F0"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:500,color:"#111"}}>{r.descripcion}</div>
+                          <div style={{fontSize:11,color:"#9CA3AF"}}>{r.capitulos?.nombre} · {r.unidad}</div>
+                        </div>
+                        <div style={{textAlign:"right",marginLeft:10,flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
+                          <div style={{fontSize:10,color:"#9CA3AF"}}>{r.precios_historial?.length||0} precios · {rubroSeleccionado?.id===r.id?"▲":"▼"}</div>
+                        </div>
                       </div>
-                      <div style={{textAlign:"right",marginLeft:10,flexShrink:0}}>
-                        <div style={{fontSize:13,fontWeight:600,color:"#E8622A"}}>${fmt(r.precio_referencia)}</div>
-                        <div style={{fontSize:10,color:"#9CA3AF"}}>ref.</div>
-                      </div>
+                      {rubroSeleccionado?.id===r.id&&(
+                        <div style={{background:"#FAFAFA",padding:"8px 12px",borderTop:"1px solid #F3F4F6"}}>
+                          <div style={{fontSize:10,fontWeight:600,color:"#6B7280",marginBottom:6,letterSpacing:0.5}}>PRECIOS POR CLIENTE</div>
+                          {r.precios_historial?.length===0&&<div style={{fontSize:11,color:"#9CA3AF"}}>Sin historial de precios.</div>}
+                          {[...new Map(r.precios_historial?.map(h=>[h.cliente_nombre,h])).values()].map((h,i)=>(
+                            <div key={i} onClick={()=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:h.precio_unitario})}
+                              style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",borderRadius:6,marginBottom:3,cursor:"pointer",background:"#fff",border:"1px solid #E5E7EB"}}
+                              onMouseEnter={e=>e.currentTarget.style.borderColor="#E8622A"} onMouseLeave={e=>e.currentTarget.style.borderColor="#E5E7EB"}>
+                              <div style={{fontSize:11,color:"#374151"}}>{h.cliente_nombre||"Sin cliente"} <span style={{color:"#9CA3AF"}}>({h.fecha})</span></div>
+                              <div style={{fontWeight:600,color:"#E8622A",fontSize:12}}>${fmt(h.precio_unitario)} <span style={{fontSize:9,color:"#9CA3AF"}}>usar este</span></div>
+                            </div>
+                          ))}
+                          <div onClick={()=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:r.precio_referencia})}
+                            style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",borderRadius:6,cursor:"pointer",background:"#FFF4F0",border:"1px solid #FED7AA",marginTop:4}}>
+                            <div style={{fontSize:11,color:"#E8622A",fontWeight:500}}>Precio promedio / referencia</div>
+                            <div style={{fontWeight:600,color:"#E8622A",fontSize:12}}>${fmt(r.precio_referencia)} <span style={{fontSize:9}}>usar</span></div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
