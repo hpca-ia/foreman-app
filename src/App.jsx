@@ -1434,7 +1434,7 @@ function ModuloPresupuestos({ currentUser }) {
   const [showAdminBD, setShowAdminBD] = useState(false);
   const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", honorarios_pct:0, iva_pct:12, notas:"" });
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
-  const fileRef = useRef(null);
+  const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
 
   useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchCapitulosDB(); }, []);
@@ -1745,8 +1745,8 @@ function ModuloPresupuestos({ currentUser }) {
             <button onClick={()=>setSubVista("nuevo")} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
-            <button onClick={()=>fileRef.current?.click()} style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,padding:"7px 12px",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
-            <input ref={fileRef} type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
+            <button onClick={()=>cotizRef.current?.click()} style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,padding:"7px 12px",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
+            <input ref={cotizRef} type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
             <button onClick={exportarExcel} disabled={exportando||items.length===0} style={{background:"#059669",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{exportando?"Exportando...":"📥 Exportar Excel"}</button>
           </>}
         </div>
