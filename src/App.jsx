@@ -1703,7 +1703,7 @@ function ModuloPresupuestos({ currentUser }) {
   async function leerParaBD(e) {
     const file=e.target.files[0]; if(!file) return;
     setUploadingBD(true); setBdResult(null);
-    const prompt='Lee este presupuesto completo. SOLO JSON sin markdown: {"proveedor":"","cliente":"","tipo":"residencial|oficinas|banca|otro","capitulos":["nombre1"],"rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}';
+    const prompt='Extrae rubros del presupuesto. SOLO JSON compacto sin espacios extra: {"proveedor":"","cliente":"","capitulos":["cap1"],"rubros":[{"c":"capitulo","d":"descripcion breve max 60 chars","u":"unidad","q":1,"p":0.00}]}. Abrevia descripciones largas. Incluye TODOS los rubros.';
     try {
       let msgContent;
       const isImage = file.type.startsWith("image/");
@@ -1717,24 +1717,77 @@ function ModuloPresupuestos({ currentUser }) {
         const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
         msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
       } else if (isExcel) {
-        // Use SheetJS to properly read Excel
+        // Use SheetJS to extract rubros directly without NOVA
         const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, {type:"array"});
-        let csvText = "";
+        const rubrosExtraidos = [];
+        const capitulosExtraidos = [];
+        let capActual = "";
+
         for (const sheetName of workbook.SheetNames) {
           const sheet = workbook.Sheets[sheetName];
-          const csv = XLSX.utils.sheet_to_csv(sheet);
-          if (csv.trim()) csvText += `\n--- HOJA: ${sheetName} ---\n${csv}`;
+          const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:""});
+          
+          for (const row of rows) {
+            const vals = row.map(v=>String(v||"").trim());
+            // Find capitulo: row where first non-empty cell is a number like "1", "2"
+            const item = vals.find(v=>v.match(/^\d+\.?\d*$/));
+            const desc = vals.find(v=>v.length>3&&!v.match(/^[\d.,]+$/));
+            
+            // Detect capitulo header (short number + long text, no price)
+            if (item && item.match(/^\d+$/) && desc && !vals.some(v=>v.match(/^\d+[.,]\d{2,}$/))) {
+              capActual = desc;
+              if (!capitulosExtraidos.includes(capActual)) capitulosExtraidos.push(capActual);
+              continue;
+            }
+            
+            // Detect rubro: item like "1.1", "2.3" with description and price
+            if (item && item.match(/^\d+\.\d+/) && desc) {
+              // Find unidad (short text like m2, ml, u, glb)
+              const unidad = vals.find(v=>v.match(/^(m2|m²|ml|u|glb|gl|kg|ton|m3|l|lt|hr|mes|dia|pza|pz|pp)$/i))||"";
+              // Find prices (numbers with decimals)
+              const precios = vals.filter(v=>v.match(/^\d+[.,]\d+$/)&&parseFloat(v.replace(",","."))<100000);
+              const precio_unitario = precios.length>0 ? parseFloat(precios[0].replace(",",".")) : 0;
+              const cantidad = vals.find(v=>v.match(/^\d+$/)&&v!==item&&parseFloat(v)<10000);
+              
+              if (desc && precio_unitario>0) {
+                rubrosExtraidos.push({
+                  capitulo: capActual,
+                  descripcion: desc.slice(0,200),
+                  unidad,
+                  cantidad: cantidad ? parseFloat(cantidad) : 1,
+                  precio_unitario
+                });
+              }
+            }
+          }
         }
-        msgContent=[{type:"text",text:`Contenido del Excel:\n\n${csvText.slice(0,15000)}\n\n${prompt}`}];
+
+        if (rubrosExtraidos.length > 0) {
+          // Direct result without NOVA
+          const directResult = {
+            proveedor: file.name.replace(/\.(xlsx|xls)$/i,""),
+            cliente: "",
+            capitulos: capitulosExtraidos,
+            rubros: rubrosExtraidos
+          };
+          setBdResult(directResult);
+          setBdRubros(directResult.rubros);
+          setBdMeta({proveedor:directResult.proveedor, cliente:"", fecha:new Date().getFullYear().toString()});
+          setUploadingBD(false); e.target.value=""; return;
+        }
+        
+        // Fallback to NOVA if direct extraction failed
+        const csv = workbook.SheetNames.map(s=>XLSX.utils.sheet_to_csv(workbook.Sheets[s])).join("\n");
+        msgContent=[{type:"text",text:`Excel:\n\n${csv.slice(0,12000)}\n\n${prompt}`}];
       } else {
         const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file);});
         msgContent=[{type:"text",text:`Contenido:\n\n${text.slice(0,10000)}\n\n${prompt}`}];
       }
 
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:16000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       let rawText = (data.content?.[0]?.text||"").trim();
       let parsed = null;
@@ -1742,7 +1795,32 @@ function ModuloPresupuestos({ currentUser }) {
         const m=rawText.match(/\{[\s\S]*\}/);
         if(m) try{parsed=JSON.parse(m[0]);}catch{}
       }
-      if(!parsed) { setBdResult({error:"NOVA no pudo leer el archivo. Respuesta: "+rawText.slice(0,200)}); setUploadingBD(false); e.target.value=""; return; }
+      if(!parsed) {
+        // Try to recover truncated JSON
+        try {
+          let partial = rawText.replace(/```json|```/g,"").trim();
+          const start = partial.indexOf("{");
+          if (start >= 0) {
+            partial = partial.slice(start);
+            let opens=0, openSq=0;
+            for(const c of partial){if(c==="{")opens++;if(c==="}")opens--;if(c==="[")openSq++;if(c==="]")openSq--;}
+            for(let i=0;i<openSq;i++) partial+="]";
+            for(let i=0;i<opens;i++) partial+="}";
+            parsed=JSON.parse(partial);
+          }
+        } catch {}
+      }
+      // Normalize compact format {c,d,u,q,p} to full format
+      if(parsed?.rubros) {
+        parsed.rubros = parsed.rubros.map(r=>({
+          capitulo: r.capitulo||r.c||"",
+          descripcion: r.descripcion||r.d||"",
+          unidad: r.unidad||r.u||"",
+          cantidad: r.cantidad||r.q||1,
+          precio_unitario: r.precio_unitario||r.p||0
+        })).filter(r=>r.descripcion);
+      }
+      if(!parsed||!parsed.rubros?.length) { setBdResult({error:"NOVA no pudo extraer rubros. El presupuesto puede ser muy grande — intenta subir por capítulos. Respuesta: "+rawText.slice(0,200)}); setUploadingBD(false); e.target.value=""; return; }
       setBdResult(parsed);
       setBdRubros(parsed.rubros||[]);
       setBdMeta({ proveedor:parsed.proveedor||"", cliente:parsed.cliente||"", fecha:new Date().getFullYear().toString() });
