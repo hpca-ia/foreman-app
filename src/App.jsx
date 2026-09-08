@@ -1562,6 +1562,37 @@ function ModuloPresupuestos({ currentUser }) {
     recalcTotales(updated);
   }
 
+  async function actualizarItemMulti(id, campos) {
+    const updated = items.map(i => {
+      if (i.id!==id) return i;
+      const u={...i,...campos};
+      u.total=(Number(u.cantidad)||0)*(Number(u.precio_unitario)||0);
+      return u;
+    });
+    setItems(updated);
+    await supabase.from("presupuesto_items").update({...campos,total:updated.find(i=>i.id===id)?.total}).eq("id",id);
+    recalcTotales(updated);
+  }
+
+  async function aplicarUtilidadCapitulo(capNombre, pct) {
+    const capItems = items.filter(i=>i.capitulo===capNombre);
+    const updated = items.map(i => {
+      if (i.capitulo!==capNombre) return i;
+      const base = i.precio_base||i.precio_unitario;
+      const nuevo = Number(base)*(1+pct/100);
+      const u={...i,utilidad_pct:pct,precio_base:base,precio_unitario:nuevo};
+      u.total=(Number(u.cantidad)||0)*nuevo;
+      return u;
+    });
+    setItems(updated);
+    for (const i of capItems) {
+      const base=i.precio_base||i.precio_unitario;
+      const nuevo=Number(base)*(1+pct/100);
+      await supabase.from("presupuesto_items").update({utilidad_pct:pct,precio_base:base,precio_unitario:nuevo,total:(i.cantidad||1)*nuevo}).eq("id",i.id);
+    }
+    recalcTotales(updated);
+  }
+
   async function eliminarItem(id) {
     await supabase.from("presupuesto_items").delete().eq("id",id);
     const u=items.filter(i=>i.id!==id); setItems(u); recalcTotales(u);
@@ -1896,10 +1927,29 @@ function ModuloPresupuestos({ currentUser }) {
                       <button onClick={()=>moverCapitulo(cap.nombre,1)} disabled={capIdx===capitulosActivos.length-1}
                         style={{background:"none",border:"none",color:capIdx===capitulosActivos.length-1?"#E5E7EB":"#9CA3AF",cursor:capIdx===capitulosActivos.length-1?"default":"pointer",fontSize:10,padding:"0 2px",lineHeight:1}}>▼</button>
                     </div>
-                    <span style={{fontSize:13,fontWeight:700,color:"#E8622A"}}>{cap.orden}. {cap.nombre}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:"#E8622A",marginRight:2}}>{cap.orden}.</span>
+                    <input
+                      defaultValue={cap.nombre}
+                      onBlur={async e=>{
+                        const nuevoNombre=e.target.value.trim();
+                        if(!nuevoNombre||nuevoNombre===cap.nombre) return;
+                        // Update items with old capitulo name
+                        await supabase.from("presupuesto_items").update({capitulo:nuevoNombre}).eq("presupuesto_id",presupuestoActivo.id).eq("capitulo",cap.nombre);
+                        setCapitulosActivos(prev=>prev.map(c=>c.nombre===cap.nombre?{...c,nombre:nuevoNombre}:c));
+                        setItems(prev=>prev.map(i=>i.capitulo===cap.nombre?{...i,capitulo:nuevoNombre}:i));
+                      }}
+                      style={{fontSize:13,fontWeight:700,color:"#E8622A",background:"transparent",border:"none",borderBottom:"1.5px dashed #FED7AA",outline:"none",minWidth:100,maxWidth:300,fontFamily:"'Inter',sans-serif"}}
+                    />
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"#374151"}}>${fmt(capTotal)}</span>}
+                    <div style={{display:"flex",alignItems:"center",gap:4,background:"#FFF7F0",border:"1px solid #FED7AA",borderRadius:6,padding:"2px 6px"}}>
+                      <span style={{fontSize:10,color:"#E8622A"}}>Util%</span>
+                      <input type="number" placeholder="0" min="0" max="100"
+                        style={{width:40,background:"transparent",border:"none",outline:"none",fontSize:11,color:"#E8622A",textAlign:"right"}}
+                        onKeyDown={e=>{if(e.key==="Enter")aplicarUtilidadCapitulo(cap.nombre,Number(e.target.value));}}
+                        onBlur={e=>{if(e.target.value)aplicarUtilidadCapitulo(cap.nombre,Number(e.target.value));}}/>
+                    </div>
                     <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"bd"});setBusquedaRubro("");buscarRubros("");fetchCapitulosDB();}} style={{background:"#E8622A",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
                     <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"manual"});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}} style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 10px",color:"#374151",fontSize:11,cursor:"pointer"}}>+ Manual</button>
                     <button onClick={()=>eliminarCapitulo(cap.nombre)} style={{background:"none",border:"none",color:"#DC2626",fontSize:14,cursor:"pointer",padding:"0 2px"}}>✕</button>
@@ -1908,7 +1958,7 @@ function ModuloPresupuestos({ currentUser }) {
                 {capItems.length>0&&(
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead><tr style={{background:"#F9FAFB"}}>
-                      {["N°","Descripción","Unidad","Cantidad","P.Unit","Total",""].map(h=>(
+                      {["N°","Descripción","Unidad","Cantidad","P.Base","Util%","P.Final","Total",""].map(h=>(
                         <th key={h} style={{padding:"6px 8px",textAlign:"left",fontSize:10,color:"#6B7280",fontWeight:600,borderBottom:"1px solid #E5E7EB"}}>{h}</th>
                       ))}
                     </tr></thead>
@@ -1916,15 +1966,26 @@ function ModuloPresupuestos({ currentUser }) {
                       {capItems.map((item,itemIdx)=>(
                         <tr key={item.id} style={{borderBottom:"1px solid #F3F4F6"}}>
                           <td style={{padding:"5px 8px",color:"#9CA3AF",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>{cap.orden}.{itemIdx+1}</td>
-                          <td style={{padding:"5px 8px",color:"#111",maxWidth:200,fontSize:12}}>{item.descripcion}</td>
+                          <td style={{padding:"5px 8px",color:"#111",maxWidth:180,fontSize:12}}>{item.descripcion}</td>
                           <td style={{padding:"5px 8px",color:"#6B7280",whiteSpace:"nowrap"}}>{item.unidad}</td>
                           <td style={{padding:"5px 8px"}}>
                             <input type="number" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
-                              style={{width:60,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                              style={{width:55,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                          </td>
+                          <td style={{padding:"5px 8px",color:"#9CA3AF",fontSize:11,whiteSpace:"nowrap"}}>${fmt(item.precio_base||item.precio_unitario)}</td>
+                          <td style={{padding:"5px 8px"}}>
+                            <input type="number" value={item.utilidad_pct||0}
+                              onChange={e=>{
+                                const pct=Number(e.target.value);
+                                const base=item.precio_base||item.precio_unitario;
+                                const nuevo=Number(base)*(1+pct/100);
+                                actualizarItemMulti(item.id,{utilidad_pct:pct,precio_unitario:nuevo,precio_base:base});
+                              }}
+                              style={{width:50,background:"#FFF7F0",border:"1px solid #FED7AA",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px"}}>
                             <input type="number" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
-                              style={{width:80,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                              style={{width:75,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px",fontWeight:600,color:"#111",whiteSpace:"nowrap"}}>${fmt(item.total)}</td>
                           <td style={{padding:"5px 8px"}}>
