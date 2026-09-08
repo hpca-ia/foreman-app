@@ -1597,8 +1597,10 @@ function ModuloPresupuestos({ currentUser }) {
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
+      console.log("NOVA response:", JSON.stringify(data).slice(0,500));
       if(data.error){setCotizacionResult({error:"Error API: "+JSON.stringify(data.error)});setUploadingCotizacion(false);e.target.value="";return;}
       const rawText=(data.content?.[0]?.text||"").trim();
+      console.log("NOVA text:", rawText.slice(0,300));
       if(!rawText){setCotizacionResult({error:"NOVA no devolvió respuesta. Intenta con una imagen más clara."});setUploadingCotizacion(false);e.target.value="";return;}
       // Try to parse JSON robustly
       let parsed=null;
