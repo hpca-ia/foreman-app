@@ -1623,6 +1623,16 @@ function ModuloPresupuestos({ currentUser }) {
         msgContent=[{type:"image",source:{type:"base64",media_type:file.type,data:base64}},{type:"text",text:prompt}];
       } else if (file.type==="application/pdf") {
         msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
+      } else if (file.name.match(/\.(xlsx|xls|csv)$/i)) {
+        const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, {type:"array"});
+        let csvText = "";
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          csvText += XLSX.utils.sheet_to_csv(sheet);
+        }
+        msgContent=[{type:"text",text:"Excel:\n\n"+csvText.slice(0,15000)+"\n\n"+prompt}];
       } else {
         const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file);});
         msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+prompt}];
@@ -1695,24 +1705,48 @@ function ModuloPresupuestos({ currentUser }) {
     setUploadingBD(true); setBdResult(null);
     const prompt='Lee este presupuesto completo. SOLO JSON sin markdown: {"proveedor":"","cliente":"","tipo":"residencial|oficinas|banca|otro","capitulos":["nombre1"],"rubros":[{"capitulo":"","descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}';
     try {
-      const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       let msgContent;
-      if (file.type.startsWith("image/")) {
+      const isImage = file.type.startsWith("image/");
+      const isPDF = file.type==="application/pdf";
+      const isExcel = file.name.match(/\.(xlsx|xls|csv)$/i);
+
+      if (isImage) {
+        const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
         msgContent=[{type:"image",source:{type:"base64",media_type:file.type,data:base64}},{type:"text",text:prompt}];
-      } else if (file.type==="application/pdf") {
+      } else if (isPDF) {
+        const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
         msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
+      } else if (isExcel) {
+        // Use SheetJS to properly read Excel
+        const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, {type:"array"});
+        let csvText = "";
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          if (csv.trim()) csvText += `\n--- HOJA: ${sheetName} ---\n${csv}`;
+        }
+        msgContent=[{type:"text",text:`Contenido del Excel:\n\n${csvText.slice(0,15000)}\n\n${prompt}`}];
       } else {
         const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file);});
-        msgContent=[{type:"text",text:`Contenido del archivo:\n\n${text.slice(0,10000)}\n\n${prompt}`}];
+        msgContent=[{type:"text",text:`Contenido:\n\n${text.slice(0,10000)}\n\n${prompt}`}];
       }
+
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
-      const parsed = JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
+      let rawText = (data.content?.[0]?.text||"").trim();
+      let parsed = null;
+      try { parsed=JSON.parse(rawText.replace(/```json|```/g,"").trim()); } catch {
+        const m=rawText.match(/\{[\s\S]*\}/);
+        if(m) try{parsed=JSON.parse(m[0]);}catch{}
+      }
+      if(!parsed) { setBdResult({error:"NOVA no pudo leer el archivo. Respuesta: "+rawText.slice(0,200)}); setUploadingBD(false); e.target.value=""; return; }
       setBdResult(parsed);
       setBdRubros(parsed.rubros||[]);
       setBdMeta({ proveedor:parsed.proveedor||"", cliente:parsed.cliente||"", fecha:new Date().getFullYear().toString() });
-    } catch(err) { setBdResult({error:"Error leyendo: "+err.message}); }
+    } catch(err) { setBdResult({error:"Error: "+err.message}); }
     setUploadingBD(false); e.target.value="";
   }
 
