@@ -9,13 +9,19 @@ export const config = {
 };
 
 async function claude(body) {
+  // Check if any message contains a PDF document
+  const hasPDF = body.messages?.some(m =>
+    Array.isArray(m.content) && m.content.some(c => c.type === "document")
+  );
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-key": process.env.ANTHROPIC_API_KEY,
+    "anthropic-version": "2023-06-01",
+  };
+  if (hasPDF) headers["anthropic-beta"] = "pdfs-2024-09-25";
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
+    headers,
     body: JSON.stringify(body),
   });
   return r.json();
@@ -46,11 +52,10 @@ export default async function handler(req, res) {
 async function pdfHandler(req, res, body) {
   const { pdfBase64 } = body;
 
-  // PASO 1 — extraer subtotales en formato minimo
   const sys1 = "Analiza este presupuesto. Extrae TODOS los subtotales. Responde SOLO JSON: {\"s\":[{\"n\":\"NOMBRE\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0}. n=nombre seccion max 4 palabras, v=monto subtotal. tg=subtotal general obra, th=con honorarios, ti=total con IVA. Sin texto extra.";
 
   const d1 = await claude({
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-4-5",
     max_tokens: 6000,
     system: sys1,
     messages: [{
@@ -67,7 +72,6 @@ async function pdfHandler(req, res, body) {
   const raw1 = d1.content?.[0]?.text || "";
   let p1 = parseJSONSafe(raw1);
 
-  // Fallback regex
   if (!p1 || !p1.s) {
     const matches = [...raw1.matchAll(/"n"\s*:\s*"([^"]{1,60})"\s*,\s*"v"\s*:\s*([\d.]+)/g)];
     if (!matches.length) return res.status(200).json({ error: "No se pudieron extraer subtotales." });
@@ -83,13 +87,12 @@ async function pdfHandler(req, res, body) {
   const sumaDetectada = Math.round(secciones.reduce((s, x) => s + (x.v || 0), 0) * 100) / 100;
   const totalObra = p1.tg || sumaDetectada;
 
-  // PASO 2 — agrupar devolviendo los subgrupos de cada rubro
   const lista = secciones.map((s, i) => i + ":" + s.n + "=" + s.v).join("|");
 
   const sys2 = "Eres experto en presupuestos de construccion Ecuador. Recibiras secciones con formato INDICE:NOMBRE=MONTO separadas por |. Agrupa las de igual naturaleza en rubros sumando montos. No mezcles: electricas, sanitarias, mobiliario, acabados, seguridad, climatizacion van separados. IMPORTANTE: en el campo ids incluye los indices de las secciones que pertenecen a ese rubro. Responde SOLO JSON: {\"r\":[{\"nm\":\"Nombre\",\"ct\":\"Categoria\",\"ids\":[0,1,2]}],\"tt\":0}";
 
   const d2 = await claude({
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-4-5",
     max_tokens: 3000,
     system: sys2,
     messages: [{
@@ -107,7 +110,6 @@ async function pdfHandler(req, res, body) {
     return res.status(200).json({ error: "NOVA no pudo agrupar. Intenta de nuevo." });
   }
 
-  // Construir rubros con subgrupos y montos calculados exactamente
   const rubros = p2.r.map(r => {
     const ids = r.ids || [];
     const subgrupos = ids
@@ -123,7 +125,6 @@ async function pdfHandler(req, res, body) {
     };
   });
 
-  // Verificar secciones huerfanas (no asignadas a ningun rubro)
   const asignados = new Set(rubros.flatMap(r => r.subgrupos.map(sg => sg.idx)));
   const huerfanos = secciones
     .map((s, i) => ({ ...s, idx: i }))
