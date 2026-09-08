@@ -1746,13 +1746,14 @@ function ModuloPresupuestos({ currentUser }) {
           </>}
           {subVista==="detalle"&&<>
             <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,padding:"7px 12px",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
-            <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
+
             <button onClick={exportarExcel} disabled={exportando||items.length===0} style={{background:"#059669",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{exportando?"Exportando...":"📥 Exportar Excel"}</button>
           </>}
         </div>
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)}/>}
+      <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
       {!showAdminBD&&<>
       {/* COTIZACIÓN LEÍDA */}
       {subVista==="detalle"&&uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
