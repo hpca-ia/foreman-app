@@ -1773,16 +1773,51 @@ function ModuloPresupuestos({ currentUser }) {
       {/* COTIZACIÓN LEÍDA */}
       {subVista==="detalle"&&uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
       {subVista==="detalle"&&cotizacionResult&&!cotizacionResult.error&&(
-        <div style={{background:"#F0FDF4",border:"1.5px solid #BBF7D0",borderRadius:10,padding:14,marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#059669",marginBottom:8}}>✓ {cotizacionResult.rubros?.length} rubros {cotizacionResult.proveedor?`— ${cotizacionResult.proveedor}`:""}</div>
-          <div style={{maxHeight:120,overflowY:"auto",marginBottom:10}}>
-            {cotizacionResult.rubros?.map((r,i)=><div key={i} style={{fontSize:11,color:"#374151",padding:"2px 0",borderBottom:"1px solid #E5E7EB"}}>{r.descripcion} · {r.unidad} · x{r.cantidad} · ${fmt(r.precio_unitario)}</div>)}
-          </div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setCotizacionResult(null)} style={{flex:1,background:"#fff",border:"1px solid #E5E7EB",borderRadius:6,padding:8,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={importarCotizacion} style={{flex:2,background:"#059669",border:"none",borderRadius:6,padding:8,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>✓ Importar al presupuesto</button>
-          </div>
-        </div>
+        <CotizacionPanel
+          result={cotizacionResult}
+          clientes={clientes}
+          capitulosActivos={capitulosActivos}
+          onCancelar={()=>setCotizacionResult(null)}
+          onImportar={(rubros, capNombre, utilidad, guardarBD, proveedor, clienteNombre, fecha)=>{
+            // Import to presupuesto
+            const capN = capNombre||"COTIZACIÓN PROVEEDOR";
+            if (!capitulosActivos.find(c=>c.nombre===capN)) {
+              setCapitulosActivos(prev=>[...prev,{nombre:capN,orden:prev.length+1}]);
+            }
+            const newItems=[];
+            const rubrosValidos=rubros.filter(r=>r.descripcion&&r.descripcion.trim());
+            supabase.from("presupuesto_items").insert(rubrosValidos.map((r,idx)=>({
+              presupuesto_id:presupuestoActivo.id,
+              capitulo:capN,
+              descripcion:r.descripcion,
+              unidad:r.unidad||"",
+              cantidad:r.cantidad||1,
+              precio_unitario:Number(r.precio_unitario_final||r.precio_unitario)||0,
+              total:(r.cantidad||1)*(Number(r.precio_unitario_final||r.precio_unitario)||0),
+              orden:(capitulosActivos.length)*1000+idx
+            }))).select().then(({data})=>{
+              if(data){
+                const all=[...items,...data];
+                setItems(all);
+                recalcTotales(all);
+              }
+            });
+            // Save to BD if requested
+            if(guardarBD && proveedor) {
+              rubrosValidos.forEach(async r=>{
+                const{data:existe}=await supabase.from("rubros").select("id").ilike("descripcion",r.descripcion).limit(1);
+                if(existe&&existe.length>0){
+                  await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:clienteNombre||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor,fecha:fecha||new Date().getFullYear().toString()});
+                } else {
+                  const{data:nr}=await supabase.from("rubros").insert({descripcion:r.descripcion,unidad:r.unidad||"",precio_referencia:r.precio_unitario,activo:true}).select().single();
+                  if(nr) await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:clienteNombre||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor,fecha:fecha||new Date().getFullYear().toString()});
+                }
+              });
+            }
+            setCotizacionResult(null);
+          }}
+          fmt={fmt}
+        />
       )}
 
       {/* LISTA */}
@@ -1937,9 +1972,24 @@ function ModuloPresupuestos({ currentUser }) {
           {/* Totales */}
           {items.length>0&&(
             <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:16}}>
-              {[["Subtotal",presupuestoActivo.subtotal],[`Honorarios (${presupuestoActivo.honorarios_pct}%)`,presupuestoActivo.honorarios_monto],[`IVA (${presupuestoActivo.iva_pct}%)`,presupuestoActivo.iva_monto]].map(([l,v])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #F3F4F6",fontSize:13,color:"#6B7280"}}>
-                  <span>{l}</span><span>${fmt(v)}</span>
+              {[["Subtotal",presupuestoActivo.subtotal,false],[`Honorarios`,presupuestoActivo.honorarios_monto,true],[`IVA (${presupuestoActivo.iva_pct}%)`,presupuestoActivo.iva_monto,false]].map(([l,v,editable])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #F3F4F6",fontSize:13,color:"#6B7280"}}>
+                  {editable?(
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span>{l}</span>
+                      <input type="number" value={presupuestoActivo.honorarios_pct||0}
+                        onChange={async e=>{
+                          const pct=Number(e.target.value);
+                          const upd={...presupuestoActivo,honorarios_pct:pct};
+                          setPresupuestoActivo(upd);
+                          await supabase.from("presupuestos").update({honorarios_pct:pct}).eq("id",presupuestoActivo.id);
+                          recalcTotales(items);
+                        }}
+                        style={{width:50,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
+                      <span style={{fontSize:11}}>%</span>
+                    </div>
+                  ):<span>{l}</span>}
+                  <span>${fmt(v)}</span>
                 </div>
               ))}
               <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 0",fontSize:16,fontWeight:700,color:"#111"}}>
@@ -2658,6 +2708,122 @@ function ModuloControlObra({ currentUser, projects }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── COTIZACIÓN PANEL ──────────────────────────────────────────────────────
+function CotizacionPanel({ result, clientes, capitulosActivos, onCancelar, onImportar, fmt }) {
+  const [capNombre, setCapNombre] = useState(result.proveedor||"COTIZACIÓN PROVEEDOR");
+  const [utilidadGlobal, setUtilidadGlobal] = useState(0);
+  const [rubros, setRubros] = useState(result.rubros?.filter(r=>r.descripcion?.trim())||[]);
+  const [guardarBD, setGuardarBD] = useState(false);
+  const [proveedor, setProveedor] = useState(result.proveedor||"");
+  const [clienteNombre, setClienteNombre] = useState("");
+  const [fecha, setFecha] = useState(new Date().getFullYear().toString());
+
+  function aplicarUtilidadGlobal(pct) {
+    setUtilidadGlobal(pct);
+    setRubros(prev=>prev.map(r=>({
+      ...r,
+      precio_unitario_final: Number(r.precio_unitario) * (1 + pct/100)
+    })));
+  }
+
+  function cambiarUtilidadRubro(idx, pct) {
+    setRubros(prev=>prev.map((r,i)=>i===idx?{
+      ...r,
+      utilidad_pct: pct,
+      precio_unitario_final: Number(r.precio_unitario) * (1 + pct/100)
+    }:r));
+  }
+
+  const iS = {background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,color:"#111",padding:"5px 8px",fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none"};
+
+  return (
+    <div style={{background:"#F0FDF4",border:"1.5px solid #BBF7D0",borderRadius:12,padding:16,marginBottom:14,fontFamily:"'Inter',sans-serif"}}>
+      <div style={{fontSize:13,fontWeight:600,color:"#059669",marginBottom:12}}>✓ NOVA encontró {rubros.length} rubros — configura antes de importar</div>
+
+      {/* Nombre del capítulo */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:3}}>Nombre del capítulo en el presupuesto</label>
+          <input value={capNombre} onChange={e=>setCapNombre(e.target.value)} style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:3}}>Utilidad global a todos los rubros (%)</label>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <input type="number" value={utilidadGlobal} onChange={e=>setUtilidadGlobal(e.target.value)} style={{...iS,width:70}}/>
+            <button onClick={()=>aplicarUtilidadGlobal(Number(utilidadGlobal))} style={{background:"#059669",border:"none",borderRadius:6,padding:"5px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>Aplicar %</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Rubros editables */}
+      <div style={{maxHeight:220,overflowY:"auto",marginBottom:12,border:"1px solid #BBF7D0",borderRadius:8,background:"#fff"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+          <thead><tr style={{background:"#F0FDF4"}}>
+            {["Descripción","Unidad","Cant","P.Original","Util%","P.Final","Total"].map(h=>(
+              <th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#059669",fontWeight:600,borderBottom:"1px solid #BBF7D0",whiteSpace:"nowrap"}}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {rubros.map((r,i)=>{
+              const pFinal = r.precio_unitario_final||r.precio_unitario||0;
+              const total = (r.cantidad||1)*pFinal;
+              return(
+                <tr key={i} style={{borderBottom:"1px solid #F0FDF4"}}>
+                  <td style={{padding:"4px 8px",color:"#111",maxWidth:180}}>{r.descripcion}</td>
+                  <td style={{padding:"4px 8px",color:"#6B7280"}}>{r.unidad}</td>
+                  <td style={{padding:"4px 8px",color:"#6B7280"}}>{r.cantidad}</td>
+                  <td style={{padding:"4px 8px",color:"#6B7280"}}>${fmt(r.precio_unitario)}</td>
+                  <td style={{padding:"4px 8px"}}>
+                    <input type="number" value={r.utilidad_pct||0} onChange={e=>cambiarUtilidadRubro(i,Number(e.target.value))}
+                      style={{...iS,width:50,textAlign:"right"}} placeholder="0"/>
+                  </td>
+                  <td style={{padding:"4px 8px",fontWeight:600,color:"#059669"}}>${fmt(pFinal)}</td>
+                  <td style={{padding:"4px 8px",fontWeight:600,color:"#111"}}>${fmt(total)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Guardar en BD */}
+      <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:10,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:guardarBD?10:0}}>
+          <input type="checkbox" id="guardar-bd" checked={guardarBD} onChange={e=>setGuardarBD(e.target.checked)} style={{cursor:"pointer"}}/>
+          <label htmlFor="guardar-bd" style={{fontSize:12,color:"#374151",cursor:"pointer",fontWeight:500}}>También guardar en base de datos de precios</label>
+        </div>
+        {guardarBD&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:8}}>
+            <div>
+              <label style={{fontSize:10,color:"#6B7280",display:"block",marginBottom:2}}>Proveedor</label>
+              <input value={proveedor} onChange={e=>setProveedor(e.target.value)} placeholder="Nombre proveedor" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#6B7280",display:"block",marginBottom:2}}>Cliente de referencia</label>
+              <select value={clienteNombre} onChange={e=>setClienteNombre(e.target.value)} style={{...iS,width:"100%",boxSizing:"border-box"}}>
+                <option value="">Sin cliente</option>
+                {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#6B7280",display:"block",marginBottom:2}}>Año</label>
+              <input value={fecha} onChange={e=>setFecha(e.target.value)} placeholder="2025" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onCancelar} style={{flex:1,background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:10,color:"#6B7280",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={()=>onImportar(rubros,capNombre,utilidadGlobal,guardarBD,proveedor,clienteNombre,fecha)}
+          style={{flex:2,background:"#059669",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+          ✓ Importar {rubros.length} rubros al presupuesto
+        </button>
+      </div>
     </div>
   );
 }
