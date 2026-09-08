@@ -18,8 +18,8 @@ const PROJECTS_DEFAULT = [
   { id: 4,  name: "Fowler",            color: "#D97706" },
   { id: 5,  name: "Banderas",          color: "#059669" },
   { id: 6,  name: "Servipagos",        color: "#DC2626" },
-  { id: 7,  name: "Zuleta",            color: "#ÅΩ0891B2" },
-  { id: 8,  name: "La Quinta",         color: "#6Å5A30D" },
+  { id: 7,  name: "Zuleta",            color: "#0891B2" },
+  { id: 8,  name: "La Quinta",         color: "#65A30D" },
   { id: 9,  name: "ManEugenia",        color: "#9333EA" },
 ];
 
@@ -1582,7 +1582,7 @@ function ModuloPresupuestos({ currentUser }) {
   async function leerCotizacion(e) {
     const file=e.target.files[0]; if(!file) return;
     setUploadingCotizacion(true); setCotizacionResult(null);
-    const prompt = 'Extrae todos los rubros de esta cotización/presupuesto. SOLO JSON sin markdown: {"proveedor":"","rubros":[{"descripcion":"","unidad":"","cantidad":0,"precio_unitario":0}]}';
+    const prompt = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: {"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00}]}';
     try {
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       let msgContent;
@@ -1591,16 +1591,31 @@ function ModuloPresupuestos({ currentUser }) {
       } else if (file.type==="application/pdf") {
         msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
       } else {
-        // Excel — read as text using FileReader
         const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file);});
-        msgContent=[{type:"text",text:`Aquí está el contenido del archivo Excel/CSV:\n\n${text.slice(0,8000)}\n\n${prompt}`}];
+        msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+prompt}];
       }
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:3000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
-      const text=(data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
-      setCotizacionResult(JSON.parse(text));
-    } catch(err) { setCotizacionResult({error:"Error leyendo archivo: "+err.message}); }
+      if(data.error){setCotizacionResult({error:"Error API: "+JSON.stringify(data.error)});setUploadingCotizacion(false);e.target.value="";return;}
+      const rawText=(data.content?.[0]?.text||"").trim();
+      if(!rawText){setCotizacionResult({error:"NOVA no devolvió respuesta. Intenta con una imagen más clara."});setUploadingCotizacion(false);e.target.value="";return;}
+      // Try to parse JSON robustly
+      let parsed=null;
+      try{
+        const clean=rawText.replace(/```json|```/g,"").trim();
+        parsed=JSON.parse(clean);
+      }catch{
+        // Try to extract JSON from text
+        const match=rawText.match(/\{[\s\S]*\}/);
+        if(match){try{parsed=JSON.parse(match[0]);}catch{}}
+      }
+      if(!parsed||!parsed.rubros||parsed.rubros.length===0){
+        setCotizacionResult({error:"NOVA no pudo extraer rubros. Respuesta: "+rawText.slice(0,200)});
+      } else {
+        setCotizacionResult(parsed);
+      }
+    } catch(err) { setCotizacionResult({error:"Error: "+err.message}); }
     setUploadingCotizacion(false); e.target.value="";
   }
 
@@ -1611,7 +1626,9 @@ function ModuloPresupuestos({ currentUser }) {
       setCapitulosActivos(prev=>[...prev,{nombre:capNombre,orden:prev.length+1}]);
     }
     const newItems=[];
-    for (const r of cotizacionResult.rubros) {
+    // Filter out empty rubros
+    const rubrosValidos = cotizacionResult.rubros.filter(r=>r.descripcion&&r.descripcion.trim()&&(r.precio_unitario||r.cantidad));
+    for (const r of rubrosValidos) {
       const capOrden = capitulosActivos.length + 1;
       const {data}=await supabase.from("presupuesto_items").insert({
         presupuesto_id:presupuestoActivo.id, capitulo:capNombre,
@@ -2130,11 +2147,14 @@ function ModuloCajaChica({ currentUser, projects, users }) {
   const [anticipos, setAnticipos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [novaLeyendo, setNovaLeyendo] = useState(false);
-  const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", monto:"", capitulo:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"" });
+  const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
   const [nuevaCajaForm, setNuevaCajaForm] = useState({ proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50 });
   const [archivoGasto, setArchivoGasto] = useState(null);
   const [archivoPreview, setArchivoPreview] = useState(null);
+  const [presupuestosProyecto, setPresupuestosProyecto] = useState([]);
+  const [capitulosPresupuesto, setCapitulosPresupuesto] = useState([]);
+  const [capitulosSeleccionados, setCapitulosSeleccionados] = useState([]);
   const fileRef = useRef(null);
   const admin = esAdmin(currentUser.role);
   const gerente = puedeControlObra(currentUser.role);
@@ -2148,6 +2168,16 @@ function ModuloCajaChica({ currentUser, projects, users }) {
     const { data } = await q; setCajas(data||[]);
   }
   async function fetchGastos(id) { const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setGastos(data||[]); }
+  async function fetchPresupuestosProyecto(proyectoNombre) {
+    const { data } = await supabase.from("presupuestos").select("id,nombre,cliente_nombre").ilike("cliente_nombre",`%${proyectoNombre}%`).order("created_at",{ascending:false});
+    setPresupuestosProyecto(data||[]);
+  }
+  async function fetchCapitulosPresupuesto(presupuestoId) {
+    const { data } = await supabase.from("presupuesto_items").select("capitulo").eq("presupuesto_id",presupuestoId);
+    const caps=[...new Set((data||[]).map(i=>i.capitulo).filter(Boolean))].sort();
+    setCapitulosPresupuesto(caps);
+    setCapitulosSeleccionados([]);
+  }
   async function fetchAnticipos(id) { const { data } = await supabase.from("cajas_anticipos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setAnticipos(data||[]); }
 
   async function crearCaja() {
@@ -2156,7 +2186,7 @@ function ModuloCajaChica({ currentUser, projects, users }) {
       proyecto_nombre:nuevaCajaForm.proyecto_nombre, responsable_id:Number(nuevaCajaForm.responsable_id),
       responsable_nombre:resUser?.name||"", limite_alerta:Number(nuevaCajaForm.limite_alerta)||50, created_by:currentUser.id
     }).select().single();
-    if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); }
+    if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); fetchPresupuestosProyecto(data.proyecto_nombre); }
   }
 
   async function agregarAnticipo() {
@@ -2210,19 +2240,32 @@ function ModuloCajaChica({ currentUser, projects, users }) {
       if(!error){const{data:u}=supabase.storage.from("task-files").getPublicUrl(path);archivoUrl=u.publicUrl;archivoNombre=archivoGasto.name;}
     }
     const monto=Number(gastoForm.monto);
+    const capitulosList = capitulosSeleccionados.length>0 ? capitulosSeleccionados : ["SIN CLASIFICAR"];
+    const montoPorCap = monto / capitulosList.length; // split equally if multiple
     const{data}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,monto,
-      capitulo:gastoForm.capitulo,proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
+      capitulo:capitulosList.join(", "),proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
       tipo:gastoForm.tipo,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
     }).select().single();
     if(data){
+      // Register in control_obra_gastos per capitulo
+      for (const cap of capitulosList) {
+        await supabase.from("control_obra_gastos").insert({
+          proyecto_nombre:cajaActiva.proyecto_nombre, capitulo:cap,
+          descripcion:gastoForm.descripcion, monto:montoPorCap,
+          fecha:gastoForm.fecha, tipo:"caja_chica",
+          gasto_caja_id:data.id, archivo_url:archivoUrl,
+          subido_por:currentUser.id, subido_por_nombre:currentUser.name
+        });
+      }
       const nuevoGastado=(cajaActiva.saldo_gastado||0)+monto;
       const nuevoDisp=(cajaActiva.saldo_total||0)-nuevoGastado;
       await supabase.from("cajas_chicas").update({saldo_gastado:nuevoGastado,saldo_disponible:nuevoDisp}).eq("id",cajaActiva.id);
       setCajaActiva(prev=>({...prev,saldo_gastado:nuevoGastado,saldo_disponible:nuevoDisp}));
       setGastos(prev=>[data,...prev]);
-      setGastoForm({descripcion:"",proveedor:"",monto:"",capitulo:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:""});
+      setGastoForm({descripcion:"",proveedor:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
+      setCapitulosSeleccionados([]);
       setArchivoGasto(null);setArchivoPreview(null);fetchCajas();
       if(nuevoDisp<=(cajaActiva.limite_alerta||50))alert(`⚠️ Saldo bajo en caja de ${cajaActiva.responsable_nombre}: $${fmt(nuevoDisp)} — Johanna debe revisar.`);
     }
@@ -2269,7 +2312,7 @@ function ModuloCajaChica({ currentUser, projects, users }) {
         <div>
           {cajas.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"#9CA3AF"}}><div style={{fontSize:40,marginBottom:12}}>💰</div>Sin cajas chicas.</div>
           :cajas.map(c=>(
-            <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);setSubVista("detalle");}}
+            <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);fetchPresupuestosProyecto(c.proyecto_nombre);setSubVista("detalle");}}
               style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer"}}
               onMouseEnter={e=>e.currentTarget.style.borderColor="#E8622A"} onMouseLeave={e=>e.currentTarget.style.borderColor="#E5E7EB"}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2349,16 +2392,39 @@ function ModuloCajaChica({ currentUser, projects, users }) {
               <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Monto *</label>
                 <input type="number" value={gastoForm.monto} onChange={e=>setGastoForm(p=>({...p,monto:e.target.value}))} placeholder="$0.00" style={iS}/></div>
             </div>
+            {/* Presupuesto */}
+            <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Presupuesto del proyecto</label>
+              <select value={gastoForm.presupuesto_id} onChange={e=>{setGastoForm(p=>({...p,presupuesto_id:e.target.value}));if(e.target.value)fetchCapitulosPresupuesto(e.target.value);else{setCapitulosPresupuesto([]);setCapitulosSeleccionados([]);}}} style={iS}>
+                <option value="">Sin asignar a presupuesto</option>
+                {presupuestosProyecto.map(p=><option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select></div>
+            {/* Capítulos */}
+            {capitulosPresupuesto.length>0&&(
+              <div>
+                <label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:6}}>Capítulo(s) al que aplica <span style={{color:"#9CA3AF"}}>(selecciona uno o varios)</span></label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {capitulosPresupuesto.map(cap=>{
+                    const sel=capitulosSeleccionados.includes(cap);
+                    return(
+                      <button key={cap} onClick={()=>setCapitulosSeleccionados(prev=>sel?prev.filter(c=>c!==cap):[...prev,cap])}
+                        style={{background:sel?"#E8622A":"#F9FAFB",border:`1.5px solid ${sel?"#E8622A":"#E5E7EB"}`,borderRadius:20,padding:"4px 12px",fontSize:11,color:sel?"#fff":"#374151",cursor:"pointer",fontWeight:sel?600:400}}>
+                        {sel?"✓ ":""}{cap}
+                      </button>
+                    );
+                  })}
+                </div>
+                {capitulosSeleccionados.length>1&&<div style={{fontSize:10,color:"#9CA3AF",marginTop:4}}>El monto se dividirá en {capitulosSeleccionados.length} capítulos (${((Number(gastoForm.monto)||0)/capitulosSeleccionados.length).toFixed(2)} c/u)</div>}
+                {capitulosSeleccionados.length===0&&<div style={{fontSize:10,color:"#D97706",marginTop:4}}>⚠ Selecciona al menos un capítulo para el control de obra</div>}
+              </div>
+            )}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Capítulo</label>
-                <input value={gastoForm.capitulo} onChange={e=>setGastoForm(p=>({...p,capitulo:e.target.value}))} placeholder="Ej: Revestimientos" style={iS}/></div>
               <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Tipo</label>
                 <select value={gastoForm.tipo} onChange={e=>setGastoForm(p=>({...p,tipo:e.target.value}))} style={iS}>
                   <option value="factura">Factura</option><option value="recibo">Recibo</option><option value="otro">Otro</option>
                 </select></div>
+              <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Fecha</label>
+                <input type="date" value={gastoForm.fecha} onChange={e=>setGastoForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
             </div>
-            <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Fecha</label>
-              <input type="date" value={gastoForm.fecha} onChange={e=>setGastoForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
             <div><label style={{fontSize:11,color:"#6B7280",fontWeight:500,display:"block",marginBottom:4}}>Notas</label>
               <textarea value={gastoForm.notas} onChange={e=>setGastoForm(p=>({...p,notas:e.target.value}))} style={{...iS,minHeight:50,resize:"vertical"}} placeholder="Observaciones..."/></div>
           </div>
