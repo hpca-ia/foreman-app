@@ -2034,26 +2034,41 @@ function ModuloPresupuestos({ currentUser }) {
           {/* Totales */}
           {items.length>0&&(
             <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:16}}>
-              {[["Subtotal",presupuestoActivo.subtotal,false],[`Honorarios`,presupuestoActivo.honorarios_monto,true],[`IVA (${presupuestoActivo.iva_pct}%)`,presupuestoActivo.iva_monto,false]].map(([l,v,editable])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #F3F4F6",fontSize:13,color:"#6B7280"}}>
-                  {editable?(
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span>{l}</span>
-                      <input type="number" value={presupuestoActivo.honorarios_pct||0}
-                        onChange={async e=>{
-                          const pct=Number(e.target.value);
-                          const upd={...presupuestoActivo,honorarios_pct:pct};
-                          setPresupuestoActivo(upd);
-                          await supabase.from("presupuestos").update({honorarios_pct:pct}).eq("id",presupuestoActivo.id);
-                          recalcTotales(items);
-                        }}
-                        style={{width:50,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
-                      <span style={{fontSize:11}}>%</span>
-                    </div>
-                  ):<span>{l}</span>}
-                  <span>${fmt(v)}</span>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #F3F4F6",fontSize:13,color:"#6B7280"}}>
+                <span>Subtotal</span><span>${fmt(presupuestoActivo.subtotal)}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #F3F4F6",fontSize:13,color:"#6B7280"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span>Honorarios</span>
+                  <input type="number" defaultValue={presupuestoActivo.honorarios_pct||0}
+                    key={presupuestoActivo.id}
+                    onBlur={async e=>{
+                      const pct=Number(e.target.value);
+                      setPresupuestoActivo(prev=>({...prev,honorarios_pct:pct}));
+                      await supabase.from("presupuestos").update({honorarios_pct:pct}).eq("id",presupuestoActivo.id);
+                      recalcTotales(items);
+                    }}
+                    style={{width:50,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
+                  <span style={{fontSize:11}}>%</span>
                 </div>
-              ))}
+                <span>${fmt(presupuestoActivo.honorarios_monto)}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #F3F4F6",fontSize:13,color:"#6B7280"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span>IVA</span>
+                  <input type="number" defaultValue={presupuestoActivo.iva_pct||12}
+                    key={`iva-${presupuestoActivo.id}`}
+                    onBlur={async e=>{
+                      const pct=Number(e.target.value);
+                      setPresupuestoActivo(prev=>({...prev,iva_pct:pct}));
+                      await supabase.from("presupuestos").update({iva_pct:pct}).eq("id",presupuestoActivo.id);
+                      recalcTotales(items);
+                    }}
+                    style={{width:50,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
+                  <span style={{fontSize:11}}>%</span>
+                </div>
+                <span>${fmt(presupuestoActivo.iva_monto)}</span>
+              </div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 0",fontSize:16,fontWeight:700,color:"#111"}}>
                 <span>TOTAL</span><span style={{color:"#E8622A"}}>${fmt(presupuestoActivo.total)}</span>
               </div>
