@@ -1595,26 +1595,39 @@ function ModuloPresupuestos({ currentUser }) {
         msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+prompt}];
       }
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       console.log("NOVA response:", JSON.stringify(data).slice(0,500));
       if(data.error){setCotizacionResult({error:"Error API: "+JSON.stringify(data.error)});setUploadingCotizacion(false);e.target.value="";return;}
       const rawText=(data.content?.[0]?.text||"").trim();
       console.log("NOVA text:", rawText.slice(0,300));
       if(!rawText){setCotizacionResult({error:"NOVA no devolvió respuesta. Intenta con una imagen más clara."});setUploadingCotizacion(false);e.target.value="";return;}
-      // Try to parse JSON robustly
+      // Parse JSON robustly
       let parsed=null;
-      try{
-        const clean=rawText.replace(/```json|```/g,"").trim();
-        parsed=JSON.parse(clean);
-      }catch{
-        // Try to extract JSON from text
-        const match=rawText.match(/\{[\s\S]*\}/);
-        if(match){try{parsed=JSON.parse(match[0]);}catch{}}
-      }
+      try {
+        // Remove markdown fences
+        let clean=rawText.replace(/```json|```/g,"").trim();
+        // Try direct parse
+        try { parsed=JSON.parse(clean); } catch {
+          // Find JSON object in text
+          const start=clean.indexOf("{");
+          const end=clean.lastIndexOf("}");
+          if(start>=0&&end>start) {
+            try { parsed=JSON.parse(clean.slice(start,end+1)); } catch {}
+          }
+        }
+      } catch(pe) { console.error("Parse error:",pe); }
+      
       if(!parsed||!parsed.rubros||parsed.rubros.length===0){
-        setCotizacionResult({error:"NOVA no pudo extraer rubros. Respuesta: "+rawText.slice(0,200)});
+        // Try to build from partial response
+        if(parsed&&parsed.rubros) {
+          setCotizacionResult({error:"NOVA extrajo 0 rubros del archivo."});
+        } else {
+          setCotizacionResult({error:"Error parseando respuesta de NOVA: "+rawText.slice(0,300)});
+        }
       } else {
+        // Filter valid rubros
+        parsed.rubros = parsed.rubros.filter(r=>r.descripcion&&r.descripcion.trim());
         setCotizacionResult(parsed);
       }
     } catch(err) { setCotizacionResult({error:"Error: "+err.message}); }
@@ -1660,7 +1673,7 @@ function ModuloPresupuestos({ currentUser }) {
         msgContent=[{type:"text",text:`Contenido del archivo:\n\n${text.slice(0,10000)}\n\n${prompt}`}];
       }
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:4000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       const parsed = JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
       setBdResult(parsed);
