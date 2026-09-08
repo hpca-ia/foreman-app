@@ -1771,8 +1771,9 @@ function ModuloPresupuestos({ currentUser }) {
       <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
       {!showAdminBD&&<>
       {/* COTIZACIÓN LEÍDA */}
-      {subVista==="detalle"&&uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
-      {subVista==="detalle"&&cotizacionResult&&!cotizacionResult.error&&(
+      {uploadingCotizacion&&<div style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"#E8622A"}}>🤖 NOVA leyendo cotización...</div>}
+      {cotizacionResult?.error&&<div style={{background:"#FEE2E2",border:"1.5px solid #FECACA",borderRadius:10,padding:12,marginBottom:12,fontSize:12,color:"#DC2626"}}>{cotizacionResult.error} <button onClick={()=>setCotizacionResult(null)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:14,marginLeft:8}}>×</button></div>}
+      {cotizacionResult&&!cotizacionResult.error&&(
         <CotizacionPanel
           result={cotizacionResult}
           clientes={clientes}
