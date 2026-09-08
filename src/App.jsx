@@ -1730,33 +1730,50 @@ function ModuloPresupuestos({ currentUser }) {
           const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:""});
           
           for (const row of rows) {
-            const vals = row.map(v=>String(v||"").trim());
-            // Find capitulo: row where first non-empty cell is a number like "1", "2"
-            const item = vals.find(v=>v.match(/^\d+\.?\d*$/));
-            const desc = vals.find(v=>v.length>3&&!v.match(/^[\d.,]+$/));
+            const vals = row.map(v=>String(v||"").trim()).filter(v=>v);
+            if (vals.length < 2) continue;
             
-            // Detect capitulo header (short number + long text, no price)
-            if (item && item.match(/^\d+$/) && desc && !vals.some(v=>v.match(/^\d+[.,]\d{2,}$/))) {
+            // Find item number (like "1", "1.1", "2.3")
+            const item = vals.find(v=>v.match(/^\d+(\.\d+)?$/));
+            // Find description (longest text that is not a number)
+            const textos = vals.filter(v=>v.length>2&&!v.match(/^[\d.,\s]+$/));
+            const desc = textos.reduce((a,b)=>b.length>a.length?b:a, "");
+            
+            if (!item || !desc) continue;
+
+            // Detect capitulo header: integer item + no decimal prices in row
+            const numeros = vals.filter(v=>v.match(/^\d+([.,]\d+)?$/)&&parseFloat(v.replace(",","."))<1000000);
+            const tienePrecios = numeros.some(v=>v.includes(".")&&parseFloat(v)>0.1);
+            
+            if (item.match(/^\d+$/) && !tienePrecios) {
               capActual = desc;
               if (!capitulosExtraidos.includes(capActual)) capitulosExtraidos.push(capActual);
               continue;
             }
             
-            // Detect rubro: item like "1.1", "2.3" with description and price
-            if (item && item.match(/^\d+\.\d+/) && desc) {
-              // Find unidad (short text like m2, ml, u, glb)
-              const unidad = vals.find(v=>v.match(/^(m2|m²|ml|u|glb|gl|kg|ton|m3|l|lt|hr|mes|dia|pza|pz|pp)$/i))||"";
-              // Find prices (numbers with decimals)
-              const precios = vals.filter(v=>v.match(/^\d+[.,]\d+$/)&&parseFloat(v.replace(",","."))<100000);
-              const precio_unitario = precios.length>0 ? parseFloat(precios[0].replace(",",".")) : 0;
-              const cantidad = vals.find(v=>v.match(/^\d+$/)&&v!==item&&parseFloat(v)<10000);
+            // Detect rubro: item with decimal like "1.1", "2.3"
+            if (item.match(/^\d+\.\d+/)) {
+              // Unidad: short text matching known units
+              const unidad = vals.find(v=>v.match(/^(m2|m²|ml|u|glb|gl|kg|ton|m3|m³|l|lt|hr|mes|dia|pza|pz|pp|und|vía|via|pto|punto|jgo|juego|global|GA)$/i))||"";
+              
+              // Precio: find all numbers, take the one that looks like unit price
+              // Usually 2nd or 3rd numeric column (after cantidad)
+              const todosNums = vals
+                .filter(v=>v.match(/^[\d]+[.,]?[\d]*$/)&&v!==item)
+                .map(v=>parseFloat(v.replace(",",".")))
+                .filter(v=>v>0&&v<500000)
+                .sort((a,b)=>a-b);
+              
+              // precio_unitario is usually the smallest non-1 number (unit price, not total)
+              const cantidad = todosNums.length>0 ? todosNums[0] : 1;
+              const precio_unitario = todosNums.length>1 ? todosNums[1] : (todosNums[0]||0);
               
               if (desc && precio_unitario>0) {
                 rubrosExtraidos.push({
-                  capitulo: capActual,
+                  capitulo: capActual||"SIN CLASIFICAR",
                   descripcion: desc.slice(0,200),
                   unidad,
-                  cantidad: cantidad ? parseFloat(cantidad) : 1,
+                  cantidad: cantidad||1,
                   precio_unitario
                 });
               }
@@ -1831,8 +1848,16 @@ function ModuloPresupuestos({ currentUser }) {
   async function guardarEnBD() {
     if (!bdRubros.length) return;
     const proveedor = bdMeta.proveedor;
-    const cliente = bdMeta.cliente;
     const fecha = bdMeta.fecha;
+    let cliente = bdMeta.cliente;
+    // Save new client if needed
+    if (bdMeta.clienteNuevo && cliente) {
+      const {data:existeCl} = await supabase.from("clientes").select("id").eq("nombre",cliente).limit(1);
+      if (!existeCl||existeCl.length===0) {
+        await supabase.from("clientes").insert({nombre:cliente,tipo:"otro"});
+        setClientes(prev=>[...prev,{nombre:cliente}]);
+      }
+    }
     let capsSaved=0;
     for (const cap of (bdResult.capitulos||[])) {
       if (cap && !capitulosDB.includes(cap)) {
@@ -2248,10 +2273,13 @@ function ModuloPresupuestos({ currentUser }) {
                 <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
                   <input value={bdMeta.proveedor} onChange={e=>setBdMeta(p=>({...p,proveedor:e.target.value}))} placeholder="Nombre del proveedor" style={iS}/></div>
                 <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Cliente de referencia</label>
-                  <select value={bdMeta.cliente} onChange={e=>setBdMeta(p=>({...p,cliente:e.target.value}))} style={iS}>
+                  <select value={bdMeta.clienteNuevo?"__nuevo__":bdMeta.cliente} onChange={e=>setBdMeta(p=>({...p,cliente:e.target.value==="__nuevo__"?"":e.target.value,clienteNuevo:e.target.value==="__nuevo__"}))} style={iS}>
                     <option value="">Sin cliente</option>
                     {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-                  </select></div>
+                    <option value="__nuevo__">+ Nuevo cliente...</option>
+                  </select>
+                  {bdMeta.clienteNuevo&&<input value={bdMeta.cliente||""} onChange={e=>setBdMeta(p=>({...p,cliente:e.target.value}))} placeholder="Nombre del cliente nuevo" style={{...iS,marginTop:6}}/>}
+                </div>
                 <div><label style={{fontSize:11,color:"#6B7280",display:"block",marginBottom:4}}>Año del presupuesto</label>
                   <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
