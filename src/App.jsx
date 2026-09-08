@@ -1598,14 +1598,16 @@ function ModuloPresupuestos({ currentUser }) {
     const u=items.filter(i=>i.id!==id); setItems(u); recalcTotales(u);
   }
 
-  async function recalcTotales(itemsList) {
+  async function recalcTotales(itemsList, overrides={}) {
     if (!presupuestoActivo) return;
     const subtotal=itemsList.reduce((s,i)=>s+(Number(i.total)||0),0);
-    const honorarios_monto=subtotal*(Number(presupuestoActivo.honorarios_pct)||0)/100;
+    const hPct = overrides.honorarios_pct ?? presupuestoActivo.honorarios_pct ?? 0;
+    const ivaPct = overrides.iva_pct ?? presupuestoActivo.iva_pct ?? 12;
+    const honorarios_monto=subtotal*(Number(hPct)||0)/100;
     const base_iva=subtotal+honorarios_monto;
-    const iva_monto=base_iva*(Number(presupuestoActivo.iva_pct)||0)/100;
+    const iva_monto=base_iva*(Number(ivaPct)||0)/100;
     const total=base_iva+iva_monto;
-    const upd={...presupuestoActivo,subtotal,honorarios_monto,iva_monto,total};
+    const upd={...presupuestoActivo,...overrides,subtotal,honorarios_monto,iva_monto,total};
     setPresupuestoActivo(upd);
     await supabase.from("presupuestos").update({subtotal,honorarios_monto,iva_monto,total}).eq("id",presupuestoActivo.id);
   }
@@ -2044,9 +2046,8 @@ function ModuloPresupuestos({ currentUser }) {
                     key={presupuestoActivo.id}
                     onBlur={async e=>{
                       const pct=Number(e.target.value);
-                      setPresupuestoActivo(prev=>({...prev,honorarios_pct:pct}));
                       await supabase.from("presupuestos").update({honorarios_pct:pct}).eq("id",presupuestoActivo.id);
-                      recalcTotales(items);
+                      recalcTotales(items, {honorarios_pct:pct});
                     }}
                     style={{width:50,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
                   <span style={{fontSize:11}}>%</span>
@@ -2060,9 +2061,8 @@ function ModuloPresupuestos({ currentUser }) {
                     key={`iva-${presupuestoActivo.id}`}
                     onBlur={async e=>{
                       const pct=Number(e.target.value);
-                      setPresupuestoActivo(prev=>({...prev,iva_pct:pct}));
                       await supabase.from("presupuestos").update({iva_pct:pct}).eq("id",presupuestoActivo.id);
-                      recalcTotales(items);
+                      recalcTotales(items, {iva_pct:pct});
                     }}
                     style={{width:50,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
                   <span style={{fontSize:11}}>%</span>
