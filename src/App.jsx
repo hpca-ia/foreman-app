@@ -1745,8 +1745,8 @@ function ModuloPresupuestos({ currentUser }) {
             <button onClick={()=>setSubVista("nuevo")} style={{background:"#E8622A",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
-            <button onClick={()=>cotizRef.current?.click()} style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,padding:"7px 12px",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
-            <input ref={cotizRef} type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
+            <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"#FFF7F0",border:"1.5px solid #FED7AA",borderRadius:8,padding:"7px 12px",color:"#E8622A",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
+            <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
             <button onClick={exportarExcel} disabled={exportando||items.length===0} style={{background:"#059669",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{exportando?"Exportando...":"📥 Exportar Excel"}</button>
           </>}
         </div>
