@@ -79,3 +79,18 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .app-sidebar .app-sidebar-spacer { display: none; }
   .app-content { padding-bottom: 76px; }
 }
+
+/* Barra de tareas: filtros que se desplazan + interruptor de vista.
+   El interruptor tenía su display en estilo inline, que le ganaba a la clase
+   que lo ocultaba: en el teléfono se veía un muñón gris que no hacía nada. */
+.tareas-barra { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.tareas-filtros { display: flex; gap: 6px; align-items: center; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
+.tareas-filtros::-webkit-scrollbar { display: none; }
+.tareas-vistas { display: flex; gap: 4px; background: var(--neutral-soft); border-radius: var(--radius-sm); padding: 3px; flex-shrink: 0; }
+
+@media (max-width: 768px) {
+  .tareas-barra { flex-direction: column; align-items: stretch; gap: 8px; }
+  .tareas-filtros { padding-bottom: 2px; }
+  .tareas-vistas { width: 100%; }
+  .tareas-vistas button { flex: 1; }
+}

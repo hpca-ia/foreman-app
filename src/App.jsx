@@ -12,6 +12,7 @@ import LoginScreen from "./components/LoginScreen";
 import NovaInput from "./components/NovaInput";
 import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
+import TareasListaMovil from "./components/TareasListaMovil";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import ModalTarea from "./components/ModalTarea";
@@ -112,6 +113,7 @@ export default function App() {
 
   const admin = esAdmin(usuario.role);
   const puede = crearPuede(usuario, permisos);
+  const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
   const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
@@ -131,6 +133,14 @@ export default function App() {
   if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
   if (filtro === "listo") visibles = visibles.filter(t => t.status === "listo");
   if (filtroP !== "all") visibles = visibles.filter(t => t.project_id === Number(filtroP));
+
+  // Un solo orden para las tres vistas: lo terminado al fondo, y arriba lo más
+  // urgente y lo que vence antes.
+  const ordenadas = visibles.slice().sort((a, b) => {
+    if (a.status === "listo" && b.status !== "listo") return 1;
+    if (b.status === "listo" && a.status !== "listo") return -1;
+    return (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]) || (daysUntil(a.due_date) - daysUntil(b.due_date));
+  });
 
   const filtS = a => ({ padding: "6px 14px", borderRadius: 20, border: a ? "none" : `1px solid ${colors.border}`, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: a ? colors.ink : "#fff", color: a ? "#fff" : colors.inkSoft, flexShrink: 0 });
 
@@ -152,7 +162,8 @@ export default function App() {
 
           {vista === "tareas" && (
             <>
-              <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 4, alignItems: "center" }}>
+              <div className="tareas-barra">
+                <div className="tareas-filtros">
                 {[["todas", "Todas"], ["urgente", "Urgentes"], ["pendiente", "Pendientes"], ["listo", "Completadas"]].map(([f, l]) => (
                   <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
                 ))}
@@ -160,7 +171,11 @@ export default function App() {
                   <option value="all">Todos los proyectos</option>
                   {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>}
-                <div className="tasks-view-desktop" style={{ marginLeft: "auto", display: "flex", gap: 4, background: colors.neutralSoft, borderRadius: colors.radiusSm, padding: 3, flexShrink: 0 }}>
+                </div>
+                {/* El interruptor tenía display:flex inline, que le gana a la clase
+                    que lo ocultaba en móvil: se veía pero no mandaba sobre nada,
+                    porque el contenido que controlaba sí estaba oculto. */}
+                <div className="tareas-vistas">
                   {[["lista", "Lista"], ["tablero", "Tablero"]].map(([v, l]) => (
                     <button key={v} onClick={() => setVistaTareas(v)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: vistaTareas === v ? colors.surface : "transparent", color: vistaTareas === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
@@ -173,12 +188,13 @@ export default function App() {
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "tablero"
                         ? <TareasKanban tasks={visibles} users={users} projects={projects} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : <TareasTabla tasks={visibles.slice().sort((a, b) => { const o = { urgente: 0, alta: 1, media: 2, baja: 3 }; if (a.status === "listo" && b.status !== "listo") return 1; if (b.status === "listo" && a.status !== "listo") return -1; return (o[a.priority] - o[b.priority]) || (daysUntil(a.due_date) - daysUntil(b.due_date)); })} users={users} projects={projects} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
+                        : <TareasTabla tasks={ordenadas} users={users} projects={projects} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
                   </div>
                   <div className="tasks-view-mobile">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
-                      : visibles.slice().sort((a, b) => { const o = { urgente: 0, alta: 1, media: 2, baja: 3 }; if (a.status === "listo" && b.status !== "listo") return 1; if (b.status === "listo" && a.status !== "listo") return -1; return (o[a.priority] - o[b.priority]) || (daysUntil(a.due_date) - daysUntil(b.due_date)); })
-                        .map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
+                      : vistaTareas === "lista"
+                        ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
                   </div>
                 </>
               )}
