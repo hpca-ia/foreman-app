@@ -54,16 +54,29 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   return porRubro;
 }
 
-/** Agrupa los rubros por capítulo respetando el orden del presupuesto. */
-export function agruparPorCapitulo(rubros = [], porRubro = {}) {
+/**
+ * Agrupa los rubros y suma sus acumulados.
+ *
+ * Por capítulo se ve el presupuesto como fue contratado; por actividad se ve
+ * como se ejecuta la obra ("muebles", "instalaciones eléctricas"), que puede
+ * cruzar capítulos. Los rubros son los mismos, cambia la lente.
+ *
+ * @param modo "capitulo" | "actividad"
+ */
+export function agruparPorCapitulo(rubros = [], porRubro = {}, modo = "capitulo") {
+  const porActividad = modo === "actividad";
+  const campo = porActividad ? "actividad" : "capitulo";
+  const campoOrden = porActividad ? "actividad_orden" : "capitulo_orden";
+  const sinAsignar = porActividad ? "SIN ACTIVIDAD" : "SIN CAPÍTULO";
+
   const mapa = new Map();
   rubros
     .slice()
-    .sort((a, b) => (a.capitulo_orden - b.capitulo_orden) || (a.orden - b.orden) || (a.numero - b.numero))
+    .sort((a, b) => ((a[campoOrden] ?? 9999) - (b[campoOrden] ?? 9999)) || (a.orden - b.orden) || (a.numero - b.numero))
     .forEach(r => {
-      const key = r.capitulo || "SIN CAPÍTULO";
+      const key = r[campo] || sinAsignar;
       if (!mapa.has(key)) {
-        mapa.set(key, { capitulo: key, capitulo_orden: r.capitulo_orden ?? 0, rubros: [], base: 0, anterior: 0, periodo: 0, acumulado: 0, saldo: 0, pct: 0 });
+        mapa.set(key, { capitulo: key, capitulo_orden: r[campoOrden] ?? 9999, rubros: [], base: 0, anterior: 0, periodo: 0, acumulado: 0, saldo: 0, pct: 0 });
       }
       const grupo = mapa.get(key);
       const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base) };
@@ -77,7 +90,10 @@ export function agruparPorCapitulo(rubros = [], porRubro = {}) {
 
   const grupos = [...mapa.values()];
   grupos.forEach(g => { g.pct = g.base > 0 ? g.acumulado / g.base : 0; });
-  return grupos;
+  // Lo no clasificado va al final, no estorbando arriba.
+  return grupos.sort((a, b) =>
+    (a.capitulo === sinAsignar ? 1 : 0) - (b.capitulo === sinAsignar ? 1 : 0) ||
+    a.capitulo_orden - b.capitulo_orden);
 }
 
 export function totalesObra(grupos = []) {

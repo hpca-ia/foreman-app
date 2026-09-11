@@ -8,6 +8,7 @@ import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import PanelDuplicados from "./PanelDuplicados";
+import PanelActividades from "./PanelActividades";
 import ExportarPlanilla from "./ExportarPlanilla";
 
 export default function VistaObra({ obra, currentUser, onVolver }) {
@@ -18,6 +19,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
   const [asignaciones, setAsignaciones] = useState([]);
   const [planillaSel, setPlanillaSel] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [agruparPor, setAgruparPor] = useState("capitulo");   // capitulo | actividad
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -52,7 +54,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
 
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
   const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: planillaActual?.numero ?? null });
-  const grupos = agruparPorCapitulo(rubros, porRubro);
+  const grupos = agruparPorCapitulo(rubros, porRubro, agruparPor);
   const totales = totalesObra(grupos);
 
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
@@ -86,13 +88,33 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("planillas")} style={tabS(tab === "planillas")}>Planillas</button>
+        <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Actividades</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
         <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
       </div>
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
         <>
-          {tab === "control" && <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} />}
+          {tab === "control" && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600, letterSpacing: 0.3 }}>AGRUPAR POR</span>
+                <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: colors.radiusSm, padding: 3 }}>
+                  {[["capitulo", "Capítulos"], ["actividad", "Actividades"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setAgruparPor(v)}
+                      style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
+                        background: agruparPor === v ? colors.surface : "transparent", color: agruparPor === v ? colors.brand : colors.inkSoft }}>{l}</button>
+                  ))}
+                </div>
+                {agruparPor === "actividad" && !rubros.some(r => r.actividad) && (
+                  <span style={{ fontSize: 11, color: colors.warning }}>
+                    Todavía no hay actividades — créalas en la pestaña Actividades.
+                  </span>
+                )}
+              </div>
+              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} />
+            </>
+          )}
           {tab === "facturas" && (
             <PanelFacturas
               obra={obra} rubros={rubros} planillas={planillas} planillaActual={planillaActual}
@@ -103,6 +125,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
           {tab === "planillas" && (
             <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} onCambio={cargar} />
           )}
+          {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
             <ExportarPlanilla obra={obra} planilla={planillaActual} grupos={grupos} porRubro={porRubro}

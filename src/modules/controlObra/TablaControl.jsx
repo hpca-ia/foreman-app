@@ -11,11 +11,13 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
-export default function TablaControl({ grupos, porRubro, totales }) {
-  const [abiertos, setAbiertos] = useState(() => new Set(grupos.map(g => g.capitulo)));
+export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo" }) {
+  // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
+  // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
+  const [cerrados, setCerrados] = useState(() => new Set());
 
   function toggle(cap) {
-    setAbiertos(prev => {
+    setCerrados(prev => {
       const n = new Set(prev);
       if (n.has(cap)) n.delete(cap); else n.add(cap);
       return n;
@@ -33,7 +35,7 @@ export default function TablaControl({ grupos, porRubro, totales }) {
 
           {/* Encabezado */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "8px 14px", background: colors.bg, borderBottom: `1px solid ${colors.border}`, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
-            <span>RUBRO</span>
+            <span>{modo === "actividad" ? "ACTIVIDAD / RUBRO" : "RUBRO"}</span>
             <span style={{ textAlign: "right" }}>UND</span>
             <span style={{ textAlign: "right" }}>CANT</span>
             <span style={{ textAlign: "right" }}>PRESUPUESTO</span>
@@ -45,7 +47,7 @@ export default function TablaControl({ grupos, porRubro, totales }) {
           </div>
 
           {grupos.map(g => {
-            const abierto = abiertos.has(g.capitulo);
+            const abierto = !cerrados.has(g.capitulo);
             return (
               <div key={g.capitulo}>
                 {/* Capítulo */}

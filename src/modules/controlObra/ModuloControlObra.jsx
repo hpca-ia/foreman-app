@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Upload } from "lucide-react";
+import { Plus, Upload, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -27,7 +27,7 @@ export default function ModuloControlObra({ currentUser }) {
       const ids = lista.map(o => o.id);
       const [{ data: rubros }, { data: facturas }] = await Promise.all([
         supabase.from("obra_rubros").select("id,obra_id,total_base").in("obra_id", ids),
-        supabase.from("obra_facturas").select("id,obra_id").in("obra_id", ids),
+        supabase.from("obra_facturas").select("id,obra_id,total").in("obra_id", ids),
       ]);
       const facturaIds = (facturas || []).map(f => f.id);
       let asignaciones = [];
@@ -39,15 +39,25 @@ export default function ModuloControlObra({ currentUser }) {
       (facturas || []).forEach(f => { obraDeFactura[f.id] = f.obra_id; });
 
       const r = {};
-      lista.forEach(o => { r[o.id] = { base: 0, invertido: 0, rubros: 0 }; });
+      lista.forEach(o => { r[o.id] = { base: 0, invertido: 0, rubros: 0, sinAsignar: 0 }; });
       (rubros || []).forEach(x => {
         if (!r[x.obra_id]) return;
         r[x.obra_id].base += Number(x.total_base) || 0;
         r[x.obra_id].rubros += 1;
       });
+      const asignadoPorFactura = {};
       asignaciones.forEach(a => {
         const oid = obraDeFactura[a.factura_id];
         if (r[oid]) r[oid].invertido += Number(a.monto) || 0;
+        asignadoPorFactura[a.factura_id] = (asignadoPorFactura[a.factura_id] || 0) + (Number(a.monto) || 0);
+      });
+
+      // Plata que entró pero no está en ningún rubro: no aparece en el control,
+      // así que el avance se vería más bajo de lo real sin este aviso.
+      (facturas || []).forEach(f => {
+        if (!r[f.obra_id]) return;
+        const pendiente = (Number(f.total) || 0) - (asignadoPorFactura[f.id] || 0);
+        if (pendiente > 0.009) r[f.obra_id].sinAsignar += pendiente;
       });
       setResumen(r);
     }
@@ -112,10 +122,18 @@ export default function ModuloControlObra({ currentUser }) {
                   <div style={{ background: colors.neutralSoft, borderRadius: 4, height: 6, marginBottom: 10, overflow: "hidden" }}>
                     <div style={{ background: pct > 100 ? colors.danger : colors.brand, height: 6, width: `${Math.min(pct, 100)}%`, transition: "width .4s" }} />
                   </div>
-                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
                     <Dato label="Presupuesto" valor={r.base} />
                     <Dato label="Invertido" valor={r.invertido} color={colors.ink} />
                     <Dato label="Saldo" valor={saldo} color={saldo < 0 ? colors.danger : colors.success} />
+                    {r.sinAsignar > 0.009 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: 20, padding: "4px 10px" }}>
+                        <AlertTriangle size={12} color={colors.warning} />
+                        <span style={{ fontSize: 11, color: colors.warning, fontWeight: 600 }}>
+                          ${fmt(r.sinAsignar)} sin asignar a rubro
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
