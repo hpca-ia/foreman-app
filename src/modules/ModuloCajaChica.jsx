@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { esAdmin, puedeControlObra, ROLES } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
+import ReporteCaja from "./cajaChica/ReporteCaja";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 
 export default function ModuloCajaChica({ currentUser, projects, users }) {
@@ -197,36 +198,28 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     setGastos(prev=>prev.map(g=>g.id===id?{...g,estado:"aprobado"}:g));
   }
 
-  async function exportarReporte() {
-    let csv=`REPORTE CAJA CHICA\nProyecto: ${cajaActiva.proyecto_nombre}\nResponsable: ${cajaActiva.responsable_nombre}\nFecha: ${new Date().toLocaleDateString("es-EC")}\n\n`;
-    csv+=`ANTICIPOS\nFecha\tDescripción\tEntregado por\tMonto\n`;
-    anticipos.forEach(a=>{csv+=`${a.fecha}\t${a.descripcion||""}\t${a.entregado_por_nombre}\t${fmt(a.monto)}\n`;});
-    csv+=`\nTotal anticipos\t\t\t${fmt(cajaActiva.saldo_total)}\n\nGASTOS\nFecha\tDescripción\tProveedor\tCapítulo\tTipo\tEstado\tMonto\n`;
-    gastos.forEach(g=>{csv+=`${g.fecha}\t${g.descripcion}\t${g.proveedor||""}\t${g.capitulo||""}\t${g.tipo}\t${g.estado}\t${fmt(g.monto)}\n`;});
-    csv+=`\nTotal gastos\t\t\t\t\t\t${fmt(cajaActiva.saldo_gastado)}\nSaldo disponible\t\t\t\t\t\t${fmt(cajaActiva.saldo_disponible)}\n`;
-    const blob=new Blob(["\uFEFF"+csv],{type:"text/tab-separated-values;charset=utf-8"});
-    const url=URL.createObjectURL(blob);const a=document.createElement("a");
-    a.href=url;a.download=`CajaChica_${cajaActiva.responsable_nombre}.xls`;a.click();URL.revokeObjectURL(url);
-  }
-
   const saldoColor=c=>c>(cajaActiva?.limite_alerta||50)*2?"var(--success)":c>(cajaActiva?.limite_alerta||50)?"var(--warning)":"var(--danger)";
 
   return(
     <div style={{fontFamily:"var(--font)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:17,fontWeight:700,color:"var(--ink)"}}>
-          {subVista==="lista"?"Caja Chica":subVista==="nueva"?"Nueva caja":subVista==="gasto"?"Nuevo gasto":subVista==="anticipo"?"Anticipo":`${cajaActiva?.proyecto_nombre} — ${cajaActiva?.responsable_nombre}`}
+          {subVista==="lista"?"Caja Chica":subVista==="nueva"?"Nueva caja":subVista==="gasto"?"Nuevo gasto":subVista==="anticipo"?"Anticipo":subVista==="reporte"?"Reporte":`${cajaActiva?.proyecto_nombre} — ${cajaActiva?.responsable_nombre}`}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {subVista!=="lista"&&<button onClick={()=>setSubVista("lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
+          {subVista!=="lista"&&<button onClick={()=>setSubVista(subVista==="reporte"?"detalle":"lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&admin&&<button onClick={()=>setSubVista("nueva")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nueva caja</button>}
           {subVista==="detalle"&&<>
             {admin&&<button onClick={()=>setSubVista("anticipo")} style={{background:"#7C3AED",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Anticipo</button>}
             <button onClick={()=>setSubVista("gasto")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Gasto</button>
-            <button onClick={exportarReporte} style={{background:"var(--success)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>📥 Reporte</button>
+            <button onClick={()=>setSubVista("reporte")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Reporte</button>
           </>}
         </div>
       </div>
+
+      {subVista==="reporte"&&cajaActiva&&(
+        <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos}/>
+      )}
 
       {subVista==="lista"&&(
         <div>

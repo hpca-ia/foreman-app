@@ -8,6 +8,7 @@ import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import PanelDuplicados from "./PanelDuplicados";
+import ExportarPlanilla from "./ExportarPlanilla";
 
 export default function VistaObra({ obra, currentUser, onVolver }) {
   const [tab, setTab] = useState("control");
@@ -86,6 +87,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("planillas")} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
+        <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
       </div>
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
@@ -102,6 +104,10 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
             <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} onCambio={cargar} />
           )}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
+          {tab === "exportar" && (
+            <ExportarPlanilla obra={obra} planilla={planillaActual} grupos={grupos} porRubro={porRubro}
+              totales={totales} facturas={facturas} asignaciones={asignaciones} rubros={rubros} />
+          )}
         </>
       )}
     </div>
