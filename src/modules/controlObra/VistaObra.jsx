@@ -7,6 +7,7 @@ import { fmt, calcularControl, agruparPorCapitulo, totalesObra } from "./calculo
 import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
+import PanelDuplicados from "./PanelDuplicados";
 
 export default function VistaObra({ obra, currentUser, onVolver }) {
   const [tab, setTab] = useState("control");
@@ -84,6 +85,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("planillas")} style={tabS(tab === "planillas")}>Planillas</button>
+        <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
       </div>
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
@@ -99,6 +101,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
           {tab === "planillas" && (
             <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} onCambio={cargar} />
           )}
+          {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
         </>
       )}
     </div>

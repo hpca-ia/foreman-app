@@ -6,6 +6,8 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt, TIPOS_GASTO } from "./calculos";
+import { buscarDuplicados, hashArchivo } from "./duplicados";
+import AlertaDuplicado from "./AlertaDuplicado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -25,7 +27,25 @@ export default function ModalFactura({ obra, rubros, planilla, factura, asignaci
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [busqueda, setBusqueda] = useState("");
+  const [dups, setDups] = useState({ exactos: [], posibles: [] });
+  const [justificacion, setJustificacion] = useState("");
+  const [revisandoDups, setRevisandoDups] = useState(false);
+  const [archivoHash, setArchivoHash] = useState(null);
   const fileRef = useRef(null);
+
+  // La detección corre sobre los datos ya cargados, no sobre el criterio de NOVA.
+  async function revisarDuplicados(extra = {}) {
+    const datos = { ...form, ...extra };
+    if (!datos.numero_factura && !datos.razon_social && !archivoHash) { setDups({ exactos: [], posibles: [] }); return; }
+    setRevisandoDups(true);
+    const r = await buscarDuplicados({
+      obraId: obra.id, ruc: datos.ruc, numeroFactura: datos.numero_factura,
+      razonSocial: datos.razon_social, monto: datos.total, fecha: datos.fecha,
+      archivoHash, excluirId: factura?.id || null,
+    });
+    setDups(r);
+    setRevisandoDups(false);
+  }
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -41,6 +61,7 @@ export default function ModalFactura({ obra, rubros, planilla, factura, asignaci
     if (!file) return;
     setArchivo(file);
     setLeyendo(true); setError("");
+    const h = await hashArchivo(file); setArchivoHash(h);
     try {
       const b64 = await new Promise(res => {
         const r = new FileReader();
@@ -87,6 +108,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       if (p.rubro_id && rubros.some(r => r.id === p.rubro_id) && repartos.length === 0) {
         setRepartos([{ obra_rubro_id: p.rubro_id, monto: n(p.total) }]);
       }
+      await revisarDuplicados({ ruc: p.ruc, numero_factura: p.numero_factura, razon_social: p.razon_social, total: n(p.total), fecha: p.fecha });
     } catch {
       setError("NOVA no pudo leer el archivo. Llena los datos a mano.");
     }
@@ -106,6 +128,10 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
 
   async function guardar() {
     if (!form.total) { setError("Falta el total de la factura."); return; }
+    if (dups.exactos.length && !justificacion.trim()) {
+      setError("Esta factura ya está cargada. Explica por qué no es un duplicado para poder guardarla.");
+      return;
+    }
     setGuardando(true); setError("");
 
     let archivo_url = form.archivo_url || null, archivo_nombre = form.archivo_nombre || null;
@@ -135,6 +161,9 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       tipo: form.tipo || "material",
       archivo_url, archivo_nombre,
       origen: archivo ? "nova" : (form.origen || "manual"),
+      archivo_hash: archivoHash || form.archivo_hash || null,
+      duplicado_de: dups.exactos[0]?.id || null,
+      duplicado_justificacion: dups.exactos.length ? justificacion.trim() : null,
       subido_por: currentUser.id, subido_por_nombre: currentUser.name,
     };
 
@@ -183,12 +212,15 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         </div>
       )}
 
+      <AlertaDuplicado exactos={dups.exactos} posibles={dups.posibles} justificacion={justificacion} setJustificacion={setJustificacion} />
+      {revisandoDups && <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>Revisando si ya está cargada...</div>}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div><label style={lbl}>FECHA</label><input type="date" value={form.fecha || ""} onChange={e => set("fecha", e.target.value)} style={mini} /></div>
-        <div><label style={lbl}>N° FACTURA</label><input value={form.numero_factura || ""} onChange={e => set("numero_factura", e.target.value)} style={mini} /></div>
+        <div><label style={lbl}>N° FACTURA</label><input value={form.numero_factura || ""} onChange={e => set("numero_factura", e.target.value)} onBlur={() => revisarDuplicados()} style={mini} /></div>
         <div><label style={lbl}>N° CHEQUE</label><input value={form.numero_cheque || ""} onChange={e => set("numero_cheque", e.target.value)} style={mini} /></div>
         <div><label style={lbl}>RUC</label><input value={form.ruc || ""} onChange={e => set("ruc", e.target.value)} style={mini} /></div>
-        <div style={{ gridColumn: "span 2" }}><label style={lbl}>PROVEEDOR</label><input value={form.razon_social || ""} onChange={e => set("razon_social", e.target.value)} style={mini} /></div>
+        <div style={{ gridColumn: "span 2" }}><label style={lbl}>PROVEEDOR</label><input value={form.razon_social || ""} onChange={e => set("razon_social", e.target.value)} onBlur={() => revisarDuplicados()} style={mini} /></div>
       </div>
 
       <div style={{ marginBottom: 10 }}>

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { esAdmin, puedeControlObra, ROLES } from "../lib/roles";
+import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
+import AlertaDuplicado from "./controlObra/AlertaDuplicado";
 
 export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [subVista, setSubVista] = useState("lista");
@@ -10,7 +12,11 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [anticipos, setAnticipos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [novaLeyendo, setNovaLeyendo] = useState(false);
-  const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
+  const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", ruc:"", numero_factura:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
+  const [novaError, setNovaError] = useState("");
+  const [dupsGasto, setDupsGasto] = useState({exactos:[],posibles:[]});
+  const [dupJustificacion, setDupJustificacion] = useState("");
+  const [archivoHash, setArchivoHash] = useState(null);
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
   const [nuevaCajaForm, setNuevaCajaForm] = useState({ obra_id:"", proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50 });
   const [obras, setObras] = useState([]);
@@ -74,19 +80,34 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     }
   }
 
-  async function leerFacturaNOVA(file) {
-    setNovaLeyendo(true);
+  async function leerFacturaNOVA(file, hash=null) {
+    setNovaLeyendo(true); setNovaError("");
     try {
+      const esImagen = file.type.startsWith("image/");
+      const esPDF = file.type==="application/pdf";
+      if (!esImagen && !esPDF) {
+        setNovaError("NOVA lee fotos y PDFs. Para otros archivos, llena los datos a mano.");
+        setNovaLeyendo(false); return;
+      }
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
-      const content=file.type.startsWith("image/")?[
-        {type:"image",source:{type:"base64",media_type:file.type,data:base64}},
-        {type:"text",text:'Lee esta factura. SOLO JSON: {"descripcion":"","proveedor":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|recibo|otro"}'}
-      ]:[{type:"text",text:'Extrae datos. SOLO JSON: {"descripcion":"","proveedor":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura"}'}];
-      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:500,messages:[{role:"user",content}]})});
+      const adjunto = esPDF
+        ? {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}}
+        : {type:"image",source:{type:"base64",media_type:file.type,data:base64}};
+      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|recibo|otro"}. "numero_factura" es el número impreso de la factura (formato 001-001-000000123). "monto" es el TOTAL a pagar.'}];
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:700,messages:[{role:"user",content}]})});
+      if (!res.ok) { setNovaError(`NOVA no respondió (error ${res.status}). Llena los datos a mano.`); setNovaLeyendo(false); return; }
       const d=await res.json();
-      const parsed=JSON.parse((d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
-      setGastoForm(prev=>({...prev,descripcion:parsed.descripcion||prev.descripcion,proveedor:parsed.proveedor||prev.proveedor,monto:parsed.monto||prev.monto,fecha:parsed.fecha||prev.fecha,tipo:parsed.tipo||prev.tipo}));
-    } catch(e) { console.error(e); }
+      if (d.error) { setNovaError("NOVA: "+(d.error.message||JSON.stringify(d.error))); setNovaLeyendo(false); return; }
+      const texto=(d.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
+      let parsed=null;
+      try { parsed=JSON.parse(texto); } catch { const m=texto.match(/\{[\s\S]*\}/); if(m) try{parsed=JSON.parse(m[0]);}catch{} }
+      if (!parsed) { setNovaError("NOVA no pudo leer esta factura. Llena los datos a mano."); setNovaLeyendo(false); return; }
+      setGastoForm(prev=>({...prev,
+        descripcion:parsed.descripcion||prev.descripcion, proveedor:parsed.proveedor||prev.proveedor,
+        ruc:parsed.ruc||prev.ruc, numero_factura:parsed.numero_factura||prev.numero_factura,
+        monto:parsed.monto||prev.monto, fecha:parsed.fecha||prev.fecha, tipo:parsed.tipo||prev.tipo}));
+      await revisarDuplicadosGasto({ruc:parsed.ruc,numero_factura:parsed.numero_factura,proveedor:parsed.proveedor,monto:parsed.monto,fecha:parsed.fecha}, hash);
+    } catch(e) { setNovaError("Error leyendo el archivo: "+e.message); }
     setNovaLeyendo(false);
   }
 
@@ -94,11 +115,26 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     const file=e.target.files[0]; if(!file) return;
     setArchivoGasto(file);
     if(file.type.startsWith("image/")){setArchivoPreview(URL.createObjectURL(file));}else{setArchivoPreview(null);}
-    await leerFacturaNOVA(file); e.target.value="";
+    const h = await hashArchivo(file); setArchivoHash(h);
+    await leerFacturaNOVA(file, h); e.target.value="";
+  }
+
+  // Misma detección que en Control de Obra: exacta, no interpretativa.
+  async function revisarDuplicadosGasto(extra={}, hash=archivoHash) {
+    if (!cajaActiva?.obra_id) return;
+    const d = {...gastoForm, ...extra};
+    if (!d.numero_factura && !d.proveedor && !hash) { setDupsGasto({exactos:[],posibles:[]}); return; }
+    const r = await buscarDuplicados({ obraId:cajaActiva.obra_id, ruc:d.ruc, numeroFactura:d.numero_factura,
+      razonSocial:d.proveedor, monto:d.monto, fecha:d.fecha, archivoHash:hash });
+    setDupsGasto(r);
   }
 
   async function agregarGasto() {
     if (!cajaActiva||!gastoForm.monto||!gastoForm.descripcion) return;
+    if (dupsGasto.exactos.length && !dupJustificacion.trim()) {
+      setNovaError("Esta factura ya está cargada en la obra. Explica por qué no es un duplicado para poder guardarla.");
+      return;
+    }
     setUploading(true);
     let archivoUrl=null, archivoNombre=null;
     if (archivoGasto) {
@@ -110,7 +146,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     const monto=Number(gastoForm.monto);
     const capitulosList = capitulosSeleccionados.length>0 ? capitulosSeleccionados : ["SIN CLASIFICAR"];
     const{data}=await supabase.from("cajas_gastos").insert({
-      caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,monto,
+      caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
       capitulo:capitulosList.join(", "),proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
       tipo:gastoForm.tipo,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
@@ -125,7 +161,11 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
         const {data:facturaObra} = await supabase.from("obra_facturas").insert({
           obra_id:cajaActiva.obra_id, planilla_id:planillaAbierta?.id||null,
           fecha:gastoForm.fecha, tipo_documento:(gastoForm.tipo||"factura").toUpperCase(),
-          razon_social:gastoForm.proveedor||null, detalle:gastoForm.descripcion,
+          razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
+          numero_factura:gastoForm.numero_factura||null, archivo_hash:archivoHash||null,
+          duplicado_de:dupsGasto.exactos[0]?.id||null,
+          duplicado_justificacion:dupsGasto.exactos.length?dupJustificacion.trim():null,
+          detalle:gastoForm.descripcion,
           justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
           tipo:"material", archivo_url:archivoUrl, archivo_nombre:archivoNombre,
           origen:"caja_chica", caja_gasto_id:data.id,
@@ -138,7 +178,8 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       await supabase.from("cajas_chicas").update({saldo_gastado:nuevoGastado,saldo_disponible:nuevoDisp}).eq("id",cajaActiva.id);
       setCajaActiva(prev=>({...prev,saldo_gastado:nuevoGastado,saldo_disponible:nuevoDisp}));
       setGastos(prev=>[data,...prev]);
-      setGastoForm({descripcion:"",proveedor:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
+      setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
+      setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
       setCapitulosSeleccionados([]);
       setArchivoGasto(null);setArchivoPreview(null);fetchCajas();
       if(nuevoDisp<=(cajaActiva.limite_alerta||50))alert(`⚠️ Saldo bajo en caja de ${cajaActiva.responsable_nombre}: $${fmt(nuevoDisp)} — Johanna debe revisar.`);
@@ -261,7 +302,10 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
               {archivoGasto&&!novaLeyendo&&<span style={{fontSize:11,color:"var(--success)"}}>✓ {archivoGasto.name}</span>}
             </div>
             {archivoPreview&&<img src={archivoPreview} alt="preview" style={{width:"100%",maxHeight:140,objectFit:"contain",borderRadius:8,marginTop:8,border:"1px solid var(--border)"}}/>}
+            {novaError&&<div style={{background:"var(--danger-soft)",border:"1px solid var(--danger-border)",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12,color:"var(--danger)"}}>{novaError}</div>}
           </div>
+
+          <AlertaDuplicado exactos={dupsGasto.exactos} posibles={dupsGasto.posibles} justificacion={dupJustificacion} setJustificacion={setDupJustificacion}/>
           <div style={{display:"grid",gap:12}}>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Descripción *</label>
               <input value={gastoForm.descripcion} onChange={e=>setGastoForm(p=>({...p,descripcion:e.target.value}))} placeholder="¿Qué se compró?" style={iS}/></div>
@@ -270,6 +314,12 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
                 <input value={gastoForm.proveedor} onChange={e=>setGastoForm(p=>({...p,proveedor:e.target.value}))} placeholder="Proveedor" style={iS}/></div>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Monto *</label>
                 <input type="number" value={gastoForm.monto} onChange={e=>setGastoForm(p=>({...p,monto:e.target.value}))} placeholder="$0.00" style={iS}/></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>RUC</label>
+                <input value={gastoForm.ruc} onChange={e=>setGastoForm(p=>({...p,ruc:e.target.value}))} onBlur={()=>revisarDuplicadosGasto()} placeholder="RUC del proveedor" style={iS}/></div>
+              <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>N° de factura</label>
+                <input value={gastoForm.numero_factura} onChange={e=>setGastoForm(p=>({...p,numero_factura:e.target.value}))} onBlur={()=>revisarDuplicadosGasto()} placeholder="001-001-000000123" style={iS}/></div>
             </div>
             {/* Presupuesto */}
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Presupuesto del proyecto</label>
