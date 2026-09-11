@@ -4,12 +4,14 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import { exportarExcel, exportarPDF, money } from "../../lib/exportar";
+import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
 
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
 export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, totales, facturas, asignaciones, rubros }) {
   const [generando, setGenerando] = useState("");
   const [progreso, setProgreso] = useState("");
+  const [contenido, setContenido] = useState("completo");
 
   const nombrePlanilla = planilla?.nombre || (planilla ? `Planilla N°${planilla.numero}` : "Acumulado");
   const delPeriodo = planilla ? facturas.filter(f => f.planilla_id === planilla.id) : facturas;
@@ -138,19 +140,22 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
       const adjuntos = delPeriodo.filter(f => f.archivo_url)
         .map(f => ({ url: f.archivo_url, titulo: `${f.razon_social || "Factura"} — ${f.numero_factura || f.fecha} — $${money(f.total)}` }));
 
+      const soloAnexos = contenido === "anexos";
+
       await exportarPDF({
-        nombreArchivo: `${obra.nombre} - ${nombrePlanilla}`,
-        titulo: `Control de Obra — ${obra.nombre}`,
+        nombreArchivo: `${obra.nombre} - ${nombrePlanilla}${soloAnexos ? " (anexos)" : ""}`,
+        titulo: soloAnexos ? `Anexos — ${obra.nombre}` : `Control de Obra — ${obra.nombre}`,
         subtitulo: `${obra.cliente_nombre ? obra.cliente_nombre + " · " : ""}${nombrePlanilla}`,
-        resumen: [
+        indiceAdjuntos: soloAnexos,
+        resumen: soloAnexos ? [] : [
           { label: "Presupuesto", valor: `$${money(totales.base)}` },
           { label: "Este período", valor: `$${money(totales.periodo)}`, color: [15, 61, 62] },
           { label: "Invertido", valor: `$${money(totales.acumulado)}` },
           { label: "Saldo", valor: `$${money(totales.saldo)}`, color: totales.saldo < 0 ? [185, 28, 28] : [21, 128, 61] },
           { label: "Avance", valor: `${(totales.pct * 100).toFixed(1)}%` },
         ],
-        bloques: bloquesControl,
-        adjuntos,
+        bloques: soloAnexos ? [] : bloquesControl,
+        adjuntos: contenido === "reporte" ? [] : adjuntos,
         onProgreso: (i, t) => setProgreso(`Adjuntando facturas ${i}/${t}...`),
       });
     } finally { setGenerando(""); setProgreso(""); }
@@ -166,19 +171,21 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
         {conAdjunto > 0 && ` · ${conAdjunto} con factura escaneada`}
       </div>
 
+      <SelectorContenido valor={contenido} onChange={setContenido} conAdjunto={conAdjunto} />
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Button variant="outline" onClick={generarExcel} disabled={!!generando}>
           <FileSpreadsheet size={14} /> {generando === "excel" ? "Generando..." : "Excel"}
         </Button>
         <Button variant="primary" onClick={generarPDF} disabled={!!generando}>
           {generando === "pdf" ? <Loader2 size={14} /> : <FileText size={14} />}
-          {generando === "pdf" ? (progreso || "Generando...") : `PDF${conAdjunto ? " con facturas" : ""}`}
+          {generando === "pdf" ? (progreso || "Generando...") : `PDF · ${CONTENIDO[contenido].label}`}
         </Button>
       </div>
 
       <div style={{ fontSize: 11, color: colors.muted, marginTop: 10, lineHeight: 1.5 }}>
         El <strong>Excel</strong> trae tres hojas: control de presupuesto por rubro, compendio de facturas y resumen de gasto por tasa de IVA.<br />
-        El <strong>PDF</strong> es el documento para presentar: los mismos datos más las facturas escaneadas, una por página.
+El <strong>PDF</strong> lo armas según lo que elijas arriba: solo el reporte, solo el legajo de anexos, o ambos.
       </div>
     </div>
   );

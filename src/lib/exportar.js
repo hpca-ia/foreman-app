@@ -36,8 +36,9 @@ export function exportarExcel(nombreArchivo, hojas) {
  * @param resumen     [{label, valor}] tarjetas de totales
  * @param bloques     [{titulo, columnas, filas, anchos?}]
  * @param adjuntos    [{titulo, url}] imágenes de facturas
+ * @param indiceAdjuntos  agrega un índice de los anexos antes de las imágenes
  */
-export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], onProgreso }) {
+export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso }) {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
   let y = 42;
@@ -90,6 +91,21 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
     });
     y = doc.lastAutoTable.finalY + 22;
     if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 42; }
+  }
+
+  // Índice de anexos: útil cuando el PDF es solo el legajo de facturas
+  if (indiceAdjuntos && adjuntos.length) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...MARCA);
+    doc.text(`Anexos (${adjuntos.length})`, 40, y); y += 8;
+    autoTable(doc, {
+      startY: y,
+      head: [["#", "Documento"]],
+      body: adjuntos.map((a, i) => [i + 1, a.titulo || `Anexo ${i + 1}`]),
+      margin: { left: 40, right: 40 },
+      styles: { fontSize: 8, cellPadding: 4, textColor: TINTA, lineColor: [235, 235, 232], lineWidth: 0.5 },
+      headStyles: { fillColor: [231, 241, 239], textColor: MARCA, fontStyle: "bold", fontSize: 7 },
+      columnStyles: { 0: { cellWidth: 30 } },
+    });
   }
 
   // Facturas escaneadas, una por página

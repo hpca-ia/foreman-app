@@ -3,6 +3,7 @@ import { FileSpreadsheet, FileText, Loader2, Mail, Check } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
 import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
 import { supabase } from "../../lib/supabase";
 
@@ -16,6 +17,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
   const [progreso, setProgreso] = useState("");
   const [envio, setEnvio] = useState(null);   // {ok, mensaje}
   const [extra, setExtra] = useState("");
+  const [contenido, setContenido] = useState("completo");
 
   const enRango = (f) => (!desde || f >= desde) && (!hasta || f <= hasta);
 
@@ -81,7 +83,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
     } finally { setGenerando(""); }
   }
 
-  function datosPDF() {
+  function datosPDF(modo = contenido) {
     const bloques = [{
         titulo: "Gastos del período",
         columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
@@ -102,18 +104,22 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
       const adjuntos = gastosF.filter(g => g.archivo_url)
         .map(g => ({ url: g.archivo_url, titulo: `${g.proveedor || "Gasto"} — ${g.fecha} — $${money(g.monto)}` }));
 
+      const soloAnexos = modo === "anexos";
+      const sufijo = soloAnexos ? " (anexos)" : modo === "reporte" ? "" : "";
+
       return {
-        nombreArchivo: `Caja Chica - ${caja.proyecto_nombre} - ${desde}`,
-        titulo: `Caja Chica — ${caja.proyecto_nombre}`,
+        nombreArchivo: `Caja Chica - ${caja.proyecto_nombre} - ${desde}${sufijo}`,
+        titulo: soloAnexos ? `Anexos — Caja Chica ${caja.proyecto_nombre}` : `Caja Chica — ${caja.proyecto_nombre}`,
         subtitulo: `Responsable: ${caja.responsable_nombre} · Período ${periodo}`,
-        resumen: [
+        indiceAdjuntos: soloAnexos,
+        bloques: soloAnexos ? [] : bloques,
+        adjuntos: modo === "reporte" ? [] : adjuntos,
+        resumen: soloAnexos ? [] : [
           { label: "Anticipos período", valor: `$${money(totalAnticipos)}` },
           { label: "Gastos período", valor: `$${money(totalGastos)}`, color: [185, 28, 28] },
           { label: "Diferencia", valor: `$${money(totalAnticipos - totalGastos)}` },
           { label: "Saldo disponible", valor: `$${money(caja.saldo_disponible)}`, color: [21, 128, 61] },
         ],
-        bloques,
-        adjuntos,
         onProgreso: (i, t) => setProgreso(`Adjuntando facturas ${i}/${t}...`),
       };
   }
@@ -138,7 +144,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
       }
 
       setProgreso("Armando el PDF...");
-      const doc = await construirPDF(datosPDF());
+      const doc = await construirPDF(datosPDF(contenido === "anexos" ? "completo" : contenido));
       const base64 = doc.output("datauristring").split(",")[1];
       const pesoMB = (base64.length * 0.75) / (1024 * 1024);
 
@@ -210,13 +216,15 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         <Mini label="Con factura" valor={`${conAdjunto}/${gastosF.length}`} moneda={false} />
       </div>
 
+      <SelectorContenido valor={contenido} onChange={setContenido} conAdjunto={conAdjunto} />
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Button variant="outline" onClick={generarExcel} disabled={!!generando || !gastosF.length}>
           <FileSpreadsheet size={14} /> {generando === "excel" ? "Generando..." : "Excel"}
         </Button>
         <Button variant="primary" onClick={generarPDF} disabled={!!generando || !gastosF.length}>
           {generando === "pdf" ? <Loader2 size={14} /> : <FileText size={14} />}
-          {generando === "pdf" ? (progreso || "Generando...") : `PDF${conAdjunto ? " con facturas" : ""}`}
+          {generando === "pdf" ? (progreso || "Generando...") : `PDF · ${CONTENIDO[contenido].label}`}
         </Button>
       </div>
 
