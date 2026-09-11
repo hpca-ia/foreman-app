@@ -136,10 +136,14 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   }
 
   async function agregarGasto() {
-    if (!cajaActiva||!gastoForm.monto||!gastoForm.descripcion) return;
+    if (!cajaActiva) return;
+    if (!gastoForm.descripcion?.trim() || !Number(gastoForm.monto)) {
+      setNovaError("Falta la descripción o el monto del gasto.");
+      return false;
+    }
     if (dupsGasto.exactos.length && !dupJustificacion.trim()) {
       setNovaError("Esta factura ya está cargada en la obra. Explica por qué no es un duplicado para poder guardarla.");
-      return;
+      return false;
     }
     setUploading(true);
     let archivoUrl=null, archivoNombre=null;
@@ -148,23 +152,31 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       const path=`caja-${cajaActiva.id}/${Date.now()}-${safeName}`;
       const{error}=await supabase.storage.from("task-files").upload(path,archivoGasto,{upsert:false});
       if(!error){const{data:u}=supabase.storage.from("task-files").getPublicUrl(path);archivoUrl=u.publicUrl;archivoNombre=archivoGasto.name;}
+      else setNovaError("No se pudo subir la foto (el gasto igual se guarda): "+error.message);
     }
     const monto=Number(gastoForm.monto);
     const capitulosList = capitulosSeleccionados.length>0 ? capitulosSeleccionados : ["SIN CLASIFICAR"];
-    const{data}=await supabase.from("cajas_gastos").insert({
+    const{data,error:errGasto}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
       capitulo:capitulosList.join(", "),proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
       tipo:gastoForm.tipo,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
     }).select().single();
-    if(data){
+
+    if (errGasto || !data) {
+      setNovaError("No se pudo guardar el gasto: " + (errGasto?.message || "respuesta vacía de la base de datos"));
+      setUploading(false);
+      return false;
+    }
+
+    {
       // El gasto entra al control de la obra como factura "por asignar":
       // nadie le pone rubro desde el celular, se asigna después en Control de Obra.
       if (cajaActiva.obra_id) {
         const {data:planillaAbierta} = await supabase.from("planillas")
           .select("id").eq("obra_id",cajaActiva.obra_id).eq("estado","abierta")
           .order("numero",{ascending:false}).limit(1).maybeSingle();
-        const {data:facturaObra} = await supabase.from("obra_facturas").insert({
+        const {data:facturaObra, error:errObra} = await supabase.from("obra_facturas").insert({
           obra_id:cajaActiva.obra_id, planilla_id:planillaAbierta?.id||null,
           fecha:gastoForm.fecha, tipo_documento:(gastoForm.tipo||"factura").toUpperCase(),
           razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
@@ -178,6 +190,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
           subido_por:currentUser.id, subido_por_nombre:currentUser.name
         }).select().single();
         if (facturaObra) await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
+        else if (errObra) setNovaError("El gasto se guardó, pero no entró al control de la obra: " + errObra.message);
       }
       const nuevoGastado=(cajaActiva.saldo_gastado||0)+monto;
       const nuevoDisp=(cajaActiva.saldo_total||0)-nuevoGastado;
@@ -188,9 +201,10 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
       setCapitulosSeleccionados([]);
       setArchivoGasto(null);setArchivoPreview(null);fetchCajas();
-      if(nuevoDisp<=(cajaActiva.limite_alerta||50))alert(`⚠️ Saldo bajo en caja de ${cajaActiva.responsable_nombre}: $${fmt(nuevoDisp)} — Johanna debe revisar.`);
+      if(nuevoDisp<=(cajaActiva.limite_alerta||50))alert(`Saldo bajo en la caja de ${cajaActiva.responsable_nombre}: $${fmt(nuevoDisp)}`);
     }
     setUploading(false);
+    return true;
   }
 
   async function aprobarGasto(id) {
@@ -355,7 +369,8 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Notas</label>
               <textarea value={gastoForm.notas} onChange={e=>setGastoForm(p=>({...p,notas:e.target.value}))} style={{...iS,minHeight:50,resize:"vertical"}} placeholder="Observaciones..."/></div>
           </div>
-          <button onClick={()=>{agregarGasto();setSubVista("detalle");}} disabled={!gastoForm.descripcion||!gastoForm.monto||uploading}
+          {novaError&&<div style={{background:"var(--danger-soft)",border:"1px solid var(--danger-border)",borderRadius:8,padding:"10px 12px",marginTop:14,fontSize:12,color:"var(--danger)"}}>{novaError}</div>}
+          <button onClick={async()=>{ if(await agregarGasto()) setSubVista("detalle"); }} disabled={!gastoForm.descripcion||!gastoForm.monto||uploading}
             style={{width:"100%",marginTop:16,background:gastoForm.descripcion&&gastoForm.monto&&!uploading?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:10,padding:12,color:gastoForm.descripcion&&gastoForm.monto&&!uploading?"#fff":"var(--muted)",fontSize:14,fontWeight:600,cursor:"pointer"}}>
             {uploading?"Guardando...":"Registrar gasto →"}
           </button>
