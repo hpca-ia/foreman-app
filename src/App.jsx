@@ -13,6 +13,7 @@ import NovaInput from "./components/NovaInput";
 import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
 import TareasListaMovil from "./components/TareasListaMovil";
+import AvisoTareas from "./components/AvisoTareas";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import ModalTarea from "./components/ModalTarea";
@@ -129,6 +130,11 @@ export default function App() {
       users.find(u => u.id === t.assignee_id)?.name?.toLowerCase().includes(q)
     );
   }
+  // El aviso mira todo lo del usuario, no lo que dejó el filtro: si al tocar
+  // "Completadas" desapareciera el conteo de vencidas, la señal se apagaría
+  // justo cuando sigue siendo cierta.
+  const paraAvisar = filtroP === "all" ? visibles : visibles.filter(t => t.project_id === Number(filtroP));
+
   if (filtro === "pendiente") visibles = visibles.filter(t => t.status === "pendiente");
   if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
   if (filtro === "listo") visibles = visibles.filter(t => t.status === "listo");
@@ -158,10 +164,15 @@ export default function App() {
         <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} />
 
         <div className="app-content" style={{ flex: 1, padding: "18px 20px", overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
-          {admin && vista === "tareas" && <><NovaInput currentUser={usuario} projects={projects} users={users} onTaskCreated={fetchTareas} /><AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} /></>}
-
           {vista === "tareas" && (
             <>
+              {/* Lo primero de la pantalla y para todos los roles: antes las
+                  herramientas de NOVA se comían el tope y una tarea vencida
+                  aparecía cuarta, debajo del pliegue en el teléfono. */}
+              <AvisoTareas tasks={paraAvisar} filtro={filtro} onFiltrar={setFiltro} />
+
+              {admin && <><NovaInput currentUser={usuario} projects={projects} users={users} onTaskCreated={fetchTareas} /><AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} /></>}
+
               <div className="tareas-barra">
                 <div className="tareas-filtros">
                 {[["todas", "Todas"], ["urgente", "Urgentes"], ["pendiente", "Pendientes"], ["listo", "Completadas"]].map(([f, l]) => (
