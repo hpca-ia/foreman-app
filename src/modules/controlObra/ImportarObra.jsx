@@ -23,6 +23,8 @@ Reglas:
 
 export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [leyendo, setLeyendo] = useState(false);
+  const [paso, setPaso] = useState("");
+  const [omitidas, setOmitidas] = useState([]);
   const [error, setError] = useState("");
   const [rubros, setRubros] = useState([]);
   const [nombre, setNombre] = useState("");
@@ -32,43 +34,139 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [guardando, setGuardando] = useState(false);
   const fileRef = useRef(null);
 
+  // Un Excel ya trae los datos en columnas: pedirle a NOVA que transcriba
+  // rubro por rubro tardaba tres minutos y arriesgaba truncarse. Ahora NOVA
+  // solo dice qué columna es cuál —unos segundos— y el resto lo recorre JS,
+  // que además no se equivoca copiando números.
+  const MAPA_PROMPT = `Estas son las primeras filas de un presupuesto de construcción en Excel.
+Identifica la estructura. Devuelve SOLO JSON, sin markdown:
+{"fila_encabezado":0,"col_descripcion":0,"col_unidad":0,"col_cantidad":0,"col_precio":0,"col_total":0,"col_capitulo":null,"nombre":"","cliente":""}
+Las columnas son índices desde 0 según el orden en que aparecen, contando las vacías.
+"col_total" es la columna del importe de cada rubro. Si el capítulo está en su propia
+columna usa "col_capitulo"; si en cambio va como fila de título, deja null.
+"fila_encabezado" es el índice de la fila con los títulos de columna.
+Si una columna no existe, ponla en null.`;
+
+  async function nova(body, señal) {
+    const res = await fetch("/api/nova", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: señal,
+    });
+    if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+    return res.json();
+  }
+
+  function filasDeExcel(XLSX, wb) {
+    const hoja = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(hoja, { header: 1, blankrows: false, defval: "" });
+  }
+
+  // Recorre las filas aplicando el mapa. Una fila es rubro si tiene descripción
+  // y algún número; si tiene descripción pero ningún número, es título de capítulo.
+  function extraerConMapa(filas, m) {
+    const val = (f, c) => (c == null ? "" : (f[c] ?? ""));
+    const num = v => {
+      if (typeof v === "number") return v;
+      const t = String(v).replace(/[^0-9,.-]/g, "").replace(/\.(?=.*\.)/g, "").replace(",", ".");
+      return Number(t) || 0;
+    };
+    const rubros = [];
+    const omitidas = [];
+    let capitulo = "SIN CAPÍTULO";
+    for (let i = (m.fila_encabezado ?? 0) + 1; i < filas.length; i++) {
+      const f = filas[i];
+      const desc = String(val(f, m.col_descripcion)).trim();
+      if (!desc) continue;
+      const cant = num(val(f, m.col_cantidad));
+      const precio = num(val(f, m.col_precio));
+      const total = num(val(f, m.col_total));
+      if (m.col_capitulo != null) {
+        const c = String(val(f, m.col_capitulo)).trim();
+        if (c) capitulo = c.toUpperCase();
+      }
+      if (/^(subtotal|total|suma|iva|honorarios)\b/i.test(desc)) continue;
+      // Un rubro siempre tiene cantidad y precio unitario. La fila de capítulo
+      // no los tiene aunque sí traiga un número: ese número es su subtotal, y
+      // contarlo como rubro duplicaría la plata del presupuesto.
+      if (!cant || !precio) {
+        // Con monto es el subtotal de un capítulo; sin monto es una línea de
+        // detalle —el despiece de ventanas, por ejemplo— que como rubro solo
+        // sería un $0 que nunca avanza.
+        if (total) { if (m.col_capitulo == null && desc.length < 90) capitulo = desc.toUpperCase(); }
+        else omitidas.push(desc);
+        continue;
+      }
+      rubros.push({
+        capitulo, descripcion: desc,
+        unidad: String(val(f, m.col_unidad)).trim(),
+        cantidad: cant, precio_unitario: precio,
+        total: total || cant * precio,
+      });
+    }
+    return { rubros, omitidas };
+  }
+
   async function leer(e) {
     const file = e.target.files[0];
     if (!file) return;
-    setLeyendo(true); setError(""); setRubros([]);
+    setLeyendo(true); setError(""); setRubros([]); setOmitidas([]); setPaso("Abriendo el archivo...");
+    const ctrl = new AbortController();
+    const reloj = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
     try {
-      let contenido;
       const esImagen = file.type.startsWith("image/");
       const esPDF = file.type === "application/pdf";
       const esExcel = /\.(xlsx|xls|csv)$/i.test(file.name);
 
+      let csvExcel = null;
+
+      // ── Camino rápido: Excel ──
+      if (esExcel) {
+        const XLSX = await import("xlsx");
+        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const filas = filasDeExcel(XLSX, wb);
+        csvExcel = wb.SheetNames.map(h => `--- HOJA: ${h} ---\n` + XLSX.utils.sheet_to_csv(wb.Sheets[h])).join("\n").slice(0, 60000);
+        setPaso("NOVA está reconociendo las columnas...");
+        const muestra = filas.slice(0, 40)
+          .map((f, i) => `${i}: ` + f.map(c => String(c ?? "").slice(0, 30)).join(" | ")).join("\n");
+        const data = await nova({
+          model: "claude-sonnet-4-5", max_tokens: 1000,
+          messages: [{ role: "user", content: [{ type: "text", text: `${muestra}\n\n${MAPA_PROMPT}` }] }],
+        }, ctrl.signal);
+        const mapa = parseJSONTolerante(data.content?.[0]?.text || "");
+        const { rubros: extraidos, omitidas } = mapa ? extraerConMapa(filas, mapa) : { rubros: [], omitidas: [] };
+        if (extraidos.length >= 3) {
+          setPaso("");
+          setRubros(extraidos);
+          setOmitidas(omitidas);
+          setNombre(mapa.nombre || file.name.replace(/\.[^.]+$/, ""));
+          setCliente(mapa.cliente || "");
+          setLeyendo(false); clearTimeout(reloj); e.target.value = "";
+          return;
+        }
+        setPaso("El formato no es el habitual. NOVA lo va a leer entero, puede tardar un par de minutos...");
+      }
+
+      // ── Camino lento: NOVA transcribe (PDF, imagen, o Excel raro) ──
+      let contenido;
       if (esImagen || esPDF) {
+        setPaso("NOVA está leyendo el documento, puede tardar un par de minutos...");
         const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(file); });
         contenido = [
           esPDF ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
                 : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
           { type: "text", text: PROMPT },
         ];
-      } else if (esExcel) {
-        const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
-        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-        const csv = wb.SheetNames.map(s => `--- HOJA: ${s} ---\n` + XLSX.utils.sheet_to_csv(wb.Sheets[s])).join("\n").slice(0, 60000);
-        contenido = [{ type: "text", text: `Presupuesto en Excel:\n\n${csv}\n\n${PROMPT}` }];
       } else {
-        const txt = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(file); });
-        contenido = [{ type: "text", text: `Presupuesto:\n\n${txt.slice(0, 40000)}\n\n${PROMPT}` }];
+        const txt = csvExcel ?? (await file.text()).slice(0, 60000);
+        contenido = [{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }];
       }
 
-      const res = await fetch("/api/nova", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }),
-      });
-      const data = await res.json();
+      const data = await nova({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, ctrl.signal);
       const parsed = parseJSONTolerante(data.content?.[0]?.text || "");
 
       if (!parsed?.rubros?.length) {
         setError("NOVA no pudo leer el presupuesto. Si es muy grande, prueba subirlo por capítulos.");
-        setLeyendo(false); e.target.value = ""; return;
+        setLeyendo(false); setPaso(""); clearTimeout(reloj); e.target.value = ""; return;
       }
 
       setRubros(parsed.rubros.map(r => ({
@@ -82,9 +180,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
       setCliente(parsed.cliente || "");
     } catch (err) {
-      setError("Error leyendo el archivo: " + err.message);
+      setError(err.name === "AbortError"
+        ? "La lectura pasó de cinco minutos y se cortó. Prueba subir el presupuesto por capítulos, o en Excel en vez de PDF."
+        : "Error leyendo el archivo: " + err.message);
     }
-    setLeyendo(false);
+    clearTimeout(reloj);
+    setLeyendo(false); setPaso("");
     e.target.value = "";
   }
 
@@ -148,7 +249,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
         <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 20, textAlign: "center" }}>
           <Sparkles size={22} color={colors.brand} style={{ marginBottom: 8 }} />
           <div style={{ fontSize: 13, color: colors.brand, marginBottom: 12 }}>
-            {leyendo ? "NOVA está leyendo el presupuesto..." : "Sube el presupuesto en Excel, PDF, CSV o foto."}
+            {leyendo ? (paso || "NOVA está leyendo el presupuesto...") : "Sube el presupuesto en Excel, PDF, CSV o foto. El Excel se lee en segundos; PDF y fotos tardan más."}
           </div>
           <Button variant="primary" onClick={() => fileRef.current?.click()} disabled={leyendo}>
             <Upload size={13} /> {leyendo ? "Leyendo..." : "Subir presupuesto"}
@@ -183,6 +284,15 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
               <span><strong>{capitulos.length}</strong> capítulos</span>
               <span>Línea base: <strong>${fmt(lineaBase)}</strong></span>
             </div>
+
+            {omitidas.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 11, color: colors.inkSoft, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
+                <strong>{omitidas.length} filas</strong> del Excel no entraron porque no tienen cantidad ni precio — son líneas de detalle sin monto, como el despiece de ventanas. No cambian el total.
+                <div style={{ color: colors.muted, marginTop: 3 }}>
+                  Por ejemplo: {omitidas.slice(0, 2).map(d => d.slice(0, 40)).join(" · ")}
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, maxHeight: 400, overflowY: "auto", marginBottom: 14 }}>

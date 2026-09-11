@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from "react";
+import { Trash2 } from "lucide-react";
+import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { supabase } from "../lib/supabase";
 import AdminBD from "./AdminBD";
 import CotizacionPanel from "./CotizacionPanel";
 
-export default function ModuloPresupuestos({ currentUser }) {
+export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
+  const [borrarPre, setBorrarPre] = useState(null);
   const [presupuestoActivo, setPresupuestoActivo] = useState(null);
   const [clientes, setClientes] = useState([]);
   const [capitulosDB, setCapitulosDB] = useState([]);
@@ -45,6 +48,28 @@ export default function ModuloPresupuestos({ currentUser }) {
     const { data } = await supabase.from("capitulos").select("*").order("nombre");
     setCapitulosDB((data||[]).map(c=>c.nombre));
   }
+  // Un presupuesto del que ya se activó una obra no se borra: la obra copió
+  // sus rubros pero lo sigue apuntando como origen, y sin él se pierde de
+  // dónde salió la línea base que se está controlando.
+  async function revisarPresupuesto(pre) {
+    const { data: obras } = await supabase.from("obras").select("nombre").eq("presupuesto_id", pre.id);
+    if ((obras || []).length) {
+      return { bloqueo: `No se puede borrar: de este presupuesto se activó ${obras.length === 1 ? "la obra" : "las obras"} ${obras.map(o => o.nombre).join(", ")}. Es la línea base contra la que se mide ese control.\n\nPara borrarlo, primero hay que borrar esa obra.` };
+    }
+    const { data: items } = await supabase.from("presupuesto_items").select("id").eq("presupuesto_id", pre.id);
+    return { bloqueo: null, detalle: [
+      `${(items || []).length} rubros del presupuesto`,
+      `El documento por $${fmt(pre.total)}`,
+      "Los capítulos y rubros de tu base de datos NO se tocan",
+    ] };
+  }
+
+  async function ejecutarBorradoPresupuesto(pre) {
+    await supabase.from("presupuesto_items").delete().eq("presupuesto_id", pre.id);
+    const { error } = await supabase.from("presupuestos").delete().eq("id", pre.id);
+    return error;
+  }
+
   async function fetchItems(pid) {
     const { data } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id",pid).order("orden");
     setItems(data||[]);
@@ -587,6 +612,17 @@ export default function ModuloPresupuestos({ currentUser }) {
       )}
 
       {/* LISTA */}
+      {borrarPre&&(
+        <ConfirmarBorrado
+          titulo="Borrar este presupuesto"
+          nombre={borrarPre.nombre}
+          revisar={()=>revisarPresupuesto(borrarPre)}
+          borrar={()=>ejecutarBorradoPresupuesto(borrarPre)}
+          onCancelar={()=>setBorrarPre(null)}
+          onBorrado={()=>{setBorrarPre(null);fetchPresupuestos();}}
+        />
+      )}
+
       {subVista==="lista"&&(
         <div>
           {presupuestos.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)"}}><div style={{fontSize:40,marginBottom:12}}>💼</div>Sin presupuestos aún.</div>
@@ -598,9 +634,17 @@ export default function ModuloPresupuestos({ currentUser }) {
                 <div style={{fontWeight:600,color:"var(--ink)",fontSize:14}}>{p.nombre}</div>
                 <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{p.cliente_nombre} · {new Date(p.created_at).toLocaleDateString("es-EC")}</div>
               </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontWeight:700,color:"var(--brand)",fontSize:16}}>${fmt(p.total)}</div>
-                <div style={{fontSize:10,color:"var(--muted)",background:"var(--neutral-soft)",borderRadius:20,padding:"1px 8px",display:"inline-block",marginTop:2}}>{p.estado}</div>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontWeight:700,color:"var(--brand)",fontSize:16}}>${fmt(p.total)}</div>
+                  <div style={{fontSize:10,color:"var(--muted)",background:"var(--neutral-soft)",borderRadius:20,padding:"1px 8px",display:"inline-block",marginTop:2}}>{p.estado}</div>
+                </div>
+                {puede?.("borrar.definitivo")&&(
+                  <button onClick={e=>{e.stopPropagation();setBorrarPre(p);}} title="Borrar este presupuesto"
+                    style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>
+                    <Trash2 size={13}/>
+                  </button>
+                )}
               </div>
             </div>
           ))}

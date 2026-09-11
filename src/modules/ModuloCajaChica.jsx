@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect } from "react";
+import { Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
 import ReporteCaja from "./cajaChica/ReporteCaja";
 import SelectorActividad from "./cajaChica/SelectorActividad";
+import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 
-export default function ModuloCajaChica({ currentUser, projects, users }) {
+export default function ModuloCajaChica({ currentUser, puede, projects, users }) {
   const [subVista, setSubVista] = useState("lista");
+  const [borrarCaja, setBorrarCaja] = useState(null);
   const [cajas, setCajas] = useState([]);
   const [cajaActiva, setCajaActiva] = useState(null);
   const [gastos, setGastos] = useState([]);
@@ -46,6 +49,39 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   }
   async function fetchGastos(id) { const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setGastos(data||[]); }
   async function fetchAnticipos(id) { const { data } = await supabase.from("cajas_anticipos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setAnticipos(data||[]); }
+
+  // Una caja que ya alimentó un control de obra no se borra: sus gastos son
+  // facturas dentro de una planilla, y borrarlas por esta puerta dejaría el
+  // avance de la obra cuadrando con nada. Si la obra se borró antes, el
+  // vínculo ya quedó suelto y la caja sí se puede borrar.
+  async function revisarCaja(caja) {
+    const { data: gs } = await supabase.from("cajas_gastos")
+      .select("id,obra_factura_id,monto").eq("caja_id", caja.id);
+    const gastos = gs || [];
+    const atados = gastos.filter(g => g.obra_factura_id).map(g => g.obra_factura_id);
+    if (atados.length) {
+      const { data: fs } = await supabase.from("obra_facturas").select("id,obra_id").in("id", atados);
+      const vivas = fs || [];
+      if (vivas.length) {
+        const { data: obras } = await supabase.from("obras").select("nombre").in("id", [...new Set(vivas.map(f => f.obra_id))]);
+        const nombres = (obras || []).map(o => o.nombre).join(", ") || "una obra";
+        return { bloqueo: `No se puede borrar: ${vivas.length} de sus gastos están cargados como facturas en ${nombres}. Si borras la caja, el control de esa obra quedaría cuadrando contra nada.\n\nPara borrarla, primero hay que sacar esas facturas del control, o borrar la obra.` };
+      }
+    }
+    const { data: ants } = await supabase.from("cajas_anticipos").select("id").eq("caja_id", caja.id);
+    return { bloqueo: null, detalle: [
+      `${gastos.length} gasto${gastos.length === 1 ? "" : "s"} por $${fmt(gastos.reduce((x, g) => x + (Number(g.monto) || 0), 0))}`,
+      `${(ants || []).length} anticipo${(ants || []).length === 1 ? "" : "s"}`,
+      "Las facturas escaneadas de esos gastos",
+    ] };
+  }
+
+  async function ejecutarBorradoCaja(caja) {
+    await supabase.from("cajas_gastos").delete().eq("caja_id", caja.id);
+    await supabase.from("cajas_anticipos").delete().eq("caja_id", caja.id);
+    const { error } = await supabase.from("cajas_chicas").delete().eq("id", caja.id);
+    return error;
+  }
 
   async function crearCaja() {
     const resUser = users.find(u=>u.id===Number(nuevaCajaForm.responsable_id));
@@ -275,6 +311,17 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
         <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos} usuarios={users}/>
       )}
 
+      {borrarCaja&&(
+        <ConfirmarBorrado
+          titulo="Borrar esta caja chica"
+          nombre={borrarCaja.proyecto_nombre}
+          revisar={()=>revisarCaja(borrarCaja)}
+          borrar={()=>ejecutarBorradoCaja(borrarCaja)}
+          onCancelar={()=>setBorrarCaja(null)}
+          onBorrado={()=>{setBorrarCaja(null);fetchCajas();}}
+        />
+      )}
+
       {subVista==="lista"&&(
         <div>
           {cajas.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)"}}><div style={{fontSize:40,marginBottom:12}}>💰</div>Sin cajas chicas.</div>
@@ -285,10 +332,18 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div><div style={{fontWeight:600,color:"var(--ink)",fontSize:14}}>{c.proyecto_nombre}</div>
                   <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>🏗 {c.responsable_nombre}</div></div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:10,color:"var(--ink-soft)"}}>Saldo disponible</div>
-                  <div style={{fontWeight:700,fontSize:18,color:saldoColor(c.saldo_disponible)}}>${fmt(c.saldo_disponible)}</div>
-                  <div style={{fontSize:10,color:"var(--muted)"}}>de ${fmt(c.saldo_total)}</div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:10,color:"var(--ink-soft)"}}>Saldo disponible</div>
+                    <div style={{fontWeight:700,fontSize:18,color:saldoColor(c.saldo_disponible)}}>${fmt(c.saldo_disponible)}</div>
+                    <div style={{fontSize:10,color:"var(--muted)"}}>de ${fmt(c.saldo_total)}</div>
+                  </div>
+                  {puede?.("borrar.definitivo")&&(
+                    <button onClick={e=>{e.stopPropagation();setBorrarCaja(c);}} title="Borrar esta caja"
+                      style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>
+                      <Trash2 size={13}/>
+                    </button>
+                  )}
                 </div>
               </div>
               <div style={{marginTop:8,background:"var(--neutral-soft)",borderRadius:4,height:5}}>
