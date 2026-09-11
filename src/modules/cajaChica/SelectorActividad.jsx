@@ -40,7 +40,7 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
   return (
     <div>
       <label style={{ fontSize: 11, color: "var(--ink-soft)", fontWeight: 500, display: "block", marginBottom: 4 }}>
-        ¿A qué actividad de la obra corresponde?
+        ¿A qué agrupación de la obra corresponde?
       </label>
 
       {seleccion.map((s, i) => {
@@ -48,7 +48,7 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
         return (
           <div key={s.obra_actividad_id} style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--bg)", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
             <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              <span style={{ color: "var(--muted)", marginRight: 5 }}>{a?.codigo}</span>{a?.nombre || "Actividad"}
+              <span style={{ color: "var(--muted)", marginRight: 5 }}>{a?.codigo}</span>{a?.nombre || "Agrupación"}
             </div>
             {varios && (
               <input type="number" value={s.monto}
@@ -71,10 +71,10 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
 
       <select value="" disabled={cargando || !disponibles.length} onChange={e => agregar(Number(e.target.value))} style={inputStyle}>
         <option value="">
-          {cargando ? "Cargando actividades..."
-            : !actividades.length ? "Esta obra todavía no tiene actividades"
-            : !disponibles.length ? "Ya asignaste todas las actividades"
-            : "Elegir una actividad..."}
+          {cargando ? "Cargando agrupaciones..."
+            : !actividades.length ? "Esta obra todavía no tiene agrupaciones"
+            : !disponibles.length ? "Ya asignaste todas las agrupaciones"
+            : "Elegir una agrupación..."}
         </option>
         {disponibles.map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
       </select>

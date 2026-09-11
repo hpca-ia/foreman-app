@@ -113,7 +113,7 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
  * @param actividades filas de obra_actividades (solo para modo actividad)
  */
 const SIN_CAPITULO = "SIN CAPÍTULO";
-const SIN_ACTIVIDAD = "SIN ACTIVIDAD";
+const SIN_ACTIVIDAD = "SIN AGRUPAR";
 
 export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividades = []) {
   const porActividad = modo === "actividad";

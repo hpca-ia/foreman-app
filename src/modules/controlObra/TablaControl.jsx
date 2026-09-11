@@ -24,7 +24,7 @@ function FilaRubro({ rubro: r, porRubro, sangria }) {
       <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(r.total_base)}</span>
       <span style={{ textAlign: "right", color: colors.muted }}>${fmt(acc.anterior)}</span>
       <span style={{ textAlign: "right", color: acc.periodo > 0 ? colors.brand : colors.muted, fontWeight: acc.periodo > 0 ? 600 : 400 }}>${fmt(acc.periodo)}</span>
-      <span style={{ textAlign: "right", color: colors.ink }} title={acc.estimado ? "Repartido desde una actividad a prorrata del presupuesto — no es un monto de factura" : undefined}>
+      <span style={{ textAlign: "right", color: colors.ink }} title={acc.estimado ? "Repartido desde una agrupación a prorrata del presupuesto — no es un monto de factura" : undefined}>
         {acc.estimado && <span style={{ color: colors.muted, marginRight: 2 }}>~</span>}${fmt(acc.acumulado)}
       </span>
       <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
@@ -57,7 +57,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
 
           {/* Encabezado */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "8px 14px", background: colors.bg, borderBottom: `1px solid ${colors.border}`, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
-            <span>{modo === "actividad" ? "ACTIVIDAD / RUBRO" : "CAPÍTULO / RUBRO"}</span>
+            <span>{modo === "actividad" ? "AGRUPACIÓN / RUBRO" : "CAPÍTULO / RUBRO"}</span>
             <span style={{ textAlign: "right" }}>UND</span>
             <span style={{ textAlign: "right" }}>CANT</span>
             <span style={{ textAlign: "right" }}>PRESUPUESTO</span>
@@ -81,7 +81,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.capitulo}</span>
                     <span style={{ fontWeight: 400, opacity: 0.7 }}>({g.rubros.length})</span>
                     {g.cruzaCapitulos && (
-                      <span title={`Esta actividad toca ${g.capitulos.length} capítulos: ${g.capitulos.join(", ")}. El gasto que se le asigne se reparte entre ellos a prorrata.`}
+                      <span title={`Esta agrupación toca ${g.capitulos.length} capítulos: ${g.capitulos.join(", ")}. El gasto que se le asigne se reparte entre ellos a prorrata.`}
                         style={{ display: "flex", alignItems: "center", gap: 3, background: colors.warningSoft, color: colors.warning, borderRadius: 10, padding: "1px 7px", fontSize: 9, fontWeight: 600, flexShrink: 0 }}>
                         <AlertTriangle size={9} /> {g.capitulos.length} capítulos
                       </span>

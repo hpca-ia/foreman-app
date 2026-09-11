@@ -142,7 +142,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
     const { data, error: e } = await supabase.from("obra_actividades")
       .insert({ obra_id: obra.id, nombre, codigo: String(actividades.length + 1).padStart(2, "0"), orden: actividades.length + 1 })
       .select().single();
-    if (e) { setError("No se pudo crear la actividad: " + e.message); return; }
+    if (e) { setError("No se pudo crear la agrupación: " + e.message); return; }
     actividades.push(data);
     setNuevaActividad("");
     agregar("actividad", data.id);
@@ -283,7 +283,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       {/* Reparto. Por actividad es el camino normal; el rubro es la excepción. */}
       <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>¿A qué actividad va?</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>¿A qué agrupación va?</div>
           <div style={{ marginLeft: "auto", fontSize: 11, color: diferencia === 0 ? colors.success : colors.warning, fontWeight: 600 }}>
             {diferencia === 0 ? "Cuadrado" : `Faltan $${fmt(diferencia)}`}
           </div>
@@ -313,7 +313,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
 
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <select value="" onChange={e => agregar("actividad", Number(e.target.value))} style={{ ...mini, flex: 1 }}>
-            <option value="">Agregar una actividad...</option>
+            <option value="">Agregar una agrupación...</option>
             {actividades.filter(a => !repartos.some(r => r.tipo === "actividad" && r.id === a.id))
               .map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
           </select>
@@ -322,7 +322,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <input value={nuevaActividad} onChange={e => setNuevaActividad(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && nuevaActividad.trim()) crearYAsignar(); }}
-            placeholder="…o crear una actividad nueva" style={{ ...mini, flex: 1 }} />
+            placeholder="…o crear una agrupación nueva" style={{ ...mini, flex: 1 }} />
           <Button variant="outline" size="sm" onClick={crearYAsignar} disabled={!nuevaActividad.trim()}>
             <Plus size={12} /> Crear
           </Button>
@@ -330,7 +330,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
 
         {actividades.length === 0 && (
           <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
-            Esta obra todavía no tiene actividades. Créala acá arriba, o agrúpalas de una con NOVA en la pestaña Actividades.
+            Esta obra todavía no tiene agrupaciones. Créala acá arriba, o agrúpalas de una con NOVA en la pestaña Agrupaciones.
           </div>
         )}
 
@@ -342,7 +342,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         {porRubro && (
           <>
             <div style={{ fontSize: 10, color: colors.muted, margin: "4px 0 5px" }}>
-              Lo asignado a una actividad se reparte entre sus rubros a prorrata. Si sabes el rubro exacto, asígnalo acá y el monto no se prorratea.
+              Lo asignado a una agrupación se reparte entre sus rubros a prorrata. Si sabes el rubro exacto, asígnalo acá y el monto no se prorratea.
             </div>
             <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro..." style={mini} />
             {coincidencias.length > 0 && (

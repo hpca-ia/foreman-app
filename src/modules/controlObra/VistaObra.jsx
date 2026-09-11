@@ -91,7 +91,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("planillas")} style={tabS(tab === "planillas")}>Planillas</button>
-        <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Actividades</button>
+        <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
         <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
       </div>
@@ -103,7 +103,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600, letterSpacing: 0.3 }}>AGRUPAR POR</span>
                 <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: colors.radiusSm, padding: 3 }}>
-                  {[["capitulo", "Capítulos"], ["actividad", "Actividades"]].map(([v, l]) => (
+                  {[["capitulo", "Capítulos"], ["actividad", "Agrupaciones"]].map(([v, l]) => (
                     <button key={v} onClick={() => setAgruparPor(v)}
                       style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
                         background: agruparPor === v ? colors.surface : "transparent", color: agruparPor === v ? colors.brand : colors.inkSoft }}>{l}</button>
@@ -111,7 +111,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
                 </div>
                 {agruparPor === "actividad" && !rubros.some(r => r.actividad) && (
                   <span style={{ fontSize: 11, color: colors.warning }}>
-                    Todavía no hay actividades — créalas en la pestaña Actividades.
+                    Todavía no hay agrupaciones — créalas en la pestaña Agrupaciones.
                   </span>
                 )}
               </div>

@@ -7,10 +7,14 @@ import { inputStyle } from "../../components/ui/Input";
 
 const SIN = "__sin__";
 
-// La actividad agrupa rubros según cómo se ejecuta la obra, cruzando capítulos
-// si hace falta: "muebles" toca carpintería, herrajes e instalación. Es el
-// nivel al que se asignan las facturas al armar una planilla, así que acá se
-// decide qué comprende cada una y con qué código se la llama.
+// Una agrupación junta los rubros que se le compran al mismo proveedor. El
+// presupuesto los separa para cotizarlos —por ambiente, por medida, por
+// variante— pero la factura llega junta: siete rubros de "revestimiento" son
+// una sola compra de porcelanato. Repartir esa factura entre los siete es lo
+// que nadie hace, y por eso se agrupa antes de planillar.
+//
+// En la base siguen llamándose obra_actividades; el usuario las llama
+// agrupaciones y eso es lo que dice la pantalla.
 export default function PanelActividades({ obra, rubros, actividades = [], onCambio }) {
   const [abiertas, setAbiertas] = useState(() => new Set([SIN]));
   const [seleccion, setSeleccion] = useState(new Set());
@@ -20,7 +24,8 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   const [sugiriendo, setSugiriendo] = useState(false);
   const [sugerencias, setSugerencias] = useState(null);
   const [error, setError] = useState("");
-  const [actsSel, setActsSel] = useState(new Set());   // actividades marcadas para fusionar
+  const [actsSel, setActsSel] = useState(new Set());   // marcadas para fusionar
+  const [fuera, setFuera] = useState(0);               // rubros que NOVA dejó sin agrupar
 
   const grupos = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -80,9 +85,9 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
     const { data: act, error: e1 } = await supabase.from("obra_actividades")
       .insert({ obra_id: obra.id, nombre, codigo: String(actividades.length + 1).padStart(2, "0"), orden: actividades.length + 1 })
       .select().single();
-    if (e1) { setError("No se pudo crear la actividad: " + e1.message); setGuardando(false); return; }
+    if (e1) { setError("No se pudo crear la agrupación: " + e1.message); setGuardando(false); return; }
     const { error: e2 } = await supabase.from("obra_rubros").update({ actividad_id: act.id }).in("id", [...seleccion]);
-    if (e2) setError("La actividad se creó pero no se pudo asignar los rubros: " + e2.message);
+    if (e2) setError("La agrupación se creó pero no se pudo asignar los rubros: " + e2.message);
     else { setSeleccion(new Set()); setNueva(""); }
     await onCambio();
     setGuardando(false);
@@ -97,7 +102,7 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
     const destino = actividades.find(a => ids.includes(a.id));
     const otras = ids.filter(id => id !== destino.id);
     const nombre = window.prompt(
-      `Fusionar ${ids.length} actividades en una sola.\n\nNombre de la actividad resultante:`, destino.nombre);
+      `Fusionar ${ids.length} agrupaciones en una sola.\n\nNombre de la agrupación resultante:`, destino.nombre);
     if (!nombre?.trim()) return;
 
     setGuardando(true); setError("");
@@ -112,7 +117,7 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   }
 
   async function limpiarVacias(vacias) {
-    if (!window.confirm(`¿Borrar ${vacias.length} actividades sin ningún rubro?\n\nNo tienen nada adentro, así que no se pierde información.`)) return;
+    if (!window.confirm(`¿Borrar ${vacias.length} agrupaciones sin ningún rubro?\n\nNo tienen nada adentro, así que no se pierde información.`)) return;
     setGuardando(true);
     await supabase.from("obra_actividades").delete().in("id", vacias.map(a => a.id));
     await onCambio();
@@ -120,9 +125,9 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   }
 
   async function editar(act) {
-    const nombre = window.prompt("Nombre de la actividad", act.nombre);
+    const nombre = window.prompt("Nombre de la agrupación", act.nombre);
     if (nombre === null) return;
-    const codigo = window.prompt("Código de la actividad", act.codigo || "");
+    const codigo = window.prompt("Código de la agrupación", act.codigo || "");
     if (codigo === null) return;
     setGuardando(true);
     await supabase.from("obra_actividades")
@@ -132,7 +137,7 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   }
 
   async function disolver(act, cuantos) {
-    if (!window.confirm(`¿Quitar la actividad "${act.nombre}"?\n\nSus ${cuantos} rubros no se borran: vuelven a quedar sin actividad.`)) return;
+    if (!window.confirm(`¿Quitar la agrupación "${act.nombre}"?\n\nSus ${cuantos} rubros no se borran: vuelven a quedar sin agrupar.`)) return;
     setGuardando(true);
     await supabase.from("obra_rubros").update({ actividad_id: null }).eq("actividad_id", act.id);
     await supabase.from("obra_actividades").delete().eq("id", act.id);
@@ -157,11 +162,41 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5", max_tokens: 8000,
-          system: `Agrupas los rubros de una obra en ACTIVIDADES: paquetes de trabajo según
-cómo se ejecuta la obra ("muebles", "instalaciones eléctricas", "movimiento de tierra").
-Una actividad PUEDE cruzar capítulos —el capítulo es cómo se contrató, no cómo se ejecuta—
-pero no la cruces sin razón: si sus rubros viven todos en un capítulo, déjala ahí.
-Cada rubro va en UNA sola actividad. Nombres cortos y concretos.
+          system: `Agrupas los rubros de un presupuesto de obra en AGRUPACIONES DE COMPRA.
+
+La pregunta para cada grupo es una sola: **¿a quién le voy a comprar esto?**
+Una agrupación = un proveedor o un contratista = una factura.
+
+El presupuesto separa rubros para poder cotizarlos —por ambiente, por medida, por
+variante— pero el proveedor factura todo junto. Repartir esa factura entre los rubros
+uno por uno es inviable en la práctica; por eso se agrupa antes.
+
+REGLA DURA: si varios rubros comparten la misma palabra de familia, van juntos.
+· "Revestimiento de piso" + "Revestimiento paredes" + "Revestimiento baño" +
+  "Revestimiento papel tapiz" + "Barredera porcelanato" + "Barredera madera" + "Perfil u"
+  → UNA sola: "Revestimientos y barrederas". Es el mismo proveedor de acabados.
+· "Tomacorrientes normales" + "regulados" + "220V" → UNA: "Tomacorrientes"
+· "Gypsum tumbado" + "Gypsum paredes" + "Gypsum cortinero" → UNA: "Gypsum"
+· "Luminaria empotrada" + "Riel" + "Perfil LED" + "Cinta LED" → UNA: "Iluminación"
+· "Hormigón en cimentación" + "en muros" + "en columnas y losas" + "ciclópeo" → UNA: "Hormigón"
+
+NUNCA separes por ambiente (cocina/baño/dormitorio), por medida, por variante ni por
+fase de obra. Eso deja la factura repartida en pedazos, que es el problema que se
+quiere evitar.
+
+Los gastos generales de obra —residente, servicios de luz y agua, limpieza, materiales
+de oficina y bodega, equipos de seguridad, seguros, permisos— van TODOS en una sola
+agrupación: no se le compran a un proveedor, son costos corrientes de la obra.
+
+Una agrupación puede cruzar capítulos si el proveedor es el mismo.
+Un rubro solo queda solo si de verdad se le compra a alguien distinto que a todos los demás.
+
+TECHO: apunta a entre 10 y 20 agrupaciones. Si te pasas de 25 en un presupuesto de cien
+y pico rubros, estás separando de más: vuelve a juntar antes de responder. Que la mayoría
+de agrupaciones tenga varios rubros; si casi todas tienen uno solo, el trabajo está mal hecho.
+Cada rubro va en UNA agrupación, y TODOS los rubros deben quedar en alguna.
+Nombres de compra, cortos: "Hormigón", "Revestimientos", "Gypsum", "Puertas", "Iluminación".
+
 Devuelve SOLO JSON, sin markdown:
 {"actividades":[{"nombre":"...","rubros":[1,2,3]}]}
 Los números son los id antes del primer "|". No inventes ids.${vocabulario.length
@@ -184,6 +219,8 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
           return { nombre: String(a.nombre || "").trim(), rubros: ids, capitulos: caps.size };
         })
         .filter(a => a.nombre && a.rubros.length));
+      const cubiertos = new Set(parsed.actividades.flatMap(a => a.rubros || []));
+      setFuera(rubros.filter(r => !cubiertos.has(r.id)).length);
     } catch (e) { setError("Error consultando a NOVA: " + e.message); }
     setSugiriendo(false);
   }
@@ -220,15 +257,15 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
   return (
     <div>
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 12 }}>
-        Las actividades son cómo se ejecuta la obra y pueden cruzar capítulos. Es a ellas que se asignan las facturas al armar una planilla.
-        {sinActividad > 0 && <> Quedan <strong>{sinActividad}</strong> rubros sin actividad.</>}
+        Una agrupación junta los rubros que le compras al mismo proveedor, para no tener que repartir cada factura entre muchos rubros. Es a ellas que se asignan las facturas al planillar.
+        {sinActividad > 0 && <> Quedan <strong>{sinActividad}</strong> rubros sin agrupar.</>}
       </div>
 
       {!sugerencias && (
         <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Sparkles size={16} color={colors.brand} />
           <div style={{ fontSize: 12, color: colors.brand, flex: 1, minWidth: 180 }}>
-            {sugiriendo ? "NOVA está agrupando los rubros..." : `Clasificar ${rubros.length} rubros a mano es lento. NOVA puede proponer las actividades y tú corriges.`}
+            {sugiriendo ? "NOVA está agrupando los rubros..." : `Clasificar ${rubros.length} rubros a mano es lento. NOVA puede proponer las agrupaciones y tú corriges.`}
           </div>
           <Button variant="primary" size="sm" onClick={sugerirConNova} disabled={sugiriendo || guardando}>
             {sugiriendo ? "Agrupando..." : "Agrupar con NOVA"}
@@ -238,7 +275,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
 
       {sugerencias && (
         <div style={{ background: colors.surface, border: `1.5px solid ${colors.brand}`, borderRadius: colors.radiusMd, padding: 14, marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 8 }}>NOVA propone {sugerencias.length} actividades</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 8 }}>NOVA propone {sugerencias.length} agrupaciones</div>
           <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 10 }}>
             {sugerencias.map((a, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${colors.neutralSoft}` }}>
@@ -257,9 +294,14 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
               </div>
             ))}
           </div>
+          {fuera > 0 && (
+            <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
+              NOVA dejó {fuera} rubro{fuera === 1 ? "" : "s"} sin agrupar. Quedan en "Sin agrupar" y los asignas tú.
+            </div>
+          )}
           {actividades.length > 0 && (
             <div style={{ fontSize: 11, color: colors.warning, background: colors.warningSoft, borderRadius: colors.radiusSm, padding: "7px 10px", marginBottom: 8 }}>
-              Esta obra ya tiene {actividades.length} actividades. Si agregas estas encima, las de antes quedan sin rubros.
+              Esta obra ya tiene {actividades.length} agrupaciones. Si agregas estas encima, las de antes quedan sin rubros.
             </div>
           )}
           <div style={{ display: "flex", gap: 8 }}>
@@ -270,7 +312,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
               </Button>
             )}
             <Button variant="primary" style={{ flex: 2 }} onClick={() => aplicarSugerencias(actividades.length > 0)} disabled={guardando}>
-              {guardando ? "Aplicando..." : actividades.length > 0 ? "Reemplazar las actuales" : "Aplicar estas actividades"}
+              {guardando ? "Aplicando..." : actividades.length > 0 ? "Reemplazar las actuales" : "Aplicar estas agrupaciones"}
             </Button>
           </div>
         </div>
@@ -294,13 +336,13 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
             ))}
             <button onClick={() => mover([...seleccion], null)} disabled={guardando}
               style={{ background: "transparent", border: `1px dashed ${colors.border}`, borderRadius: 20, padding: "5px 12px", fontSize: 12, color: colors.muted, cursor: "pointer", fontFamily: colors.font }}>
-              Sin actividad
+              Sin agrupar
             </button>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={nueva} onChange={e => setNueva(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && nueva.trim()) moverANueva(); }}
-              placeholder="…o una actividad nueva" style={{ ...inputStyle, flex: 1 }} />
+              placeholder="…o una agrupación nueva" style={{ ...inputStyle, flex: 1 }} />
             <Button variant="primary" onClick={moverANueva} disabled={!nueva.trim() || guardando}>
               <Plus size={13} /> Crear
             </Button>
@@ -312,7 +354,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
         <div style={{ display: "flex", alignItems: "center", gap: 10, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10, flexWrap: "wrap" }}>
           <AlertTriangle size={14} color={colors.warning} />
           <span style={{ fontSize: 12, color: colors.warning, flex: 1, minWidth: 160 }}>
-            {vacias.length} actividades quedaron sin ningún rubro.
+            {vacias.length} agrupaciones quedaron sin ningún rubro.
           </span>
           <Button variant="outline" size="sm" onClick={() => limpiarVacias(vacias)} disabled={guardando}>
             <Trash2 size={12} /> Borrar las vacías
@@ -324,7 +366,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
         <div style={{ display: "flex", alignItems: "center", gap: 10, background: colors.brandSoft, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10, flexWrap: "wrap" }}>
           <Merge size={14} color={colors.brand} />
           <span style={{ fontSize: 12, color: colors.brand, flex: 1, minWidth: 160 }}>
-            {actsSel.size} actividad{actsSel.size === 1 ? "" : "es"} marcada{actsSel.size === 1 ? "" : "s"}
+            {actsSel.size} agrupa{actsSel.size === 1 ? "ción" : "ciones"} marcada{actsSel.size === 1 ? "" : "s"}
             {actsSel.size < 2 && " — marca al menos dos para fusionarlas"}
           </span>
           <Button variant="outline" size="sm" onClick={() => setActsSel(new Set())}>Quitar marcas</Button>
@@ -348,7 +390,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
                 </button>
                 <span onClick={() => alternarGrupo(g.clave)} style={{ flex: 1, fontSize: 12, fontWeight: 600, color: esSin ? colors.muted : colors.brand, cursor: "pointer", minWidth: 0 }}>
                   {!esSin && <span style={{ opacity: 0.65, marginRight: 5 }}>{g.act.codigo}</span>}
-                  {esSin ? "Sin actividad" : g.act.nombre}
+                  {esSin ? "Sin agrupar" : g.act.nombre}
                   <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 5 }}>({g.rubros.length})</span>
                   {!esSin && g.capitulos.length > 1 && (
                     <span title={`Toca ${g.capitulos.length} capítulos: ${g.capitulos.join(", ")}. Lo que se le asigne se reparte entre ellos a prorrata; si necesitas el capítulo exacto, pártela en dos.`}
@@ -370,7 +412,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
                     </button>
                     <button onClick={() => editar(g.act)} title="Nombre y código"
                       style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Pencil size={12} /></button>
-                    <button onClick={() => disolver(g.act, g.rubros.length)} title="Quitar la actividad"
+                    <button onClick={() => disolver(g.act, g.rubros.length)} title="Quitar la agrupación"
                       style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={12} /></button>
                   </>
                 )}
