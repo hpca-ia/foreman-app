@@ -2,17 +2,23 @@
 // Requiere variable de entorno: RESEND_API_KEY
 
 export const config = {
-  api: { bodyParser: { sizeLimit: "5mb" } },
+  api: { bodyParser: { sizeLimit: "15mb" } },
 };
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const { tipo, datos } = req.body;
+    const { tipo, datos, to, subject, html } = req.body;
 
     if (tipo === "alerta_saldo_bajo") return await alertaSaldoBajo(res, datos);
     if (tipo === "reporte_caja_chica") return await reporteCajaChica(res, datos);
+
+    // Formato directo: lo usa el aviso de tarea asignada.
+    if (to && subject && html) {
+      const result = await enviarEmail({ to, subject, html });
+      return res.status(200).json({ ok: true, result });
+    }
 
     return res.status(400).json({ error: "Tipo desconocido" });
   } catch (e) {
@@ -20,19 +26,22 @@ export default async function handler(req, res) {
   }
 }
 
-async function enviarEmail({ to, subject, html }) {
+async function enviarEmail({ to, subject, html, attachments }) {
+  const cuerpo = {
+    from: "FOREMAN <notificaciones@hcastudio.com>",
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html,
+  };
+  if (attachments?.length) cuerpo.attachments = attachments;
+
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": "Bearer " + process.env.RESEND_API_KEY,
     },
-    body: JSON.stringify({
-      from: "FOREMAN <notificaciones@hcastudio.com>",
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-    }),
+    body: JSON.stringify(cuerpo),
   });
   return r.json();
 }
@@ -92,7 +101,8 @@ async function alertaSaldoBajo(res, datos) {
 }
 
 async function reporteCajaChica(res, datos) {
-  const { nombre, proyecto, gastos, recibido, gastado, saldo, emailAsistente, emailResponsable } = datos;
+  const { nombre, proyecto, periodo, gastos, recibido, gastado, saldo,
+          emailAsistente, emailResponsable, destinatariosExtra, pdfBase64, pdfNombre, pdfUrl } = datos;
 
   const fmtUSD = n => "$" + Number(n || 0).toFixed(2);
 
@@ -115,7 +125,7 @@ async function reporteCajaChica(res, datos) {
       <div style="background:#1F2937;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="color:#E8622A;font-size:18px;font-weight:700">FOREMAN + FINANCE</div>
-          <div style="color:#9CA3AF;font-size:12px;margin-top:2px">Reporte de Caja Chica</div>
+          <div style="color:#9CA3AF;font-size:12px;margin-top:2px">Reporte de Caja Chica${periodo ? " · " + periodo : ""}</div>
         </div>
         <div style="color:#6B7280;font-size:12px">${new Date().toLocaleDateString("es-EC", {day:"2-digit",month:"long",year:"numeric"})}</div>
       </div>
@@ -170,6 +180,10 @@ async function reporteCajaChica(res, datos) {
           </div>
         </div>
 
+        ${pdfUrl ? `<div style="margin-top:16px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:14px;text-align:center">
+          <a href="${pdfUrl}" style="color:#1D4ED8;font-size:13px;font-weight:600;text-decoration:none">Descargar el reporte completo en PDF (con las facturas)</a>
+        </div>` : ""}
+
         <div style="margin-top:20px;padding-top:16px;border-top:1px solid #F3F4F6;color:#9CA3AF;font-size:11px;text-align:center">
           Generado por FOREMAN + FINANCE · HCA Studio · ${new Date().toLocaleDateString("es-EC")}
         </div>
@@ -177,14 +191,22 @@ async function reporteCajaChica(res, datos) {
     </div>
   `;
 
-  const destinatarios = [emailAsistente];
-  if (emailResponsable && emailResponsable !== emailAsistente) destinatarios.push(emailResponsable);
+  const destinatarios = [...new Set([
+    ...(Array.isArray(emailAsistente) ? emailAsistente : [emailAsistente]),
+    emailResponsable,
+    ...(destinatariosExtra || []),
+  ].filter(Boolean))];
+
+  if (!destinatarios.length) {
+    return res.status(200).json({ ok: false, error: "Nadie tiene correo configurado. Revisa los usuarios en Ajustes." });
+  }
 
   const result = await enviarEmail({
     to: destinatarios,
-    subject: `Reporte Caja Chica — ${nombre} · ${proyecto}`,
+    subject: `Reporte Caja Chica — ${nombre} · ${proyecto}${periodo ? " · " + periodo : ""}`,
     html,
+    attachments: pdfBase64 ? [{ filename: pdfNombre || "reporte-caja-chica.pdf", content: pdfBase64 }] : undefined,
   });
 
-  return res.status(200).json({ ok: true, result });
+  return res.status(200).json({ ok: true, enviadoA: destinatarios, result });
 }

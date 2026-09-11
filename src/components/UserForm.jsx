@@ -14,10 +14,9 @@ export default function UserForm({ u, onSave, onCancel }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
           <select value={f.role} onChange={e => setF(p => ({ ...p, role: e.target.value }))} style={inputStyle}>
             <option value="owner">Director</option>
-            <option value="assistant">Asistente</option>
+            <option value="assistant">Admin</option>
             <option value="gerente">Gerente de Proyecto</option>
             <option value="residente">Residente</option>
-            <option value="member">Equipo</option>
           </select>
           <input type="color" value={f.color || "#0F3D3E"} onChange={e => setF(p => ({ ...p, color: e.target.value }))} style={{ width: 38, height: 38, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", cursor: "pointer", padding: 2 }} />
         </div>

@@ -1,5 +1,5 @@
-import { ListTodo, Users, Building2, Wallet, HardHat, PiggyBank } from "lucide-react";
-import { ROLES, esAdmin, puedeControlObra, puedeCajaChica } from "../lib/roles";
+import { ListTodo, Wallet, HardHat, PiggyBank } from "lucide-react";
+import { rolInfo, esAdmin, puedeControlObra, puedeCajaChica } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
@@ -30,15 +30,13 @@ export default function Sidebar({ usuario, empresa, vista, setVista, admin }) {
       </div>
 
       {navItem("tareas", "Tareas", ListTodo)}
-      {admin && navItem("equipo", "Equipo", Users)}
-      {admin && navItem("proyectos", "Proyectos", Building2)}
       {esAdmin(usuario.role) && navItem("presupuestos", "Presupuestos", Wallet)}
       {puedeControlObra(usuario.role) && navItem("controlObra", "Control Obra", HardHat)}
       {puedeCajaChica(usuario.role) && navItem("cajaChica", "Caja Chica", PiggyBank)}
 
       <div className="app-sidebar-spacer" style={{ flex: 1 }} />
 
-      <div className="app-sidebar-profile" title={`${usuario.name} · ${ROLES[usuario.role]?.label || "Equipo"}`}>
+      <div className="app-sidebar-profile" title={`${usuario.name} · ${rolInfo(usuario.role).label}`}>
         <Avatar name={usuario.name} size={30} color={usuario.color || colors.brand} />
       </div>
     </div>

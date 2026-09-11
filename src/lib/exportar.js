@@ -37,7 +37,7 @@ export function exportarExcel(nombreArchivo, hojas) {
  * @param bloques     [{titulo, columnas, filas, anchos?}]
  * @param adjuntos    [{titulo, url}] imágenes de facturas
  */
-export async function exportarPDF({ nombreArchivo, titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], onProgreso }) {
+export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], onProgreso }) {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
   let y = 42;
@@ -107,7 +107,13 @@ export async function exportarPDF({ nombreArchivo, titulo, subtitulo, resumen = 
     doc.addImage(img.dataUrl, "JPEG", 40, 56, img.width * escala, img.height * escala);
   }
 
-  doc.save(`${limpiarNombre(nombreArchivo)}.pdf`);
+  return doc;
+}
+
+/** Construye el PDF y lo descarga. */
+export async function exportarPDF(opciones) {
+  const doc = await construirPDF(opciones);
+  doc.save(`${limpiarNombre(opciones.nombreArchivo)}.pdf`);
 }
 
 /** Descarga la imagen y la pasa a JPEG para que jsPDF pueda incrustarla. */

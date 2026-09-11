@@ -1,18 +1,21 @@
 import { useState, useMemo } from "react";
-import { FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { FileSpreadsheet, FileText, Loader2, Mail, Check } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { exportarExcel, exportarPDF, money } from "../../lib/exportar";
+import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
+import { supabase } from "../../lib/supabase";
 
 const primerDiaMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0]; };
 const hoy = () => new Date().toISOString().split("T")[0];
 
-export default function ReporteCaja({ caja, gastos, anticipos }) {
+export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) {
   const [desde, setDesde] = useState(primerDiaMes());
   const [hasta, setHasta] = useState(hoy());
   const [generando, setGenerando] = useState("");
   const [progreso, setProgreso] = useState("");
+  const [envio, setEnvio] = useState(null);   // {ok, mensaje}
+  const [extra, setExtra] = useState("");
 
   const enRango = (f) => (!desde || f >= desde) && (!hasta || f <= hasta);
 
@@ -78,10 +81,8 @@ export default function ReporteCaja({ caja, gastos, anticipos }) {
     } finally { setGenerando(""); }
   }
 
-  async function generarPDF() {
-    setGenerando("pdf"); setProgreso("");
-    try {
-      const bloques = [{
+  function datosPDF() {
+    const bloques = [{
         titulo: "Gastos del período",
         columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
         filas: gastosF.map(g => [g.fecha, g.proveedor || "—", g.numero_factura || "—",
@@ -101,7 +102,7 @@ export default function ReporteCaja({ caja, gastos, anticipos }) {
       const adjuntos = gastosF.filter(g => g.archivo_url)
         .map(g => ({ url: g.archivo_url, titulo: `${g.proveedor || "Gasto"} — ${g.fecha} — $${money(g.monto)}` }));
 
-      await exportarPDF({
+      return {
         nombreArchivo: `Caja Chica - ${caja.proyecto_nombre} - ${desde}`,
         titulo: `Caja Chica — ${caja.proyecto_nombre}`,
         subtitulo: `Responsable: ${caja.responsable_nombre} · Período ${periodo}`,
@@ -114,7 +115,66 @@ export default function ReporteCaja({ caja, gastos, anticipos }) {
         bloques,
         adjuntos,
         onProgreso: (i, t) => setProgreso(`Adjuntando facturas ${i}/${t}...`),
+      };
+  }
+
+  async function generarPDF() {
+    setGenerando("pdf"); setProgreso("");
+    try { await exportarPDF(datosPDF()); }
+    finally { setGenerando(""); setProgreso(""); }
+  }
+
+  // El reporte llega al responsable de la caja y a los Admin.
+  async function enviarPorCorreo() {
+    setGenerando("mail"); setProgreso(""); setEnvio(null);
+    try {
+      const responsable = usuarios.find(u => u.id === caja.responsable_id);
+      const admins = usuarios.filter(u => u.role === "assistant" && u.email).map(u => u.email);
+      const extras = extra.split(/[,;\s]+/).filter(e => e.includes("@"));
+
+      if (!responsable?.email && !admins.length && !extras.length) {
+        setEnvio({ ok: false, mensaje: "Nadie tiene correo configurado. Agrégalo en Ajustes → Usuarios." });
+        setGenerando(""); return;
+      }
+
+      setProgreso("Armando el PDF...");
+      const doc = await construirPDF(datosPDF());
+      const base64 = doc.output("datauristring").split(",")[1];
+      const pesoMB = (base64.length * 0.75) / (1024 * 1024);
+
+      // Si pesa demasiado para el correo, se sube y va como enlace.
+      let pdfBase64 = base64, pdfUrl = null;
+      if (pesoMB > 8) {
+        setProgreso("El PDF es grande, subiéndolo...");
+        const ruta = `caja-${caja.id}/reporte-${desde}-${Date.now()}.pdf`;
+        const { error } = await supabase.storage.from("task-files")
+          .upload(ruta, doc.output("blob"), { contentType: "application/pdf", upsert: false });
+        pdfBase64 = null;
+        if (!error) pdfUrl = supabase.storage.from("task-files").getPublicUrl(ruta).data.publicUrl;
+      }
+
+      setProgreso("Enviando...");
+      const res = await fetch("/api/email", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tipo: "reporte_caja_chica",
+          datos: {
+            nombre: caja.responsable_nombre, proyecto: caja.proyecto_nombre, periodo,
+            recibido: caja.saldo_total, gastado: caja.saldo_gastado, saldo: caja.saldo_disponible,
+            gastos: gastosF.map(g => ({ fecha: g.fecha, descripcion: g.descripcion,
+              montoTotal: g.monto, tieneFactura: !!g.archivo_url, fotoUrl: g.archivo_url })),
+            emailAsistente: admins, emailResponsable: responsable?.email || null,
+            destinatariosExtra: extras,
+            pdfBase64, pdfUrl, pdfNombre: `Caja Chica - ${caja.proyecto_nombre} - ${desde}.pdf`,
+          },
+        }),
       });
+      const r = await res.json();
+      setEnvio(r.ok
+        ? { ok: true, mensaje: `Enviado a ${(r.enviadoA || []).join(", ")}` }
+        : { ok: false, mensaje: r.error || "No se pudo enviar. Revisa la configuración de correo." });
+    } catch (e) {
+      setEnvio({ ok: false, mensaje: "Error al enviar: " + e.message });
     } finally { setGenerando(""); setProgreso(""); }
   }
 
@@ -161,6 +221,24 @@ export default function ReporteCaja({ caja, gastos, anticipos }) {
       </div>
 
       {!gastosF.length && <div style={{ fontSize: 11, color: colors.muted, marginTop: 10 }}>No hay gastos en este período.</div>}
+
+      <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: 16, paddingTop: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>Enviar por correo</div>
+        <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
+          Va a <strong>{caja.responsable_nombre}</strong> (responsable) y a los usuarios con rol <strong>Admin</strong>.
+        </div>
+        <input value={extra} onChange={e => setExtra(e.target.value)} placeholder="Otro correo (opcional): contador@..." style={{ ...inputStyle, marginBottom: 8 }} />
+        <Button variant="primary" onClick={enviarPorCorreo} disabled={!!generando || !gastosF.length}>
+          {generando === "mail" ? <Loader2 size={14} /> : <Mail size={14} />}
+          {generando === "mail" ? (progreso || "Enviando...") : "Enviar reporte"}
+        </Button>
+        {envio && (
+          <div style={{ marginTop: 8, fontSize: 11, display: "flex", alignItems: "center", gap: 6,
+            color: envio.ok ? colors.success : colors.danger }}>
+            {envio.ok && <Check size={12} />}{envio.mensaje}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

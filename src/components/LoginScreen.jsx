@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { loadFromStorage, saveToStorage } from "../lib/storage";
-import { ROLES } from "../lib/roles";
+import { rolInfo } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
@@ -84,7 +84,7 @@ export default function LoginScreen({ onLogin, users }) {
               <Avatar name={u.name} size={40} color={u.color || colors.brand} />
               <div style={{ textAlign: "left" }}>
                 <div style={{ color: colors.ink, fontSize: 15, fontWeight: 600, fontFamily: colors.font }}>{u.name}</div>
-                <div style={{ color: colors.muted, fontSize: 12, fontFamily: colors.font }}>{ROLES[u.role]?.label || "Equipo"}</div>
+                <div style={{ color: colors.muted, fontSize: 12, fontFamily: colors.font }}>{rolInfo(u.role).label}</div>
               </div>
               <div style={{ marginLeft: "auto", color: colors.border, fontSize: 18 }}>›</div>
             </button>

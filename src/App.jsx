@@ -3,7 +3,7 @@ import { ListTodo } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
-import { esAdmin, puedeControlObra, puedeCajaChica, ROLES } from "./lib/roles";
+import { esAdmin, puedeControlObra, puedeCajaChica } from "./lib/roles";
 import { USERS_DEFAULT, PROJECTS_DEFAULT } from "./lib/seedData";
 import { colors } from "./theme/colors";
 
@@ -17,8 +17,6 @@ import ModalTarea from "./components/ModalTarea";
 import PanelAjustes from "./components/PanelAjustes";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
-import Avatar from "./components/ui/Avatar";
-import FechaBadge from "./components/FechaBadge";
 
 import ModuloPresupuestos from "./modules/ModuloPresupuestos";
 import ModuloControlObra from "./modules/controlObra/ModuloControlObra";
@@ -42,7 +40,6 @@ export default function App() {
   const [showAjustes, setShowAjustes] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const [busqueda, setBusqueda] = useState("");
-  const gP = id => projects.find(p => p.id === id);
 
   useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, [usuario]);
 
@@ -183,37 +180,6 @@ export default function App() {
             </>
           )}
 
-          {admin && vista === "equipo" && (
-            <div style={{ display: "grid", gap: 10 }}>
-              {users.map(m => {
-                const mt = tareas.filter(t => t.assignee_id === m.id && t.status !== "listo");
-                const mo = mt.filter(t => daysUntil(t.due_date) < 0);
-                return (
-                  <div key={m.id} style={{ background: "#fff", borderRadius: 12, padding: 14, border: `1px solid ${colors.border}` }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: mt.length ? 12 : 0 }}>
-                      <Avatar name={m.name} size={40} color={mo.length > 0 ? colors.danger : m.color || colors.brand} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: colors.ink }}>{m.name}</div>
-                        <div style={{ fontSize: 11, color: colors.muted }}>{ROLES[m.role]?.label || "Equipo"}</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ color: mo.length > 0 ? colors.danger : colors.brand, fontSize: 20, fontWeight: 700 }}>{mt.length}</div>
-                        <div style={{ color: colors.muted, fontSize: 9, fontWeight: 600, letterSpacing: 0.5 }}>ABIERTAS</div>
-                      </div>
-                    </div>
-                    {mt.map(t => (
-                      <div key={t.id} style={{ background: colors.bg, borderRadius: 8, padding: "7px 10px", marginBottom: 5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div><div style={{ fontSize: 12, fontWeight: 500, color: colors.ink }}>{t.title}</div><div style={{ fontSize: 11, color: colors.muted }}>{gP(t.project_id)?.name}</div></div>
-                        <FechaBadge due={t.due_date} status={t.status} />
-                      </div>
-                    ))}
-                    {mt.length === 0 && <div style={{ color: colors.muted, fontSize: 12, textAlign: "center", padding: "4px 0" }}>Sin pendientes</div>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
           {esAdmin(usuario.role) && vista === "presupuestos" && (
             <ModuloPresupuestos currentUser={usuario} projects={projects} />
           )}
@@ -224,31 +190,6 @@ export default function App() {
             <ModuloCajaChica currentUser={usuario} projects={projects} users={users} />
           )}
 
-          {admin && vista === "proyectos" && (
-            <div style={{ display: "grid", gap: 10 }}>
-              {projects.map(p => {
-                const pt = tareas.filter(t => t.project_id === p.id);
-                const pPen = pt.filter(t => t.status !== "listo");
-                const pOk = pt.filter(t => t.status === "listo");
-                const pct = pt.length > 0 ? Math.round((pOk.length / pt.length) * 100) : 0;
-                return (
-                  <div key={p.id} style={{ background: "#fff", borderRadius: 12, padding: 14, border: `1px solid ${colors.border}`, borderLeft: `4px solid ${p.color}` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: colors.ink }}>{p.name}</div>
-                      <div style={{ color: p.color, fontSize: 16, fontWeight: 700 }}>{pct}%</div>
-                    </div>
-                    <div style={{ background: colors.neutralSoft, borderRadius: 4, height: 6, marginBottom: 10 }}>
-                      <div style={{ background: p.color, height: 6, borderRadius: 4, width: `${pct}%`, transition: "width 0.5s" }} />
-                    </div>
-                    <div style={{ display: "flex", gap: 16 }}>
-                      <span style={{ fontSize: 12, color: colors.inkSoft }}><span style={{ color: p.color, fontWeight: 700 }}>{pPen.length}</span> abiertas</span>
-                      <span style={{ fontSize: 12, color: colors.inkSoft }}><span style={{ color: colors.success, fontWeight: 700 }}>{pOk.length}</span> completadas</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
 

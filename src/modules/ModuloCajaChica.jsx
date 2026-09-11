@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { esAdmin, puedeControlObra, ROLES } from "../lib/roles";
+import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
 import ReporteCaja from "./cajaChica/ReporteCaja";
@@ -218,7 +218,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       </div>
 
       {subVista==="reporte"&&cajaActiva&&(
-        <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos}/>
+        <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos} usuarios={users}/>
       )}
 
       {subVista==="lista"&&(
@@ -258,7 +258,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Responsable *</label>
               <select value={nuevaCajaForm.responsable_id} onChange={e=>{const u=users.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,responsable_id:e.target.value,responsable_nombre:u?.name||""}));}} style={iS}>
                 <option value="">Selecciona...</option>
-                {users.map(u=><option key={u.id} value={u.id}>{u.name} — {ROLES[u.role]?.label||u.role}</option>)}
+                {users.map(u=><option key={u.id} value={u.id}>{u.name} — {rolInfo(u.role).label}</option>)}
               </select></div>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Alerta cuando saldo baje de ($)</label>
               <input type="number" value={nuevaCajaForm.limite_alerta} onChange={e=>setNuevaCajaForm(p=>({...p,limite_alerta:e.target.value}))} style={iS}/></div>

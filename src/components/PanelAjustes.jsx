@@ -3,7 +3,7 @@ import { Pencil, X, Building2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { saveToStorage } from "../lib/storage";
 import { initials } from "../lib/dates";
-import { ROLES } from "../lib/roles";
+import { rolInfo } from "../lib/roles";
 import Modal from "./ui/Modal";
 import Avatar from "./ui/Avatar";
 import Button from "./ui/Button";
@@ -19,7 +19,7 @@ export default function PanelAjustes({ users, setUsers, projects, setProjects, e
   const [newP, setNewP] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoRef = useRef(null);
-  const emptyUser = { id: Date.now(), name: "", role: "member", pin: "", avatar: "", color: "#0F3D3E" };
+  const emptyUser = { id: Date.now(), name: "", role: "residente", pin: "", avatar: "", color: "#0F3D3E" };
   const emptyProject = { id: Date.now(), name: "", color: "#0F3D3E" };
 
   function saveUsers(updated) { setUsers(updated); saveToStorage("foreman_users", updated); }
@@ -122,7 +122,7 @@ export default function PanelAjustes({ users, setUsers, projects, setProjects, e
               <Avatar name={u.name} size={36} color={u.color || "#0F3D3E"} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{ROLES[u.role]?.label || "Equipo"} · PIN: {u.pin}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label} · PIN: {u.pin}</div>
               </div>
               <button onClick={() => setEditU({ ...u })} style={iconBtn}><Pencil size={13} /></button>
               {u.role !== "owner" && <button onClick={() => deleteUser(u.id)} style={deleteBtn}><X size={13} /></button>}
