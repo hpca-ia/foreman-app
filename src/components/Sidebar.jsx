@@ -1,9 +1,9 @@
 import { ListTodo, Wallet, HardHat, PiggyBank } from "lucide-react";
-import { rolInfo, esAdmin, puedeControlObra, puedeCajaChica } from "../lib/roles";
+import { rolInfo } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
-export default function Sidebar({ usuario, empresa, vista, setVista, admin }) {
+export default function Sidebar({ puede, usuario, empresa, vista, setVista, admin }) {
   const navItem = (v, label, Icon) => (
     <button
       key={v}
@@ -30,9 +30,9 @@ export default function Sidebar({ usuario, empresa, vista, setVista, admin }) {
       </div>
 
       {navItem("tareas", "Tareas", ListTodo)}
-      {esAdmin(usuario.role) && navItem("presupuestos", "Presupuestos", Wallet)}
-      {puedeControlObra(usuario.role) && navItem("controlObra", "Control Obra", HardHat)}
-      {puedeCajaChica(usuario.role) && navItem("cajaChica", "Caja Chica", PiggyBank)}
+      {puede("presupuestos.ver") && navItem("presupuestos", "Presupuestos", Wallet)}
+      {puede("controlObra.ver") && navItem("controlObra", "Control Obra", HardHat)}
+      {puede("cajaChica.ver") && navItem("cajaChica", "Caja Chica", PiggyBank)}
 
       <div className="app-sidebar-spacer" style={{ flex: 1 }} />
 

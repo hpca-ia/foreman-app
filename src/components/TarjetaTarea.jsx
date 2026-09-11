@@ -1,13 +1,12 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
-import { esAdmin } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
 import WhatsAppDraftModal from "./WhatsAppDraftModal";
 
-export default function TarjetaTarea({ task, currentUser, users, projects, onCambiarEstado, onEditar, onEliminar }) {
+export default function TarjetaTarea({ puede, task, currentUser, users, projects, onCambiarEstado, onEditar, onEliminar }) {
   const gP = id => projects.find(p => p.id === id);
   const gU = id => users.find(u => u.id === id);
   const proy = gP(task.project_id);
@@ -15,7 +14,7 @@ export default function TarjetaTarea({ task, currentUser, users, projects, onCam
   const crea = gU(task.created_by);
   const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;
   const eC = ESTADO[task.status] || ESTADO.pendiente;
-  const admin = esAdmin(currentUser.role);
+  const admin = puede("tareas.asignar");
   // Solo el asignado puede cambiar SU tarea. Admins pueden todo. Nadie puede cambiar la tarea de otro miembro.
   const esMiTarea = task.assignee_id === currentUser.id;
   const puedeCambiar = admin || esMiTarea;

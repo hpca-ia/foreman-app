@@ -3,7 +3,8 @@ import { ListTodo } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
-import { esAdmin, puedeControlObra, puedeCajaChica } from "./lib/roles";
+import { esAdmin } from "./lib/roles";
+import { cargarPermisos, crearPuede } from "./lib/permisos";
 import { USERS_DEFAULT, PROJECTS_DEFAULT } from "./lib/seedData";
 import { colors } from "./theme/colors";
 
@@ -38,10 +39,12 @@ export default function App() {
   const [showModal, setShowModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [showAjustes, setShowAjustes] = useState(false);
+  const [permisos, setPermisos] = useState(null);
   const [showAlerts, setShowAlerts] = useState(false);
   const [busqueda, setBusqueda] = useState("");
 
   useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, [usuario]);
+  useEffect(() => { cargarPermisos().then(setPermisos); }, []);
 
   useEffect(() => {
     if (!usuario) return;
@@ -108,11 +111,13 @@ export default function App() {
   if (!usuario) return <LoginScreen onLogin={setUsuario} users={users} />;
 
   const admin = esAdmin(usuario.role);
-  const misAlertasTareas = admin
+  const puede = crearPuede(usuario, permisos);
+  const veTodo = puede("tareas.todas");
+  const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
     : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
   const alertCount = misAlertasTareas.length;
-  let visibles = admin ? tareas : tareas.filter(t => t.assignee_id === usuario.id || t.created_by === usuario.id);
+  let visibles = veTodo ? tareas : tareas.filter(t => t.assignee_id === usuario.id || t.created_by === usuario.id);
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -134,13 +139,13 @@ export default function App() {
       <Header
         busqueda={busqueda} setBusqueda={setBusqueda}
         alertCount={alertCount} onOpenAlerts={() => { setVista("tareas"); setFiltro("urgente"); setShowAlerts(true); }}
-        admin={admin} onOpenAjustes={() => setShowAjustes(true)}
+        admin={puede("ajustes.ver")} onOpenAjustes={() => setShowAjustes(true)}
         usuario={usuario} onLogout={logout}
         onNuevaTarea={() => { setEditTask(null); setShowModal(true); }}
       />
 
       <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1100, margin: "0 auto", width: "100%" }}>
-        <Sidebar usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} />
+        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} />
 
         <div className="app-content" style={{ flex: 1, padding: "18px 20px", overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
           {admin && vista === "tareas" && <><NovaInput currentUser={usuario} projects={projects} users={users} onTaskCreated={fetchTareas} /><AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} /></>}
@@ -173,21 +178,21 @@ export default function App() {
                   <div className="tasks-view-mobile">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : visibles.slice().sort((a, b) => { const o = { urgente: 0, alta: 1, media: 2, baja: 3 }; if (a.status === "listo" && b.status !== "listo") return 1; if (b.status === "listo" && a.status !== "listo") return -1; return (o[a.priority] - o[b.priority]) || (daysUntil(a.due_date) - daysUntil(b.due_date)); })
-                        .map(t => <TarjetaTarea key={t.id} task={t} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
+                        .map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
                   </div>
                 </>
               )}
             </>
           )}
 
-          {esAdmin(usuario.role) && vista === "presupuestos" && (
-            <ModuloPresupuestos currentUser={usuario} projects={projects} />
+          {puede("presupuestos.ver") && vista === "presupuestos" && (
+            <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} />
           )}
-          {puedeControlObra(usuario.role) && vista === "controlObra" && (
-            <ModuloControlObra currentUser={usuario} projects={projects} />
+          {puede("controlObra.ver") && vista === "controlObra" && (
+            <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
           )}
-          {puedeCajaChica(usuario.role) && vista === "cajaChica" && (
-            <ModuloCajaChica currentUser={usuario} projects={projects} users={users} />
+          {puede("cajaChica.ver") && vista === "cajaChica" && (
+            <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} />
           )}
 
         </div>
@@ -229,8 +234,8 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} currentUser={usuario} users={users} projects={projects} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
-      {showAjustes && <PanelAjustes users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
+      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
     </div>
   );
 }

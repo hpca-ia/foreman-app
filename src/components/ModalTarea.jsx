@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { TIPOS, PRIORIDAD } from "../theme/constants";
-import { esAdmin } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 
-export default function ModalTarea({ onCerrar, onGuardar, editTask, currentUser, users, projects }) {
-  const admin = esAdmin(currentUser.role);
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects }) {
+  const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,

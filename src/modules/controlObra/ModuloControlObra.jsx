@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Upload, AlertTriangle } from "lucide-react";
+import { Plus, Upload, AlertTriangle, Trash2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -7,13 +7,15 @@ import { fmt } from "./calculos";
 import ActivarObra from "./ActivarObra";
 import ImportarObra from "./ImportarObra";
 import VistaObra from "./VistaObra";
+import BorrarObra from "./BorrarObra";
 
-export default function ModuloControlObra({ currentUser }) {
+export default function ModuloControlObra({ currentUser, puede }) {
   const [vista, setVista] = useState("lista"); // lista | activar | obra
   const [obras, setObras] = useState([]);
   const [obraActiva, setObraActiva] = useState(null);
   const [resumen, setResumen] = useState({});
   const [cargando, setCargando] = useState(true);
+  const [borrar, setBorrar] = useState(null);
 
   useEffect(() => { fetchObras(); }, []);
 
@@ -114,9 +116,17 @@ export default function ModuloControlObra({ currentUser }) {
                       <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink }}>{o.nombre}</div>
                       <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>{o.cliente_nombre || "Sin cliente"} · {r.rubros} rubros</div>
                     </div>
-                    <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: pct > 100 ? colors.danger : colors.brand }}>{pct.toFixed(1)}%</div>
-                      <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.4 }}>AVANCE</div>
+                    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: pct > 100 ? colors.danger : colors.brand }}>{pct.toFixed(1)}%</div>
+                        <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.4 }}>AVANCE</div>
+                      </div>
+                      {puede?.("borrar.definitivo") && (
+                        <button onClick={e => { e.stopPropagation(); setBorrar(o); }} title="Borrar esta obra"
+                          style={{ background: "transparent", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "6px 7px", color: colors.muted, cursor: "pointer", display: "flex" }}>
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div style={{ background: colors.neutralSoft, borderRadius: 4, height: 6, marginBottom: 10, overflow: "hidden" }}>
@@ -140,6 +150,7 @@ export default function ModuloControlObra({ currentUser }) {
             })}
           </div>
         )}
+      {borrar && <BorrarObra obra={borrar} onCancelar={() => setBorrar(null)} onBorrada={() => { setBorrar(null); fetchObras(); }} />}
     </div>
   );
 }

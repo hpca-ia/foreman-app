@@ -9,9 +9,10 @@ import Avatar from "./ui/Avatar";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 import UserForm from "./UserForm";
+import PanelPermisos from "./PanelPermisos";
 import ProjectForm from "./ProjectForm";
 
-export default function PanelAjustes({ users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
+export default function PanelAjustes({ usuario, permisos, setPermisos, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
   const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
   const [editP, setEditP] = useState(null);
@@ -68,7 +69,10 @@ export default function PanelAjustes({ users, setUsers, projects, setProjects, e
         <button onClick={() => setTab("empresa")} style={tabS(tab === "empresa")}>Empresa</button>
         <button onClick={() => setTab("usuarios")} style={tabS(tab === "usuarios")}>Usuarios</button>
         <button onClick={() => setTab("proyectos")} style={tabS(tab === "proyectos")}>Proyectos</button>
+        {usuario?.role === "owner" && <button onClick={() => setTab("permisos")} style={tabS(tab === "permisos")}>Permisos</button>}
       </div>
+
+      {tab === "permisos" && usuario?.role === "owner" && <PanelPermisos permisos={permisos} setPermisos={setPermisos} />}
 
       {tab === "empresa" && (
         <div style={{ display: "grid", gap: 14 }}>
