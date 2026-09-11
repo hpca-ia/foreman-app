@@ -10,6 +10,17 @@
 //   acumulado  = anterior + periodo
 //   saldo      = A - acumulado
 //   pct        = acumulado / A
+//
+// Capítulo y actividad son dos vistas paralelas de los mismos rubros: el
+// capítulo es cómo se contrató, la actividad cómo se ejecuta, y una actividad
+// puede cruzar capítulos. El total es idéntico, solo cambia el orden.
+//
+// Las planillas se cargan por actividad, así que la plata entra a un nivel
+// más alto que el rubro. Para que la vista por capítulos siga cuadrando, lo
+// asignado a una actividad se reparte entre sus rubros a prorrata del
+// presupuesto de cada uno. Eso hace que el número por actividad sea exacto y
+// el de rubro estimado — salvo que la factura se haya asignado al rubro
+// directamente, que también se permite.
 
 const n = v => Number(v) || 0;
 
@@ -17,10 +28,26 @@ export function fmt(v) {
   return n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Reparte un monto entre rubros a prorrata de su presupuesto, exacto al
+ *  centavo: el sobrante de redondeo va a los rubros más grandes, uno a uno. */
+export function repartirProporcional(monto, rubros) {
+  if (!rubros.length) return [];
+  const centavos = Math.round(n(monto) * 100);
+  const base = rubros.reduce((s, r) => s + n(r.total_base), 0);
+  const partes = base > 0
+    ? rubros.map(r => Math.floor(centavos * n(r.total_base) / base))
+    : rubros.map(() => Math.floor(centavos / rubros.length));
+  let resto = centavos - partes.reduce((a, b) => a + b, 0);
+  const mayoresPrimero = rubros.map((_, i) => i).sort((a, b) => n(rubros[b].total_base) - n(rubros[a].total_base));
+  for (let k = 0; k < resto; k++) partes[mayoresPrimero[k % mayoresPrimero.length]] += 1;
+  return partes.map(c => c / 100);
+}
+
 /**
- * @param rubros      filas de obra_rubros
- * @param facturas    filas de obra_facturas (de toda la obra)
- * @param asignaciones filas de obra_factura_rubros (de toda la obra)
+ * @param rubros        filas de obra_rubros
+ * @param facturas      filas de obra_facturas (de toda la obra)
+ * @param asignaciones  filas de obra_asignaciones; cada una apunta a un rubro
+ *                      (monto exacto) o a una actividad (se reparte)
  * @param planillaNumero número de la planilla en curso; null = acumulado total
  */
 export function calcularControl({ rubros = [], facturas = [], asignaciones = [], planillaNumero = null }) {
@@ -29,18 +56,41 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
 
   const porRubro = {};
   rubros.forEach(r => {
-    porRubro[r.id] = { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base), pct: 0 };
+    porRubro[r.id] = { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base), pct: 0, estimado: false };
   });
 
+  const rubrosDe = new Map();
+  rubros.forEach(r => {
+    if (r.actividad_id == null) return;
+    if (!rubrosDe.has(r.actividad_id)) rubrosDe.set(r.actividad_id, []);
+    rubrosDe.get(r.actividad_id).push(r);
+  });
+
+  // Plata asignada a una actividad que no tiene rubros: no hay dónde repartirla.
+  let sinRepartir = 0;
+
   asignaciones.forEach(a => {
-    const acc = porRubro[a.obra_rubro_id];
-    if (!acc) return;
     const num = planillaDeFactura[a.factura_id];
-    if (num == null) return; // factura todavía sin planilla: no cuenta aún
-    const monto = n(a.monto);
-    if (planillaNumero == null || num < planillaNumero) acc.anterior += monto;
-    else if (num === planillaNumero) acc.periodo += monto;
-    // planillas posteriores a la seleccionada no se cuentan
+    if (num == null) return;                       // factura todavía sin planilla
+    const campo = planillaNumero == null || num < planillaNumero ? "anterior"
+      : num === planillaNumero ? "periodo"
+      : null;                                      // planillas posteriores no cuentan
+    if (!campo) return;
+
+    if (a.obra_rubro_id != null) {
+      const acc = porRubro[a.obra_rubro_id];
+      if (acc) acc[campo] += n(a.monto);
+      return;
+    }
+    const destino = rubrosDe.get(a.obra_actividad_id) || [];
+    if (!destino.length) { sinRepartir += n(a.monto); return; }
+    // Con un solo rubro no hay nada que repartir: el monto es exacto.
+    const reparte = destino.length > 1;
+    repartirProporcional(a.monto, destino).forEach((parte, i) => {
+      const acc = porRubro[destino[i].id];
+      acc[campo] += parte;
+      if (reparte) acc.estimado = true;
+    });
   });
 
   rubros.forEach(r => {
@@ -51,79 +101,70 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     acc.pct = base > 0 ? acc.acumulado / base : 0;
   });
 
+  porRubro._sinRepartir = sinRepartir;
   return porRubro;
 }
 
 /**
- * Agrupa los rubros y suma sus acumulados.
+ * Agrupa los rubros para una de las dos vistas. Son paralelas, no anidadas:
+ * los mismos rubros ordenados de otra forma, con el mismo total.
  *
- * La jerarquía es Presupuesto → Capítulo → Actividad → Rubro. El capítulo
- * viene del presupuesto y es siempre el primer nivel; la actividad es el
- * paquete de trabajo dentro del capítulo. En modo "actividad" cada capítulo
- * trae además sus `subgrupos`, y `rubros` se mantiene plano para que los
- * reportes que ya lo usan sigan funcionando igual.
- *
- * @param modo "capitulo" | "actividad"
+ * @param modo        "capitulo" | "actividad"
+ * @param actividades filas de obra_actividades (solo para modo actividad)
  */
 const SIN_CAPITULO = "SIN CAPÍTULO";
 const SIN_ACTIVIDAD = "SIN ACTIVIDAD";
 
-function grupoVacio(nombre, orden) {
-  return { capitulo: nombre, capitulo_orden: orden, rubros: [], base: 0, anterior: 0, periodo: 0, acumulado: 0, saldo: 0, pct: 0 };
-}
-
-function acumularEn(grupo, rubro, acc) {
-  grupo.rubros.push(rubro);
-  grupo.base += n(rubro.total_base);
-  grupo.anterior += acc.anterior;
-  grupo.periodo += acc.periodo;
-  grupo.acumulado += acc.acumulado;
-  grupo.saldo += acc.saldo;
-}
-
-export function agruparPorCapitulo(rubros = [], porRubro = {}, modo = "capitulo") {
-  const conActividades = modo === "actividad";
+export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividades = []) {
+  const porActividad = modo === "actividad";
+  const dic = new Map(actividades.map(a => [a.id, a]));
 
   const mapa = new Map();
-  rubros
-    .slice()
+  rubros.slice()
     .sort((a, b) => ((a.capitulo_orden ?? 9999) - (b.capitulo_orden ?? 9999)) || (a.orden - b.orden) || (a.numero - b.numero))
     .forEach(r => {
-      const cap = r.capitulo || SIN_CAPITULO;
-      if (!mapa.has(cap)) {
-        const g = grupoVacio(cap, r.capitulo_orden ?? 9999);
-        if (conActividades) g.subgrupos = new Map();
-        mapa.set(cap, g);
+      const act = porActividad ? dic.get(r.actividad_id) : null;
+      const clave = porActividad ? (act ? `a${act.id}` : SIN_ACTIVIDAD) : (r.capitulo || SIN_CAPITULO);
+      if (!mapa.has(clave)) {
+        mapa.set(clave, {
+          clave,
+          capitulo: porActividad ? (act ? act.nombre : SIN_ACTIVIDAD) : (r.capitulo || SIN_CAPITULO),
+          codigo: porActividad ? (act?.codigo || "") : "",
+          capitulo_orden: porActividad ? (act?.orden ?? 9999) : (r.capitulo_orden ?? 9999),
+          capitulos: new Set(),
+          rubros: [], base: 0, anterior: 0, periodo: 0, acumulado: 0, saldo: 0, pct: 0, estimado: false,
+        });
       }
-      const grupo = mapa.get(cap);
+      const g = mapa.get(clave);
       const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base) };
-      acumularEn(grupo, r, acc);
-
-      if (conActividades) {
-        const act = r.actividad || SIN_ACTIVIDAD;
-        if (!grupo.subgrupos.has(act)) grupo.subgrupos.set(act, grupoVacio(act, r.actividad_orden ?? 9999));
-        acumularEn(grupo.subgrupos.get(act), r, acc);
-      }
+      g.rubros.push(r);
+      g.capitulos.add(r.capitulo || SIN_CAPITULO);
+      g.base += n(r.total_base);
+      g.anterior += acc.anterior;
+      g.periodo += acc.periodo;
+      g.acumulado += acc.acumulado;
+      g.saldo += acc.saldo;
+      if (acc.estimado) g.estimado = true;
     });
 
   const grupos = [...mapa.values()];
   grupos.forEach(g => {
     g.pct = g.base > 0 ? g.acumulado / g.base : 0;
-    if (g.subgrupos) {
-      // Lo que todavía no tiene actividad se muestra al final del capítulo.
-      g.subgrupos = [...g.subgrupos.values()]
-        .map(s => ({ ...s, pct: s.base > 0 ? s.acumulado / s.base : 0 }))
-        .sort((a, b) =>
-          (a.capitulo === SIN_ACTIVIDAD ? 1 : 0) - (b.capitulo === SIN_ACTIVIDAD ? 1 : 0) ||
-          a.capitulo_orden - b.capitulo_orden ||
-          a.capitulo.localeCompare(b.capitulo));
-    }
+    // Una actividad que cruza capítulos es la única que vuelve estimado el
+    // número contractual del capítulo: se marca para poder partirla.
+    g.cruzaCapitulos = porActividad && g.capitulos.size > 1;
+    g.capitulos = [...g.capitulos];
   });
+  const sinAsignar = porActividad ? SIN_ACTIVIDAD : SIN_CAPITULO;
   // Lo no clasificado va al final, no estorbando arriba.
   return grupos.sort((a, b) =>
-    (a.capitulo === SIN_CAPITULO ? 1 : 0) - (b.capitulo === SIN_CAPITULO ? 1 : 0) ||
-    a.capitulo_orden - b.capitulo_orden);
+    (a.capitulo === sinAsignar ? 1 : 0) - (b.capitulo === sinAsignar ? 1 : 0) ||
+    a.capitulo_orden - b.capitulo_orden ||
+    a.capitulo.localeCompare(b.capitulo));
 }
+
+// Nombre viejo, para no romper lo que todavía lo importa.
+export const agruparPorCapitulo = agrupar;
 
 export function totalesObra(grupos = []) {
   const t = grupos.reduce((acc, g) => ({
@@ -138,7 +179,7 @@ export function totalesObra(grupos = []) {
 }
 
 /**
- * Resumen de una planilla: cuánto entró, cuánto quedó sin asignar a rubro,
+ * Resumen de una planilla: cuánto entró, cuánto quedó sin asignar,
  * desglose de IVA por tasa y por tipo de gasto (como la hoja RESUMEN GASTO).
  */
 export function resumenPlanilla({ facturas = [], asignaciones = [] }) {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { fmt } from "./calculos";
 
@@ -24,7 +24,9 @@ function FilaRubro({ rubro: r, porRubro, sangria }) {
       <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(r.total_base)}</span>
       <span style={{ textAlign: "right", color: colors.muted }}>${fmt(acc.anterior)}</span>
       <span style={{ textAlign: "right", color: acc.periodo > 0 ? colors.brand : colors.muted, fontWeight: acc.periodo > 0 ? 600 : 400 }}>${fmt(acc.periodo)}</span>
-      <span style={{ textAlign: "right", color: colors.ink }}>${fmt(acc.acumulado)}</span>
+      <span style={{ textAlign: "right", color: colors.ink }} title={acc.estimado ? "Repartido desde una actividad a prorrata del presupuesto — no es un monto de factura" : undefined}>
+        {acc.estimado && <span style={{ color: colors.muted, marginRight: 2 }}>~</span>}${fmt(acc.acumulado)}
+      </span>
       <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
       <span style={{ textAlign: "right", fontWeight: 600, color: pctColor(acc.pct, acc.saldo) }}>{(acc.pct * 100).toFixed(0)}%</span>
     </div>
@@ -55,7 +57,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
 
           {/* Encabezado */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "8px 14px", background: colors.bg, borderBottom: `1px solid ${colors.border}`, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
-            <span>{modo === "actividad" ? "CAPÍTULO / ACTIVIDAD / RUBRO" : "CAPÍTULO / RUBRO"}</span>
+            <span>{modo === "actividad" ? "ACTIVIDAD / RUBRO" : "CAPÍTULO / RUBRO"}</span>
             <span style={{ textAlign: "right" }}>UND</span>
             <span style={{ textAlign: "right" }}>CANT</span>
             <span style={{ textAlign: "right" }}>PRESUPUESTO</span>
@@ -67,16 +69,23 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
           </div>
 
           {grupos.map(g => {
-            const abierto = !cerrados.has(g.capitulo);
+            const abierto = !cerrados.has(g.clave || g.capitulo);
             return (
-              <div key={g.capitulo}>
-                {/* Capítulo */}
-                <div onClick={() => toggle(g.capitulo)}
+              <div key={g.clave || g.capitulo}>
+                {/* Capítulo o actividad */}
+                <div onClick={() => toggle(g.clave || g.capitulo)}
                   style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "9px 14px", background: colors.brandSoft, borderBottom: `1px solid ${colors.border}`, cursor: "pointer", fontSize: 11, fontWeight: 700, color: colors.brand, alignItems: "center" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
                     {abierto ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    {g.capitulo}
+                    {g.codigo && <span style={{ opacity: 0.6 }}>{g.codigo}</span>}
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.capitulo}</span>
                     <span style={{ fontWeight: 400, opacity: 0.7 }}>({g.rubros.length})</span>
+                    {g.cruzaCapitulos && (
+                      <span title={`Esta actividad toca ${g.capitulos.length} capítulos: ${g.capitulos.join(", ")}. El gasto que se le asigne se reparte entre ellos a prorrata.`}
+                        style={{ display: "flex", alignItems: "center", gap: 3, background: colors.warningSoft, color: colors.warning, borderRadius: 10, padding: "1px 7px", fontSize: 9, fontWeight: 600, flexShrink: 0 }}>
+                        <AlertTriangle size={9} /> {g.capitulos.length} capítulos
+                      </span>
+                    )}
                   </span>
                   <span /><span />
                   <span style={{ textAlign: "right" }}>${fmt(g.base)}</span>
@@ -87,27 +96,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <span style={{ textAlign: "right" }}>{(g.pct * 100).toFixed(0)}%</span>
                 </div>
 
-                {/* Nivel intermedio: las actividades del capítulo */}
-                {abierto && g.subgrupos
-                  ? g.subgrupos.map(sub => (
-                      <div key={sub.capitulo}>
-                        <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "7px 14px 7px 28px", background: colors.bg, borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 11, fontWeight: 600, color: sub.capitulo === "SIN ACTIVIDAD" ? colors.muted : colors.inkSoft, alignItems: "center" }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {sub.capitulo === "SIN ACTIVIDAD" ? "Sin actividad" : sub.capitulo}
-                            <span style={{ fontWeight: 400, opacity: 0.7, marginLeft: 5 }}>({sub.rubros.length})</span>
-                          </span>
-                          <span /><span />
-                          <span style={{ textAlign: "right" }}>${fmt(sub.base)}</span>
-                          <span style={{ textAlign: "right" }}>${fmt(sub.anterior)}</span>
-                          <span style={{ textAlign: "right" }}>${fmt(sub.periodo)}</span>
-                          <span style={{ textAlign: "right" }}>${fmt(sub.acumulado)}</span>
-                          <span style={{ textAlign: "right", color: sub.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(sub.saldo)}</span>
-                          <span style={{ textAlign: "right" }}>{(sub.pct * 100).toFixed(0)}%</span>
-                        </div>
-                        {sub.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={48} />)}
-                      </div>
-                    ))
-                  : abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14} />)}
+                {abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14} />)}
               </div>
             );
           })}

@@ -34,7 +34,7 @@ export default function ModuloControlObra({ currentUser, puede }) {
       const facturaIds = (facturas || []).map(f => f.id);
       let asignaciones = [];
       if (facturaIds.length) {
-        const { data } = await supabase.from("obra_factura_rubros").select("factura_id,monto").in("factura_id", facturaIds);
+        const { data } = await supabase.from("obra_asignaciones").select("factura_id,monto").in("factura_id", facturaIds);
         asignaciones = data || [];
       }
       const obraDeFactura = {};

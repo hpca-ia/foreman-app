@@ -13,16 +13,23 @@ import AlertaDuplicado from "./AlertaDuplicado";
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
 
-export default function ModalFactura({ obra, rubros, planilla, factura, asignacionesFactura = [], currentUser, onCerrar, onGuardado }) {
+export default function ModalFactura({ obra, rubros, actividades = [], planilla, factura, asignacionesFactura = [], currentUser, onCerrar, onGuardado }) {
   const editando = !!factura;
   const [form, setForm] = useState(factura ? { ...factura } : {
     fecha: hoy(), tipo_documento: "FACTURA", numero_factura: "", ruc: "", razon_social: "",
     detalle: "", justificacion: "", numero_cheque: "", tipo: "material",
     subtotal_0: 0, subtotal_5: 0, subtotal_15: 0, iva: 0, total: 0,
   });
+  // Una factura se reparte entre varias actividades, que pueden estar en
+  // capítulos distintos. El rubro directo queda como salida para cuando sí se
+  // sabe el rubro exacto y se quiere el monto sin prorratear.
   const [repartos, setRepartos] = useState(
-    asignacionesFactura.length ? asignacionesFactura.map(a => ({ obra_rubro_id: a.obra_rubro_id, monto: a.monto })) : []
+    asignacionesFactura.map(a => a.obra_actividad_id != null
+      ? { tipo: "actividad", id: a.obra_actividad_id, monto: a.monto }
+      : { tipo: "rubro", id: a.obra_rubro_id, monto: a.monto })
   );
+  const [nuevaActividad, setNuevaActividad] = useState("");
+  const [porRubro, setPorRubro] = useState(false);
   const [archivo, setArchivo] = useState(null);
   const [leyendo, setLeyendo] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -108,7 +115,9 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         tipo: p.tipo || f.tipo,
       }));
       if (p.rubro_id && rubros.some(r => r.id === p.rubro_id) && repartos.length === 0) {
-        setRepartos([{ obra_rubro_id: p.rubro_id, monto: n(p.total) }]);
+        const act = rubros.find(r => r.id === p.rubro_id)?.actividad_id;
+        if (act != null) setRepartos([{ tipo: "actividad", id: act, monto: n(p.total) }]);
+        else setRepartos([{ tipo: "rubro", id: p.rubro_id, monto: n(p.total) }]);
       }
       await revisarDuplicados({ ruc: p.ruc, numero_factura: p.numero_factura, razon_social: p.razon_social, total: n(p.total), fecha: p.fecha });
     } catch {
@@ -118,11 +127,25 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
     e.target.value = "";
   }
 
-  function agregarReparto(rubroId) {
-    if (repartos.some(r => r.obra_rubro_id === rubroId)) return;
+  function agregar(tipo, id) {
+    if (id == null || repartos.some(r => r.tipo === tipo && r.id === id)) return;
     const restante = Math.max(n(form.total) - repartos.reduce((s, r) => s + n(r.monto), 0), 0);
-    setRepartos([...repartos, { obra_rubro_id: rubroId, monto: restante }]);
+    setRepartos([...repartos, { tipo, id, monto: restante }]);
     setBusqueda("");
+  }
+
+  // Crear la actividad sin salir de la factura: si el gasto no encaja en
+  // ninguna, obligar a ir al otro panel es la forma de que no se cargue.
+  async function crearYAsignar() {
+    const nombre = nuevaActividad.trim();
+    if (!nombre) return;
+    const { data, error: e } = await supabase.from("obra_actividades")
+      .insert({ obra_id: obra.id, nombre, codigo: String(actividades.length + 1).padStart(2, "0"), orden: actividades.length + 1 })
+      .select().single();
+    if (e) { setError("No se pudo crear la actividad: " + e.message); return; }
+    actividades.push(data);
+    setNuevaActividad("");
+    agregar("actividad", data.id);
   }
 
   const asignado = repartos.reduce((s, r) => s + n(r.monto), 0);
@@ -173,15 +196,23 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
     if (editando) {
       const { error: e1 } = await supabase.from("obra_facturas").update(payload).eq("id", factura.id);
       if (e1) { setError(e1.message); setGuardando(false); return; }
-      await supabase.from("obra_factura_rubros").delete().eq("factura_id", factura.id);
+      await supabase.from("obra_asignaciones").delete().eq("factura_id", factura.id);
     } else {
       const { data, error: e1 } = await supabase.from("obra_facturas").insert(payload).select().single();
       if (e1 || !data) { setError(e1?.message || "No se pudo guardar"); setGuardando(false); return; }
       facturaId = data.id;
     }
 
-    const filas = repartos.filter(r => n(r.monto) !== 0).map(r => ({ factura_id: facturaId, obra_rubro_id: r.obra_rubro_id, monto: n(r.monto) }));
-    if (filas.length) await supabase.from("obra_factura_rubros").insert(filas);
+    const filas = repartos.filter(r => n(r.monto) !== 0).map(r => ({
+      factura_id: facturaId,
+      obra_actividad_id: r.tipo === "actividad" ? r.id : null,
+      obra_rubro_id: r.tipo === "rubro" ? r.id : null,
+      monto: n(r.monto),
+    }));
+    if (filas.length) {
+      const { error: e2 } = await supabase.from("obra_asignaciones").insert(filas);
+      if (e2) { setError("La factura se guardó pero la asignación falló: " + e2.message); setGuardando(false); return; }
+    }
 
     setGuardando(false);
     onGuardado();
@@ -249,21 +280,26 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         </select>
       </div>
 
-      {/* Reparto entre rubros */}
+      {/* Reparto. Por actividad es el camino normal; el rubro es la excepción. */}
       <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>Asignación a rubros</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>¿A qué actividad va?</div>
           <div style={{ marginLeft: "auto", fontSize: 11, color: diferencia === 0 ? colors.success : colors.warning, fontWeight: 600 }}>
             {diferencia === 0 ? "Cuadrado" : `Faltan $${fmt(diferencia)}`}
           </div>
         </div>
 
         {repartos.map((r, i) => {
-          const rubro = rubros.find(x => x.id === r.obra_rubro_id);
+          const act = r.tipo === "actividad" ? actividades.find(a => a.id === r.id) : null;
+          const rubro = r.tipo === "rubro" ? rubros.find(x => x.id === r.id) : null;
           return (
-            <div key={r.obra_rubro_id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <div style={{ flex: 1, fontSize: 12, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                <span style={{ color: colors.muted, marginRight: 5 }}>{rubro?.numero}</span>{rubro?.descripcion || "Rubro"}
+            <div key={`${r.tipo}-${r.id}`} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {act ? (
+                  <><span style={{ color: colors.muted, marginRight: 5 }}>{act.codigo}</span>{act.nombre}</>
+                ) : (
+                  <><span style={{ color: colors.muted, marginRight: 5 }}>rubro {rubro?.numero}</span>{rubro?.descripcion || "Rubro"}</>
+                )}
               </div>
               <input type="number" value={r.monto} onChange={e => setRepartos(rs => rs.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
                 style={{ ...mini, width: 110, textAlign: "right" }} />
@@ -275,22 +311,58 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
           );
         })}
 
-        <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro para asignar..." style={{ ...mini, marginTop: 6 }} />
-        {coincidencias.length > 0 && (
-          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, marginTop: 4, maxHeight: 160, overflowY: "auto" }}>
-            {coincidencias.map(r => (
-              <div key={r.id} onClick={() => agregarReparto(r.id)}
-                style={{ padding: "7px 10px", fontSize: 12, cursor: "pointer", borderBottom: `1px solid ${colors.neutralSoft}`, display: "flex", gap: 8 }}>
-                <span style={{ color: colors.muted }}>{r.numero}</span>
-                <span style={{ flex: 1, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.descripcion}</span>
-                <span style={{ color: colors.muted, fontSize: 11 }}>{r.capitulo}</span>
-              </div>
-            ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <select value="" onChange={e => agregar("actividad", Number(e.target.value))} style={{ ...mini, flex: 1 }}>
+            <option value="">Agregar una actividad...</option>
+            {actividades.filter(a => !repartos.some(r => r.tipo === "actividad" && r.id === a.id))
+              .map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
+          </select>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <input value={nuevaActividad} onChange={e => setNuevaActividad(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && nuevaActividad.trim()) crearYAsignar(); }}
+            placeholder="…o crear una actividad nueva" style={{ ...mini, flex: 1 }} />
+          <Button variant="outline" size="sm" onClick={crearYAsignar} disabled={!nuevaActividad.trim()}>
+            <Plus size={12} /> Crear
+          </Button>
+        </div>
+
+        {actividades.length === 0 && (
+          <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
+            Esta obra todavía no tiene actividades. Créala acá arriba, o agrúpalas de una con NOVA en la pestaña Actividades.
           </div>
         )}
-        {repartos.length === 0 && !busqueda && (
+
+        <button onClick={() => setPorRubro(v => !v)}
+          style={{ background: "none", border: "none", padding: "8px 0 0", color: colors.muted, fontSize: 11, cursor: "pointer", fontFamily: colors.font, textDecoration: "underline" }}>
+          {porRubro ? "Ocultar" : "Asignar a un rubro exacto"}
+        </button>
+
+        {porRubro && (
+          <>
+            <div style={{ fontSize: 10, color: colors.muted, margin: "4px 0 5px" }}>
+              Lo asignado a una actividad se reparte entre sus rubros a prorrata. Si sabes el rubro exacto, asígnalo acá y el monto no se prorratea.
+            </div>
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro..." style={mini} />
+            {coincidencias.length > 0 && (
+              <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, marginTop: 4, maxHeight: 160, overflowY: "auto" }}>
+                {coincidencias.map(r => (
+                  <div key={r.id} onClick={() => agregar("rubro", r.id)}
+                    style={{ padding: "7px 10px", fontSize: 12, cursor: "pointer", borderBottom: `1px solid ${colors.neutralSoft}`, display: "flex", gap: 8 }}>
+                    <span style={{ color: colors.muted }}>{r.numero}</span>
+                    <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.descripcion}</span>
+                    <span style={{ color: colors.muted, fontSize: 11 }}>{r.capitulo}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {repartos.length === 0 && (
           <div style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
-            Si no asignas rubro ahora, la factura queda en "por asignar" y no se cuenta en el control hasta que la asignes.
+            Si no asignas nada ahora, la factura queda en "por asignar" y no se cuenta en el control hasta que la asignes.
           </div>
         )}
       </div>

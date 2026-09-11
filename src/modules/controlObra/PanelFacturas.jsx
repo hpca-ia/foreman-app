@@ -6,7 +6,7 @@ import Button from "../../components/ui/Button";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import ModalFactura from "./ModalFactura";
 
-export default function PanelFacturas({ obra, rubros, planillas, planillaActual, facturas, asignaciones, currentUser, onCambio }) {
+export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, onCambio }) {
   const [modal, setModal] = useState(null); // null | {factura?}
 
   const delPeriodo = facturas.filter(f => planillaActual ? f.planilla_id === planillaActual.id : !f.planilla_id);
@@ -18,6 +18,7 @@ export default function PanelFacturas({ obra, rubros, planillas, planillaActual,
 
   async function eliminar(f) {
     if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"}?`)) return;
+    await supabase.from("obra_asignaciones").delete().eq("factura_id", f.id);
     await supabase.from("obra_facturas").delete().eq("id", f.id);
     onCambio();
   }
@@ -102,7 +103,7 @@ export default function PanelFacturas({ obra, rubros, planillas, planillaActual,
       </div>
 
       {modal && (
-        <ModalFactura
+        <ModalFactura actividades={actividades}
           obra={obra} rubros={rubros} planilla={planillaActual}
           factura={modal.factura}
           asignacionesFactura={modal.factura ? asignaciones.filter(a => a.factura_id === modal.factura.id) : []}

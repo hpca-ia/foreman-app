@@ -31,24 +31,17 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
       ["RUBRO", "DESCRIPCIÓN", "UNIDAD", "CANTIDAD", "P. UNITARIO", "PRESUPUESTO", "ACUM. ANTERIOR", "ESTE PERÍODO", "INVERTIDO", "SALDO", "% AVANCE"],
     ];
     for (const g of grupos) {
-      filas.push(["", g.capitulo, "", "", "", g.base, g.anterior, g.periodo, g.acumulado, g.saldo, g.pct]);
-      for (const sub of subgruposDe(g)) {
-        if (sub) filas.push(["", `   ${etiqueta(sub)}`, "", "", "", sub.base, sub.anterior, sub.periodo, sub.acumulado, sub.saldo, sub.pct]);
-        for (const r of (sub || g).rubros) {
-          const acc = gAcc(g, r);
-          filas.push([r.numero, r.descripcion, r.unidad, Number(r.cantidad), Number(r.precio_unitario),
-            Number(r.total_base), acc.anterior, acc.periodo, acc.acumulado, acc.saldo, acc.pct]);
-        }
+      filas.push(["", [g.codigo, g.capitulo].filter(Boolean).join("  "), "", "", "", g.base, g.anterior, g.periodo, g.acumulado, g.saldo, g.pct]);
+      for (const r of g.rubros) {
+        const acc = gAcc(g, r);
+        filas.push([r.numero, r.descripcion, r.unidad, Number(r.cantidad), Number(r.precio_unitario),
+          Number(r.total_base), acc.anterior, acc.periodo, acc.acumulado, acc.saldo, acc.pct]);
       }
     }
     filas.push([]);
     filas.push(["", "TOTAL OBRA", "", "", "", totales.base, totales.anterior, totales.periodo, totales.acumulado, totales.saldo, totales.pct]);
     return filas;
   }
-  // Al agrupar por actividad el reporte lleva el mismo nivel intermedio que
-  // la pantalla; por capítulo devuelve [null] y los rubros van directo.
-  const subgruposDe = g => (g.subgrupos?.length ? g.subgrupos : [null]);
-  const etiqueta = sub => (sub.capitulo === "SIN ACTIVIDAD" ? "Sin actividad" : sub.capitulo);
   const gAcc = (g, r) => porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: Number(r.total_base) || 0, pct: 0 };
 
   // ── Hoja 2: compendio de facturas ──
@@ -116,14 +109,11 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
       const destacadas = [];
       for (const g of grupos) {
         destacadas.push(filasTabla.length);
-        filasTabla.push([g.capitulo, "", "", money(g.base), money(g.anterior), money(g.periodo), money(g.acumulado), money(g.saldo), `${(g.pct * 100).toFixed(0)}%`]);
-        for (const sub of subgruposDe(g)) {
-          if (sub) filasTabla.push([`   ${etiqueta(sub)}`, "", "", money(sub.base), money(sub.anterior), money(sub.periodo), money(sub.acumulado), money(sub.saldo), `${(sub.pct * 100).toFixed(0)}%`]);
-          for (const r of (sub || g).rubros) {
-            const a = gAcc(g, r);
-            filasTabla.push([`${sub ? "      " : ""}${r.numero}  ${r.descripcion}`, r.unidad || "", fmt(r.cantidad),
-              money(r.total_base), money(a.anterior), money(a.periodo), money(a.acumulado), money(a.saldo), `${(a.pct * 100).toFixed(0)}%`]);
-          }
+        filasTabla.push([[g.codigo, g.capitulo].filter(Boolean).join("  "), "", "", money(g.base), money(g.anterior), money(g.periodo), money(g.acumulado), money(g.saldo), `${(g.pct * 100).toFixed(0)}%`]);
+        for (const r of g.rubros) {
+          const a = gAcc(g, r);
+          filasTabla.push([`${r.numero}  ${r.descripcion}`, r.unidad || "", fmt(r.cantidad),
+            money(r.total_base), money(a.anterior), money(a.periodo), money(a.acumulado), money(a.saldo), `${(a.pct * 100).toFixed(0)}%`]);
         }
       }
       destacadas.push(filasTabla.length);

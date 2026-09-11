@@ -4,7 +4,7 @@ import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
 import ReporteCaja from "./cajaChica/ReporteCaja";
-import SelectorRubros from "./cajaChica/SelectorRubros";
+import SelectorActividad from "./cajaChica/SelectorActividad";
 import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 
@@ -27,7 +27,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [obras, setObras] = useState([]);
   const [archivoGasto, setArchivoGasto] = useState(null);
   const [archivoPreview, setArchivoPreview] = useState(null);
-  const [rubrosGasto, setRubrosGasto] = useState([]);   // [{obra_rubro_id, monto}]
+  const [rubrosGasto, setRubrosGasto] = useState([]);   // [{obra_actividad_id, monto}]
   const fileRef = useRef(null);
   const admin = esAdmin(currentUser.role);
   const gerente = puedeControlObra(currentUser.role);
@@ -187,7 +187,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       else setNovaError("No se pudo subir la foto (el gasto igual se guarda): "+error.message);
     }
     const monto=Number(gastoForm.monto);
-    const conRubros = rubrosGasto.filter(r=>r.obra_rubro_id);
+    const conRubros = rubrosGasto.filter(r=>r.obra_actividad_id);
     const{data,error:errGasto}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
       proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
@@ -225,9 +225,9 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
           await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
           // Lo que eligió quien cargó el gasto entra como asignación real.
           const filas = conRubros
-            .map(r=>({factura_id:facturaObra.id, obra_rubro_id:r.obra_rubro_id, monto:Number(r.monto)||0}))
+            .map(r=>({factura_id:facturaObra.id, obra_actividad_id:r.obra_actividad_id, monto:Number(r.monto)||0}))
             .filter(f=>f.monto!==0);
-          if (filas.length) await supabase.from("obra_factura_rubros").insert(filas);
+          if (filas.length) await supabase.from("obra_asignaciones").insert(filas);
         }
         else if (errObra) setNovaError("El gasto se guardó, pero no entró al control de la obra: " + errObra.message);
       }
@@ -382,7 +382,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
                 <input value={gastoForm.numero_factura} onChange={e=>setGastoForm(p=>({...p,numero_factura:e.target.value}))} onBlur={()=>revisarDuplicadosGasto()} placeholder="001-001-000000123" style={iS}/></div>
             </div>
             {cajaActiva?.obra_id ? (
-              <SelectorRubros obraId={cajaActiva.obra_id} seleccion={rubrosGasto}
+              <SelectorActividad obraId={cajaActiva.obra_id} seleccion={rubrosGasto}
                 onChange={setRubrosGasto} montoTotal={gastoForm.monto} />
             ) : (
               <div style={{fontSize:11,color:"var(--muted)",background:"var(--bg)",borderRadius:8,padding:"8px 10px"}}>

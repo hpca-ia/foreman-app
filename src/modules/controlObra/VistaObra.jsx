@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
-import { fmt, calcularControl, agruparPorCapitulo, totalesObra } from "./calculos";
+import { fmt, calcularControl, agrupar, totalesObra } from "./calculos";
 import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
@@ -19,14 +19,16 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
   const [asignaciones, setAsignaciones] = useState([]);
   const [planillaSel, setPlanillaSel] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [actividades, setActividades] = useState([]);
   const [agruparPor, setAgruparPor] = useState("capitulo");   // capitulo | actividad
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [{ data: r }, { data: p }, { data: f }] = await Promise.all([
+    const [{ data: r }, { data: p }, { data: f }, { data: act }] = await Promise.all([
       supabase.from("obra_rubros").select("*").eq("obra_id", obra.id).order("capitulo_orden").order("orden"),
       supabase.from("planillas").select("*").eq("obra_id", obra.id).order("numero"),
       supabase.from("obra_facturas").select("*").eq("obra_id", obra.id).order("fecha", { ascending: false }),
+      supabase.from("obra_actividades").select("*").eq("obra_id", obra.id).order("orden"),
     ]);
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
@@ -34,11 +36,12 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
 
     let asig = [];
     if (facturasConNumero.length) {
-      const { data } = await supabase.from("obra_factura_rubros").select("*").in("factura_id", facturasConNumero.map(x => x.id));
+      const { data } = await supabase.from("obra_asignaciones").select("*").in("factura_id", facturasConNumero.map(x => x.id));
       asig = data || [];
     }
 
     setRubros(r || []);
+    setActividades(act || []);
     setPlanillas(p || []);
     setFacturas(facturasConNumero);
     setAsignaciones(asig);
@@ -54,7 +57,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
 
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
   const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: planillaActual?.numero ?? null });
-  const grupos = agruparPorCapitulo(rubros, porRubro, agruparPor);
+  const grupos = agrupar(rubros, porRubro, agruparPor, actividades);
   const totales = totalesObra(grupos);
 
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
@@ -117,7 +120,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
           )}
           {tab === "facturas" && (
             <PanelFacturas
-              obra={obra} rubros={rubros} planillas={planillas} planillaActual={planillaActual}
+              obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
               facturas={facturas} asignaciones={asignaciones}
               currentUser={currentUser} onCambio={cargar}
             />
@@ -125,7 +128,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
           {tab === "planillas" && (
             <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} onCambio={cargar} />
           )}
-          {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} onCambio={cargar} />}
+          {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
             <ExportarPlanilla obra={obra} planilla={planillaActual} grupos={grupos} porRubro={porRubro}

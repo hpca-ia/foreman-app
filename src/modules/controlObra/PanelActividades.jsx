@@ -1,17 +1,18 @@
 import { useState, useMemo } from "react";
-import { Plus, Sparkles, Check, X, ChevronRight, ChevronDown, Trash2, Pencil, CornerDownRight } from "lucide-react";
+import { Plus, Sparkles, Check, X, ChevronRight, ChevronDown, Trash2, Pencil, CornerDownRight, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 
-const SIN_ACTIVIDAD = "__sin__";
+const SIN = "__sin__";
 
-// La jerarquía es Presupuesto → Capítulo → Actividad → Rubro. Acá se
-// organiza el tercer nivel: qué rubros comprende cada actividad y a cuál
-// pasan si hay que moverlos.
-export default function PanelActividades({ obra, rubros, onCambio }) {
-  const [abiertas, setAbiertas] = useState(() => new Set([SIN_ACTIVIDAD]));
+// La actividad agrupa rubros según cómo se ejecuta la obra, cruzando capítulos
+// si hace falta: "muebles" toca carpintería, herrajes e instalación. Es el
+// nivel al que se asignan las facturas al armar una planilla, así que acá se
+// decide qué comprende cada una y con qué código se la llama.
+export default function PanelActividades({ obra, rubros, actividades = [], onCambio }) {
+  const [abiertas, setAbiertas] = useState(() => new Set([SIN]));
   const [seleccion, setSeleccion] = useState(new Set());
   const [busqueda, setBusqueda] = useState("");
   const [nueva, setNueva] = useState("");
@@ -20,34 +21,34 @@ export default function PanelActividades({ obra, rubros, onCambio }) {
   const [sugerencias, setSugerencias] = useState(null);
   const [error, setError] = useState("");
 
-  // Agrupa por capítulo y, dentro, por actividad.
-  const arbol = useMemo(() => {
+  const grupos = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     const coincide = r => !q || r.descripcion.toLowerCase().includes(q) ||
-      (r.actividad || "").toLowerCase().includes(q) || String(r.numero) === q;
+      (r.capitulo || "").toLowerCase().includes(q) || String(r.numero) === q;
 
-    const caps = new Map();
+    const dic = new Map(actividades.map(a => [a.id, a]));
+    const mapa = new Map();
+    actividades.forEach(a => mapa.set(a.id, { act: a, rubros: [], capitulos: new Set() }));
+    mapa.set(SIN, { act: null, rubros: [], capitulos: new Set() });
+
     rubros.filter(coincide)
       .slice()
       .sort((a, b) => (a.capitulo_orden - b.capitulo_orden) || (a.orden - b.orden))
       .forEach(r => {
-        const cap = r.capitulo || "SIN CAPÍTULO";
-        if (!caps.has(cap)) caps.set(cap, new Map());
-        const acts = caps.get(cap);
-        const act = r.actividad || SIN_ACTIVIDAD;
-        if (!acts.has(act)) acts.set(act, []);
-        acts.get(act).push(r);
+        const clave = r.actividad_id != null && dic.has(r.actividad_id) ? r.actividad_id : SIN;
+        const g = mapa.get(clave);
+        g.rubros.push(r);
+        g.capitulos.add(r.capitulo || "SIN CAPÍTULO");
       });
-    return caps;
-  }, [rubros, busqueda]);
 
-  const actividades = useMemo(
-    () => [...new Set(rubros.map(r => r.actividad).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
-    [rubros]
-  );
-  const sinActividad = rubros.filter(r => !r.actividad).length;
+    return [...mapa.entries()]
+      .filter(([k, g]) => k !== SIN || g.rubros.length)
+      .map(([clave, g]) => ({ clave, ...g, capitulos: [...g.capitulos] }))
+      .sort((a, b) => (a.clave === SIN ? 1 : 0) - (b.clave === SIN ? 1 : 0) || (a.act?.orden ?? 0) - (b.act?.orden ?? 0));
+  }, [rubros, actividades, busqueda]);
 
-  const clave = (cap, act) => `${cap}||${act}`;
+  const sinActividad = rubros.filter(r => r.actividad_id == null).length;
+
   function alternarGrupo(k) {
     setAbiertas(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
   }
@@ -57,40 +58,50 @@ export default function PanelActividades({ obra, rubros, onCambio }) {
   function seleccionarGrupo(lista) {
     const ids = lista.map(r => r.id);
     const todos = ids.every(id => seleccion.has(id));
-    setSeleccion(prev => {
-      const n = new Set(prev);
-      ids.forEach(id => todos ? n.delete(id) : n.add(id));
-      return n;
-    });
+    setSeleccion(prev => { const n = new Set(prev); ids.forEach(id => todos ? n.delete(id) : n.add(id)); return n; });
   }
 
-  async function mover(ids, actividad) {
+  async function mover(ids, actividadId) {
     if (!ids.length) return;
     setGuardando(true); setError("");
-    const orden = actividad ? (actividades.indexOf(actividad) + 1 || actividades.length + 1) : null;
-    const { error: e } = await supabase.from("obra_rubros")
-      .update({ actividad: actividad || null, actividad_orden: orden }).in("id", ids);
+    const { error: e } = await supabase.from("obra_rubros").update({ actividad_id: actividadId }).in("id", ids);
     if (e) setError("No se pudo mover: " + e.message);
     else { setSeleccion(new Set()); setNueva(""); await onCambio(); }
     setGuardando(false);
   }
 
-  async function renombrar(vieja) {
-    const nuevo = window.prompt(`Nuevo nombre para "${vieja}"`, vieja);
-    if (!nuevo?.trim() || nuevo === vieja) return;
-    setGuardando(true);
-    await supabase.from("obra_rubros").update({ actividad: nuevo.trim() })
-      .eq("obra_id", obra.id).eq("actividad", vieja);
+  async function moverANueva() {
+    const nombre = nueva.trim();
+    if (!nombre) return;
+    setGuardando(true); setError("");
+    const { data: act, error: e1 } = await supabase.from("obra_actividades")
+      .insert({ obra_id: obra.id, nombre, codigo: String(actividades.length + 1).padStart(2, "0"), orden: actividades.length + 1 })
+      .select().single();
+    if (e1) { setError("No se pudo crear la actividad: " + e1.message); setGuardando(false); return; }
+    const { error: e2 } = await supabase.from("obra_rubros").update({ actividad_id: act.id }).in("id", [...seleccion]);
+    if (e2) setError("La actividad se creó pero no se pudo asignar los rubros: " + e2.message);
+    else { setSeleccion(new Set()); setNueva(""); }
     await onCambio();
     setGuardando(false);
   }
 
-  async function disolver(actividad) {
-    const cuantos = rubros.filter(r => r.actividad === actividad).length;
-    if (!window.confirm(`¿Quitar la actividad "${actividad}"?\n\nSus ${cuantos} rubros no se borran: vuelven a quedar sin actividad.`)) return;
+  async function editar(act) {
+    const nombre = window.prompt("Nombre de la actividad", act.nombre);
+    if (nombre === null) return;
+    const codigo = window.prompt("Código de la actividad", act.codigo || "");
+    if (codigo === null) return;
     setGuardando(true);
-    await supabase.from("obra_rubros").update({ actividad: null, actividad_orden: null })
-      .eq("obra_id", obra.id).eq("actividad", actividad);
+    await supabase.from("obra_actividades")
+      .update({ nombre: nombre.trim() || act.nombre, codigo: codigo.trim() }).eq("id", act.id);
+    await onCambio();
+    setGuardando(false);
+  }
+
+  async function disolver(act, cuantos) {
+    if (!window.confirm(`¿Quitar la actividad "${act.nombre}"?\n\nSus ${cuantos} rubros no se borran: vuelven a quedar sin actividad.`)) return;
+    setGuardando(true);
+    await supabase.from("obra_rubros").update({ actividad_id: null }).eq("actividad_id", act.id);
+    await supabase.from("obra_actividades").delete().eq("id", act.id);
     await onCambio();
     setGuardando(false);
   }
@@ -104,13 +115,14 @@ export default function PanelActividades({ obra, rubros, onCambio }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5", max_tokens: 8000,
-          system: `Agrupas los rubros de una obra en ACTIVIDADES. La jerarquía es
-Capítulo → Actividad → Rubro: la actividad es un paquete de trabajo dentro de un capítulo
-(ej. en "Instalaciones": "Iluminación", "Tomacorrientes", "Tableros").
-Cada rubro va en UNA sola actividad. Usa nombres cortos y concretos.
+          system: `Agrupas los rubros de una obra en ACTIVIDADES: paquetes de trabajo según
+cómo se ejecuta la obra ("muebles", "instalaciones eléctricas", "movimiento de tierra").
+Una actividad PUEDE cruzar capítulos —el capítulo es cómo se contrató, no cómo se ejecuta—
+pero no la cruces sin razón: si sus rubros viven todos en un capítulo, déjala ahí.
+Cada rubro va en UNA sola actividad. Nombres cortos y concretos.
 Devuelve SOLO JSON, sin markdown:
 {"actividades":[{"nombre":"...","rubros":[1,2,3]}]}
-Los números son los id que van antes del primer "|". No inventes ids.`,
+Los números son los id antes del primer "|". No inventes ids.`,
           messages: [{ role: "user", content: `Rubros (id|capítulo|descripción):\n${lista}` }],
         }),
       });
@@ -119,9 +131,13 @@ Los números son los id que van antes del primer "|". No inventes ids.`,
       let parsed = null;
       try { parsed = JSON.parse(txt); } catch { const m = txt.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
       if (!parsed?.actividades?.length) { setError("NOVA no pudo agrupar los rubros. Intenta de nuevo o hazlo a mano."); setSugiriendo(false); return; }
-      const idsValidos = new Set(rubros.map(r => r.id));
+      const validos = new Map(rubros.map(r => [r.id, r]));
       setSugerencias(parsed.actividades
-        .map(a => ({ nombre: String(a.nombre || "").trim(), rubros: (a.rubros || []).filter(id => idsValidos.has(id)) }))
+        .map(a => {
+          const ids = (a.rubros || []).filter(id => validos.has(id));
+          const caps = new Set(ids.map(id => validos.get(id).capitulo || "SIN CAPÍTULO"));
+          return { nombre: String(a.nombre || "").trim(), rubros: ids, capitulos: caps.size };
+        })
         .filter(a => a.nombre && a.rubros.length));
     } catch (e) { setError("Error consultando a NOVA: " + e.message); }
     setSugiriendo(false);
@@ -130,11 +146,15 @@ Los números son los id que van antes del primer "|". No inventes ids.`,
   async function aplicarSugerencias() {
     setGuardando(true); setError("");
     try {
+      const filas = sugerencias.map((a, i) => ({
+        obra_id: obra.id, nombre: a.nombre, codigo: String(i + 1).padStart(2, "0"), orden: i + 1, origen: "nova",
+      }));
+      const { data: creadas, error: e1 } = await supabase.from("obra_actividades").insert(filas).select();
+      if (e1) { setError("Falló al crear las actividades: " + e1.message); setGuardando(false); return; }
       for (let i = 0; i < sugerencias.length; i++) {
-        const a = sugerencias[i];
-        const { error: e } = await supabase.from("obra_rubros")
-          .update({ actividad: a.nombre, actividad_orden: i + 1 }).in("id", a.rubros);
-        if (e) { setError("Falló al aplicar: " + e.message); setGuardando(false); return; }
+        const { error: e2 } = await supabase.from("obra_rubros")
+          .update({ actividad_id: creadas[i].id }).in("id", sugerencias[i].rubros);
+        if (e2) { setError("Falló al asignar rubros: " + e2.message); setGuardando(false); return; }
       }
       setSugerencias(null);
       await onCambio();
@@ -144,7 +164,7 @@ Los números son los id que van antes del primer "|". No inventes ids.`,
   return (
     <div>
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 12 }}>
-        Presupuesto → capítulo → actividad → rubro. Despliega una actividad para ver qué rubros comprende y moverlos a otra.
+        Las actividades son cómo se ejecuta la obra y pueden cruzar capítulos. Es a ellas que se asignan las facturas al armar una planilla.
         {sinActividad > 0 && <> Quedan <strong>{sinActividad}</strong> rubros sin actividad.</>}
       </div>
 
@@ -166,9 +186,16 @@ Los números son los id que van antes del primer "|". No inventes ids.`,
           <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 10 }}>
             {sugerencias.map((a, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                <span style={{ fontSize: 11, color: colors.muted, width: 18, flexShrink: 0 }}>{String(i + 1).padStart(2, "0")}</span>
                 <input value={a.nombre} onChange={e => setSugerencias(s => s.map((x, j) => j === i ? { ...x, nombre: e.target.value } : x))}
                   style={{ ...inputStyle, flex: 1, padding: "6px 9px", fontSize: 12 }} />
                 <span style={{ fontSize: 11, color: colors.muted, flexShrink: 0 }}>{a.rubros.length} rubros</span>
+                {a.capitulos > 1 && (
+                  <span title={`Cruza ${a.capitulos} capítulos`}
+                    style={{ fontSize: 9, color: colors.warning, background: colors.warningSoft, borderRadius: 8, padding: "1px 6px", flexShrink: 0, fontWeight: 600 }}>
+                    {a.capitulos} cap.
+                  </span>
+                )}
                 <button onClick={() => setSugerencias(s => s.filter((_, j) => j !== i))}
                   style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex" }}><X size={13} /></button>
               </div>
@@ -185,20 +212,18 @@ Los números son los id que van antes del primer "|". No inventes ids.`,
 
       {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
-      <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro o actividad..." style={{ ...inputStyle, marginBottom: 10 }} />
+      <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro o capítulo..." style={{ ...inputStyle, marginBottom: 10 }} />
 
-      {/* Barra de acción: aparece al seleccionar rubros */}
       {seleccion.size > 0 && (
         <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 12, marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.brand, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-            <CornerDownRight size={13} />
-            Mover {seleccion.size} rubro{seleccion.size === 1 ? "" : "s"} a:
+            <CornerDownRight size={13} /> Mover {seleccion.size} rubro{seleccion.size === 1 ? "" : "s"} a:
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             {actividades.map(a => (
-              <button key={a} onClick={() => mover([...seleccion], a)} disabled={guardando}
+              <button key={a.id} onClick={() => mover([...seleccion], a.id)} disabled={guardando}
                 style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 20, padding: "5px 12px", fontSize: 12, color: colors.ink, cursor: "pointer", fontFamily: colors.font }}>
-                {a}
+                <span style={{ color: colors.muted, marginRight: 4 }}>{a.codigo}</span>{a.nombre}
               </button>
             ))}
             <button onClick={() => mover([...seleccion], null)} disabled={guardando}
@@ -208,75 +233,71 @@ Los números son los id que van antes del primer "|". No inventes ids.`,
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={nueva} onChange={e => setNueva(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && nueva.trim() && mover([...seleccion], nueva.trim())}
+              onKeyDown={e => { if (e.key === "Enter" && nueva.trim()) moverANueva(); }}
               placeholder="…o una actividad nueva" style={{ ...inputStyle, flex: 1 }} />
-            <Button variant="primary" onClick={() => mover([...seleccion], nueva.trim())} disabled={!nueva.trim() || guardando}>
+            <Button variant="primary" onClick={moverANueva} disabled={!nueva.trim() || guardando}>
               <Plus size={13} /> Crear
             </Button>
           </div>
         </div>
       )}
 
-      {/* Árbol: capítulo → actividad → rubros */}
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-        {[...arbol.entries()].map(([cap, acts]) => (
-          <div key={cap}>
-            <div style={{ background: colors.bg, padding: "8px 12px", fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, borderBottom: `1px solid ${colors.border}` }}>
-              {cap}
-            </div>
+        {grupos.map(g => {
+          const abierta = abiertas.has(g.clave);
+          const esSin = g.clave === SIN;
+          const todos = g.rubros.length > 0 && g.rubros.every(r => seleccion.has(r.id));
+          return (
+            <div key={g.clave}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, background: esSin ? "transparent" : colors.brandSoft }}>
+                <button onClick={() => alternarGrupo(g.clave)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: esSin ? colors.muted : colors.brand, display: "flex", padding: 0 }}>
+                  {abierta ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
+                <span onClick={() => alternarGrupo(g.clave)} style={{ flex: 1, fontSize: 12, fontWeight: 600, color: esSin ? colors.muted : colors.brand, cursor: "pointer", minWidth: 0 }}>
+                  {!esSin && <span style={{ opacity: 0.65, marginRight: 5 }}>{g.act.codigo}</span>}
+                  {esSin ? "Sin actividad" : g.act.nombre}
+                  <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 5 }}>({g.rubros.length})</span>
+                  {!esSin && g.capitulos.length > 1 && (
+                    <span title={`Toca ${g.capitulos.length} capítulos: ${g.capitulos.join(", ")}. Lo que se le asigne se reparte entre ellos a prorrata; si necesitas el capítulo exacto, pártela en dos.`}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 3, background: colors.warningSoft, color: colors.warning, borderRadius: 10, padding: "1px 7px", fontSize: 9, fontWeight: 600, marginLeft: 6 }}>
+                      <AlertTriangle size={9} /> {g.capitulos.length} capítulos
+                    </span>
+                  )}
+                </span>
+                <button onClick={() => seleccionarGrupo(g.rubros)} title="Seleccionar todos"
+                  style={{ background: todos ? colors.brand : "transparent", border: `1px solid ${todos ? colors.brand : colors.border}`, borderRadius: 4, width: 18, height: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}>
+                  {todos && <Check size={11} color="#fff" />}
+                </button>
+                {!esSin && (
+                  <>
+                    <button onClick={() => editar(g.act)} title="Nombre y código"
+                      style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Pencil size={12} /></button>
+                    <button onClick={() => disolver(g.act, g.rubros.length)} title="Quitar la actividad"
+                      style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={12} /></button>
+                  </>
+                )}
+              </div>
 
-            {[...acts.entries()]
-              .sort((a, b) => (a[0] === SIN_ACTIVIDAD ? 1 : 0) - (b[0] === SIN_ACTIVIDAD ? 1 : 0) || a[0].localeCompare(b[0]))
-              .map(([act, lista]) => {
-                const k = clave(cap, act);
-                const abierta = abiertas.has(k);
-                const esSin = act === SIN_ACTIVIDAD;
-                const todosMarcados = lista.every(r => seleccion.has(r.id));
+              {abierta && g.rubros.map(r => {
+                const marcado = seleccion.has(r.id);
                 return (
-                  <div key={k}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, background: esSin ? "transparent" : colors.brandSoft }}>
-                      <button onClick={() => alternarGrupo(k)}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: esSin ? colors.muted : colors.brand, display: "flex", padding: 0 }}>
-                        {abierta ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      </button>
-                      <span onClick={() => alternarGrupo(k)} style={{ flex: 1, fontSize: 12, fontWeight: 600, color: esSin ? colors.muted : colors.brand, cursor: "pointer" }}>
-                        {esSin ? "Sin actividad" : act}
-                        <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 6 }}>({lista.length})</span>
-                      </span>
-                      <button onClick={() => seleccionarGrupo(lista)} title="Seleccionar todos"
-                        style={{ background: todosMarcados ? colors.brand : "transparent", border: `1px solid ${todosMarcados ? colors.brand : colors.border}`, borderRadius: 4, width: 18, height: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                        {todosMarcados && <Check size={11} color="#fff" />}
-                      </button>
-                      {!esSin && (
-                        <>
-                          <button onClick={() => renombrar(act)} title="Renombrar"
-                            style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Pencil size={12} /></button>
-                          <button onClick={() => disolver(act)} title="Quitar la actividad"
-                            style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={12} /></button>
-                        </>
-                      )}
+                  <div key={r.id} onClick={() => alternarRubro(r.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px 7px 34px", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer", background: marcado ? colors.brandSoft : "transparent" }}>
+                    <div style={{ width: 15, height: 15, borderRadius: 4, flexShrink: 0, border: `1.5px solid ${marcado ? colors.brand : colors.border}`, background: marcado ? colors.brand : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {marcado && <Check size={10} color="#fff" />}
                     </div>
-
-                    {abierta && lista.map(r => {
-                      const marcado = seleccion.has(r.id);
-                      return (
-                        <div key={r.id} onClick={() => alternarRubro(r.id)}
-                          style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px 7px 34px", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer", background: marcado ? colors.brandSoft : "transparent" }}>
-                          <div style={{ width: 15, height: 15, borderRadius: 4, flexShrink: 0, border: `1.5px solid ${marcado ? colors.brand : colors.border}`, background: marcado ? colors.brand : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            {marcado && <Check size={10} color="#fff" />}
-                          </div>
-                          <span style={{ fontSize: 12, color: colors.ink, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            <span style={{ color: colors.muted, marginRight: 6 }}>{r.numero}</span>{r.descripcion}
-                          </span>
-                        </div>
-                      );
-                    })}
+                    <span style={{ fontSize: 12, color: colors.ink, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ color: colors.muted, marginRight: 6 }}>{r.numero}</span>{r.descripcion}
+                    </span>
+                    <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.capitulo}</span>
                   </div>
                 );
               })}
-          </div>
-        ))}
-        {arbol.size === 0 && <div style={{ padding: "30px 0", textAlign: "center", color: colors.muted, fontSize: 13 }}>Sin rubros que mostrar.</div>}
+            </div>
+          );
+        })}
+        {grupos.length === 0 && <div style={{ padding: "30px 0", textAlign: "center", color: colors.muted, fontSize: 13 }}>Sin rubros que mostrar.</div>}
       </div>
     </div>
   );

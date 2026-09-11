@@ -39,7 +39,7 @@ export default function BorrarObra({ obra, onCancelar, onBorrada }) {
       const { data: facturas } = await supabase.from("obra_facturas").select("id").eq("obra_id", obra.id);
       const ids = (facturas || []).map(f => f.id);
       if (ids.length) {
-        await supabase.from("obra_factura_rubros").delete().in("factura_id", ids);
+        await supabase.from("obra_asignaciones").delete().in("factura_id", ids);
         // Los gastos de caja chica no se borran: son de la caja, no de la obra.
         // Solo pierden el vínculo con una factura que va a dejar de existir.
         await supabase.from("cajas_gastos").update({ obra_factura_id: null }).in("obra_factura_id", ids);
@@ -47,6 +47,7 @@ export default function BorrarObra({ obra, onCancelar, onBorrada }) {
       await supabase.from("obra_facturas").delete().eq("obra_id", obra.id);
       await supabase.from("planillas").delete().eq("obra_id", obra.id);
       await supabase.from("obra_rubros").delete().eq("obra_id", obra.id);
+      await supabase.from("obra_actividades").delete().eq("obra_id", obra.id);
       await supabase.from("cajas_chicas").update({ obra_id: null }).eq("obra_id", obra.id);
       const { error: e } = await supabase.from("obras").delete().eq("id", obra.id);
       if (e) { setError("No se pudo borrar: " + e.message); setBorrando(false); return; }
