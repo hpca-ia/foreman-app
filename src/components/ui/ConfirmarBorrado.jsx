@@ -14,6 +14,18 @@ import { inputStyle } from "./Input";
  * @param revisar  async () => ({ bloqueo, detalle })  bloqueo = motivo, o null si se puede
  * @param borrar   async () => error | null
  */
+// La base devuelve el error de la llave foránea en crudo, con el nombre del
+// constraint. Eso no le dice nada a quien lo lee: lo que necesita saber es que
+// algo más lo está reteniendo y que no es culpa suya.
+function enCristiano(e) {
+  const msg = e?.message || String(e);
+  if (/foreign key|violates/i.test(msg)) {
+    const tabla = msg.match(/on table "([^"]+)"/)?.[1];
+    return `No se pudo borrar: otra parte del sistema todavía lo está usando${tabla ? ` (${tabla})` : ""}. Avísame y lo suelto.`;
+  }
+  return "No se pudo borrar: " + msg;
+}
+
 export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, onCancelar, onBorrado }) {
   const [estado, setEstado] = useState(null);      // { bloqueo, detalle }
   const [texto, setTexto] = useState("");
@@ -36,7 +48,7 @@ export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, onCa
   async function confirmar() {
     setBorrando(true); setError("");
     const e = await borrar();
-    if (e) { setError("No se pudo borrar: " + (e.message || e)); setBorrando(false); return; }
+    if (e) { setError(enCristiano(e)); setBorrando(false); return; }
     onBorrado();
   }
 
