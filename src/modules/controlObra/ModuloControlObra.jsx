@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { Plus, ArrowLeft } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt } from "./calculos";
 import ActivarObra from "./ActivarObra";
+import ImportarObra from "./ImportarObra";
 import VistaObra from "./VistaObra";
 
 export default function ModuloControlObra({ currentUser }) {
@@ -59,17 +60,26 @@ export default function ModuloControlObra({ currentUser }) {
     return <ActivarObra currentUser={currentUser} onCancelar={() => setVista("lista")} onCreada={async o => { await fetchObras(); setObraActiva(o); setVista("obra"); }} />;
   }
 
+  if (vista === "importar") {
+    return <ImportarObra currentUser={currentUser} onVolver={() => setVista("lista")} onCreada={async o => { await fetchObras(); setObraActiva(o); setVista("obra"); }} />;
+  }
+
   if (vista === "obra" && obraActiva) {
     return <VistaObra obra={obraActiva} currentUser={currentUser} onVolver={() => { setVista("lista"); fetchObras(); }} />;
   }
 
   return (
     <div style={{ fontFamily: colors.font }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Control de Obra</div>
-        <Button variant="primary" size="md" style={{ marginLeft: "auto" }} onClick={() => setVista("activar")}>
-          <Plus size={14} /> Activar presupuesto
-        </Button>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, flexShrink: 0 }}>Control de Obra</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Button variant="outline" size="md" onClick={() => setVista("activar")}>
+            <Plus size={14} /> Desde un presupuesto
+          </Button>
+          <Button variant="primary" size="md" onClick={() => setVista("importar")}>
+            <Upload size={14} /> Subir presupuesto
+          </Button>
+        </div>
       </div>
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div>

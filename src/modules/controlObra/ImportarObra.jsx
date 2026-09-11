@@ -1,16 +1,16 @@
 import { useState, useRef } from "react";
-import { Upload, Sparkles, Trash2 } from "lucide-react";
+import { Upload, Sparkles, Trash2, ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import { fmt } from "./calculos";
 
 const n = v => Number(v) || 0;
-const fmt = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Replicar fiel ≠ alimentar la base de precios.
-// Acá NOVA copia el presupuesto tal cual viene: mismos capítulos, mismos
-// rubros, en el mismo orden, para usarlo como línea base de una obra.
+// El presupuesto que se controla NO es el que se cotiza: puede ser el
+// aprobado por el cliente, el del contratista, otro documento. Por eso
+// esta importación crea la obra directamente, sin pasar por Presupuestos.
 const PROMPT = `Replica este presupuesto de construcción TAL CUAL, sin resumir ni reagrupar.
 Devuelve SOLO JSON compacto, sin markdown:
 {"nombre":"","cliente":"","rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0}]}
@@ -21,12 +21,13 @@ Reglas:
 - "q" cantidad, "p" precio unitario, "t" total de la fila. Si falta "t", omítelo.
 - No inventes rubros ni cambies descripciones.`;
 
-export default function ImportarPresupuesto({ currentUser, onVolver, onCreado }) {
+export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [leyendo, setLeyendo] = useState(false);
   const [error, setError] = useState("");
   const [rubros, setRubros] = useState([]);
   const [nombre, setNombre] = useState("");
   const [cliente, setCliente] = useState("");
+  const [yaIncluyeIva, setYaIncluyeIva] = useState(true);
   const [ivaPct, setIvaPct] = useState(15);
   const [guardando, setGuardando] = useState(false);
   const fileRef = useRef(null);
@@ -87,61 +88,60 @@ export default function ImportarPresupuesto({ currentUser, onVolver, onCreado })
     e.target.value = "";
   }
 
-  async function guardar() {
+  async function crearObra() {
     if (!rubros.length || !nombre.trim()) return;
     setGuardando(true); setError("");
+    const factorIva = yaIncluyeIva ? 1 : 1 + n(ivaPct) / 100;
 
-    let clienteId = null;
-    if (cliente.trim()) {
-      const { data: existente } = await supabase.from("clientes").select("id").eq("nombre", cliente.trim()).maybeSingle();
-      if (existente) clienteId = existente.id;
-      else {
-        const { data } = await supabase.from("clientes").insert({ nombre: cliente.trim() }).select().single();
-        clienteId = data?.id || null;
-      }
-    }
-
-    const subtotal = rubros.reduce((s, r) => s + r.total, 0);
-    const { data: pres, error: e1 } = await supabase.from("presupuestos").insert({
-      nombre: nombre.trim(), cliente_id: clienteId, cliente_nombre: cliente.trim() || null,
-      honorarios_pct: 0, iva_pct: n(ivaPct), notas: "Importado con NOVA",
-      created_by: currentUser.id, subtotal, honorarios_monto: 0,
-      iva_monto: subtotal * n(ivaPct) / 100, total: subtotal * (1 + n(ivaPct) / 100), estado: "borrador",
+    const { data: obra, error: e1 } = await supabase.from("obras").insert({
+      nombre: nombre.trim(), cliente_nombre: cliente.trim() || null,
+      notas: "Presupuesto importado con NOVA", created_by: currentUser.id,
     }).select().single();
 
-    if (e1 || !pres) { setError("No se pudo crear el presupuesto: " + (e1?.message || "")); setGuardando(false); return; }
+    if (e1 || !obra) { setError("No se pudo crear la obra: " + (e1?.message || "")); setGuardando(false); return; }
 
-    // orden = capOrden*1000 + índice, la convención que ya usa el módulo
     const ordenCap = {}; let capN = 0; const idxCap = {};
-    const filas = rubros.map(r => {
+    const filas = rubros.map((r, i) => {
       if (!(r.capitulo in ordenCap)) ordenCap[r.capitulo] = ++capN;
       const c = ordenCap[r.capitulo];
       idxCap[c] = (idxCap[c] || 0) + 1;
       return {
-        presupuesto_id: pres.id, capitulo: r.capitulo, descripcion: r.descripcion,
-        unidad: r.unidad, cantidad: r.cantidad, precio_unitario: r.precio_unitario,
-        total: Math.round(r.total * 100) / 100, orden: c * 1000 + idxCap[c],
+        obra_id: obra.id, numero: i + 1, capitulo: r.capitulo,
+        capitulo_orden: c, orden: c * 1000 + idxCap[c],
+        descripcion: r.descripcion, unidad: r.unidad,
+        cantidad: r.cantidad, precio_unitario: r.precio_unitario,
+        iva_pct: yaIncluyeIva ? 0 : n(ivaPct),
+        total_base: Math.round(r.total * factorIva * 100) / 100,
       };
     });
 
     for (let i = 0; i < filas.length; i += 50) {
-      const { error: e2 } = await supabase.from("presupuesto_items").insert(filas.slice(i, i + 50));
+      const { error: e2 } = await supabase.from("obra_rubros").insert(filas.slice(i, i + 50));
       if (e2) { setError("Fallaron algunos rubros: " + e2.message); setGuardando(false); return; }
     }
 
+    await supabase.from("planillas").insert({
+      obra_id: obra.id, numero: 1, nombre: "Planilla N°1", fecha_desde: new Date().toISOString().split("T")[0],
+    });
+
     setGuardando(false);
-    onCreado(pres);
+    onCreada(obra);
   }
 
   const capitulos = [...new Set(rubros.map(r => r.capitulo))];
-  const total = rubros.reduce((s, r) => s + r.total, 0);
+  const subtotal = rubros.reduce((s, r) => s + r.total, 0);
+  const lineaBase = subtotal * (yaIncluyeIva ? 1 : 1 + n(ivaPct) / 100);
   const lbl = { fontSize: 11, color: colors.muted, display: "block", marginBottom: 4 };
 
   return (
     <div style={{ fontFamily: colors.font }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <Button variant="secondary" size="sm" onClick={onVolver}><ArrowLeft size={13} /> Volver</Button>
+        <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>Importar presupuesto de obra</div>
+      </div>
+
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 14 }}>
-        NOVA replica el presupuesto tal cual: mismos capítulos, mismos rubros, mismo orden. Sirve para usarlo como línea base de una obra.
-        Esto es distinto de <strong>Alimentar BD</strong>, que extrae precios de presupuestos viejos para la base de rubros.
+        Sube el presupuesto que vas a <strong>ejecutar y controlar</strong> — el aprobado por el cliente, el del contratista, el que sea. NOVA lo replica tal cual y se convierte en la línea base de la obra.
       </div>
 
       {rubros.length === 0 && (
@@ -162,20 +162,30 @@ export default function ImportarPresupuesto({ currentUser, onVolver, onCreado })
       {rubros.length > 0 && (
         <>
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16, marginBottom: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 90px", gap: 10, marginBottom: 12 }}>
-              <div><label style={lbl}>NOMBRE DEL PRESUPUESTO</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr", gap: 10, marginBottom: 12 }}>
+              <div><label style={lbl}>NOMBRE DE LA OBRA</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} /></div>
               <div><label style={lbl}>CLIENTE</label><input value={cliente} onChange={e => setCliente(e.target.value)} style={inputStyle} placeholder="Opcional" /></div>
-              <div><label style={lbl}>IVA %</label><input type="number" value={ivaPct} onChange={e => setIvaPct(e.target.value)} style={inputStyle} /></div>
             </div>
+
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, cursor: "pointer" }}>
+              <input type="checkbox" checked={yaIncluyeIva} onChange={e => setYaIncluyeIva(e.target.checked)} style={{ cursor: "pointer" }} />
+              <span style={{ fontSize: 12, color: colors.inkSoft }}>Los totales del archivo <strong>ya incluyen IVA</strong></span>
+            </label>
+            {!yaIncluyeIva && (
+              <div style={{ marginBottom: 10, maxWidth: 140 }}>
+                <label style={lbl}>IVA % A APLICAR</label>
+                <input type="number" value={ivaPct} onChange={e => setIvaPct(e.target.value)} style={inputStyle} />
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft }}>
               <span><strong>{rubros.length}</strong> rubros</span>
               <span><strong>{capitulos.length}</strong> capítulos</span>
-              <span>Subtotal: <strong>${fmt(total)}</strong></span>
-              <span>Con IVA: <strong>${fmt(total * (1 + n(ivaPct) / 100))}</strong></span>
+              <span>Línea base: <strong>${fmt(lineaBase)}</strong></span>
             </div>
           </div>
 
-          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, maxHeight: 420, overflowY: "auto", marginBottom: 14 }}>
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, maxHeight: 400, overflowY: "auto", marginBottom: 14 }}>
             {capitulos.map(cap => (
               <div key={cap}>
                 <div style={{ background: colors.brandSoft, padding: "7px 14px", fontSize: 11, fontWeight: 700, color: colors.brand, position: "sticky", top: 0 }}>
@@ -198,8 +208,8 @@ export default function ImportarPresupuesto({ currentUser, onVolver, onCreado })
 
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" style={{ flex: 1 }} onClick={() => { setRubros([]); setError(""); }}>Descartar</Button>
-            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={guardar} disabled={guardando || !nombre.trim()}>
-              {guardando ? "Guardando..." : `Crear presupuesto con ${rubros.length} rubros`}
+            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={crearObra} disabled={guardando || !nombre.trim()}>
+              {guardando ? "Creando obra..." : `Crear obra con ${rubros.length} rubros`}
             </Button>
           </div>
         </>
@@ -215,7 +225,6 @@ function parseJSONTolerante(raw) {
   if (start < 0) return null;
   t = t.slice(start);
   try { return JSON.parse(t); } catch {}
-  // JSON truncado: cerrar llaves/corchetes abiertos
   try {
     const corte = t.lastIndexOf("}");
     let p = corte > 0 ? t.slice(0, corte + 1) : t;

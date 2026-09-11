@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import AdminBD from "./AdminBD";
 import CotizacionPanel from "./CotizacionPanel";
-import ImportarPresupuesto from "./presupuestos/ImportarPresupuesto";
 
 export default function ModuloPresupuestos({ currentUser }) {
   const [subVista, setSubVista] = useState("lista");
@@ -512,7 +511,7 @@ export default function ModuloPresupuestos({ currentUser }) {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
         <div>
           <div style={{fontSize:17,fontWeight:700,color:"var(--ink)"}}>
-            {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="detalle"?`${presupuestoActivo?.nombre}`:subVista==="baseDatos"?"Base de rubros":subVista==="importar"?"Importar presupuesto":"Alimentar BD"}
+            {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="detalle"?`${presupuestoActivo?.nombre}`:subVista==="baseDatos"?"Base de rubros":"Alimentar BD"}
           </div>
           {subVista==="detalle"&&presupuestoActivo&&<div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</div>}
         </div>
@@ -522,7 +521,6 @@ export default function ModuloPresupuestos({ currentUser }) {
             <button onClick={()=>{setSubVista("baseDatos");buscarRubros("");}} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>
             <button onClick={()=>setSubVista("alimentarBD")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Alimentar BD</button>
             <button onClick={()=>setShowAdminBD(true)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Admin BD</button>
-            <button onClick={()=>setSubVista("importar")} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Importar con NOVA</button>
             <button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
@@ -536,15 +534,7 @@ export default function ModuloPresupuestos({ currentUser }) {
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)}/>}
       <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
 
-      {!showAdminBD&&subVista==="importar"&&(
-        <ImportarPresupuesto
-          currentUser={currentUser}
-          onVolver={()=>setSubVista("lista")}
-          onCreado={p=>{ fetchPresupuestos(); setPresupuestoActivo(p); fetchItems(p.id); setSubVista("detalle"); }}
-        />
-      )}
-
-      {!showAdminBD&&subVista!=="importar"&&<>
+      {!showAdminBD&&<>
       {/* COTIZACIÓN LEÍDA */}
       {uploadingCotizacion&&<div style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"var(--brand)"}}>🤖 NOVA leyendo cotización...</div>}
       {cotizacionResult?.error&&<div style={{background:"var(--danger-soft)",border:"1.5px solid var(--danger-border)",borderRadius:10,padding:12,marginBottom:12,fontSize:12,color:"var(--danger)"}}>{cotizacionResult.error} <button onClick={()=>setCotizacionResult(null)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:14,marginLeft:8}}>×</button></div>}

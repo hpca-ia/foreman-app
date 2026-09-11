@@ -12,7 +12,8 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [novaLeyendo, setNovaLeyendo] = useState(false);
   const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
-  const [nuevaCajaForm, setNuevaCajaForm] = useState({ proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50 });
+  const [nuevaCajaForm, setNuevaCajaForm] = useState({ obra_id:"", proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50 });
+  const [obras, setObras] = useState([]);
   const [archivoGasto, setArchivoGasto] = useState(null);
   const [archivoPreview, setArchivoPreview] = useState(null);
   const [presupuestosProyecto, setPresupuestosProyecto] = useState([]);
@@ -24,7 +25,11 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   const fmt = n => (Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
   const iS = {width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
 
-  useEffect(() => { fetchCajas(); }, []);
+  useEffect(() => { fetchCajas(); fetchObras(); }, []);
+  async function fetchObras() {
+    const { data } = await supabase.from("obras").select("id,nombre").eq("estado","activa").order("created_at",{ascending:false});
+    setObras(data||[]);
+  }
   async function fetchCajas() {
     let q = supabase.from("cajas_chicas").select("*").order("created_at",{ascending:false});
     if (!admin && !gerente) q = q.eq("responsable_id", currentUser.id);
@@ -46,7 +51,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   async function crearCaja() {
     const resUser = users.find(u=>u.id===Number(nuevaCajaForm.responsable_id));
     const { data, error } = await supabase.from("cajas_chicas").insert({
-      proyecto_nombre:nuevaCajaForm.proyecto_nombre, responsable_id:Number(nuevaCajaForm.responsable_id),
+      proyecto_nombre:nuevaCajaForm.proyecto_nombre, obra_id:Number(nuevaCajaForm.obra_id)||null, responsable_id:Number(nuevaCajaForm.responsable_id),
       responsable_nombre:resUser?.name||"", limite_alerta:Number(nuevaCajaForm.limite_alerta)||50, created_by:currentUser.id
     }).select().single();
     if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); fetchPresupuestosProyecto(data.proyecto_nombre); }
@@ -104,7 +109,6 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     }
     const monto=Number(gastoForm.monto);
     const capitulosList = capitulosSeleccionados.length>0 ? capitulosSeleccionados : ["SIN CLASIFICAR"];
-    const montoPorCap = monto / capitulosList.length; // split equally if multiple
     const{data}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,monto,
       capitulo:capitulosList.join(", "),proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
@@ -112,15 +116,22 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
     }).select().single();
     if(data){
-      // Register in control_obra_gastos per capitulo
-      for (const cap of capitulosList) {
-        await supabase.from("control_obra_gastos").insert({
-          proyecto_nombre:cajaActiva.proyecto_nombre, capitulo:cap,
-          descripcion:gastoForm.descripcion, monto:montoPorCap,
-          fecha:gastoForm.fecha, tipo:"caja_chica",
-          gasto_caja_id:data.id, archivo_url:archivoUrl,
+      // El gasto entra al control de la obra como factura "por asignar":
+      // nadie le pone rubro desde el celular, se asigna después en Control de Obra.
+      if (cajaActiva.obra_id) {
+        const {data:planillaAbierta} = await supabase.from("planillas")
+          .select("id").eq("obra_id",cajaActiva.obra_id).eq("estado","abierta")
+          .order("numero",{ascending:false}).limit(1).maybeSingle();
+        const {data:facturaObra} = await supabase.from("obra_facturas").insert({
+          obra_id:cajaActiva.obra_id, planilla_id:planillaAbierta?.id||null,
+          fecha:gastoForm.fecha, tipo_documento:(gastoForm.tipo||"factura").toUpperCase(),
+          razon_social:gastoForm.proveedor||null, detalle:gastoForm.descripcion,
+          justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
+          tipo:"material", archivo_url:archivoUrl, archivo_nombre:archivoNombre,
+          origen:"caja_chica", caja_gasto_id:data.id,
           subido_por:currentUser.id, subido_por_nombre:currentUser.name
-        });
+        }).select().single();
+        if (facturaObra) await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
       }
       const nuevoGastado=(cajaActiva.saldo_gastado||0)+monto;
       const nuevoDisp=(cajaActiva.saldo_total||0)-nuevoGastado;
@@ -198,8 +209,13 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       {subVista==="nueva"&&(
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid var(--border)"}}>
           <div style={{display:"grid",gap:14}}>
-            <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Proyecto *</label>
-              <input value={nuevaCajaForm.proyecto_nombre} onChange={e=>setNuevaCajaForm(p=>({...p,proyecto_nombre:e.target.value}))} placeholder="Nombre del proyecto" style={iS}/></div>
+            <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Obra *</label>
+              <select value={nuevaCajaForm.obra_id} onChange={e=>{const o=obras.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,obra_id:e.target.value,proyecto_nombre:o?.nombre||""}));}} style={iS}>
+                <option value="">Selecciona la obra...</option>
+                {obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}
+              </select>
+              <div style={{fontSize:10,color:"var(--muted)",marginTop:4}}>Los gastos de esta caja entran al control de esa obra como facturas por asignar.</div>
+              {obras.length===0&&<div style={{fontSize:11,color:"var(--warning)",marginTop:4}}>No hay obras en curso. Crea una primero en Control de Obra.</div>}</div>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Responsable *</label>
               <select value={nuevaCajaForm.responsable_id} onChange={e=>{const u=users.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,responsable_id:e.target.value,responsable_nombre:u?.name||""}));}} style={iS}>
                 <option value="">Selecciona...</option>
@@ -208,8 +224,8 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Alerta cuando saldo baje de ($)</label>
               <input type="number" value={nuevaCajaForm.limite_alerta} onChange={e=>setNuevaCajaForm(p=>({...p,limite_alerta:e.target.value}))} style={iS}/></div>
           </div>
-          <button onClick={crearCaja} disabled={!nuevaCajaForm.proyecto_nombre||!nuevaCajaForm.responsable_id}
-            style={{width:"100%",marginTop:16,background:nuevaCajaForm.proyecto_nombre&&nuevaCajaForm.responsable_id?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:10,padding:12,color:nuevaCajaForm.proyecto_nombre&&nuevaCajaForm.responsable_id?"#fff":"var(--muted)",fontSize:14,fontWeight:600,cursor:"pointer"}}>
+          <button onClick={crearCaja} disabled={!nuevaCajaForm.obra_id||!nuevaCajaForm.responsable_id}
+            style={{width:"100%",marginTop:16,background:nuevaCajaForm.obra_id&&nuevaCajaForm.responsable_id?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:10,padding:12,color:nuevaCajaForm.obra_id&&nuevaCajaForm.responsable_id?"#fff":"var(--muted)",fontSize:14,fontWeight:600,cursor:"pointer"}}>
             Crear caja chica →
           </button>
         </div>
