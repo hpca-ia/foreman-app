@@ -57,42 +57,71 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
 /**
  * Agrupa los rubros y suma sus acumulados.
  *
- * Por capítulo se ve el presupuesto como fue contratado; por actividad se ve
- * como se ejecuta la obra ("muebles", "instalaciones eléctricas"), que puede
- * cruzar capítulos. Los rubros son los mismos, cambia la lente.
+ * La jerarquía es Presupuesto → Capítulo → Actividad → Rubro. El capítulo
+ * viene del presupuesto y es siempre el primer nivel; la actividad es el
+ * paquete de trabajo dentro del capítulo. En modo "actividad" cada capítulo
+ * trae además sus `subgrupos`, y `rubros` se mantiene plano para que los
+ * reportes que ya lo usan sigan funcionando igual.
  *
  * @param modo "capitulo" | "actividad"
  */
+const SIN_CAPITULO = "SIN CAPÍTULO";
+const SIN_ACTIVIDAD = "SIN ACTIVIDAD";
+
+function grupoVacio(nombre, orden) {
+  return { capitulo: nombre, capitulo_orden: orden, rubros: [], base: 0, anterior: 0, periodo: 0, acumulado: 0, saldo: 0, pct: 0 };
+}
+
+function acumularEn(grupo, rubro, acc) {
+  grupo.rubros.push(rubro);
+  grupo.base += n(rubro.total_base);
+  grupo.anterior += acc.anterior;
+  grupo.periodo += acc.periodo;
+  grupo.acumulado += acc.acumulado;
+  grupo.saldo += acc.saldo;
+}
+
 export function agruparPorCapitulo(rubros = [], porRubro = {}, modo = "capitulo") {
-  const porActividad = modo === "actividad";
-  const campo = porActividad ? "actividad" : "capitulo";
-  const campoOrden = porActividad ? "actividad_orden" : "capitulo_orden";
-  const sinAsignar = porActividad ? "SIN ACTIVIDAD" : "SIN CAPÍTULO";
+  const conActividades = modo === "actividad";
 
   const mapa = new Map();
   rubros
     .slice()
-    .sort((a, b) => ((a[campoOrden] ?? 9999) - (b[campoOrden] ?? 9999)) || (a.orden - b.orden) || (a.numero - b.numero))
+    .sort((a, b) => ((a.capitulo_orden ?? 9999) - (b.capitulo_orden ?? 9999)) || (a.orden - b.orden) || (a.numero - b.numero))
     .forEach(r => {
-      const key = r[campo] || sinAsignar;
-      if (!mapa.has(key)) {
-        mapa.set(key, { capitulo: key, capitulo_orden: r[campoOrden] ?? 9999, rubros: [], base: 0, anterior: 0, periodo: 0, acumulado: 0, saldo: 0, pct: 0 });
+      const cap = r.capitulo || SIN_CAPITULO;
+      if (!mapa.has(cap)) {
+        const g = grupoVacio(cap, r.capitulo_orden ?? 9999);
+        if (conActividades) g.subgrupos = new Map();
+        mapa.set(cap, g);
       }
-      const grupo = mapa.get(key);
+      const grupo = mapa.get(cap);
       const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base) };
-      grupo.rubros.push(r);
-      grupo.base += n(r.total_base);
-      grupo.anterior += acc.anterior;
-      grupo.periodo += acc.periodo;
-      grupo.acumulado += acc.acumulado;
-      grupo.saldo += acc.saldo;
+      acumularEn(grupo, r, acc);
+
+      if (conActividades) {
+        const act = r.actividad || SIN_ACTIVIDAD;
+        if (!grupo.subgrupos.has(act)) grupo.subgrupos.set(act, grupoVacio(act, r.actividad_orden ?? 9999));
+        acumularEn(grupo.subgrupos.get(act), r, acc);
+      }
     });
 
   const grupos = [...mapa.values()];
-  grupos.forEach(g => { g.pct = g.base > 0 ? g.acumulado / g.base : 0; });
+  grupos.forEach(g => {
+    g.pct = g.base > 0 ? g.acumulado / g.base : 0;
+    if (g.subgrupos) {
+      // Lo que todavía no tiene actividad se muestra al final del capítulo.
+      g.subgrupos = [...g.subgrupos.values()]
+        .map(s => ({ ...s, pct: s.base > 0 ? s.acumulado / s.base : 0 }))
+        .sort((a, b) =>
+          (a.capitulo === SIN_ACTIVIDAD ? 1 : 0) - (b.capitulo === SIN_ACTIVIDAD ? 1 : 0) ||
+          a.capitulo_orden - b.capitulo_orden ||
+          a.capitulo.localeCompare(b.capitulo));
+    }
+  });
   // Lo no clasificado va al final, no estorbando arriba.
   return grupos.sort((a, b) =>
-    (a.capitulo === sinAsignar ? 1 : 0) - (b.capitulo === sinAsignar ? 1 : 0) ||
+    (a.capitulo === SIN_CAPITULO ? 1 : 0) - (b.capitulo === SIN_CAPITULO ? 1 : 0) ||
     a.capitulo_orden - b.capitulo_orden);
 }
 

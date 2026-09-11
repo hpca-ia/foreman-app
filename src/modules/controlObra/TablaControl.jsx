@@ -11,6 +11,26 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
+function FilaRubro({ rubro: r, porRubro, sangria }) {
+  const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: Number(r.total_base) || 0, pct: 0 };
+  return (
+    <div className="tabla-row"
+      style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: `7px 14px 7px ${sangria}px`, borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center" }}>
+      <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
+        <span style={{ color: colors.muted, marginRight: 6 }}>{r.numero}</span>{r.descripcion}
+      </span>
+      <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{r.unidad}</span>
+      <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{fmt(r.cantidad)}</span>
+      <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(r.total_base)}</span>
+      <span style={{ textAlign: "right", color: colors.muted }}>${fmt(acc.anterior)}</span>
+      <span style={{ textAlign: "right", color: acc.periodo > 0 ? colors.brand : colors.muted, fontWeight: acc.periodo > 0 ? 600 : 400 }}>${fmt(acc.periodo)}</span>
+      <span style={{ textAlign: "right", color: colors.ink }}>${fmt(acc.acumulado)}</span>
+      <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
+      <span style={{ textAlign: "right", fontWeight: 600, color: pctColor(acc.pct, acc.saldo) }}>{(acc.pct * 100).toFixed(0)}%</span>
+    </div>
+  );
+}
+
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo" }) {
   // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
   // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
@@ -35,7 +55,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
 
           {/* Encabezado */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "8px 14px", background: colors.bg, borderBottom: `1px solid ${colors.border}`, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
-            <span>{modo === "actividad" ? "ACTIVIDAD / RUBRO" : "RUBRO"}</span>
+            <span>{modo === "actividad" ? "CAPÍTULO / ACTIVIDAD / RUBRO" : "CAPÍTULO / RUBRO"}</span>
             <span style={{ textAlign: "right" }}>UND</span>
             <span style={{ textAlign: "right" }}>CANT</span>
             <span style={{ textAlign: "right" }}>PRESUPUESTO</span>
@@ -67,26 +87,27 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <span style={{ textAlign: "right" }}>{(g.pct * 100).toFixed(0)}%</span>
                 </div>
 
-                {/* Rubros */}
-                {abierto && g.rubros.map(r => {
-                  const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: Number(r.total_base) || 0, pct: 0 };
-                  return (
-                    <div key={r.id} className="tabla-row"
-                      style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "7px 14px", borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center" }}>
-                      <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
-                        <span style={{ color: colors.muted, marginRight: 6 }}>{r.numero}</span>{r.descripcion}
-                      </span>
-                      <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{r.unidad}</span>
-                      <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{fmt(r.cantidad)}</span>
-                      <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(r.total_base)}</span>
-                      <span style={{ textAlign: "right", color: colors.muted }}>${fmt(acc.anterior)}</span>
-                      <span style={{ textAlign: "right", color: acc.periodo > 0 ? colors.brand : colors.muted, fontWeight: acc.periodo > 0 ? 600 : 400 }}>${fmt(acc.periodo)}</span>
-                      <span style={{ textAlign: "right", color: colors.ink }}>${fmt(acc.acumulado)}</span>
-                      <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
-                      <span style={{ textAlign: "right", fontWeight: 600, color: pctColor(acc.pct, acc.saldo) }}>{(acc.pct * 100).toFixed(0)}%</span>
-                    </div>
-                  );
-                })}
+                {/* Nivel intermedio: las actividades del capítulo */}
+                {abierto && g.subgrupos
+                  ? g.subgrupos.map(sub => (
+                      <div key={sub.capitulo}>
+                        <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "7px 14px 7px 28px", background: colors.bg, borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 11, fontWeight: 600, color: sub.capitulo === "SIN ACTIVIDAD" ? colors.muted : colors.inkSoft, alignItems: "center" }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {sub.capitulo === "SIN ACTIVIDAD" ? "Sin actividad" : sub.capitulo}
+                            <span style={{ fontWeight: 400, opacity: 0.7, marginLeft: 5 }}>({sub.rubros.length})</span>
+                          </span>
+                          <span /><span />
+                          <span style={{ textAlign: "right" }}>${fmt(sub.base)}</span>
+                          <span style={{ textAlign: "right" }}>${fmt(sub.anterior)}</span>
+                          <span style={{ textAlign: "right" }}>${fmt(sub.periodo)}</span>
+                          <span style={{ textAlign: "right" }}>${fmt(sub.acumulado)}</span>
+                          <span style={{ textAlign: "right", color: sub.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(sub.saldo)}</span>
+                          <span style={{ textAlign: "right" }}>{(sub.pct * 100).toFixed(0)}%</span>
+                        </div>
+                        {sub.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={48} />)}
+                      </div>
+                    ))
+                  : abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14} />)}
               </div>
             );
           })}
