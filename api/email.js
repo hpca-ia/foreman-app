@@ -47,21 +47,25 @@ async function enviarEmail({ to, subject, html, attachments }) {
 }
 
 async function alertaSaldoBajo(res, datos) {
-  // La alerta llega al RESIDENTE para que sepa que debe enviar su reporte
-  const { nombre, saldo, recibido, gastado, emailResponsable } = datos;
+  // La alerta va a quien repone la caja (Admin / Gerente), no al residente:
+  // el residente ya sabe que se le acabó, quien tiene que actuar es el otro.
+  const { nombre, proyecto, saldo, recibido, gastado, limite,
+          emailsReposicion, pdfBase64, pdfNombre, pdfUrl } = datos;
 
-  if (!emailResponsable) {
-    return res.status(200).json({ ok: false, error: "El residente no tiene email configurado." });
+  const destinatarios = (emailsReposicion || []).filter(Boolean);
+  if (!destinatarios.length) {
+    return res.status(200).json({ ok: false, error: "Nadie con rol Admin o Gerente tiene email configurado." });
   }
 
   const html = `
     <div style="font-family:Inter,sans-serif;max-width:500px;margin:0 auto">
       <div style="background:#1F2937;padding:20px 24px;border-radius:8px 8px 0 0">
-        <div style="color:#E8622A;font-size:18px;font-weight:700">⚠️ FOREMAN — Tu caja chica esta baja</div>
+        <div style="color:#E8622A;font-size:18px;font-weight:700">FOREMAN — Caja chica por reponer</div>
       </div>
       <div style="background:#fff;border:1px solid #E5E7EB;border-top:none;padding:24px;border-radius:0 0 8px 8px">
         <p style="color:#374151;font-size:15px;margin:0 0 16px">
-          Hola <strong>${nombre}</strong>, tu saldo de caja chica esta por agotarse:
+          La caja chica de <strong>${nombre}</strong>${proyecto ? ` (${proyecto})` : ""} bajó de
+          $${Number(limite || 50).toFixed(2)} y necesita reposición:
         </p>
         <div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:16px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;margin-bottom:8px">
@@ -78,12 +82,14 @@ async function alertaSaldoBajo(res, datos) {
           </div>
         </div>
         <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:14px;margin-bottom:16px">
-          <div style="color:#1D4ED8;font-size:13px;font-weight:600;margin-bottom:4px">¿Que hacer?</div>
+          <div style="color:#1D4ED8;font-size:13px;font-weight:600;margin-bottom:4px">Qué hacer</div>
           <div style="color:#374151;font-size:13px">
-            Entra a FOREMAN, revisa tus gastos y presiona <strong>"Enviar reporte al Asistente"</strong> 
-            para solicitar la recarga de tu caja chica.
+            Revisa el reporte de gastos ${pdfBase64 ? "adjunto" : pdfUrl ? "en el enlace de abajo" : "en FOREMAN"} y registra el anticipo de reposición.
           </div>
         </div>
+        ${pdfUrl ? `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:12px;text-align:center;margin-bottom:16px">
+          <a href="${pdfUrl}" style="color:#1D4ED8;font-size:13px;font-weight:600;text-decoration:none">Ver el reporte de gastos en PDF</a>
+        </div>` : ""}
         <div style="margin-top:20px;padding-top:16px;border-top:1px solid #F3F4F6;color:#9CA3AF;font-size:11px">
           FOREMAN + FINANCE · HCA Studio · Quito, Ecuador
         </div>
@@ -92,12 +98,13 @@ async function alertaSaldoBajo(res, datos) {
   `;
 
   const result = await enviarEmail({
-    to: emailResponsable,
-    subject: `⚠️ Tu caja chica esta baja — ${nombre}`,
+    to: destinatarios,
+    subject: `Caja chica por reponer — ${nombre}${proyecto ? " · " + proyecto : ""}`,
     html,
+    attachments: pdfBase64 ? [{ filename: pdfNombre || "reporte-caja-chica.pdf", content: pdfBase64 }] : undefined,
   });
 
-  return res.status(200).json({ ok: true, result });
+  return res.status(200).json({ ok: true, enviadoA: destinatarios, result });
 }
 
 async function reporteCajaChica(res, datos) {

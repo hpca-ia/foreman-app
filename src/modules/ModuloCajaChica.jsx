@@ -4,6 +4,8 @@ import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
 import ReporteCaja from "./cajaChica/ReporteCaja";
+import SelectorRubros from "./cajaChica/SelectorRubros";
+import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 
 export default function ModuloCajaChica({ currentUser, projects, users }) {
@@ -25,9 +27,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [obras, setObras] = useState([]);
   const [archivoGasto, setArchivoGasto] = useState(null);
   const [archivoPreview, setArchivoPreview] = useState(null);
-  const [presupuestosProyecto, setPresupuestosProyecto] = useState([]);
-  const [capitulosPresupuesto, setCapitulosPresupuesto] = useState([]);
-  const [capitulosSeleccionados, setCapitulosSeleccionados] = useState([]);
+  const [rubrosGasto, setRubrosGasto] = useState([]);   // [{obra_rubro_id, monto}]
   const fileRef = useRef(null);
   const admin = esAdmin(currentUser.role);
   const gerente = puedeControlObra(currentUser.role);
@@ -45,16 +45,6 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     const { data } = await q; setCajas(data||[]);
   }
   async function fetchGastos(id) { const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setGastos(data||[]); }
-  async function fetchPresupuestosProyecto(proyectoNombre) {
-    const { data } = await supabase.from("presupuestos").select("id,nombre,cliente_nombre").ilike("cliente_nombre",`%${proyectoNombre}%`).order("created_at",{ascending:false});
-    setPresupuestosProyecto(data||[]);
-  }
-  async function fetchCapitulosPresupuesto(presupuestoId) {
-    const { data } = await supabase.from("presupuesto_items").select("capitulo").eq("presupuesto_id",presupuestoId);
-    const caps=[...new Set((data||[]).map(i=>i.capitulo).filter(Boolean))].sort();
-    setCapitulosPresupuesto(caps);
-    setCapitulosSeleccionados([]);
-  }
   async function fetchAnticipos(id) { const { data } = await supabase.from("cajas_anticipos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setAnticipos(data||[]); }
 
   async function crearCaja() {
@@ -63,7 +53,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       proyecto_nombre:nuevaCajaForm.proyecto_nombre, obra_id:Number(nuevaCajaForm.obra_id)||null, responsable_id:Number(nuevaCajaForm.responsable_id),
       responsable_nombre:resUser?.name||"", limite_alerta:Number(nuevaCajaForm.limite_alerta)||50, created_by:currentUser.id
     }).select().single();
-    if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); fetchPresupuestosProyecto(data.proyecto_nombre); }
+    if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); }
   }
 
   async function agregarAnticipo() {
@@ -81,6 +71,48 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       setAnticipoForm({monto:"",descripcion:"",fecha:new Date().toISOString().split("T")[0]});
       fetchCajas();
     }
+  }
+
+  // Cuando la caja baja del límite, avisa a quien la repone (Admin / Gerente)
+  // y le manda el reporte, para que no tenga que ir a buscarlo.
+  async function avisarReposicion(saldoActual) {
+    const emails = users.filter(u => ["assistant","gerente"].includes(u.role) && u.email).map(u => u.email);
+    if (!emails.length) {
+      setNovaError("La caja quedó baja pero nadie con rol Admin o Gerente tiene correo configurado para avisarle.");
+      return;
+    }
+    try {
+      let pdfBase64 = null, pdfUrl = null;
+      try {
+        const doc = await construirPDF({
+          titulo: `Caja Chica — ${cajaActiva.proyecto_nombre}`,
+          subtitulo: `Responsable: ${cajaActiva.responsable_nombre} · Saldo $${fmt(saldoActual)}`,
+          resumen: [
+            { label: "Recibido", valor: `$${fmt(cajaActiva.saldo_total)}` },
+            { label: "Gastado", valor: `$${fmt((cajaActiva.saldo_gastado||0)+Number(gastoForm.monto||0))}` },
+            { label: "Saldo", valor: `$${fmt(saldoActual)}` },
+          ],
+          bloques: [{
+            titulo: "Gastos de la caja",
+            columnas: ["Fecha","Proveedor","Descripción","Monto"],
+            filas: [{fecha:gastoForm.fecha,proveedor:gastoForm.proveedor,descripcion:gastoForm.descripcion,monto:gastoForm.monto}, ...gastos]
+              .map(g=>[g.fecha,g.proveedor||"—",(g.descripcion||"").slice(0,60),fmt(g.monto)]),
+            anchos: { 3: { halign: "right" } },
+          }],
+        });
+        const b64 = doc.output("datauristring").split(",")[1];
+        if ((b64.length*0.75)/(1024*1024) < 8) pdfBase64 = b64;
+      } catch { /* si el PDF falla, el aviso igual sale */ }
+
+      await fetch("/api/email",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({tipo:"alerta_saldo_bajo",datos:{
+          nombre:cajaActiva.responsable_nombre, proyecto:cajaActiva.proyecto_nombre,
+          saldo:saldoActual, recibido:cajaActiva.saldo_total,
+          gastado:(cajaActiva.saldo_gastado||0)+Number(gastoForm.monto||0),
+          limite:cajaActiva.limite_alerta||50, emailsReposicion:emails,
+          pdfBase64, pdfUrl, pdfNombre:`Caja Chica - ${cajaActiva.proyecto_nombre}.pdf`,
+        }})});
+    } catch (e) { console.error("aviso de reposición:", e); }
   }
 
   async function leerFacturaNOVA(file, hash=null) {
@@ -155,10 +187,10 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       else setNovaError("No se pudo subir la foto (el gasto igual se guarda): "+error.message);
     }
     const monto=Number(gastoForm.monto);
-    const capitulosList = capitulosSeleccionados.length>0 ? capitulosSeleccionados : ["SIN CLASIFICAR"];
+    const conRubros = rubrosGasto.filter(r=>r.obra_rubro_id);
     const{data,error:errGasto}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
-      capitulo:capitulosList.join(", "),proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
+      proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
       tipo:gastoForm.tipo,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
     }).select().single();
@@ -189,7 +221,14 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
           origen:"caja_chica", caja_gasto_id:data.id,
           subido_por:currentUser.id, subido_por_nombre:currentUser.name
         }).select().single();
-        if (facturaObra) await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
+        if (facturaObra) {
+          await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
+          // Lo que eligió quien cargó el gasto entra como asignación real.
+          const filas = conRubros
+            .map(r=>({factura_id:facturaObra.id, obra_rubro_id:r.obra_rubro_id, monto:Number(r.monto)||0}))
+            .filter(f=>f.monto!==0);
+          if (filas.length) await supabase.from("obra_factura_rubros").insert(filas);
+        }
         else if (errObra) setNovaError("El gasto se guardó, pero no entró al control de la obra: " + errObra.message);
       }
       const nuevoGastado=(cajaActiva.saldo_gastado||0)+monto;
@@ -199,9 +238,9 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       setGastos(prev=>[data,...prev]);
       setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
       setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
-      setCapitulosSeleccionados([]);
+      setRubrosGasto([]);
       setArchivoGasto(null);setArchivoPreview(null);fetchCajas();
-      if(nuevoDisp<=(cajaActiva.limite_alerta||50))alert(`Saldo bajo en la caja de ${cajaActiva.responsable_nombre}: $${fmt(nuevoDisp)}`);
+      if(nuevoDisp<=(cajaActiva.limite_alerta||50)) await avisarReposicion(nuevoDisp);
     }
     setUploading(false);
     return true;
@@ -212,6 +251,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
     setGastos(prev=>prev.map(g=>g.id===id?{...g,estado:"aprobado"}:g));
   }
 
+  const cajaValida = !!nuevaCajaForm.responsable_id && (!!nuevaCajaForm.obra_id || !!nuevaCajaForm.proyecto_nombre?.trim());
   const saldoColor=c=>c>(cajaActiva?.limite_alerta||50)*2?"var(--success)":c>(cajaActiva?.limite_alerta||50)?"var(--warning)":"var(--danger)";
 
   return(
@@ -239,7 +279,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
         <div>
           {cajas.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)"}}><div style={{fontSize:40,marginBottom:12}}>💰</div>Sin cajas chicas.</div>
           :cajas.map(c=>(
-            <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);fetchPresupuestosProyecto(c.proyecto_nombre);setSubVista("detalle");}}
+            <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);setSubVista("detalle");}}
               style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer"}}
               onMouseEnter={e=>e.currentTarget.style.borderColor="var(--brand)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -262,13 +302,21 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
       {subVista==="nueva"&&(
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid var(--border)"}}>
           <div style={{display:"grid",gap:14}}>
-            <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Obra *</label>
-              <select value={nuevaCajaForm.obra_id} onChange={e=>{const o=obras.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,obra_id:e.target.value,proyecto_nombre:o?.nombre||""}));}} style={iS}>
-                <option value="">Selecciona la obra...</option>
+            <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Obra</label>
+              <select value={nuevaCajaForm.obra_id} onChange={e=>{const o=obras.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,obra_id:e.target.value,proyecto_nombre:o?.nombre||p.proyecto_nombre}));}} style={iS}>
+                <option value="">Sin obra — gastos generales</option>
                 {obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}
               </select>
-              <div style={{fontSize:10,color:"var(--muted)",marginTop:4}}>Los gastos de esta caja entran al control de esa obra como facturas por asignar.</div>
-              {obras.length===0&&<div style={{fontSize:11,color:"var(--warning)",marginTop:4}}>No hay obras en curso. Crea una primero en Control de Obra.</div>}</div>
+              <div style={{fontSize:10,color:"var(--muted)",marginTop:4}}>
+                {nuevaCajaForm.obra_id
+                  ? "Los gastos entran al control de esa obra y se asignan a sus rubros."
+                  : "Para gastos que no son de una obra (movilización, oficina, etc.). No entran al control de obra."}
+              </div></div>
+
+            {!nuevaCajaForm.obra_id&&(
+              <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Nombre de la caja *</label>
+                <input value={nuevaCajaForm.proyecto_nombre} onChange={e=>setNuevaCajaForm(p=>({...p,proyecto_nombre:e.target.value}))} placeholder="Ej: Gastos generales — conductor" style={iS}/></div>
+            )}
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Responsable *</label>
               <select value={nuevaCajaForm.responsable_id} onChange={e=>{const u=users.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,responsable_id:e.target.value,responsable_nombre:u?.name||""}));}} style={iS}>
                 <option value="">Selecciona...</option>
@@ -277,8 +325,8 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Alerta cuando saldo baje de ($)</label>
               <input type="number" value={nuevaCajaForm.limite_alerta} onChange={e=>setNuevaCajaForm(p=>({...p,limite_alerta:e.target.value}))} style={iS}/></div>
           </div>
-          <button onClick={crearCaja} disabled={!nuevaCajaForm.obra_id||!nuevaCajaForm.responsable_id}
-            style={{width:"100%",marginTop:16,background:nuevaCajaForm.obra_id&&nuevaCajaForm.responsable_id?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:10,padding:12,color:nuevaCajaForm.obra_id&&nuevaCajaForm.responsable_id?"#fff":"var(--muted)",fontSize:14,fontWeight:600,cursor:"pointer"}}>
+          <button onClick={crearCaja} disabled={!cajaValida}
+            style={{width:"100%",marginTop:16,background:cajaValida?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:10,padding:12,color:cajaValida?"#fff":"var(--muted)",fontSize:14,fontWeight:600,cursor:"pointer"}}>
             Crear caja chica →
           </button>
         </div>
@@ -333,29 +381,12 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>N° de factura</label>
                 <input value={gastoForm.numero_factura} onChange={e=>setGastoForm(p=>({...p,numero_factura:e.target.value}))} onBlur={()=>revisarDuplicadosGasto()} placeholder="001-001-000000123" style={iS}/></div>
             </div>
-            {/* Presupuesto */}
-            <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Presupuesto del proyecto</label>
-              <select value={gastoForm.presupuesto_id} onChange={e=>{setGastoForm(p=>({...p,presupuesto_id:e.target.value}));if(e.target.value)fetchCapitulosPresupuesto(e.target.value);else{setCapitulosPresupuesto([]);setCapitulosSeleccionados([]);}}} style={iS}>
-                <option value="">Sin asignar a presupuesto</option>
-                {presupuestosProyecto.map(p=><option key={p.id} value={p.id}>{p.nombre}</option>)}
-              </select></div>
-            {/* Capítulos */}
-            {capitulosPresupuesto.length>0&&(
-              <div>
-                <label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:6}}>Capítulo(s) al que aplica <span style={{color:"var(--muted)"}}>(selecciona uno o varios)</span></label>
-                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                  {capitulosPresupuesto.map(cap=>{
-                    const sel=capitulosSeleccionados.includes(cap);
-                    return(
-                      <button key={cap} onClick={()=>setCapitulosSeleccionados(prev=>sel?prev.filter(c=>c!==cap):[...prev,cap])}
-                        style={{background:sel?"var(--brand)":"var(--bg)",border:`1.5px solid ${sel?"var(--brand)":"var(--border)"}`,borderRadius:20,padding:"4px 12px",fontSize:11,color:sel?"#fff":"var(--ink-soft)",cursor:"pointer",fontWeight:sel?600:400}}>
-                        {sel?"✓ ":""}{cap}
-                      </button>
-                    );
-                  })}
-                </div>
-                {capitulosSeleccionados.length>1&&<div style={{fontSize:10,color:"var(--muted)",marginTop:4}}>El monto se dividirá en {capitulosSeleccionados.length} capítulos (${((Number(gastoForm.monto)||0)/capitulosSeleccionados.length).toFixed(2)} c/u)</div>}
-                {capitulosSeleccionados.length===0&&<div style={{fontSize:10,color:"var(--warning)",marginTop:4}}>⚠ Selecciona al menos un capítulo para el control de obra</div>}
+            {cajaActiva?.obra_id ? (
+              <SelectorRubros obraId={cajaActiva.obra_id} seleccion={rubrosGasto}
+                onChange={setRubrosGasto} montoTotal={gastoForm.monto} />
+            ) : (
+              <div style={{fontSize:11,color:"var(--muted)",background:"var(--bg)",borderRadius:8,padding:"8px 10px"}}>
+                Caja de gastos generales: no se asigna a rubros de obra.
               </div>
             )}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
