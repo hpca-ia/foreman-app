@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Copy } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { supabase } from "../lib/supabase";
+import { alimentarBase, resumenAlimentacion } from "../lib/baseRubros";
 import AdminBD from "./AdminBD";
 import CotizacionPanel from "./CotizacionPanel";
 
@@ -9,6 +10,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
   const [borrarPre, setBorrarPre] = useState(null);
+  const [duplicando, setDuplicando] = useState(null);
   const [presupuestoActivo, setPresupuestoActivo] = useState(null);
   const [clientes, setClientes] = useState([]);
   const [capitulosDB, setCapitulosDB] = useState([]);
@@ -51,6 +53,33 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // Un presupuesto del que ya se activó una obra no se borra: la obra copió
   // sus rubros pero lo sigue apuntando como origen, y sin él se pierde de
   // dónde salió la línea base que se está controlando.
+  // Casi ningún presupuesto arranca en blanco: se parte de uno parecido y se
+  // ajustan cantidades y precios. Duplicar copia los rubros pero no el estado
+  // ni los totales del original — el nuevo nace en borrador, como si se
+  // hubiera creado a mano.
+  async function duplicarPresupuesto(pre) {
+    setDuplicando(pre.id);
+    const { data: nuevo, error } = await supabase.from("presupuestos").insert({
+      nombre: `${pre.nombre} (copia)`,
+      cliente_id: pre.cliente_id, cliente_nombre: pre.cliente_nombre,
+      honorarios_pct: pre.honorarios_pct, iva_pct: pre.iva_pct,
+      estado: "borrador", created_by: currentUser.id,
+      subtotal: pre.subtotal, honorarios_monto: pre.honorarios_monto,
+      iva_monto: pre.iva_monto, total: pre.total,
+    }).select().single();
+    if (error || !nuevo) { alert("No se pudo duplicar: " + (error?.message || "")); setDuplicando(null); return; }
+
+    const { data: orig } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id", pre.id).order("orden");
+    const copias = (orig || []).map(({ id, presupuesto_id, created_at, ...resto }) => ({ ...resto, presupuesto_id: nuevo.id }));
+    for (let i = 0; i < copias.length; i += 100) {
+      const { error: e } = await supabase.from("presupuesto_items").insert(copias.slice(i, i + 100));
+      if (e) { alert("Se creó la copia pero fallaron algunos rubros: " + e.message); break; }
+    }
+    setDuplicando(null);
+    await fetchPresupuestos();
+    setPresupuestoActivo(nuevo); fetchItems(nuevo.id); setSubVista("detalle");
+  }
+
   async function revisarPresupuesto(pre) {
     const { data: obras } = await supabase.from("obras").select("nombre").eq("presupuesto_id", pre.id);
     if ((obras || []).length) {
@@ -477,29 +506,12 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         setClientes(prev=>[...prev,{nombre:cliente}]);
       }
     }
-    let capsSaved=0;
-    for (const cap of (bdResult.capitulos||[])) {
-      if (cap && !capitulosDB.includes(cap)) {
-        await supabase.from("capitulos").insert({nombre:cap,orden:capitulosDB.length+capsSaved+1});
-        capsSaved++;
-      }
-    }
-    if (capsSaved>0) fetchCapitulosDB();
-    let nuevos=0, dups=0;
-    for (const r of bdRubros) {
-      if (!r.descripcion||!r.precio_unitario) continue;
-      const {data:existe}=await supabase.from("rubros").select("id").ilike("descripcion",r.descripcion).limit(1);
-      if (existe&&existe.length>0) {
-        dups++;
-        await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:fecha});
-      } else {
-        let capId=null;
-        if (r.capitulo) { const {data:cap}=await supabase.from("capitulos").select("id").ilike("nombre",`%${r.capitulo}%`).limit(1); if(cap&&cap.length>0)capId=cap[0].id; }
-        const {data:nr}=await supabase.from("rubros").insert({capitulo_id:capId,descripcion:r.descripcion,unidad:r.unidad||"",precio_referencia:r.precio_unitario,activo:true}).select().single();
-        if (nr) { nuevos++; await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:cliente||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor||"",fecha:fecha}); }
-      }
-    }
-    alert(`✅ ${capsSaved} capítulos nuevos · ${nuevos} rubros nuevos · ${dups} historial actualizado.`);
+    const res = await alimentarBase(
+      bdRubros.map(r => ({ descripcion: r.descripcion, unidad: r.unidad, precio_unitario: r.precio_unitario, capitulo: r.capitulo })),
+      { cliente, proyecto: proveedor, fecha }
+    );
+    fetchCapitulosDB();
+    alert(res.error ? "⚠️ " + res.error : "✅ " + (resumenAlimentacion(res) || "No había nada nuevo que guardar."));
     setBdResult(null);
   }
 
@@ -593,18 +605,10 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                 recalcTotales(all);
               }
             });
-            // Save to BD if requested
-            if(guardarBD && proveedor) {
-              rubrosValidos.forEach(async r=>{
-                const{data:existe}=await supabase.from("rubros").select("id").ilike("descripcion",r.descripcion).limit(1);
-                if(existe&&existe.length>0){
-                  await supabase.from("precios_historial").insert({rubro_id:existe[0].id,cliente_nombre:clienteNombre||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor,fecha:fecha||new Date().getFullYear().toString()});
-                } else {
-                  const{data:nr}=await supabase.from("rubros").insert({descripcion:r.descripcion,unidad:r.unidad||"",precio_referencia:r.precio_unitario,activo:true}).select().single();
-                  if(nr) await supabase.from("precios_historial").insert({rubro_id:nr.id,cliente_nombre:clienteNombre||"",precio_unitario:r.precio_unitario,proyecto_ref:proveedor,fecha:fecha||new Date().getFullYear().toString()});
-                }
-              });
-            }
+            // Todo lo que entra alimenta la base, sin casilla que marcar: un
+            // precio que no se guarda es un precio que se pierde.
+            alimentarBase(rubrosValidos, { cliente: clienteNombre, proyecto: proveedor, fecha })
+              .then(r => { if (r.rubrosNuevos || r.capitulosNuevos) fetchCapitulosDB(); });
             setCotizacionResult(null);
           }}
           fmt={fmt}
@@ -639,6 +643,11 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                   <div style={{fontWeight:700,color:"var(--brand)",fontSize:16}}>${fmt(p.total)}</div>
                   <div style={{fontSize:10,color:"var(--muted)",background:"var(--neutral-soft)",borderRadius:20,padding:"1px 8px",display:"inline-block",marginTop:2}}>{p.estado}</div>
                 </div>
+                <button onClick={e=>{e.stopPropagation();duplicarPresupuesto(p);}} disabled={duplicando===p.id}
+                  title="Duplicar para partir de este"
+                  style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>
+                  <Copy size={13}/>
+                </button>
                 {puede?.("borrar.definitivo")&&(
                   <button onClick={e=>{e.stopPropagation();setBorrarPre(p);}} title="Borrar este presupuesto"
                     style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>

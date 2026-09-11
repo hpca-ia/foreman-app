@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
+import { alimentarBase, resumenAlimentacion } from "../../lib/baseRubros";
 
 const n = v => Number(v) || 0;
 
@@ -224,6 +225,11 @@ Si una columna no existe, ponla en null.`;
     await supabase.from("planillas").insert({
       obra_id: obra.id, numero: 1, nombre: "Planilla N°1", fecha_desde: new Date().toISOString().split("T")[0],
     });
+
+    // El presupuesto que se controla también es conocimiento: sus rubros y sus
+    // precios entran a la base para poder cotizar después con lo que de verdad
+    // costó. Si esto falla, la obra ya quedó creada y no se pierde.
+    await alimentarBase(rubros, { cliente: cliente.trim(), proyecto: nombre.trim() });
 
     setGuardando(false);
     onCreada(obra);
