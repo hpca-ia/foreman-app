@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { esAdmin, puedeControlObra, ROLES } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
+import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 
 export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [subVista, setSubVista] = useState("lista");
@@ -17,6 +18,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   const [dupsGasto, setDupsGasto] = useState({exactos:[],posibles:[]});
   const [dupJustificacion, setDupJustificacion] = useState("");
   const [archivoHash, setArchivoHash] = useState(null);
+  const [pesoOriginal, setPesoOriginal] = useState("");
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
   const [nuevaCajaForm, setNuevaCajaForm] = useState({ obra_id:"", proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50 });
   const [obras, setObras] = useState([]);
@@ -112,10 +114,13 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
   }
 
   async function handleFileSelect(e) {
-    const file=e.target.files[0]; if(!file) return;
+    const original=e.target.files[0]; if(!original) return;
+    // El hash va sobre el archivo original: es la identidad del documento.
+    const h = await hashArchivo(original); setArchivoHash(h);
+    const file = await comprimirImagen(original);
     setArchivoGasto(file);
+    setPesoOriginal(original.size!==file.size ? `${pesoLegible(original.size)} → ${pesoLegible(file.size)}` : "");
     if(file.type.startsWith("image/")){setArchivoPreview(URL.createObjectURL(file));}else{setArchivoPreview(null);}
-    const h = await hashArchivo(file); setArchivoHash(h);
     await leerFacturaNOVA(file, h); e.target.value="";
   }
 
@@ -299,7 +304,7 @@ export default function ModuloCajaChica({ currentUser, projects, users }) {
               <button onClick={()=>fileRef.current?.click()} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>📷 Subir factura</button>
               <input ref={fileRef} type="file" accept="image/*,.pdf" onChange={handleFileSelect} style={{display:"none"}}/>
               {novaLeyendo&&<span style={{fontSize:12,color:"var(--brand)"}}>🤖 Leyendo...</span>}
-              {archivoGasto&&!novaLeyendo&&<span style={{fontSize:11,color:"var(--success)"}}>✓ {archivoGasto.name}</span>}
+              {archivoGasto&&!novaLeyendo&&<span style={{fontSize:11,color:"var(--success)"}}>✓ {archivoGasto.name}{pesoOriginal&&<span style={{color:"var(--muted)"}}> · {pesoOriginal}</span>}</span>}
             </div>
             {archivoPreview&&<img src={archivoPreview} alt="preview" style={{width:"100%",maxHeight:140,objectFit:"contain",borderRadius:8,marginTop:8,border:"1px solid var(--border)"}}/>}
             {novaError&&<div style={{background:"var(--danger-soft)",border:"1px solid var(--danger-border)",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12,color:"var(--danger)"}}>{novaError}</div>}

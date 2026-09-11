@@ -7,6 +7,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt, TIPOS_GASTO } from "./calculos";
 import { buscarDuplicados, hashArchivo } from "./duplicados";
+import { comprimirImagen } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
@@ -57,11 +58,12 @@ export default function ModalFactura({ obra, rubros, planilla, factura, asignaci
   }
 
   async function leerConNova(e) {
-    const file = e.target.files[0];
+    let file = e.target.files[0];
     if (!file) return;
-    setArchivo(file);
     setLeyendo(true); setError("");
     const h = await hashArchivo(file); setArchivoHash(h);
+    file = await comprimirImagen(file);
+    setArchivo(file);
     try {
       const b64 = await new Promise(res => {
         const r = new FileReader();
