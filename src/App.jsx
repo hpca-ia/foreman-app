@@ -14,6 +14,7 @@ import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
 import TareasListaMovil from "./components/TareasListaMovil";
 import AvisoTareas from "./components/AvisoTareas";
+import ModuloLeads from "./modules/leads/ModuloLeads";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import ModalTarea from "./components/ModalTarea";
@@ -218,6 +219,10 @@ export default function App() {
           {puede("controlObra.ver") && vista === "controlObra" && (
             <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
           )}
+          {puede("leads.ver") && vista === "leads" && (
+            <ModuloLeads currentUser={usuario} users={users} />
+          )}
+
           {puede("cajaChica.ver") && vista === "cajaChica" && (
             <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} />
           )}

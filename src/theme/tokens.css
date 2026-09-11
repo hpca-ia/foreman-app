@@ -94,3 +94,15 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .tareas-vistas { width: 100%; }
   .tareas-vistas button { flex: 1; }
 }
+
+/* Túnel de leads: columnas por etapa en desktop, apiladas en el teléfono
+   —cinco columnas en 375px no son columnas, son rendijas—. */
+.leads-tunel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.leads-columna { min-width: 0; }
+
+@media (max-width: 900px) {
+  .leads-tunel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .leads-tunel { grid-template-columns: 1fr; }
+}
