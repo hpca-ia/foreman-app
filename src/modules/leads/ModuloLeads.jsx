@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, AlertTriangle, Clock } from "lucide-react";
+import { Plus, AlertTriangle, Clock, ArrowRight } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
 import Button from "../../components/ui/Button";
 import { ETAPAS, ETAPAS_ABIERTAS, etapaInfo, DIAS_SIN_MOVER } from "./constantes";
 import ModalLead from "./ModalLead";
+import NovaLeads from "./NovaLeads";
 
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { maximumFractionDigits: 0 });
 const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -17,6 +18,7 @@ export default function ModuloLeads({ currentUser, users = [] }) {
   const [nuevo, setNuevo] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [verCerrados, setVerCerrados] = useState(false);
+  const [convirtiendo, setConvirtiendo] = useState(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -40,6 +42,26 @@ export default function ModuloLeads({ currentUser, users = [] }) {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  // Ganar el lead no termina el trabajo: recién ahí empieza la obra. Esto cierra
+  // el hilo entre lo comercial y lo que se construye, que si no vive en la
+  // cabeza de alguien.
+  async function convertirEnObra(lead) {
+    setConvirtiendo(lead.id);
+    const { data: obra, error } = await supabase.from("obras").insert({
+      nombre: lead.nombre, cliente_nombre: lead.contacto || lead.nombre,
+      notas: `Viene del lead ${lead.nombre}`, created_by: currentUser?.id,
+    }).select().single();
+    if (!error && obra) {
+      await supabase.from("leads").update({ obra_id: obra.id }).eq("id", lead.id);
+      await supabase.from("lead_movimientos").insert({
+        lead_id: lead.id, tipo: "nota", detalle: `Arrancó como obra: ${obra.nombre}`,
+        autor_id: currentUser?.id, autor_nombre: currentUser?.name,
+      });
+      await cargar();
+    }
+    setConvirtiendo(null);
+  }
+
   const abiertos = leads.filter(l => !etapaInfo(l.etapa).cerrada);
   const cerrados = leads.filter(l => etapaInfo(l.etapa).cerrada);
 
@@ -52,6 +74,10 @@ export default function ModuloLeads({ currentUser, users = [] }) {
   });
   const vencidos = abiertos.filter(l => { const x = rutas[l.id]?.siguiente; return x?.due_date && daysUntil(x.due_date) < 0; });
 
+  // El final del túnel: un lead ganado que no arrancó como obra está a medio
+  // camino, y es justo donde se pierde el hilo entre vender y construir.
+  const porArrancar = cerrados.filter(l => l.etapa === "ganado" && !l.obra_id);
+
   const enJuego = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0), 0);
   const ponderado = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0) * ((l.probabilidad ?? etapaInfo(l.etapa).pct) / 100), 0);
 
@@ -63,6 +89,8 @@ export default function ModuloLeads({ currentUser, users = [] }) {
           <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo lead</Button>
         </div>
       </div>
+
+      <NovaLeads leads={leads} currentUser={currentUser} onCambio={cargar} />
 
       {/* Lo que exige atención va primero, igual que en tareas */}
       {(vencidos.length > 0 || sinPaso.length > 0 || estancados.length > 0) && (
@@ -82,6 +110,22 @@ export default function ModuloLeads({ currentUser, users = [] }) {
         </div>
       )}
 
+      {porArrancar.length > 0 && (
+        <div style={{ background: colors.successSoft, border: `1px solid ${colors.success}33`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.success, marginBottom: 7 }}>
+            {porArrancar.length === 1 ? "Un lead ganado sin arrancar" : `${porArrancar.length} leads ganados sin arrancar`}
+          </div>
+          {porArrancar.map(l => (
+            <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: colors.ink, flex: 1, minWidth: 120 }}>{l.nombre}</span>
+              <Button variant="primary" size="sm" onClick={() => convertirEnObra(l)} disabled={convirtiendo === l.id}>
+                {convirtiendo === l.id ? "Creando..." : <>Pasar a obra <ArrowRight size={12} /></>}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 22, marginBottom: 14, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft }}>
         <span><strong style={{ color: colors.ink, fontSize: 15 }}>{abiertos.length}</strong> en el túnel</span>
         <span>En juego <strong style={{ color: colors.ink, fontSize: 15 }}>${fmt(enJuego)}</strong></span>
@@ -91,7 +135,7 @@ export default function ModuloLeads({ currentUser, users = [] }) {
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div>
         : leads.length === 0 ? (
           <div style={{ textAlign: "center", color: colors.muted, padding: "50px 20px", fontSize: 13, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd }}>
-            Todavía no hay leads.<br />Cada oportunidad que entre por aquí lleva su próximo paso con fecha, para que ninguna se quede dormida.
+            Todavía no hay leads.<br />Dictale a NOVA la oportunidad y ella abre el lead. La ruta se va escribiendo sola, un paso a la vez.
           </div>
         ) : (
           <>

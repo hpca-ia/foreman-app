@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { Plus, Check, Trash2, GripVertical, MessageSquare } from "lucide-react";
+import { Plus, Check, X, Trash2, GripVertical, MessageSquare, Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { ETAPAS, ETAPAS_ABIERTAS, etapaInfo, ORIGENES, RUTA_BASE } from "./constantes";
+import { ETAPAS, etapaInfo, ORIGENES, SIGUIENTE_ESTADO } from "./constantes";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
@@ -20,9 +20,9 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
   });
   const [ruta, setRuta] = useState([]);
   const [movs, setMovs] = useState([]);
-  const [conRuta, setConRuta] = useState(true);
   const [nota, setNota] = useState("");
   const [nuevoPaso, setNuevoPaso] = useState("");
+  const [pensando, setPensando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
 
@@ -74,26 +74,23 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
       .insert({ ...payload, created_by: currentUser?.id }).select().single();
     if (e || !creado) { setError(e?.message || "No se pudo crear"); setGuardando(false); return; }
 
-    // La ruta se instancia al crear: el lead nace con sus pasos y sus fechas.
-    if (conRuta) {
-      await supabase.from("tasks").insert(RUTA_BASE.map((p, i) => ({
-        title: `${form.nombre.trim()} — ${p.titulo}`,
-        lead_id: creado.id, ruta_orden: i + 1,
-        due_date: enDias(p.dias), priority: "media", status: "pendiente",
-        assignee_id: Number(form.responsable_id) || currentUser?.id,
-        created_by: currentUser?.id, type: "lead",
-      })));
-    }
-    await anotar(creado.id, "nota", "Lead creado" + (conRuta ? ` con la ruta base (${RUTA_BASE.length} pasos)` : ""));
+    // El lead nace en blanco: su ruta la va escribiendo NOVA a medida que
+    // aparecen los pasos. Una ruta de plantilla se llena de pasos que nadie
+    // pensó, y eso entrena a ignorarla.
+    await anotar(creado.id, "nota", "Lead creado");
     setGuardando(false); onGuardado();
   }
 
+  // Tres estados, no dos: pendiente → hecho → no se hizo. Un paso que se
+  // descartó y queda "pendiente" para siempre ensucia la señal de lo que
+  // falta, y termina enseñando a ignorarla.
   async function alternarPaso(t) {
-    const nuevo = t.status === "listo" ? "pendiente" : "listo";
+    const nuevo = SIGUIENTE_ESTADO[t.status] || "listo";
     await supabase.from("tasks").update({ status: nuevo }).eq("id", t.id);
     setRuta(r => r.map(x => x.id === t.id ? { ...x, status: nuevo } : x));
     await supabase.from("leads").update({ actualizado_at: new Date().toISOString() }).eq("id", lead.id);
-    if (nuevo === "listo") await anotar(lead.id, "nota", `Paso completado: ${t.title}`);
+    if (nuevo === "listo") await anotar(lead.id, "nota", `Hecho: ${t.title}`);
+    if (nuevo === "bloqueado") await anotar(lead.id, "nota", `No se hizo: ${t.title}`);
   }
 
   async function cambiarFecha(t, fecha) {
@@ -101,16 +98,48 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
     setRuta(r => r.map(x => x.id === t.id ? { ...x, due_date: fecha } : x));
   }
 
+  // Se le dicta a NOVA en el idioma de uno —"enviar portafolio el viernes y
+  // llamar al arquitecto el lunes"— y ella lo parte en pasos con fecha. Si no
+  // entiende, el texto entra tal cual como un paso: nunca se pierde lo escrito.
   async function agregarPaso() {
-    const titulo = nuevoPaso.trim();
-    if (!titulo) return;
-    const orden = Math.max(0, ...ruta.map(t => t.ruta_orden || 0)) + 1;
-    const { data } = await supabase.from("tasks").insert({
-      title: titulo, lead_id: lead.id, ruta_orden: orden, due_date: enDias(3),
-      priority: "media", status: "pendiente", type: "lead",
-      assignee_id: Number(form.responsable_id) || currentUser?.id, created_by: currentUser?.id,
-    }).select().single();
-    if (data) { setRuta(r => [...r, data]); setNuevoPaso(""); }
+    const texto = nuevoPaso.trim();
+    if (!texto || !lead) return;
+    setPensando(true); setError("");
+    const orden = Math.max(0, ...ruta.map(t => t.ruta_orden || 0));
+    let pasos = null;
+    try {
+      const res = await fetch("/api/nova", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5", max_tokens: 800,
+          system: `Conviertes lo que dicta un director comercial en pasos de seguimiento de un lead.
+Hoy es ${hoy()}. El lead se llama "${lead.nombre}"${form.contacto ? `, contacto ${form.contacto}` : ""}.
+Puede venir más de un paso en una frase. Devuelve SOLO JSON, sin markdown:
+{"pasos":[{"titulo":"Enviar portafolio","fecha":"2026-09-18"}]}
+El título es corto y empieza con el verbo de la acción. La fecha en AAAA-MM-DD:
+interpreta "el viernes", "mañana", "en dos semanas" contra la fecha de hoy.
+Si no se dice cuándo, pon la fecha de hoy.`,
+          messages: [{ role: "user", content: texto }],
+        }),
+      });
+      const data = await res.json();
+      const txt = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
+      pasos = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]).pasos;
+    } catch { pasos = null; }
+
+    const filas = (pasos?.length ? pasos : [{ titulo: texto, fecha: hoy() }])
+      .filter(p => p.titulo?.trim())
+      .map((p, i) => ({
+        title: p.titulo.trim(), lead_id: lead.id, ruta_orden: orden + i + 1,
+        due_date: /^\d{4}-\d{2}-\d{2}$/.test(p.fecha) ? p.fecha : hoy(),
+        priority: "media", status: "pendiente", type: "lead",
+        assignee_id: Number(form.responsable_id) || currentUser?.id, created_by: currentUser?.id,
+      }));
+
+    const { data, error: e } = await supabase.from("tasks").insert(filas).select();
+    if (e) setError("No se pudo agregar: " + e.message);
+    else { setRuta(r => [...r, ...(data || [])]); setNuevoPaso(""); }
+    setPensando(false);
   }
 
   async function borrarPaso(t) {
@@ -127,8 +156,7 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
     setMovs(data || []); setNota("");
   }
 
-  const pendientes = ruta.filter(t => t.status !== "listo");
-  const hechos = ruta.length - pendientes.length;
+  const hechos = ruta.filter(t => t.status === "listo" || t.status === "bloqueado").length;
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
 
@@ -185,34 +213,28 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
         )}
       </div>
 
-      {!editando && (
-        <label style={{ display: "flex", alignItems: "center", gap: 8, background: colors.brandSoft, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12, cursor: "pointer" }}>
-          <input type="checkbox" checked={conRuta} onChange={e => setConRuta(e.target.checked)} />
-          <span style={{ fontSize: 12, color: colors.brand }}>
-            Arrancar con la ruta base ({RUTA_BASE.length} pasos con fecha). Después le cambias lo que sea.
-          </span>
-        </label>
-      )}
-
       {editando && (
         <>
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>La ruta de este lead</div>
           <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, marginBottom: 12 }}>
-            {ruta.length === 0 && <div style={{ fontSize: 11, color: colors.warning, marginBottom: 8 }}>Este lead no tiene ruta. Agrégale al menos un paso o se va a quedar dormido.</div>}
+            {ruta.length === 0 && <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>Todavía sin pasos. Dictale abajo a NOVA qué sigue y con qué fecha.</div>}
             {ruta.map(t => {
               const listo = t.status === "listo";
+              const noHecho = t.status === "bloqueado";
+              const cerrado = listo || noHecho;
               const d = t.due_date ? daysUntil(t.due_date) : null;
-              const vencido = !listo && d != null && d < 0;
+              const vencido = !cerrado && d != null && d < 0;
               return (
                 <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
                   <GripVertical size={11} color={colors.border} style={{ flexShrink: 0 }} />
-                  <button onClick={() => alternarPaso(t)}
+                  <button onClick={() => alternarPaso(t)} title="Pendiente → hecho → no se hizo"
                     style={{ width: 17, height: 17, borderRadius: 5, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
-                      border: `1.5px solid ${listo ? colors.success : vencido ? colors.danger : colors.border}`,
-                      background: listo ? colors.success : "transparent" }}>
+                      border: `1.5px solid ${listo ? colors.success : noHecho ? colors.muted : vencido ? colors.danger : colors.border}`,
+                      background: listo ? colors.success : noHecho ? colors.muted : "transparent" }}>
                     {listo && <Check size={11} color="#fff" />}
+                    {noHecho && <X size={11} color="#fff" />}
                   </button>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: listo ? colors.muted : colors.ink, textDecoration: listo ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: cerrado ? colors.muted : colors.ink, textDecoration: cerrado ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {t.title}
                   </span>
                   <input type="date" value={t.due_date || ""} onChange={e => cambiarFecha(t, e.target.value)}
@@ -221,11 +243,16 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
                 </div>
               );
             })}
-            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+              <Sparkles size={14} color={colors.brand} style={{ flexShrink: 0 }} />
               <input value={nuevoPaso} onChange={e => setNuevoPaso(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && agregarPaso()}
-                placeholder="Agregar un paso a esta ruta..." style={{ ...mini, flex: 1 }} />
-              <Button variant="outline" size="sm" onClick={agregarPaso} disabled={!nuevoPaso.trim()}><Plus size={12} /></Button>
+                onKeyDown={e => e.key === "Enter" && !pensando && agregarPaso()}
+                disabled={pensando}
+                placeholder={pensando ? "NOVA está anotando..." : "Enviar portafolio el viernes..."}
+                style={{ ...mini, flex: 1 }} />
+              <Button variant="primary" size="sm" onClick={agregarPaso} disabled={!nuevoPaso.trim() || pensando}>
+                <Plus size={12} /> {pensando ? "..." : "Anotar"}
+              </Button>
             </div>
           </div>
 

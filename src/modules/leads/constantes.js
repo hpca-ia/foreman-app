@@ -24,16 +24,12 @@ export const DIAS_SIN_MOVER = {
   nuevo: 7, contactado: 7, visita: 5, propuesta: 5, negociacion: 3,
 };
 
-// La ruta que sigue un lead. Es el arranque: cada lead se lleva su copia y
-// desde ahí se le cambian fechas, responsables, se agregan pasos o se borran
-// los que no apliquen. Dos leads nunca terminan con la misma ruta, pero
-// ninguno arranca en blanco —que es como se olvidan las cosas—.
-export const RUTA_BASE = [
-  { titulo: "Primer contacto",            dias: 0,  etapa: "contactado" },
-  { titulo: "Visita o reunión",           dias: 3,  etapa: "visita" },
-  { titulo: "Levantar alcance",           dias: 7 },
-  { titulo: "Armar la propuesta",         dias: 12, etapa: "propuesta" },
-  { titulo: "Presentar la propuesta",     dias: 15 },
-  { titulo: "Seguimiento de la propuesta", dias: 22, etapa: "negociacion" },
-  { titulo: "Cierre",                     dias: 30 },
-];
+// Un paso de la ruta no es solo hecho o no hecho: también se puede decidir
+// que no se hizo y seguir. Sin ese tercer estado, un paso que se descartó
+// queda pendiente para siempre y ensucia la señal de "sin próximo paso".
+export const ESTADO_PASO = {
+  pendiente: { label: "Pendiente", icono: null },
+  listo:     { label: "Hecho",     icono: "check" },
+  bloqueado: { label: "No se hizo", icono: "equis" },
+};
+export const SIGUIENTE_ESTADO = { pendiente: "listo", listo: "bloqueado", bloqueado: "pendiente" };
