@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Sparkles, Check, X, ChevronRight, ChevronDown, Trash2, Pencil, CornerDownRight, AlertTriangle } from "lucide-react";
+import { Plus, Sparkles, Check, X, ChevronRight, ChevronDown, Trash2, Pencil, CornerDownRight, AlertTriangle, Merge } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -20,6 +20,7 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   const [sugiriendo, setSugiriendo] = useState(false);
   const [sugerencias, setSugerencias] = useState(null);
   const [error, setError] = useState("");
+  const [actsSel, setActsSel] = useState(new Set());   // actividades marcadas para fusionar
 
   const grupos = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -48,6 +49,8 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   }, [rubros, actividades, busqueda]);
 
   const sinActividad = rubros.filter(r => r.actividad_id == null).length;
+  const conRubros = new Set(rubros.filter(r => r.actividad_id != null).map(r => r.actividad_id));
+  const vacias = actividades.filter(a => !conRubros.has(a.id));
 
   function alternarGrupo(k) {
     setAbiertas(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -85,6 +88,37 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
     setGuardando(false);
   }
 
+  // Fusionar se lleva también las asignaciones de plata, no solo los rubros:
+  // si quedaran apuntando a una actividad borrada, el dinero se pierde del
+  // control sin que nadie lo note.
+  async function fusionar() {
+    const ids = [...actsSel];
+    if (ids.length < 2) return;
+    const destino = actividades.find(a => ids.includes(a.id));
+    const otras = ids.filter(id => id !== destino.id);
+    const nombre = window.prompt(
+      `Fusionar ${ids.length} actividades en una sola.\n\nNombre de la actividad resultante:`, destino.nombre);
+    if (!nombre?.trim()) return;
+
+    setGuardando(true); setError("");
+    const { error: e1 } = await supabase.from("obra_rubros").update({ actividad_id: destino.id }).in("actividad_id", otras);
+    const { error: e2 } = await supabase.from("obra_asignaciones").update({ obra_actividad_id: destino.id }).in("obra_actividad_id", otras);
+    if (e1 || e2) { setError("No se pudo fusionar: " + (e1 || e2).message); setGuardando(false); return; }
+    await supabase.from("obra_actividades").update({ nombre: nombre.trim() }).eq("id", destino.id);
+    await supabase.from("obra_actividades").delete().in("id", otras);
+    setActsSel(new Set());
+    await onCambio();
+    setGuardando(false);
+  }
+
+  async function limpiarVacias(vacias) {
+    if (!window.confirm(`¿Borrar ${vacias.length} actividades sin ningún rubro?\n\nNo tienen nada adentro, así que no se pierde información.`)) return;
+    setGuardando(true);
+    await supabase.from("obra_actividades").delete().in("id", vacias.map(a => a.id));
+    await onCambio();
+    setGuardando(false);
+  }
+
   async function editar(act) {
     const nombre = window.prompt("Nombre de la actividad", act.nombre);
     if (nombre === null) return;
@@ -111,6 +145,14 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
     setSugiriendo(true); setError(""); setSugerencias(null);
     try {
       const lista = rubros.map(r => `${r.id}|${r.capitulo}|${r.descripcion.slice(0, 60)}`).join("\n");
+      // NOVA no recuerda nada entre llamadas. Se le pasan los nombres que la
+      // oficina ya usó en otras obras para que converja a ese vocabulario en
+      // vez de inventar uno nuevo cada vez.
+      const { data: previas } = await supabase.from("obra_actividades")
+        .select("nombre").neq("obra_id", obra.id).limit(400);
+      const frec = {};
+      (previas || []).forEach(a => { frec[a.nombre] = (frec[a.nombre] || 0) + 1; });
+      const vocabulario = Object.entries(frec).sort((a, b) => b[1] - a[1]).slice(0, 60).map(([x]) => x);
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -122,7 +164,10 @@ pero no la cruces sin razón: si sus rubros viven todos en un capítulo, déjala
 Cada rubro va en UNA sola actividad. Nombres cortos y concretos.
 Devuelve SOLO JSON, sin markdown:
 {"actividades":[{"nombre":"...","rubros":[1,2,3]}]}
-Los números son los id antes del primer "|". No inventes ids.`,
+Los números son los id antes del primer "|". No inventes ids.${vocabulario.length
+  ? `\n\nEsta oficina ya usó estos nombres en otras obras. Reutiliza el que corresponda
+en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaja ninguno:\n${vocabulario.join(", ")}`
+  : ""}`,
           messages: [{ role: "user", content: `Rubros (id|capítulo|descripción):\n${lista}` }],
         }),
       });
@@ -143,11 +188,22 @@ Los números son los id antes del primer "|". No inventes ids.`,
     setSugiriendo(false);
   }
 
-  async function aplicarSugerencias() {
+  async function aplicarSugerencias(reemplazar) {
     setGuardando(true); setError("");
     try {
+      // Aplicar dos veces sin esto deja la tanda anterior huérfana: sus rubros
+      // se van a las nuevas y quedan decenas de actividades vacías.
+      let base = actividades;
+      if (reemplazar && actividades.length) {
+        await supabase.from("obra_rubros").update({ actividad_id: null }).eq("obra_id", obra.id);
+        await supabase.from("obra_asignaciones").update({ obra_actividad_id: null })
+          .in("obra_actividad_id", actividades.map(a => a.id));
+        await supabase.from("obra_actividades").delete().eq("obra_id", obra.id);
+        base = [];
+      }
+      const desde = base.length;
       const filas = sugerencias.map((a, i) => ({
-        obra_id: obra.id, nombre: a.nombre, codigo: String(i + 1).padStart(2, "0"), orden: i + 1, origen: "nova",
+        obra_id: obra.id, nombre: a.nombre, codigo: String(desde + i + 1).padStart(2, "0"), orden: desde + i + 1, origen: "nova",
       }));
       const { data: creadas, error: e1 } = await supabase.from("obra_actividades").insert(filas).select();
       if (e1) { setError("Falló al crear las actividades: " + e1.message); setGuardando(false); return; }
@@ -201,10 +257,20 @@ Los números son los id antes del primer "|". No inventes ids.`,
               </div>
             ))}
           </div>
+          {actividades.length > 0 && (
+            <div style={{ fontSize: 11, color: colors.warning, background: colors.warningSoft, borderRadius: colors.radiusSm, padding: "7px 10px", marginBottom: 8 }}>
+              Esta obra ya tiene {actividades.length} actividades. Si agregas estas encima, las de antes quedan sin rubros.
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="outline" style={{ flex: 1 }} onClick={() => setSugerencias(null)}>Descartar</Button>
-            <Button variant="primary" style={{ flex: 2 }} onClick={aplicarSugerencias} disabled={guardando}>
-              {guardando ? "Aplicando..." : "Aplicar estas actividades"}
+            <Button variant="outline" style={{ flex: 1 }} onClick={() => setSugerencias(null)} disabled={guardando}>Descartar</Button>
+            {actividades.length > 0 && (
+              <Button variant="outline" style={{ flex: 1 }} onClick={() => aplicarSugerencias(false)} disabled={guardando}>
+                Agregar
+              </Button>
+            )}
+            <Button variant="primary" style={{ flex: 2 }} onClick={() => aplicarSugerencias(actividades.length > 0)} disabled={guardando}>
+              {guardando ? "Aplicando..." : actividades.length > 0 ? "Reemplazar las actuales" : "Aplicar estas actividades"}
             </Button>
           </div>
         </div>
@@ -242,6 +308,32 @@ Los números son los id antes del primer "|". No inventes ids.`,
         </div>
       )}
 
+      {vacias.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10, flexWrap: "wrap" }}>
+          <AlertTriangle size={14} color={colors.warning} />
+          <span style={{ fontSize: 12, color: colors.warning, flex: 1, minWidth: 160 }}>
+            {vacias.length} actividades quedaron sin ningún rubro.
+          </span>
+          <Button variant="outline" size="sm" onClick={() => limpiarVacias(vacias)} disabled={guardando}>
+            <Trash2 size={12} /> Borrar las vacías
+          </Button>
+        </div>
+      )}
+
+      {actsSel.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: colors.brandSoft, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10, flexWrap: "wrap" }}>
+          <Merge size={14} color={colors.brand} />
+          <span style={{ fontSize: 12, color: colors.brand, flex: 1, minWidth: 160 }}>
+            {actsSel.size} actividad{actsSel.size === 1 ? "" : "es"} marcada{actsSel.size === 1 ? "" : "s"}
+            {actsSel.size < 2 && " — marca al menos dos para fusionarlas"}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => setActsSel(new Set())}>Quitar marcas</Button>
+          <Button variant="primary" size="sm" onClick={fusionar} disabled={actsSel.size < 2 || guardando}>
+            Fusionar en una
+          </Button>
+        </div>
+      )}
+
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
         {grupos.map(g => {
           const abierta = abiertas.has(g.clave);
@@ -271,6 +363,11 @@ Los números son los id antes del primer "|". No inventes ids.`,
                 </button>
                 {!esSin && (
                   <>
+                    <button onClick={() => setActsSel(prev => { const n = new Set(prev); n.has(g.act.id) ? n.delete(g.act.id) : n.add(g.act.id); return n; })}
+                      title="Marcar para fusionar"
+                      style={{ background: actsSel.has(g.act.id) ? colors.brand : "transparent", border: "none", borderRadius: 4, padding: 2, color: actsSel.has(g.act.id) ? "#fff" : colors.muted, cursor: "pointer", display: "flex" }}>
+                      <Merge size={12} />
+                    </button>
                     <button onClick={() => editar(g.act)} title="Nombre y código"
                       style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Pencil size={12} /></button>
                     <button onClick={() => disolver(g.act, g.rubros.length)} title="Quitar la actividad"
