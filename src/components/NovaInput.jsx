@@ -9,16 +9,56 @@ export default function NovaInput({ currentUser, projects, users, onTaskCreated 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [grabando, setGrabando] = useState(false);
+  const [vozError, setVozError] = useState("");
+  const [oyo, setOyo] = useState(false);
+
+  // El dictado del navegador falla de varias maneras y ninguna se anuncia
+  // sola: sin permiso, dentro del navegador de WhatsApp, o simplemente sin
+  // oír nada. Antes todos esos casos se veían igual —no pasa nada— que es la
+  // peor forma de fallar. Cada uno dice ahora qué hacer al respecto.
+  const MOTIVOS = {
+    "not-allowed": "No diste permiso al micrófono. Búscalo en los ajustes del navegador para este sitio.",
+    "service-not-allowed": "Este navegador no deja dictar. Si abriste FOREMAN desde WhatsApp, ábrelo en Safari o Chrome.",
+    "no-speech": "No te escuché. Habla más cerca del teléfono.",
+    "audio-capture": "No encontré micrófono.",
+    "network": "El dictado necesita internet y no hay conexión.",
+    "aborted": "",
+  };
 
   function startVoice() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert("Usa Chrome para dictado."); return; }
-    const r = new SR();
-    r.lang = "es-ES"; r.continuous = false; r.interimResults = false;
-    r.onresult = e => { setTexto(e.results[0][0].transcript); setGrabando(false); };
-    r.onerror = () => setGrabando(false);
-    r.onend = () => setGrabando(false);
-    r.start(); setGrabando(true);
+    if (!SR) {
+      setVozError("Este navegador no sabe dictar. Usa el micrófono del teclado de tu teléfono, que funciona igual.");
+      return;
+    }
+    setVozError(""); setOyo(false);
+    let r;
+    try { r = new SR(); } catch {
+      setVozError("No se pudo abrir el dictado. Usa el micrófono del teclado de tu teléfono.");
+      return;
+    }
+    r.lang = "es-EC"; r.continuous = false; r.interimResults = true;
+    r.onresult = e => {
+      const t = Array.from(e.results).map(x => x[0].transcript).join("");
+      if (t) { setTexto(t); setOyo(true); }
+    };
+    r.onerror = ev => {
+      setGrabando(false);
+      const m = MOTIVOS[ev.error];
+      setVozError(m === "" ? "" : (m || `El dictado falló (${ev.error}). Usa el micrófono del teclado de tu teléfono.`));
+    };
+    // Termina sin resultado y sin error: pasa en los navegadores embebidos,
+    // que aceptan arrancar y se apagan en silencio.
+    r.onend = () => {
+      setGrabando(false);
+      setOyo(prev => {
+        if (!prev) setVozError(v => v || "No llegó nada del micrófono. Si abriste FOREMAN desde WhatsApp, ábrelo en Safari o Chrome — o dicta con el micrófono del teclado.");
+        return prev;
+      });
+    };
+    try { r.start(); setGrabando(true); } catch {
+      setVozError("El dictado ya estaba andando. Espera un momento y vuelve a intentar.");
+    }
   }
 
   async function procesar() {
@@ -30,7 +70,7 @@ export default function NovaInput({ currentUser, projects, users, onTaskCreated 
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 500,
+          model: "claude-sonnet-4-5", max_tokens: 500,
           system: `Eres NOVA. Extrae datos y responde SOLO JSON sin markdown:
 {"title":"...","project_id":N,"assignee_id":N_OR_NULL,"type":"...","due_date":"YYYY-MM-DD","priority":"urgente|alta|media|baja","notes":"..."}
 Proyectos: ${proyList}. Usuarios: ${userList}.
@@ -70,7 +110,7 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
         <button
           onClick={startVoice}
           style={{ width: 36, background: grabando ? colors.dangerSoft : colors.bg, border: `1.5px solid ${grabando ? colors.danger : colors.border}`, borderRadius: colors.radiusMd, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, animation: grabando ? "pulse 1s infinite" : "none" }}
-        >🎤</button>
+          title="Dictar" aria-label="Dictar">🎤</button>
         <Button onClick={procesar} disabled={!texto.trim() || loading} size="md">
           {loading ? "..." : "Crear →"}
         </Button>
@@ -84,6 +124,12 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
             <Button variant="outline" size="sm" style={{ flex: 1 }} onClick={() => setResult(null)}>Cancelar</Button>
             <Button variant="primary" size="sm" style={{ flex: 2, background: colors.success }} onClick={confirmar}>✓ Confirmar</Button>
           </div>
+        </div>
+      )}
+      {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 2 }}>Escuchando... habla ahora.</div>}
+      {vozError && (
+        <div style={{ fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "8px 10px", marginTop: 6 }}>
+          {vozError}
         </div>
       )}
       {result?.error && <div style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{result.error}</div>}
