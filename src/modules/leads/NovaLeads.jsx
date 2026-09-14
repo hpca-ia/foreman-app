@@ -71,7 +71,10 @@ Si no entiendes a qué lead se refiere: {"accion":"nada","motivo":"..."}`,
         }).select().single();
         if (e) throw new Error(e.message);
         const pasos = (p.pasos || []).filter(x => x.titulo?.trim());
-        if (pasos.length) await supabase.from("tasks").insert(pasos.map((x, i) => nuevoPaso(lead.id, x, i, 0)));
+        if (pasos.length) {
+          const { error: eP } = await supabase.from("tasks").insert(pasos.map((x, i) => nuevoPaso(lead.id, x, i, 0)));
+          if (eP) throw new Error(/null value/i.test(eP.message) ? "el lead se creó, pero sus pasos no: falta correr la migración 011" : eP.message);
+        }
         await supabase.from("lead_movimientos").insert({
           lead_id: lead.id, tipo: "nota", detalle: `Creado por NOVA: "${t}"`,
           autor_id: currentUser?.id, autor_nombre: currentUser?.name,
@@ -85,7 +88,8 @@ Si no entiendes a qué lead se refiere: {"accion":"nada","motivo":"..."}`,
         const base = Math.max(0, ...(ya || []).map(x => x.ruta_orden || 0));
         const pasos = (p.pasos || []).filter(x => x.titulo?.trim());
         if (!pasos.length) throw new Error("No entendí qué había que hacer.");
-        await supabase.from("tasks").insert(pasos.map((x, i) => nuevoPaso(lead.id, x, i, base)));
+        const { error: eP } = await supabase.from("tasks").insert(pasos.map((x, i) => nuevoPaso(lead.id, x, i, base)));
+        if (eP) throw new Error(/null value/i.test(eP.message) ? "los pasos no se guardaron: falta correr la migración 011" : eP.message);
         await supabase.from("leads").update({ actualizado_at: new Date().toISOString() }).eq("id", lead.id);
         setDijo(`Anoté en ${lead.nombre}: ${pasos.map(x => x.titulo).join(", ")}.`);
 

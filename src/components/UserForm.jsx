@@ -15,6 +15,11 @@ export default function UserForm({ u, esNuevo = false, onSave, onCancel }) {
           <input value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo" style={inputStyle} />
           <input value={f.pin} onChange={e => setF(p => ({ ...p, pin: e.target.value.replace(/\D/g, "") }))} placeholder={esNuevo ? "PIN (4 dígitos)" : "Nuevo PIN (vacío: no cambia)"} maxLength={4} inputMode="numeric" style={inputStyle} />
         </div>
+        {!esNuevo && (
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -2 }}>
+            El PIN actual no se puede ver. Escribe uno nuevo de 4 dígitos solo si quieres cambiarlo.
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
           <select value={f.role} onChange={e => setF(p => ({ ...p, role: e.target.value }))} style={inputStyle}>
             <option value="owner">Director</option>

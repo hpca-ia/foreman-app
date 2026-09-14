@@ -91,6 +91,12 @@ export default function App() {
     } catch (e) { console.error("Email error:", e); }
   }
 
+  // Antes un error al guardar se tragaba: el formulario se cerraba y la tarea
+  // simplemente no aparecía, sin saber por qué.
+  const mensajeErrorTarea = e => /null value|not-null/i.test(e.message)
+    ? "No se pudo guardar: falta correr la migración 011 en Supabase. Mientras tanto, elige un proyecto para la tarea."
+    : "No se pudo guardar la tarea: " + e.message;
+
   async function eliminarTarea(id) {
     if (!window.confirm("¿Borrar esta tarea? No se puede deshacer.")) return false;
     const { error } = await supabase.from("tasks").delete().eq("id", id);
@@ -107,9 +113,11 @@ export default function App() {
 
   async function guardarTarea(form, id) {
     if (id) {
-      await supabase.from("tasks").update(form).eq("id", id);
+      const { error } = await supabase.from("tasks").update(form).eq("id", id);
+      if (error) { alert(mensajeErrorTarea(error)); return; }
     } else {
-      await supabase.from("tasks").insert({ ...form, created_by: usuario.id });
+      const { error } = await supabase.from("tasks").insert({ ...form, created_by: usuario.id });
+      if (error) { alert(mensajeErrorTarea(error)); return; }
       if (form.assignee_id) {
         const asignado = users.find(u => u.id === form.assignee_id);
         const proyecto = projects.find(p => p.id === form.project_id);
@@ -165,6 +173,10 @@ export default function App() {
   if (filtro === "pendiente") visibles = visibles.filter(t => t.status === "pendiente");
   if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
   if (filtro === "listo") visibles = visibles.filter(t => t.status === "listo");
+  // Los que se activan tocando los avisos de arriba: mismas reglas que sus conteos.
+  if (filtro === "vencidas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
+  if (filtro === "hoy") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) === 0);
+  if (filtro === "urgentes") visibles = visibles.filter(t => t.status !== "listo" && t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
   if (filtroP !== "all") visibles = visibles.filter(t => t.project_id === Number(filtroP));
 
   // Un solo orden para las tres vistas: lo terminado al fondo, y arriba lo más

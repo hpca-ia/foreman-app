@@ -12,7 +12,8 @@ export default function AvisoTareas({ tasks, onFiltrar, filtro }) {
   const pendientes = tasks.filter(t => t.status !== "listo");
   const vencidas = pendientes.filter(t => t.due_date && daysUntil(t.due_date) < 0);
   const hoy = pendientes.filter(t => t.due_date && daysUntil(t.due_date) === 0);
-  const urgentes = pendientes.filter(t => t.priority === "urgente" && daysUntil(t.due_date) > 0);
+  // Urgentes que no están ya contadas como vencidas o de hoy (con o sin fecha).
+  const urgentes = pendientes.filter(t => t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
 
   if (!pendientes.length) {
     return (
@@ -40,9 +41,9 @@ export default function AvisoTareas({ tasks, onFiltrar, filtro }) {
   return (
     <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
       {avisos.map(({ k, n, txt, Icono, color, bg, borde }) => {
-        const activo = filtro === "urgente" && (k === "vencidas" || k === "urgentes");
+        const activo = filtro === k;
         return (
-          <button key={k} onClick={() => onFiltrar("urgente")}
+          <button key={k} onClick={() => onFiltrar(activo ? "todas" : k)} title={activo ? "Quitar filtro" : "Ver solo estas"}
             style={{
               flex: "1 1 140px", display: "flex", alignItems: "center", gap: 9,
               background: bg, border: `1.5px solid ${activo ? color : borde}`,

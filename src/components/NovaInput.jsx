@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import Button from "./ui/Button";
@@ -11,6 +11,7 @@ export default function NovaInput({ currentUser, projects, users, tareas = [], o
   const [grabando, setGrabando] = useState(false);
   const [vozError, setVozError] = useState("");
   const [oyo, setOyo] = useState(false);
+  const recRef = useRef(null);
 
   // El dictado del navegador falla de varias maneras y ninguna se anuncia
   // sola: sin permiso, dentro del navegador de WhatsApp, o simplemente sin
@@ -26,6 +27,8 @@ export default function NovaInput({ currentUser, projects, users, tareas = [], o
   };
 
   function startVoice() {
+    // Tocar el micrófono mientras escucha = "ya terminé": corta y procesa.
+    if (recRef.current) { try { recRef.current.stop(); } catch {} return; }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
       setVozError("Este navegador no sabe dictar. Usa el micrófono del teclado de tu teléfono, que funciona igual.");
@@ -39,11 +42,22 @@ export default function NovaInput({ currentUser, projects, users, tareas = [], o
     }
     r.lang = "es-EC"; r.continuous = false; r.interimResults = true;
     let oido = "";
+    // Algunos navegadores no cortan solos al terminar de hablar y el micrófono
+    // quedaba abierto hasta tocarlo. Ahora se corta tras 2 segundos sin
+    // palabras nuevas, a los 7 si no se oyó nada, y nunca pasa de 25.
+    let silencio = null;
+    const cortar = () => { try { r.stop(); } catch {} };
+    const limpiar = () => { clearTimeout(silencio); clearTimeout(tope); };
+    const tope = setTimeout(cortar, 25000);
+    silencio = setTimeout(cortar, 7000);
     r.onresult = e => {
       const t = Array.from(e.results).map(x => x[0].transcript).join("");
       if (t) { oido = t; setTexto(t); setOyo(true); }
+      clearTimeout(silencio);
+      silencio = setTimeout(cortar, 2000);
     };
     r.onerror = ev => {
+      limpiar(); recRef.current = null;
       setGrabando(false);
       const m = MOTIVOS[ev.error];
       setVozError(m === "" ? "" : (m || `El dictado falló (${ev.error}). Usa el micrófono del teclado de tu teléfono.`));
@@ -54,11 +68,13 @@ export default function NovaInput({ currentUser, projects, users, tareas = [], o
     // es un paso que no aporta nada. Lo que sí queda es confirmar, porque el
     // dictado se equivoca y una tarea mal asignada cuesta más que un toque.
     r.onend = () => {
+      limpiar(); recRef.current = null;
       setGrabando(false);
       if (oido.trim()) procesar(oido);
       else setVozError(v => v || "No llegó nada del micrófono. Si abriste FOREMAN desde WhatsApp, ábrelo en Safari o Chrome — o dicta con el micrófono del teclado.");
     };
-    try { r.start(); setGrabando(true); } catch {
+    try { r.start(); recRef.current = r; setGrabando(true); } catch {
+      limpiar();
       setVozError("El dictado ya estaba andando. Espera un momento y vuelve a intentar.");
     }
   }
@@ -89,6 +105,11 @@ Para crear:
 {"accion":"crear","title":"...","project_id":N_O_NULL,"assignee_id":N_O_NULL,"type":"...","due_date":"YYYY-MM-DD","priority":"urgente|alta|media|baja","notes":"..."}
 Proyectos: ${proyList}. Usuarios: ${userList}.
 Tipos: Llamada,Reunión,Contrato,Compra,Inspección,Aprobación,Visita a obra,Otro.
+Prioridad: "urgente", "ya mismo", "hoy sin falta" → urgente; "importante", "prioridad alta",
+"alta" → alta; "cuando puedas", "sin apuro", "baja" → baja; si no dice nada → media.
+Fecha: interpreta "mañana", "el viernes", "en dos semanas" contra hoy; sin fecha dicha, usa hoy.
+Si no menciona proyecto, project_id es null. Si no menciona a nadie, la tarea es para quien
+habla: assignee_id ${currentUser.id}.
 
 Para terminar ("terminé", "ya hice", "listo lo de", "completé", "ya compré"...), busca en estas
 tareas abiertas (id|título|proyecto|responsable|vence):
@@ -126,7 +147,12 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
     if (fila.assignee_id != null && !users.some(u => u.id === fila.assignee_id)) fila.assignee_id = currentUser.id;
     if (fila.project_id != null && !projects.some(p => p.id === fila.project_id)) fila.project_id = null;
     const { error } = await supabase.from("tasks").insert({ ...fila, created_by: currentUser.id });
-    if (error) { setResult({ ...result, errorGuardar: "No se pudo crear la tarea: " + error.message }); return; }
+    if (error) {
+      const msg = /null value|not-null/i.test(error.message)
+        ? "Falta correr la migración 011 en Supabase: por ahora toda tarea necesita proyecto. Elige uno arriba y vuelve a confirmar."
+        : "No se pudo crear la tarea: " + error.message;
+      setResult({ ...result, errorGuardar: msg }); return;
+    }
     setTexto(""); setResult(null); setOyo(false); onTaskCreated();
   }
 
@@ -213,7 +239,7 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
           {result.errorGuardar && <div style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{result.errorGuardar}</div>}
         </div>
       )}
-      {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 2 }}>Escuchando... habla ahora.</div>}
+      {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 2 }}>Escuchando… habla ahora. Se corta solo al callarte, o toca 🎤 para terminar.</div>}
       {loading && !grabando && <div style={{ fontSize: 12, color: colors.brand, marginTop: 2 }}>NOVA está entendiendo...</div>}
       {vozError && (
         <div style={{ fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "8px 10px", marginTop: 6 }}>
