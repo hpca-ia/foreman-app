@@ -93,7 +93,9 @@ export default function App() {
 
   // Antes un error al guardar se tragaba: el formulario se cerraba y la tarea
   // simplemente no aparecía, sin saber por qué.
-  const mensajeErrorTarea = e => /null value|not-null/i.test(e.message)
+  const mensajeErrorTarea = e => /out of range/i.test(e.message)
+    ? "No se pudo guardar: falta correr la migración 012 en Supabase. Los proyectos y usuarios nuevos tienen un número de identificación que la tabla de tareas todavía no acepta."
+    : /null value|not-null/i.test(e.message)
     ? "No se pudo guardar: falta correr la migración 011 en Supabase. Mientras tanto, elige un proyecto para la tarea."
     : "No se pudo guardar la tarea: " + e.message;
 

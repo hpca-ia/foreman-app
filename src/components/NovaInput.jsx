@@ -148,7 +148,9 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
     if (fila.project_id != null && !projects.some(p => p.id === fila.project_id)) fila.project_id = null;
     const { error } = await supabase.from("tasks").insert({ ...fila, created_by: currentUser.id });
     if (error) {
-      const msg = /null value|not-null/i.test(error.message)
+      const msg = /out of range/i.test(error.message)
+        ? "Falta correr la migración 012 en Supabase: los proyectos y usuarios nuevos todavía no se pueden usar en tareas."
+        : /null value|not-null/i.test(error.message)
         ? "Falta correr la migración 011 en Supabase: por ahora toda tarea necesita proyecto. Elige uno arriba y vuelve a confirmar."
         : "No se pudo crear la tarea: " + error.message;
       setResult({ ...result, errorGuardar: msg }); return;
