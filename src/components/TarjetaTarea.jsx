@@ -2,6 +2,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
+import MarcaPrivada from "./ui/MarcaPrivada";
 import Avatar from "./ui/Avatar";
 import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
@@ -38,7 +39,7 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
         </div>
         <FechaBadge due={task.due_date} status={task.status} />
       </div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: task.notes ? 4 : 6, lineHeight: 1.3 }}>{task.title}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: task.notes ? 4 : 6, lineHeight: 1.3 }}>{task.privada && <MarcaPrivada />}{task.title}</div>
       {task.notes && <div style={{ color: colors.inkSoft, fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>{task.notes}</div>}
       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
         <span style={{ background: `${proy?.color}18`, color: proy?.color, fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>{proy?.name}</span>

@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 import { colors } from "../theme/colors";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import FechaBadge from "./FechaBadge";
+import MarcaPrivada from "./ui/MarcaPrivada";
 
 // La vista de lista en el teléfono. Las tarjetas sirven para trabajar una
 // tarea —cambiar estado, subir un archivo—; esto sirve para ver veinte de un
@@ -30,10 +31,11 @@ export default function TareasListaMovil({ tasks, users, projects, onEditar }) {
                 fontSize: 13, fontWeight: 600, color: colors.ink,
                 textDecoration: listo ? "line-through" : "none",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>{t.title}</div>
+              }}>{t.privada && <MarcaPrivada />}{t.title}</div>
               <div style={{ fontSize: 11, color: colors.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {[proyecto, persona, ESTADO[t.status]?.label].filter(Boolean).join(" · ")}
               </div>
+              {t.notes && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>}
             </div>
 
             <span style={{ flexShrink: 0 }}><FechaBadge due={t.due_date} status={t.status} /></span>

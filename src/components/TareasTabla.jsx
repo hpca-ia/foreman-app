@@ -2,6 +2,7 @@ import { daysUntil } from "../lib/dates";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
+import MarcaPrivada from "./ui/MarcaPrivada";
 
 function fechaLabel(t) {
   if (t.status === "listo") return "—";
@@ -22,11 +23,11 @@ export default function TareasTabla({ tasks, users, projects, onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
-  const row = { display: "grid", gridTemplateColumns: "10px 3fr 1.3fr 1.1fr .9fr .9fr .8fr", gap: 14, alignItems: "center", padding: "0 16px", height: 40, borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer" };
+  const row = { display: "grid", gridTemplateColumns: "10px 3fr 1.3fr 1.1fr .9fr .9fr .8fr", gap: 14, alignItems: "center", padding: "6px 16px", minHeight: 40, boxSizing: "border-box", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer" };
 
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-      <div style={{ ...row, height: 34, background: colors.bg, cursor: "default" }}>
+      <div style={{ ...row, minHeight: 34, padding: "0 16px", background: colors.bg, cursor: "default" }}>
         <span />
         {["TAREA", "PROYECTO", "RESPONSABLE", "PRIORIDAD", "ESTADO", "VENCE"].map(h => (
           <span key={h} style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>{h}</span>
@@ -41,7 +42,13 @@ export default function TareasTabla({ tasks, users, projects, onEditar }) {
         return (
           <div key={t.id} className="tabla-row" style={row} onClick={() => onEditar(t)}>
             <div style={{ width: 8, height: 8, borderRadius: 2, background: proy?.color || colors.brand }} />
-            <span style={{ fontSize: 13, fontWeight: 500, color: colors.ink, opacity: t.status === "listo" ? 0.55 : 1, textDecoration: t.status === "listo" ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+            <div style={{ minWidth: 0, opacity: t.status === "listo" ? 0.55 : 1 }}>
+              <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+                {t.privada && <MarcaPrivada />}
+                <span style={{ fontSize: 13, fontWeight: 500, color: colors.ink, textDecoration: t.status === "listo" ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+              </div>
+              {t.notes && <div title={t.notes} style={{ fontSize: 11, color: colors.muted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>}
+            </div>
             <span style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{proy?.name}</span>
             {asig ? (
               <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>

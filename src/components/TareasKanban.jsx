@@ -1,5 +1,6 @@
 import { daysUntil } from "../lib/dates";
 import { esAdmin } from "../lib/roles";
+import MarcaPrivada from "./ui/MarcaPrivada";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
@@ -42,7 +43,8 @@ export default function TareasKanban({ tasks, users, projects, currentUser, onCa
                 return (
                   <div key={t.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderLeft: `3px solid ${proy?.color || colors.brand}`, borderRadius: colors.radiusMd, padding: 12, display: "flex", flexDirection: "column", gap: 7, cursor: "pointer" }} onClick={() => onEditar(t)}>
                     <span style={{ fontSize: 10, fontWeight: 600, color: pC.color, background: pC.bg, padding: "2px 7px", borderRadius: 20, width: "fit-content" }}>{pC.label}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink, lineHeight: 1.35 }}>{t.title}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink, lineHeight: 1.35 }}>{t.privada && <MarcaPrivada />}{t.title}</span>
+                    {t.notes && <span style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.notes}</span>}
                     <span style={{ fontSize: 11, color: colors.muted }}>{proy?.name}</span>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       {asig ? (
