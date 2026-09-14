@@ -38,9 +38,10 @@ export default function NovaInput({ currentUser, projects, users, onTaskCreated 
       return;
     }
     r.lang = "es-EC"; r.continuous = false; r.interimResults = true;
+    let oido = "";
     r.onresult = e => {
       const t = Array.from(e.results).map(x => x[0].transcript).join("");
-      if (t) { setTexto(t); setOyo(true); }
+      if (t) { oido = t; setTexto(t); setOyo(true); }
     };
     r.onerror = ev => {
       setGrabando(false);
@@ -49,20 +50,24 @@ export default function NovaInput({ currentUser, projects, users, onTaskCreated 
     };
     // Termina sin resultado y sin error: pasa en los navegadores embebidos,
     // que aceptan arrancar y se apagan en silencio.
+    // Al terminar de hablar NOVA procesa sola: si uno ya dictó, apretar "Crear"
+    // es un paso que no aporta nada. Lo que sí queda es confirmar, porque el
+    // dictado se equivoca y una tarea mal asignada cuesta más que un toque.
     r.onend = () => {
       setGrabando(false);
-      setOyo(prev => {
-        if (!prev) setVozError(v => v || "No llegó nada del micrófono. Si abriste FOREMAN desde WhatsApp, ábrelo en Safari o Chrome — o dicta con el micrófono del teclado.");
-        return prev;
-      });
+      if (oido.trim()) procesar(oido);
+      else setVozError(v => v || "No llegó nada del micrófono. Si abriste FOREMAN desde WhatsApp, ábrelo en Safari o Chrome — o dicta con el micrófono del teclado.");
     };
     try { r.start(); setGrabando(true); } catch {
       setVozError("El dictado ya estaba andando. Espera un momento y vuelve a intentar.");
     }
   }
 
-  async function procesar() {
-    if (!texto.trim()) return;
+  // Recibe el texto dictado directo: el estado todavía no se actualizó cuando
+  // termina el dictado. Desde el botón llega un evento, no un texto.
+  async function procesar(entrada) {
+    const texto_ = typeof entrada === "string" ? entrada : texto;
+    if (!texto_.trim()) return;
     setLoading(true); setResult(null);
     const proyList = projects.map(p => `${p.id}=${p.name}`).join(",");
     const userList = users.map(u => `${u.id}=${u.name}`).join(",");
@@ -76,7 +81,7 @@ export default function NovaInput({ currentUser, projects, users, onTaskCreated 
 Proyectos: ${proyList}. Usuarios: ${userList}.
 Tipos: Llamada,Reunión,Contrato,Compra,Inspección,Aprobación,Visita a obra,Otro.
 Hoy: ${new Date().toISOString().split("T")[0]}.`,
-          messages: [{ role: "user", content: texto }],
+          messages: [{ role: "user", content: texto_ }],
         }),
       });
       const data = await res.json();
@@ -88,12 +93,13 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
 
   async function confirmar() {
     if (!result || result.error) return;
-    await supabase.from("tasks").insert({ ...result, created_by: currentUser.id });
-    setTexto(""); setResult(null); onTaskCreated();
+    const { error } = await supabase.from("tasks").insert({ ...result, created_by: currentUser.id });
+    if (error) { setResult({ ...result, errorGuardar: "No se pudo crear la tarea: " + error.message }); return; }
+    setTexto(""); setResult(null); setOyo(false); onTaskCreated();
   }
 
-  const gP = id => projects.find(p => p.id === id);
-  const gU = id => users.find(u => u.id === id);
+  const cambiar = (k, v) => setResult(r => ({ ...r, [k]: v }));
+  const campo = { background: "#fff", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, color: colors.ink, fontSize: 12, fontFamily: colors.font, padding: "6px 8px", minWidth: 0, boxSizing: "border-box" };
 
   return (
     <div style={{ background: colors.surface, border: `1.5px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 14, marginBottom: 14 }}>
@@ -111,22 +117,41 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
           onClick={startVoice}
           style={{ width: 36, background: grabando ? colors.dangerSoft : colors.bg, border: `1.5px solid ${grabando ? colors.danger : colors.border}`, borderRadius: colors.radiusMd, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, animation: grabando ? "pulse 1s infinite" : "none" }}
           title="Dictar" aria-label="Dictar">🎤</button>
-        <Button onClick={procesar} disabled={!texto.trim() || loading} size="md">
+        <Button onClick={() => procesar()} disabled={!texto.trim() || loading} size="md">
           {loading ? "..." : "Crear →"}
         </Button>
       </div>
       {result && !result.error && (
         <div style={{ background: colors.successSoft, border: "1.5px solid #BFE3CC", borderRadius: colors.radiusMd, padding: 10 }}>
-          <div style={{ fontSize: 11, color: colors.success, fontWeight: 600, marginBottom: 4 }}>✓ NOVA entendió:</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 2 }}>{result.title}</div>
-          <div style={{ fontSize: 11, color: colors.inkSoft }}>{gP(result.project_id)?.name} · {result.assignee_id ? gU(result.assignee_id)?.name : "Sin asignar"} · {result.due_date} · {result.priority}</div>
+          <div style={{ fontSize: 11, color: colors.success, fontWeight: 600, marginBottom: 4 }}>✓ NOVA entendió — corrige lo que haga falta:</div>
+          {/* Todo editable: NOVA propone y uno corrige ahí mismo. El dictado se
+              equivoca, y rehacer la tarea desde cero por un nombre mal oído
+              hace que se deje de dictar. */}
+          <input value={result.title || ""} onChange={e => cambiar("title", e.target.value)}
+            style={{ ...campo, fontSize: 13, fontWeight: 600, marginBottom: 6, width: "100%" }} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <select value={result.project_id ?? ""} onChange={e => cambiar("project_id", e.target.value ? Number(e.target.value) : null)} style={campo}>
+              <option value="">Sin proyecto</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <select value={result.assignee_id ?? ""} onChange={e => cambiar("assignee_id", e.target.value ? Number(e.target.value) : null)} style={campo}>
+              <option value="">Sin asignar</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <input type="date" value={result.due_date || ""} onChange={e => cambiar("due_date", e.target.value)} style={campo} />
+            <select value={result.priority || "media"} onChange={e => cambiar("priority", e.target.value)} style={campo}>
+              {[["urgente", "Urgente"], ["alta", "Alta"], ["media", "Media"], ["baja", "Baja"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <Button variant="outline" size="sm" style={{ flex: 1 }} onClick={() => setResult(null)}>Cancelar</Button>
             <Button variant="primary" size="sm" style={{ flex: 2, background: colors.success }} onClick={confirmar}>✓ Confirmar</Button>
           </div>
+          {result.errorGuardar && <div style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{result.errorGuardar}</div>}
         </div>
       )}
       {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 2 }}>Escuchando... habla ahora.</div>}
+      {loading && !grabando && <div style={{ fontSize: 12, color: colors.brand, marginTop: 2 }}>NOVA está entendiendo...</div>}
       {vozError && (
         <div style={{ fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "8px 10px", marginTop: 6 }}>
           {vozError}
