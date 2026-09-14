@@ -7,14 +7,18 @@ import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 
-export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, onProyectoCreado }) {
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, onProyectoCreado, onEliminar }) {
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
-    status: editTask.status, notes: editTask.notes || "",
-  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "" });
+    status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada,
+  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "", privada: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
+  const soyAdmin = esAdmin(currentUser.role);
+  // Ver no es tocar: la tarea de otra persona se abre, pero solo la cambia
+  // quien la tiene asignada, quien la creó o un admin.
+  const soloLectura = !!editTask && !soyAdmin && editTask.assignee_id !== currentUser.id && editTask.created_by !== currentUser.id;
   const [creandoP, setCreandoP] = useState(false);
   const [nombreP, setNombreP] = useState("");
   const [errP, setErrP] = useState("");
@@ -45,10 +49,10 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   return (
     <Modal onClose={onCerrar} maxWidth={480}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink }}>{editTask ? "Editar tarea" : "Nueva tarea"}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink }}>{soloLectura ? "Tarea" : editTask ? "Editar tarea" : "Nueva tarea"}</div>
         <button onClick={onCerrar} style={{ background: colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, width: 28, height: 28, color: colors.inkSoft, cursor: "pointer", fontSize: 15 }}>×</button>
       </div>
-      <div style={{ display: "grid", gap: 12 }}>
+      <fieldset disabled={soloLectura} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: "grid", gap: 12 }}>
         <div><label style={lS}>Título *</label><input value={form.title} onChange={e => inp("title", e.target.value)} placeholder="¿Qué hay que hacer?" style={inputStyle} /></div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div><label style={lS}>Proyecto</label><select value={form.project_id ?? ""} onChange={e => e.target.value === "__nuevo__" ? setCreandoP(true) : inp("project_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}>
@@ -73,12 +77,28 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           </div>
         )}
         <div><label style={lS}>Fecha límite *</label><input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} style={inputStyle} /></div>
+        {soyAdmin && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
+            <input type="checkbox" checked={!!form.privada} onChange={e => inp("privada", e.target.checked)} />
+            Privada — solo la ven los admins y la persona asignada
+          </label>
+        )}
         <div><label style={lS}>Notas</label><textarea value={form.notes} onChange={e => inp("notes", e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
-      </div>
-      {(!form.title || !form.due_date) ? <div style={{ color: colors.muted, fontSize: 11, marginTop: 12, textAlign: "center" }}>Completa título y fecha</div>
+      </fieldset>
+      {soloLectura ? (
+        <div style={{ color: colors.muted, fontSize: 12, marginTop: 14, textAlign: "center" }}>
+          Solo lectura: es una tarea de {users.find(u => u.id === editTask.assignee_id)?.name || "otra persona"}. La puede cambiar esa persona o un admin.
+        </div>
+      ) : (!form.title || !form.due_date) ? <div style={{ color: colors.muted, fontSize: 11, marginTop: 12, textAlign: "center" }}>Completa título y fecha</div>
         : <Button variant="primary" size="lg" style={{ width: "100%", marginTop: 16 }} onClick={() => { onGuardar(form, editTask?.id); onCerrar(); }}>
             {editTask ? "Guardar cambios" : "Agregar tarea"}
           </Button>}
+      {editTask && soyAdmin && onEliminar && (
+        <button onClick={async () => { if (await onEliminar(editTask.id)) onCerrar(); }}
+          style={{ width: "100%", marginTop: 10, background: "transparent", border: `1px solid ${colors.dangerBorder}`, color: colors.danger, borderRadius: colors.radiusMd, padding: "9px 0", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+          Borrar tarea
+        </button>
+      )}
     </Modal>
   );
 }

@@ -1,6 +1,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import { colors } from "../theme/colors";
+import { esAdmin } from "../lib/roles";
 import Avatar from "./ui/Avatar";
 import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
@@ -14,7 +15,9 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
   const crea = gU(task.created_by);
   const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;
   const eC = ESTADO[task.status] || ESTADO.pendiente;
-  const admin = puede("tareas.asignar");
+  // Cambiar estado, editar y borrar la tarea de otro es de admins, no de quien
+  // tenga permiso de asignar: un gerente ve la tarea de su par, no la toca.
+  const admin = esAdmin(currentUser.role);
   // Solo el asignado puede cambiar SU tarea. Admins pueden todo. Nadie puede cambiar la tarea de otro miembro.
   const esMiTarea = task.assignee_id === currentUser.id;
   const puedeCambiar = admin || esMiTarea;
@@ -56,7 +59,7 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
             ))}
           </div>
         )}
-        {admin && <button onClick={() => onEditar(task)} style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "5px 8px", color: colors.inkSoft, cursor: "pointer", display: "flex", alignItems: "center" }}><Pencil size={13} /></button>}
+        {(admin || esMiTarea) && <button onClick={() => onEditar(task)} style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "5px 8px", color: colors.inkSoft, cursor: "pointer", display: "flex", alignItems: "center" }}><Pencil size={13} /></button>}
         {admin && <WhatsAppDraftModal task={task} users={users} projects={projects} />}
         {admin && <button onClick={() => onEliminar(task.id)} style={{ background: colors.dangerSoft, border: "1px solid #F3C6C6", borderRadius: colors.radiusSm, padding: "5px 8px", color: colors.danger, cursor: "pointer", display: "flex", alignItems: "center" }}><Trash2 size={13} /></button>}
       </div>

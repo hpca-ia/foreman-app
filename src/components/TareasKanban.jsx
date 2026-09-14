@@ -1,4 +1,5 @@
 import { daysUntil } from "../lib/dates";
+import { esAdmin } from "../lib/roles";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
@@ -36,7 +37,8 @@ export default function TareasKanban({ tasks, users, projects, currentUser, onCa
                 const proy = gP(t.project_id);
                 const asig = t.assignee_id ? gU(t.assignee_id) : null;
                 const pC = PRIORIDAD[t.priority] || PRIORIDAD.media;
-                const puedeCambiar = currentUser.id === t.assignee_id || true;
+                // Antes decía "|| true": cualquiera podía mover la tarea de cualquiera.
+                const puedeCambiar = esAdmin(currentUser.role) || currentUser.id === t.assignee_id;
                 return (
                   <div key={t.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderLeft: `3px solid ${proy?.color || colors.brand}`, borderRadius: colors.radiusMd, padding: 12, display: "flex", flexDirection: "column", gap: 7, cursor: "pointer" }} onClick={() => onEditar(t)}>
                     <span style={{ fontSize: 10, fontWeight: 600, color: pC.color, background: pC.bg, padding: "2px 7px", borderRadius: 20, width: "fit-content" }}>{pC.label}</span>

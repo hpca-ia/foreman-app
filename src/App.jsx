@@ -92,9 +92,11 @@ export default function App() {
   }
 
   async function eliminarTarea(id) {
-    if (!window.confirm("¿Eliminar esta tarea? Esta acción no se puede deshacer.")) return;
-    await supabase.from("tasks").delete().eq("id", id);
+    if (!window.confirm("¿Borrar esta tarea? No se puede deshacer.")) return false;
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) { alert("No se pudo borrar: " + error.message); return false; }
     setTareas(prev => prev.filter(t => t.id !== id));
+    return true;
   }
 
   async function cambiarEstado(id, estado) {
@@ -135,7 +137,14 @@ export default function App() {
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
     : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
   const alertCount = misAlertasTareas.length;
-  let visibles = veTodo ? tareas : tareas.filter(t => t.assignee_id === usuario.id || t.created_by === usuario.id);
+  // Quien no es admin ve lo suyo en "Mis tareas". Al elegir uno de sus
+  // proyectos ve también lo de sus compañeros ahí —para coordinarse—, salvo lo
+  // marcado como privado. Lo privado solo lo ven los admins y el asignado.
+  const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id;
+  const misProyectos = new Set(proyectosElegibles.map(p => p.id));
+  let visibles = veTodo
+    ? tareas.filter(t => !t.privada || admin || esMia(t))
+    : tareas.filter(t => esMia(t) || (filtroP !== "all" && !t.privada && misProyectos.has(t.project_id) && t.project_id === Number(filtroP)));
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -148,7 +157,10 @@ export default function App() {
   // El aviso mira todo lo del usuario, no lo que dejó el filtro: si al tocar
   // "Completadas" desapareciera el conteo de vencidas, la señal se apagaría
   // justo cuando sigue siendo cierta.
-  const paraAvisar = filtroP === "all" ? visibles : visibles.filter(t => t.project_id === Number(filtroP));
+  // El aviso de arriba es sobre lo que te toca a ti: a María no se le prende
+  // la alarma por una tarea vencida de Héctor.
+  const baseAviso = veTodo ? visibles : visibles.filter(esMia);
+  const paraAvisar = filtroP === "all" ? baseAviso : baseAviso.filter(t => t.project_id === Number(filtroP));
 
   if (filtro === "pendiente") visibles = visibles.filter(t => t.status === "pendiente");
   if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
@@ -186,16 +198,22 @@ export default function App() {
                   aparecía cuarta, debajo del pliegue en el teléfono. */}
               <AvisoTareas tasks={paraAvisar} filtro={filtro} onFiltrar={setFiltro} />
 
-              {admin && <><NovaInput currentUser={usuario} projects={projects} users={users} onTaskCreated={fetchTareas} /><AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} /></>}
+              {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
+                  Solo cierra tareas que esa persona puede cambiar. */}
+              <NovaInput currentUser={usuario} projects={proyectosElegibles}
+                users={puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id)}
+                tareas={tareas.filter(t => t.status !== "listo" && (admin || t.assignee_id === usuario.id))}
+                onCambiarEstado={cambiarEstado} onTaskCreated={fetchTareas} />
+              {admin && <AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} />}
 
               <div className="tareas-barra">
                 <div className="tareas-filtros">
                 {[["todas", "Todas"], ["urgente", "Urgentes"], ["pendiente", "Pendientes"], ["listo", "Completadas"]].map(([f, l]) => (
                   <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
                 ))}
-                {admin && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
-                  <option value="all">Todos los proyectos</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {proyectosElegibles.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
+                  <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
+                  {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>}
                 </div>
                 {/* El interruptor tenía display:flex inline, que le gana a la clase
@@ -280,7 +298,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} onProyectoCreado={recargarEquipo} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
       {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
     </div>
   );

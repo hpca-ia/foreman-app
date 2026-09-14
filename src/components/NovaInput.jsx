@@ -4,7 +4,7 @@ import { colors } from "../theme/colors";
 import Button from "./ui/Button";
 import NovaMark from "./NovaMark";
 
-export default function NovaInput({ currentUser, projects, users, onTaskCreated }) {
+export default function NovaInput({ currentUser, projects, users, tareas = [], onCambiarEstado, onTaskCreated }) {
   const [texto, setTexto] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -69,33 +69,74 @@ export default function NovaInput({ currentUser, projects, users, onTaskCreated 
     const texto_ = typeof entrada === "string" ? entrada : texto;
     if (!texto_.trim()) return;
     setLoading(true); setResult(null);
+    const hoy = new Date().toISOString().split("T")[0];
     const proyList = projects.map(p => `${p.id}=${p.name}`).join(",");
     const userList = users.map(u => `${u.id}=${u.name}`).join(",");
+    // Las tareas que esta persona puede cerrar, las más próximas primero: una
+    // lista acotada para que NOVA elija entre pocas y no se confunda.
+    const abiertas = tareas.slice().sort((a, b) => (a.due_date || "9999").localeCompare(b.due_date || "9999")).slice(0, 80);
+    const listaTareas = abiertas.map(t => `${t.id}|${t.title}|${projects.find(p => p.id === t.project_id)?.name || ""}|${users.find(u => u.id === t.assignee_id)?.name || ""}|${t.due_date || ""}`).join("\n") || "(ninguna)";
     try {
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 500,
-          system: `Eres NOVA. Extrae datos y responde SOLO JSON sin markdown:
-{"title":"...","project_id":N,"assignee_id":N_OR_NULL,"type":"...","due_date":"YYYY-MM-DD","priority":"urgente|alta|media|baja","notes":"..."}
+          model: "claude-sonnet-4-5", max_tokens: 600,
+          system: `Eres NOVA, la asistente de tareas de una constructora en Ecuador. Hoy: ${hoy}.
+Decide si la persona quiere CREAR una tarea nueva o dar por TERMINADA una que ya existe.
+Responde SOLO JSON, sin markdown.
+
+Para crear:
+{"accion":"crear","title":"...","project_id":N_O_NULL,"assignee_id":N_O_NULL,"type":"...","due_date":"YYYY-MM-DD","priority":"urgente|alta|media|baja","notes":"..."}
 Proyectos: ${proyList}. Usuarios: ${userList}.
 Tipos: Llamada,Reunión,Contrato,Compra,Inspección,Aprobación,Visita a obra,Otro.
-Hoy: ${new Date().toISOString().split("T")[0]}.`,
+
+Para terminar ("terminé", "ya hice", "listo lo de", "completé", "ya compré"...), busca en estas
+tareas abiertas (id|título|proyecto|responsable|vence):
+${listaTareas}
+Si una coincide claramente: {"accion":"completar","task_id":N}
+Si varias podrían ser, no adivines: {"accion":"completar","candidatas":[N,N]}
+Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta que se parezca a eso."}`,
           messages: [{ role: "user", content: texto_ }],
         }),
       });
       const data = await res.json();
-      const t = data.content?.[0]?.text || "{}";
-      setResult(JSON.parse(t.replace(/```json|```/g, "").trim()));
+      const raw = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
+      const p = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+      const ids = new Set(abiertas.map(t => t.id));
+      if (p.accion === "completar") {
+        // Solo ids que de verdad están en la lista: NOVA no puede cerrar una
+        // tarea que esta persona no tiene permiso de cambiar.
+        const cands = (p.candidatas || (p.task_id != null ? [p.task_id] : [])).map(Number).filter(id => ids.has(id));
+        if (!cands.length) setResult({ error: "No encontré una tarea abierta tuya que se parezca a eso." });
+        else setResult({ accion: "completar", candidatas: cands });
+      } else if (p.accion === "nada") {
+        setResult({ error: p.motivo || "No entendí. Intenta de nuevo." });
+      } else {
+        setResult({ ...p, accion: "crear" });
+      }
     } catch { setResult({ error: "No pude entender. Intenta de nuevo." }); }
     setLoading(false);
   }
 
   async function confirmar() {
     if (!result || result.error) return;
-    const { error } = await supabase.from("tasks").insert({ ...result, created_by: currentUser.id });
+    const { accion, errorGuardar, candidatas, ...fila } = result;
+    // Quien no puede asignar a otros no termina asignándole a otro por un
+    // nombre que NOVA creyó oír; y un proyecto que no es suyo queda vacío.
+    if (fila.assignee_id != null && !users.some(u => u.id === fila.assignee_id)) fila.assignee_id = currentUser.id;
+    if (fila.project_id != null && !projects.some(p => p.id === fila.project_id)) fila.project_id = null;
+    const { error } = await supabase.from("tasks").insert({ ...fila, created_by: currentUser.id });
     if (error) { setResult({ ...result, errorGuardar: "No se pudo crear la tarea: " + error.message }); return; }
     setTexto(""); setResult(null); setOyo(false); onTaskCreated();
+  }
+
+  // Cerrar también se confirma: el dictado se equivoca, y dar por terminada
+  // una tarea que no lo está es peor que un toque de más.
+  async function completar(id) {
+    const t = tareas.find(x => x.id === id);
+    await onCambiarEstado?.(id, "listo");
+    setTexto(""); setOyo(false);
+    setResult({ hecho: `Listo: «${t?.title || "la tarea"}» quedó como completada.` });
   }
 
   const cambiar = (k, v) => setResult(r => ({ ...r, [k]: v }));
@@ -105,12 +146,12 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
     <div style={{ background: colors.surface, border: `1.5px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 14, marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <NovaMark />
-        <span style={{ fontSize: 13, fontWeight: 600, color: colors.brand }}>NOVA — Crear tarea</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: colors.brand }}>NOVA — Tareas</span>
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
         <input
           value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={e => e.key === "Enter" && procesar()}
-          placeholder='"Tarea para Hector, inspección BdP Condado, urgente mañana"'
+          placeholder='"Tarea para Hector, inspección BdP Condado, mañana" · "Terminé la inspección de BdP"'
           style={{ flex: 1, background: colors.bg, border: `1.5px solid ${colors.border}`, borderRadius: colors.radiusMd, color: colors.ink, fontSize: 13, fontFamily: colors.font, padding: "8px 12px", outline: "none" }}
         />
         <button
@@ -121,7 +162,29 @@ Hoy: ${new Date().toISOString().split("T")[0]}.`,
           {loading ? "..." : "Crear →"}
         </Button>
       </div>
-      {result && !result.error && (
+      {result?.hecho && <div style={{ color: colors.success, fontSize: 12, marginTop: 6, fontWeight: 600 }}>✓ {result.hecho}</div>}
+      {result?.accion === "completar" && (
+        <div style={{ background: colors.brandSoft, border: `1.5px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 10 }}>
+          <div style={{ fontSize: 11, color: colors.brand, fontWeight: 600, marginBottom: 4 }}>
+            {result.candidatas.length === 1 ? "¿Marco esta tarea como completada?" : "¿Cuál de estas terminaste?"}
+          </div>
+          {result.candidatas.map(id => {
+            const t = tareas.find(x => x.id === id);
+            if (!t) return null;
+            return (
+              <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                  <div style={{ fontSize: 11, color: colors.inkSoft }}>{[projects.find(p => p.id === t.project_id)?.name, users.find(u => u.id === t.assignee_id)?.name, t.due_date].filter(Boolean).join(" · ")}</div>
+                </div>
+                <Button variant="primary" size="sm" style={{ background: colors.success, flexShrink: 0 }} onClick={() => completar(id)}>✓ Terminada</Button>
+              </div>
+            );
+          })}
+          <Button variant="outline" size="sm" style={{ width: "100%", marginTop: 6 }} onClick={() => setResult(null)}>Cancelar</Button>
+        </div>
+      )}
+      {result && !result.error && result.accion !== "completar" && !result.hecho && (
         <div style={{ background: colors.successSoft, border: "1.5px solid #BFE3CC", borderRadius: colors.radiusMd, padding: 10 }}>
           <div style={{ fontSize: 11, color: colors.success, fontWeight: 600, marginBottom: 4 }}>✓ NOVA entendió — corrige lo que haga falta:</div>
           {/* Todo editable: NOVA propone y uno corrige ahí mismo. El dictado se
