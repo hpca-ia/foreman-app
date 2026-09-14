@@ -16,6 +16,14 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "", privada: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   const soyAdmin = esAdmin(currentUser.role);
+  // Quien no tiene permiso de asignar solo puede dejarse la tarea a sí mismo.
+  // NOVA ya lo respetaba; el formulario no, y un residente podía cargarle
+  // tareas a cualquiera. Al editar se conserva el asignado actual para que el
+  // menú no lo muestre en blanco.
+  const puedeAsignar = puede("tareas.asignar");
+  const asignables = puedeAsignar
+    ? users
+    : users.filter(u => u.id === currentUser.id || u.id === editTask?.assignee_id);
   // Ver no es tocar: la tarea de otra persona se abre, pero solo la cambia
   // quien la tiene asignada, quien la creó o un admin.
   const soloLectura = !!editTask && !soyAdmin && editTask.assignee_id !== currentUser.id && editTask.created_by !== currentUser.id;
@@ -61,7 +69,7 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
             {puedeCrearProyecto && <option value="__nuevo__">+ Nuevo proyecto…</option>}
           </select></div>
           <div><label style={lS}>Tipo</label><select value={form.type} onChange={e => inp("type", e.target.value)} style={inputStyle}>{TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
-          <div><label style={lS}>Asignar a</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+          <div><label style={lS}>Asignar a</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
           <div><label style={lS}>Prioridad</label><select value={form.priority} onChange={e => inp("priority", e.target.value)} style={inputStyle} disabled={!admin}>{Object.entries(PRIORIDAD).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
         </div>
         {creandoP && (
