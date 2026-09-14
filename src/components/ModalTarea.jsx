@@ -7,7 +7,7 @@ import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 
-export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, onProyectoCreado, onEliminar }) {
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar }) {
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
@@ -16,14 +16,13 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "", privada: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   const soyAdmin = esAdmin(currentUser.role);
-  // Quien no tiene permiso de asignar solo puede dejarse la tarea a sí mismo.
-  // NOVA ya lo respetaba; el formulario no, y un residente podía cargarle
-  // tareas a cualquiera. Al editar se conserva el asignado actual para que el
-  // menú no lo muestre en blanco.
-  const puedeAsignar = puede("tareas.asignar");
-  const asignables = puedeAsignar
-    ? users
-    : users.filter(u => u.id === currentUser.id || u.id === editTask?.assignee_id);
+  // La lista de a quién se puede asignar la decide App —cualquiera con el
+  // permiso de asignar; sin él, uno mismo y sus compañeros de proyecto—, la
+  // misma que usa NOVA. Al editar se agrega el asignado actual para que el menú
+  // no lo muestre en blanco.
+  const baseAsignables = asignablesApp || users.filter(u => u.id === currentUser.id);
+  const actualAsignado = users.find(u => u.id === editTask?.assignee_id);
+  const asignables = actualAsignado && !baseAsignables.some(u => u.id === actualAsignado.id) ? [...baseAsignables, actualAsignado] : baseAsignables;
   // Ver no es tocar: la tarea de otra persona se abre, pero solo la cambia
   // quien la tiene asignada, quien la creó o un admin.
   const soloLectura = !!editTask && !soyAdmin && editTask.assignee_id !== currentUser.id && editTask.created_by !== currentUser.id;

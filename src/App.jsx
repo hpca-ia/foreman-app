@@ -143,6 +143,12 @@ export default function App() {
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
   const proyectosElegibles = veTodo ? projects : projects.filter(p => (p.miembros || []).includes(usuario.id));
+  // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
+  // Sin él, a sí mismo y a sus compañeros: quienes comparten con él al menos un
+  // proyecto. Así se coordinan en obra sin poder cargarle tareas a un admin o a
+  // gente de otras obras.
+  const compañeros = new Set(projects.filter(p => (p.miembros || []).includes(usuario.id)).flatMap(p => p.miembros || []));
+  const asignables = puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id || compañeros.has(u.id));
   const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
     : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
@@ -215,7 +221,7 @@ export default function App() {
               {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
                   Solo cierra tareas que esa persona puede cambiar. */}
               <NovaInput currentUser={usuario} projects={proyectosElegibles}
-                users={puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id)}
+                users={asignables}
                 tareas={tareas.filter(t => t.status !== "listo" && (admin || t.assignee_id === usuario.id))}
                 onCambiarEstado={cambiarEstado} onTaskCreated={fetchTareas} />
               {admin && <AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} />}
@@ -312,7 +318,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
       {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
     </div>
   );
