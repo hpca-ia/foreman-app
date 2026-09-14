@@ -56,7 +56,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   gerente: {
-    "tareas.ver": true, "tareas.todas": true, "tareas.asignar": true,
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
     "facturas.registrar": true, "planillas.cerrar": true,

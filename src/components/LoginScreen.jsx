@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { loadFromStorage, saveToStorage } from "../lib/storage";
 import { rolInfo } from "../lib/roles";
+import { hashPin } from "../lib/equipo";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
@@ -33,7 +34,7 @@ export default function LoginScreen({ onLogin, users }) {
         }
       }
     } catch {}
-  }, []);
+  }, [users]);
 
   function selectUser(u) {
     setSel(u); setPin(""); setErr(""); setStep("pin");
@@ -44,8 +45,12 @@ export default function LoginScreen({ onLogin, users }) {
     const n = pin + d;
     setPin(n);
     if (n.length === 4) {
-      setTimeout(() => {
-        if (n === sel.pin) {
+      setTimeout(async () => {
+        // En la base solo está la huella del PIN; en un equipo que todavía no
+        // subió su lista puede seguir estando el PIN viejo en texto.
+        if (!sel.pin_hash && !sel.pin) { setErr("Este usuario no tiene PIN. Pídele a un admin que le asigne uno."); setPin(""); return; }
+        const ok = sel.pin_hash ? (await hashPin(sel.id, n)) === sel.pin_hash : n === sel.pin;
+        if (ok) {
           const exp = new Date();
           exp.setDate(exp.getDate() + 7);
           saveToStorage("foreman_session", { userId: sel.id, expires: exp.toISOString() });

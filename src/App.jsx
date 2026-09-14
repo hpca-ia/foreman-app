@@ -5,7 +5,7 @@ import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
 import { esAdmin } from "./lib/roles";
 import { cargarPermisos, crearPuede } from "./lib/permisos";
-import { USERS_DEFAULT, PROJECTS_DEFAULT } from "./lib/seedData";
+import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 
 import LoginScreen from "./components/LoginScreen";
@@ -27,8 +27,12 @@ import ModuloControlObra from "./modules/controlObra/ModuloControlObra";
 import ModuloCajaChica from "./modules/ModuloCajaChica";
 
 export default function App() {
-  const [users, setUsers] = useState(() => loadFromStorage("foreman_users", USERS_DEFAULT));
-  const [projects, setProjects] = useState(() => loadFromStorage("foreman_projects", PROJECTS_DEFAULT));
+  // Arranca con la copia guardada en el navegador y se refresca desde la base:
+  // así la pantalla de ingreso no espera, pero todos los equipos terminan
+  // viendo la misma lista.
+  const [users, setUsers] = useState(() => equipoEnCache().usuarios);
+  const [projects, setProjects] = useState(() => equipoEnCache().proyectos);
+  const [equipoRemoto, setEquipoRemoto] = useState(true);
   const [empresa, setEmpresa] = useState(() => loadFromStorage("foreman_empresa", {
     nombre: "HCA Studio", tipo: "Construcción", email: "", telefono: "", web: "", ciudad: "Quito", moneda: "USD", color: colors.brand, logoUrl: "",
   }));
@@ -48,6 +52,14 @@ export default function App() {
 
   useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, [usuario]);
   useEffect(() => { cargarPermisos().then(setPermisos); }, []);
+  useEffect(() => { recargarEquipo(); }, []);
+
+  async function recargarEquipo() {
+    const eq = await cargarEquipo();
+    setUsers(eq.usuarios); setProjects(eq.proyectos); setEquipoRemoto(eq.remoto);
+    // Si a alguien lo desactivaron desde otro equipo, deja de poder usar la app.
+    setUsuario(u => u ? (eq.usuarios.find(x => x.id === u.id) || (eq.remoto ? null : u)) : u);
+  }
 
   useEffect(() => {
     if (!usuario) return;
@@ -117,6 +129,8 @@ export default function App() {
   const puede = crearPuede(usuario, permisos);
   const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
+  // Quien no ve todo solo elige entre los proyectos donde es miembro.
+  const proyectosElegibles = veTodo ? projects : projects.filter(p => (p.miembros || []).includes(usuario.id));
   const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
     : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
@@ -266,8 +280,8 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
-      {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
+      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} onProyectoCreado={recargarEquipo} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
     </div>
   );
 }

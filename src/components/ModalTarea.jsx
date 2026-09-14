@@ -1,18 +1,45 @@
 import { useState } from "react";
+import { guardarProyecto } from "../lib/equipo";
+import { esAdmin } from "../lib/roles";
 import { TIPOS, PRIORIDAD } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 
-export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects }) {
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, onProyectoCreado }) {
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
     status: editTask.status, notes: editTask.notes || "",
-  } : { title: "", project_id: projects[0]?.id || 1, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "" });
+  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "" });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
+  const [creandoP, setCreandoP] = useState(false);
+  const [nombreP, setNombreP] = useState("");
+  const [errP, setErrP] = useState("");
+  const puedeCrearProyecto = esAdmin(currentUser.role);
+
+  // Solo los proyectos donde uno está, más el de la tarea si se está editando
+  // una que viene de otro proyecto: si no, el menú la mostraría en blanco.
+  const base = proyectosElegibles || projects;
+  const actual = projects.find(p => p.id === form.project_id);
+  const opciones = actual && !base.some(p => p.id === actual.id) ? [...base, actual] : base;
+
+  // Crear el proyecto sin salir de la tarea. Quedan como miembros quien lo
+  // crea y a quien se le asigna, que es lo mínimo para que ambos lo vean.
+  async function crearProyecto() {
+    const nombre = nombreP.trim();
+    if (!nombre) return;
+    const id = Date.now();
+    const { error } = await guardarProyecto(
+      { id, name: nombre, color: "#0F3D3E", tipo: "otro", miembros: [currentUser.id, form.assignee_id].filter(Boolean) },
+      currentUser.id
+    );
+    if (error) { setErrP("No se pudo crear: " + error.message); return; }
+    await onProyectoCreado?.();
+    inp("project_id", id); setCreandoP(false); setNombreP(""); setErrP("");
+  }
   const lS = { color: colors.muted, fontSize: 11, fontWeight: 500, marginBottom: 4, display: "block" };
 
   return (
@@ -24,11 +51,27 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
       <div style={{ display: "grid", gap: 12 }}>
         <div><label style={lS}>Título *</label><input value={form.title} onChange={e => inp("title", e.target.value)} placeholder="¿Qué hay que hacer?" style={inputStyle} /></div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div><label style={lS}>Proyecto</label><select value={form.project_id} onChange={e => inp("project_id", Number(e.target.value))} style={inputStyle}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+          <div><label style={lS}>Proyecto</label><select value={form.project_id ?? ""} onChange={e => e.target.value === "__nuevo__" ? setCreandoP(true) : inp("project_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}>
+            <option value="">Sin proyecto</option>
+            {opciones.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {puedeCrearProyecto && <option value="__nuevo__">+ Nuevo proyecto…</option>}
+          </select></div>
           <div><label style={lS}>Tipo</label><select value={form.type} onChange={e => inp("type", e.target.value)} style={inputStyle}>{TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
           <div><label style={lS}>Asignar a</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
           <div><label style={lS}>Prioridad</label><select value={form.priority} onChange={e => inp("priority", e.target.value)} style={inputStyle} disabled={!admin}>{Object.entries(PRIORIDAD).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
         </div>
+        {creandoP && (
+          <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 10 }}>
+            <label style={lS}>Nombre del proyecto nuevo</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={nombreP} onChange={e => setNombreP(e.target.value)} onKeyDown={e => e.key === "Enter" && crearProyecto()} placeholder="Ej: Mensajería oficina" style={{ ...inputStyle, flex: 1 }} autoFocus />
+              <Button variant="primary" size="sm" onClick={crearProyecto} disabled={!nombreP.trim()}>Crear</Button>
+              <Button variant="outline" size="sm" onClick={() => { setCreandoP(false); setErrP(""); }}>×</Button>
+            </div>
+            {errP && <div style={{ color: colors.danger, fontSize: 11, marginTop: 5 }}>{errP}</div>}
+            <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>El tipo y los miembros se ajustan después en Ajustes → Proyectos.</div>
+          </div>
+        )}
         <div><label style={lS}>Fecha límite *</label><input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} style={inputStyle} /></div>
         <div><label style={lS}>Notas</label><textarea value={form.notes} onChange={e => inp("notes", e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
       </div>

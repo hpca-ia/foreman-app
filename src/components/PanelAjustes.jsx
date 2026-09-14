@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { Pencil, X, Building2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { saveToStorage } from "../lib/storage";
-import { initials } from "../lib/dates";
+import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, TIPOS_PROYECTO } from "../lib/equipo";
 import { rolInfo } from "../lib/roles";
 import Modal from "./ui/Modal";
 import Avatar from "./ui/Avatar";
@@ -12,7 +12,7 @@ import UserForm from "./UserForm";
 import PanelPermisos from "./PanelPermisos";
 import ProjectForm from "./ProjectForm";
 
-export default function PanelAjustes({ usuario, permisos, setPermisos, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
+export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
   const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
   const [editP, setEditP] = useState(null);
@@ -21,10 +21,9 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, users, se
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoRef = useRef(null);
   const emptyUser = { id: Date.now(), name: "", role: "residente", pin: "", avatar: "", color: "#0F3D3E" };
-  const emptyProject = { id: Date.now(), name: "", color: "#0F3D3E" };
+  const emptyProject = { id: Date.now(), name: "", color: "#0F3D3E", tipo: "otro", miembros: [] };
+  const [errEquipo, setErrEquipo] = useState("");
 
-  function saveUsers(updated) { setUsers(updated); saveToStorage("foreman_users", updated); }
-  function saveProjects(updated) { setProjects(updated); saveToStorage("foreman_projects", updated); }
   function saveEmpresa(updated) { setEmpresa(updated); saveToStorage("foreman_empresa", updated); }
 
   async function uploadLogo(e) {
@@ -43,16 +42,45 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, users, se
     e.target.value = "";
   }
 
-  function saveUser(u) {
-    const updated = users.find(x => x.id === u.id) ? users.map(x => x.id === u.id ? { ...u, avatar: initials(u.name) } : x) : [...users, { ...u, id: Date.now(), avatar: initials(u.name) }];
-    saveUsers(updated); setEditU(null); setNewU(false);
+  // Usuarios y proyectos se guardan en la base, no en este navegador: lo que se
+  // cambia acá lo ven todos los equipos al refrescar.
+  async function saveUser(u) {
+    setErrEquipo("");
+    const existe = users.some(x => x.id === u.id);
+    const { error } = await guardarUsuario({ ...u, id: existe ? u.id : Date.now() });
+    if (error) { setErrEquipo("No se pudo guardar el usuario: " + error.message); return; }
+    setEditU(null); setNewU(false); onEquipoCambio();
   }
-  function deleteUser(id) { if (window.confirm("¿Eliminar este usuario?")) saveUsers(users.filter(u => u.id !== id)); }
-  function saveProject(p) {
-    const updated = projects.find(x => x.id === p.id) ? projects.map(x => x.id === p.id ? p : x) : [...projects, { ...p, id: Date.now() }];
-    saveProjects(updated); setEditP(null); setNewP(false);
+  async function deleteUser(id) {
+    if (!window.confirm("¿Quitar este usuario?\n\nSu historial y sus tareas no se borran: deja de poder entrar y de aparecer en las listas.")) return;
+    const { error } = await desactivarUsuario(id);
+    if (error) { setErrEquipo("No se pudo quitar: " + error.message); return; }
+    onEquipoCambio();
   }
-  function deleteProject(id) { if (window.confirm("¿Eliminar este proyecto?")) saveProjects(projects.filter(p => p.id !== id)); }
+  async function saveProject(p) {
+    setErrEquipo("");
+    const existe = projects.some(x => x.id === p.id);
+    const { error } = await guardarProyecto({ ...p, id: existe ? p.id : Date.now() }, usuario?.id);
+    if (error) { setErrEquipo("No se pudo guardar el proyecto: " + error.message); return; }
+    setEditP(null); setNewP(false); onEquipoCambio();
+  }
+  async function deleteProject(id) {
+    if (!window.confirm("¿Quitar este proyecto?\n\nSus tareas no se borran.")) return;
+    const { error } = await desactivarProyecto(id);
+    if (error) { setErrEquipo("No se pudo quitar: " + error.message); return; }
+    onEquipoCambio();
+  }
+
+  const avisoEquipo = (
+    <>
+      {!equipoRemoto && (
+        <div style={{ background: "var(--warning-soft)", border: "1px solid var(--warning-border)", color: "var(--warning)", borderRadius: "var(--radius-sm)", padding: "8px 10px", fontSize: 12, marginBottom: 10 }}>
+          Falta correr la migración 009 en Supabase. Hasta entonces esta lista es solo de este equipo y no se puede guardar.
+        </div>
+      )}
+      {errEquipo && <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 10 }}>{errEquipo}</div>}
+    </>
+  );
 
   const tabS = a => ({ padding: "7px 16px", borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", fontFamily: "var(--font)", fontSize: 12, fontWeight: 600, background: a ? "var(--brand)" : "transparent", color: a ? "#fff" : "var(--ink-soft)" });
   const lS = { color: "var(--ink-soft)", fontSize: 11, fontWeight: 500, marginBottom: 4, display: "block" };
@@ -119,6 +147,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, users, se
 
       {tab === "usuarios" && (
         <div>
+          {avisoEquipo}
           {users.map(u => editU?.id === u.id ? (
             <UserForm key={u.id} u={editU} onSave={saveUser} onCancel={() => setEditU(null)} />
           ) : (
@@ -126,13 +155,13 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, users, se
               <Avatar name={u.name} size={36} color={u.color || "#0F3D3E"} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label} · PIN: {u.pin}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
               </div>
-              <button onClick={() => setEditU({ ...u })} style={iconBtn}><Pencil size={13} /></button>
+              <button onClick={() => setEditU({ ...u, pin: "" })} style={iconBtn}><Pencil size={13} /></button>
               {u.role !== "owner" && <button onClick={() => deleteUser(u.id)} style={deleteBtn}><X size={13} /></button>}
             </div>
           ))}
-          {newU ? <UserForm u={emptyUser} onSave={saveUser} onCancel={() => setNewU(false)} /> : (
+          {newU ? <UserForm u={emptyUser} esNuevo onSave={saveUser} onCancel={() => setNewU(false)} /> : (
             <button onClick={() => setNewU(true)} style={{ width: "100%", background: "var(--bg)", border: "1.5px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 10, color: "var(--ink-soft)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>+ Agregar usuario</button>
           )}
         </div>
@@ -140,17 +169,23 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, users, se
 
       {tab === "proyectos" && (
         <div>
+          {avisoEquipo}
           {projects.map(p => editP?.id === p.id ? (
-            <ProjectForm key={p.id} p={editP} onSave={saveProject} onCancel={() => setEditP(null)} />
+            <ProjectForm key={p.id} p={editP} users={users} onSave={saveProject} onCancel={() => setEditP(null)} />
           ) : (
             <div key={p.id} style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10, borderLeft: `3px solid ${p.color}` }}>
               <div style={{ width: 12, height: 12, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
-              <div style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{p.name}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {TIPOS_PROYECTO.find(t => t.id === p.tipo)?.label || "Otro"} · {(p.miembros || []).length ? `${p.miembros.length} miembro${p.miembros.length === 1 ? "" : "s"}` : "sin miembros — solo lo ven los admins"}
+                </div>
+              </div>
               <button onClick={() => setEditP({ ...p })} style={iconBtn}><Pencil size={13} /></button>
               <button onClick={() => deleteProject(p.id)} style={deleteBtn}><X size={13} /></button>
             </div>
           ))}
-          {newP ? <ProjectForm p={emptyProject} onSave={saveProject} onCancel={() => setNewP(false)} /> : (
+          {newP ? <ProjectForm p={emptyProject} users={users} onSave={saveProject} onCancel={() => setNewP(false)} /> : (
             <button onClick={() => setNewP(true)} style={{ width: "100%", background: "var(--bg)", border: "1.5px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 10, color: "var(--ink-soft)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>+ Agregar proyecto</button>
           )}
         </div>

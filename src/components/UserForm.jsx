@@ -2,14 +2,18 @@ import { useState } from "react";
 import { inputStyle } from "./ui/Input";
 import Button from "./ui/Button";
 
-export default function UserForm({ u, onSave, onCancel }) {
-  const [f, setF] = useState({ ...u });
+export default function UserForm({ u, esNuevo = false, onSave, onCancel }) {
+  const [f, setF] = useState({ ...u, pin: u.pin || "" });
+  // Al crear, el PIN es obligatorio. Al editar, vacío deja el que tenía: en la
+  // base solo hay una huella del PIN, así que no hay forma de mostrarlo.
+  const pinOk = f.pin ? /^\d{4}$/.test(f.pin) : !esNuevo;
+  const listo = f.name?.trim() && pinOk;
   return (
     <div style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: 12, marginBottom: 8, border: "1.5px solid var(--brand)" }}>
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <input value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo" style={inputStyle} />
-          <input value={f.pin} onChange={e => setF(p => ({ ...p, pin: e.target.value }))} placeholder="PIN (4 dígitos)" maxLength={4} style={inputStyle} />
+          <input value={f.pin} onChange={e => setF(p => ({ ...p, pin: e.target.value.replace(/\D/g, "") }))} placeholder={esNuevo ? "PIN (4 dígitos)" : "Nuevo PIN (vacío: no cambia)"} maxLength={4} inputMode="numeric" style={inputStyle} />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
           <select value={f.role} onChange={e => setF(p => ({ ...p, role: e.target.value }))} style={inputStyle}>
@@ -23,7 +27,7 @@ export default function UserForm({ u, onSave, onCancel }) {
         <input value={f.email || ""} onChange={e => setF(p => ({ ...p, email: e.target.value }))} placeholder="Email (para notificaciones)" style={inputStyle} />
         <input value={f.phone || ""} onChange={e => setF(p => ({ ...p, phone: e.target.value }))} placeholder="WhatsApp (+593...)" style={inputStyle} />
         <div style={{ display: "flex", gap: 8 }}>
-          <Button variant="primary" style={{ flex: 2 }} onClick={() => f.name && f.pin && onSave(f)} disabled={!f.name || !f.pin}>Guardar</Button>
+          <Button variant="primary" style={{ flex: 2 }} onClick={() => listo && onSave(f)} disabled={!listo}>Guardar</Button>
           <Button variant="secondary" style={{ flex: 1 }} onClick={onCancel}>Cancelar</Button>
         </div>
       </div>
