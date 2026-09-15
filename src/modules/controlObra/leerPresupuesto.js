@@ -125,24 +125,24 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
 
   const rubros = [], omitidas = [], cargos = [], capitulos = [];
   let cap = null, subtotalExcel = null, totalExcel = null, ivaExcel = null;
-  const abrir = (nombre, codigo, declarado, pref = null) => {
-    cap = { nombre, codigo, declarado: declarado || null, prefijo: esCodigoCapitulo(codigo) ? prefijo(codigo) : pref };
+  const abrir = (nombre, codigo, declarado, pref = null, fila = null) => {
+    cap = { nombre, codigo, declarado: declarado || null, prefijo: esCodigoCapitulo(codigo) ? prefijo(codigo) : pref, fila };
     capitulos.push(cap);
   };
-  const rubro = (r, cantidad, precio, total) => {
+  const rubro = (r, cantidad, precio, total, global = false) => {
     if (cap && !cap.prefijo) cap.prefijo = prefijo(r.codigo);
     return rubros.push({
     capitulo: cap?.nombre || "SIN CAPÍTULO", codigo: r.codigo, descripcion: r.desc,
-    unidad: r.unidad, cantidad, precio_unitario: precio, total, fila: r.fila,
+    unidad: r.unidad, cantidad, precio_unitario: precio, total, fila: r.fila, global,
     });
   };
 
   leidas.forEach((r, k) => {
     if (!r.desc && !r.total) return;
-    if (r.capCol && cap?.nombre !== r.capCol.toUpperCase()) abrir(r.capCol.toUpperCase(), "", null);
+    if (r.capCol && cap?.nombre !== r.capCol.toUpperCase()) abrir(r.capCol.toUpperCase(), "", null, null, r.fila);
 
     if (esRubro(r)) return rubro(r, r.cant, r.precio, m.col_total != null ? r.total : r.cant * r.precio);
-    if (r.cant && r.precio && r.totalVacio) return omitidas.push(r.desc);
+    if (r.cant && r.precio && r.totalVacio) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "sin_total", cant: r.cant, precio: r.precio });
 
     if (esSubtotal(r)) {
       if (k > ultimoRubro || /general/i.test(r.linea)) { if (r.total) subtotalExcel = r.total; }
@@ -162,16 +162,16 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
     // Un global sin desglose: tiene unidad y total pero le falta cantidad o precio.
     if (r.unidad && r.total) {
       const cantidad = r.cant || 1;
-      return rubro(r, cantidad, r.precio || r.total / cantidad, r.total);
+      return rubro(r, cantidad, r.precio || r.total / cantidad, r.total, true);
     }
-    if (r.unidad) return omitidas.push(r.desc);
+    if (r.unidad) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "detalle" });
     if (m.col_capitulo == null && r.desc && r.desc.length <= 120) {
-      if (esCodigoCapitulo(r.codigo)) return abrir(r.desc.toUpperCase(), r.codigo, r.total);
+      if (esCodigoCapitulo(r.codigo)) return abrir(r.desc.toUpperCase(), r.codigo, r.total, null, r.fila);
       const p = siguientePrefijo(k);
       if (cap && (p === "mismo" || (cap.prefijo && p && p === cap.prefijo))) return;   // subtítulo o nota dentro del capítulo
-      return abrir(r.desc.toUpperCase(), r.codigo, r.total, p);
+      return abrir(r.desc.toUpperCase(), r.codigo, r.total, p, r.fila);
     }
-    if (r.desc) omitidas.push(r.desc);
+    if (r.desc) omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "otra" });
   });
 
   const suma = a => a.reduce((s, x) => s + x.total, 0);
@@ -183,9 +183,140 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
     .filter(c => c.declarado != null && Math.abs((porCap[c.nombre] || 0) - c.declarado) > 1)
     .map(c => ({ capitulo: c.nombre, excel: c.declarado, importado: porCap[c.nombre] || 0 }));
 
+  const advertencias = revisar({ rubros, omitidas, cargos, capitulos: conRubros, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres });
+
   return {
-    mapa: m, rubros, omitidas, cargos, capitulos: capitulos.filter(c => porCap[c.nombre] != null),
-    subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres,
+    mapa: m, rubros, omitidas, cargos, capitulos: conRubros,
+    subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, advertencias,
     preciosIncluyenIva: typeof mapaNova.precios_incluyen_iva === "boolean" ? mapaNova.precios_incluyen_iva : null,
   };
+}
+
+// ── Revisión del presupuesto ─────────────────────────────────────────────
+// El presupuesto se importa tal cual dice el Excel. Esto no corrige nada:
+// señala lo que el Excel trae mal —sumas que no dan, numeración que no
+// corresponde, filas que el propio Excel no suma— con su número de fila, para
+// que quien importa lo vea y decida. Son reglas y no IA a propósito: una suma
+// está bien o está mal, no se interpreta.
+
+const plata = v => (Math.round(v * 100) / 100).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const moda = a => {
+  const c = {};
+  a.forEach(x => { c[x] = (c[x] || 0) + 1; });
+  return Object.entries(c).sort((x, y) => y[1] - x[1])[0]?.[0] || null;
+};
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres }) {
+  const adv = [];
+  const add = (tipo, nivel, titulo, filas = []) => adv.push({ tipo, nivel, titulo, filas });
+  const F = f => f + 1;   // Excel numera las filas desde 1
+  const etiqueta = x => `${x.codigo ? x.codigo + " " : ""}${String(x.descripcion).slice(0, 55)}`;
+
+  // Diferencias generales. Se calculan antes y se informan después de los
+  // capítulos: si ya las explica un capítulo que no cuadra, no se repiten, que
+  // sería el mismo error contado tres veces.
+  const explicado = descuadres.reduce((t, d) => t + (d.importado - d.excel), 0);
+  const difSub = subtotalExcel != null ? sumaRubros - subtotalExcel : null;
+  const calculado = sumaRubros + sumaCargos + (ivaExcel?.total || 0);
+  const difTot = totalExcel != null ? calculado - totalExcel : null;
+
+  // Sumas por capítulo
+  descuadres.forEach(d => {
+    const c = capitulos.find(x => x.nombre === d.capitulo);
+    add("suma_capitulo", "error",
+      `El subtotal del capítulo "${d.capitulo}" dice $${plata(d.excel)}, pero sus rubros suman $${plata(d.importado)} (diferencia $${plata(d.importado - d.excel)}). Suele ser una fórmula que no incluye todas las filas.`,
+      c?.fila != null ? [{ fila: F(c.fila), texto: d.capitulo }] : []);
+  });
+
+  const subExplicado = difSub != null && Math.abs(difSub) > 1 && descuadres.length && Math.abs(difSub - explicado) <= 1;
+  if (difSub != null && Math.abs(difSub) > 1 && !subExplicado)
+    add("suma_subtotal", "error", `Los rubros suman $${plata(sumaRubros)} y el SUBTOTAL del Excel dice $${plata(subtotalExcel)} (diferencia $${plata(difSub)}).`);
+  const heredada = difSub != null ? difSub : explicado;
+  const totExplicado = difTot != null && Math.abs(difTot) > 1 && Math.abs(difTot - heredada) <= 1 && Math.abs(heredada) > 1;
+  if (difTot != null && Math.abs(difTot) > 1 && !totExplicado)
+    add("suma_total", "error", `Rubros y cargos${ivaExcel ? " con IVA" : ""} suman $${plata(calculado)} y el TOTAL del Excel dice $${plata(totalExcel)} (diferencia $${plata(difTot)}).`);
+  if (subExplicado || totExplicado) {
+    const a = adv.find(x => x.tipo === "suma_capitulo");
+    if (a) a.titulo += " Por esa misma diferencia tampoco cuadran el subtotal y el total del Excel.";
+  }
+
+  // Sumas por fila: cantidad × precio contra el total escrito
+  const malas = rubros.filter(x => !x.global && x.cantidad && x.precio_unitario
+    && Math.abs(x.total - x.cantidad * x.precio_unitario) > Math.max(0.02, Math.abs(x.total) * 0.0005));
+  if (malas.length) add("suma_fila", "error",
+    `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito. Se importa el total del Excel.`,
+    malas.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.precio_unitario)} = $${plata(x.cantidad * x.precio_unitario)}, el Excel dice $${plata(x.total)}` })));
+
+  // Cargos con porcentaje que no coincide
+  cargos.forEach(c => {
+    const pct = (String(c.descripcion).match(/(\d+(?:[.,]\d+)?)\s*%/) || [])[1];
+    if (!pct) return;
+    const base = subtotalExcel ?? sumaRubros;
+    const esperado = base * Number(pct.replace(",", ".")) / 100;
+    if (Math.abs(esperado - c.total) > 1) add("cargo_porcentaje", "aviso",
+      `"${c.descripcion}" dice ${pct} %, pero el monto es $${plata(c.total)}; el ${pct} % del subtotal serían $${plata(esperado)}.`,
+      [{ fila: F(c.fila), texto: c.descripcion }]);
+  });
+
+  // Filas que el propio Excel no suma
+  const sinTotal = omitidas.filter(o => o.motivo === "sin_total");
+  if (sinTotal.length) add("fila_sin_total", "aviso",
+    `${plural(sinTotal.length, "fila tiene", "filas tienen")} cantidad y precio pero la celda de total vacía: el Excel no las suma, así que no se importan.`,
+    sinTotal.map(o => ({ fila: F(o.fila), texto: `${etiqueta(o)}: ${o.cant} × $${plata(o.precio)} = $${plata(o.cant * o.precio)}` })));
+
+  // Numeración de capítulos
+  const prefDe = {};
+  capitulos.forEach(c => { prefDe[c.nombre] = moda(rubros.filter(x => x.capitulo === c.nombre).map(x => prefijo(x.codigo)).filter(Boolean)); });
+  const numerados = capitulos.filter(c => esCodigo(c.codigo)).length;
+  capitulos.forEach(c => {
+    const pr = prefDe[c.nombre];
+    const donde = c.fila != null ? [{ fila: F(c.fila), texto: c.nombre }] : [];
+    if (esCodigo(c.codigo) && !esCodigoCapitulo(c.codigo))
+      add("capitulo_numeracion", "aviso", `El capítulo "${c.nombre}" está numerado "${c.codigo}", que es un código de rubro${pr ? `; sus rubros son ${pr}.x` : ""}.`, donde);
+    else if (esCodigoCapitulo(c.codigo) && pr && prefijo(c.codigo) !== pr)
+      add("capitulo_numeracion", "aviso", `El capítulo "${c.nombre}" es el ${prefijo(c.codigo)}, pero sus rubros están numerados ${pr}.x.`, donde);
+    else if (!esCodigo(c.codigo) && numerados >= capitulos.length / 2 && capitulos.length > 1)
+      add("capitulo_numeracion", "aviso", `El capítulo "${c.nombre}" no tiene número${pr ? `; sus rubros son ${pr}.x` : ""}.`, donde);
+  });
+
+  // Numeración de rubros
+  const fuera = rubros.filter(x => {
+    const c = capitulos.find(k => k.nombre === x.capitulo);
+    const pc = c && (esCodigoCapitulo(c.codigo) ? prefijo(c.codigo) : prefDe[c.nombre]);
+    return pc && prefijo(x.codigo) && prefijo(x.codigo) !== pc;
+  });
+  if (fuera.length) add("rubro_codigo_fuera", "aviso",
+    `${plural(fuera.length, "rubro tiene", "rubros tienen")} un código que no corresponde a su capítulo.`,
+    fuera.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)} — está en "${x.capitulo}"` })));
+
+  const porCodigo = {};
+  rubros.forEach(x => { if (esCodigo(x.codigo)) (porCodigo[x.codigo] = porCodigo[x.codigo] || []).push(x); });
+  const repetidos = Object.values(porCodigo).filter(a => a.length > 1);
+  if (repetidos.length) add("codigo_repetido", "aviso",
+    `${plural(repetidos.length, "código aparece", "códigos aparecen")} en más de un rubro.`,
+    repetidos.flat().map(x => ({ fila: F(x.fila), texto: etiqueta(x) })));
+
+  const sinCodigo = rubros.filter(x => !esCodigo(x.codigo));
+  if (sinCodigo.length && sinCodigo.length <= rubros.length * 0.3) add("rubro_sin_codigo", "aviso",
+    `${plural(sinCodigo.length, "rubro no tiene", "rubros no tienen")} código, cuando el resto sí.`,
+    sinCodigo.map(x => ({ fila: F(x.fila), texto: `${String(x.descripcion).slice(0, 55)} — en "${x.capitulo}"` })));
+
+  // Posibles duplicados
+  const grupos = {};
+  rubros.forEach(x => {
+    const k = `${String(x.descripcion).toLowerCase().replace(/\s+/g, " ")}|${x.cantidad}|${x.precio_unitario}`;
+    (grupos[k] = grupos[k] || []).push(x);
+  });
+  const dups = Object.values(grupos).filter(a => a.length > 1);
+  if (dups.length) add("duplicado", "aviso",
+    `${plural(dups.length, "rubro aparece", "rubros aparecen")} dos o más veces con la misma descripción, cantidad y precio. Puede ser a propósito; revísalo.`,
+    dups.flat().map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)} — $${plata(x.total)}` })));
+
+  const sinCap = rubros.filter(x => x.capitulo === "SIN CAPÍTULO");
+  if (sinCap.length && capitulos.length) add("sin_capitulo", "aviso",
+    `${plural(sinCap.length, "rubro quedó", "rubros quedaron")} antes del primer capítulo.`,
+    sinCap.map(x => ({ fila: F(x.fila), texto: etiqueta(x) })));
+
+  return adv.sort((a, b) => (a.nivel === "error" ? 0 : 1) - (b.nivel === "error" ? 0 : 1));
 }

@@ -1,6 +1,7 @@
 import { Download, FileSpreadsheet, CheckCircle2, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { fmt } from "./calculos";
+import RevisionPresupuesto from "./RevisionPresupuesto";
 
 const n = v => Number(v) || 0;
 
@@ -52,6 +53,12 @@ export default function PresupuestoOriginal({ obra, rubros }) {
           </a>
         )}
       </div>
+
+      {Array.isArray(obra.advertencias) && (
+        <div style={{ marginBottom: 12 }}>
+          <RevisionPresupuesto advertencias={obra.advertencias} guardada />
+        </div>
+      )}
 
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>

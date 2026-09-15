@@ -7,6 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
 import { MAPA_PROMPT, interpretarPresupuesto } from "./leerPresupuesto";
+import RevisionPresupuesto from "./RevisionPresupuesto";
 
 const n = v => Number(v) || 0;
 const CAP_CARGOS = "HONORARIOS Y CARGOS";
@@ -41,6 +42,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [cargos, setCargos] = useState([]);
   const [omitidas, setOmitidas] = useState([]);
   const [control, setControl] = useState(null);     // lo que declaraba el Excel, para comparar
+  const [advertencias, setAdvertencias] = useState([]);
   const [nombre, setNombre] = useState("");
   const [cliente, setCliente] = useState("");
   // Sin valor por defecto a propósito. El control de obra se hace con IVA
@@ -65,7 +67,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   }
 
   function limpiar() {
-    setRubros([]); setCargos([]); setOmitidas([]); setControl(null);
+    setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]);
     setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true); setAviso("");
   }
 
@@ -100,6 +102,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
         if (r && r.rubros.length >= 3) {
           setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
           setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
+          setAdvertencias(r.advertencias || []);
           // Sugerir sin decidir: la respuesta la tiene que dar quien importa.
           if (r.ivaExcel) {
             setIvaPct(r.ivaExcel.pct || 15);
@@ -236,12 +239,20 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       }
     }
 
+    // La revisión queda con la obra, para volver a verla en la pestaña Presupuesto.
+    let faltaRevision = false;
+    if (!sinMigracion) {
+      const { error: eAdv } = await supabase.from("obras").update({ advertencias }).eq("id", obra.id);
+      faltaRevision = !!eAdv;
+    }
+
     // El presupuesto que se controla también es conocimiento: sus rubros y sus
     // precios (sin IVA, como se cotizan) entran a la base de rubros.
     await alimentarBase(rubros, { cliente: cliente.trim(), proyecto: nombre.trim() });
 
     setGuardando(false);
     if (sinMigracion) alert("La obra se creó, pero falta correr la migración 013 en Supabase: no se guardó el archivo original ni el IVA del Excel.");
+    else if (faltaRevision) alert("La obra se creó, pero falta correr la migración 014 en Supabase: no se guardó la revisión del Excel.");
     onCreada(obra);
   }
 
@@ -338,23 +349,21 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
                   <Cuadra t="Rubros contra el subtotal:" dif={difSubtotal} />
                   {control.total != null && <div style={{ marginTop: 4 }}>Total del Excel: ${fmt(control.total)}</div>}
                   <Cuadra t="Rubros y cargos contra el total:" dif={difTotal} />
-                  {control.descuadres?.length > 0 && (
-                    <div style={{ marginTop: 6, color: colors.warning }}>
-                      Capítulos cuyos rubros no suman lo que dice su subtotal en el Excel:
-                      {control.descuadres.map(d => (
-                        <div key={d.capitulo} style={{ fontSize: 11 }}>· {d.capitulo}: Excel ${fmt(d.excel)} / rubros ${fmt(d.importado)}</div>
-                      ))}
-                      <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>Suele ser una fórmula del Excel que no incluye todas las filas.</div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
 
-            {omitidas.length > 0 && (
+            {control && (
+              <div style={{ marginTop: 14 }}>
+                <RevisionPresupuesto advertencias={advertencias} />
+              </div>
+            )}
+
+            {/* Las filas con cantidad y precio sin total ya aparecen en la revisión. */}
+            {omitidas.filter(o => o.motivo !== "sin_total").length > 0 && (
               <div style={{ marginTop: 12, fontSize: 11, color: colors.inkSoft, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
-                <strong>{omitidas.length} filas</strong> no entraron por ser líneas de detalle sin monto, como el despiece de ventanas. No cambian el total.
-                <div style={{ color: colors.muted, marginTop: 3 }}>Por ejemplo: {omitidas.slice(0, 2).map(d => d.slice(0, 40)).join(" · ")}</div>
+                <strong>{omitidas.filter(o => o.motivo !== "sin_total").length} filas</strong> no entraron por ser líneas de detalle sin monto, como el despiece de ventanas. No cambian el total.
+                <div style={{ color: colors.muted, marginTop: 3 }}>Por ejemplo: {omitidas.filter(o => o.motivo !== "sin_total").slice(0, 2).map(d => String(d.descripcion).slice(0, 40)).join(" · ")}</div>
               </div>
             )}
           </div>
