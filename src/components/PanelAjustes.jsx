@@ -2,7 +2,8 @@ import { useState, useRef } from "react";
 import { Pencil, X, Building2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { saveToStorage } from "../lib/storage";
-import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, TIPOS_PROYECTO } from "../lib/equipo";
+import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
+import { esAdmin } from "../lib/roles";
 import { rolInfo } from "../lib/roles";
 import Modal from "./ui/Modal";
 import Avatar from "./ui/Avatar";
@@ -47,8 +48,14 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
   async function saveUser(u) {
     setErrEquipo("");
     const existe = users.some(x => x.id === u.id);
-    const { error } = await guardarUsuario({ ...u, id: existe ? u.id : Date.now() });
+    const id = existe ? u.id : Date.now();
+    const { error } = await guardarUsuario({ ...u, id });
     if (error) { setErrEquipo("No se pudo guardar el usuario: " + error.message); return; }
+    // Los admins ven todo: sus membresías no se tocan desde acá.
+    if (!esAdmin(u.role) && Array.isArray(u.proyectos)) {
+      const r = await asignarProyectosAUsuario(id, u.proyectos, projects.map(p => p.id));
+      if (r.error) { setErrEquipo("El usuario se guardó, pero sus proyectos no: " + r.error.message); onEquipoCambio(); return; }
+    }
     setEditU(null); setNewU(false); onEquipoCambio();
   }
   async function deleteUser(id) {
@@ -149,19 +156,19 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
         <div>
           {avisoEquipo}
           {users.map(u => editU?.id === u.id ? (
-            <UserForm key={u.id} u={editU} onSave={saveUser} onCancel={() => setEditU(null)} />
+            <UserForm key={u.id} u={editU} projects={projects} onSave={saveUser} onCancel={() => setEditU(null)} />
           ) : (
             <div key={u.id} style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
               <Avatar name={u.name} size={36} color={u.color || "#0F3D3E"} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{!esAdmin(u.role) && ` · ${projects.filter(p => (p.miembros || []).includes(u.id)).length} proyecto${projects.filter(p => (p.miembros || []).includes(u.id)).length === 1 ? "" : "s"}`}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
               </div>
-              <button onClick={() => setEditU({ ...u, pin: "" })} style={iconBtn}><Pencil size={13} /></button>
+              <button onClick={() => setEditU({ ...u, pin: "", proyectos: projects.filter(p => (p.miembros || []).includes(u.id)).map(p => p.id) })} style={iconBtn}><Pencil size={13} /></button>
               {u.role !== "owner" && <button onClick={() => deleteUser(u.id)} style={deleteBtn}><X size={13} /></button>}
             </div>
           ))}
-          {newU ? <UserForm u={emptyUser} esNuevo onSave={saveUser} onCancel={() => setNewU(false)} /> : (
+          {newU ? <UserForm u={emptyUser} esNuevo projects={projects} onSave={saveUser} onCancel={() => setNewU(false)} /> : (
             <button onClick={() => setNewU(true)} style={{ width: "100%", background: "var(--bg)", border: "1.5px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 10, color: "var(--ink-soft)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>+ Agregar usuario</button>
           )}
         </div>

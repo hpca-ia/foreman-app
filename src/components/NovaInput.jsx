@@ -4,7 +4,7 @@ import { colors } from "../theme/colors";
 import Button from "./ui/Button";
 import NovaMark from "./NovaMark";
 
-export default function NovaInput({ currentUser, projects, users, tareas = [], onCambiarEstado, onTaskCreated }) {
+export default function NovaInput({ currentUser, projects, users, puedeAsignarATodos = true, tareas = [], onCambiarEstado, onTaskCreated }) {
   const [texto, setTexto] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -146,6 +146,7 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
     // nombre que NOVA creyó oír; y un proyecto que no es suyo queda vacío.
     if (fila.assignee_id != null && !users.some(u => u.id === fila.assignee_id)) fila.assignee_id = currentUser.id;
     if (fila.project_id != null && !projects.some(p => p.id === fila.project_id)) fila.project_id = null;
+    if (fila.assignee_id != null && !asignablesDe(fila.project_id).some(u => u.id === fila.assignee_id)) fila.assignee_id = currentUser.id;
     const { error } = await supabase.from("tasks").insert({ ...fila, created_by: currentUser.id });
     if (error) {
       const msg = /out of range/i.test(error.message)
@@ -168,6 +169,20 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
   }
 
   const cambiar = (k, v) => setResult(r => ({ ...r, [k]: v }));
+  // Sin permiso de asignar a todos, las personas dependen del proyecto elegido.
+  const asignablesDe = projectId => {
+    if (puedeAsignarATodos) return users;
+    const p = projects.find(x => x.id === projectId);
+    return p ? users.filter(u => (p.miembros || []).includes(u.id)) : users;
+  };
+  const cambiarProyecto = valor => {
+    const id = valor ? Number(valor) : null;
+    const lista = asignablesDe(id);
+    setResult(r => ({
+      ...r, project_id: id,
+      assignee_id: r.assignee_id == null || lista.some(u => u.id === r.assignee_id) ? r.assignee_id : currentUser.id,
+    }));
+  };
   const campo = { background: "#fff", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, color: colors.ink, fontSize: 12, fontFamily: colors.font, padding: "6px 8px", minWidth: 0, boxSizing: "border-box" };
 
   return (
@@ -221,13 +236,13 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
           <input value={result.title || ""} onChange={e => cambiar("title", e.target.value)}
             style={{ ...campo, fontSize: 13, fontWeight: 600, marginBottom: 6, width: "100%" }} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <select value={result.project_id ?? ""} onChange={e => cambiar("project_id", e.target.value ? Number(e.target.value) : null)} style={campo}>
+            <select value={result.project_id ?? ""} onChange={e => cambiarProyecto(e.target.value)} style={campo}>
               <option value="">Sin proyecto</option>
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <select value={result.assignee_id ?? ""} onChange={e => cambiar("assignee_id", e.target.value ? Number(e.target.value) : null)} style={campo}>
               <option value="">Sin asignar</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {asignablesDe(result.project_id).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
             <input type="date" value={result.due_date || ""} onChange={e => cambiar("due_date", e.target.value)} style={campo} />
             <select value={result.priority || "media"} onChange={e => cambiar("priority", e.target.value)} style={campo}>

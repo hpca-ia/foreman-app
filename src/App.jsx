@@ -221,7 +221,7 @@ export default function App() {
               {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
                   Solo cierra tareas que esa persona puede cambiar. */}
               <NovaInput currentUser={usuario} projects={proyectosElegibles}
-                users={asignables}
+                users={asignables} puedeAsignarATodos={puede("tareas.asignar")}
                 tareas={tareas.filter(t => t.status !== "listo" && (admin || t.assignee_id === usuario.id))}
                 onCambiarEstado={cambiarEstado} onTaskCreated={fetchTareas} />
               {admin && <AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} />}

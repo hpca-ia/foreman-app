@@ -146,3 +146,21 @@ export async function guardarProyecto(p, creadoPor) {
 export function desactivarProyecto(id) {
   return supabase.from("proyectos").update({ activo: false }).eq("id", id);
 }
+
+/**
+ * Los proyectos de una persona, marcados desde su ficha. Solo toca los
+ * proyectos que se mostraron en pantalla (`visibles`): una membresía en un
+ * proyecto desactivado no se borra por no aparecer en la lista.
+ */
+export async function asignarProyectosAUsuario(usuarioId, proyectoIds = [], visibles = []) {
+  if (visibles.length) {
+    const { error: e1 } = await supabase.from("proyecto_miembros").delete()
+      .eq("usuario_id", usuarioId).in("proyecto_id", visibles);
+    if (e1) return { error: e1 };
+  }
+  const ids = [...new Set(proyectoIds)];
+  if (!ids.length) return { error: null };
+  const { error } = await supabase.from("proyecto_miembros")
+    .insert(ids.map(proyecto_id => ({ proyecto_id, usuario_id: usuarioId })));
+  return { error };
+}

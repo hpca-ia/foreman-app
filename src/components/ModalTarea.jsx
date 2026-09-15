@@ -16,13 +16,33 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "", privada: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   const soyAdmin = esAdmin(currentUser.role);
-  // La lista de a quién se puede asignar la decide App —cualquiera con el
-  // permiso de asignar; sin él, uno mismo y sus compañeros de proyecto—, la
-  // misma que usa NOVA. Al editar se agrega el asignado actual para que el menú
-  // no lo muestre en blanco.
-  const baseAsignables = asignablesApp || users.filter(u => u.id === currentUser.id);
+  // A quién se puede asignar. Con el permiso de asignar, a cualquiera. Sin él,
+  // manda el proyecto: si hay uno elegido, solo sus miembros —para no mandarle
+  // a alguien una tarea de una obra donde no está—; sin proyecto, uno mismo y
+  // todos sus compañeros, la misma lista que usa NOVA. Al editar se agrega el
+  // asignado actual para que el menú no lo muestre en blanco.
+  const puedeAsignarATodos = puede("tareas.asignar");
+  const asignablesPara = projectId => {
+    if (puedeAsignarATodos) return users;
+    const p = projects.find(x => x.id === projectId);
+    if (p) return users.filter(u => (p.miembros || []).includes(u.id));
+    return asignablesApp || users.filter(u => u.id === currentUser.id);
+  };
+  const baseAsignables = asignablesPara(form.project_id);
   const actualAsignado = users.find(u => u.id === editTask?.assignee_id);
   const asignables = actualAsignado && !baseAsignables.some(u => u.id === actualAsignado.id) ? [...baseAsignables, actualAsignado] : baseAsignables;
+
+  function elegirProyecto(valor) {
+    if (valor === "__nuevo__") { setCreandoP(true); return; }
+    const id = valor ? Number(valor) : null;
+    const lista = asignablesPara(id);
+    setForm(f => ({
+      ...f, project_id: id,
+      // Si el asignado no es de ese proyecto, la tarea vuelve a quien la crea.
+      assignee_id: f.assignee_id == null || lista.some(u => u.id === f.assignee_id) ? f.assignee_id
+        : (lista.some(u => u.id === currentUser.id) ? currentUser.id : null),
+    }));
+  }
   // Ver no es tocar: la tarea de otra persona se abre, pero solo la cambia
   // quien la tiene asignada, quien la creó o un admin.
   const soloLectura = !!editTask && !soyAdmin && editTask.assignee_id !== currentUser.id && editTask.created_by !== currentUser.id;
@@ -62,7 +82,7 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
       <fieldset disabled={soloLectura} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: "grid", gap: 12 }}>
         <div><label style={lS}>Título *</label><input value={form.title} onChange={e => inp("title", e.target.value)} placeholder="¿Qué hay que hacer?" style={inputStyle} /></div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div><label style={lS}>Proyecto</label><select value={form.project_id ?? ""} onChange={e => e.target.value === "__nuevo__" ? setCreandoP(true) : inp("project_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}>
+          <div><label style={lS}>Proyecto</label><select value={form.project_id ?? ""} onChange={e => elegirProyecto(e.target.value)} style={inputStyle}>
             <option value="">Sin proyecto</option>
             {opciones.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             {puedeCrearProyecto && <option value="__nuevo__">+ Nuevo proyecto…</option>}
