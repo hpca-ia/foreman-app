@@ -6,12 +6,17 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { normalizarUnidad, etiquetaUnidad } from "../../lib/unidades";
 import { normalNombre } from "../../lib/preguntasNova";
+import { precioAlCosto } from "../../lib/analisisUtilidad";
 
 // Base de rubros para ingeniería de costos: cada rubro con todos los precios
 // que tuvo, de qué cliente o proveedor, en qué obra y cuándo. Los filtros
 // recortan los precios —no los rubros—, así que el mínimo, el promedio y la
 // variación son siempre de lo que se está mirando: "este rubro, solo
 // proveedores, desde 2025".
+//
+// "Al costo" saca el IVA y la utilidad de cada precio. Los que traen utilidad
+// sin saber cuánto —o los viejos, de los que nunca se dijo— no entran en esa
+// cuenta: se ven en el detalle pero no inflan el costo.
 
 const fmt = n => (Number(n) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const FILTROS = { q: "", tipo: "todos", nombre: "", proyecto: "", capitulo: "", unidad: "", desde: "", minPrecios: 1, orden: "precios" };
@@ -37,6 +42,7 @@ export default function BaseRubros({ puede }) {
   const [f, setF] = useState(FILTROS);
   const [abierto, setAbierto] = useState(null);
   const [limite, setLimite] = useState(100);
+  const [modo, setModo] = useState("vinieron");   // vinieron | costo
   const puedeEditar = puede ? puede("presupuestos.crear") : true;
 
   async function cargar() {
@@ -62,7 +68,8 @@ export default function BaseRubros({ puede }) {
       const tipo = h.origen_tipo || (String(h.cliente_nombre || "").trim() ? "cliente" : null);
       const nombre = String((tipo === "proveedor" ? h.proveedor_nombre : h.cliente_nombre) || "").trim();
       const u = h.unidad ?? r.unidad;
-      return { ...h, rubro: r, tipo, nombre, unidadTexto: u, unidadCanon: normalizarUnidad(u).canon || String(u || "").trim().toLowerCase(),
+      const pc = precioAlCosto(h);
+      return { ...h, rubro: r, tipo, nombre, unidadTexto: u, costo: pc.costo, utilEstado: pc.estado, unidadCanon: normalizarUnidad(u).canon || String(u || "").trim().toLowerCase(),
         capituloNombre: h.capitulo || r.capitulos?.nombre || "", anio: String(h.fecha || "").slice(0, 4), proyecto: h.proyecto_ref || "" };
     }).filter(Boolean);
   }, [rubros, precios]);
@@ -96,14 +103,16 @@ export default function BaseRubros({ puede }) {
     const grupos = new Map();
     filtrados.forEach(h => { if (!grupos.has(h.rubro_id)) grupos.set(h.rubro_id, []); grupos.get(h.rubro_id).push(h); });
     const filas = [...grupos.values()].map(ps => {
-      const valores = ps.map(p => Number(p.precio_unitario) || 0);
-      const min = Math.min(...valores), max = Math.max(...valores);
       const ordenados = ps.slice().sort((a, b) => fechaOrden(b.fecha).localeCompare(fechaOrden(a.fecha)) || b.id - a.id);
-      return { rubro: ps[0].rubro, precios: ordenados, n: ps.length, min, max,
+      const validos = ordenados.filter(p => valorDe(p, modo) != null);
+      if (!validos.length) return null;
+      const valores = validos.map(p => valorDe(p, modo));
+      const min = Math.min(...valores), max = Math.max(...valores);
+      return { rubro: ps[0].rubro, precios: ordenados, n: validos.length, min, max,
         prom: valores.reduce((s, v) => s + v, 0) / valores.length,
         variacion: min > 0 ? (max - min) / min : 0,
-        ultimo: ordenados[0], fuentes: new Set(ps.map(p => normalNombre(p.nombre) || "-")).size };
-    }).filter(x => x.n >= Number(f.minPrecios));
+        ultimo: validos[0], fuentes: new Set(validos.map(p => normalNombre(p.nombre) || "-")).size };
+    }).filter(x => x && x.n >= Number(f.minPrecios));
     const orden = {
       precios: (a, b) => b.n - a.n,
       variacion: (a, b) => b.variacion - a.variacion,
@@ -111,13 +120,14 @@ export default function BaseRubros({ puede }) {
       descripcion: (a, b) => a.rubro.descripcion.localeCompare(b.rubro.descripcion, "es"),
     }[f.orden];
     return filas.sort((a, b) => orden(a, b) || a.rubro.descripcion.localeCompare(b.rubro.descripcion, "es"));
-  }, [filtrados, f.minPrecios, f.orden]);
+  }, [filtrados, f.minPrecios, f.orden, modo]);
 
   const resumen = useMemo(() => ({
     clientes: new Set(filtrados.filter(h => h.tipo === "cliente").map(h => normalNombre(h.nombre))).size,
     proveedores: new Set(filtrados.filter(h => h.tipo === "proveedor").map(h => normalNombre(h.nombre))).size,
     sinOrigen: vigentes.filter(h => !h.tipo).length,
     sinPrecios: rubros.length - new Set(vigentes.map(h => h.rubro_id)).size,
+    sinCosto: filtrados.filter(h => h.costo == null).length,
   }), [filtrados, vigentes, rubros]);
 
   const cambiar = (k, v) => { setF(prev => ({ ...prev, [k]: v, ...(k === "tipo" ? { nombre: "", proyecto: "" } : {}) })); setLimite(100); setAbierto(null); };
@@ -129,12 +139,13 @@ export default function BaseRubros({ puede }) {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filasRubros.map(x => ({
       Rubro: x.rubro.descripcion, Unidad: etiquetaUnidad(x.ultimo.unidadCanon), Capítulo: x.ultimo.capituloNombre,
       Precios: x.n, Mínimo: x.min, Promedio: Math.round(x.prom * 100) / 100, Máximo: x.max, "Variación %": Math.round(x.variacion * 1000) / 10,
-      "Último precio": Number(x.ultimo.precio_unitario), "Último de": x.ultimo.nombre, "Última fecha": x.ultimo.fecha,
-    }))), "Rubros");
+      [modo === "costo" ? "Último al costo" : "Último precio"]: valorDe(x.ultimo, modo), "Último de": x.ultimo.nombre, "Última fecha": x.ultimo.fecha,
+    }))), modo === "costo" ? "Rubros al costo" : "Rubros");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filtrados.map(h => ({
       Rubro: h.rubro.descripcion, Origen: h.tipo === "proveedor" ? "Proveedor" : h.tipo === "cliente" ? "Cliente" : "Sin origen",
       Nombre: h.nombre, Proyecto: h.proyecto, Fecha: h.fecha, Unidad: h.unidadTexto, Cantidad: h.cantidad ?? "", Precio: Number(h.precio_unitario),
       "Con IVA": h.iva_incluido === true ? "sí" : h.iva_incluido === false ? "no" : "",
+      Utilidad: etiquetaUtilidad(h), "Al costo": h.costo != null ? Math.round(h.costo * 100) / 100 : "",
     }))), "Precios");
     XLSX.writeFile(wb, `base-de-rubros-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
@@ -165,6 +176,17 @@ export default function BaseRubros({ puede }) {
         <>
           {/* Filtros */}
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>PRECIOS</span>
+              {[["vinieron", "Como vinieron"], ["costo", "Al costo (sin IVA ni utilidad)"]].map(([v, t]) => (
+                <button key={v} onClick={() => { setModo(v); setAbierto(null); }}
+                  style={{ padding: "5px 11px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                    border: `1.5px solid ${modo === v ? colors.brand : colors.border}`, background: modo === v ? colors.brandSoft : "#fff", color: modo === v ? colors.brand : colors.inkSoft }}>{t}</button>
+              ))}
+              {modo === "costo" && resumen.sinCosto > 0 && (
+                <span style={{ fontSize: 11, color: colors.warning }}>{resumen.sinCosto} precios no entran: no se sabe si traen utilidad. Corrígelos en Fuentes.</span>
+              )}
+            </div>
             <input value={f.q} onChange={e => cambiar("q", e.target.value)} placeholder="Buscar rubro… (ej. porcelanato 60)" style={{ ...inputStyle, marginBottom: 10 }} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
               <div><label style={lbl}>ORIGEN</label>
@@ -241,11 +263,11 @@ export default function BaseRubros({ puede }) {
                         <span style={{ ...num, color: colors.inkSoft }}>${fmt(x.max)}</span>
                         <span style={{ ...num, color: alta ? colors.warning : colors.muted, fontWeight: alta ? 700 : 400 }}>{x.n > 1 ? `${Math.round(x.variacion * 100)} %` : "—"}</span>
                         <span style={{ ...num, minWidth: 0 }}>
-                          <span style={{ display: "block", color: colors.ink }}>${fmt(x.ultimo.precio_unitario)}</span>
+                          <span style={{ display: "block", color: colors.ink }}>${fmt(valorDe(x.ultimo, modo))}</span>
                           <span style={{ display: "block", fontSize: 10, color: colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.ultimo.nombre || "sin origen"} · {x.ultimo.anio}</span>
                         </span>
                       </div>
-                      {open && <DetallePrecios x={x} />}
+                      {open && <DetallePrecios x={x} modo={modo} />}
                     </div>
                   );
                 })}
@@ -263,6 +285,12 @@ export default function BaseRubros({ puede }) {
   );
 }
 
+// El precio que cuenta en cada modo; null si en ese modo no entra.
+const valorDe = (p, modo) => (modo === "costo" ? p.costo : Number(p.precio_unitario) || 0);
+const etiquetaUtilidad = p => p.utilEstado === "costo" ? "al costo"
+  : p.utilEstado === "con_utilidad" ? `+${Number(p.utilidad_pct) || 0} %`
+  : p.utilEstado === "desconocida" ? "desconocida" : "";
+
 const filaGrid = { display: "grid", gridTemplateColumns: "minmax(260px,1fr) 50px 64px 90px 90px 90px 76px 150px", gap: 8 };
 const num = { textAlign: "right" };
 const enlace = { background: "none", border: "none", padding: 0, color: colors.brand, fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" };
@@ -273,16 +301,16 @@ function Origen({ tipo }) {
   return <span style={{ display: "inline-block", fontSize: 9, fontWeight: 700, color, background: fondo, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>{txt}</span>;
 }
 
-function DetallePrecios({ x }) {
-  const cols = "76px minmax(150px,1fr) minmax(140px,1fr) 80px 56px 70px 100px";
+function DetallePrecios({ x, modo }) {
+  const cols = "76px minmax(150px,1fr) minmax(130px,1fr) 76px 50px 64px 96px 80px 90px";
   return (
     <div style={{ background: colors.bg, padding: "6px 14px 10px 36px" }}>
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 8, fontSize: 9, fontWeight: 700, color: colors.muted, padding: "4px 0", letterSpacing: 0.3 }}>
-        <span>ORIGEN</span><span>CLIENTE / PROVEEDOR</span><span>PROYECTO</span><span>FECHA</span><span>UND</span><span style={num}>CANT.</span><span style={num}>PRECIO</span>
+        <span>ORIGEN</span><span>CLIENTE / PROVEEDOR</span><span>PROYECTO</span><span>FECHA</span><span>UND</span><span style={num}>CANT.</span><span style={num}>PRECIO</span><span>UTILIDAD</span><span style={num}>AL COSTO</span>
       </div>
       {x.precios.map(p => {
-        const valor = Number(p.precio_unitario);
-        const color = x.n > 1 && valor === x.min ? colors.success : x.n > 1 && valor === x.max ? colors.danger : colors.ink;
+        const valor = valorDe(p, modo);
+        const color = valor == null ? colors.muted : x.n > 1 && valor === x.min ? colors.success : x.n > 1 && valor === x.max ? colors.danger : colors.ink;
         return (
           <div key={p.id} style={{ display: "grid", gridTemplateColumns: cols, gap: 8, fontSize: 11, padding: "3px 0", alignItems: "center", color: colors.inkSoft }}>
             <span><Origen tipo={p.tipo} /></span>
@@ -291,11 +319,13 @@ function DetallePrecios({ x }) {
             <span>{p.fecha}</span>
             <span>{p.unidadTexto}</span>
             <span style={num}>{p.cantidad != null ? fmt(p.cantidad) : ""}</span>
-            <span style={{ ...num, color, fontWeight: 600 }}>${fmt(valor)}{p.iva_incluido === true && <span style={{ fontSize: 9, color: colors.muted, fontWeight: 400 }}> c/IVA</span>}</span>
+            <span style={{ ...num, color: modo === "costo" ? colors.inkSoft : color, fontWeight: modo === "costo" ? 400 : 600 }}>${fmt(p.precio_unitario)}{p.iva_incluido === true && <span style={{ fontSize: 9, color: colors.muted, fontWeight: 400 }}> c/IVA</span>}</span>
+            <span style={{ fontSize: 10, color: p.utilEstado === "desconocida" ? colors.warning : colors.muted }}>{etiquetaUtilidad(p) || "sin dato"}</span>
+            <span style={{ ...num, color: modo === "costo" ? color : colors.inkSoft, fontWeight: modo === "costo" ? 600 : 400 }}>{p.costo != null ? `$${fmt(p.costo)}` : "—"}</span>
           </div>
         );
       })}
-      {x.n > 1 && <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>En verde el más bajo, en rojo el más alto.</div>}
+      {x.n > 1 && <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>En verde el más bajo, en rojo el más alto{modo === "costo" ? " al costo. Los que no tienen costo no cuentan" : ""}.</div>}
     </div>
   );
 }
@@ -313,8 +343,8 @@ function Fuentes({ todos, puedeEditar, onCambio, setError, onVer }) {
     const m = new Map();
     todos.filter(h => !!h.anulado === verQuitados).forEach(h => {
       const clave = `${h.tipo || ""}|${normalNombre(h.nombre)}|${h.proyecto}`;
-      if (!m.has(clave)) m.set(clave, { clave, tipo: h.tipo, nombre: h.nombre, proyecto: h.proyecto, ids: [], fechas: [] });
-      const g = m.get(clave); g.ids.push(h.id); g.fechas.push(h.fecha);
+      if (!m.has(clave)) m.set(clave, { clave, tipo: h.tipo, nombre: h.nombre, proyecto: h.proyecto, ids: [], fechas: [], utilidades: new Set() });
+      const g = m.get(clave); g.ids.push(h.id); g.fechas.push(h.fecha); g.utilidades.add(etiquetaUtilidad(h) || "sin dato");
     });
     return [...m.values()].sort((a, b) => (!a.tipo === !b.tipo ? b.ids.length - a.ids.length : a.tipo ? 1 : -1));
   }, [todos, verQuitados]);
@@ -324,7 +354,7 @@ function Fuentes({ todos, puedeEditar, onCambio, setError, onVer }) {
     for (let i = 0; i < ids.length; i += 200) {
       const { error } = await supabase.from("precios_historial").update(cambios).in("id", ids.slice(i, i + 200));
       if (error) {
-        setError(/column|schema cache/i.test(error.message) ? "Falta correr la migración 016 en Supabase para guardar el origen de los precios." : "No se pudo guardar: " + error.message);
+        setError(/column|schema cache/i.test(error.message) ? "Faltan migraciones en Supabase (016 y 017) para guardar el origen y la utilidad de los precios." : "No se pudo guardar: " + error.message);
         setGuardando(false); return false;
       }
     }
@@ -333,9 +363,15 @@ function Fuentes({ todos, puedeEditar, onCambio, setError, onVer }) {
     return true;
   }
 
-  const guardarOrigen = g => actualizar(g.ids, editando.tipo === "proveedor"
-    ? { origen_tipo: "proveedor", proveedor_nombre: editando.nombre.trim() }
-    : { origen_tipo: "cliente", cliente_nombre: editando.nombre.trim() });
+  const guardarOrigen = g => actualizar(g.ids, {
+    ...(editando.tipo === "proveedor"
+      ? { origen_tipo: "proveedor", proveedor_nombre: editando.nombre.trim() }
+      : { origen_tipo: "cliente", cliente_nombre: editando.nombre.trim() }),
+    // "" es no cambiar la utilidad: puede ser distinta por capítulo.
+    ...(editando.util === "costo" ? { utilidad_estado: "costo", utilidad_pct: 0 }
+      : editando.util === "con_utilidad" ? { utilidad_estado: "con_utilidad", utilidad_pct: Number(editando.pct) || 0 }
+      : editando.util === "desconocida" ? { utilidad_estado: "desconocida", utilidad_pct: null } : {}),
+  });
 
   const chipB = activo => ({ padding: "5px 10px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
     border: `1.5px solid ${activo ? colors.brand : colors.border}`, background: activo ? colors.brand : "#fff", color: activo ? "#fff" : colors.inkSoft });
@@ -357,12 +393,12 @@ function Fuentes({ todos, puedeEditar, onCambio, setError, onVer }) {
               <Origen tipo={g.tipo} />
               <div style={{ flex: 1, minWidth: 200 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{g.nombre || (g.tipo ? "Sin nombre" : "¿De quién son estos precios?")}</div>
-                <div style={{ fontSize: 11, color: colors.muted }}>{g.proyecto || "sin proyecto"} · {g.ids.length} precios · {rango}</div>
+                <div style={{ fontSize: 11, color: colors.muted }}>{g.proyecto || "sin proyecto"} · {g.ids.length} precios · {rango} · utilidad: {[...g.utilidades].join(", ")}</div>
               </div>
               {!verQuitados && <button onClick={() => onVer(g.tipo, g.nombre, g.proyecto)} style={enlace}>Ver precios</button>}
               {puedeEditar && !verQuitados && !ed && quitando !== g.clave && (
                 <>
-                  <button onClick={() => setEditando({ clave: g.clave, tipo: g.tipo || null, nombre: g.nombre || (g.tipo ? "" : g.proyecto) })} style={chipB(false)}>Corregir origen</button>
+                  <button onClick={() => setEditando({ clave: g.clave, tipo: g.tipo || null, nombre: g.nombre || (g.tipo ? "" : g.proyecto), util: "", pct: "" })} style={chipB(false)}>Corregir origen</button>
                   <button onClick={() => setQuitando(g.clave)} style={{ ...chipB(false), color: colors.danger }}>Quitar de la base</button>
                 </>
               )}
@@ -386,8 +422,17 @@ function Fuentes({ todos, puedeEditar, onCambio, setError, onVer }) {
                 <button onClick={() => setEditando(e => ({ ...e, tipo: "proveedor" }))} style={chipB(editando.tipo === "proveedor")}>De un proveedor</button>
                 <input value={editando.nombre} onChange={e => setEditando(x => ({ ...x, nombre: e.target.value }))} placeholder={editando.tipo === "proveedor" ? "Nombre del proveedor" : "Nombre del cliente"}
                   style={{ ...inputStyle, padding: "6px 9px", fontSize: 12, width: 240 }} />
+                <select value={editando.util} onChange={e => setEditando(x => ({ ...x, util: e.target.value }))} style={{ ...inputStyle, padding: "6px 9px", fontSize: 12, width: 200 }}>
+                  <option value="">Utilidad: no cambiar</option>
+                  <option value="costo">Al costo</option>
+                  <option value="con_utilidad">Con utilidad de…</option>
+                  <option value="desconocida">Con utilidad, no sé cuánto</option>
+                </select>
+                {editando.util === "con_utilidad" && (
+                  <input type="number" value={editando.pct} onChange={e => setEditando(x => ({ ...x, pct: e.target.value }))} placeholder="%" style={{ ...inputStyle, padding: "6px 9px", fontSize: 12, width: 70 }} />
+                )}
                 <Button variant="outline" size="sm" onClick={() => setEditando(null)}>Cancelar</Button>
-                <Button variant="primary" size="sm" disabled={guardando || !editando.tipo || !editando.nombre.trim()} onClick={() => guardarOrigen(g)}>{guardando ? "Guardando…" : `Guardar en ${g.ids.length} precios`}</Button>
+                <Button variant="primary" size="sm" disabled={guardando || !editando.tipo || !editando.nombre.trim() || (editando.util === "con_utilidad" && !(Number(editando.pct) > 0))} onClick={() => guardarOrigen(g)}>{guardando ? "Guardando…" : `Guardar en ${g.ids.length} precios`}</Button>
               </div>
             )}
           </div>

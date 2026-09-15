@@ -1,19 +1,60 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sparkles, CheckCircle2, Users, Truck } from "lucide-react";
+import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import { inputStyle } from "./ui/Input";
 import { UNIDADES, etiquetaUnidad } from "../lib/unidades";
-import { buscarNombre, sugerirTipo, faltanRespuestas, unidadesPorResolver, IGUAL } from "../lib/preguntasNova";
+import { buscarNombre, sugerirTipo, faltanRespuestas, unidadesPorResolver, unidadParaBase, IGUAL } from "../lib/preguntasNova";
+import { compararConBase } from "../lib/analisisUtilidad";
 
 // Las preguntas de NOVA antes de que un presupuesto entre a la base: de dónde
-// vienen los precios, de quién, y las unidades que no se entienden. Controlado:
-// las respuestas viven en el componente que guarda.
-export default function PreguntasNova({ rubros = [], respuestas, onCambiar, sugerencia = {}, clientes = [], proveedores = [] }) {
+// vienen los precios, de quién, si traen utilidad, y las unidades que no se
+// entienden. Controlado: las respuestas viven en el componente que guarda.
+
+async function todas(tabla, select, filtrar = q => q) {
+  const filas = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await filtrar(supabase.from(tabla).select(select)).range(desde, desde + 999);
+    if (error || !data) return filas;
+    filas.push(...data);
+    if (data.length < 1000) return filas;
+  }
+}
+
+const pct = v => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(Math.round(v * 100))} %`;
+const CARGO_UTILIDAD = /honorario|utilidad|indirecto|administraci|gerencia|direcci[oó]n t[eé]cnica|fee/i;
+
+export default function PreguntasNova({ rubros = [], respuestas, onCambiar, sugerencia = {}, clientes = [], proveedores = [], cargos = [], ivaIncluido = null, ivaPct = 15 }) {
   const [verVacias, setVerVacias] = useState(false);
+  const [verCapitulos, setVerCapitulos] = useState(false);
+  const [verEjemplos, setVerEjemplos] = useState(false);
+  const [base, setBase] = useState(null);
+
+  // La base contra la que se comparan los precios, leída una vez al abrir.
+  useEffect(() => {
+    let vivo = true;
+    Promise.all([
+      todas("rubros", "id,descripcion,unidad", q => q.eq("activo", true)),
+      todas("precios_historial", "*"),
+    ]).then(([rs, ps]) => { if (vivo) setBase({ rubros: rs, precios: ps }); });
+    return () => { vivo = false; };
+  }, []);
+
   const falta = faltanRespuestas(respuestas, rubros);
   const { raras, vacias } = unidadesPorResolver(rubros);
   const tipoSugerido = sugerirTipo(sugerencia);
   const set = cambios => onCambiar({ ...respuestas, ...cambios });
+  const utilidad = respuestas.utilidad || { estado: null, pct: "", porCapitulo: {} };
+  const setUtilidad = cambios => set({ utilidad: { ...utilidad, ...cambios } });
+
+  const analisis = useMemo(() => {
+    if (!base) return null;
+    const conUnidad = rubros.filter(r => r.origen !== "ajuste").map(r => ({ ...r, unidad: unidadParaBase(r, respuestas) }));
+    return compararConBase(conUnidad, base, { ivaIncluido: ivaIncluido === true, ivaPct });
+  }, [base, rubros, respuestas, ivaIncluido, ivaPct]);
+  const capitulos = useMemo(() => [...new Set(rubros.filter(r => r.origen !== "ajuste").map(r => r.capitulo).filter(Boolean))], [rubros]);
+  const cargoUtilidad = cargos.find(c => CARGO_UTILIDAD.test(c.descripcion));
+  const difSugerida = analisis?.referencia === "costo" && analisis.diferencia > 0.03 ? Math.round(analisis.diferencia * 100) : null;
 
   const elegirTipo = tipo => {
     const cambios = { tipo };
@@ -21,14 +62,16 @@ export default function PreguntasNova({ rubros = [], respuestas, onCambiar, suge
     if (!respuestas.cliente && sugerencia.cliente) cambios.cliente = sugerencia.cliente;
     set(cambios);
   };
+  const elegirUtilidad = estado => setUtilidad({ estado, ...(estado === "con_utilidad" && !utilidad.pct && difSugerida ? { pct: String(difSugerida) } : {}) });
 
   const lbl = { fontSize: 12, fontWeight: 600, color: colors.ink, display: "block", marginBottom: 6 };
   const campo = { ...inputStyle, padding: "7px 10px", fontSize: 13 };
   const bloque = { padding: "12px 0", borderTop: `1px solid ${colors.neutralSoft}` };
+  const nota = { fontSize: 11, color: colors.inkSoft, marginTop: 6, lineHeight: 1.5 };
 
   return (
     <div style={{ background: colors.surface, border: `1.5px solid ${falta.length ? colors.brand : colors.successBorder}`, borderRadius: colors.radiusMd, padding: "12px 14px 2px", marginBottom: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         {falta.length ? <Sparkles size={15} color={colors.brand} /> : <CheckCircle2 size={15} color={colors.success} />}
         <span style={{ fontSize: 13, fontWeight: 700, color: falta.length ? colors.brand : colors.success }}>
           {falta.length ? "NOVA necesita saber algunas cosas antes de guardar" : "NOVA ya no tiene preguntas"}
@@ -40,20 +83,12 @@ export default function PreguntasNova({ rubros = [], respuestas, onCambiar, suge
       <div style={bloque}>
         <label style={lbl}>¿De dónde vienen estos precios?</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[["cliente", <Users size={14} />, "De un cliente", "Lo que HCA le cotizó"], ["proveedor", <Truck size={14} />, "De un proveedor o contratista", "Lo que le cobran a HCA"]].map(([v, icono, t, sub]) => {
-            const activo = respuestas.tipo === v;
-            return (
-              <button key={v} onClick={() => elegirTipo(v)}
-                style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", padding: "8px 12px", borderRadius: colors.radiusSm, cursor: "pointer", fontFamily: colors.font,
-                  border: `1.5px solid ${activo ? colors.brand : colors.border}`, background: activo ? colors.brand : "#fff", color: activo ? "#fff" : colors.ink }}>
-                {icono}
-                <span><span style={{ display: "block", fontSize: 12, fontWeight: 600 }}>{t}</span><span style={{ display: "block", fontSize: 10, opacity: 0.8 }}>{sub}</span></span>
-              </button>
-            );
-          })}
+          {[["cliente", <Users size={14} />, "De un cliente", "Lo que HCA le cotizó"], ["proveedor", <Truck size={14} />, "De un proveedor o contratista", "Lo que le cobran a HCA"]].map(([v, icono, t, sub]) => (
+            <Opcion key={v} activa={respuestas.tipo === v} onClick={() => elegirTipo(v)} icono={icono} texto={t} sub={sub} />
+          ))}
         </div>
         {tipoSugerido && !respuestas.tipo && (
-          <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 6 }}>
+          <div style={nota}>
             NOVA cree que es de {tipoSugerido === "proveedor" ? `un proveedor${sugerencia.emisor ? `: el documento lo hizo ${sugerencia.emisor}` : ""}` : "un cliente: el documento lo hizo HCA"}.
           </div>
         )}
@@ -79,6 +114,78 @@ export default function PreguntasNova({ rubros = [], respuestas, onCambiar, suge
           </div>
         </div>
       )}
+
+      {/* Utilidad: se compara con lo que ya hay en la base y se pregunta */}
+      <div style={bloque}>
+        <label style={lbl}>¿Estos precios son al costo o ya traen utilidad?</label>
+        <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 8 }}>
+          {!analisis ? "NOVA está comparando con los precios de la base…"
+            : analisis.n === 0 ? "Ninguno de estos rubros está todavía en la base: NOVA no tiene con qué comparar."
+            : analisis.referencia === "costo" ? (
+              <>Comparados con lo que ya sabes que cuestan, en <strong>{analisis.n} rubros</strong> estos precios están{" "}
+                <strong style={{ color: Math.abs(analisis.diferencia) < 0.05 ? colors.success : colors.warning }}>
+                  {Math.abs(analisis.diferencia) < 0.05 ? "prácticamente iguales" : `${pct(analisis.diferencia)} en promedio`}
+                </strong>
+                {analisis.rango && Math.abs(analisis.diferencia) >= 0.05 && <> (la mitad de ellos entre {pct(analisis.rango[0])} y {pct(analisis.rango[1])})</>}.
+              </>
+            ) : (
+              <>No hay precios al costo de estos rubros. Contra los precios anteriores ({analisis.n} rubros, sin saber si eran al costo) están{" "}
+                <strong>{Math.abs(analisis.diferencia) < 0.05 ? "prácticamente iguales" : `${pct(analisis.diferencia)} en promedio`}</strong>.</>
+            )}
+          {ivaIncluido === null && analisis?.n > 0 && <span style={{ color: colors.muted }}> Responde lo del IVA para comparar sin IVA.</span>}
+          {cargoUtilidad && <div style={{ marginTop: 4 }}>El presupuesto suma aparte <strong>"{cargoUtilidad.descripcion}"</strong>: cuando la utilidad va al final, los rubros suelen ir al costo.</div>}
+          {analisis?.n > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <button onClick={() => setVerEjemplos(v => !v)} style={enlace}>{verEjemplos ? "Ocultar ejemplos" : "Ver ejemplos"}</button>
+              {analisis.descartados > 0 && <span style={{ color: colors.muted }}> · {analisis.descartados} rubros no se usaron por estar al doble o a la mitad: parecen otro alcance.</span>}
+            </div>
+          )}
+          {verEjemplos && analisis?.ejemplos.map((e, i) => (
+            <div key={i} style={{ fontSize: 11, color: colors.inkSoft, display: "flex", gap: 8, padding: "2px 0" }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.descripcion}</span>
+              <span style={{ flexShrink: 0 }}>${e.nuevo.toFixed(2)} contra ${e.referencia.toFixed(2)} ({pct(e.ratio - 1)})</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Opcion activa={utilidad.estado === "costo"} onClick={() => elegirUtilidad("costo")} texto="Al costo" sub="Sin utilidad en los rubros" />
+          <Opcion activa={utilidad.estado === "con_utilidad"} onClick={() => elegirUtilidad("con_utilidad")} texto="Con utilidad" sub={difSugerida ? `NOVA calcula ${difSugerida} %` : "Dices cuánto %"} />
+          <Opcion activa={utilidad.estado === "desconocida"} onClick={() => elegirUtilidad("desconocida")} texto="Con utilidad, no sé cuánto" sub="No cuenta al comparar costos" />
+        </div>
+
+        {utilidad.estado === "con_utilidad" && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: colors.inkSoft }}>Utilidad</span>
+              <input type="number" value={utilidad.pct} onChange={e => setUtilidad({ pct: e.target.value })} placeholder="%" style={{ ...campo, width: 80 }} />
+              <span style={{ fontSize: 12, color: colors.inkSoft }}>% sobre el costo</span>
+              {capitulos.length > 1 && <button onClick={() => setVerCapitulos(v => !v)} style={enlace}>{verCapitulos ? "Ocultar capítulos" : "Es distinta por capítulo"}</button>}
+            </div>
+            {verCapitulos && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: colors.muted, marginBottom: 4 }}>
+                  Deja vacío el capítulo que lleva el % general.
+                  {analisis?.referencia === "costo" && analisis.porCapitulo.some(c => c.n >= 2) && (
+                    <> <button onClick={() => setUtilidad({ porCapitulo: Object.fromEntries(analisis.porCapitulo.filter(c => c.n >= 2 && c.diferencia > 0.03).map(c => [c.capitulo, String(Math.round(c.diferencia * 100))])) })} style={enlace}>Usar lo que calcula NOVA por capítulo</button></>
+                  )}
+                </div>
+                {capitulos.map(c => {
+                  const a = analisis?.porCapitulo.find(x => x.capitulo === c);
+                  return (
+                    <div key={c} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) 130px 80px", gap: 8, alignItems: "center", padding: "2px 0" }}>
+                      <span style={{ fontSize: 12, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c}>{c}</span>
+                      <span style={{ fontSize: 11, color: colors.muted }}>{a ? `${pct(a.diferencia)} en ${a.n} rubros` : "sin con qué comparar"}</span>
+                      <input type="number" value={utilidad.porCapitulo?.[c] ?? ""} placeholder={utilidad.pct || "%"}
+                        onChange={e => setUtilidad({ porCapitulo: { ...utilidad.porCapitulo, [c]: e.target.value } })} style={{ ...campo, padding: "5px 8px", fontSize: 12 }} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Unidades que no se entienden */}
       {raras.length > 0 && (
@@ -130,6 +237,17 @@ export default function PreguntasNova({ rubros = [], respuestas, onCambiar, suge
         </div>
       )}
     </div>
+  );
+}
+
+function Opcion({ activa, onClick, icono, texto, sub }) {
+  return (
+    <button onClick={onClick}
+      style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", padding: "8px 12px", borderRadius: colors.radiusSm, cursor: "pointer", fontFamily: colors.font,
+        border: `1.5px solid ${activa ? colors.brand : colors.border}`, background: activa ? colors.brand : "#fff", color: activa ? "#fff" : colors.ink }}>
+      {icono}
+      <span><span style={{ display: "block", fontSize: 12, fontWeight: 600 }}>{texto}</span>{sub && <span style={{ display: "block", fontSize: 10, opacity: 0.8 }}>{sub}</span>}</span>
+    </button>
   );
 }
 

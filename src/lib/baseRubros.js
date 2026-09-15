@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { normalizarUnidad } from "./unidades";
 import { normalNombre } from "./preguntasNova";
+import { pctUtilidad } from "./analisisUtilidad";
 
 // Todo presupuesto que entra a FOREMAN —para cotizar, para controlar una obra,
 // o subido a propósito— alimenta la base de rubros. Cada aparición de un rubro
@@ -39,8 +40,9 @@ async function registrar(tabla, nombre, extra = {}) {
 
 /**
  * @param rubros  [{ descripcion, unidad, precio_unitario, capitulo, cantidad }]
- * @param origen  { tipo: "cliente" | "proveedor", cliente, proveedor, proyecto, fecha, fuente, obraId, ivaIncluido }
- * @returns { capitulosNuevos, rubrosNuevos, historial, sinMigracion, error }
+ * @param origen  { tipo: "cliente" | "proveedor", cliente, proveedor, proyecto, fecha, fuente, obraId,
+ *                  ivaIncluido, ivaPct, utilidad: { estado, pct, porCapitulo } }
+ * @returns { capitulosNuevos, rubrosNuevos, historial, faltaMigracion: "016" | "017" | null, error }
  */
 export async function alimentarBase(rubros = [], origen = {}) {
   const utiles = rubros.filter(r => r?.descripcion && Number(r.precio_unitario) > 0);
@@ -123,21 +125,29 @@ export async function alimentarBase(rubros = [], origen = {}) {
       fuente: origen.fuente || null,
       obra_id: origen.obraId || null,
     },
+    utilidad: {
+      utilidad_estado: origen.utilidad?.estado || null,
+      utilidad_pct: origen.utilidad?.estado === "costo" ? 0 : origen.utilidad?.estado === "con_utilidad" ? pctUtilidad(r, origen.utilidad) : null,
+      iva_pct: origen.ivaIncluido === true ? Number(origen.ivaPct) || null : null,
+    },
   })).filter(h => h.basico.rubro_id);
 
-  // Sin la migración 016 el precio se guarda igual, sin su origen.
-  let sinMigracion = false, historial = 0;
+  // Si faltan migraciones el precio se guarda igual, con lo que la base acepte:
+  // sin la 017 va sin utilidad, sin la 016 va también sin origen.
+  const niveles = [h => ({ ...h.basico, ...h.origen, ...h.utilidad }), h => ({ ...h.basico, ...h.origen }), h => h.basico];
+  const faltas = ["", "017", "016"];
+  let nivel = 0, historial = 0;
   for (let i = 0; i < hist.length; i += 200) {
     const lote = hist.slice(i, i + 200);
-    let { error } = await supabase.from("precios_historial").insert(lote.map(h => sinMigracion ? h.basico : { ...h.basico, ...h.origen }));
-    if (error && !sinMigracion && /column|schema cache/i.test(error.message)) {
-      sinMigracion = true;
-      ({ error } = await supabase.from("precios_historial").insert(lote.map(h => h.basico)));
+    let { error } = await supabase.from("precios_historial").insert(lote.map(niveles[nivel]));
+    while (error && nivel < 2 && /column|schema cache/i.test(error.message)) {
+      nivel++;
+      ({ error } = await supabase.from("precios_historial").insert(lote.map(niveles[nivel])));
     }
     if (!error) historial += lote.length;
   }
 
-  return { capitulosNuevos: capsNuevos.length, rubrosNuevos, historial, sinMigracion };
+  return { capitulosNuevos: capsNuevos.length, rubrosNuevos, historial, faltaMigracion: faltas[nivel] || null };
 }
 
 export function resumenAlimentacion(r) {
@@ -148,6 +158,6 @@ export function resumenAlimentacion(r) {
   if (r.capitulosNuevos) partes.push(`${r.capitulosNuevos} capítulos nuevos`);
   if (r.historial) partes.push(`${r.historial} precios al historial`);
   let txt = partes.length ? "Base de rubros: " + partes.join(" · ") : "";
-  if (r.sinMigracion) txt += " (sin el origen de los precios: falta correr la migración 016)";
+  if (r.faltaMigracion) txt += ` (sin ${r.faltaMigracion === "016" ? "el origen ni la utilidad" : "la utilidad"} de los precios: falta correr la migración ${r.faltaMigracion})`;
   return txt;
 }

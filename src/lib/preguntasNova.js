@@ -7,7 +7,8 @@
 
 import { normalizarUnidad } from "./unidades";
 
-export const RESPUESTAS_VACIAS = { tipo: null, cliente: "", proveedor: "", unidades: {}, unidadFila: {}, sinUnidadOk: false };
+// utilidad: { estado: "costo" | "con_utilidad" | "desconocida", pct, porCapitulo: { capítulo: pct } }
+export const RESPUESTAS_VACIAS = { tipo: null, cliente: "", proveedor: "", unidades: {}, unidadFila: {}, sinUnidadOk: false, utilidad: { estado: null, pct: "", porCapitulo: {} } };
 
 // "Dejar la unidad como está escrita".
 export const IGUAL = "__igual__";
@@ -70,6 +71,9 @@ export function faltanRespuestas(resp, rubros) {
   if (!resp.tipo) falta.push("de dónde vienen los precios");
   else if (resp.tipo === "cliente" && !resp.cliente.trim()) falta.push("el cliente");
   else if (resp.tipo === "proveedor" && !resp.proveedor.trim()) falta.push("el proveedor");
+  const u = resp.utilidad || {};
+  if (!u.estado) falta.push("si los precios traen utilidad");
+  else if (u.estado === "con_utilidad" && !(Number(u.pct) > 0) && !Object.values(u.porCapitulo || {}).some(v => Number(v) > 0)) falta.push("el % de utilidad");
   const { raras, vacias } = unidadesPorResolver(rubros);
   const sinResolver = raras.filter(u => !resp.unidades[u.texto]).length;
   if (sinResolver) falta.push(sinResolver === 1 ? "una unidad" : `${sinResolver} unidades`);

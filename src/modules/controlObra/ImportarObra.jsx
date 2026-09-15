@@ -287,8 +287,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     // precios entran a la base con su origen. Los ajustes no son rubros de verdad.
     const base = await alimentarBase(
       final.rubros.filter(r => r.origen !== "ajuste").map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
-      { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "obra", obraId: obra.id, ivaIncluido: incluyeIva });
-    if (base.sinMigracion) faltan.push("016 (origen de los precios)");
+      { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "obra", obraId: obra.id, ivaIncluido: incluyeIva, ivaPct: n(ivaPct), utilidad: preguntas.utilidad });
+    if (base.faltaMigracion) faltan.push(`${base.faltaMigracion} (${base.faltaMigracion === "016" ? "origen" : "utilidad"} de los precios)`);
 
     setGuardando(false);
     if (faltan.length) alert(`La obra se creó, pero falta correr en Supabase la migración ${faltan.join(", ")}.`);
@@ -384,9 +384,6 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
               </div>
             )}
 
-            <PreguntasNova rubros={final.rubros} respuestas={preguntas} onCambiar={setPreguntas} sugerencia={sugerencia}
-              clientes={clientesLista} proveedores={proveedoresLista} />
-
             {/* IVA: pregunta obligatoria */}
             <div style={{ background: incluyeIva === null ? colors.warningSoft : colors.bg, border: `1.5px solid ${incluyeIva === null ? colors.warningBorder : colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 4 }}>¿Los valores del Excel incluyen IVA?</div>
@@ -410,6 +407,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
                 )}
               </div>
             </div>
+
+            <PreguntasNova rubros={final.rubros} respuestas={preguntas} onCambiar={setPreguntas} sugerencia={sugerencia}
+              clientes={clientesLista} proveedores={proveedoresLista} cargos={final.cargos} ivaIncluido={incluyeIva} ivaPct={ivaPct} />
 
             {/* Totales y comparación con el Excel */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>

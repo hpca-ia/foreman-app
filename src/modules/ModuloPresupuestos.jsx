@@ -386,7 +386,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         const lectura = await reconocerExcel(file);
         const r = interpretarPresupuesto(lectura.filas, lectura.mapa);
         if (r.rubros.length >= 3) {
-          setBdResult({ capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros });
+          setBdResult({ capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros, cargos: r.cargos });
           setBdRubros(r.rubros.map(x => ({ fila: x.fila, capitulo: x.capitulo, descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad, precio_unitario: x.precio_unitario })));
           setBdLectura({ filas: lectura.filas, mapa: r.mapa, archivo: file.name, origen: lectura.origen });
           setBdSugerencia({ emisor: lectura.datos.emisor || "", cliente: lectura.datos.cliente || "" });
@@ -453,7 +453,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setGuardandoBD(true);
     const res = await alimentarBase(
       bdRubros.map(r => ({ descripcion: r.descripcion, unidad: unidadParaBase(r, bdPreguntas), precio_unitario: r.precio_unitario, capitulo: r.capitulo, cantidad: r.cantidad })),
-      { tipo: bdPreguntas.tipo, cliente: bdPreguntas.cliente, proveedor: bdPreguntas.proveedor, proyecto: bdMeta.proveedor, fecha: bdMeta.fecha, fuente: "alimentar" }
+      { tipo: bdPreguntas.tipo, cliente: bdPreguntas.cliente, proveedor: bdPreguntas.proveedor, proyecto: bdMeta.proveedor, fecha: bdMeta.fecha, fuente: "alimentar", utilidad: bdPreguntas.utilidad }
     );
     // Se guardó bien: el formato del Excel queda aprendido.
     if (bdLectura && !res.error) await recordarFormato({ filas: bdLectura.filas, mapa: bdLectura.mapa, archivo: bdLectura.archivo, usuarioId: currentUser?.id });
@@ -516,7 +516,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         </div>
       </div>
 
-      {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)}/>}
+      {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
       <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
 
       {!showAdminBD&&<>
@@ -555,7 +555,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             });
             // Todo lo que entra alimenta la base, sin casilla que marcar: un
             // precio que no se guarda es un precio que se pierde.
-            alimentarBase(rubrosValidos, { cliente: clienteNombre, proyecto: proveedor, fecha })
+            // Lo que cotiza un proveedor es costo para HCA: la utilidad se suma aparte en el presupuesto.
+            alimentarBase(rubrosValidos, { tipo: "proveedor", proveedor, cliente: clienteNombre, proyecto: presupuestoActivo?.nombre || proveedor, fecha, fuente: "cotizacion", utilidad: { estado: "costo" } })
               .then(r => { if (r.rubrosNuevos || r.capitulosNuevos) fetchCapitulosDB(); });
             setCotizacionResult(null);
           }}
@@ -837,7 +838,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                   <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
               {bdLectura?.origen?.tipo==="recordado"&&<div style={{fontSize:11,color:"var(--success)",marginBottom:10}}>Formato reconocido: se leyó igual que "{bdLectura.origen.archivo}".</div>}
-              <PreguntasNova rubros={bdRubros} respuestas={bdPreguntas} onCambiar={setBdPreguntas} sugerencia={bdSugerencia} clientes={clientes} proveedores={proveedores}/>
+              <PreguntasNova rubros={bdRubros} respuestas={bdPreguntas} onCambiar={setBdPreguntas} sugerencia={bdSugerencia} clientes={clientes} proveedores={proveedores} cargos={bdResult.cargos||[]}/>
 
               {/* Capítulos detectados */}
               {bdResult.capitulos?.length>0&&(

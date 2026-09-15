@@ -1,20 +1,19 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Pencil, Trash2, CheckCircle2, Search } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { inputStyle } from "../components/ui/Input";
 import Button from "../components/ui/Button";
+import DuplicadosRubros from "./presupuestos/DuplicadosRubros";
 
-export default function AdminBD({ onVolver }) {
+export default function AdminBD({ onVolver, currentUser }) {
   const [tab, setTab] = useState("rubros"); // rubros | capitulos | duplicados
   const [capitulos, setCapitulos] = useState([]);
   const [rubros, setRubros] = useState([]);
-  const [duplicados, setDuplicados] = useState([]);
   const [busqueda, setBusqueda] = useState("");
   const [filtroCapitulo, setFiltroCapitulo] = useState("");
   const [editRubro, setEditRubro] = useState(null);
   const [editCapitulo, setEditCapitulo] = useState(null);
   const [nuevoCapNombre, setNuevoCapNombre] = useState("");
-  const [loadingDups, setLoadingDups] = useState(false);
   const [page, setPage] = useState(0);
   const PER_PAGE = 40;
 
@@ -32,21 +31,6 @@ export default function AdminBD({ onVolver }) {
     const { data } = await q.order("descripcion").range(page * PER_PAGE, (page + 1) * PER_PAGE - 1);
     setRubros(data || []);
   }
-  async function buscarDuplicados() {
-    setLoadingDups(true);
-    const { data: todos } = await supabase.from("rubros").select("id,descripcion,unidad,precio_referencia,capitulos(nombre)").eq("activo", true).order("descripcion");
-    if (!todos) { setLoadingDups(false); return; }
-    const groups = {};
-    todos.forEach(r => {
-      const key = r.descripcion.toLowerCase().trim().slice(0, 25);
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(r);
-    });
-    const dups = Object.values(groups).filter(g => g.length > 1);
-    setDuplicados(dups);
-    setLoadingDups(false);
-  }
-
   async function saveCapitulo(cap) {
     await supabase.from("capitulos").update({ nombre: cap.nombre, orden: cap.orden }).eq("id", cap.id);
     setEditCapitulo(null); fetchCapitulos();
@@ -75,14 +59,6 @@ export default function AdminBD({ onVolver }) {
     await supabase.from("rubros").update({ activo: false }).eq("id", id);
     fetchRubros();
   }
-  async function mergeDuplicados(keep, deleteIds) {
-    for (const id of deleteIds) {
-      await supabase.from("precios_historial").update({ rubro_id: keep }).eq("rubro_id", id);
-      await supabase.from("rubros").update({ activo: false }).eq("id", id);
-    }
-    fetchRubros(); buscarDuplicados();
-  }
-
   const fmt = n => (Number(n) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const tabS = a => ({ padding: "7px 16px", border: "none", borderBottom: a ? "2px solid var(--brand)" : "2px solid transparent", background: "transparent", color: a ? "var(--brand)" : "var(--ink-soft)", fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: "var(--font)" });
   const iconBtn = { background: "var(--neutral-soft)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", color: "var(--ink-soft)", cursor: "pointer", display: "inline-flex" };
@@ -98,7 +74,7 @@ export default function AdminBD({ onVolver }) {
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 16 }}>
         <button onClick={() => setTab("rubros")} style={tabS(tab === "rubros")}>Rubros</button>
         <button onClick={() => setTab("capitulos")} style={tabS(tab === "capitulos")}>Capítulos</button>
-        <button onClick={() => { setTab("duplicados"); buscarDuplicados(); }} style={tabS(tab === "duplicados")}>Duplicados</button>
+        <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
       </div>
 
       {tab === "rubros" && (
@@ -189,33 +165,7 @@ export default function AdminBD({ onVolver }) {
         </div>
       )}
 
-      {tab === "duplicados" && (
-        <div>
-          {loadingDups ? <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}><Search size={24} /> Analizando duplicados...</div>
-            : duplicados.length === 0 ? <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}><CheckCircle2 size={28} color="var(--success)" />Sin duplicados detectados.</div>
-              : <div>
-                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 12 }}>Se encontraron <strong>{duplicados.length}</strong> grupos con rubros similares. Selecciona cuál conservar y cuál eliminar.</div>
-                {duplicados.map((grupo, gi) => (
-                  <div key={gi} style={{ background: "#fff", border: "1.5px solid var(--border)", borderRadius: "var(--radius-md)", padding: 14, marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--brand)", marginBottom: 10 }}>Grupo {gi + 1} — {grupo.length} rubros similares</div>
-                    {grupo.map((r, ri) => (
-                      <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: ri === 0 ? "var(--success-soft)" : "var(--brand-soft)", borderRadius: "var(--radius-sm)", marginBottom: 6, border: `1px solid ${ri === 0 ? "var(--success-border)" : "var(--border)"}` }}>
-                        <div style={{ flex: 1 }}>
-                          {ri === 0 && <div style={{ fontSize: 9, fontWeight: 700, color: "var(--success)", letterSpacing: 1, marginBottom: 2 }}>CONSERVAR</div>}
-                          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--ink)" }}>{r.descripcion}</div>
-                          <div style={{ fontSize: 10, color: "var(--muted)" }}>{r.capitulos?.nombre} · {r.unidad} · ${fmt(r.precio_referencia)}</div>
-                        </div>
-                        <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
-                          {ri !== 0 && <button onClick={() => mergeDuplicados(grupo[0].id, [r.id])} style={{ ...deleteBtn, whiteSpace: "nowrap" }}>Eliminar</button>}
-                          {ri === 0 && grupo.length > 1 && <button onClick={() => mergeDuplicados(grupo[0].id, grupo.slice(1).map(x => x.id))} style={{ background: "var(--success)", border: "none", borderRadius: "var(--radius-sm)", padding: "4px 10px", color: "#fff", fontSize: 11, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}>Fusionar todos</button>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>}
-        </div>
-      )}
+      {tab === "duplicados" && <DuplicadosRubros currentUser={currentUser} />}
     </div>
   );
 }
