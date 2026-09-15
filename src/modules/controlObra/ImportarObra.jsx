@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Upload, Sparkles, Trash2, ArrowLeft, CheckCircle2, AlertTriangle, SlidersHorizontal, BookmarkCheck } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -6,7 +6,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
-import { MAPA_PROMPT, interpretarPresupuesto, buscarFormato, firmaEncabezado, soloColumnas } from "./leerPresupuesto";
+import { MAPA_PROMPT, interpretarPresupuesto, buscarFormato, firmaEncabezado, soloColumnas, aplicarDecisiones } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
 
@@ -44,6 +44,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [omitidas, setOmitidas] = useState([]);
   const [control, setControl] = useState(null);     // lo que declaraba el Excel, para comparar
   const [advertencias, setAdvertencias] = useState([]);
+  // { índice de advertencia: "aceptar" | "corregir" }. Lo leído no se toca:
+  // los rubros que se crean salen de aplicar estas decisiones.
+  const [decisiones, setDecisiones] = useState({});
   // Para poder corregir columnas y recordar el formato hay que conservar las
   // filas del Excel y el mapa con que se leyeron.
   const [filasExcel, setFilasExcel] = useState(null);
@@ -73,7 +76,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   }
 
   function limpiar() {
-    setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]);
+    setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]); setDecisiones({});
     setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
     setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true);
   }
@@ -85,7 +88,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     setFilasExcel(filas); setMapaActual(r.mapa); setOrigenMapa(origen);
     setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
     setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
-    setAdvertencias(r.advertencias || []);
+    setAdvertencias(r.advertencias || []); setDecisiones({});
     if (r.ivaExcel) {
       if (r.ivaExcel.pct) setIvaPct(r.ivaExcel.pct);
       setSugerenciaIva(`El Excel suma el IVA aparte al final ($${fmt(r.ivaExcel.total)}), así que sus rubros vienen sin IVA.`);
@@ -185,8 +188,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     }
     // Leído por NOVA ya no hay columnas que corregir ni formato que recordar.
     setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
-    setControl(null); setAdvertencias([]); setCargos([]); setOmitidas([]);
-    setRubros(parsed.rubros.map(r => ({
+    setControl(null); setAdvertencias([]); setDecisiones({}); setCargos([]); setOmitidas([]);
+    setRubros(parsed.rubros.map((r, i) => ({
+      fila: i,
       capitulo: (r.c || r.capitulo || "SIN CAPÍTULO").toString().trim().toUpperCase(),
       codigo: "",
       descripcion: (r.d || r.descripcion || "").toString().trim(),
@@ -205,19 +209,25 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     aplicarMapa(filasExcel, nuevoMapa, { tipo: "manual" });
   }
 
+  // ── Lo que se va a crear: lo leído con las decisiones aplicadas ──
+  const final = useMemo(() => aplicarDecisiones({ rubros, cargos, omitidas, advertencias }, decisiones), [rubros, cargos, omitidas, advertencias, decisiones]);
+  const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !decisiones[i]).length;
+  const decidir = (i, v) => setDecisiones(d => { const x = { ...d }; if (v) x[i] = v; else delete x[i]; return x; });
+
   // ── Cuentas de la vista previa ──
   const factor = incluyeIva === false ? 1 + n(ivaPct) / 100 : 1;
-  const sumaRubros = rubros.reduce((s, r) => s + r.total, 0);
-  const sumaCargos = incluirCargos ? cargos.reduce((s, c) => s + c.total, 0) : 0;
+  const sumaRubros = final.rubros.reduce((s, r) => s + r.total, 0);
+  const sumaTodosCargos = final.cargos.reduce((s, c) => s + c.total, 0);
+  const sumaCargos = incluirCargos ? sumaTodosCargos : 0;
   const base = sumaRubros + sumaCargos;
   const ivaSumado = base * (factor - 1);
   const lineaBase = base * factor;
-  const capitulos = [...new Set(rubros.map(r => r.capitulo))];
+  const capitulos = [...new Set(final.rubros.map(r => r.capitulo))];
 
   // Contra el Excel: los rubros contra su SUBTOTAL; rubros + cargos (+ su línea
-  // de IVA, si tenía) contra su TOTAL.
+  // de IVA, si tenía) contra su TOTAL. Con las decisiones ya aplicadas.
   const difSubtotal = control?.subtotal != null ? sumaRubros - control.subtotal : null;
-  const difTotal = control?.total != null ? sumaRubros + cargos.reduce((s, c) => s + c.total, 0) + (control.iva?.total || 0) - control.total : null;
+  const difTotal = control?.total != null ? sumaRubros + sumaTodosCargos + (control.iva?.total || 0) - control.total : null;
 
   // Guarda el mapa como formato conocido. Si ya existía, suma un uso y se
   // queda con la última corrección.
@@ -236,7 +246,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   }
 
   async function crearObra() {
-    if (!rubros.length || !nombre.trim() || incluyeIva === null) return;
+    if (!rubros.length || !nombre.trim() || incluyeIva === null || pendientes) return;
     setGuardando(true); setError("");
     const pct = incluyeIva ? 0 : n(ivaPct);
     const faltan = [];
@@ -260,8 +270,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     if (e1 || !obra) { setError("No se pudo crear la obra: " + (e1?.message || "")); setGuardando(false); return; }
 
     const todos = [
-      ...rubros,
-      ...(incluirCargos ? cargos.map(c => ({ capitulo: CAP_CARGOS, codigo: "", descripcion: c.descripcion, unidad: "glb", cantidad: 1, precio_unitario: c.total, total: c.total })) : []),
+      ...final.rubros,
+      ...(incluirCargos ? final.cargos.map(c => ({ capitulo: CAP_CARGOS, codigo: "", descripcion: c.descripcion, unidad: "glb", cantidad: 1, precio_unitario: c.total, total: c.total })) : []),
     ];
     const ordenCap = {}; let capN = 0; const idxCap = {};
     const filas = todos.map((r, i) => {
@@ -299,7 +309,11 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
     // La revisión queda con la obra, para volver a verla en la pestaña Presupuesto.
     if (!sinMigracion) {
-      const { error: eAdv } = await supabase.from("obras").update({ advertencias }).eq("id", obra.id);
+      const ahora = new Date().toISOString();
+      const conDecision = advertencias.map((a, i) => decisiones[i]
+        ? { ...a, decision: decisiones[i], decidido_por: currentUser.name || null, decidido_at: ahora }
+        : a);
+      const { error: eAdv } = await supabase.from("obras").update({ advertencias: conDecision }).eq("id", obra.id);
       if (eAdv) faltan.push("014 (revisión del Excel)");
     }
 
@@ -309,7 +323,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
     // El presupuesto que se controla también es conocimiento: sus rubros y sus
     // precios (sin IVA, como se cotizan) entran a la base de rubros.
-    await alimentarBase(rubros, { cliente: cliente.trim(), proyecto: nombre.trim() });
+    // Los ajustes no son rubros de verdad: no entran.
+    await alimentarBase(final.rubros.filter(r => r.origen !== "ajuste"), { cliente: cliente.trim(), proyecto: nombre.trim() });
 
     setGuardando(false);
     if (faltan.length) alert(`La obra se creó, pero falta correr en Supabase la migración ${faltan.join(", ")}.`);
@@ -433,11 +448,11 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
             {/* Totales y comparación con el Excel */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
               <div>
-                <Linea t={`${rubros.length} rubros en ${capitulos.length} capítulos`} v={sumaRubros} />
-                {cargos.length > 0 && (
+                <Linea t={`${final.rubros.length} rubros en ${capitulos.length} capítulos`} v={sumaRubros} />
+                {final.cargos.length > 0 && (
                   <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                     <input type="checkbox" checked={incluirCargos} onChange={e => setIncluirCargos(e.target.checked)} />
-                    <span style={{ flex: 1 }}><Linea t={cargos.map(c => c.descripcion).join(" · ").slice(0, 60)} v={cargos.reduce((s, c) => s + c.total, 0)} /></span>
+                    <span style={{ flex: 1 }}><Linea t={final.cargos.map(c => c.descripcion).join(" · ").slice(0, 60)} v={sumaTodosCargos} /></span>
                   </label>
                 )}
                 {incluyeIva === false && <Linea t={`IVA ${n(ivaPct)} %`} v={ivaSumado} />}
@@ -458,7 +473,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
             {control && (
               <div style={{ marginTop: 14 }}>
-                <RevisionPresupuesto advertencias={advertencias} />
+                <RevisionPresupuesto advertencias={advertencias} decisiones={decisiones} onDecidir={decidir} />
               </div>
             )}
 
@@ -472,10 +487,10 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
           </div>
 
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, maxHeight: 400, overflowY: "auto", marginBottom: 14 }}>
-            {[...capitulos, ...(incluirCargos && cargos.length ? [CAP_CARGOS] : [])].map(cap => {
+            {[...capitulos, ...(incluirCargos && final.cargos.length ? [CAP_CARGOS] : [])].map(cap => {
               const lista = cap === CAP_CARGOS
-                ? cargos.map((c, i) => ({ ...c, codigo: "", unidad: "glb", cantidad: 1, precio_unitario: c.total, _cargo: i }))
-                : rubros.map((r, i) => ({ ...r, _i: i })).filter(r => r.capitulo === cap);
+                ? final.cargos.map((c, i) => ({ ...c, codigo: "", unidad: "glb", cantidad: 1, precio_unitario: c.total, _cargo: i }))
+                : final.rubros.map((r, i) => ({ ...r, _i: i })).filter(r => r.capitulo === cap);
               return (
                 <div key={cap}>
                   <div style={{ background: colors.brandSoft, padding: "7px 14px", fontSize: 11, fontWeight: 700, color: colors.brand, position: "sticky", top: 0, display: "flex", justifyContent: "space-between" }}>
@@ -485,13 +500,16 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
                   {lista.map(r => (
                     <div key={cap + (r._i ?? r._cargo)} style={{ display: "grid", gridTemplateColumns: "48px 1fr 44px 64px 84px 90px 26px", gap: 8, padding: "6px 14px", borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center" }}>
                       <span style={{ color: colors.muted, fontSize: 10 }}>{r.codigo}</span>
-                      <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>{r.descripcion}</span>
+                      <span style={{ color: r.origen === "ajuste" ? colors.warning : colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
+                        {r.origen && r.origen !== "ajuste" && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>{r.origen === "agregado" ? "AGREGADO" : "CORREGIDO"}</span>}
+                        {r.descripcion}
+                      </span>
                       <span style={{ color: colors.muted, fontSize: 11 }}>{r.unidad}</span>
                       <span style={{ color: colors.muted, textAlign: "right" }}>{fmt(r.cantidad)}</span>
                       <span style={{ color: colors.inkSoft, textAlign: "right" }}>${fmt(r.precio_unitario)}</span>
                       <span style={{ color: colors.ink, textAlign: "right", fontWeight: 600 }}>${fmt(r.total)}</span>
-                      {r._i != null ? (
-                        <button onClick={() => setRubros(rs => rs.filter((_, j) => j !== r._i))}
+                      {r._i != null && !r.origen ? (
+                        <button onClick={() => setRubros(rs => rs.filter(x => x.fila !== r.fila))}
                           style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex" }}><Trash2 size={12} /></button>
                       ) : <span />}
                     </div>
@@ -503,8 +521,11 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" style={{ flex: 1 }} onClick={() => { limpiar(); setError(""); }}>Descartar</Button>
-            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={crearObra} disabled={guardando || !nombre.trim() || incluyeIva === null}>
-              {guardando ? "Creando obra..." : incluyeIva === null ? "Responde lo del IVA para continuar" : `Crear obra · línea base $${fmt(lineaBase)}`}
+            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={crearObra} disabled={guardando || !nombre.trim() || incluyeIva === null || pendientes > 0}>
+              {guardando ? "Creando obra..."
+                : pendientes ? `Acepta o no acepta ${pendientes === 1 ? "el error" : `los ${pendientes} errores`} para continuar`
+                : incluyeIva === null ? "Responde lo del IVA para continuar"
+                : `Crear obra · línea base $${fmt(lineaBase)}`}
             </Button>
           </div>
         </>

@@ -142,7 +142,7 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
     if (r.capCol && cap?.nombre !== r.capCol.toUpperCase()) abrir(r.capCol.toUpperCase(), "", null, null, r.fila);
 
     if (esRubro(r)) return rubro(r, r.cant, r.precio, m.col_total != null ? r.total : r.cant * r.precio);
-    if (r.cant && r.precio && r.totalVacio) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "sin_total", cant: r.cant, precio: r.precio });
+    if (r.cant && r.precio && r.totalVacio) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "sin_total", cant: r.cant, precio: r.precio, unidad: r.unidad, capitulo: cap?.nombre || "SIN CAPÍTULO" });
 
     if (esSubtotal(r)) {
       if (k > ultimoRubro || /general/i.test(r.linea)) { if (r.total) subtotalExcel = r.total; }
@@ -209,7 +209,8 @@ const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
 export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres }) {
   const adv = [];
-  const add = (tipo, nivel, titulo, filas = []) => adv.push({ tipo, nivel, titulo, filas });
+  // "datos" lleva lo necesario para corregir, si quien importa no acepta el error.
+  const add = (tipo, nivel, titulo, filas = [], datos = null) => adv.push({ tipo, nivel, titulo, filas, datos });
   const F = f => f + 1;   // Excel numera las filas desde 1
   const etiqueta = x => `${x.codigo ? x.codigo + " " : ""}${String(x.descripcion).slice(0, 55)}`;
 
@@ -226,16 +227,19 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
     const c = capitulos.find(x => x.nombre === d.capitulo);
     add("suma_capitulo", "error",
       `El subtotal del capítulo "${d.capitulo}" dice $${plata(d.excel)}, pero sus rubros suman $${plata(d.importado)} (diferencia $${plata(d.importado - d.excel)}). Suele ser una fórmula que no incluye todas las filas.`,
-      c?.fila != null ? [{ fila: F(c.fila), texto: d.capitulo }] : []);
+      c?.fila != null ? [{ fila: F(c.fila), texto: d.capitulo }] : [],
+      { capitulo: d.capitulo, excel: d.excel, importado: d.importado });
   });
 
   const subExplicado = difSub != null && Math.abs(difSub) > 1 && descuadres.length && Math.abs(difSub - explicado) <= 1;
   if (difSub != null && Math.abs(difSub) > 1 && !subExplicado)
-    add("suma_subtotal", "error", `Los rubros suman $${plata(sumaRubros)} y el SUBTOTAL del Excel dice $${plata(subtotalExcel)} (diferencia $${plata(difSub)}).`);
+    add("suma_subtotal", "error", `Los rubros suman $${plata(sumaRubros)} y el SUBTOTAL del Excel dice $${plata(subtotalExcel)} (diferencia $${plata(difSub)}).`, [],
+      { excel: subtotalExcel, importado: sumaRubros });
   const heredada = difSub != null ? difSub : explicado;
   const totExplicado = difTot != null && Math.abs(difTot) > 1 && Math.abs(difTot - heredada) <= 1 && Math.abs(heredada) > 1;
   if (difTot != null && Math.abs(difTot) > 1 && !totExplicado)
-    add("suma_total", "error", `Rubros y cargos${ivaExcel ? " con IVA" : ""} suman $${plata(calculado)} y el TOTAL del Excel dice $${plata(totalExcel)} (diferencia $${plata(difTot)}).`);
+    add("suma_total", "error", `Rubros y cargos${ivaExcel ? " con IVA" : ""} suman $${plata(calculado)} y el TOTAL del Excel dice $${plata(totalExcel)} (diferencia $${plata(difTot)}).`, [],
+      { excel: totalExcel, importado: calculado, ivaPct: ivaExcel ? (ivaExcel.pct || 15) : null });
   if (subExplicado || totExplicado) {
     const a = adv.find(x => x.tipo === "suma_capitulo");
     if (a) a.titulo += " Por esa misma diferencia tampoco cuadran el subtotal y el total del Excel.";
@@ -246,7 +250,8 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
     && Math.abs(x.total - x.cantidad * x.precio_unitario) > Math.max(0.02, Math.abs(x.total) * 0.0005));
   if (malas.length) add("suma_fila", "error",
     `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito. Se importa el total del Excel.`,
-    malas.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.precio_unitario)} = $${plata(x.cantidad * x.precio_unitario)}, el Excel dice $${plata(x.total)}` })));
+    malas.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.precio_unitario)} = $${plata(x.cantidad * x.precio_unitario)}, el Excel dice $${plata(x.total)}` })),
+    { filas: malas.map(x => x.fila), dif: malas.reduce((s, x) => s + x.cantidad * x.precio_unitario - x.total, 0) });
 
   // Cargos con porcentaje que no coincide
   cargos.forEach(c => {
@@ -256,14 +261,17 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
     const esperado = base * Number(pct.replace(",", ".")) / 100;
     if (Math.abs(esperado - c.total) > 1) add("cargo_porcentaje", "aviso",
       `"${c.descripcion}" dice ${pct} %, pero el monto es $${plata(c.total)}; el ${pct} % del subtotal serían $${plata(esperado)}.`,
-      [{ fila: F(c.fila), texto: c.descripcion }]);
+      [{ fila: F(c.fila), texto: c.descripcion }],
+      { fila: c.fila, actual: c.total, esperado: Math.round(esperado * 100) / 100, pct });
   });
 
   // Filas que el propio Excel no suma
   const sinTotal = omitidas.filter(o => o.motivo === "sin_total");
-  if (sinTotal.length) add("fila_sin_total", "aviso",
-    `${plural(sinTotal.length, "fila tiene", "filas tienen")} cantidad y precio pero la celda de total vacía: el Excel no las suma, así que no se importan.`,
-    sinTotal.map(o => ({ fila: F(o.fila), texto: `${etiqueta(o)}: ${o.cant} × $${plata(o.precio)} = $${plata(o.cant * o.precio)}` })));
+  // Es un error y no un aviso: es plata que el Excel deja afuera sin decirlo.
+  if (sinTotal.length) add("fila_sin_total", "error",
+    `${plural(sinTotal.length, "fila tiene", "filas tienen")} cantidad y precio pero la celda de total vacía: el Excel no las suma.`,
+    sinTotal.map(o => ({ fila: F(o.fila), texto: `${etiqueta(o)}: ${o.cant} × $${plata(o.precio)} = $${plata(o.cant * o.precio)}` })),
+    { filas: sinTotal.map(o => o.fila), monto: sinTotal.reduce((s, o) => s + o.cant * o.precio, 0) });
 
   // Numeración de capítulos
   const prefDe = {};
@@ -311,7 +319,8 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
   const dups = Object.values(grupos).filter(a => a.length > 1);
   if (dups.length) add("duplicado", "aviso",
     `${plural(dups.length, "rubro aparece", "rubros aparecen")} dos o más veces con la misma descripción, cantidad y precio. Puede ser a propósito; revísalo.`,
-    dups.flat().map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)} — $${plata(x.total)}` })));
+    dups.flat().map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)} — $${plata(x.total)}` })),
+    { quitar: dups.flatMap(a => a.slice(1).map(x => x.fila)), monto: dups.reduce((s, a) => s + a.slice(1).reduce((t, x) => t + x.total, 0), 0) });
 
   const sinCap = rubros.filter(x => x.capitulo === "SIN CAPÍTULO");
   if (sinCap.length && capitulos.length) add("sin_capitulo", "aviso",
@@ -319,6 +328,115 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
     sinCap.map(x => ({ fila: F(x.fila), texto: etiqueta(x) })));
 
   return adv.sort((a, b) => (a.nivel === "error" ? 0 : 1) - (b.nivel === "error" ? 0 : 1));
+}
+
+// ── Aceptar o no aceptar lo que marcó la revisión ────────────────────────
+// Aceptar: el presupuesto queda como dice el Excel. No aceptar: se corrige,
+// cuando hay forma de hacerlo sin inventar; si no la hay (una numeración mal
+// puesta), queda anotado como error del Excel para pedir que lo corrijan.
+//
+// Una suma mal hecha no se arregla tocando rubros, porque no se sabe qué fila
+// dejó afuera la fórmula. Si se acepta la cifra del Excel —porque es la que el
+// cliente aprobó— se agrega una línea de ajuste por la diferencia.
+
+export const CAP_AJUSTES = "AJUSTES AL EXCEL";
+const r2 = v => Math.round(v * 100) / 100;
+
+/** Qué pasa con cada opción, para mostrarlo antes de decidir. */
+export function efectos(a) {
+  const d = a.datos || {};
+  const signo = v => `${v < 0 ? "−" : "+"}$${plata(Math.abs(v))}`;
+  switch (a.tipo) {
+    case "suma_capitulo":
+      return { corrige: true,
+        aceptar: `Vale el subtotal del Excel: se agrega un ajuste de ${signo(d.excel - d.importado)} en el capítulo.`,
+        noAceptar: `Vale la suma real de los rubros, $${plata(d.importado)}.` };
+    case "suma_subtotal":
+      return { corrige: true,
+        aceptar: `Vale el subtotal del Excel: se agrega un ajuste de ${signo(d.excel - d.importado)}.`,
+        noAceptar: `Vale la suma real de los rubros, $${plata(d.importado)}.` };
+    case "suma_total":
+      return { corrige: true,
+        aceptar: `Vale el total del Excel: se agrega un ajuste por la diferencia.`,
+        noAceptar: `Vale la suma real, $${plata(d.importado)}.` };
+    case "suma_fila":
+      return { corrige: true,
+        aceptar: "Se importa el total escrito en el Excel.",
+        noAceptar: `Se corrige a cantidad × precio (${signo(d.dif)}).` };
+    case "fila_sin_total":
+      return { corrige: true,
+        aceptar: "No se importan, igual que en el Excel.",
+        noAceptar: `Se agregan con cantidad × precio (+$${plata(d.monto)}).` };
+    case "duplicado":
+      return { corrige: true,
+        aceptar: "Se dejan todos, están a propósito.",
+        noAceptar: `Se quita la repetición (−$${plata(d.monto)}).` };
+    case "cargo_porcentaje":
+      return { corrige: true,
+        aceptar: `Se deja el monto del Excel, $${plata(d.actual)}.`,
+        noAceptar: `Se corrige al ${d.pct} %, $${plata(d.esperado)}.` };
+    default:
+      return { corrige: false,
+        aceptar: "Está bien así.",
+        noAceptar: "Queda anotado como error del Excel, para pedir que lo corrijan. No cambia montos." };
+  }
+}
+
+/**
+ * Aplica las decisiones ({ índice de advertencia: "aceptar" | "corregir" }) a
+ * lo leído. Primero las correcciones de filas, después los ajustes de sumas,
+ * que se calculan contra lo ya corregido para no contar dos veces la misma
+ * diferencia.
+ */
+export function aplicarDecisiones({ rubros, cargos, omitidas, advertencias = [] }, decisiones = {}) {
+  let rs = rubros.map(r => ({ ...r }));
+  let cs = cargos.map(c => ({ ...c }));
+  const decide = (tipo, valor) => advertencias.map((a, i) => [a, i]).filter(([a, i]) => a.tipo === tipo && decisiones[i] === valor).map(([a]) => a);
+  const suma = a => a.reduce((s, x) => s + x.total, 0);
+
+  decide("suma_fila", "corregir").forEach(a => {
+    const filas = new Set(a.datos?.filas || []);
+    rs = rs.map(r => filas.has(r.fila) ? { ...r, total: r2(r.cantidad * r.precio_unitario), origen: "corregido" } : r);
+  });
+  decide("fila_sin_total", "corregir").forEach(a => {
+    const filas = new Set(a.datos?.filas || []);
+    omitidas.filter(o => o.motivo === "sin_total" && filas.has(o.fila)).forEach(o => rs.push({
+      capitulo: o.capitulo || "SIN CAPÍTULO", codigo: o.codigo, descripcion: o.descripcion, unidad: o.unidad || "",
+      cantidad: o.cant, precio_unitario: o.precio, total: r2(o.cant * o.precio), fila: o.fila, global: false, origen: "agregado",
+    }));
+  });
+  decide("duplicado", "corregir").forEach(a => {
+    const quitar = new Set(a.datos?.quitar || []);
+    rs = rs.filter(r => !quitar.has(r.fila));
+  });
+  decide("cargo_porcentaje", "corregir").forEach(a => {
+    cs = cs.map(c => c.fila === a.datos?.fila ? { ...c, total: a.datos.esperado, origen: "corregido" } : c);
+  });
+  rs.sort((x, y) => x.fila - y.fila);
+
+  const ajuste = (capitulo, monto, fila, descripcion) => {
+    if (Math.abs(monto) < 0.005) return;
+    rs.push({ capitulo, codigo: "", descripcion, unidad: "glb", cantidad: 1, precio_unitario: r2(monto), total: r2(monto), fila, global: true, origen: "ajuste" });
+  };
+  decide("suma_capitulo", "aceptar").forEach(a => {
+    const delCap = rs.filter(r => r.capitulo === a.datos.capitulo);
+    const ultima = delCap.length ? Math.max(...delCap.map(r => r.fila)) : 0;
+    const i = rs.findIndex(r => r.fila === ultima && r.capitulo === a.datos.capitulo);
+    const antes = rs.length;
+    ajuste(a.datos.capitulo, a.datos.excel - suma(delCap), ultima + 0.5, "AJUSTE PARA CUADRAR CON EL SUBTOTAL DEL EXCEL");
+    // Queda al final de su capítulo, no al final del presupuesto.
+    if (rs.length > antes && i >= 0) rs.splice(i + 1, 0, rs.pop());
+  });
+  decide("suma_subtotal", "aceptar").forEach(a => {
+    ajuste(CAP_AJUSTES, a.datos.excel - suma(rs), 1e9, "AJUSTE PARA CUADRAR CON EL SUBTOTAL GENERAL DEL EXCEL");
+  });
+  decide("suma_total", "aceptar").forEach(a => {
+    // El total del Excel ya trae su IVA; el ajuste va sin IVA, como los rubros.
+    const dif = a.datos.excel - (a.datos.importado - suma(rubros) - suma(cargos) + suma(rs) + suma(cs));
+    ajuste(CAP_AJUSTES, a.datos.ivaPct ? dif / (1 + a.datos.ivaPct / 100) : dif, 1e9 + 1, "AJUSTE PARA CUADRAR CON EL TOTAL DEL EXCEL");
+  });
+
+  return { rubros: rs, cargos: cs };
 }
 
 // ── Formatos recordados ──────────────────────────────────────────────────
