@@ -4,6 +4,11 @@ import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { supabase } from "../lib/supabase";
 import { alimentarBase, resumenAlimentacion } from "../lib/baseRubros";
 import AdminBD from "./AdminBD";
+import BaseRubros from "./presupuestos/BaseRubros";
+import PreguntasNova from "../components/PreguntasNova";
+import { reconocerExcel, recordarFormato } from "../lib/leerExcelPresupuesto";
+import { interpretarPresupuesto } from "./controlObra/leerPresupuesto";
+import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
 
 export default function ModuloPresupuestos({ currentUser, puede }) {
@@ -24,6 +29,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [bdResult, setBdResult] = useState(null);
   const [bdRubros, setBdRubros] = useState([]); // editable rubros list
   const [bdMeta, setBdMeta] = useState({ proveedor:"", cliente:"", fecha:new Date().getFullYear().toString() });
+  // Lo que NOVA pregunta antes de guardar (origen de los precios, unidades) y
+  // lo leído del Excel, para recordar su formato.
+  const [bdPreguntas, setBdPreguntas] = useState(RESPUESTAS_VACIAS);
+  const [bdSugerencia, setBdSugerencia] = useState({});
+  const [bdLectura, setBdLectura] = useState(null);
+  const [guardandoBD, setGuardandoBD] = useState(false);
+  const [proveedores, setProveedores] = useState([]);
   const [modalRubro, setModalRubro] = useState(null);
   const [rubroSeleccionado, setRubroSeleccionado] = useState(null); // rubro with historial expanded
   const [busquedaRubro, setBusquedaRubro] = useState("");
@@ -36,7 +48,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
 
-  useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchCapitulosDB(); }, []);
+  useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchProveedores(); fetchCapitulosDB(); }, []);
 
   async function fetchPresupuestos() {
     const { data } = await supabase.from("presupuestos").select("*").order("created_at",{ascending:false});
@@ -45,6 +57,10 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   async function fetchClientes() {
     const { data } = await supabase.from("clientes").select("*").order("nombre");
     setClientes(data||[]);
+  }
+  async function fetchProveedores() {
+    const { data } = await supabase.from("proveedores").select("id,nombre").order("nombre");
+    setProveedores(data||[]);
   }
   async function fetchCapitulosDB() {
     const { data } = await supabase.from("capitulos").select("*").order("nombre");
@@ -350,8 +366,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
 
   async function leerParaBD(e) {
     const file=e.target.files[0]; if(!file) return;
-    setUploadingBD(true); setBdResult(null);
-    const prompt='Extrae rubros del presupuesto. SOLO JSON compacto sin espacios extra: {"proveedor":"","cliente":"","capitulos":["cap1"],"rubros":[{"c":"capitulo","d":"descripcion breve max 60 chars","u":"unidad","q":1,"p":0.00}]}. Abrevia descripciones largas. Incluye TODOS los rubros.';
+    setUploadingBD(true); setBdResult(null); setBdLectura(null);
+    const prompt='Extrae rubros del presupuesto. SOLO JSON compacto sin espacios extra: {"proveedor":"","cliente":"","capitulos":["cap1"],"rubros":[{"c":"capitulo","d":"descripcion breve max 60 chars","u":"unidad","q":1,"p":0.00}]}. "proveedor" es la empresa que hizo el documento y "cliente" a quién va dirigido; si no aparecen, vacíos. Abrevia descripciones largas. Incluye TODOS los rubros.';
     try {
       let msgContent;
       const isImage = file.type.startsWith("image/");
@@ -365,86 +381,23 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
         msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
       } else if (isExcel) {
-        // Use SheetJS to extract rubros directly without NOVA
-        const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, {type:"array"});
-        const rubrosExtraidos = [];
-        const capitulosExtraidos = [];
-        let capActual = "";
-
-        for (const sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:""});
-          
-          for (const row of rows) {
-            const vals = row.map(v=>String(v||"").trim()).filter(v=>v);
-            if (vals.length < 2) continue;
-            
-            // Find item number (like "1", "1.1", "2.3")
-            const item = vals.find(v=>v.match(/^\d+(\.\d+)?$/));
-            // Find description (longest text that is not a number)
-            const textos = vals.filter(v=>v.length>2&&!v.match(/^[\d.,\s]+$/));
-            const desc = textos.reduce((a,b)=>b.length>a.length?b:a, "");
-            
-            if (!item || !desc) continue;
-
-            // Detect capitulo header: integer item + no decimal prices in row
-            const numeros = vals.filter(v=>v.match(/^\d+([.,]\d+)?$/)&&parseFloat(v.replace(",","."))<1000000);
-            const tienePrecios = numeros.some(v=>v.includes(".")&&parseFloat(v)>0.1);
-            
-            if (item.match(/^\d+$/) && !tienePrecios) {
-              capActual = desc;
-              if (!capitulosExtraidos.includes(capActual)) capitulosExtraidos.push(capActual);
-              continue;
-            }
-            
-            // Detect rubro: item with decimal like "1.1", "2.3"
-            if (item.match(/^\d+\.\d+/)) {
-              // Unidad: short text matching known units
-              const unidad = vals.find(v=>v.match(/^(m2|m²|ml|u|glb|gl|kg|ton|m3|m³|l|lt|hr|mes|dia|pza|pz|pp|und|vía|via|pto|punto|jgo|juego|global|GA)$/i))||"";
-              
-              // Precio: find all numbers, take the one that looks like unit price
-              // Usually 2nd or 3rd numeric column (after cantidad)
-              const todosNums = vals
-                .filter(v=>v.match(/^[\d]+[.,]?[\d]*$/)&&v!==item)
-                .map(v=>parseFloat(v.replace(",",".")))
-                .filter(v=>v>0&&v<500000)
-                .sort((a,b)=>a-b);
-              
-              // precio_unitario is usually the smallest non-1 number (unit price, not total)
-              const cantidad = todosNums.length>0 ? todosNums[0] : 1;
-              const precio_unitario = todosNums.length>1 ? todosNums[1] : (todosNums[0]||0);
-              
-              if (desc && precio_unitario>0) {
-                rubrosExtraidos.push({
-                  capitulo: capActual||"SIN CLASIFICAR",
-                  descripcion: desc.slice(0,200),
-                  unidad,
-                  cantidad: cantidad||1,
-                  precio_unitario
-                });
-              }
-            }
-          }
+        // La misma lectura que al importar una obra: formato aprendido o NOVA
+        // reconoce las columnas, y las filas se recorren sin IA.
+        const lectura = await reconocerExcel(file);
+        const r = interpretarPresupuesto(lectura.filas, lectura.mapa);
+        if (r.rubros.length >= 3) {
+          setBdResult({ capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros });
+          setBdRubros(r.rubros.map(x => ({ fila: x.fila, capitulo: x.capitulo, descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad, precio_unitario: x.precio_unitario })));
+          setBdLectura({ filas: lectura.filas, mapa: r.mapa, archivo: file.name, origen: lectura.origen });
+          setBdSugerencia({ emisor: lectura.datos.emisor || "", cliente: lectura.datos.cliente || "" });
+          setBdPreguntas({ ...RESPUESTAS_VACIAS, cliente: lectura.datos.cliente || "" });
+          setBdMeta({ proveedor: lectura.datos.nombre || file.name.replace(/\.(xlsx|xls|csv)$/i, ""), cliente: "", fecha: new Date().getFullYear().toString() });
+          setUploadingBD(false); e.target.value = ""; return;
         }
-
-        if (rubrosExtraidos.length > 0) {
-          // Direct result without NOVA
-          const directResult = {
-            proveedor: file.name.replace(/\.(xlsx|xls)$/i,""),
-            cliente: "",
-            capitulos: capitulosExtraidos,
-            rubros: rubrosExtraidos
-          };
-          setBdResult(directResult);
-          setBdRubros(directResult.rubros);
-          setBdMeta({proveedor:directResult.proveedor, cliente:"", fecha:new Date().getFullYear().toString()});
-          setUploadingBD(false); e.target.value=""; return;
-        }
-        
-        // Fallback to NOVA if direct extraction failed
-        const csv = workbook.SheetNames.map(s=>XLSX.utils.sheet_to_csv(workbook.Sheets[s])).join("\n");
+        // Si no salieron rubros, NOVA lee el Excel entero.
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const csv = workbook.SheetNames.map(h => XLSX.utils.sheet_to_csv(workbook.Sheets[h])).join("\n");
         msgContent=[{type:"text",text:`Excel:\n\n${csv.slice(0,12000)}\n\n${prompt}`}];
       } else {
         const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file);});
@@ -487,32 +440,27 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       }
       if(!parsed||!parsed.rubros?.length) { setBdResult({error:"NOVA no pudo extraer rubros. El presupuesto puede ser muy grande — intenta subir por capítulos. Respuesta: "+rawText.slice(0,200)}); setUploadingBD(false); e.target.value=""; return; }
       setBdResult(parsed);
-      setBdRubros(parsed.rubros||[]);
-      setBdMeta({ proveedor:parsed.proveedor||"", cliente:parsed.cliente||"", fecha:new Date().getFullYear().toString() });
+      setBdRubros((parsed.rubros||[]).map((r, i) => ({ ...r, fila: i })));
+      setBdSugerencia({ emisor: parsed.proveedor || "", cliente: parsed.cliente || "" });
+      setBdPreguntas({ ...RESPUESTAS_VACIAS, cliente: parsed.cliente || "" });
+      setBdMeta({ proveedor:file.name.replace(/\.[^.]+$/, ""), cliente:"", fecha:new Date().getFullYear().toString() });
     } catch(err) { setBdResult({error:"Error: "+err.message}); }
     setUploadingBD(false); e.target.value="";
   }
 
   async function guardarEnBD() {
-    if (!bdRubros.length) return;
-    const proveedor = bdMeta.proveedor;
-    const fecha = bdMeta.fecha;
-    let cliente = bdMeta.cliente;
-    // Save new client if needed
-    if (bdMeta.clienteNuevo && cliente) {
-      const {data:existeCl} = await supabase.from("clientes").select("id").eq("nombre",cliente).limit(1);
-      if (!existeCl||existeCl.length===0) {
-        await supabase.from("clientes").insert({nombre:cliente,tipo:"otro"});
-        setClientes(prev=>[...prev,{nombre:cliente}]);
-      }
-    }
+    if (!bdRubros.length || faltanRespuestas(bdPreguntas, bdRubros).length) return;
+    setGuardandoBD(true);
     const res = await alimentarBase(
-      bdRubros.map(r => ({ descripcion: r.descripcion, unidad: r.unidad, precio_unitario: r.precio_unitario, capitulo: r.capitulo })),
-      { cliente, proyecto: proveedor, fecha }
+      bdRubros.map(r => ({ descripcion: r.descripcion, unidad: unidadParaBase(r, bdPreguntas), precio_unitario: r.precio_unitario, capitulo: r.capitulo, cantidad: r.cantidad })),
+      { tipo: bdPreguntas.tipo, cliente: bdPreguntas.cliente, proveedor: bdPreguntas.proveedor, proyecto: bdMeta.proveedor, fecha: bdMeta.fecha, fuente: "alimentar" }
     );
-    fetchCapitulosDB();
+    // Se guardó bien: el formato del Excel queda aprendido.
+    if (bdLectura && !res.error) await recordarFormato({ filas: bdLectura.filas, mapa: bdLectura.mapa, archivo: bdLectura.archivo, usuarioId: currentUser?.id });
+    fetchCapitulosDB(); fetchClientes(); fetchProveedores();
+    setGuardandoBD(false);
     alert(res.error ? "⚠️ " + res.error : "✅ " + (resumenAlimentacion(res) || "No había nada nuevo que guardar."));
-    setBdResult(null);
+    setBdResult(null); setBdLectura(null);
   }
 
   async function exportarExcel() {
@@ -863,42 +811,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       )}
 
       {/* BASE DE RUBROS */}
-      {subVista==="baseDatos"&&(
-        <div>
-          <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value);}}
-            placeholder="Buscar en base de rubros..." style={{...iS,marginBottom:12}}
-            onFocus={()=>buscarRubros(busquedaRubro)}/>
-          <div style={{fontSize:11,color:"var(--muted)",marginBottom:10}}>Base: 1,151+ rubros · Primeros 60 resultados</div>
-          {rubrosDB.map(r=>(
-            <div key={r.id} style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,marginBottom:6,overflow:"hidden"}}>
-              <div onClick={()=>setRubroSeleccionado(rubroSeleccionado?.id===r.id?null:r)}
-                style={{padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}
-                onMouseEnter={e=>e.currentTarget.style.background="var(--bg)"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{r.descripcion}</div>
-                  <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{r.capitulos?.nombre} · {r.unidad}</div>
-                </div>
-                <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
-                  <div style={{fontSize:13,fontWeight:600,color:"var(--brand)"}}>${fmt(r.precio_referencia)}</div>
-                  <div style={{fontSize:10,color:"var(--muted)"}}>{r.precios_historial?.length||0} clientes · {rubroSeleccionado?.id===r.id?"▲":"▼"}</div>
-                </div>
-              </div>
-              {rubroSeleccionado?.id===r.id&&(
-                <div style={{background:"var(--bg)",borderTop:"1px solid var(--neutral-soft)",padding:"8px 14px"}}>
-                  <div style={{fontSize:10,fontWeight:600,color:"var(--ink-soft)",marginBottom:6,letterSpacing:0.5}}>HISTORIAL POR CLIENTE</div>
-                  {r.precios_historial?.length===0&&<div style={{fontSize:11,color:"var(--muted)"}}>Sin historial.</div>}
-                  {[...new Map(r.precios_historial?.map(h=>[h.cliente_nombre,h])).values()].map((h,i)=>(
-                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",background:"#fff",borderRadius:6,marginBottom:3,border:"1px solid var(--border)"}}>
-                      <div style={{fontSize:11,color:"var(--ink-soft)"}}>{h.cliente_nombre||"Sin cliente"} <span style={{color:"var(--muted)"}}>({h.fecha})</span></div>
-                      <div style={{fontWeight:600,color:"var(--brand)",fontSize:12}}>${fmt(h.precio_unitario)}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {subVista==="baseDatos"&&<BaseRubros puede={puede}/>}
 
       {/* ALIMENTAR BD */}
       {subVista==="alimentarBD"&&(
@@ -917,20 +830,14 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               <div style={{fontSize:14,fontWeight:600,color:"var(--ink)",marginBottom:12}}>✓ NOVA analizó el archivo — revisa y edita antes de guardar</div>
 
               {/* Metadata */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
-                <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Proveedor / Fuente</label>
-                  <input value={bdMeta.proveedor} onChange={e=>setBdMeta(p=>({...p,proveedor:e.target.value}))} placeholder="Nombre del proveedor" style={iS}/></div>
-                <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Cliente de referencia</label>
-                  <select value={bdMeta.clienteNuevo?"__nuevo__":bdMeta.cliente} onChange={e=>setBdMeta(p=>({...p,cliente:e.target.value==="__nuevo__"?"":e.target.value,clienteNuevo:e.target.value==="__nuevo__"}))} style={iS}>
-                    <option value="">Sin cliente</option>
-                    {clientes.map(c=><option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-                    <option value="__nuevo__">+ Nuevo cliente...</option>
-                  </select>
-                  {bdMeta.clienteNuevo&&<input value={bdMeta.cliente||""} onChange={e=>setBdMeta(p=>({...p,cliente:e.target.value}))} placeholder="Nombre del cliente nuevo" style={{...iS,marginTop:6}}/>}
-                </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10,marginBottom:12}}>
+                <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Proyecto o referencia</label>
+                  <input value={bdMeta.proveedor} onChange={e=>setBdMeta(p=>({...p,proveedor:e.target.value}))} placeholder="Ej. Casa Fowler, proforma de pisos" style={iS}/></div>
                 <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Año del presupuesto</label>
                   <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
+              {bdLectura?.origen?.tipo==="recordado"&&<div style={{fontSize:11,color:"var(--success)",marginBottom:10}}>Formato reconocido: se leyó igual que "{bdLectura.origen.archivo}".</div>}
+              <PreguntasNova rubros={bdRubros} respuestas={bdPreguntas} onCambiar={setBdPreguntas} sugerencia={bdSugerencia} clientes={clientes} proveedores={proveedores}/>
 
               {/* Capítulos detectados */}
               {bdResult.capitulos?.length>0&&(
@@ -971,10 +878,11 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
 
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>{setBdResult(null);setBdRubros([]);}} style={{flex:1,background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:10,color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-                <button onClick={guardarEnBD} disabled={!bdRubros.length}
-                  style={{flex:2,background:bdRubros.length?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:8,padding:10,color:bdRubros.length?"#fff":"var(--muted)",fontSize:13,fontWeight:600,cursor:bdRubros.length?"pointer":"default"}}>
-                  ✓ Guardar {bdRubros.length} rubros en base de datos
-                </button>
+                {(()=>{ const falta=faltanRespuestas(bdPreguntas,bdRubros); const listo=bdRubros.length&&!falta.length&&!guardandoBD; return (
+                <button onClick={guardarEnBD} disabled={!listo}
+                  style={{flex:2,background:listo?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:8,padding:10,color:listo?"#fff":"var(--muted)",fontSize:13,fontWeight:600,cursor:listo?"pointer":"default"}}>
+                  {guardandoBD?"Guardando...":falta.length?"Responde las preguntas de NOVA para guardar":`✓ Guardar ${bdRubros.length} rubros en base de datos`}
+                </button>); })()}
               </div>
             </div>
           )}

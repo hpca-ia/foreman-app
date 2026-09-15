@@ -44,7 +44,9 @@ export function num(v) {
 
 export const MAPA_PROMPT = `Estas son las primeras filas de un presupuesto de construcción en Excel.
 Identifica la estructura. Devuelve SOLO JSON, sin markdown:
-{"fila_encabezado":0,"col_item":null,"col_descripcion":0,"col_unidad":0,"col_cantidad":0,"col_precio":0,"col_total":0,"col_capitulo":null,"precios_incluyen_iva":null,"nombre":"","cliente":""}
+{"fila_encabezado":0,"col_item":null,"col_descripcion":0,"col_unidad":0,"col_cantidad":0,"col_precio":0,"col_total":0,"col_capitulo":null,"precios_incluyen_iva":null,"nombre":"","cliente":"","emisor":""}
+"nombre": el proyecto u obra. "cliente": a quién va dirigido. "emisor": la empresa que hizo el
+documento (quien cotiza). Si no aparecen, déjalos vacíos; no inventes.
 Las columnas son índices desde 0 según el orden en que aparecen, contando las vacías.
 "fila_encabezado": la fila con los títulos de columna.
 "col_item": la columna con la numeración o código de cada rubro (1.1, 2.03, A-12). Null si no hay.

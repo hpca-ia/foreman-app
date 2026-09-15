@@ -1,12 +1,15 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { Upload, Sparkles, Trash2, ArrowLeft, CheckCircle2, AlertTriangle, SlidersHorizontal, BookmarkCheck } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import PreguntasNova from "../../components/PreguntasNova";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
-import { MAPA_PROMPT, interpretarPresupuesto, buscarFormato, firmaEncabezado, soloColumnas, aplicarDecisiones } from "./leerPresupuesto";
+import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
+import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
+import { interpretarPresupuesto, aplicarDecisiones } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
 
@@ -18,21 +21,14 @@ const CAP_CARGOS = "HONORARIOS Y CARGOS";
 // esta importación crea la obra directamente, sin pasar por Presupuestos.
 const PROMPT = `Replica este presupuesto de construcción TAL CUAL, sin resumir ni reagrupar.
 Devuelve SOLO JSON compacto, sin markdown:
-{"nombre":"","cliente":"","rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0}]}
+{"nombre":"","cliente":"","emisor":"","rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0}]}
 Reglas:
+- "emisor" es la empresa que hizo el documento (quien cotiza); "cliente", a quién va dirigido.
 - Un objeto por rubro, en el MISMO ORDEN del documento.
 - "c" = el capítulo/sección al que pertenece ese rubro (repite el nombre en cada rubro).
 - Las filas de encabezado de capítulo y las de subtotal NO son rubros: no las incluyas.
 - "q" cantidad, "p" precio unitario, "t" total de la fila. Si falta "t", omítelo.
 - No inventes rubros ni cambies descripciones.`;
-
-// La hoja con el presupuesto: la que se llama así, o la más larga.
-function hojaPresupuesto(XLSX, wb) {
-  const leer = nombre => XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, blankrows: false, defval: "" });
-  const porNombre = wb.SheetNames.find(s => /presupuesto/i.test(s));
-  if (porNombre) return leer(porNombre);
-  return wb.SheetNames.map(leer).sort((a, b) => b.length - a.length)[0] || [];
-}
 
 export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [leyendo, setLeyendo] = useState(false);
@@ -54,7 +50,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [origenMapa, setOrigenMapa] = useState(null);  // { tipo: "recordado" | "nova" | "manual", veces, archivo }
   const [verColumnas, setVerColumnas] = useState(false);
   const [nombre, setNombre] = useState("");
-  const [cliente, setCliente] = useState("");
+  // Lo que NOVA pregunta antes de guardar: de dónde vienen los precios, de
+  // qué cliente o proveedor, y las unidades que no se entienden.
+  const [preguntas, setPreguntas] = useState(RESPUESTAS_VACIAS);
+  const [sugerencia, setSugerencia] = useState({});
+  const [clientesLista, setClientesLista] = useState([]);
+  const [proveedoresLista, setProveedoresLista] = useState([]);
   // Sin valor por defecto a propósito. El control de obra se hace con IVA
   // porque las facturas lo traen; si la línea base entra sin IVA, el avance
   // sale inflado cerca de un 15 %. Venía marcado "ya incluye IVA" y así se
@@ -66,19 +67,17 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [guardando, setGuardando] = useState(false);
   const fileRef = useRef(null);
 
-  async function nova(body, señal) {
-    const res = await fetch("/api/nova", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body), signal: señal,
-    });
-    if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
-    return res.json();
-  }
+  useEffect(() => {
+    supabase.from("clientes").select("id,nombre").order("nombre").then(({ data }) => setClientesLista(data || []));
+    // Sin la migración 016 no hay tabla de proveedores: la lista queda vacía.
+    supabase.from("proveedores").select("id,nombre").order("nombre").then(({ data }) => setProveedoresLista(data || []));
+  }, []);
 
   function limpiar() {
     setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]); setDecisiones({});
     setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
     setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true);
+    setPreguntas(RESPUESTAS_VACIAS); setSugerencia({});
   }
 
   // Lee las filas con un mapa de columnas y deja todo listo para la vista
@@ -110,45 +109,20 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     const ctrl = new AbortController();
     const reloj = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
     try {
-      const esExcel = /\.(xlsx|xls|csv)$/i.test(file.name);
-
-      if (esExcel) {
-        const XLSX = await import("xlsx");
-        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-        const filas = hojaPresupuesto(XLSX, wb);
-
-        // Primero, ¿ya conocemos este formato? Si otro Excel con los mismos
-        // títulos de columna se importó bien, se lee igual y NOVA no adivina.
-        const { data: formatos } = await supabase.from("formatos_presupuesto").select("*");
-        const recordado = buscarFormato(filas, formatos || []);
-        let mapa, origen, datosNova = null;
-        if (recordado) {
-          mapa = recordado.mapa;
-          origen = { tipo: "recordado", veces: recordado.formato.veces, archivo: recordado.formato.ejemplo_archivo };
-        } else {
-          setPaso("NOVA está reconociendo las columnas...");
-          const muestra = filas.slice(0, 40).map((f, i) => `${i}: ` + f.map(c => String(c ?? "").slice(0, 30)).join(" | ")).join("\n");
-          const data = await nova({
-            model: "claude-sonnet-4-5", max_tokens: 1000,
-            messages: [{ role: "user", content: [{ type: "text", text: `${muestra}\n\n${MAPA_PROMPT}` }] }],
-          }, ctrl.signal);
-          datosNova = parseJSONTolerante(data.content?.[0]?.text || "");
-          mapa = datosNova || { fila_encabezado: 0 };
-          origen = { tipo: "nova" };
-        }
-
-        setNombre(datosNova?.nombre || file.name.replace(/\.[^.]+$/, ""));
-        setCliente(datosNova?.cliente || "");
-        const cuantos = aplicarMapa(filas, mapa, origen);
+      if (/\.(xlsx|xls|csv)$/i.test(file.name)) {
+        // Con un formato ya aprendido se lee igual que la vez anterior; si es
+        // nuevo, NOVA reconoce las columnas.
+        const lectura = await reconocerExcel(file, { signal: ctrl.signal, onPaso: setPaso });
+        setNombre(lectura.datos.nombre || file.name.replace(/\.[^.]+$/, ""));
+        setSugerencia({ emisor: lectura.datos.emisor || "", cliente: lectura.datos.cliente || "" });
+        setPreguntas({ ...RESPUESTAS_VACIAS, cliente: lectura.datos.cliente || "" });
+        const cuantos = aplicarMapa(lectura.filas, lectura.mapa, lectura.origen);
         // Si con esas columnas no salen rubros, no se adivina más: se muestran
         // las columnas para corregirlas, con la opción de que NOVA lea todo.
         if (cuantos < 3) setVerColumnas(true);
-        clearTimeout(reloj);
-        setLeyendo(false); setPaso(""); e.target.value = "";
-        return;
+      } else {
+        await leerConNova(file, null, ctrl.signal);
       }
-
-      await leerConNova(file, null, ctrl.signal);
     } catch (err) {
       setError(err.name === "AbortError"
         ? "La lectura pasó de cinco minutos y se cortó. Prueba subir el presupuesto por capítulos, o en Excel en vez de PDF."
@@ -180,7 +154,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       contenido = [{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }];
     }
 
-    const data = await nova({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal);
+    const data = await pedirNova({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal);
     const parsed = parseJSONTolerante(data.content?.[0]?.text || "");
     if (!parsed?.rubros?.length) {
       setError("NOVA no pudo leer el presupuesto. Si es muy grande, prueba subirlo por capítulos.");
@@ -201,7 +175,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     })).filter(r => r.descripcion));
     setSugerenciaIva("Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
     setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
-    setCliente(parsed.cliente || "");
+    setSugerencia({ emisor: parsed.emisor || "", cliente: parsed.cliente || "" });
+    setPreguntas({ ...RESPUESTAS_VACIAS, cliente: parsed.cliente || "" });
     setLeyendo(false); setPaso("");
   }
 
@@ -213,6 +188,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const final = useMemo(() => aplicarDecisiones({ rubros, cargos, omitidas, advertencias }, decisiones), [rubros, cargos, omitidas, advertencias, decisiones]);
   const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !decisiones[i]).length;
   const decidir = (i, v) => setDecisiones(d => { const x = { ...d }; if (v) x[i] = v; else delete x[i]; return x; });
+  const faltanPreguntas = faltanRespuestas(preguntas, final.rubros);
 
   // ── Cuentas de la vista previa ──
   const factor = incluyeIva === false ? 1 + n(ivaPct) / 100 : 1;
@@ -229,30 +205,15 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const difSubtotal = control?.subtotal != null ? sumaRubros - control.subtotal : null;
   const difTotal = control?.total != null ? sumaRubros + sumaTodosCargos + (control.iva?.total || 0) - control.total : null;
 
-  // Guarda el mapa como formato conocido. Si ya existía, suma un uso y se
-  // queda con la última corrección.
-  async function recordarFormato() {
-    if (!filasExcel || !mapaActual) return null;
-    const encabezado = filasExcel[mapaActual.fila_encabezado ?? 0] || [];
-    const firma = firmaEncabezado(encabezado);
-    if (!firma) return null;
-    const { data: ya, error: eBusca } = await supabase.from("formatos_presupuesto").select("id,veces").eq("firma", firma).maybeSingle();
-    if (eBusca) return eBusca;
-    const datos = { firma, encabezados: encabezado, mapa: soloColumnas(mapaActual), actualizado_at: new Date().toISOString() };
-    const { error } = ya
-      ? await supabase.from("formatos_presupuesto").update({ ...datos, veces: (ya.veces || 1) + 1 }).eq("id", ya.id)
-      : await supabase.from("formatos_presupuesto").insert({ ...datos, ejemplo_archivo: archivo?.name || null, creado_por: currentUser.id });
-    return error;
-  }
-
   async function crearObra() {
-    if (!rubros.length || !nombre.trim() || incluyeIva === null || pendientes) return;
+    if (!rubros.length || !nombre.trim() || incluyeIva === null || pendientes || faltanPreguntas.length) return;
     setGuardando(true); setError("");
     const pct = incluyeIva ? 0 : n(ivaPct);
     const faltan = [];
+    const cliente = preguntas.cliente.trim();
 
     const datosObra = {
-      nombre: nombre.trim(), cliente_nombre: cliente.trim() || null,
+      nombre: nombre.trim(), cliente_nombre: cliente || null,
       notas: "Presupuesto importado con NOVA", created_by: currentUser.id,
     };
     const extras = {
@@ -281,7 +242,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       return {
         obra_id: obra.id, numero: i + 1, codigo: r.codigo || null, capitulo: r.capitulo,
         capitulo_orden: c, orden: c * 1000 + idxCap[c],
-        descripcion: r.descripcion, unidad: r.unidad,
+        // La unidad como está en el Excel, salvo las que NOVA preguntó.
+        descripcion: r.descripcion, unidad: unidadRespondida(r, preguntas),
         cantidad: r.cantidad, precio_unitario: r.precio_unitario,
         iva_pct: pct,
         total_base: Math.round(r.total * factor * 100) / 100,
@@ -318,13 +280,15 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     }
 
     // La obra se creó bien: el formato con que se leyó queda aprendido.
-    const eFormato = await recordarFormato();
+    const eFormato = await recordarFormato({ filas: filasExcel, mapa: mapaActual, archivo: archivo?.name, usuarioId: currentUser.id });
     if (eFormato) faltan.push("015 (recordar el formato)");
 
     // El presupuesto que se controla también es conocimiento: sus rubros y sus
-    // precios (sin IVA, como se cotizan) entran a la base de rubros.
-    // Los ajustes no son rubros de verdad: no entran.
-    await alimentarBase(final.rubros.filter(r => r.origen !== "ajuste"), { cliente: cliente.trim(), proyecto: nombre.trim() });
+    // precios entran a la base con su origen. Los ajustes no son rubros de verdad.
+    const base = await alimentarBase(
+      final.rubros.filter(r => r.origen !== "ajuste").map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
+      { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "obra", obraId: obra.id, ivaIncluido: incluyeIva });
+    if (base.sinMigracion) faltan.push("016 (origen de los precios)");
 
     setGuardando(false);
     if (faltan.length) alert(`La obra se creó, pero falta correr en Supabase la migración ${faltan.join(", ")}.`);
@@ -400,9 +364,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       {rubros.length >= 3 && (
         <>
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16, marginBottom: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr", gap: 10, marginBottom: 14 }}>
-              <div><label style={lbl}>NOMBRE DE LA OBRA</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} /></div>
-              <div><label style={lbl}>CLIENTE</label><input value={cliente} onChange={e => setCliente(e.target.value)} style={inputStyle} placeholder="Opcional" /></div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>NOMBRE DE LA OBRA</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} />
             </div>
 
             {origenTexto && (
@@ -420,6 +383,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
                 )}
               </div>
             )}
+
+            <PreguntasNova rubros={final.rubros} respuestas={preguntas} onCambiar={setPreguntas} sugerencia={sugerencia}
+              clientes={clientesLista} proveedores={proveedoresLista} />
 
             {/* IVA: pregunta obligatoria */}
             <div style={{ background: incluyeIva === null ? colors.warningSoft : colors.bg, border: `1.5px solid ${incluyeIva === null ? colors.warningBorder : colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
@@ -504,7 +470,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
                         {r.origen && r.origen !== "ajuste" && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>{r.origen === "agregado" ? "AGREGADO" : "CORREGIDO"}</span>}
                         {r.descripcion}
                       </span>
-                      <span style={{ color: colors.muted, fontSize: 11 }}>{r.unidad}</span>
+                      <span style={{ color: colors.muted, fontSize: 11 }}>{r._cargo != null ? r.unidad : unidadRespondida(r, preguntas)}</span>
                       <span style={{ color: colors.muted, textAlign: "right" }}>{fmt(r.cantidad)}</span>
                       <span style={{ color: colors.inkSoft, textAlign: "right" }}>${fmt(r.precio_unitario)}</span>
                       <span style={{ color: colors.ink, textAlign: "right", fontWeight: 600 }}>${fmt(r.total)}</span>
@@ -521,9 +487,10 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" style={{ flex: 1 }} onClick={() => { limpiar(); setError(""); }}>Descartar</Button>
-            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={crearObra} disabled={guardando || !nombre.trim() || incluyeIva === null || pendientes > 0}>
+            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={crearObra} disabled={guardando || !nombre.trim() || incluyeIva === null || pendientes > 0 || faltanPreguntas.length > 0}>
               {guardando ? "Creando obra..."
                 : pendientes ? `Acepta o no acepta ${pendientes === 1 ? "el error" : `los ${pendientes} errores`} para continuar`
+                : faltanPreguntas.length ? "Responde las preguntas de NOVA para continuar"
                 : incluyeIva === null ? "Responde lo del IVA para continuar"
                 : `Crear obra · línea base $${fmt(lineaBase)}`}
             </Button>
@@ -532,21 +499,4 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       )}
     </div>
   );
-}
-
-function parseJSONTolerante(raw) {
-  let t = raw.replace(/```json|```/g, "").trim();
-  try { return JSON.parse(t); } catch {}
-  const start = t.indexOf("{");
-  if (start < 0) return null;
-  t = t.slice(start);
-  try { return JSON.parse(t); } catch {}
-  try {
-    const corte = t.lastIndexOf("}");
-    let p = corte > 0 ? t.slice(0, corte + 1) : t;
-    let llaves = 0, corchetes = 0;
-    for (const c of p) { if (c === "{") llaves++; if (c === "}") llaves--; if (c === "[") corchetes++; if (c === "]") corchetes--; }
-    p += "]".repeat(Math.max(corchetes, 0)) + "}".repeat(Math.max(llaves, 0));
-    return JSON.parse(p);
-  } catch { return null; }
 }
