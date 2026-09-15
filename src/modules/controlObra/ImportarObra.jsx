@@ -1,13 +1,14 @@
 import { useState, useRef } from "react";
-import { Upload, Sparkles, Trash2, ArrowLeft, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Upload, Sparkles, Trash2, ArrowLeft, CheckCircle2, AlertTriangle, SlidersHorizontal, BookmarkCheck } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
-import { MAPA_PROMPT, interpretarPresupuesto } from "./leerPresupuesto";
+import { MAPA_PROMPT, interpretarPresupuesto, buscarFormato, firmaEncabezado, soloColumnas } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
+import EditorColumnas from "./EditorColumnas";
 
 const n = v => Number(v) || 0;
 const CAP_CARGOS = "HONORARIOS Y CARGOS";
@@ -43,6 +44,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [omitidas, setOmitidas] = useState([]);
   const [control, setControl] = useState(null);     // lo que declaraba el Excel, para comparar
   const [advertencias, setAdvertencias] = useState([]);
+  // Para poder corregir columnas y recordar el formato hay que conservar las
+  // filas del Excel y el mapa con que se leyeron.
+  const [filasExcel, setFilasExcel] = useState(null);
+  const [mapaActual, setMapaActual] = useState(null);
+  const [origenMapa, setOrigenMapa] = useState(null);  // { tipo: "recordado" | "nova" | "manual", veces, archivo }
+  const [verColumnas, setVerColumnas] = useState(false);
   const [nombre, setNombre] = useState("");
   const [cliente, setCliente] = useState("");
   // Sin valor por defecto a propósito. El control de obra se hace con IVA
@@ -54,7 +61,6 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const [ivaPct, setIvaPct] = useState(15);
   const [incluirCargos, setIncluirCargos] = useState(true);
   const [guardando, setGuardando] = useState(false);
-  const [aviso, setAviso] = useState("");
   const fileRef = useRef(null);
 
   async function nova(body, señal) {
@@ -68,7 +74,29 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
   function limpiar() {
     setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]);
-    setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true); setAviso("");
+    setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
+    setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true);
+  }
+
+  // Lee las filas con un mapa de columnas y deja todo listo para la vista
+  // previa. Se usa al leer, al reconocer un formato y al corregir a mano.
+  function aplicarMapa(filas, mapa, origen) {
+    const r = interpretarPresupuesto(filas, mapa);
+    setFilasExcel(filas); setMapaActual(r.mapa); setOrigenMapa(origen);
+    setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
+    setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
+    setAdvertencias(r.advertencias || []);
+    if (r.ivaExcel) {
+      if (r.ivaExcel.pct) setIvaPct(r.ivaExcel.pct);
+      setSugerenciaIva(`El Excel suma el IVA aparte al final ($${fmt(r.ivaExcel.total)}), así que sus rubros vienen sin IVA.`);
+    } else if (r.preciosIncluyenIva === false) {
+      setSugerenciaIva("Las columnas del Excel indican precios sin IVA.");
+    } else if (r.preciosIncluyenIva === true) {
+      setSugerenciaIva("Las columnas del Excel indican precios con IVA.");
+    } else {
+      setSugerenciaIva("El Excel no tiene una línea de IVA. Si el total final no lo suma, sus valores vienen sin IVA.");
+    }
+    return r.rubros.length;
   }
 
   async function leer(e) {
@@ -79,82 +107,45 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     const ctrl = new AbortController();
     const reloj = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
     try {
-      const esImagen = file.type.startsWith("image/");
-      const esPDF = file.type === "application/pdf";
       const esExcel = /\.(xlsx|xls|csv)$/i.test(file.name);
-      let csvExcel = null;
 
-      // ── Camino rápido: Excel. NOVA solo reconoce las columnas; las filas las
-      //    recorre leerPresupuesto, sin IA, para que los números sean exactos. ──
       if (esExcel) {
         const XLSX = await import("xlsx");
         const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
         const filas = hojaPresupuesto(XLSX, wb);
-        csvExcel = wb.SheetNames.map(h => `--- HOJA: ${h} ---\n` + XLSX.utils.sheet_to_csv(wb.Sheets[h])).join("\n").slice(0, 60000);
-        setPaso("NOVA está reconociendo las columnas...");
-        const muestra = filas.slice(0, 40).map((f, i) => `${i}: ` + f.map(c => String(c ?? "").slice(0, 30)).join(" | ")).join("\n");
-        const data = await nova({
-          model: "claude-sonnet-4-5", max_tokens: 1000,
-          messages: [{ role: "user", content: [{ type: "text", text: `${muestra}\n\n${MAPA_PROMPT}` }] }],
-        }, ctrl.signal);
-        const mapa = parseJSONTolerante(data.content?.[0]?.text || "");
-        const r = mapa ? interpretarPresupuesto(filas, mapa) : null;
-        if (r && r.rubros.length >= 3) {
-          setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
-          setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
-          setAdvertencias(r.advertencias || []);
-          // Sugerir sin decidir: la respuesta la tiene que dar quien importa.
-          if (r.ivaExcel) {
-            setIvaPct(r.ivaExcel.pct || 15);
-            setSugerenciaIva(`El Excel suma el IVA aparte al final ($${fmt(r.ivaExcel.total)}), así que sus rubros vienen sin IVA.`);
-          } else if (r.preciosIncluyenIva === false) {
-            setSugerenciaIva("Las columnas del Excel indican precios sin IVA.");
-          } else if (r.preciosIncluyenIva === true) {
-            setSugerenciaIva("Las columnas del Excel indican precios con IVA.");
-          } else {
-            setSugerenciaIva("El Excel no tiene una línea de IVA. Si el total final no lo suma, sus valores vienen sin IVA.");
-          }
-          setNombre(mapa.nombre || file.name.replace(/\.[^.]+$/, ""));
-          setCliente(mapa.cliente || "");
-          setPaso(""); setLeyendo(false); clearTimeout(reloj); e.target.value = "";
-          return;
+
+        // Primero, ¿ya conocemos este formato? Si otro Excel con los mismos
+        // títulos de columna se importó bien, se lee igual y NOVA no adivina.
+        const { data: formatos } = await supabase.from("formatos_presupuesto").select("*");
+        const recordado = buscarFormato(filas, formatos || []);
+        let mapa, origen, datosNova = null;
+        if (recordado) {
+          mapa = recordado.mapa;
+          origen = { tipo: "recordado", veces: recordado.formato.veces, archivo: recordado.formato.ejemplo_archivo };
+        } else {
+          setPaso("NOVA está reconociendo las columnas...");
+          const muestra = filas.slice(0, 40).map((f, i) => `${i}: ` + f.map(c => String(c ?? "").slice(0, 30)).join(" | ")).join("\n");
+          const data = await nova({
+            model: "claude-sonnet-4-5", max_tokens: 1000,
+            messages: [{ role: "user", content: [{ type: "text", text: `${muestra}\n\n${MAPA_PROMPT}` }] }],
+          }, ctrl.signal);
+          datosNova = parseJSONTolerante(data.content?.[0]?.text || "");
+          mapa = datosNova || { fila_encabezado: 0 };
+          origen = { tipo: "nova" };
         }
-        setPaso("El formato no es el habitual. NOVA lo va a leer entero, puede tardar un par de minutos...");
+
+        setNombre(datosNova?.nombre || file.name.replace(/\.[^.]+$/, ""));
+        setCliente(datosNova?.cliente || "");
+        const cuantos = aplicarMapa(filas, mapa, origen);
+        // Si con esas columnas no salen rubros, no se adivina más: se muestran
+        // las columnas para corregirlas, con la opción de que NOVA lea todo.
+        if (cuantos < 3) setVerColumnas(true);
+        clearTimeout(reloj);
+        setLeyendo(false); setPaso(""); e.target.value = "";
+        return;
       }
 
-      // ── Camino lento: NOVA transcribe (PDF, imagen, o Excel raro) ──
-      let contenido;
-      if (esImagen || esPDF) {
-        setPaso("NOVA está leyendo el documento, puede tardar un par de minutos...");
-        const b64 = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result.split(",")[1]); rd.readAsDataURL(file); });
-        contenido = [
-          esPDF ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-                : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
-          { type: "text", text: PROMPT },
-        ];
-      } else {
-        const txt = csvExcel ?? (await file.text()).slice(0, 60000);
-        contenido = [{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }];
-      }
-
-      const data = await nova({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, ctrl.signal);
-      const parsed = parseJSONTolerante(data.content?.[0]?.text || "");
-      if (!parsed?.rubros?.length) {
-        setError("NOVA no pudo leer el presupuesto. Si es muy grande, prueba subirlo por capítulos.");
-        setLeyendo(false); setPaso(""); clearTimeout(reloj); e.target.value = ""; return;
-      }
-      setRubros(parsed.rubros.map(r => ({
-        capitulo: (r.c || r.capitulo || "SIN CAPÍTULO").toString().trim().toUpperCase(),
-        codigo: "",
-        descripcion: (r.d || r.descripcion || "").toString().trim(),
-        unidad: (r.u || r.unidad || "").toString().trim(),
-        cantidad: n(r.q ?? r.cantidad),
-        precio_unitario: n(r.p ?? r.precio_unitario),
-        total: n(r.t ?? r.total) || n(r.q ?? r.cantidad) * n(r.p ?? r.precio_unitario),
-      })).filter(r => r.descripcion));
-      setSugerenciaIva("Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
-      setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
-      setCliente(parsed.cliente || "");
+      await leerConNova(file, null, ctrl.signal);
     } catch (err) {
       setError(err.name === "AbortError"
         ? "La lectura pasó de cinco minutos y se cortó. Prueba subir el presupuesto por capítulos, o en Excel en vez de PDF."
@@ -163,6 +154,55 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     clearTimeout(reloj);
     setLeyendo(false); setPaso("");
     e.target.value = "";
+  }
+
+  // El camino lento: NOVA transcribe el documento entero. Para PDF y fotos, o
+  // para un Excel cuyas columnas no se pudieron reconocer ni corregir.
+  async function leerConNova(file, filas, señal) {
+    setLeyendo(true); setError("");
+    const esImagen = file.type.startsWith("image/");
+    const esPDF = file.type === "application/pdf";
+    let contenido;
+    if (esImagen || esPDF) {
+      setPaso("NOVA está leyendo el documento, puede tardar un par de minutos...");
+      const b64 = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result.split(",")[1]); rd.readAsDataURL(file); });
+      contenido = [
+        esPDF ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+              : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
+        { type: "text", text: PROMPT },
+      ];
+    } else {
+      setPaso("NOVA está leyendo el Excel entero, puede tardar un par de minutos...");
+      const txt = filas ? filas.map(f => f.map(c => String(c ?? "")).join(",")).join("\n").slice(0, 60000) : (await file.text()).slice(0, 60000);
+      contenido = [{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }];
+    }
+
+    const data = await nova({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal);
+    const parsed = parseJSONTolerante(data.content?.[0]?.text || "");
+    if (!parsed?.rubros?.length) {
+      setError("NOVA no pudo leer el presupuesto. Si es muy grande, prueba subirlo por capítulos.");
+      setLeyendo(false); setPaso(""); return;
+    }
+    // Leído por NOVA ya no hay columnas que corregir ni formato que recordar.
+    setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
+    setControl(null); setAdvertencias([]); setCargos([]); setOmitidas([]);
+    setRubros(parsed.rubros.map(r => ({
+      capitulo: (r.c || r.capitulo || "SIN CAPÍTULO").toString().trim().toUpperCase(),
+      codigo: "",
+      descripcion: (r.d || r.descripcion || "").toString().trim(),
+      unidad: (r.u || r.unidad || "").toString().trim(),
+      cantidad: n(r.q ?? r.cantidad),
+      precio_unitario: n(r.p ?? r.precio_unitario),
+      total: n(r.t ?? r.total) || n(r.q ?? r.cantidad) * n(r.p ?? r.precio_unitario),
+    })).filter(r => r.descripcion));
+    setSugerenciaIva("Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
+    setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
+    setCliente(parsed.cliente || "");
+    setLeyendo(false); setPaso("");
+  }
+
+  function corregirColumnas(nuevoMapa) {
+    aplicarMapa(filasExcel, nuevoMapa, { tipo: "manual" });
   }
 
   // ── Cuentas de la vista previa ──
@@ -179,10 +219,27 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
   const difSubtotal = control?.subtotal != null ? sumaRubros - control.subtotal : null;
   const difTotal = control?.total != null ? sumaRubros + cargos.reduce((s, c) => s + c.total, 0) + (control.iva?.total || 0) - control.total : null;
 
+  // Guarda el mapa como formato conocido. Si ya existía, suma un uso y se
+  // queda con la última corrección.
+  async function recordarFormato() {
+    if (!filasExcel || !mapaActual) return null;
+    const encabezado = filasExcel[mapaActual.fila_encabezado ?? 0] || [];
+    const firma = firmaEncabezado(encabezado);
+    if (!firma) return null;
+    const { data: ya, error: eBusca } = await supabase.from("formatos_presupuesto").select("id,veces").eq("firma", firma).maybeSingle();
+    if (eBusca) return eBusca;
+    const datos = { firma, encabezados: encabezado, mapa: soloColumnas(mapaActual), actualizado_at: new Date().toISOString() };
+    const { error } = ya
+      ? await supabase.from("formatos_presupuesto").update({ ...datos, veces: (ya.veces || 1) + 1 }).eq("id", ya.id)
+      : await supabase.from("formatos_presupuesto").insert({ ...datos, ejemplo_archivo: archivo?.name || null, creado_por: currentUser.id });
+    return error;
+  }
+
   async function crearObra() {
     if (!rubros.length || !nombre.trim() || incluyeIva === null) return;
-    setGuardando(true); setError(""); setAviso("");
+    setGuardando(true); setError("");
     const pct = incluyeIva ? 0 : n(ivaPct);
+    const faltan = [];
 
     const datosObra = {
       nombre: nombre.trim(), cliente_nombre: cliente.trim() || null,
@@ -197,6 +254,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     if (e1 && /column|schema cache/i.test(e1.message)) {
       // Sin la migración 013 la obra se crea igual; solo no guarda el original.
       sinMigracion = true;
+      faltan.push("013 (archivo original e IVA)");
       ({ data: obra, error: e1 } = await supabase.from("obras").insert(datosObra).select().single());
     }
     if (e1 || !obra) { setError("No se pudo crear la obra: " + (e1?.message || "")); setGuardando(false); return; }
@@ -240,19 +298,21 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     }
 
     // La revisión queda con la obra, para volver a verla en la pestaña Presupuesto.
-    let faltaRevision = false;
     if (!sinMigracion) {
       const { error: eAdv } = await supabase.from("obras").update({ advertencias }).eq("id", obra.id);
-      faltaRevision = !!eAdv;
+      if (eAdv) faltan.push("014 (revisión del Excel)");
     }
+
+    // La obra se creó bien: el formato con que se leyó queda aprendido.
+    const eFormato = await recordarFormato();
+    if (eFormato) faltan.push("015 (recordar el formato)");
 
     // El presupuesto que se controla también es conocimiento: sus rubros y sus
     // precios (sin IVA, como se cotizan) entran a la base de rubros.
     await alimentarBase(rubros, { cliente: cliente.trim(), proyecto: nombre.trim() });
 
     setGuardando(false);
-    if (sinMigracion) alert("La obra se creó, pero falta correr la migración 013 en Supabase: no se guardó el archivo original ni el IVA del Excel.");
-    else if (faltaRevision) alert("La obra se creó, pero falta correr la migración 014 en Supabase: no se guardó la revisión del Excel.");
+    if (faltan.length) alert(`La obra se creó, pero falta correr en Supabase la migración ${faltan.join(", ")}.`);
     onCreada(obra);
   }
 
@@ -269,6 +329,13 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     </div>
   );
 
+  const origenTexto = !origenMapa ? null
+    : origenMapa.tipo === "recordado"
+      ? `Formato reconocido: se leyó igual que ${origenMapa.archivo ? `"${origenMapa.archivo}"` : "un presupuesto anterior"} (usado ${origenMapa.veces} ${origenMapa.veces === 1 ? "vez" : "veces"}). NOVA no tuvo que adivinar las columnas.`
+      : origenMapa.tipo === "manual"
+        ? "Columnas corregidas a mano. Al crear la obra, este formato queda aprendido."
+        : "Formato nuevo: NOVA reconoció las columnas. Al crear la obra, queda aprendido.";
+
   return (
     <div style={{ fontFamily: colors.font }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
@@ -280,7 +347,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
         Sube el presupuesto que vas a <strong>ejecutar y controlar</strong> — el aprobado por el cliente, el del contratista, el que sea. Se guarda también el archivo original, para verlo tal cual cuando haga falta.
       </div>
 
-      {rubros.length === 0 && (
+      {rubros.length === 0 && !filasExcel && (
         <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 20, textAlign: "center" }}>
           <Sparkles size={22} color={colors.brand} style={{ marginBottom: 8 }} />
           <div style={{ fontSize: 13, color: colors.brand, marginBottom: 12 }}>
@@ -295,13 +362,49 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
       {error && <div style={{ color: colors.danger, fontSize: 12, marginTop: 10 }}>{error}</div>}
 
-      {rubros.length > 0 && (
+      {/* Excel cuyas columnas no dieron rubros: corregir antes de seguir */}
+      {filasExcel && rubros.length < 3 && (
+        <div style={{ background: colors.surface, border: `1.5px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 16, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <AlertTriangle size={16} color={colors.warning} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>No pude leer los rubros con estas columnas</div>
+          </div>
+          <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 12 }}>
+            Elige qué columna es cada cosa. La lista de abajo se recalcula al instante; cuando aparezcan los rubros, sigue con la importación y este formato queda aprendido.
+          </div>
+          <EditorColumnas filas={filasExcel} mapa={mapaActual || {}} onCambiar={corregirColumnas} />
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            <Button variant="outline" onClick={() => { limpiar(); setError(""); }}>Subir otro archivo</Button>
+            <Button variant="outline" onClick={() => leerConNova(archivo, filasExcel).catch(err => { setError("Error leyendo el archivo: " + err.message); setLeyendo(false); setPaso(""); })} disabled={leyendo}>
+              <Sparkles size={13} /> {leyendo ? (paso || "Leyendo...") : "Que NOVA lo lea entero (lento)"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {rubros.length >= 3 && (
         <>
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16, marginBottom: 14 }}>
             <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr", gap: 10, marginBottom: 14 }}>
               <div><label style={lbl}>NOMBRE DE LA OBRA</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} /></div>
               <div><label style={lbl}>CLIENTE</label><input value={cliente} onChange={e => setCliente(e.target.value)} style={inputStyle} placeholder="Opcional" /></div>
             </div>
+
+            {origenTexto && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft, background: colors.bg, borderRadius: colors.radiusSm, padding: "8px 10px", marginBottom: 14 }}>
+                <BookmarkCheck size={14} color={origenMapa.tipo === "recordado" ? colors.success : colors.brand} />
+                <span style={{ flex: 1, minWidth: 200 }}>{origenTexto}</span>
+                <button onClick={() => setVerColumnas(v => !v)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "5px 9px", fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+                  <SlidersHorizontal size={12} /> {verColumnas ? "Ocultar columnas" : "Ver o corregir columnas"}
+                </button>
+                {verColumnas && (
+                  <div style={{ width: "100%", marginTop: 8 }}>
+                    <EditorColumnas filas={filasExcel} mapa={mapaActual || {}} onCambiar={corregirColumnas} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* IVA: pregunta obligatoria */}
             <div style={{ background: incluyeIva === null ? colors.warningSoft : colors.bg, border: `1.5px solid ${incluyeIva === null ? colors.warningBorder : colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
@@ -397,8 +500,6 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
               );
             })}
           </div>
-
-          {aviso && <div style={{ color: colors.warning, fontSize: 12, marginBottom: 10 }}>{aviso}</div>}
 
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" style={{ flex: 1 }} onClick={() => { limpiar(); setError(""); }}>Descartar</Button>

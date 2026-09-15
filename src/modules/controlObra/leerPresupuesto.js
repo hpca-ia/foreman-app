@@ -320,3 +320,36 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
 
   return adv.sort((a, b) => (a.nivel === "error" ? 0 : 1) - (b.nivel === "error" ? 0 : 1));
 }
+
+// ── Formatos recordados ──────────────────────────────────────────────────
+// La "firma" de un Excel son sus títulos de columna con la posición de cada
+// uno. Dos presupuestos con la misma firma se arman igual, así que el mapa
+// que sirvió para uno sirve para el otro. Se normalizan tildes, mayúsculas y
+// signos para que "P.UNITARIO" y "P. Unitario" cuenten como lo mismo.
+
+const normal = v => String(v ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export const CAMPOS_MAPA = ["col_item", "col_descripcion", "col_unidad", "col_cantidad", "col_precio", "col_total", "col_capitulo"];
+
+export function firmaEncabezado(fila = []) {
+  const partes = fila.map((c, i) => [i, normal(c)]).filter(([, t]) => t && isNaN(Number(t)));
+  // Con menos de tres títulos la firma es tan genérica que confundiría formatos.
+  return partes.length >= 3 ? partes.map(([i, t]) => `${i}:${t}`).join("|") : null;
+}
+
+export function soloColumnas(mapa) {
+  const o = {};
+  CAMPOS_MAPA.forEach(k => { o[k] = mapa?.[k] ?? null; });
+  return o;
+}
+
+/** Busca, en las primeras filas, un encabezado cuya firma ya esté guardada. */
+export function buscarFormato(filas, formatos = []) {
+  const porFirma = new Map(formatos.map(f => [f.firma, f]));
+  for (let i = 0; i < Math.min(filas.length, 40); i++) {
+    const firma = firmaEncabezado(filas[i]);
+    const f = firma && porFirma.get(firma);
+    if (f) return { formato: f, mapa: { ...soloColumnas(f.mapa), fila_encabezado: i } };
+  }
+  return null;
+}
