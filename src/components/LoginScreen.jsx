@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { loadFromStorage, saveToStorage } from "../lib/storage";
 import { rolInfo } from "../lib/roles";
-import { hashPin } from "../lib/equipo";
+import { hashPin, deUsuario } from "../lib/equipo";
+import { estadoLogin, entrar, haySesion } from "../lib/sesion";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
@@ -22,19 +23,38 @@ export default function LoginScreen({ onLogin, users }) {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
   const [step, setStep] = useState("pick");
+  // { configurado, usuarios }: si el PIN se verifica en el servidor. Mientras no
+  // lo esté, se entra como antes, comparando en el teléfono.
+  const [servidor, setServidor] = useState(null);
+  const [entrando, setEntrando] = useState(false);
+
+  useEffect(() => { estadoLogin().then(setServidor); }, []);
+
+  // Con la base cerrada la lista de usuarios no se puede leer antes de entrar:
+  // la da el servidor, sin las huellas de los PIN.
+  const lista = servidor?.configurado && servidor.usuarios?.length ? servidor.usuarios.map(deUsuario) : users;
 
   useEffect(() => {
-    try {
-      const s = localStorage.getItem("foreman_session");
-      if (s) {
+    if (!servidor) return;
+    (async () => {
+      try {
+        const s = localStorage.getItem("foreman_session");
+        if (!s) return;
         const { userId, expires } = JSON.parse(s);
-        if (new Date(expires) > new Date()) {
-          const u = users.find(u => u.id === userId);
-          if (u) onLogin(u);
-        }
-      }
-    } catch {}
-  }, [users]);
+        if (new Date(expires) <= new Date()) return;
+        // Una sesión guardada de antes del cambio no sirve: hay que volver a poner el PIN.
+        if (servidor.configurado && !(await haySesion())) { localStorage.removeItem("foreman_session"); return; }
+        const u = users.find(x => x.id === userId) || lista.find(x => x.id === userId);
+        if (u) onLogin(u);
+      } catch {}
+    })();
+  }, [servidor, users]);
+
+  function guardarSesion(id) {
+    const exp = new Date();
+    exp.setDate(exp.getDate() + 7);
+    saveToStorage("foreman_session", { userId: id, expires: exp.toISOString() });
+  }
 
   function selectUser(u) {
     setSel(u); setPin(""); setErr(""); setStep("pin");
@@ -46,15 +66,23 @@ export default function LoginScreen({ onLogin, users }) {
     setPin(n);
     if (n.length === 4) {
       setTimeout(async () => {
+        const local = users.find(x => x.id === sel.id) || sel;
+        if (servidor?.configurado) {
+          setEntrando(true);
+          const r = await entrar(sel.id, n);
+          setEntrando(false);
+          if (r.usuario) { guardarSesion(sel.id); onLogin(users.find(x => x.id === sel.id) || deUsuario(r.usuario)); return; }
+          // Un PIN malo o demasiados intentos se dicen tal cual. Si lo que falló
+          // es el servidor, mientras la base siga abierta se entra como antes.
+          if (!(r.status >= 500 && local.pin_hash)) { setErr(r.error); setPin(""); return; }
+        }
         // En la base solo está la huella del PIN; en un equipo que todavía no
         // subió su lista puede seguir estando el PIN viejo en texto.
-        if (!sel.pin_hash && !sel.pin) { setErr("Este usuario no tiene PIN. Pídele a un admin que le asigne uno."); setPin(""); return; }
-        const ok = sel.pin_hash ? (await hashPin(sel.id, n)) === sel.pin_hash : n === sel.pin;
+        if (!local.pin_hash && !local.pin) { setErr("Este usuario no tiene PIN. Pídele a un admin que le asigne uno."); setPin(""); return; }
+        const ok = local.pin_hash ? (await hashPin(local.id, n)) === local.pin_hash : n === local.pin;
         if (ok) {
-          const exp = new Date();
-          exp.setDate(exp.getDate() + 7);
-          saveToStorage("foreman_session", { userId: sel.id, expires: exp.toISOString() });
-          onLogin(sel);
+          guardarSesion(local.id);
+          onLogin(local);
         } else {
           setErr("PIN incorrecto"); setPin("");
         }
@@ -78,7 +106,7 @@ export default function LoginScreen({ onLogin, users }) {
       {step === "pick" && (
         <div style={{ width: "100%", maxWidth: 400 }}>
           <div style={{ fontSize: 10, color: colors.muted, fontFamily: colors.font, letterSpacing: 1, marginBottom: 10, textAlign: "center", fontWeight: 600 }}>SELECCIONA TU PERFIL</div>
-          {users.map(u => (
+          {lista.map(u => (
             <button
               key={u.id}
               onClick={() => selectUser(u)}
@@ -125,6 +153,7 @@ export default function LoginScreen({ onLogin, users }) {
               </button>
             ))}
           </div>
+          {entrando && <div style={{ color: colors.muted, fontSize: 12, marginTop: 14 }}>Entrando…</div>}
           {err && <div style={{ color: colors.danger, fontSize: 12, marginTop: 14 }}>{err}</div>}
         </div>
       )}

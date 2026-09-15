@@ -29,7 +29,7 @@ export async function hashPin(id, pin) {
   return [...new Uint8Array(huella)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-const deUsuario = r => ({
+export const deUsuario = r => ({
   id: r.id, name: r.nombre, role: r.rol, pin_hash: r.pin_hash, color: r.color,
   email: r.email, phone: r.telefono, avatar: initials(r.nombre),
 });

@@ -1,4 +1,5 @@
 // api/nova.js — Vercel Serverless Function
+import { sesionValida } from "./_supabase.js";
 
 export const config = {
   api: {
@@ -38,6 +39,8 @@ function parseJSONSafe(text) {
 }
 
 export default async function handler(req, res) {
+  // Solo quien entró a FOREMAN: si no, cualquiera podría gastar el crédito de NOVA.
+  if (!(await sesionValida(req))) return res.status(401).json({ error: "Tu sesión venció. Vuelve a entrar a FOREMAN." });
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   try {
     const body = req.body;

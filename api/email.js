@@ -1,5 +1,6 @@
 // api/email.js — Envio de emails con Resend
 // Requiere variable de entorno: RESEND_API_KEY
+import { sesionValida } from "./_supabase.js";
 
 export const config = {
   api: { bodyParser: { sizeLimit: "15mb" } },
@@ -7,6 +8,7 @@ export const config = {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!(await sesionValida(req))) return res.status(401).json({ error: "Tu sesión venció. Vuelve a entrar a FOREMAN." });
 
   try {
     const { tipo, datos, to, subject, html } = req.body;

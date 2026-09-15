@@ -9,6 +9,7 @@ import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 
 import LoginScreen from "./components/LoginScreen";
+import { salir } from "./lib/sesion";
 import NovaInput from "./components/NovaInput";
 import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
@@ -133,9 +134,9 @@ export default function App() {
     setEditTask(null);
   }
 
-  function logout() { saveToStorage("foreman_session", null); localStorage.removeItem("foreman_session"); setUsuario(null); }
+  function logout() { saveToStorage("foreman_session", null); localStorage.removeItem("foreman_session"); salir(); setUsuario(null); }
 
-  if (!usuario) return <LoginScreen onLogin={setUsuario} users={users} />;
+  if (!usuario) return <LoginScreen onLogin={u => { setUsuario(u); recargarEquipo(); }} users={users} />;
 
   const admin = esAdmin(usuario.role);
   const puede = crearPuede(usuario, permisos);
