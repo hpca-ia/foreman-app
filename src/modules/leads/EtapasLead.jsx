@@ -115,6 +115,12 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
         await anotar(`${etapaInfo(lead.etapa, catalogo).nombre} → ${etapaInfo(fila.etapa_id, catalogo).nombre}`,
           { etapa_de: lead.etapa, etapa_a: fila.etapa_id });
         onEtapaCambiada?.(fila.etapa_id);
+        // Quien recibe la posta se entera por correo, sin depender de que
+        // alguien se acuerde de avisarle.
+        fetch("/api/pipeline-informe", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leadId: lead.id, a: "responsable", motivo: `cambio de etapa a ${etapaInfo(fila.etapa_id, catalogo).nombre}` }),
+        }).catch(() => {});
       }
     } else if (estado === "hecha") {
       await anotar(`Etapa hecha: ${etapaInfo(fila.etapa_id, catalogo).nombre}`);

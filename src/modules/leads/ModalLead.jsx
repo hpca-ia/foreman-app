@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Check, X, Trash2, GripVertical, MessageSquare, Sparkles } from "lucide-react";
+import { Plus, Check, X, Trash2, GripVertical, MessageSquare, Sparkles, Mail } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
@@ -7,6 +7,7 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import ConfirmarBorrado from "../../components/ui/ConfirmarBorrado";
+import InformeLead from "./InformeLead";
 import { esAdmin } from "../../lib/roles";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
@@ -29,6 +30,7 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   const [guardando, setGuardando] = useState(false);
   const [borrar, setBorrar] = useState(false);
   const [verEtapas, setVerEtapas] = useState(false);
+  const [informe, setInforme] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -356,6 +358,11 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
       <div style={{ display: "flex", gap: 8 }}>
+        {editando && (
+          <Button variant="outline" onClick={() => setInforme(true)} title="Mandar un informe de avance por correo">
+            <Mail size={13} /> Informe
+          </Button>
+        )}
         {puedeBorrar && (
           <Button variant="outline" onClick={() => setBorrar(true)} style={{ color: colors.danger, borderColor: colors.dangerBorder }}>
             <Trash2 size={13} /> Borrar
@@ -366,6 +373,8 @@ Si no se dice cuándo, pon la fecha de hoy.`,
           {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
         </Button>
       </div>
+
+      {informe && <InformeLead lead={lead} onCerrar={() => setInforme(false)} />}
 
       {borrar && (
         <ConfirmarBorrado
