@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { Pencil, X, Building2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import EtapasCatalogo from "./EtapasCatalogo";
 import { BUCKET_PUBLICO } from "../lib/archivos";
 import { saveToStorage } from "../lib/storage";
 import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
@@ -108,9 +109,11 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
         <button onClick={() => setTab("usuarios")} style={tabS(tab === "usuarios")}>Usuarios</button>
         <button onClick={() => setTab("proyectos")} style={tabS(tab === "proyectos")}>Proyectos</button>
         {usuario?.role === "owner" && <button onClick={() => setTab("permisos")} style={tabS(tab === "permisos")}>Permisos</button>}
+        {usuario?.role === "owner" && <button onClick={() => setTab("etapas")} style={tabS(tab === "etapas")}>Etapas</button>}
       </div>
 
       {tab === "permisos" && usuario?.role === "owner" && <PanelPermisos permisos={permisos} setPermisos={setPermisos} />}
+      {tab === "etapas" && usuario?.role === "owner" && <EtapasCatalogo />}
 
       {tab === "empresa" && (
         <div style={{ display: "grid", gap: 14 }}>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, AlertTriangle, Clock, ArrowRight } from "lucide-react";
+import { Plus, AlertTriangle, Clock, ArrowRight, CornerDownLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
@@ -7,6 +7,16 @@ import Button from "../../components/ui/Button";
 import { CATALOGO_BASE, etapaInfo, tempInfo, DIAS_SIN_MOVER } from "./constantes";
 import ModalLead from "./ModalLead";
 import NovaLeads from "./NovaLeads";
+
+// El pipeline no es un embudo de casillas fijas: cada proyecto lleva su propio
+// camino —reunión, plan masa, otra reunión— y encajarlo en una columna por
+// etapa confundía más de lo que ordenaba. Se lee como una carrera: el catálogo
+// de etapas es la ruta estándar con sus puntos de revisión, cada proyecto
+// muestra hasta dónde llegó, y la lista se ordena por urgencia: arriba lo
+// atrasado.
+//
+// Volver atrás es información, no una columna: un proyecto que regresó a plan
+// masa no está avanzando, y la pantalla lo dice con todas sus letras.
 
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { maximumFractionDigits: 0 });
 const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -16,7 +26,9 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // El catálogo vive en la base porque cambia con el tiempo; si la migración
   // todavía no se corrió, se usa el de siempre.
   const [catalogo, setCatalogo] = useState(CATALOGO_BASE);
-  const [rutas, setRutas] = useState({});      // lead_id -> { pasos, hechos, siguiente }
+  const [rutas, setRutas] = useState({});       // lead_id -> { total, hechos, siguiente }
+  const [planes, setPlanes] = useState({});     // lead_id -> { total, hechas, actual, indice }
+  const [historia, setHistoria] = useState({}); // lead_id -> hasta dónde llegó en la ruta
   const [abierto, setAbierto] = useState(null);
   const [nuevo, setNuevo] = useState(false);
   const [cargando, setCargando] = useState(true);
@@ -25,14 +37,18 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [{ data: ls }, { data: ts }, { data: cat }] = await Promise.all([
+    const [{ data: ls }, { data: ts }, { data: cat }, { data: es }, { data: ms }] = await Promise.all([
       supabase.from("leads").select("*").order("actualizado_at", { ascending: false }),
       supabase.from("tasks").select("id,lead_id,title,due_date,status,ruta_orden").not("lead_id", "is", null),
       supabase.from("pipeline_etapas").select("*").eq("activa", true).order("orden"),
+      supabase.from("lead_etapas").select("*").order("orden"),
+      supabase.from("lead_movimientos").select("lead_id,etapa_a").eq("tipo", "etapa"),
     ]);
+    const ct = cat?.length ? cat : CATALOGO_BASE;
     if (cat?.length) setCatalogo(cat);
+
     // La ruta entera, no solo el siguiente: cuántos pasos tiene, cuántos van y
-    // cuál toca ahora. Un lead sin pasos pendientes se quedó sin ruta.
+    // cuál toca ahora. Un proyecto sin pasos pendientes se quedó sin ruta.
     const porLead = {};
     (ts || []).forEach(t => {
       const r = porLead[t.lead_id] || (porLead[t.lead_id] = { total: 0, hechos: 0, siguiente: null });
@@ -40,16 +56,32 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       if (t.status === "listo") r.hechos++;
       else if (!r.siguiente || (t.ruta_orden ?? 999) < (r.siguiente.ruta_orden ?? 999)) r.siguiente = t;
     });
-    setLeads(ls || []);
-    setRutas(porLead);
+
+    // El plan de etapas de cada proyecto, en SU orden.
+    const porPlan = {};
+    (es || []).forEach(e => {
+      const p = porPlan[e.lead_id] || (porPlan[e.lead_id] = { total: 0, hechas: 0, actual: null, indice: 0, lista: [] });
+      p.lista.push(e);
+      p.total++;
+      if (e.estado === "hecha" || e.estado === "omitida") p.hechas++;
+      if (e.estado === "en_curso" && !p.actual) { p.actual = e; p.indice = p.lista.length; }
+    });
+
+    // Hasta dónde llegó cada uno en la ruta estándar: si hoy está más atrás, retrocedió.
+    const lejos = {};
+    (ms || []).forEach(m => {
+      const o = etapaInfo(m.etapa_a, ct).orden || 0;
+      if (o > (lejos[m.lead_id] || 0)) lejos[m.lead_id] = o;
+    });
+
+    setLeads(ls || []); setRutas(porLead); setPlanes(porPlan); setHistoria(lejos);
     setCargando(false);
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  // Ganar el lead no termina el trabajo: recién ahí empieza la obra. Esto cierra
-  // el hilo entre lo comercial y lo que se construye, que si no vive en la
-  // cabeza de alguien.
+  // Ganar el proyecto no termina el trabajo: recién ahí empieza la obra. Esto
+  // cierra el hilo entre lo comercial y lo que se construye.
   async function convertirEnObra(lead) {
     setConvirtiendo(lead.id);
     const { data: obra, error } = await supabase.from("obras").insert({
@@ -68,22 +100,50 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   }
 
   // Un proyecto sigue abierto mientras no se haya ganado ni perdido: ganarlo
-  // no lo saca del tablero, lo manda a ejecución.
+  // no lo saca de la lista, lo manda a ejecución.
   const abiertos = leads.filter(l => !l.resultado && !etapaInfo(l.etapa, catalogo).cierra);
   const cerrados = leads.filter(l => l.resultado || etapaInfo(l.etapa, catalogo).cierra);
 
-  // Las dos formas de perder un negocio sin darse cuenta: no saber cuál es el
-  // siguiente paso, o saberlo y no haberlo dado.
-  const sinPaso = abiertos.filter(l => !rutas[l.id]?.siguiente);
+  // Lo que manda en la lista: la fecha más cercana entre el próximo paso y la
+  // etapa en curso. Sin fecha, el proyecto se va al final: no está corriendo.
+  const cuando = l => {
+    const f = [rutas[l.id]?.siguiente?.due_date, planes[l.id]?.actual?.fecha_objetivo].filter(Boolean).sort();
+    return f[0] || null;
+  };
+  const orden = (a, b) => {
+    const fa = cuando(a), fb = cuando(b);
+    if (fa && fb) return fa.localeCompare(fb);
+    if (fa) return -1;
+    if (fb) return 1;
+    return new Date(a.actualizado_at) - new Date(b.actualizado_at);
+  };
+  const retrocedio = l => (historia[l.id] || 0) > (etapaInfo(l.etapa, catalogo).orden || 0);
+
+  // Las formas de perder un negocio sin darse cuenta: no saber cuál es el
+  // siguiente paso, saberlo y no haberlo dado, o ir para atrás sin notarlo.
+  const sinPaso = abiertos.filter(l => !rutas[l.id]?.siguiente && !planes[l.id]?.actual);
   const estancados = abiertos.filter(l => {
     const limite = DIAS_SIN_MOVER[l.etapa];
     return limite && dias(l.actualizado_at) > limite;
   });
-  const vencidos = abiertos.filter(l => { const x = rutas[l.id]?.siguiente; return x?.due_date && daysUntil(x.due_date) < 0; });
+  const vencidos = abiertos.filter(l => { const f = cuando(l); return f && daysUntil(f) < 0; });
+  const devueltos = abiertos.filter(retrocedio);
 
-  // El final del túnel: un lead ganado que no arrancó como obra está a medio
-  // camino, y es justo donde se pierde el hilo entre vender y construir.
+  // El final del túnel: un proyecto ganado que no arrancó como obra está a
+  // medio camino, y es justo donde se pierde el hilo entre vender y construir.
   const porArrancar = leads.filter(l => l.resultado === "ganado" && !l.obra_id);
+
+  const entre = (l, desde, hasta) => {
+    const f = cuando(l);
+    const d = f ? daysUntil(f) : null;
+    return d != null && d >= desde && d <= hasta;
+  };
+  const grupos = [
+    { titulo: "Atrasados", color: colors.danger, leads: abiertos.filter(l => { const f = cuando(l); return f && daysUntil(f) < 0; }) },
+    { titulo: "Esta semana", color: colors.warning, leads: abiertos.filter(l => entre(l, 0, 7)) },
+    { titulo: "Más adelante", color: colors.inkSoft, leads: abiertos.filter(l => entre(l, 8, 99999)) },
+    { titulo: "Sin fecha", color: colors.muted, leads: abiertos.filter(l => !cuando(l)) },
+  ].map(g => ({ ...g, leads: g.leads.slice().sort(orden) }));
 
   const enJuego = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0), 0);
   const ponderado = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0) * ((l.probabilidad ?? 50) / 100), 0);
@@ -100,19 +160,22 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       {puede("leads.ver") && <NovaLeads leads={leads} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />}
 
       {/* Lo que exige atención va primero, igual que en tareas */}
-      {(vencidos.length > 0 || sinPaso.length > 0 || estancados.length > 0) && (
+      {(vencidos.length > 0 || devueltos.length > 0 || sinPaso.length > 0 || estancados.length > 0) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
           {vencidos.length > 0 && (
-            <Aviso n={vencidos.length} txt={vencidos.length === 1 ? "paso vencido" : "pasos vencidos"}
+            <Aviso n={vencidos.length} txt={vencidos.length === 1 ? "atrasado" : "atrasados"}
               Icono={AlertTriangle} color={colors.danger} bg={colors.dangerSoft} borde={colors.dangerBorder} />
           )}
+          {devueltos.length > 0 && (
+            <Aviso n={devueltos.length} txt={devueltos.length === 1 ? "volvió atrás" : "volvieron atrás"}
+              Icono={CornerDownLeft} color={colors.warning} bg={colors.warningSoft} borde={colors.warningBorder} />
+          )}
           {sinPaso.length > 0 && (
-            <Aviso n={sinPaso.length} txt={sinPaso.length === 1 ? "sin próximo paso" : "sin próximo paso"}
+            <Aviso n={sinPaso.length} txt="sin próximo paso"
               Icono={AlertTriangle} color={colors.warning} bg={colors.warningSoft} borde={colors.warningBorder} />
           )}
           {estancados.length > 0 && (
-            <Aviso n={estancados.length} txt={estancados.length === 1 ? "sin moverse" : "sin moverse"}
-              Icono={Clock} color={colors.inkSoft} bg={colors.bg} borde={colors.border} />
+            <Aviso n={estancados.length} txt="sin moverse" Icono={Clock} color={colors.inkSoft} bg={colors.bg} borde={colors.border} />
           )}
         </div>
       )}
@@ -120,7 +183,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       {porArrancar.length > 0 && (
         <div style={{ background: colors.successSoft, border: `1px solid ${colors.success}33`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.success, marginBottom: 7 }}>
-            {porArrancar.length === 1 ? "Un lead ganado sin arrancar" : `${porArrancar.length} leads ganados sin arrancar`}
+            {porArrancar.length === 1 ? "Un proyecto ganado sin arrancar" : `${porArrancar.length} proyectos ganados sin arrancar`}
           </div>
           {porArrancar.map(l => (
             <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", flexWrap: "wrap" }}>
@@ -134,7 +197,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       )}
 
       <div style={{ display: "flex", gap: 22, marginBottom: 14, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft }}>
-        <span><strong style={{ color: colors.ink, fontSize: 15 }}>{abiertos.length}</strong> en el túnel</span>
+        <span><strong style={{ color: colors.ink, fontSize: 15 }}>{abiertos.length}</strong> en curso</span>
         <span>En juego <strong style={{ color: colors.ink, fontSize: 15 }}>${fmt(enJuego)}</strong></span>
         <span>Ponderado <strong style={{ color: colors.brand, fontSize: 15 }}>${fmt(ponderado)}</strong></span>
       </div>
@@ -148,24 +211,19 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           </div>
         ) : (
           <>
-            <div className="leads-tunel">
-              {catalogo.filter(et => !et.cierra && (et.principal || abiertos.some(l => l.etapa === et.id))).map(et => {
-                const suyos = abiertos.filter(l => l.etapa === et.id);
-                const monto = suyos.reduce((s, l) => s + (Number(l.valor_estimado) || 0), 0);
-                return (
-                  <div key={et.id} className="leads-columna">
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `2px solid ${et.color}`, marginBottom: 8 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: et.color, flex: 1 }}>{et.nombre}</span>
-                      <span style={{ fontSize: 11, color: colors.muted }}>{suyos.length}</span>
-                    </div>
-                    {monto > 0 && <div style={{ fontSize: 10, color: colors.muted, padding: "0 10px 6px" }}>${fmt(monto)}</div>}
-                    {suyos.map(l => (
-                      <TarjetaLead key={l.id} lead={l} ruta={rutas[l.id]} onAbrir={() => setAbierto(l)} />
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
+            {grupos.filter(g => g.leads.length).map(g => (
+              <div key={g.titulo} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: g.color, letterSpacing: 0.5, marginBottom: 6 }}>
+                  {g.titulo.toUpperCase()} · {g.leads.length}
+                </div>
+                <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+                  {g.leads.map(l => (
+                    <FilaLead key={l.id} lead={l} ruta={rutas[l.id]} plan={planes[l.id]} catalogo={catalogo}
+                      fecha={cuando(l)} volvioAtras={retrocedio(l)} onAbrir={() => setAbierto(l)} />
+                  ))}
+                </div>
+              </div>
+            ))}
 
             {cerrados.length > 0 && (
               <div style={{ marginTop: 16 }}>
@@ -180,7 +238,9 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                         style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer", fontSize: 12 }}>
                         <span style={{ width: 6, height: 6, borderRadius: "50%", background: etapaInfo(l.etapa, catalogo).color, flexShrink: 0 }} />
                         <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nombre}</span>
-                        <span style={{ color: colors.muted, fontSize: 11 }}>{l.resultado === "ganado" ? "Ganado" : l.resultado === "perdido" ? "Perdido" : etapaInfo(l.etapa, catalogo).nombre}</span>
+                        <span style={{ color: l.resultado === "ganado" ? colors.success : colors.muted, fontSize: 11, fontWeight: 600 }}>
+                          {l.resultado === "ganado" ? "Ganado" : l.resultado === "perdido" ? "Perdido" : etapaInfo(l.etapa, catalogo).nombre}
+                        </span>
                         <span style={{ color: colors.inkSoft }}>${fmt(l.valor_estimado)}</span>
                       </div>
                     ))}
@@ -210,43 +270,66 @@ function Aviso({ n, txt, Icono, color, bg, borde }) {
   );
 }
 
-function TarjetaLead({ lead, ruta, onAbrir }) {
-  const paso = ruta?.siguiente;
+// Una fila por proyecto: hasta dónde llegó en la ruta estándar, qué toca ahora
+// y cuándo. La barra son los puntos de revisión; si volvió a una etapa
+// anterior lo dice, porque un proyecto que regresa no está caminando.
+function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
   const temp = tempInfo(lead.temperatura);
-  const d = paso?.due_date ? daysUntil(paso.due_date) : null;
+  const etapa = etapaInfo(plan?.actual?.etapa_id || lead.etapa, catalogo);
+  const puntos = catalogo.filter(e => !e.cierra);
+  const llegada = puntos.findIndex(e => e.id === etapa.id);
+  const d = fecha ? daysUntil(fecha) : null;
   const vencido = d != null && d < 0;
+  const paso = ruta?.siguiente;
+  const responsable = plan?.actual?.responsable_nombre || lead.responsable_nombre;
+  const cuandoTxt = d == null ? "sin fecha" : vencido ? `atrasado ${Math.abs(d)} d` : d === 0 ? "hoy" : d === 1 ? "mañana" : `en ${d} d`;
+
   return (
     <div onClick={onAbrir}
-      style={{ background: colors.surface, border: `1px solid ${vencido ? colors.dangerBorder : colors.border}`, borderRadius: colors.radiusSm, padding: "9px 10px", marginBottom: 6, cursor: "pointer" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-        {temp && <span title={temp.label} style={{ width: 7, height: 7, borderRadius: "50%", background: temp.color, flexShrink: 0 }} />}
-        <span style={{ fontSize: 12, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      style={{ display: "grid", gridTemplateColumns: "minmax(170px, 1.4fr) minmax(150px, 1.1fr) minmax(150px, 1.2fr) 92px", gap: 10,
+        alignItems: "center", padding: "10px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer",
+        borderLeft: `3px solid ${vencido ? colors.danger : temp?.color || "transparent"}` }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {lead.nombre}
-        </span>
-      </div>
-      {lead.valor_estimado > 0 && (
-        <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 4 }}>${fmt(lead.valor_estimado)}</div>
-      )}
-      {ruta?.total > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
-          <div style={{ flex: 1, height: 3, background: colors.neutralSoft, borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ height: 3, width: `${(ruta.hechos / ruta.total) * 100}%`, background: colors.brand }} />
-          </div>
-          <span style={{ fontSize: 9, color: colors.muted, flexShrink: 0 }}>{ruta.hechos}/{ruta.total}</span>
         </div>
-      )}
-      {paso ? (
-        <div style={{ fontSize: 10, color: vencido ? colors.danger : colors.muted, display: "flex", alignItems: "center", gap: 4 }}>
-          <Clock size={9} />
+        <div style={{ fontSize: 11, color: colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {[lead.contacto, temp?.label].filter(Boolean).join(" · ") || "Sin contacto"}
+        </div>
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: etapa.color || colors.inkSoft }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{etapa.nombre}</span>
+          {volvioAtras && <CornerDownLeft size={11} color={colors.warning} />}
+        </span>
+        <div style={{ display: "flex", gap: 2, margin: "3px 0" }}>
+          {puntos.map((p, i) => (
+            <span key={p.id} title={p.nombre}
+              style={{ flex: 1, height: 3, borderRadius: 2, background: i <= llegada ? (etapa.color || colors.brand) : colors.neutralSoft }} />
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: volvioAtras ? colors.warning : colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {volvioAtras ? "volvió atrás · " : ""}
+          {plan?.total ? `etapa ${plan.indice || plan.hechas + 1} de ${plan.total}` : `punto ${llegada + 1} de ${puntos.length}`}
+          {responsable ? ` · ${responsable}` : ""}
+        </div>
+      </div>
+
+      <div style={{ minWidth: 0, fontSize: 11, color: vencido ? colors.danger : colors.inkSoft }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <Clock size={10} style={{ flexShrink: 0 }} />
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {vencido ? `Vencido ${Math.abs(d)}d · ` : d === 0 ? "Hoy · " : d != null ? `en ${d}d · ` : ""}{paso.title}
+            {paso ? paso.title : plan?.actual ? `En curso: ${etapa.nombre}` : "Sin próximo paso"}
           </span>
         </div>
-      ) : (
-        <div style={{ fontSize: 10, color: colors.warning, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
-          <AlertTriangle size={9} /> {ruta?.total ? "Ruta terminada, sin paso nuevo" : "Sin ruta"}
-        </div>
-      )}
+        <div style={{ fontSize: 10, color: vencido ? colors.danger : colors.muted, fontWeight: vencido ? 700 : 400 }}>{cuandoTxt}</div>
+      </div>
+
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>${fmt(lead.valor_estimado)}</div>
+        {ruta?.total > 0 && <div style={{ fontSize: 10, color: colors.muted }}>{ruta.hechos}/{ruta.total} pasos</div>}
+      </div>
     </div>
   );
 }
