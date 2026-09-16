@@ -28,12 +28,18 @@ export default async function handler(req, res) {
   }
 }
 
+// Nadie lee la bandeja de notificaciones@: mejor decirlo que dejar que
+// alguien conteste y se pierda su respuesta.
+const AVISO = `<div style="max-width:500px;margin:14px auto 0;color:#9CA3AF;font-family:Inter,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.5;text-align:center">
+  Correo automático de FOREMAN. No respondas a este mensaje: nadie lo lee.<br />Lo que tengas que decir, escríbelo en FOREMAN.
+</div>`;
+
 async function enviarEmail({ to, subject, html, attachments }) {
   const cuerpo = {
     from: "FOREMAN <notificaciones@hcastudio.com>",
     to: Array.isArray(to) ? to : [to],
     subject,
-    html,
+    html: html + AVISO,
   };
   if (attachments?.length) cuerpo.attachments = attachments;
 

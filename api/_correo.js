@@ -18,7 +18,9 @@ export async function enviarCorreo({ to, subject, html }) {
 const escapar = t => String(t ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
 
 /** El mismo marco para todos los correos: título, cuerpo y una nota al pie. */
-export function plantilla({ titulo, subtitulo, cuerpo, pie = "FOREMAN · HCA Studio" }) {
+export const PIE = "Correo automático de FOREMAN · HCA Studio. No respondas a este mensaje: nadie lo lee. Lo que tengas que decir, escríbelo en FOREMAN.";
+
+export function plantilla({ titulo, subtitulo, cuerpo, pie = PIE }) {
   return `
   <div style="font-family:Inter,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto">
     <div style="background:#0F3D3E;padding:18px 22px;border-radius:8px 8px 0 0">
