@@ -4,6 +4,7 @@ import { colors } from "../../theme/colors";
 import Modal from "./Modal";
 import Button from "./Button";
 import { inputStyle } from "./Input";
+import { verificarPin } from "../../lib/sesion";
 
 /**
  * Borrado definitivo con dos seguros: primero se revisa si algo depende del
@@ -13,6 +14,9 @@ import { inputStyle } from "./Input";
  *
  * @param revisar  async () => ({ bloqueo, detalle })  bloqueo = motivo, o null si se puede
  * @param borrar   async () => error | null
+ * @param usuarioId  si se pasa, además del nombre hay que poner el PIN: una
+ *                   sesión abierta en un computador prestado no debería bastar
+ *                   para borrar algo que no se puede deshacer.
  */
 // La base devuelve el error de la llave foránea en crudo, con el nombre del
 // constraint. Eso no le dice nada a quien lo lee: lo que necesita saber es que
@@ -26,9 +30,10 @@ function enCristiano(e) {
   return "No se pudo borrar: " + msg;
 }
 
-export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, onCancelar, onBorrado }) {
+export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, usuarioId, onCancelar, onBorrado }) {
   const [estado, setEstado] = useState(null);      // { bloqueo, detalle }
   const [texto, setTexto] = useState("");
+  const [pin, setPin] = useState("");
   const [borrando, setBorrando] = useState(false);
   const [error, setError] = useState("");
 
@@ -47,13 +52,17 @@ export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, onCa
 
   async function confirmar() {
     setBorrando(true); setError("");
+    if (usuarioId) {
+      const r = await verificarPin(usuarioId, pin);
+      if (!r.ok) { setError(r.error); setBorrando(false); return; }
+    }
     const e = await borrar();
     if (e) { setError(enCristiano(e)); setBorrando(false); return; }
     onBorrado();
   }
 
   const bloqueado = !!estado?.bloqueo;
-  const listo = texto.trim().toLowerCase() === (nombre || "").trim().toLowerCase();
+  const listo = texto.trim().toLowerCase() === (nombre || "").trim().toLowerCase() && (!usuarioId || /^\d{4,8}$/.test(pin));
 
   return (
     <Modal onClose={onCancelar} maxWidth={460}>
@@ -87,6 +96,16 @@ export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, onCa
           </label>
           <input value={texto} onChange={e => setTexto(e.target.value)} placeholder={nombre}
             style={{ ...inputStyle, marginBottom: 12 }} autoFocus />
+          {usuarioId && (
+            <>
+              <label style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, display: "block", marginBottom: 4 }}>
+                Y tu PIN
+              </label>
+              <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} type="password"
+                inputMode="numeric" maxLength={8} placeholder="····"
+                style={{ ...inputStyle, marginBottom: 12, letterSpacing: 4 }} />
+            </>
+          )}
         </>
       )}
 

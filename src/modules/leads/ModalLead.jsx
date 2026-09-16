@@ -6,6 +6,8 @@ import { daysUntil } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import ConfirmarBorrado from "../../components/ui/ConfirmarBorrado";
+import { esAdmin } from "../../lib/roles";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
 
@@ -25,6 +27,7 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   const [nuevoPaso, setNuevoPaso] = useState("");
   const [pensando, setPensando] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [borrar, setBorrar] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -158,6 +161,34 @@ Si no se dice cuándo, pon la fecha de hoy.`,
     setMovs(data || []); setNota("");
   }
 
+  // Un lead que se borra se lleva su ruta, sus etapas y su bitácora: dejarlos
+  // sueltos llenaría las tareas de pasos de algo que ya no existe.
+  async function revisarBorrado() {
+    if (lead.obra_id) {
+      return { bloqueo: "Este proyecto ya arrancó como obra. Bórralo desde Control de Obra si de verdad quieres eliminarlo; desde acá no, para no dejar la obra sin su origen." };
+    }
+    const [{ count: etapas }, { count: invitados }] = await Promise.all([
+      supabase.from("lead_etapas").select("id", { count: "exact", head: true }).eq("lead_id", lead.id),
+      supabase.from("pipeline_invitados").select("id", { count: "exact", head: true }).eq("lead_id", lead.id),
+    ]);
+    return { bloqueo: null, detalle: [
+      `${ruta.length} pasos de la ruta (tareas)`,
+      `${etapas || 0} etapas del proyecto`,
+      `${movs.length} movimientos de la bitácora`,
+      `${invitados || 0} personas invitadas al proyecto`,
+    ] };
+  }
+
+  async function ejecutarBorrado() {
+    await supabase.from("tasks").delete().eq("lead_id", lead.id);
+    await supabase.from("lead_etapas").delete().eq("lead_id", lead.id);
+    await supabase.from("pipeline_invitados").delete().eq("lead_id", lead.id);
+    await supabase.from("lead_movimientos").delete().eq("lead_id", lead.id);
+    const { error: e } = await supabase.from("leads").delete().eq("id", lead.id);
+    return e;
+  }
+
+  const puedeBorrar = editando && esAdmin(currentUser?.role);
   const hechos = ruta.filter(t => t.status === "listo" || t.status === "bloqueado").length;
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
@@ -310,11 +341,26 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
       <div style={{ display: "flex", gap: 8 }}>
+        {puedeBorrar && (
+          <Button variant="outline" onClick={() => setBorrar(true)} style={{ color: colors.danger, borderColor: colors.dangerBorder }}>
+            <Trash2 size={13} /> Borrar
+          </Button>
+        )}
         <Button variant="outline" style={{ flex: 1 }} onClick={onCerrar}>Cerrar</Button>
         <Button variant="primary" style={{ flex: 2 }} onClick={guardar} disabled={guardando}>
-          {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear lead"}
+          {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
         </Button>
       </div>
+
+      {borrar && (
+        <ConfirmarBorrado
+          titulo="Borrar este proyecto del pipeline" nombre={lead.nombre}
+          usuarioId={currentUser?.id}
+          revisar={revisarBorrado} borrar={ejecutarBorrado}
+          onCancelar={() => setBorrar(false)}
+          onBorrado={() => { setBorrar(false); onGuardado(); }}
+        />
+      )}
     </Modal>
   );
 }

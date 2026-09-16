@@ -30,6 +30,26 @@ export async function entrar(usuarioId, pin) {
   return { usuario: datos.usuario };
 }
 
+/**
+ * Comprueba el PIN de quien está usando FOREMAN. Sirve como segunda llave
+ * antes de borrar algo para siempre: saber la sesión abierta no alcanza, hay
+ * que saber el PIN. Si el ingreso por servidor no está configurado, no bloquea.
+ */
+export async function verificarPin(usuarioId, pin) {
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuarioId, pin }),
+    });
+    if (r.status === 503) return { ok: true, sinServidor: true };
+    if (r.ok) return { ok: true };
+    const datos = await r.json().catch(() => ({}));
+    return { ok: false, error: r.status === 429 ? "Demasiados intentos. Espera unos minutos." : datos.error || "PIN incorrecto" };
+  } catch (e) {
+    return { ok: false, error: "Sin conexión: " + e.message };
+  }
+}
+
 export async function salir() {
   try { await supabase.auth.signOut(); } catch {}
 }
