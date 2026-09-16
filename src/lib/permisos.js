@@ -10,7 +10,7 @@ export const GRUPOS_PERMISOS = [
       { id: "presupuestos.ver", label: "Presupuestos" },
       { id: "controlObra.ver", label: "Control de Obra" },
       { id: "cajaChica.ver", label: "Caja Chica" },
-      { id: "leads.ver", label: "Leads", nota: "El túnel comercial: oportunidades y su ruta de seguimiento" },
+      { id: "leads.ver", label: "Pipeline", nota: "Los proyectos y leads con sus etapas, de la oportunidad a la ejecución" },
       { id: "ajustes.ver", label: "Ajustes", nota: "Usuarios, proyectos y datos de la empresa" },
     ],
   },
@@ -41,7 +41,7 @@ export const TODOS_LOS_PERMISOS = GRUPOS_PERMISOS.flatMap(g => g.permisos);
 
 // El Director no aparece acá: siempre puede todo, por código. Si sus permisos
 // fueran editables, un error de edición lo dejaría fuera de su propia app.
-export const ROLES_EDITABLES = ["assistant", "gerente", "residente"];
+export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "residente"];
 
 // Se usa mientras la tabla carga, y para sembrar permisos nuevos que todavía
 // no existan en la base.
@@ -62,6 +62,18 @@ export const POR_DEFECTO = {
     "facturas.registrar": true, "planillas.cerrar": true,
     "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": false,
     "montos.ver": true, "gastos.anular": true, "ajustes.ver": false,
+    "borrar.definitivo": false,
+  },
+  // Arquitectura trabaja el proyecto antes de la obra: diseño, propuesta y
+  // presupuesto. Ve el pipeline porque muchas etapas son suyas, pero no maneja
+  // plata de obra. Todo esto se puede cambiar en Ajustes.
+  arquitecto: {
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true,
+    "presupuestos.ver": true, "presupuestos.crear": true,
+    "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
+    "facturas.registrar": false, "planillas.cerrar": false,
+    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": true,
+    "montos.ver": true, "gastos.anular": false, "ajustes.ver": false,
     "borrar.definitivo": false,
   },
   residente: {
