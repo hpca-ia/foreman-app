@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
 import Button from "../../components/ui/Button";
-import { ETAPAS, ETAPAS_ABIERTAS, etapaInfo, DIAS_SIN_MOVER } from "./constantes";
+import { CATALOGO_BASE, etapaInfo, tempInfo, DIAS_SIN_MOVER } from "./constantes";
 import ModalLead from "./ModalLead";
 import NovaLeads from "./NovaLeads";
 
@@ -13,6 +13,9 @@ const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000
 
 export default function ModuloLeads({ currentUser, users = [] }) {
   const [leads, setLeads] = useState([]);
+  // El catálogo vive en la base porque cambia con el tiempo; si la migración
+  // todavía no se corrió, se usa el de siempre.
+  const [catalogo, setCatalogo] = useState(CATALOGO_BASE);
   const [rutas, setRutas] = useState({});      // lead_id -> { pasos, hechos, siguiente }
   const [abierto, setAbierto] = useState(null);
   const [nuevo, setNuevo] = useState(false);
@@ -22,10 +25,12 @@ export default function ModuloLeads({ currentUser, users = [] }) {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    const [{ data: ls }, { data: ts }] = await Promise.all([
+    const [{ data: ls }, { data: ts }, { data: cat }] = await Promise.all([
       supabase.from("leads").select("*").order("actualizado_at", { ascending: false }),
       supabase.from("tasks").select("id,lead_id,title,due_date,status,ruta_orden").not("lead_id", "is", null),
+      supabase.from("pipeline_etapas").select("*").eq("activa", true).order("orden"),
     ]);
+    if (cat?.length) setCatalogo(cat);
     // La ruta entera, no solo el siguiente: cuántos pasos tiene, cuántos van y
     // cuál toca ahora. Un lead sin pasos pendientes se quedó sin ruta.
     const porLead = {};
@@ -52,7 +57,7 @@ export default function ModuloLeads({ currentUser, users = [] }) {
       notas: `Viene del lead ${lead.nombre}`, created_by: currentUser?.id,
     }).select().single();
     if (!error && obra) {
-      await supabase.from("leads").update({ obra_id: obra.id }).eq("id", lead.id);
+      await supabase.from("leads").update({ obra_id: obra.id, etapa: "ejecucion" }).eq("id", lead.id);
       await supabase.from("lead_movimientos").insert({
         lead_id: lead.id, tipo: "nota", detalle: `Arrancó como obra: ${obra.nombre}`,
         autor_id: currentUser?.id, autor_nombre: currentUser?.name,
@@ -62,8 +67,10 @@ export default function ModuloLeads({ currentUser, users = [] }) {
     setConvirtiendo(null);
   }
 
-  const abiertos = leads.filter(l => !etapaInfo(l.etapa).cerrada);
-  const cerrados = leads.filter(l => etapaInfo(l.etapa).cerrada);
+  // Un proyecto sigue abierto mientras no se haya ganado ni perdido: ganarlo
+  // no lo saca del tablero, lo manda a ejecución.
+  const abiertos = leads.filter(l => !l.resultado && !etapaInfo(l.etapa, catalogo).cierra);
+  const cerrados = leads.filter(l => l.resultado || etapaInfo(l.etapa, catalogo).cierra);
 
   // Las dos formas de perder un negocio sin darse cuenta: no saber cuál es el
   // siguiente paso, o saberlo y no haberlo dado.
@@ -76,21 +83,21 @@ export default function ModuloLeads({ currentUser, users = [] }) {
 
   // El final del túnel: un lead ganado que no arrancó como obra está a medio
   // camino, y es justo donde se pierde el hilo entre vender y construir.
-  const porArrancar = cerrados.filter(l => l.etapa === "ganado" && !l.obra_id);
+  const porArrancar = leads.filter(l => l.resultado === "ganado" && !l.obra_id);
 
   const enJuego = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0), 0);
-  const ponderado = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0) * ((l.probabilidad ?? etapaInfo(l.etapa).pct) / 100), 0);
+  const ponderado = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0) * ((l.probabilidad ?? 50) / 100), 0);
 
   return (
     <div style={{ fontFamily: colors.font }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Leads</div>
+        <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Pipeline</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo lead</Button>
+          <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo proyecto</Button>
         </div>
       </div>
 
-      <NovaLeads leads={leads} currentUser={currentUser} onCambio={cargar} />
+      <NovaLeads leads={leads} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />
 
       {/* Lo que exige atención va primero, igual que en tareas */}
       {(vencidos.length > 0 || sinPaso.length > 0 || estancados.length > 0) && (
@@ -140,13 +147,13 @@ export default function ModuloLeads({ currentUser, users = [] }) {
         ) : (
           <>
             <div className="leads-tunel">
-              {ETAPAS_ABIERTAS.map(et => {
+              {catalogo.filter(et => !et.cierra && (et.principal || abiertos.some(l => l.etapa === et.id))).map(et => {
                 const suyos = abiertos.filter(l => l.etapa === et.id);
                 const monto = suyos.reduce((s, l) => s + (Number(l.valor_estimado) || 0), 0);
                 return (
                   <div key={et.id} className="leads-columna">
                     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `2px solid ${et.color}`, marginBottom: 8 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: et.color, flex: 1 }}>{et.label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: et.color, flex: 1 }}>{et.nombre}</span>
                       <span style={{ fontSize: 11, color: colors.muted }}>{suyos.length}</span>
                     </div>
                     {monto > 0 && <div style={{ fontSize: 10, color: colors.muted, padding: "0 10px 6px" }}>${fmt(monto)}</div>}
@@ -169,9 +176,9 @@ export default function ModuloLeads({ currentUser, users = [] }) {
                     {cerrados.map(l => (
                       <div key={l.id} onClick={() => setAbierto(l)}
                         style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer", fontSize: 12 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: etapaInfo(l.etapa).color, flexShrink: 0 }} />
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: etapaInfo(l.etapa, catalogo).color, flexShrink: 0 }} />
                         <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nombre}</span>
-                        <span style={{ color: colors.muted, fontSize: 11 }}>{etapaInfo(l.etapa).label}</span>
+                        <span style={{ color: colors.muted, fontSize: 11 }}>{l.resultado === "ganado" ? "Ganado" : l.resultado === "perdido" ? "Perdido" : etapaInfo(l.etapa, catalogo).nombre}</span>
                         <span style={{ color: colors.inkSoft }}>${fmt(l.valor_estimado)}</span>
                       </div>
                     ))}
@@ -183,7 +190,7 @@ export default function ModuloLeads({ currentUser, users = [] }) {
         )}
 
       {(abierto || nuevo) && (
-        <ModalLead lead={abierto} currentUser={currentUser} users={users} 
+        <ModalLead lead={abierto} currentUser={currentUser} users={users} catalogo={catalogo}
           onCerrar={() => { setAbierto(null); setNuevo(false); }}
           onGuardado={async () => { setAbierto(null); setNuevo(false); await cargar(); }} />
       )}
@@ -203,13 +210,17 @@ function Aviso({ n, txt, Icono, color, bg, borde }) {
 
 function TarjetaLead({ lead, ruta, onAbrir }) {
   const paso = ruta?.siguiente;
+  const temp = tempInfo(lead.temperatura);
   const d = paso?.due_date ? daysUntil(paso.due_date) : null;
   const vencido = d != null && d < 0;
   return (
     <div onClick={onAbrir}
       style={{ background: colors.surface, border: `1px solid ${vencido ? colors.dangerBorder : colors.border}`, borderRadius: colors.radiusSm, padding: "9px 10px", marginBottom: 6, cursor: "pointer" }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {lead.nombre}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
+        {temp && <span title={temp.label} style={{ width: 7, height: 7, borderRadius: "50%", background: temp.color, flexShrink: 0 }} />}
+        <span style={{ fontSize: 12, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {lead.nombre}
+        </span>
       </div>
       {lead.valor_estimado > 0 && (
         <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 4 }}>${fmt(lead.valor_estimado)}</div>

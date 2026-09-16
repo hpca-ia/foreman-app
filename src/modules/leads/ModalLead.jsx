@@ -6,16 +6,17 @@ import { daysUntil } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { ETAPAS, etapaInfo, ORIGENES, SIGUIENTE_ESTADO } from "./constantes";
+import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
+import EtapasLead from "./EtapasLead";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
-export default function ModalLead({ lead, currentUser, users = [], onCerrar, onGuardado }) {
+export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, onCerrar, onGuardado }) {
   const editando = !!lead;
   const [form, setForm] = useState(lead ? { ...lead } : {
     nombre: "", contacto: "", telefono: "", email: "", origen: "Referido",
-    etapa: "nuevo", valor_estimado: "", fecha_cierre: "", notas: "",
+    etapa: "lead", temperatura: "tibio", resultado: null, valor_estimado: "", fecha_cierre: "", notas: "",
     responsable_id: currentUser?.id || null, responsable_nombre: currentUser?.name || "",
   });
   const [ruta, setRuta] = useState([]);
@@ -52,11 +53,12 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
     const payload = {
       nombre: form.nombre.trim(), contacto: form.contacto || null, telefono: form.telefono || null,
       email: form.email || null, origen: form.origen || null, etapa: form.etapa,
+      temperatura: form.temperatura || null, resultado: form.resultado || null,
       valor_estimado: Number(form.valor_estimado) || null,
       fecha_cierre: form.fecha_cierre || null, notas: form.notas || null,
       responsable_id: Number(form.responsable_id) || null,
       responsable_nombre: users.find(u => u.id === Number(form.responsable_id))?.name || form.responsable_nombre || null,
-      motivo_perdida: form.etapa === "perdido" ? (form.motivo_perdida || null) : null,
+      motivo_perdida: form.resultado === "perdido" ? (form.motivo_perdida || null) : null,
       actualizado_at: new Date().toISOString(),
     };
 
@@ -64,7 +66,7 @@ export default function ModalLead({ lead, currentUser, users = [], onCerrar, onG
       const { error: e } = await supabase.from("leads").update(payload).eq("id", lead.id);
       if (e) { setError(e.message); setGuardando(false); return; }
       if (lead.etapa !== form.etapa) {
-        await anotar(lead.id, "etapa", `${etapaInfo(lead.etapa).label} → ${etapaInfo(form.etapa).label}`,
+        await anotar(lead.id, "etapa", `${etapaInfo(lead.etapa, catalogo).nombre} → ${etapaInfo(form.etapa, catalogo).nombre}`,
           { etapa_de: lead.etapa, etapa_a: form.etapa });
       }
       setGuardando(false); onGuardado(); return;
@@ -192,20 +194,48 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         <div><label style={lbl}>VALOR ESTIMADO</label><input type="number" value={form.valor_estimado || ""} onChange={e => inp("valor_estimado", e.target.value)} placeholder="0" style={mini} /></div>
         <div><label style={lbl}>SE DECIDE EL</label><input type="date" value={form.fecha_cierre || ""} onChange={e => inp("fecha_cierre", e.target.value)} style={mini} /></div>
         <div style={{ gridColumn: "1 / -1" }}>
-          <label style={lbl}>ETAPA</label>
+          <label style={lbl}>ETAPA ACTUAL</label>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {ETAPAS.map(et => (
+            {catalogo.map(et => (
               <button key={et.id} onClick={() => inp("etapa", et.id)}
                 style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
                   border: `1px solid ${form.etapa === et.id ? et.color : colors.border}`,
                   background: form.etapa === et.id ? et.color : "transparent",
                   color: form.etapa === et.id ? "#fff" : colors.inkSoft }}>
-                {et.label}
+                {et.nombre}
               </button>
             ))}
           </div>
         </div>
-        {form.etapa === "perdido" && (
+        <div>
+          <label style={lbl}>TEMPERATURA</label>
+          <div style={{ display: "flex", gap: 4 }}>
+            {TEMPERATURAS.map(t => (
+              <button key={t.id} onClick={() => inp("temperatura", form.temperatura === t.id ? null : t.id)}
+                style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                  border: `1px solid ${form.temperatura === t.id ? t.color : colors.border}`,
+                  background: form.temperatura === t.id ? t.color : "transparent",
+                  color: form.temperatura === t.id ? "#fff" : colors.inkSoft }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label style={lbl}>RESULTADO</label>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[[null, "Abierto", colors.inkSoft], ["ganado", "Ganado", colors.success], ["perdido", "Perdido", colors.muted]].map(([v, t, c]) => (
+              <button key={t} onClick={() => inp("resultado", v)}
+                style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                  border: `1px solid ${(form.resultado || null) === v ? c : colors.border}`,
+                  background: (form.resultado || null) === v ? c : "transparent",
+                  color: (form.resultado || null) === v ? "#fff" : colors.inkSoft }}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+        {form.resultado === "perdido" && (
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={lbl}>¿POR QUÉ SE PERDIÓ?</label>
             <input value={form.motivo_perdida || ""} onChange={e => inp("motivo_perdida", e.target.value)} placeholder="Precio, plazo, se fue con otro..." style={mini} />
@@ -215,7 +245,10 @@ Si no se dice cuándo, pon la fecha de hoy.`,
 
       {editando && (
         <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>La ruta de este lead</div>
+          <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
+            onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>Los pasos del día a día</div>
           <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, marginBottom: 12 }}>
             {ruta.length === 0 && <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>Todavía sin pasos. Dictale abajo a NOVA qué sigue y con qué fecha.</div>}
             {ruta.map(t => {

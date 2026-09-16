@@ -3,7 +3,7 @@ import { Sparkles, ArrowRight } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
-import { ETAPAS } from "./constantes";
+import { CATALOGO_BASE } from "./constantes";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 
@@ -11,7 +11,7 @@ const hoy = () => new Date().toISOString().split("T")[0];
 // Fowler" abre el lead; "hay que enviar el presupuesto el viernes" le agrega
 // el paso al lead que corresponda. NOVA decide cuál de las dos cosas es, así
 // que quien dicta no tiene que pensar en formularios.
-export default function NovaLeads({ leads, currentUser, onCambio }) {
+export default function NovaLeads({ leads, currentUser, catalogo, onCambio }) {
   const [texto, setTexto] = useState("");
   const [pensando, setPensando] = useState(false);
   const [dijo, setDijo] = useState("");
@@ -43,7 +43,7 @@ el presupuesto de Fowler el viernes", "solicitar los planos"—:
 Si además del lead nuevo dicta cosas por hacer, ponlas en "pasos" de la acción "crear".
 Si cambia la etapa —"ya firmamos", "lo perdimos"—:
 {"accion":"etapa","lead_id":3,"etapa":"ganado"}
-Etapas: ${ETAPAS.map(e => e.id).join(", ")}.
+Etapas: ${(catalogo || CATALOGO_BASE).map(e => e.id).join(", ")}.
 
 Títulos cortos que empiecen con el verbo. Fechas en AAAA-MM-DD, interpretando
 "el viernes", "mañana", "en dos semanas" contra hoy. Sin fecha dicha, usa hoy.

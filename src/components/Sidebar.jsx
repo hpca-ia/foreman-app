@@ -33,7 +33,7 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
       {puede("presupuestos.ver") && navItem("presupuestos", "Presupuestos", Wallet)}
       {puede("controlObra.ver") && navItem("controlObra", "Control Obra", HardHat)}
       {puede("cajaChica.ver") && navItem("cajaChica", "Caja Chica", PiggyBank)}
-      {puede("leads.ver") && navItem("leads", "Leads", Target)}
+      {puede("leads.ver") && navItem("leads", "Pipeline", Target)}
 
       <div className="app-sidebar-spacer" style={{ flex: 1 }} />
 
