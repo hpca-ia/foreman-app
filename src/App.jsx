@@ -78,7 +78,6 @@ export default function App() {
     supabase.from("leads").select("id", { count: "exact", head: true })
       .then(({ count }) => setTienePipeline((count || 0) > 0));
   }, [usuario]);
-  const verPipeline = puede("leads.ver") || tienePipeline;
 
   useEffect(() => {
     if (!usuario) return;
@@ -158,6 +157,8 @@ export default function App() {
 
   const admin = esAdmin(usuario.role);
   const puede = crearPuede(usuario, permisos);
+  // Se calcula acá y no antes: `puede` todavía no existe más arriba.
+  const verPipeline = puede("leads.ver") || tienePipeline;
   const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
