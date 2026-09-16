@@ -61,11 +61,19 @@ export default function LoginScreen({ onLogin, users }) {
   }
 
   function handlePin(d) {
-    if (pin.length >= 4) return;
+    if (pin.length >= 8) return;
     const n = pin + d;
     setPin(n);
-    if (n.length === 4) {
-      setTimeout(async () => {
+    // Con PIN de largo variable no se puede entrar solo: la app no sabe cuántos
+    // dígitos tiene el de cada quien —eso solo lo sabe el servidor—, así que se
+    // confirma con el botón. Con 8, que es el máximo, entra directo.
+    if (n.length === 8) probar(n);
+  }
+
+  function probar(n) {
+    if (n.length < 4 || entrando) return;
+    setErr("");
+    setTimeout(async () => {
         const local = users.find(x => x.id === sel.id) || sel;
         if (servidor?.configurado) {
           setEntrando(true);
@@ -86,8 +94,7 @@ export default function LoginScreen({ onLogin, users }) {
         } else {
           setErr("PIN incorrecto"); setPin("");
         }
-      }, 200);
-    }
+    }, 200);
   }
 
   const btnS = {
@@ -130,24 +137,26 @@ export default function LoginScreen({ onLogin, users }) {
           <button onClick={() => { setStep("pick"); setErr(""); }} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", fontSize: 13, marginBottom: 20, display: "flex", alignItems: "center", gap: 4, margin: "0 auto 20px" }}>← Volver</button>
           <Avatar name={sel.name} size={60} color={sel.color || colors.brand} />
           <div style={{ color: colors.ink, fontSize: 18, fontWeight: 700, marginTop: 12 }}>{sel.name}</div>
-          <div style={{ color: colors.muted, fontSize: 13, marginBottom: 28, marginTop: 6 }}>Ingresa tu PIN</div>
+          <div style={{ color: colors.muted, fontSize: 13, marginBottom: 28, marginTop: 6 }}>Ingresa tu PIN y toca ✓</div>
           <div style={{ display: "flex", justifyContent: "center", gap: 16, marginBottom: 28 }}>
-            {[0, 1, 2, 3].map(i => (
+            {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
               <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: pin.length > i ? colors.brand : colors.border, transition: "background 0.15s" }} />
             ))}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, maxWidth: 220, margin: "0 auto" }}>
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((d, i) => (
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "✓"].map((d, i) => (
               <button
                 key={i}
-                onClick={() => { if (d === "⌫") setPin(p => p.slice(0, -1)); else if (d !== "") handlePin(d); }}
+                disabled={d === "✓" && (pin.length < 4 || entrando)}
+                onClick={() => { if (d === "⌫") setPin(p => p.slice(0, -1)); else if (d === "✓") probar(pin); else handlePin(d); }}
                 style={{
-                  background: d === "" ? "transparent" : colors.surface, border: d === "" ? "none" : `1.5px solid ${colors.border}`,
-                  borderRadius: colors.radiusMd, height: 54, color: colors.ink, fontSize: 18, fontWeight: 500,
-                  cursor: d === "" ? "default" : "pointer", fontFamily: colors.font, transition: "all 0.1s",
+                  background: d === "✓" ? (pin.length >= 4 ? colors.brand : colors.neutralSoft) : colors.surface,
+                  border: `1.5px solid ${d === "✓" && pin.length >= 4 ? colors.brand : colors.border}`,
+                  borderRadius: colors.radiusMd, height: 54, color: d === "✓" ? (pin.length >= 4 ? "#fff" : colors.muted) : colors.ink,
+                  fontSize: 18, fontWeight: 500, cursor: d === "✓" && pin.length < 4 ? "default" : "pointer", fontFamily: colors.font, transition: "all 0.1s",
                 }}
-                onMouseEnter={e => { if (d !== "") { e.currentTarget.style.background = colors.brandSoft; e.currentTarget.style.borderColor = colors.brand; } }}
-                onMouseLeave={e => { if (d !== "") { e.currentTarget.style.background = colors.surface; e.currentTarget.style.borderColor = colors.border; } }}
+                onMouseEnter={e => { if (d !== "✓") { e.currentTarget.style.background = colors.brandSoft; e.currentTarget.style.borderColor = colors.brand; } }}
+                onMouseLeave={e => { if (d !== "✓") { e.currentTarget.style.background = colors.surface; e.currentTarget.style.borderColor = colors.border; } }}
               >
                 {d}
               </button>

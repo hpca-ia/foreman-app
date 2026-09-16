@@ -10,14 +10,14 @@ export default function UserForm({ u, esNuevo = false, projects = [], onSave, on
   }));
   // Al crear, el PIN es obligatorio. Al editar, vacío deja el que tenía: en la
   // base solo hay una huella del PIN, así que no hay forma de mostrarlo.
-  const pinOk = f.pin ? /^\d{4}$/.test(f.pin) : !esNuevo;
+  const pinOk = f.pin ? /^\d{4,8}$/.test(f.pin) : !esNuevo;
   const listo = f.name?.trim() && pinOk;
   return (
     <div style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: 12, marginBottom: 8, border: "1.5px solid var(--brand)" }}>
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <input value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo" style={inputStyle} />
-          <input value={f.pin} onChange={e => setF(p => ({ ...p, pin: e.target.value.replace(/\D/g, "") }))} placeholder={esNuevo ? "PIN (4 dígitos)" : "Nuevo PIN (vacío: no cambia)"} maxLength={4} inputMode="numeric" style={inputStyle} />
+          <input value={f.pin} onChange={e => setF(p => ({ ...p, pin: e.target.value.replace(/\D/g, "") }))} placeholder={esNuevo ? "PIN (de 4 a 8 dígitos)" : "Nuevo PIN (vacío: no cambia)"} maxLength={8} inputMode="numeric" style={inputStyle} />
         </div>
         {!esNuevo && (
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -2 }}>
