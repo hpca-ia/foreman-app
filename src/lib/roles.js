@@ -6,7 +6,8 @@ export const ROLES = {
   owner: { label: "Director", color: colors.brand },
   assistant: { label: "Admin", color: "#5B5F97" },
   gerente: { label: "Gerente de Proyecto", color: "#3D6B7D" },
-  arquitecto: { label: "Arquitectura", color: "#8A6BA1" },
+  arquitecto: { label: "Arquitecto", color: "#8A6BA1" },
+  arquitecto_jr: { label: "Arquitecto Jr.", color: "#A98AC0" },
   residente: { label: "Residente", color: "#6B7F4F" },
 };
 
@@ -18,5 +19,5 @@ export const rolInfo = role => ROLES[role] || LEGACY[role] || { label: "Equipo",
 
 export const esAdmin = role => role === "owner" || role === "assistant";
 export const esResidente = role => role === "residente";
-export const puedeControlObra = role => ["owner", "assistant", "gerente", "arquitecto"].includes(role);
-export const puedeCajaChica = role => ["owner", "assistant", "gerente", "arquitecto", "residente"].includes(role);
+export const puedeControlObra = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr"].includes(role);
+export const puedeCajaChica = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr", "residente"].includes(role);

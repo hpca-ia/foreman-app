@@ -11,7 +11,7 @@ import NovaLeads from "./NovaLeads";
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { maximumFractionDigits: 0 });
 const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 
-export default function ModuloLeads({ currentUser, users = [] }) {
+export default function ModuloLeads({ currentUser, users = [], puede = () => true }) {
   const [leads, setLeads] = useState([]);
   // El catálogo vive en la base porque cambia con el tiempo; si la migración
   // todavía no se corrió, se usa el de siempre.
@@ -93,11 +93,11 @@ export default function ModuloLeads({ currentUser, users = [] }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Pipeline</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo proyecto</Button>
+          {puede("leads.ver") && <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo proyecto</Button>}
         </div>
       </div>
 
-      <NovaLeads leads={leads} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />
+      {puede("leads.ver") && <NovaLeads leads={leads} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />}
 
       {/* Lo que exige atención va primero, igual que en tareas */}
       {(vencidos.length > 0 || sinPaso.length > 0 || estancados.length > 0) && (
@@ -142,7 +142,9 @@ export default function ModuloLeads({ currentUser, users = [] }) {
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div>
         : leads.length === 0 ? (
           <div style={{ textAlign: "center", color: colors.muted, padding: "50px 20px", fontSize: 13, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd }}>
-            Todavía no hay leads.<br />Dictale a NOVA la oportunidad y ella abre el lead. La ruta se va escribiendo sola, un paso a la vez.
+            {puede("leads.ver")
+              ? <>Todavía no hay proyectos.<br />Dictale a NOVA la oportunidad y ella abre el lead. La ruta se va escribiendo sola, un paso a la vez.</>
+              : <>Todavía no te compartieron ningún proyecto.<br />Vas a verlos acá cuando te pongan a cargo de una etapa.</>}
           </div>
         ) : (
           <>

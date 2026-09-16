@@ -10,7 +10,7 @@ export const GRUPOS_PERMISOS = [
       { id: "presupuestos.ver", label: "Presupuestos" },
       { id: "controlObra.ver", label: "Control de Obra" },
       { id: "cajaChica.ver", label: "Caja Chica" },
-      { id: "leads.ver", label: "Pipeline", nota: "Los proyectos y leads con sus etapas, de la oportunidad a la ejecución" },
+      { id: "leads.ver", label: "Todo el pipeline", nota: "Ver todos los proyectos y leads. Sin esto igual se ven los que le compartan o donde tenga una etapa a su cargo" },
       { id: "ajustes.ver", label: "Ajustes", nota: "Usuarios, proyectos y datos de la empresa" },
     ],
   },
@@ -41,7 +41,7 @@ export const TODOS_LOS_PERMISOS = GRUPOS_PERMISOS.flatMap(g => g.permisos);
 
 // El Director no aparece acá: siempre puede todo, por código. Si sus permisos
 // fueran editables, un error de edición lo dejaría fuera de su propia app.
-export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "residente"];
+export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitecto_jr", "residente"];
 
 // Se usa mientras la tabla carga, y para sembrar permisos nuevos que todavía
 // no existan en la base.
@@ -65,15 +65,25 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   // Arquitectura trabaja el proyecto antes de la obra: diseño, propuesta y
-  // presupuesto. Ve el pipeline porque muchas etapas son suyas, pero no maneja
-  // plata de obra. Todo esto se puede cambiar en Ajustes.
+  // presupuesto. Del pipeline ve solo los proyectos que le tocan, no todo lo
+  // comercial. Todo esto se puede cambiar en Ajustes.
   arquitecto: {
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": true,
+    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false,
     "montos.ver": true, "gastos.anular": false, "ajustes.ver": false,
+    "borrar.definitivo": false,
+  },
+  // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros ni ve montos.
+  arquitecto_jr: {
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false,
+    "presupuestos.ver": true, "presupuestos.crear": false,
+    "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
+    "facturas.registrar": false, "planillas.cerrar": false,
+    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false,
+    "montos.ver": false, "gastos.anular": false, "ajustes.ver": false,
     "borrar.definitivo": false,
   },
   residente: {

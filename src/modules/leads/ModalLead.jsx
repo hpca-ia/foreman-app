@@ -28,6 +28,7 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   const [pensando, setPensando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [borrar, setBorrar] = useState(false);
+  const [verEtapas, setVerEtapas] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -226,7 +227,20 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         <div><label style={lbl}>SE DECIDE EL</label><input type="date" value={form.fecha_cierre || ""} onChange={e => inp("fecha_cierre", e.target.value)} style={mini} /></div>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={lbl}>ETAPA ACTUAL</label>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: verEtapas ? 6 : 0 }}>
+            <span style={{ padding: "4px 11px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff",
+              background: etapaInfo(form.etapa, catalogo).color || colors.muted }}>
+              {etapaInfo(form.etapa, catalogo).nombre}
+            </span>
+            <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 140 }}>
+              {editando ? "Se mueve marcando una etapa \"En curso\" abajo." : "Empieza donde de verdad esté."}
+            </span>
+            <button onClick={() => setVerEtapas(v => !v)}
+              style={{ background: "none", border: "none", color: colors.brand, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+              {verEtapas ? "Listo" : "Cambiar a mano"}
+            </button>
+          </div>
+          <div style={{ display: verEtapas || !editando ? "flex" : "none", gap: 4, flexWrap: "wrap" }}>
             {catalogo.map(et => (
               <button key={et.id} onClick={() => inp("etapa", et.id)}
                 style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
@@ -277,6 +291,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {editando && (
         <>
           <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
+            puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
             onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
 
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>Los pasos del día a día</div>

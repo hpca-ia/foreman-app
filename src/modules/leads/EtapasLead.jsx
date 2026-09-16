@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, ChevronUp, ChevronDown, Trash2, UserPlus } from "lucide-react";
+import { Plus, ChevronUp, ChevronDown, Trash2, UserPlus, Eye, X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -10,27 +10,30 @@ import { etapaInfo, ESTADOS_ETAPA, SIGUIENTE_ESTADO_ETAPA } from "./constantes";
 // hacen lo mismo: uno arranca por presupuesto, otro por plan masa. La reunión
 // con cliente se agrega tantas veces como haga falta.
 //
-// Cada etapa tiene un responsable del siguiente paso, que puede ser alguien de
-// FOREMAN o alguien de fuera —el cliente, un proveedor—, porque muchas veces
-// la pelota está del otro lado.
+// Poner a alguien a cargo de una etapa hace dos cosas más, que es como se
+// trabaja de verdad: esa persona pasa a ver el proyecto, y la etapa le aparece
+// como tarea con su fecha, junto al resto de su trabajo. "Plan masa, 15 días,
+// Camila" no debería vivir solo en la cabeza de quien lo decidió.
 
 const vacio = { nombre: "", rol: "cliente", email: "", telefono: "" };
 
-export default function EtapasLead({ lead, catalogo, users = [], currentUser, onEtapaCambiada }) {
+export default function EtapasLead({ lead, catalogo, users = [], currentUser, puedeCompartir, onEtapaCambiada }) {
   const [etapas, setEtapas] = useState([]);
   const [invitados, setInvitados] = useState([]);
+  const [accesos, setAccesos] = useState([]);
   const [sinTabla, setSinTabla] = useState(false);
   const [agregando, setAgregando] = useState(false);
-  const [invitado, setInvitado] = useState(null);   // null = formulario cerrado
+  const [invitado, setInvitado] = useState(null);
   const [ocupado, setOcupado] = useState(false);
 
   const cargar = useCallback(async () => {
-    const [{ data: es, error }, { data: inv }] = await Promise.all([
+    const [{ data: es, error }, { data: inv }, { data: acc }] = await Promise.all([
       supabase.from("lead_etapas").select("*").eq("lead_id", lead.id).order("orden"),
       supabase.from("pipeline_invitados").select("*").eq("lead_id", lead.id).order("nombre"),
+      supabase.from("lead_accesos").select("*").eq("lead_id", lead.id),
     ]);
     if (error && /relation|schema cache|does not exist/i.test(error.message)) { setSinTabla(true); return; }
-    setEtapas(es || []); setInvitados(inv || []);
+    setEtapas(es || []); setInvitados(inv || []); setAccesos(acc || []);
   }, [lead.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -39,6 +42,38 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
       lead_id: lead.id, tipo: "etapa", detalle,
       autor_id: currentUser?.id, autor_nombre: currentUser?.name, ...extra,
     });
+  }
+
+  // Quien tiene una etapa a su cargo ve el proyecto: la etapa es suya.
+  async function darAcceso(usuarioId, origen = "responsable") {
+    if (!usuarioId || usuarioId === lead.created_by) return;
+    await supabase.from("lead_accesos").upsert(
+      { lead_id: lead.id, usuario_id: usuarioId, origen, creado_por: currentUser?.id },
+      { onConflict: "lead_id,usuario_id", ignoreDuplicates: true });
+    await cargar();
+  }
+
+  // La etapa con responsable y fecha también es una tarea suya: aparece donde
+  // ya mira todos los días, no en una lista aparte que hay que acordarse de abrir.
+  async function sincronizarTarea(fila) {
+    const info = etapaInfo(fila.etapa_id, catalogo);
+    const estado = fila.estado === "hecha" ? "listo" : fila.estado === "omitida" ? "bloqueado" : "pendiente";
+    const datos = {
+      title: `${info.nombre} · ${lead.nombre}`,
+      due_date: fila.fecha_objetivo || null,
+      assignee_id: fila.responsable_id || null,
+      status: estado, priority: "media", type: "lead", lead_id: lead.id,
+    };
+    if (fila.tarea_id) {
+      await supabase.from("tasks").update(datos).eq("id", fila.tarea_id);
+      return fila.tarea_id;
+    }
+    if (!fila.responsable_id) return null;   // sin responsable no hay tarea
+    const { data } = await supabase.from("tasks")
+      .insert({ ...datos, created_by: currentUser?.id, ruta_orden: fila.orden })
+      .select("id").single();
+    if (data?.id) await supabase.from("lead_etapas").update({ tarea_id: data.id }).eq("id", fila.id);
+    return data?.id || null;
   }
 
   async function agregar(etapaId) {
@@ -63,22 +98,25 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
   // La etapa en curso es la del proyecto: al marcarla, el tablero se mueve y
   // queda el registro de quién la movió y cuándo.
   async function cambiarEstado(fila) {
-    const nuevo = SIGUIENTE_ESTADO_ETAPA[fila.estado] || "en_curso";
+    const estado = SIGUIENTE_ESTADO_ETAPA[fila.estado] || "en_curso";
     setOcupado(true);
     await supabase.from("lead_etapas").update({
-      estado: nuevo, hecha_at: nuevo === "hecha" ? new Date().toISOString() : null,
+      estado, hecha_at: estado === "hecha" ? new Date().toISOString() : null,
     }).eq("id", fila.id);
+    await sincronizarTarea({ ...fila, estado });
 
-    if (nuevo === "en_curso") {
-      const otras = etapas.filter(e => e.id !== fila.id && e.estado === "en_curso");
-      for (const o of otras) await supabase.from("lead_etapas").update({ estado: "hecha", hecha_at: new Date().toISOString() }).eq("id", o.id);
+    if (estado === "en_curso") {
+      for (const o of etapas.filter(e => e.id !== fila.id && e.estado === "en_curso")) {
+        await supabase.from("lead_etapas").update({ estado: "hecha", hecha_at: new Date().toISOString() }).eq("id", o.id);
+        await sincronizarTarea({ ...o, estado: "hecha" });
+      }
       if (lead.etapa !== fila.etapa_id) {
         await supabase.from("leads").update({ etapa: fila.etapa_id, actualizado_at: new Date().toISOString() }).eq("id", lead.id);
         await anotar(`${etapaInfo(lead.etapa, catalogo).nombre} → ${etapaInfo(fila.etapa_id, catalogo).nombre}`,
           { etapa_de: lead.etapa, etapa_a: fila.etapa_id });
         onEtapaCambiada?.(fila.etapa_id);
       }
-    } else if (nuevo === "hecha") {
+    } else if (estado === "hecha") {
       await anotar(`Etapa hecha: ${etapaInfo(fila.etapa_id, catalogo).nombre}`);
     }
     setOcupado(false);
@@ -87,20 +125,25 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
 
   async function actualizar(fila, campos) {
     await supabase.from("lead_etapas").update(campos).eq("id", fila.id);
-    setEtapas(es => es.map(e => e.id === fila.id ? { ...e, ...campos } : e));
+    const nueva = { ...fila, ...campos };
+    setEtapas(es => es.map(e => e.id === fila.id ? nueva : e));
+    await sincronizarTarea(nueva);
   }
 
   async function borrar(fila) {
+    if (fila.tarea_id) await supabase.from("tasks").delete().eq("id", fila.tarea_id);
     await supabase.from("lead_etapas").delete().eq("id", fila.id);
     await cargar();
   }
 
-  function elegirResponsable(fila, valor) {
+  async function elegirResponsable(fila, valor) {
     if (!valor) return actualizar(fila, { responsable_id: null, invitado_id: null, responsable_nombre: null });
     const [tipo, id] = valor.split(":");
     if (tipo === "u") {
       const u = users.find(x => String(x.id) === id);
-      return actualizar(fila, { responsable_id: Number(id), invitado_id: null, responsable_nombre: u?.name || null });
+      await actualizar(fila, { responsable_id: Number(id), invitado_id: null, responsable_nombre: u?.name || null });
+      await darAcceso(Number(id));
+      return;
     }
     const inv = invitados.find(x => String(x.id) === id);
     return actualizar(fila, { invitado_id: Number(id), responsable_id: null, responsable_nombre: inv?.nombre || null });
@@ -117,25 +160,35 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
     await cargar();
   }
 
+  async function quitarAcceso(usuarioId) {
+    await supabase.from("lead_accesos").delete().eq("lead_id", lead.id).eq("usuario_id", usuarioId);
+    await cargar();
+  }
+
   if (sinTabla) {
     return (
       <div style={{ fontSize: 11, color: colors.warning, background: colors.warningSoft, borderRadius: colors.radiusSm, padding: "8px 10px", marginBottom: 12 }}>
-        Para usar las etapas del proyecto falta correr la migración 021 en Supabase.
+        Para usar las etapas del proyecto falta correr las migraciones 021 y 022 en Supabase.
       </div>
     );
   }
 
+  // Una etapa repetible lleva su número: "Reunión con cliente (2)".
+  const repeticion = (fila, i) => {
+    const iguales = etapas.filter(e => e.etapa_id === fila.etapa_id);
+    if (iguales.length < 2) return "";
+    return ` (${iguales.findIndex(e => e.id === fila.id) + 1})`;
+  };
   const usadas = new Set(etapas.map(e => e.etapa_id));
   const disponibles = catalogo.filter(e => e.repetible || !usadas.has(e.id));
+  const conAcceso = accesos.map(a => ({ ...a, nombre: users.find(u => u.id === a.usuario_id)?.name || `Usuario ${a.usuario_id}` }));
   const mini = { ...inputStyle, padding: "5px 7px", fontSize: 11 };
 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>Etapas de este proyecto</div>
-        <button onClick={() => setAgregando(a => !a)} style={{ background: "none", border: "none", color: colors.brand, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 3 }}>
-          <Plus size={12} /> Agregar etapa
-        </button>
+        <button onClick={() => setAgregando(a => !a)} style={enlace}><Plus size={12} /> Agregar etapa</button>
       </div>
 
       {agregando && (
@@ -167,8 +220,9 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
                 <button onClick={() => mover(e, 1)} disabled={i === etapas.length - 1} style={flechita}><ChevronDown size={10} /></button>
               </div>
               <span style={{ fontSize: 12, color: colors.ink, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>{i + 1}.</span>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: info.color || colors.border, flexShrink: 0 }} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{info.nombre}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{info.nombre}{repeticion(e, i)}</span>
               </span>
               <button onClick={() => cambiarEstado(e)} disabled={ocupado} title="Pendiente → en curso → hecha → no se hizo"
                 style={{ padding: "4px 6px", borderRadius: colors.radiusSm, fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: colors.font,
@@ -193,15 +247,45 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
             </div>
           );
         })}
+        {etapas.some(e => e.responsable_id) && (
+          <div style={{ fontSize: 10, color: colors.muted, marginTop: 6 }}>
+            Las etapas con responsable del equipo aparecen como tarea suya, con su fecha.
+          </div>
+        )}
+      </div>
+
+      {/* Quién ve este proyecto */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>
+          Quién ve este proyecto <span style={{ fontWeight: 400, color: colors.muted }}>además de ti</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+        {conAcceso.length === 0 && <span style={{ fontSize: 11, color: colors.muted }}>Nadie: por ahora es privado.</span>}
+        {conAcceso.map(a => (
+          <span key={a.usuario_id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: colors.inkSoft, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 20, padding: "3px 4px 3px 9px" }}>
+            <Eye size={11} color={colors.muted} /> {a.nombre}
+            {a.origen === "responsable" && <span style={{ color: colors.muted }}>· tiene una etapa</span>}
+            {puedeCompartir && (
+              <button onClick={() => quitarAcceso(a.usuario_id)} title="Quitarle el acceso"
+                style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><X size={11} /></button>
+            )}
+          </span>
+        ))}
+        {puedeCompartir && (
+          <select value="" onChange={e => e.target.value && darAcceso(Number(e.target.value), "manual")} style={{ ...mini, width: 150 }}>
+            <option value="">+ Compartir con…</option>
+            {users.filter(u => u.id !== lead.created_by && !accesos.some(a => a.usuario_id === u.id))
+              .map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        )}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>
           Personas de este proyecto <span style={{ fontWeight: 400, color: colors.muted }}>fuera de FOREMAN</span>
         </div>
-        <button onClick={() => setInvitado(invitado ? null : { ...vacio })} style={{ background: "none", border: "none", color: colors.brand, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 3 }}>
-          <UserPlus size={12} /> Agregar persona
-        </button>
+        <button onClick={() => setInvitado(invitado ? null : { ...vacio })} style={enlace}><UserPlus size={12} /> Agregar persona</button>
       </div>
 
       {invitado && (
@@ -230,3 +314,4 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, on
 }
 
 const flechita = { background: "none", border: "none", color: colors.border, cursor: "pointer", padding: 0, display: "flex", lineHeight: 0 };
+const enlace = { background: "none", border: "none", color: colors.brand, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 3 };

@@ -59,8 +59,26 @@ export default function App() {
     const eq = await cargarEquipo();
     setUsers(eq.usuarios); setProjects(eq.proyectos); setEquipoRemoto(eq.remoto);
     // Si a alguien lo desactivaron desde otro equipo, deja de poder usar la app.
-    setUsuario(u => u ? (eq.usuarios.find(x => x.id === u.id) || (eq.remoto ? null : u)) : u);
+    // Si no cambió nada suyo se conserva el mismo objeto: antes cambiaba de
+    // identidad en cada recarga, y eso cerraba el panel de Ajustes a media
+    // configuración.
+    setUsuario(u => {
+      if (!u) return u;
+      const actual = eq.usuarios.find(x => x.id === u.id);
+      if (!actual) return eq.remoto ? null : u;
+      return JSON.stringify(actual) === JSON.stringify(u) ? u : actual;
+    });
   }
+
+  // El pipeline aparece en el menú si ve todo, o si le compartieron algún
+  // proyecto: el acceso es por persona, no por rol.
+  const [tienePipeline, setTienePipeline] = useState(false);
+  useEffect(() => {
+    if (!usuario) return;
+    supabase.from("leads").select("id", { count: "exact", head: true })
+      .then(({ count }) => setTienePipeline((count || 0) > 0));
+  }, [usuario]);
+  const verPipeline = puede("leads.ver") || tienePipeline;
 
   useEffect(() => {
     if (!usuario) return;
@@ -209,7 +227,7 @@ export default function App() {
       />
 
       <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1100, margin: "0 auto", width: "100%" }}>
-        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} />
+        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} verPipeline={verPipeline} />
 
         <div className="app-content" style={{ flex: 1, padding: "18px 20px", overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
           {vista === "tareas" && (
@@ -272,8 +290,8 @@ export default function App() {
           {puede("controlObra.ver") && vista === "controlObra" && (
             <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
           )}
-          {puede("leads.ver") && vista === "leads" && (
-            <ModuloLeads currentUser={usuario} users={users} />
+          {verPipeline && vista === "leads" && (
+            <ModuloLeads currentUser={usuario} users={users} puede={puede} />
           )}
 
           {puede("cajaChica.ver") && vista === "cajaChica" && (
