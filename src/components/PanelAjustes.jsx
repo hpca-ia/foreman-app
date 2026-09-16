@@ -99,12 +99,12 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
   const deleteBtn = { background: "var(--danger-soft)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", color: "var(--danger)", cursor: "pointer", display: "inline-flex" };
 
   return (
-    <Modal onClose={onClose} maxWidth={500}>
+    <Modal onClose={onClose} maxWidth={560}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>Ajustes</div>
         <button onClick={onClose} style={{ background: "var(--neutral-soft)", border: "none", borderRadius: "var(--radius-sm)", width: 28, height: 28, color: "var(--ink-soft)", cursor: "pointer", fontSize: 15 }}>×</button>
       </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "var(--neutral-soft)", borderRadius: "var(--radius-sm)", padding: 4 }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 16, background: "var(--neutral-soft)", borderRadius: "var(--radius-sm)", padding: 4 }}>
         <button onClick={() => setTab("empresa")} style={tabS(tab === "empresa")}>Empresa</button>
         <button onClick={() => setTab("usuarios")} style={tabS(tab === "usuarios")}>Usuarios</button>
         <button onClick={() => setTab("proyectos")} style={tabS(tab === "proyectos")}>Proyectos</button>
