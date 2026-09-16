@@ -8,13 +8,13 @@ import MarcaPrivada from "./ui/MarcaPrivada";
 // tarea —cambiar estado, subir un archivo—; esto sirve para ver veinte de un
 // vistazo y decidir cuál abrir. Por eso cada fila es una línea y media y lo
 // único que hace es abrir la tarea.
-export default function TareasListaMovil({ tasks, users, projects, onEditar }) {
+export default function TareasListaMovil({ tasks, users, projects, leads = {}, onEditar }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
       {tasks.map((t, i) => {
         const listo = t.status === "listo";
         const pri = PRIORIDAD[t.priority] || PRIORIDAD.media;
-        const proyecto = projects.find(p => p.id === t.project_id)?.name;
+        const proyecto = t.lead_id ? (leads[t.lead_id] || "Pipeline") : projects.find(p => p.id === t.project_id)?.name;
         const persona = users.find(u => u.id === t.assignee_id)?.name;
 
         return (

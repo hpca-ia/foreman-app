@@ -72,11 +72,14 @@ export default function App() {
 
   // El pipeline aparece en el menú si ve todo, o si le compartieron algún
   // proyecto: el acceso es por persona, no por rol.
-  const [tienePipeline, setTienePipeline] = useState(false);
+  // Los proyectos del pipeline no están en Ajustes, pero sus etapas son tareas
+  // de alguien: sin su nombre, esas tareas aparecían sin proyecto.
+  const [leadsPorId, setLeadsPorId] = useState({});
+  const tienePipeline = Object.keys(leadsPorId).length > 0;
   useEffect(() => {
     if (!usuario) return;
-    supabase.from("leads").select("id", { count: "exact", head: true })
-      .then(({ count }) => setTienePipeline((count || 0) > 0));
+    supabase.from("leads").select("id,nombre")
+      .then(({ data }) => setLeadsPorId(Object.fromEntries((data || []).map(l => [l.id, l.nombre]))));
   }, [usuario]);
 
   useEffect(() => {
@@ -159,6 +162,7 @@ export default function App() {
   const puede = crearPuede(usuario, permisos);
   // Se calcula acá y no antes: `puede` todavía no existe más arriba.
   const verPipeline = puede("leads.ver") || tienePipeline;
+  const nombreProyecto = t => t.lead_id ? (leadsPorId[t.lead_id] || "Pipeline") : nombreProyecto(t);
   const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
@@ -186,7 +190,7 @@ export default function App() {
     visibles = visibles.filter(t =>
       t.title?.toLowerCase().includes(q) ||
       t.notes?.toLowerCase().includes(q) ||
-      projects.find(p => p.id === t.project_id)?.name?.toLowerCase().includes(q) ||
+      nombreProyecto(t)?.toLowerCase().includes(q) ||
       users.find(u => u.id === t.assignee_id)?.name?.toLowerCase().includes(q)
     );
   }
@@ -271,14 +275,14 @@ export default function App() {
                   <div className="tasks-view-desktop">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "tablero"
-                        ? <TareasKanban tasks={visibles} users={users} projects={projects} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : <TareasTabla tasks={ordenadas} users={users} projects={projects} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
+                        ? <TareasKanban tasks={visibles} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        : <TareasTabla tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
                   </div>
                   <div className="tasks-view-mobile">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "lista"
-                        ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
+                        ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
                   </div>
                 </>
               )}
@@ -317,7 +321,7 @@ export default function App() {
                     {misAlertasTareas.filter(t => daysUntil(t.due_date) < 0).map(t => (
                       <div key={t.id} style={{ background: colors.dangerSoft, borderRadius: 8, padding: "8px 12px", marginBottom: 6, borderLeft: `3px solid ${colors.danger}` }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{t.title}</div>
-                        <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>{projects.find(p => p.id === t.project_id)?.name} · {users.find(u => u.id === t.assignee_id)?.name || "Sin asignar"} · Vencida {Math.abs(daysUntil(t.due_date))}d</div>
+                        <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>{nombreProyecto(t)} · {users.find(u => u.id === t.assignee_id)?.name || "Sin asignar"} · Vencida {Math.abs(daysUntil(t.due_date))}d</div>
                       </div>
                     ))}
                   </div>
@@ -328,7 +332,7 @@ export default function App() {
                     {misAlertasTareas.filter(t => daysUntil(t.due_date) >= 0 && daysUntil(t.due_date) <= 2).map(t => (
                       <div key={t.id} style={{ background: colors.warningSoft, borderRadius: 8, padding: "8px 12px", marginBottom: 6, borderLeft: `3px solid ${colors.warning}` }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{t.title}</div>
-                        <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>{projects.find(p => p.id === t.project_id)?.name} · {users.find(u => u.id === t.assignee_id)?.name || "Sin asignar"} · {daysUntil(t.due_date) === 0 ? "Hoy" : `en ${daysUntil(t.due_date)}d`}</div>
+                        <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>{nombreProyecto(t)} · {users.find(u => u.id === t.assignee_id)?.name || "Sin asignar"} · {daysUntil(t.due_date) === 0 ? "Hoy" : `en ${daysUntil(t.due_date)}d`}</div>
                       </div>
                     ))}
                   </div>

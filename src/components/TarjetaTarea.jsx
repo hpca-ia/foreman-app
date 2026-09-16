@@ -8,10 +8,12 @@ import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
 import WhatsAppDraftModal from "./WhatsAppDraftModal";
 
-export default function TarjetaTarea({ puede, task, currentUser, users, projects, onCambiarEstado, onEditar, onEliminar }) {
+export default function TarjetaTarea({ puede, task, currentUser, users, projects, leads = {}, onCambiarEstado, onEditar, onEliminar }) {
   const gP = id => projects.find(p => p.id === id);
   const gU = id => users.find(u => u.id === id);
-  const proy = gP(task.project_id);
+  // Una etapa del pipeline es una tarea sin proyecto de Ajustes: su nombre
+  // es el del proyecto del pipeline.
+  const proy = task.lead_id ? { name: leads[task.lead_id] || "Pipeline", color: null } : gP(task.project_id);
   const asig = task.assignee_id ? gU(task.assignee_id) : null;
   const crea = gU(task.created_by);
   const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;

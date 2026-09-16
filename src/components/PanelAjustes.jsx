@@ -63,7 +63,14 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
     setEditU(null); setNewU(false); onEquipoCambio();
   }
   async function deleteUser(id) {
-    if (!window.confirm("¿Quitar este usuario?\n\nSu historial y sus tareas no se borran: deja de poder entrar y de aparecer en las listas.")) return;
+    setErrEquipo("");
+    const { count: pendientes } = await supabase.from("tasks")
+      .select("id", { count: "exact", head: true }).eq("assignee_id", id).neq("status", "listo");
+    if (pendientes) {
+      setErrEquipo(`No se puede quitar: tiene ${pendientes} ${pendientes === 1 ? "tarea pendiente" : "tareas pendientes"} a su cargo. Pásaselas a alguien más primero.`);
+      return;
+    }
+    if (!window.confirm("¿Quitar este usuario?\n\nSu historial y sus tareas terminadas no se borran: deja de poder entrar y de aparecer en las listas.")) return;
     const { error } = await desactivarUsuario(id);
     if (error) { setErrEquipo("No se pudo quitar: " + error.message); return; }
     onEquipoCambio();
@@ -75,8 +82,19 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
     if (error) { setErrEquipo("No se pudo guardar el proyecto: " + error.message); return; }
     setEditP(null); setNewP(false); onEquipoCambio();
   }
+  // Un proyecto con trabajo pendiente no se quita: sus tareas quedarían
+  // huérfanas, sin nombre de proyecto y fuera de los filtros.
   async function deleteProject(id) {
-    if (!window.confirm("¿Quitar este proyecto?\n\nSus tareas no se borran.")) return;
+    setErrEquipo("");
+    const { count: pendientes } = await supabase.from("tasks")
+      .select("id", { count: "exact", head: true }).eq("project_id", id).neq("status", "listo");
+    if (pendientes) {
+      setErrEquipo(`No se puede quitar: el proyecto tiene ${pendientes} ${pendientes === 1 ? "tarea pendiente" : "tareas pendientes"}. Termínalas o pásalas a otro proyecto primero.`);
+      return;
+    }
+    const { count: hechas } = await supabase.from("tasks")
+      .select("id", { count: "exact", head: true }).eq("project_id", id);
+    if (!window.confirm(`¿Quitar este proyecto?\n\n${hechas ? `Sus ${hechas} tareas terminadas no se borran: quedan en el historial.` : "No tiene tareas."}`)) return;
     const { error } = await desactivarProyecto(id);
     if (error) { setErrEquipo("No se pudo quitar: " + error.message); return; }
     onEquipoCambio();

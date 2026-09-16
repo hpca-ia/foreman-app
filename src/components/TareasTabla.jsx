@@ -19,7 +19,7 @@ function fechaColor(t) {
   return colors.muted;
 }
 
-export default function TareasTabla({ tasks, users, projects, onEditar }) {
+export default function TareasTabla({ tasks, users, projects, leads = {}, onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
@@ -35,7 +35,7 @@ export default function TareasTabla({ tasks, users, projects, onEditar }) {
       </div>
       {tasks.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", color: colors.muted, fontSize: 13 }}>Sin tareas.</div>}
       {tasks.map(t => {
-        const proy = gP(t.project_id);
+        const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline" } : gP(t.project_id);
         const asig = t.assignee_id ? gU(t.assignee_id) : null;
         const pC = PRIORIDAD[t.priority] || PRIORIDAD.media;
         const eC = ESTADO[t.status] || ESTADO.pendiente;

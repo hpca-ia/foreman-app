@@ -15,7 +15,7 @@ function fechaLabel(t) {
   return `en ${d}d`;
 }
 
-export default function TareasKanban({ tasks, users, projects, currentUser, onCambiarEstado, onEditar }) {
+export default function TareasKanban({ tasks, users, projects, leads = {}, currentUser, onCambiarEstado, onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
@@ -35,7 +35,7 @@ export default function TareasKanban({ tasks, users, projects, currentUser, onCa
             </div>
             <div className="kanban-col" style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 230px)", overflowY: "auto", paddingRight: 2 }}>
               {enColumna.slice(0, MAX_VISIBLE).map(t => {
-                const proy = gP(t.project_id);
+                const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline" } : gP(t.project_id);
                 const asig = t.assignee_id ? gU(t.assignee_id) : null;
                 const pC = PRIORIDAD[t.priority] || PRIORIDAD.media;
                 // Antes decía "|| true": cualquiera podía mover la tarea de cualquiera.
