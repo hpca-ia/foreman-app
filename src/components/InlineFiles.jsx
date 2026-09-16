@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { enlacesArchivos } from "../lib/archivos";
 import { colors } from "../theme/colors";
 
 export default function InlineFiles({ taskId }) {
   const [files, setFiles] = useState([]);
+  // Los archivos son privados: cada uno necesita su enlace temporal.
+  const [enlaces, setEnlaces] = useState({});
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
@@ -11,7 +14,10 @@ export default function InlineFiles({ taskId }) {
 
   async function fetchFiles() {
     const { data } = await supabase.storage.from("task-files").list(`task-${taskId}/`, { sortBy: { column: "created_at", order: "desc" } });
-    setFiles(data || []);
+    const lista = data || [];
+    setFiles(lista);
+    const urls = await enlacesArchivos(lista.map(f => `task-${taskId}/${f.name}`));
+    setEnlaces(Object.fromEntries(lista.map((f, i) => [f.name, urls[i]])));
   }
 
   async function uploadFile(e) {
@@ -44,10 +50,7 @@ export default function InlineFiles({ taskId }) {
     }
   }
 
-  function getUrl(name) {
-    const { data } = supabase.storage.from("task-files").getPublicUrl(`task-${taskId}/${name}`);
-    return data.publicUrl;
-  }
+  const getUrl = name => enlaces[name] || undefined;
 
   function isImage(name) {
     return ["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(name.split(".").pop().toLowerCase());

@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { Upload, Trash2, Plus, Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabase";
+import { subirArchivo } from "../../lib/archivos";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
@@ -163,9 +164,9 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
     if (archivo) {
       const safe = archivo.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `obra-${obra.id}/${Date.now()}-${safe}`;
-      const { error: upErr } = await supabase.storage.from("task-files").upload(path, archivo, { upsert: false, contentType: archivo.type || "application/octet-stream" });
+      const { ruta, error: upErr } = await subirArchivo(path, archivo);
       if (!upErr) {
-        archivo_url = supabase.storage.from("task-files").getPublicUrl(path).data.publicUrl;
+        archivo_url = ruta;
         archivo_nombre = archivo.name;
       }
     }

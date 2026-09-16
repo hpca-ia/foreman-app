@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Plus, Paperclip, AlertTriangle, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
+import { abrirArchivo } from "../../lib/archivos";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
@@ -88,9 +89,10 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
                 )}
               </div>
               {f.archivo_url && (
-                <a href={f.archivo_url} target="_blank" rel="noreferrer" title={f.archivo_nombre || "Adjunto"} style={{ color: colors.muted, display: "flex" }}>
+                <button onClick={() => abrirArchivo(f.archivo_url)} title={f.archivo_nombre || "Adjunto"}
+                  style={{ color: colors.muted, display: "flex", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                   <Paperclip size={14} />
-                </a>
+                </button>
               )}
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>${fmt(f.total)}</div>

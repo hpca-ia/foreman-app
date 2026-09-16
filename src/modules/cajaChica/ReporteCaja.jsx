@@ -5,7 +5,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
 import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
-import { supabase } from "../../lib/supabase";
+import { enlaceArchivo, enlacesArchivos, subirArchivo } from "../../lib/archivos";
 
 const primerDiaMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0]; };
 const hoy = () => new Date().toISOString().split("T")[0];
@@ -83,7 +83,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
     } finally { setGenerando(""); }
   }
 
-  function datosPDF(modo = contenido) {
+  async function datosPDF(modo = contenido) {
     const bloques = [{
         titulo: "Gastos del período",
         columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
@@ -101,8 +101,12 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         });
       }
 
-      const adjuntos = gastosF.filter(g => g.archivo_url)
-        .map(g => ({ url: g.archivo_url, titulo: `${g.proveedor || "Gasto"} — ${g.fecha} — $${money(g.monto)}` }));
+      // Los archivos son privados: se pide un enlace temporal para cada uno.
+      const conArchivo = gastosF.filter(g => g.archivo_url);
+      const urls = await enlacesArchivos(conArchivo.map(g => g.archivo_url));
+      const adjuntos = conArchivo
+        .map((g, i) => ({ url: urls[i], titulo: `${g.proveedor || "Gasto"} — ${g.fecha} — $${money(g.monto)}` }))
+        .filter(a => a.url);
 
       const soloAnexos = modo === "anexos";
       const sufijo = soloAnexos ? " (anexos)" : modo === "reporte" ? "" : "";
@@ -126,7 +130,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
 
   async function generarPDF() {
     setGenerando("pdf"); setProgreso("");
-    try { await exportarPDF(datosPDF()); }
+    try { await exportarPDF(await datosPDF()); }
     finally { setGenerando(""); setProgreso(""); }
   }
 
@@ -144,7 +148,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
       }
 
       setProgreso("Armando el PDF...");
-      const doc = await construirPDF(datosPDF(contenido === "anexos" ? "completo" : contenido));
+      const doc = await construirPDF(await datosPDF(contenido === "anexos" ? "completo" : contenido));
       const base64 = doc.output("datauristring").split(",")[1];
       const pesoMB = (base64.length * 0.75) / (1024 * 1024);
 
@@ -153,11 +157,14 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
       if (pesoMB > 8) {
         setProgreso("El PDF es grande, subiéndolo...");
         const ruta = `caja-${caja.id}/reporte-${desde}-${Date.now()}.pdf`;
-        const { error } = await supabase.storage.from("task-files")
-          .upload(ruta, doc.output("blob"), { contentType: "application/pdf", upsert: false });
+        const { error } = await subirArchivo(ruta, doc.output("blob"), { contentType: "application/pdf" });
         pdfBase64 = null;
-        if (!error) pdfUrl = supabase.storage.from("task-files").getPublicUrl(ruta).data.publicUrl;
+        // Un mes: el enlace va por correo y tiene que seguir abriendo después.
+        if (!error) pdfUrl = await enlaceArchivo(ruta, 60 * 60 * 24 * 30);
       }
+
+      // Las fotos de los gastos van al correo con enlace temporal de un mes.
+      const fotos = await enlacesArchivos(gastosF.map(g => g.archivo_url), 60 * 60 * 24 * 30);
 
       setProgreso("Enviando...");
       const res = await fetch("/api/email", {
@@ -167,8 +174,8 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
           datos: {
             nombre: caja.responsable_nombre, proyecto: caja.proyecto_nombre, periodo,
             recibido: caja.saldo_total, gastado: caja.saldo_gastado, saldo: caja.saldo_disponible,
-            gastos: gastosF.map(g => ({ fecha: g.fecha, descripcion: g.descripcion,
-              montoTotal: g.monto, tieneFactura: !!g.archivo_url, fotoUrl: g.archivo_url })),
+            gastos: gastosF.map((g, i) => ({ fecha: g.fecha, descripcion: g.descripcion,
+              montoTotal: g.monto, tieneFactura: !!g.archivo_url, fotoUrl: fotos[i] })),
             emailAsistente: admins, emailResponsable: responsable?.email || null,
             destinatariosExtra: extras,
             pdfBase64, pdfUrl, pdfNombre: `Caja Chica - ${caja.proyecto_nombre} - ${desde}.pdf`,

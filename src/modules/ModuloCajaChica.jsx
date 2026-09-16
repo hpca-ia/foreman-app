@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { subirArchivo, abrirArchivo } from "../lib/archivos";
 import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
@@ -218,8 +219,8 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
     if (archivoGasto) {
       const safeName=archivoGasto.name.replace(/[^a-zA-Z0-9._-]/g,"_");
       const path=`caja-${cajaActiva.id}/${Date.now()}-${safeName}`;
-      const{error}=await supabase.storage.from("task-files").upload(path,archivoGasto,{upsert:false});
-      if(!error){const{data:u}=supabase.storage.from("task-files").getPublicUrl(path);archivoUrl=u.publicUrl;archivoNombre=archivoGasto.name;}
+      const{ruta,error}=await subirArchivo(path,archivoGasto);
+      if(!error){archivoUrl=ruta;archivoNombre=archivoGasto.name;}
       else setNovaError("No se pudo subir la foto (el gasto igual se guarda): "+error.message);
     }
     const monto=Number(gastoForm.monto);
@@ -498,7 +499,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
                   <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{g.fecha} {g.proveedor?`· ${g.proveedor}`:""} {g.capitulo?`· ${g.capitulo}`:""} · {g.tipo}</div>
-                  {g.archivo_url&&<a href={g.archivo_url} target="_blank" rel="noreferrer" style={{fontSize:11,color:"var(--brand)",textDecoration:"none",display:"block",marginTop:3}}>Ver archivo</a>}
+                  {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url)} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
                   <div style={{fontWeight:700,color:"var(--danger)",fontSize:14}}>${fmt(g.monto)}</div>

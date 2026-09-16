@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { Pencil, X, Building2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { BUCKET_PUBLICO } from "../lib/archivos";
 import { saveToStorage } from "../lib/storage";
 import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
@@ -33,10 +34,12 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
     setUploadingLogo(true);
     const ext = file.name.split(".").pop();
     const path = `empresa/logo.${ext}`;
-    await supabase.storage.from("task-files").remove([path]);
-    const { error } = await supabase.storage.from("task-files").upload(path, file, { upsert: true });
+    // El logo va al depósito público: se muestra en correos y PDF, donde un
+    // enlace que caduca se vería roto. El resto de archivos es privado.
+    await supabase.storage.from(BUCKET_PUBLICO).remove([path]);
+    const { error } = await supabase.storage.from(BUCKET_PUBLICO).upload(path, file, { upsert: true });
     if (!error) {
-      const { data } = supabase.storage.from("task-files").getPublicUrl(path);
+      const { data } = supabase.storage.from(BUCKET_PUBLICO).getPublicUrl(path);
       saveEmpresa({ ...empresa, logoUrl: data.publicUrl + "?t=" + Date.now() });
     }
     setUploadingLogo(false);

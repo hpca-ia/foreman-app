@@ -4,6 +4,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import { exportarExcel, exportarPDF, money } from "../../lib/exportar";
+import { enlacesArchivos } from "../../lib/archivos";
 import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
 
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
@@ -137,8 +138,12 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
         });
       }
 
-      const adjuntos = delPeriodo.filter(f => f.archivo_url)
-        .map(f => ({ url: f.archivo_url, titulo: `${f.razon_social || "Factura"} — ${f.numero_factura || f.fecha} — $${money(f.total)}` }));
+      // Los archivos son privados: se pide un enlace temporal para cada uno.
+      const conArchivo = delPeriodo.filter(f => f.archivo_url);
+      const urls = await enlacesArchivos(conArchivo.map(f => f.archivo_url));
+      const adjuntos = conArchivo
+        .map((f, i) => ({ url: urls[i], titulo: `${f.razon_social || "Factura"} — ${f.numero_factura || f.fecha} — $${money(f.total)}` }))
+        .filter(a => a.url);
 
       const soloAnexos = contenido === "anexos";
 

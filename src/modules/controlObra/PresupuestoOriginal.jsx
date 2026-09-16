@@ -1,5 +1,6 @@
 import { Download, FileSpreadsheet, CheckCircle2, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
+import { abrirArchivo } from "../../lib/archivos";
 import { fmt } from "./calculos";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 
@@ -47,10 +48,10 @@ export default function PresupuestoOriginal({ obra, rubros }) {
           )}
         </div>
         {obra.archivo_presupuesto_url && (
-          <a href={obra.archivo_presupuesto_url} target="_blank" rel="noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, background: colors.brand, color: "#fff", borderRadius: colors.radiusSm, padding: "8px 12px", fontSize: 12, fontWeight: 600, textDecoration: "none" }}>
+          <button onClick={() => abrirArchivo(obra.archivo_presupuesto_url)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, background: colors.brand, color: "#fff", border: "none", borderRadius: colors.radiusSm, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
             <Download size={13} /> {obra.archivo_presupuesto_nombre || "Descargar el archivo original"}
-          </a>
+          </button>
         )}
       </div>
 

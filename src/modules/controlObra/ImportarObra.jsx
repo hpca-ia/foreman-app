@@ -7,6 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import PreguntasNova from "../../components/PreguntasNova";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
+import { subirArchivo } from "../../lib/archivos";
 import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
 import { interpretarPresupuesto, aplicarDecisiones } from "./leerPresupuesto";
@@ -262,11 +263,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     if (archivo && !sinMigracion) {
       const ext = (archivo.name.split(".").pop() || "xlsx").toLowerCase();
       const ruta = `obras/${obra.id}/presupuesto-original-${Date.now()}.${ext}`;
-      const { error: eUp } = await supabase.storage.from("task-files").upload(ruta, archivo, { upsert: false, contentType: archivo.type || "application/octet-stream" });
-      if (!eUp) {
-        const { data: pub } = supabase.storage.from("task-files").getPublicUrl(ruta);
-        await supabase.from("obras").update({ archivo_presupuesto_url: pub.publicUrl, archivo_presupuesto_nombre: archivo.name }).eq("id", obra.id);
-      }
+      const { error: eUp } = await subirArchivo(ruta, archivo);
+      if (!eUp) await supabase.from("obras").update({ archivo_presupuesto_url: ruta, archivo_presupuesto_nombre: archivo.name }).eq("id", obra.id);
     }
 
     // La revisión queda con la obra, para volver a verla en la pestaña Presupuesto.
