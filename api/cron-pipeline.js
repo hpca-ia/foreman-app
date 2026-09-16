@@ -15,10 +15,11 @@ const fila = (que, cuando, quien) =>
   `<div style="font-size:13px;color:#374151;padding:3px 0">• ${esc(que)}${cuando ? ` <span style="color:#9CA3AF">· ${esc(cuando)}</span>` : ""}${quien ? ` <span style="color:#9CA3AF">· ${esc(quien)}</span>` : ""}</div>`;
 
 export default async function handler(req, res) {
+  // Cerrado por defecto: sin la llave no corre. Abierto, cualquiera podría
+  // disparar los correos de toda la oficina.
   const secreto = process.env.CRON_SECRET;
-  if (secreto && req.headers.authorization !== `Bearer ${secreto}`) {
-    return res.status(401).json({ error: "No autorizado" });
-  }
+  if (!secreto) return res.status(503).json({ error: "Falta CRON_SECRET en Vercel" });
+  if (req.headers.authorization !== `Bearer ${secreto}`) return res.status(401).json({ error: "No autorizado" });
   if (!configurado()) return res.status(503).json({ error: "Falta SUPABASE_SECRET_KEY" });
 
   try {
