@@ -6,6 +6,7 @@ import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
+import ComentariosTarea from "./ComentariosTarea";
 
 export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar }) {
   const admin = puede("tareas.asignar");
@@ -112,6 +113,15 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
         )}
         <div><label style={lS}>Notas</label><textarea value={form.notes} onChange={e => inp("notes", e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
       </fieldset>
+
+      {/* Comentar se puede siempre: justamente el que no puede editar la tarea
+          es el que más necesita decir por qué está parada. */}
+      {editTask && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${colors.neutralSoft}` }}>
+          <ComentariosTarea taskId={editTask.id} currentUser={currentUser} />
+        </div>
+      )}
+
       {soloLectura ? (
         <div style={{ color: colors.muted, fontSize: 12, marginTop: 14, textAlign: "center" }}>
           Solo lectura: es una tarea de {users.find(u => u.id === editTask.assignee_id)?.name || "otra persona"}. La puede cambiar esa persona o un admin.

@@ -8,7 +8,7 @@ import MarcaPrivada from "./ui/MarcaPrivada";
 // tarea —cambiar estado, subir un archivo—; esto sirve para ver veinte de un
 // vistazo y decidir cuál abrir. Por eso cada fila es una línea y media y lo
 // único que hace es abrir la tarea.
-export default function TareasListaMovil({ tasks, users, projects, leads = {}, onEditar }) {
+export default function TareasListaMovil({ tasks, users, projects, leads = {}, comentarios = {}, onEditar }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
       {tasks.map((t, i) => {
@@ -33,7 +33,7 @@ export default function TareasListaMovil({ tasks, users, projects, leads = {}, o
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}>{t.privada && <MarcaPrivada />}{t.title}</div>
               <div style={{ fontSize: 11, color: colors.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {[proyecto, persona, ESTADO[t.status]?.label].filter(Boolean).join(" · ")}
+                {[proyecto, persona, ESTADO[t.status]?.label, comentarios[t.id] ? `${comentarios[t.id]} comentario${comentarios[t.id] === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}
               </div>
               {t.notes && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>}
             </div>

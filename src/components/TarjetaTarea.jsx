@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, MessageSquare } from "lucide-react";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
@@ -8,7 +8,7 @@ import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
 import WhatsAppDraftModal from "./WhatsAppDraftModal";
 
-export default function TarjetaTarea({ puede, task, currentUser, users, projects, leads = {}, onCambiarEstado, onEditar, onEliminar }) {
+export default function TarjetaTarea({ puede, task, currentUser, users, projects, leads = {}, comentarios = 0, onCambiarEstado, onEditar, onEliminar }) {
   const gP = id => projects.find(p => p.id === id);
   const gU = id => users.find(u => u.id === id);
   // Una etapa del pipeline es una tarea sin proyecto de Ajustes: su nombre
@@ -49,6 +49,12 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
           : <span style={{ color: colors.danger, fontSize: 11 }}>Sin asignar</span>}
         {!esListo && admin && <span style={{ color: colors.border, fontSize: 10 }}>{task.priority === "urgente" ? "c/3h" : task.priority === "alta" ? "c/6h" : "diario"}</span>}
         {crea && <span style={{ color: colors.border, fontSize: 10 }}>por {crea.name}</span>}
+        {comentarios > 0 && (
+          <span title={`${comentarios} comentario${comentarios === 1 ? "" : "s"}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 3, color: colors.inkSoft, fontSize: 11 }}>
+            <MessageSquare size={11} /> {comentarios}
+          </span>
+        )}
       </div>
       <InlineFiles taskId={task.id} />
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", paddingTop: 6, borderTop: "1px solid #F3F4F6", marginTop: 4 }}>

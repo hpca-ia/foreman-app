@@ -75,11 +75,17 @@ export default function App() {
   // Los proyectos del pipeline no están en Ajustes, pero sus etapas son tareas
   // de alguien: sin su nombre, esas tareas aparecían sin proyecto.
   const [leadsPorId, setLeadsPorId] = useState({});
+  const [comentarios, setComentarios] = useState({});   // task_id -> cuántos
   const tienePipeline = Object.keys(leadsPorId).length > 0;
   useEffect(() => {
     if (!usuario) return;
     supabase.from("leads").select("id,nombre")
       .then(({ data }) => setLeadsPorId(Object.fromEntries((data || []).map(l => [l.id, l.nombre]))));
+    supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
+      const c = {};
+      (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; });
+      setComentarios(c);
+    });
   }, [usuario]);
 
   useEffect(() => {
@@ -281,8 +287,8 @@ export default function App() {
                   <div className="tasks-view-mobile">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "lista"
-                        ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
+                        ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
                   </div>
                 </>
               )}
