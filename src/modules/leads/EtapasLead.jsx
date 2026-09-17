@@ -246,7 +246,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
           const info = etapaInfo(e.etapa_id, catalogo);
           const est = ESTADOS_ETAPA[e.estado] || ESTADOS_ETAPA.pendiente;
           return (
-            <div key={e.id} style={{ display: "grid", gridTemplateColumns: "16px 1fr 96px 130px 120px 22px", gap: 6, alignItems: "center", padding: "4px 0" }}>
+            <div key={e.id} className="etapa-fila">
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <button onClick={() => mover(e, -1)} disabled={i === 0} style={flechita}><ChevronUp size={10} /></button>
                 <button onClick={() => mover(e, 1)} disabled={i === etapas.length - 1} style={flechita}><ChevronDown size={10} /></button>
@@ -321,7 +321,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
       </div>
 
       {invitado && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 1fr 1fr auto", gap: 6, alignItems: "center", marginBottom: 8 }}>
+        <div className="invitado-form">
           <input value={invitado.nombre} onChange={e => setInvitado(p => ({ ...p, nombre: e.target.value }))} placeholder="Nombre" style={mini} autoFocus />
           <select value={invitado.rol} onChange={e => setInvitado(p => ({ ...p, rol: e.target.value }))} style={mini}>
             <option value="cliente">Cliente</option><option value="proveedor">Proveedor</option><option value="otro">Otro</option>

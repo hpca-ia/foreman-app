@@ -88,7 +88,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
         <Tarjeta label="Avance" valor={totales.pct * 100} sufijo="%" moneda={false} color={colors.brand} />
       </div>
 
-      <div style={{ display: "flex", borderBottom: `1px solid ${colors.border}`, marginBottom: 14 }}>
+      <div className="obra-tabs">
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>

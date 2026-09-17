@@ -106,3 +106,45 @@ input, select, textarea { outline: none; font-family: var(--font); }
 @media (max-width: 560px) {
   .leads-tunel { grid-template-columns: 1fr; }
 }
+
+/* ── Teléfono: el pipeline y las etapas ──────────────────────────────
+   Cuatro columnas en 375px no son columnas. En el teléfono cada fila se
+   apila: primero de qué proyecto se trata, después en qué va y qué toca.
+   Ojo: estas reglas viven acá y no en el estilo inline, porque el inline
+   le gana a la clase y así el layout del teléfono nunca se aplicaba. */
+.pipeline-fila {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.4fr) minmax(150px, 1.1fr) minmax(150px, 1.2fr) 92px;
+  gap: 10px; align-items: center; padding: 10px 12px;
+  border-bottom: 1px solid var(--neutral-soft); cursor: pointer;
+}
+.etapa-fila {
+  display: grid; grid-template-columns: 16px 1fr 96px 130px 120px 22px;
+  gap: 6px; align-items: center; padding: 4px 0;
+}
+.invitado-form { display: grid; grid-template-columns: 1fr 110px 1fr 1fr auto; gap: 6px; align-items: center; margin-bottom: 8px; }
+.obra-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+
+@media (max-width: 768px) {
+  /* El nombre y el monto arriba, en la misma línea; debajo, en qué va y qué toca. */
+  .pipeline-fila { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 12px; }
+  .pipeline-fila > *:nth-child(4) { grid-row: 1; grid-column: 2; text-align: right; }
+  .pipeline-fila > *:nth-child(2),
+  .pipeline-fila > *:nth-child(3) { grid-column: 1 / -1; }
+
+  /* El tacho se queda arriba a la derecha, no en una línea para él solo. */
+  .etapa-fila { grid-template-columns: 16px 1fr 24px; row-gap: 6px; padding: 9px 0; border-bottom: 1px solid var(--neutral-soft); }
+  .etapa-fila > *:nth-child(6) { grid-row: 1; grid-column: 3; }
+  .etapa-fila > *:nth-child(3) { grid-column: 2 / -1; justify-self: start; width: max-content; }
+  .etapa-fila > *:nth-child(4),
+  .etapa-fila > *:nth-child(5) { grid-column: 2 / -1; width: 100%; }
+
+  .invitado-form { grid-template-columns: 1fr 1fr; }
+  .invitado-form > *:nth-child(1) { grid-column: 1 / -1; }
+  .invitado-form > *:last-child { grid-column: 1 / -1; }
+
+  /* Siete pestañas no caben: se deslizan de lado en vez de apretarse. */
+  .obra-tabs { overflow-x: auto; scrollbar-width: none; }
+  .obra-tabs::-webkit-scrollbar { display: none; }
+  .obra-tabs button { white-space: nowrap; flex-shrink: 0; }
+}

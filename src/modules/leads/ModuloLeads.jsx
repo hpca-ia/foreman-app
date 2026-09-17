@@ -285,10 +285,8 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
   const cuandoTxt = d == null ? "sin fecha" : vencido ? `atrasado ${Math.abs(d)} d` : d === 0 ? "hoy" : d === 1 ? "mañana" : `en ${d} d`;
 
   return (
-    <div onClick={onAbrir}
-      style={{ display: "grid", gridTemplateColumns: "minmax(170px, 1.4fr) minmax(150px, 1.1fr) minmax(150px, 1.2fr) 92px", gap: 10,
-        alignItems: "center", padding: "10px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer",
-        borderLeft: `3px solid ${vencido ? colors.danger : temp?.color || "transparent"}` }}>
+    <div onClick={onAbrir} className="pipeline-fila"
+      style={{ borderLeft: `3px solid ${vencido ? colors.danger : temp?.color || "transparent"}` }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {lead.nombre}

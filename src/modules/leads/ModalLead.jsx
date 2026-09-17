@@ -222,7 +222,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={lbl}>NOMBRE DEL LEAD</label>
           <input value={form.nombre} onChange={e => inp("nombre", e.target.value)} placeholder="Ej: Diners Plaza Lagos" style={mini} autoFocus />
