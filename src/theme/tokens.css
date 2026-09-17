@@ -62,7 +62,8 @@ input, select, textarea { outline: none; font-family: var(--font); }
 .tasks-view-mobile { display: none; }
 .app-sidebar { width: 60px; flex-direction: column; border-right: 1px solid var(--border); border-top: none; padding: 16px 0; gap: 6px; position: relative; }
 .app-shell-layout { flex-direction: row; }
-.app-content { padding: 20px 34px 24px; }
+.app-content { padding: 26px 44px 32px; }
+.app-header-inner { padding: 0 44px; }
 
 @media (max-width: 768px) {
   .tasks-view-desktop { display: none; }
@@ -77,7 +78,8 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .app-sidebar .app-sidebar-profile,
   .app-sidebar .app-sidebar-logo,
   .app-sidebar .app-sidebar-spacer { display: none; }
-  .app-content { padding: 16px 14px 76px; }
+  .app-content { padding: 16px 16px 84px; }
+  .app-header-inner { padding: 0 14px; }
 }
 
 /* Barra de tareas: filtros que se desplazan + interruptor de vista.

@@ -23,10 +23,13 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
 
   return (
     <div className="app-sidebar" style={{ display: "flex", alignItems: "center", background: colors.surface, flexShrink: 0 }}>
+      {/* La barra es un riel de 60 px: el logo de HCA Studio es un letrero
+          ancho y ahí adentro queda como un hilo. Va arriba, en el encabezado,
+          donde se lee; acá queda la marca compacta. */}
       <div className="app-sidebar-logo" style={{ marginBottom: 10 }}>
-        {empresa?.logoUrl
-          ? <img src={empresa.logoUrl} alt={empresa?.nombre || "Logo"} style={{ width: 44, height: 44, objectFit: "contain", borderRadius: 8 }} />
-          : <div style={{ width: 40, height: 40, borderRadius: 10, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#fff", fontSize: 20, fontWeight: 700 }}>F</span></div>}
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ color: "#fff", fontSize: 20, fontWeight: 700 }}>F</span>
+        </div>
       </div>
 
       {navItem("tareas", "Tareas", ListTodo)}

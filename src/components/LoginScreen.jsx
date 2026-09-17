@@ -4,27 +4,22 @@ import { rolInfo } from "../lib/roles";
 import { hashPin, deUsuario } from "../lib/equipo";
 import { estadoLogin, entrar, haySesion } from "../lib/sesion";
 import { colors } from "../theme/colors";
+import { logoEmpresa } from "../lib/marca";
 import Avatar from "./ui/Avatar";
 
-const LOGO_HCA = "https://qxoincfvscvbqvoxamdi.supabase.co/storage/v1/object/public/publico/empresa/logo.png";
-
 function Wordmark() {
-  // El logo de la empresa, del depósito público. Si todavía no lo subieron,
-  // queda la marca de FOREMAN sola.
-  let logo = LOGO_HCA;
-  try { logo = JSON.parse(localStorage.getItem("foreman_empresa") || "{}").logoUrl || LOGO_HCA; } catch {}
+  const [sinLogo, setSinLogo] = useState(false);
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 14 }}>
-      {logo
-        ? <img src={logo} alt="HCA Studio" style={{ height: 46, maxWidth: 140, objectFit: "contain" }} onError={e => { e.currentTarget.style.display = "none"; }} />
-        : <div style={{ width: 46, height: 46, borderRadius: 12, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: "#fff", fontSize: 24, fontWeight: 700 }}>F</span>
-          </div>}
-      <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-        <span style={{ color: colors.ink, fontSize: 28, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
-        <span style={{ color: colors.muted, fontSize: 12 }}>de HCA Studio</span>
-      </span>
-      <span style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4, alignSelf: "flex-start", marginTop: 4 }}>BETA</span>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
+      {sinLogo
+        ? <div style={{ width: 30, height: 30, borderRadius: 8, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>F</span>
+          </div>
+        : <img src={logoEmpresa()} alt="HCA Studio" onError={() => setSinLogo(true)}
+            style={{ height: 30, maxWidth: 130, objectFit: "contain", display: "block" }} />}
+      <span style={{ width: 1, height: 24, background: colors.border }} />
+      <span style={{ color: colors.ink, fontSize: 22, fontWeight: 700, letterSpacing: 0.3 }}>FOREMAN</span>
+      <span style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4 }}>BETA</span>
     </div>
   );
 }
@@ -150,22 +145,18 @@ export default function LoginScreen({ onLogin, users }) {
       {step === "pin" && sel && (
         <div style={{ width: "100%", maxWidth: 280, textAlign: "center", fontFamily: colors.font }}>
           <button onClick={() => { setStep("pick"); setErr(""); }} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", fontSize: 13, marginBottom: 20, display: "flex", alignItems: "center", gap: 4, margin: "0 auto 20px" }}>← Volver</button>
-          <Avatar name={sel.name} size={60} color={sel.color || colors.brand} />
-          <div style={{ color: colors.ink, fontSize: 18, fontWeight: 700, marginTop: 12 }}>{sel.name}</div>
-          <div style={{ color: colors.muted, fontSize: 13, marginBottom: 20, marginTop: 6 }}>Escríbelo y pulsa Enter, o tócalo abajo</div>
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <Avatar name={sel.name} size={60} color={sel.color || colors.brand} />
+          </div>
+          <div style={{ color: colors.ink, fontSize: 18, fontWeight: 700, margin: "12px 0 16px" }}>{sel.name}</div>
+          {/* El campo ya se explica solo: pone puntos, el teclado está abajo. */}
           <input type="password" inputMode="numeric" autoFocus value={pin}
             onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
             onKeyDown={e => { if (e.key === "Enter") probar(pin); }}
-            placeholder="Escribe tu PIN y pulsa Enter"
-            style={{ width: "100%", textAlign: "center", letterSpacing: 6, fontSize: 18, padding: "10px 12px", marginBottom: 16,
+            style={{ width: 132, textAlign: "center", letterSpacing: 8, fontSize: 17, padding: "8px 10px", marginBottom: 18,
               background: colors.surface, border: `1.5px solid ${colors.border}`, borderRadius: colors.radiusMd, color: colors.ink,
               fontFamily: colors.font, outline: "none", boxSizing: "border-box" }} />
 
-          <div style={{ display: "flex", justifyContent: "center", gap: 16, marginBottom: 20 }}>
-            {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
-              <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: pin.length > i ? colors.brand : colors.border, transition: "background 0.15s" }} />
-            ))}
-          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, maxWidth: 220, margin: "0 auto" }}>
             {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "✓"].map((d, i) => (
               <button
