@@ -20,10 +20,20 @@ const escapar = t => String(t ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">":
 /** El mismo marco para todos los correos: título, cuerpo y una nota al pie. */
 export const PIE = "Correo automático de FOREMAN · HCA Studio. No respondas a este mensaje: nadie lo lee. Lo que tengas que decir, escríbelo en FOREMAN.";
 
+// El logo vive en el depósito público, que para esto existe: en un correo
+// un enlace que caduca se vería roto.
+export const LOGO = "https://qxoincfvscvbqvoxamdi.supabase.co/storage/v1/object/public/publico/empresa/logo.png";
+
 export function plantilla({ titulo, subtitulo, cuerpo, pie = PIE }) {
   return `
   <div style="font-family:Inter,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto">
-    <div style="background:#0F3D3E;padding:18px 22px;border-radius:8px 8px 0 0">
+    <div style="background:#0F3D3E;padding:16px 22px;border-radius:8px 8px 0 0">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:10px">
+        <tr>
+          <td style="padding-right:9px"><img src="${LOGO}" alt="HCA Studio" width="26" height="26" style="display:block;border-radius:5px;background:#fff" /></td>
+          <td style="color:#fff;font-size:13px;font-weight:700;letter-spacing:.3px">FOREMAN <span style="color:#B7CBCB;font-weight:400">de HCA Studio</span></td>
+        </tr>
+      </table>
       <div style="color:#fff;font-size:17px;font-weight:700">${escapar(titulo)}</div>
       ${subtitulo ? `<div style="color:#B7CBCB;font-size:13px;margin-top:3px">${escapar(subtitulo)}</div>` : ""}
     </div>

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { Sparkles, ArrowRight, Mic } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CATALOGO_BASE } from "./constantes";
+import { useDictado } from "../../lib/dictado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 
@@ -16,9 +17,15 @@ export default function NovaLeads({ leads, currentUser, catalogo, onCambio }) {
   const [pensando, setPensando] = useState(false);
   const [dijo, setDijo] = useState("");
   const [error, setError] = useState("");
+  // Dictar es lo natural acá: uno se entera de una oportunidad manejando o
+  // saliendo de una reunión, no sentado frente al teclado.
+  const { grabando, error: errorVoz, dictar } = useDictado({
+    onParcial: setTexto,
+    onListo: t => { setTexto(t); enviar(t); },
+  });
 
-  async function enviar() {
-    const t = texto.trim();
+  async function enviar(dictado) {
+    const t = (typeof dictado === "string" ? dictado : texto).trim();
     if (!t) return;
     setPensando(true); setError(""); setDijo("");
     try {
@@ -130,11 +137,18 @@ Si no entiendes a qué lead se refiere: {"accion":"nada","motivo":"..."}`,
           disabled={pensando}
           placeholder={pensando ? "NOVA está anotando..." : '"Hay la oportunidad de construir la casa Fowler" · "Enviar el presupuesto de Fowler el viernes"'}
           style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
-        <button onClick={enviar} disabled={!texto.trim() || pensando}
+        <button onClick={dictar} disabled={pensando} title={grabando ? "Tocar para terminar" : "Dictar"}
+          style={{ background: grabando ? colors.danger : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, width: 38, flexShrink: 0,
+            color: grabando ? "#fff" : colors.inkSoft, cursor: pensando ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Mic size={14} />
+        </button>
+        <button onClick={() => enviar()} disabled={!texto.trim() || pensando}
           style={{ background: texto.trim() && !pensando ? colors.brand : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, padding: "0 14px", color: texto.trim() && !pensando ? "#fff" : colors.muted, cursor: texto.trim() && !pensando ? "pointer" : "default", fontFamily: colors.font, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
           {pensando ? "..." : <>Anotar <ArrowRight size={12} /></>}
         </button>
       </div>
+      {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 7 }}>Escuchando… toca el micrófono cuando termines.</div>}
+      {errorVoz && <div style={{ fontSize: 12, color: colors.warning, marginTop: 7 }}>{errorVoz}</div>}
       {dijo && <div style={{ fontSize: 12, color: colors.success, marginTop: 7 }}>{dijo}</div>}
       {error && <div style={{ fontSize: 12, color: colors.danger, marginTop: 7 }}>{error}</div>}
     </div>

@@ -53,6 +53,26 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
     await cargar();
   }
 
+  // Le avisa a quien queda a cargo. Las tareas normales ya avisaban; las que
+  // nacían de una etapa, no: la persona se enteraba solo si abría FOREMAN.
+  function avisarPorCorreo(fila) {
+    const u = users.find(x => x.id === fila.responsable_id);
+    if (!u?.email) return;
+    const info = etapaInfo(fila.etapa_id, catalogo);
+    fetch("/api/email", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: u.email,
+        subject: `Nueva tarea: ${info.nombre} \u00b7 ${lead.nombre}`,
+        html: `<div style="font-family:Inter,Helvetica,Arial,sans-serif;max-width:500px;margin:0 auto;color:#374151">
+          <p style="font-size:15px">${currentUser?.name || "Alguien"} te dej\u00f3 a cargo de <strong>${info.nombre}</strong> en <strong>${lead.nombre}</strong>.</p>
+          ${fila.fecha_objetivo ? `<p style="font-size:14px">Para el <strong>${fila.fecha_objetivo}</strong>.</p>` : ""}
+          <p style="font-size:13px;color:#6B7280">Lo tienes en FOREMAN, en tus tareas y en el proyecto.</p>
+        </div>`,
+      }),
+    }).catch(() => {});
+  }
+
   // La etapa con responsable y fecha también es una tarea suya: aparece donde
   // ya mira todos los días, no en una lista aparte que hay que acordarse de abrir.
   async function sincronizarTarea(fila) {
@@ -149,6 +169,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
       const u = users.find(x => String(x.id) === id);
       await actualizar(fila, { responsable_id: Number(id), invitado_id: null, responsable_nombre: u?.name || null });
       await darAcceso(Number(id));
+      avisarPorCorreo({ ...fila, responsable_id: Number(id) });
       return;
     }
     const inv = invitados.find(x => String(x.id) === id);
@@ -195,6 +216,11 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>Etapas de este proyecto</div>
         <button onClick={() => setAgregando(a => !a)} style={enlace}><Plus size={12} /> Agregar etapa</button>
+      </div>
+      <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
+        Los hitos grandes del proyecto: plan masa, propuesta, contrato. Cada uno con quién responde y para cuándo.
+        La que marques <strong>En curso</strong> es la etapa en la que el proyecto aparece en el tablero,
+        y la que tenga responsable se le convierte en tarea con su fecha. Los pasos sueltos del día a día van más abajo.
       </div>
 
       {agregando && (

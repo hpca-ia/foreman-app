@@ -30,6 +30,13 @@ export default async function handler(req, res) {
 
 // Nadie lee la bandeja de notificaciones@: mejor decirlo que dejar que
 // alguien conteste y se pierda su respuesta.
+const MARCA = `<table role="presentation" cellpadding="0" cellspacing="0" style="max-width:500px;margin:0 auto 10px">
+  <tr>
+    <td style="padding-right:8px"><img src="https://qxoincfvscvbqvoxamdi.supabase.co/storage/v1/object/public/publico/empresa/logo.png" alt="HCA Studio" width="24" height="24" style="display:block;border-radius:5px" /></td>
+    <td style="font-family:Inter,Helvetica,Arial,sans-serif;font-size:12px;font-weight:700;color:#0F3D3E">FOREMAN <span style="color:#9CA3AF;font-weight:400">de HCA Studio</span></td>
+  </tr>
+</table>`;
+
 const AVISO = `<div style="max-width:500px;margin:14px auto 0;color:#9CA3AF;font-family:Inter,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.5;text-align:center">
   Correo automático de FOREMAN. No respondas a este mensaje: nadie lo lee.<br />Lo que tengas que decir, escríbelo en FOREMAN.
 </div>`;
@@ -39,7 +46,7 @@ async function enviarEmail({ to, subject, html, attachments }) {
     from: "FOREMAN <notificaciones@hcastudio.com>",
     to: Array.isArray(to) ? to : [to],
     subject,
-    html: html + AVISO,
+    html: MARCA + html + AVISO,
   };
   if (attachments?.length) cuerpo.attachments = attachments;
 

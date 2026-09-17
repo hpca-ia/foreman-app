@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Check, X, Trash2, GripVertical, MessageSquare, Sparkles, Mail } from "lucide-react";
+import { Plus, Check, X, Trash2, GripVertical, MessageSquare, Sparkles, Mail, Mic } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
@@ -11,6 +11,7 @@ import InformeLead from "./InformeLead";
 import { esAdmin } from "../../lib/roles";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
+import { useDictado } from "../../lib/dictado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
@@ -109,8 +110,8 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   // Se le dicta a NOVA en el idioma de uno —"enviar portafolio el viernes y
   // llamar al arquitecto el lunes"— y ella lo parte en pasos con fecha. Si no
   // entiende, el texto entra tal cual como un paso: nunca se pierde lo escrito.
-  async function agregarPaso() {
-    const texto = nuevoPaso.trim();
+  async function agregarPaso(dictado) {
+    const texto = (typeof dictado === "string" ? dictado : nuevoPaso).trim();
     if (!texto || !lead) return;
     setPensando(true); setError("");
     const orden = Math.max(0, ...ruta.map(t => t.ruta_orden || 0));
@@ -145,14 +146,23 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       }));
 
     const { data, error: e } = await supabase.from("tasks").insert(filas).select();
-    if (e) setError("No se pudo agregar: " + e.message);
-    else { setRuta(r => [...r, ...(data || [])]); setNuevoPaso(""); }
+    if (e) setError("No se pudo agregar el paso: " + e.message);
+    else {
+      setRuta(r => [...r, ...(data || [])]);
+      setNuevoPaso("");
+      // Los pasos también son movimientos del proyecto: quien lea la bitácora
+      // tiene que ver qué se decidió hacer, no solo lo que ya se hizo.
+      await anotar(lead.id, "nota", `Pasos nuevos: ${filas.map(f => `${f.title}${f.due_date ? ` (${f.due_date})` : ""}`).join(" · ")}`);
+      const { data: ms } = await supabase.from("lead_movimientos").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(30);
+      setMovs(ms || []);
+    }
     setPensando(false);
   }
 
   async function borrarPaso(t) {
     await supabase.from("tasks").delete().eq("id", t.id);
     setRuta(r => r.filter(x => x.id !== t.id));
+    await anotar(lead.id, "nota", `Paso quitado: ${t.title}`);
   }
 
   async function agregarNota() {
@@ -190,6 +200,11 @@ Si no se dice cuándo, pon la fecha de hoy.`,
     const { error: e } = await supabase.from("leads").delete().eq("id", lead.id);
     return e;
   }
+
+  const { grabando, error: errorVoz, dictar } = useDictado({
+    onParcial: setNuevoPaso,
+    onListo: t => { setNuevoPaso(t); agregarPaso(t); },
+  });
 
   const puedeBorrar = editando && esAdmin(currentUser?.role);
   const hechos = ruta.filter(t => t.status === "listo" || t.status === "bloqueado").length;
@@ -324,6 +339,8 @@ Si no se dice cuándo, pon la fecha de hoy.`,
                 </div>
               );
             })}
+            {grabando && <div style={{ fontSize: 11, color: colors.danger, marginTop: 6 }}>Escuchando… toca el micrófono cuando termines.</div>}
+            {errorVoz && <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>{errorVoz}</div>}
             <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
               <Sparkles size={14} color={colors.brand} style={{ flexShrink: 0 }} />
               <input value={nuevoPaso} onChange={e => setNuevoPaso(e.target.value)}
@@ -331,7 +348,12 @@ Si no se dice cuándo, pon la fecha de hoy.`,
                 disabled={pensando}
                 placeholder={pensando ? "NOVA está anotando..." : "Enviar portafolio el viernes..."}
                 style={{ ...mini, flex: 1 }} />
-              <Button variant="primary" size="sm" onClick={agregarPaso} disabled={!nuevoPaso.trim() || pensando}>
+              <button onClick={dictar} disabled={pensando} title={grabando ? "Tocar para terminar" : "Dictar el paso"}
+                style={{ background: grabando ? colors.danger : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, width: 32, height: 30, flexShrink: 0,
+                  color: grabando ? "#fff" : colors.inkSoft, cursor: pensando ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Mic size={13} />
+              </button>
+              <Button variant="primary" size="sm" onClick={() => agregarPaso()} disabled={!nuevoPaso.trim() || pensando}>
                 <Plus size={12} /> {pensando ? "..." : "Anotar"}
               </Button>
             </div>
