@@ -7,12 +7,17 @@ import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
 function Wordmark() {
+  // El logo de la empresa si ya lo subieron; si no, la marca de FOREMAN.
+  let logo = null;
+  try { logo = JSON.parse(localStorage.getItem("foreman_empresa") || "{}").logoUrl || null; } catch {}
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-      <div style={{ width: 28, height: 28, borderRadius: 8, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <span style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>F</span>
-      </div>
-      <span style={{ color: colors.ink, fontSize: 22, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+      {logo
+        ? <img src={logo} alt="" style={{ width: 54, height: 54, objectFit: "contain", borderRadius: 12 }} />
+        : <div style={{ width: 54, height: 54, borderRadius: 14, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: "#fff", fontSize: 28, fontWeight: 700 }}>F</span>
+          </div>}
+      <span style={{ color: colors.ink, fontSize: 30, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
       <span style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4 }}>BETA</span>
     </div>
   );
@@ -137,8 +142,16 @@ export default function LoginScreen({ onLogin, users }) {
           <button onClick={() => { setStep("pick"); setErr(""); }} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", fontSize: 13, marginBottom: 20, display: "flex", alignItems: "center", gap: 4, margin: "0 auto 20px" }}>← Volver</button>
           <Avatar name={sel.name} size={60} color={sel.color || colors.brand} />
           <div style={{ color: colors.ink, fontSize: 18, fontWeight: 700, marginTop: 12 }}>{sel.name}</div>
-          <div style={{ color: colors.muted, fontSize: 13, marginBottom: 28, marginTop: 6 }}>Ingresa tu PIN y toca ✓</div>
-          <div style={{ display: "flex", justifyContent: "center", gap: 16, marginBottom: 28 }}>
+          <div style={{ color: colors.muted, fontSize: 13, marginBottom: 20, marginTop: 6 }}>Escríbelo y pulsa Enter, o tócalo abajo</div>
+          <input type="password" inputMode="numeric" autoFocus value={pin}
+            onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
+            onKeyDown={e => { if (e.key === "Enter") probar(pin); }}
+            placeholder="Escribe tu PIN y pulsa Enter"
+            style={{ width: "100%", textAlign: "center", letterSpacing: 6, fontSize: 18, padding: "10px 12px", marginBottom: 16,
+              background: colors.surface, border: `1.5px solid ${colors.border}`, borderRadius: colors.radiusMd, color: colors.ink,
+              fontFamily: colors.font, outline: "none", boxSizing: "border-box" }} />
+
+          <div style={{ display: "flex", justifyContent: "center", gap: 16, marginBottom: 20 }}>
             {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
               <div key={i} style={{ width: 12, height: 12, borderRadius: "50%", background: pin.length > i ? colors.brand : colors.border, transition: "background 0.15s" }} />
             ))}

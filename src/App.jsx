@@ -258,7 +258,7 @@ export default function App() {
         onNuevaTarea={() => { setEditTask(null); setShowModal(true); }}
       />
 
-      <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1100, margin: "0 auto", width: "100%" }}>
+      <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1600, margin: "0 auto", width: "100%" }}>
         <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} verPipeline={verPipeline} />
 
         <div className="app-content" style={{ flex: 1, padding: "18px 20px", overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>

@@ -25,8 +25,8 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
     <div className="app-sidebar" style={{ display: "flex", alignItems: "center", background: colors.surface, flexShrink: 0 }}>
       <div className="app-sidebar-logo" style={{ marginBottom: 10 }}>
         {empresa?.logoUrl
-          ? <img src={empresa.logoUrl} alt={empresa?.nombre || "Logo"} style={{ width: 32, height: 32, objectFit: "contain", borderRadius: 6 }} />
-          : <div style={{ width: 24, height: 24, borderRadius: 7, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>F</span></div>}
+          ? <img src={empresa.logoUrl} alt={empresa?.nombre || "Logo"} style={{ width: 44, height: 44, objectFit: "contain", borderRadius: 8 }} />
+          : <div style={{ width: 40, height: 40, borderRadius: 10, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#fff", fontSize: 20, fontWeight: 700 }}>F</span></div>}
       </div>
 
       {navItem("tareas", "Tareas", ListTodo)}
