@@ -148,3 +148,16 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .obra-tabs::-webkit-scrollbar { display: none; }
   .obra-tabs button { white-space: nowrap; flex-shrink: 0; }
 }
+
+/* Los botones de un modal: en el teléfono, guardar ocupa la línea entera y el
+   resto va debajo. Antes se salían de la pantalla y "Guardar cambios" quedaba
+   cortado por la mitad. */
+.modal-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.modal-acciones > *:first-child { flex: 2; }
+.modal-acciones > * { flex: 1; }
+
+@media (max-width: 640px) {
+  .modal-acciones { display: grid; grid-template-columns: 1fr 1fr; }
+  .modal-acciones > * { flex: none; }
+  .modal-acciones > *:first-child { grid-column: 1 / -1; }
+}

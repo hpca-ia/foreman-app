@@ -17,7 +17,7 @@ import { etapaInfo, ESTADOS_ETAPA, SIGUIENTE_ESTADO_ETAPA } from "./constantes";
 
 const vacio = { nombre: "", rol: "cliente", email: "", telefono: "" };
 
-export default function EtapasLead({ lead, catalogo, users = [], currentUser, puedeCompartir, onEtapaCambiada, onBitacora }) {
+export default function EtapasLead({ lead, catalogo, users = [], currentUser, puedeCompartir, parte = "todo", onEtapaCambiada, onBitacora }) {
   const [etapas, setEtapas] = useState([]);
   const [invitados, setInvitados] = useState([]);
   const [accesos, setAccesos] = useState([]);
@@ -218,16 +218,19 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
   const conAcceso = accesos.map(a => ({ ...a, nombre: users.find(u => u.id === a.usuario_id)?.name || `Usuario ${a.usuario_id}` }));
   const mini = { ...inputStyle, padding: "5px 7px", fontSize: 11 };
 
+  const verEtapas = parte === "todo" || parte === "etapas";
+  const verGente = parte === "todo" || parte === "gente";
+
   return (
     <>
+      {verEtapas && (<>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>Etapas de este proyecto</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>El plan de este proyecto</div>
         <button onClick={() => setAgregando(a => !a)} style={enlace}><Plus size={12} /> Agregar etapa</button>
       </div>
       <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
-        Los hitos grandes del proyecto: plan masa, propuesta, contrato. Cada uno con quién responde y para cuándo.
-        La que marques <strong>En curso</strong> es la etapa en la que el proyecto aparece en el tablero,
-        y la que tenga responsable se le convierte en tarea con su fecha. El orden lo pones tú con las flechitas: hay proyectos que presupuestan antes del plan masa, y la reunión con cliente se puede repetir. Los pasos sueltos del día a día van más abajo.
+        Los hitos, en el orden de <strong>este</strong> proyecto: el que pones tú con las flechitas.
+        La que marques <strong>En curso</strong> manda en el tablero; la que tenga responsable se le convierte en tarea con su fecha.
       </div>
 
       {agregando && (
@@ -298,6 +301,9 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
         )}
       </div>
 
+      </>)}
+
+      {verGente && (<>
       {/* Quién ve este proyecto */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>
@@ -353,6 +359,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
           ))}
         </div>
       )}
+      </>)}
     </>
   );
 }

@@ -34,6 +34,9 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   const [borrar, setBorrar] = useState(false);
   const [verEtapas, setVerEtapas] = useState(false);
   const [editNota, setEditNota] = useState({ id: null, texto: "" });
+  // Todo junto en una columna era ilegible en el teléfono: ahora el proyecto
+  // se abre en el plan, que es lo que uno viene a mirar, y lo demás está a un toque.
+  const [seccion, setSeccion] = useState(lead ? "plan" : "datos");
   const [informe, setInforme] = useState(false);
   const [error, setError] = useState("");
 
@@ -245,110 +248,126 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
 
+  const etapaActual = etapaInfo(form.etapa, catalogo);
+  const temp = TEMPERATURAS.find(t => t.id === form.temperatura);
+  const SECCIONES = editando
+    ? [["plan", "Plan"], ["dia", "Día a día"], ["bitacora", "Bitácora"], ["datos", "Datos"], ["gente", "Gente"]]
+    : [["datos", "Datos"]];
+
   return (
     <Modal onClose={onCerrar} maxWidth={560}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1 }}>
-          {editando ? lead.nombre : "Nuevo lead"}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>
+          {editando ? lead.nombre : "Nuevo proyecto"}
         </div>
-        {editando && ruta.length > 0 && (
-          <span style={{ fontSize: 11, color: colors.muted }}>Ruta: {hechos} de {ruta.length}</span>
-        )}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
-        <div style={{ gridColumn: "1 / -1" }}>
-          <label style={lbl}>NOMBRE DEL LEAD</label>
-          <input value={form.nombre} onChange={e => inp("nombre", e.target.value)} placeholder="Ej: Diners Plaza Lagos" style={mini} autoFocus />
-        </div>
-        <div><label style={lbl}>CONTACTO</label><input value={form.contacto || ""} onChange={e => inp("contacto", e.target.value)} style={mini} /></div>
-        <div><label style={lbl}>TELÉFONO</label><input value={form.telefono || ""} onChange={e => inp("telefono", e.target.value)} style={mini} /></div>
-        <div><label style={lbl}>ORIGEN</label>
-          <select value={form.origen || ""} onChange={e => inp("origen", e.target.value)} style={mini}>
-            {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div><label style={lbl}>RESPONSABLE</label>
-          <select value={form.responsable_id || ""} onChange={e => inp("responsable_id", e.target.value)} style={mini}>
-            <option value="">Sin asignar</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </div>
-        <div><label style={lbl}>VALOR ESTIMADO</label><input type="number" value={form.valor_estimado || ""} onChange={e => inp("valor_estimado", e.target.value)} placeholder="0" style={mini} /></div>
-        <div><label style={lbl}>SE DECIDE EL</label><input type="date" value={form.fecha_cierre || ""} onChange={e => inp("fecha_cierre", e.target.value)} style={mini} /></div>
-        <div style={{ gridColumn: "1 / -1" }}>
-          <label style={lbl}>ETAPA ACTUAL</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: verEtapas ? 6 : 0 }}>
-            <span style={{ padding: "4px 11px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff",
-              background: etapaInfo(form.etapa, catalogo).color || colors.muted }}>
-              {etapaInfo(form.etapa, catalogo).nombre}
+        {editando && (
+          <>
+            {temp && <span title={temp.label} style={{ width: 8, height: 8, borderRadius: "50%", background: temp.color }} />}
+            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: etapaActual.color || colors.muted }}>
+              {etapaActual.nombre}
             </span>
-            <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 140 }}>
-              {editando ? "Se mueve marcando una etapa \"En curso\" abajo." : "Empieza donde de verdad esté."}
-            </span>
-            <button onClick={() => setVerEtapas(v => !v)}
-              style={{ background: "none", border: "none", color: colors.brand, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
-              {verEtapas ? "Listo" : "Cambiar a mano"}
-            </button>
-          </div>
-          <div style={{ display: verEtapas || !editando ? "flex" : "none", gap: 4, flexWrap: "wrap" }}>
-            {catalogo.map(et => (
-              <button key={et.id} onClick={() => inp("etapa", et.id)}
-                style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
-                  border: `1px solid ${form.etapa === et.id ? et.color : colors.border}`,
-                  background: form.etapa === et.id ? et.color : "transparent",
-                  color: form.etapa === et.id ? "#fff" : colors.inkSoft }}>
-                {et.nombre}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label style={lbl}>TEMPERATURA</label>
-          <div style={{ display: "flex", gap: 4 }}>
-            {TEMPERATURAS.map(t => (
-              <button key={t.id} onClick={() => inp("temperatura", form.temperatura === t.id ? null : t.id)}
-                style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
-                  border: `1px solid ${form.temperatura === t.id ? t.color : colors.border}`,
-                  background: form.temperatura === t.id ? t.color : "transparent",
-                  color: form.temperatura === t.id ? "#fff" : colors.inkSoft }}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label style={lbl}>RESULTADO</label>
-          <div style={{ display: "flex", gap: 4 }}>
-            {[[null, "Abierto", colors.inkSoft], ["ganado", "Ganado", colors.success], ["perdido", "Perdido", colors.muted]].map(([v, t, c]) => (
-              <button key={t} onClick={() => inp("resultado", v)}
-                style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
-                  border: `1px solid ${(form.resultado || null) === v ? c : colors.border}`,
-                  background: (form.resultado || null) === v ? c : "transparent",
-                  color: (form.resultado || null) === v ? "#fff" : colors.inkSoft }}>
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-        {form.resultado === "perdido" && (
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={lbl}>¿POR QUÉ SE PERDIÓ?</label>
-            <input value={form.motivo_perdida || ""} onChange={e => inp("motivo_perdida", e.target.value)} placeholder="Precio, plazo, se fue con otro..." style={mini} />
-          </div>
+          </>
         )}
       </div>
 
       {editando && (
-        <>
-          <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
-            puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
-            onBitacora={recargarBitacora}
-            onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
+        <div className="obra-tabs" style={{ marginBottom: 12 }}>
+          {SECCIONES.map(([id, txt]) => (
+            <button key={id} onClick={() => setSeccion(id)}
+              style={{ padding: "7px 13px", border: "none", background: "transparent", cursor: "pointer", fontFamily: colors.font,
+                fontSize: 12, fontWeight: seccion === id ? 600 : 400, color: seccion === id ? colors.brand : colors.inkSoft,
+                borderBottom: `2px solid ${seccion === id ? colors.brand : "transparent"}` }}>
+              {txt}{id === "dia" && ruta.length > 0 ? ` ${hechos}/${ruta.length}` : ""}
+            </button>
+          ))}
+        </div>
+      )}
 
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 2 }}>Los pasos del día a día</div>
-          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6, lineHeight: 1.5 }}>
-            Lo suelto de esta semana: llamar, mandar, pedir. Son tareas de verdad —vencen y aparecen en la lista de quien las tiene— y no mueven al proyecto de etapa. Todo lo que pasa acá queda en la bitácora.
+      {seccion === "datos" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={lbl}>NOMBRE DEL PROYECTO</label>
+            <input value={form.nombre} onChange={e => inp("nombre", e.target.value)} placeholder="Ej: Plaza Comercial Puembo" style={mini} autoFocus />
+          </div>
+          <div><label style={lbl}>CONTACTO</label><input value={form.contacto || ""} onChange={e => inp("contacto", e.target.value)} style={mini} /></div>
+          <div><label style={lbl}>TELÉFONO</label><input value={form.telefono || ""} onChange={e => inp("telefono", e.target.value)} style={mini} /></div>
+          <div><label style={lbl}>ORIGEN</label>
+            <select value={form.origen || ""} onChange={e => inp("origen", e.target.value)} style={mini}>
+              {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>RESPONSABLE</label>
+            <select value={form.responsable_id || ""} onChange={e => inp("responsable_id", e.target.value)} style={mini}>
+              <option value="">Sin asignar</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>VALOR ESTIMADO</label><input type="number" value={form.valor_estimado || ""} onChange={e => inp("valor_estimado", e.target.value)} placeholder="0" style={mini} /></div>
+          <div><label style={lbl}>SE DECIDE EL</label><input type="date" value={form.fecha_cierre || ""} onChange={e => inp("fecha_cierre", e.target.value)} style={mini} /></div>
+          <div>
+            <label style={lbl}>TEMPERATURA</label>
+            <div style={{ display: "flex", gap: 4 }}>
+              {TEMPERATURAS.map(t => (
+                <button key={t.id} onClick={() => inp("temperatura", form.temperatura === t.id ? null : t.id)}
+                  style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                    border: `1px solid ${form.temperatura === t.id ? t.color : colors.border}`,
+                    background: form.temperatura === t.id ? t.color : "transparent",
+                    color: form.temperatura === t.id ? "#fff" : colors.inkSoft }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>RESULTADO</label>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[[null, "Abierto", colors.inkSoft], ["ganado", "Ganado", colors.success], ["perdido", "Perdido", colors.muted]].map(([v, t, c]) => (
+                <button key={t} onClick={() => inp("resultado", v)}
+                  style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                    border: `1px solid ${(form.resultado || null) === v ? c : colors.border}`,
+                    background: (form.resultado || null) === v ? c : "transparent",
+                    color: (form.resultado || null) === v ? "#fff" : colors.inkSoft }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.resultado === "perdido" && (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={lbl}>¿POR QUÉ SE PERDIÓ?</label>
+              <input value={form.motivo_perdida || ""} onChange={e => inp("motivo_perdida", e.target.value)} placeholder="Precio, plazo, se fue con otro..." style={mini} />
+            </div>
+          )}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={lbl}>ETAPA ACTUAL</label>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {catalogo.map(et => (
+                <button key={et.id} onClick={() => inp("etapa", et.id)}
+                  style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                    border: `1px solid ${form.etapa === et.id ? et.color : colors.border}`,
+                    background: form.etapa === et.id ? et.color : "transparent",
+                    color: form.etapa === et.id ? "#fff" : colors.inkSoft }}>
+                  {et.nombre}
+                </button>
+              ))}
+            </div>
+            {editando && <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>Normalmente se mueve sola, al marcar una etapa En curso en el Plan.</div>}
+          </div>
+        </div>
+      )}
+
+      {editando && (seccion === "plan" || seccion === "gente") && (
+        <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
+          parte={seccion === "plan" ? "etapas" : "gente"}
+          puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
+          onBitacora={recargarBitacora}
+          onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
+      )}
+
+      {editando && seccion === "dia" && (
+        <>
+          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
+            Lo suelto de esta semana. Son tareas de verdad: vencen y aparecen en la lista de quien las tiene.
           </div>
           <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, marginBottom: 12 }}>
             {ruta.length === 0 && <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>Todavía sin pasos. Dictale abajo a NOVA qué sigue y con qué fecha.</div>}
@@ -359,21 +378,20 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               const d = t.due_date ? daysUntil(t.due_date) : null;
               const vencido = !cerrado && d != null && d < 0;
               return (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
-                  <GripVertical size={11} color={colors.border} style={{ flexShrink: 0 }} />
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", flexWrap: "wrap" }}>
                   <button onClick={() => alternarPaso(t)} title="Pendiente → hecho → no se hizo"
-                    style={{ width: 17, height: 17, borderRadius: 5, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                    style={{ width: 19, height: 19, borderRadius: 5, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
                       border: `1.5px solid ${listo ? colors.success : noHecho ? colors.muted : vencido ? colors.danger : colors.border}`,
                       background: listo ? colors.success : noHecho ? colors.muted : "transparent" }}>
                     {listo && <Check size={11} color="#fff" />}
                     {noHecho && <X size={11} color="#fff" />}
                   </button>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: cerrado ? colors.muted : colors.ink, textDecoration: cerrado ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ flex: 1, minWidth: 120, fontSize: 12, color: cerrado ? colors.muted : colors.ink, textDecoration: cerrado ? "line-through" : "none" }}>
                     {t.title}
                   </span>
                   <input type="date" value={t.due_date || ""} onChange={e => cambiarFecha(t, e.target.value)}
-                    style={{ ...mini, width: 132, padding: "4px 6px", fontSize: 11, color: vencido ? colors.danger : colors.inkSoft, borderColor: vencido ? colors.dangerBorder : colors.border }} />
-                  <button onClick={() => borrarPaso(t)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={11} /></button>
+                    style={{ ...mini, width: 130, padding: "4px 6px", fontSize: 11, color: vencido ? colors.danger : colors.inkSoft, borderColor: vencido ? colors.dangerBorder : colors.border }} />
+                  <button onClick={() => borrarPaso(t)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={12} /></button>
                 </div>
               );
             })}
@@ -382,10 +400,9 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
               <Sparkles size={14} color={colors.brand} style={{ flexShrink: 0 }} />
               <input value={nuevoPaso} onChange={e => setNuevoPaso(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && !pensando && agregarPaso()}
                 disabled={pensando}
                 placeholder={pensando ? "NOVA está anotando..." : "Enviar portafolio el viernes..."}
-                style={{ ...mini, flex: 1 }} />
+                style={{ ...mini, flex: 1, minWidth: 0 }} />
               <button onClick={dictar} disabled={pensando} title={grabando ? "Tocar para terminar" : "Dictar el paso"}
                 style={{ background: grabando ? colors.danger : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, width: 32, height: 30, flexShrink: 0,
                   color: grabando ? "#fff" : colors.inkSoft, cursor: pensando ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -396,20 +413,20 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               </Button>
             </div>
           </div>
+        </>
+      )}
 
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 2 }}>Bitácora</div>
-          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6, lineHeight: 1.5 }}>
-            Qué pasó, en orden. Se llena sola con las etapas y los pasos, y a mano con lo que se conversó. Lo que escribes tú se puede corregir; lo que anotó el sistema queda como quedó.
+      {editando && seccion === "bitacora" && (
+        <>
+          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
+            Qué pasó, en orden. Se llena sola con el plan y los pasos; lo que escribes tú se puede corregir.
           </div>
-          {/* De varias líneas y sin mandar con Enter: en el teléfono el teclado
-              manda Enter antes de que uno termine —dictando, sobre todo— y la
-              nota quedaba cortada a la mitad. Se manda con el botón. */}
           <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "flex-end" }}>
             <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2}
               onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) agregarNota(); }}
               placeholder="¿Qué pasó? Una llamada, una visita, lo que dijeron..."
-              style={{ ...mini, flex: 1, resize: "vertical", lineHeight: 1.5 }} />
-            <button onClick={dictarNota} disabled={!lead} title={grabandoNota ? "Tocar para terminar" : "Dictar la nota"}
+              style={{ ...mini, flex: 1, minWidth: 0, resize: "vertical", lineHeight: 1.5 }} />
+            <button onClick={dictarNota} title={grabandoNota ? "Tocar para terminar" : "Dictar la nota"}
               style={{ background: grabandoNota ? colors.danger : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm,
                 width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                 color: grabandoNota ? "#fff" : colors.inkSoft, cursor: "pointer" }}>
@@ -419,7 +436,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
           </div>
           {grabandoNota && <div style={{ fontSize: 11, color: colors.danger, marginBottom: 6 }}>Escuchando… toca el micrófono cuando termines.</div>}
           {errorVozNota && <div style={{ fontSize: 11, color: colors.warning, marginBottom: 6 }}>{errorVozNota}</div>}
-          <div style={{ maxHeight: 150, overflowY: "auto", marginBottom: 12 }}>
+          <div style={{ maxHeight: 260, overflowY: "auto", marginBottom: 12 }}>
             {movs.map(m => {
               const mio = !m.automatico && (m.autor_id === currentUser?.id || esAdmin(currentUser?.role));
               const enEdicion = editNota.id === m.id;
@@ -438,9 +455,9 @@ Si no se dice cuándo, pon la fecha de hoy.`,
                     )}
                   </div>
                   {enEdicion ? (
-                    <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                    <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
                       <input value={editNota.texto} onChange={e => setEditNota(p => ({ ...p, texto: e.target.value }))}
-                        onKeyDown={e => e.key === "Enter" && guardarNotaEditada(m)} style={{ ...mini, flex: 1 }} autoFocus />
+                        style={{ ...mini, flex: 1, minWidth: 140 }} autoFocus />
                       <Button variant="primary" size="sm" onClick={() => guardarNotaEditada(m)}>Guardar</Button>
                       <Button variant="outline" size="sm" onClick={() => setEditNota({ id: null, texto: "" })}>Cancelar</Button>
                     </div>
@@ -455,7 +472,11 @@ Si no se dice cuándo, pon la fecha de hoy.`,
 
       {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="modal-acciones">
+        <Button variant="primary" onClick={guardar} disabled={guardando}>
+          {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
+        </Button>
+        <Button variant="outline" onClick={onCerrar}>Cerrar</Button>
         {editando && (
           <Button variant="outline" onClick={() => setInforme(true)} title="Mandar un informe de avance por correo">
             <Mail size={13} /> Informe
@@ -466,10 +487,6 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             <Trash2 size={13} /> Borrar
           </Button>
         )}
-        <Button variant="outline" style={{ flex: 1 }} onClick={onCerrar}>Cerrar</Button>
-        <Button variant="primary" style={{ flex: 2 }} onClick={guardar} disabled={guardando}>
-          {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
-        </Button>
       </div>
 
       {informe && <InformeLead lead={lead} onCerrar={() => setInforme(false)} />}
