@@ -45,6 +45,11 @@ export default function UserForm({ u, esNuevo = false, projects = [], onSave, on
         <label style={etiqueta}>CONTACTO</label>
         <input value={f.email || ""} onChange={e => setF(p => ({ ...p, email: e.target.value }))} placeholder="Email (para notificaciones)" style={inputStyle} />
         <input value={f.phone || ""} onChange={e => setF(p => ({ ...p, phone: e.target.value }))} placeholder="WhatsApp (+593...)" style={inputStyle} />
+        {/* En WhatsApp no hay clave que poner: el número es la credencial. NOVA
+            solo le contesta a los que están acá. */}
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -4, lineHeight: 1.5 }}>
+          Con ese número reconoce NOVA a {f.name ? f.name.split(" ")[0] : "esta persona"} en WhatsApp. Sin número, no le contesta.
+        </div>
         {/* Para quien está en varias obras: sus proyectos se marcan acá de una
             vez, en vez de entrar proyecto por proyecto. Los admins ven todos. */}
         {esAdmin(f.role) ? (
