@@ -120,6 +120,10 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // Cada proyecto lleva su propio orden: uno presupuesta antes del plan masa y
   // otro al revés. Retroceder es volver a una etapa anterior DE SU PLAN, no de
   // la ruta estándar; si no tiene plan, se compara contra la ruta estándar.
+  // Cuánto vale el negocio lo ve el Director y quien lo abrió. Al resto le
+  // toca su etapa, no la plata.
+  const verMonto = l => currentUser?.role === "owner" || l.created_by === currentUser?.id;
+
   const retrocedio = l => {
     const plan = planes[l.id];
     if (plan?.lista?.length && plan.actual) {
@@ -208,8 +212,10 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
       <div style={{ display: "flex", gap: 22, marginBottom: 14, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft }}>
         <span><strong style={{ color: colors.ink, fontSize: 15 }}>{abiertos.length}</strong> en curso</span>
-        <span>En juego <strong style={{ color: colors.ink, fontSize: 15 }}>${fmt(enJuego)}</strong></span>
-        <span>Ponderado <strong style={{ color: colors.brand, fontSize: 15 }}>${fmt(ponderado)}</strong></span>
+        {currentUser?.role === "owner" && <>
+          <span>En juego <strong style={{ color: colors.ink, fontSize: 15 }}>${fmt(enJuego)}</strong></span>
+          <span>Ponderado <strong style={{ color: colors.brand, fontSize: 15 }}>${fmt(ponderado)}</strong></span>
+        </>}
       </div>
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div>
@@ -229,7 +235,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                 <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
                   {g.leads.map(l => (
                     <FilaLead key={l.id} lead={l} ruta={rutas[l.id]} plan={planes[l.id]} catalogo={catalogo}
-                      fecha={cuando(l)} volvioAtras={retrocedio(l)} onAbrir={() => setAbierto(l)} />
+                      verMonto={verMonto(l)} fecha={cuando(l)} volvioAtras={retrocedio(l)} onAbrir={() => setAbierto(l)} />
                   ))}
                 </div>
               </div>
@@ -283,7 +289,7 @@ function Aviso({ n, txt, Icono, color, bg, borde }) {
 // Una fila por proyecto: hasta dónde llegó en la ruta estándar, qué toca ahora
 // y cuándo. La barra son los puntos de revisión; si volvió a una etapa
 // anterior lo dice, porque un proyecto que regresa no está caminando.
-function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
+function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = true, onAbrir }) {
   const temp = tempInfo(lead.temperatura);
   const etapa = etapaInfo(plan?.actual?.etapa_id || lead.etapa, catalogo);
   // Los puntos de revisión son los de ESTE proyecto, en su orden. Sin plan
@@ -343,7 +349,7 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
       </div>
 
       <div style={{ textAlign: "right" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>${fmt(lead.valor_estimado)}</div>
+        {verMonto && <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>${fmt(lead.valor_estimado)}</div>}
         {ruta?.total > 0 && <div style={{ fontSize: 10, color: colors.muted }}>{ruta.hechos}/{ruta.total} pasos</div>}
       </div>
     </div>

@@ -37,6 +37,8 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   // Todo junto en una columna era ilegible en el teléfono: ahora el proyecto
   // se abre en el plan, que es lo que uno viene a mirar, y lo demás está a un toque.
   const [seccion, setSeccion] = useState(lead ? "plan" : "datos");
+  // Si le compartieron el proyecto y cae en una pestaña que no le toca, al plan.
+  const seccionVisible = seccion === "datos" && editando && currentUser?.role !== "owner" && lead?.created_by !== currentUser?.id ? "plan" : seccion;
   const [informe, setInforme] = useState(false);
   const [error, setError] = useState("");
 
@@ -250,8 +252,12 @@ Si no se dice cuándo, pon la fecha de hoy.`,
 
   const etapaActual = etapaInfo(form.etapa, catalogo);
   const temp = TEMPERATURAS.find(t => t.id === form.temperatura);
+  // Los datos del proyecto —valor, contacto, origen, resultado— son del
+  // Director y de quien lo abrió. Quien trabaja una etapa ve el plan y lo suyo,
+  // no cuánto vale el negocio.
+  const verDatos = currentUser?.role === "owner" || !editando || lead.created_by === currentUser?.id;
   const SECCIONES = editando
-    ? [["plan", "Plan"], ["dia", "Día a día"], ["bitacora", "Bitácora"], ["datos", "Datos"], ["gente", "Gente"]]
+    ? [...(verDatos ? [["datos", "Datos"]] : []), ["plan", "Plan"], ["dia", "Tareas"], ["bitacora", "Bitácora"], ["gente", "Gente"]]
     : [["datos", "Datos"]];
 
   return (
@@ -275,15 +281,15 @@ Si no se dice cuándo, pon la fecha de hoy.`,
           {SECCIONES.map(([id, txt]) => (
             <button key={id} onClick={() => setSeccion(id)}
               style={{ padding: "7px 13px", border: "none", background: "transparent", cursor: "pointer", fontFamily: colors.font,
-                fontSize: 12, fontWeight: seccion === id ? 600 : 400, color: seccion === id ? colors.brand : colors.inkSoft,
-                borderBottom: `2px solid ${seccion === id ? colors.brand : "transparent"}` }}>
+                fontSize: 12, fontWeight: seccionVisible === id ? 600 : 400, color: seccionVisible === id ? colors.brand : colors.inkSoft,
+                borderBottom: `2px solid ${seccionVisible === id ? colors.brand : "transparent"}` }}>
               {txt}{id === "dia" && ruta.length > 0 ? ` ${hechos}/${ruta.length}` : ""}
             </button>
           ))}
         </div>
       )}
 
-      {seccion === "datos" && (
+      {seccionVisible === "datos" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={lbl}>NOMBRE DEL PROYECTO</label>
@@ -356,15 +362,15 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         </div>
       )}
 
-      {editando && (seccion === "plan" || seccion === "gente") && (
+      {editando && (seccionVisible === "plan" || seccionVisible === "gente") && (
         <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
-          parte={seccion === "plan" ? "etapas" : "gente"}
+          parte={seccionVisible === "plan" ? "etapas" : "gente"}
           puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
           onBitacora={recargarBitacora}
           onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
       )}
 
-      {editando && seccion === "dia" && (
+      {editando && seccionVisible === "dia" && (
         <>
           <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
             Lo suelto de esta semana. Son tareas de verdad: vencen y aparecen en la lista de quien las tiene.
@@ -416,7 +422,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         </>
       )}
 
-      {editando && seccion === "bitacora" && (
+      {editando && seccionVisible === "bitacora" && (
         <>
           <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
             Qué pasó, en orden. Se llena sola con el plan y los pasos; lo que escribes tú se puede corregir.

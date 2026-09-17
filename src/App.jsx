@@ -145,9 +145,20 @@ export default function App() {
   }
 
   async function cambiarEstado(id, estado) {
+    const tarea = tareas.find(t => t.id === id);
     setTareas(prev => prev.map(t => t.id === id ? { ...t, status: estado } : t));
     const { error } = await supabase.from("tasks").update({ status: estado }).eq("id", id);
-    if (error) { console.error("Error updating status:", error); fetchTareas(); }
+    if (error) { console.error("Error updating status:", error); fetchTareas(); return; }
+
+    // Si la tarea es de un proyecto del pipeline, su bitácora se entera: quien
+    // la trabaja la marca desde sus tareas, no entrando al proyecto.
+    if (tarea?.lead_id && estado !== "pendiente") {
+      await supabase.from("lead_movimientos").insert({
+        lead_id: tarea.lead_id, tipo: "nota", automatico: true,
+        detalle: `${estado === "listo" ? "Hecho" : "No se hizo"}: ${tarea.title}`,
+        autor_id: usuario.id, autor_nombre: usuario.name,
+      });
+    }
   }
 
   async function guardarTarea(form, id) {
