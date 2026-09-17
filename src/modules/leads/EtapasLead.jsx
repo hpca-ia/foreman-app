@@ -220,7 +220,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
       <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
         Los hitos grandes del proyecto: plan masa, propuesta, contrato. Cada uno con quién responde y para cuándo.
         La que marques <strong>En curso</strong> es la etapa en la que el proyecto aparece en el tablero,
-        y la que tenga responsable se le convierte en tarea con su fecha. Los pasos sueltos del día a día van más abajo.
+        y la que tenga responsable se le convierte en tarea con su fecha. El orden lo pones tú con las flechitas: hay proyectos que presupuestan antes del plan masa, y la reunión con cliente se puede repetir. Los pasos sueltos del día a día van más abajo.
       </div>
 
       {agregando && (

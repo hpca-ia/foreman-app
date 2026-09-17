@@ -117,7 +117,17 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
     if (fb) return 1;
     return new Date(a.actualizado_at) - new Date(b.actualizado_at);
   };
-  const retrocedio = l => (historia[l.id] || 0) > (etapaInfo(l.etapa, catalogo).orden || 0);
+  // Cada proyecto lleva su propio orden: uno presupuesta antes del plan masa y
+  // otro al revés. Retroceder es volver a una etapa anterior DE SU PLAN, no de
+  // la ruta estándar; si no tiene plan, se compara contra la ruta estándar.
+  const retrocedio = l => {
+    const plan = planes[l.id];
+    if (plan?.lista?.length && plan.actual) {
+      const i = plan.lista.findIndex(e => e.id === plan.actual.id);
+      return plan.lista.some((e, j) => j > i && (e.estado === "hecha" || e.estado === "omitida"));
+    }
+    return (historia[l.id] || 0) > (etapaInfo(l.etapa, catalogo).orden || 0);
+  };
 
   // Las formas de perder un negocio sin darse cuenta: no saber cuál es el
   // siguiente paso, saberlo y no haberlo dado, o ir para atrás sin notarlo.
@@ -276,8 +286,16 @@ function Aviso({ n, txt, Icono, color, bg, borde }) {
 function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
   const temp = tempInfo(lead.temperatura);
   const etapa = etapaInfo(plan?.actual?.etapa_id || lead.etapa, catalogo);
-  const puntos = catalogo.filter(e => !e.cierra);
-  const llegada = puntos.findIndex(e => e.id === etapa.id);
+  // Los puntos de revisión son los de ESTE proyecto, en su orden. Sin plan
+  // todavía, se muestran los de la ruta estándar.
+  const conPlan = plan?.lista?.length ? plan.lista : null;
+  const puntos = conPlan
+    ? conPlan.map(e => ({ id: e.id, nombre: etapaInfo(e.etapa_id, catalogo).nombre }))
+    : catalogo.filter(e => !e.cierra);
+  const llegada = conPlan
+    ? (plan.actual ? conPlan.findIndex(e => e.id === plan.actual.id)
+       : conPlan.map(e => e.estado).lastIndexOf("hecha"))
+    : puntos.findIndex(e => e.id === etapa.id);
   const d = fecha ? daysUntil(fecha) : null;
   const vencido = d != null && d < 0;
   const paso = ruta?.siguiente;
@@ -309,7 +327,7 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
         </div>
         <div style={{ fontSize: 10, color: volvioAtras ? colors.warning : colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {volvioAtras ? "volvió atrás · " : ""}
-          {plan?.total ? `etapa ${plan.indice || plan.hechas + 1} de ${plan.total}` : `punto ${llegada + 1} de ${puntos.length}`}
+          {conPlan ? `etapa ${llegada + 1} de ${conPlan.length}` : `punto ${llegada + 1} de ${puntos.length}`}
           {responsable ? ` · ${responsable}` : ""}
         </div>
       </div>
