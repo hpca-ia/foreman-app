@@ -7,19 +7,20 @@ import { colors } from "../theme/colors";
 import { logoEmpresa } from "../lib/marca";
 import Avatar from "./ui/Avatar";
 
-function Wordmark() {
+function Marca() {
+  // Todo al centro: FOREMAN grande y, debajo, la firma de HCA Studio. Es una
+  // portada, no una barra de herramientas; no hay nada que apurar a un lado.
   const [sinLogo, setSinLogo] = useState(false);
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
-      {sinLogo
-        ? <div style={{ width: 30, height: 30, borderRadius: 8, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>F</span>
-          </div>
-        : <img src={logoEmpresa()} alt="HCA Studio" onError={() => setSinLogo(true)}
-            style={{ height: 30, maxWidth: 130, objectFit: "contain", display: "block" }} />}
-      <span style={{ width: 1, height: 24, background: colors.border }} />
-      <span style={{ color: colors.ink, fontSize: 22, fontWeight: 700, letterSpacing: 0.3 }}>FOREMAN</span>
-      <span style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4 }}>BETA</span>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 30 }}>
+      <div style={{ position: "relative", display: "inline-block" }}>
+        <span style={{ color: colors.ink, fontSize: 36, fontWeight: 700, letterSpacing: 2, lineHeight: 1 }}>FOREMAN</span>
+        <span style={{ position: "absolute", left: "100%", top: 0, marginLeft: 7, background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "2px 5px", borderRadius: 4 }}>BETA</span>
+      </div>
+      {!sinLogo && (
+        <img src={logoEmpresa()} alt="HCA Studio" onError={() => setSinLogo(true)}
+          style={{ height: 19, maxWidth: 150, objectFit: "contain", display: "block", marginTop: 12, opacity: 0.7 }} />
+      )}
     </div>
   );
 }
@@ -111,12 +112,8 @@ export default function LoginScreen({ onLogin, users }) {
 
   return (
     <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, position: "relative" }}>
-      {/* La marca vive arriba a la izquierda, como en la app: la pantalla de
-          ingreso es la misma casa, no una portada aparte. */}
-      <div style={{ position: "absolute", top: 20, left: 24, right: 24 }}>
-        <Wordmark />
-      </div>
-      <div style={{ marginBottom: 26, textAlign: "center" }}>
+      <Marca />
+      <div style={{ marginBottom: 22, textAlign: "center" }}>
         <div style={{ fontSize: 12, color: colors.muted, fontFamily: colors.font }}>Sesión guardada por 7 días</div>
       </div>
 
