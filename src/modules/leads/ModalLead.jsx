@@ -8,6 +8,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import ConfirmarBorrado from "../../components/ui/ConfirmarBorrado";
 import InformeLead from "./InformeLead";
+import ObraDelProyecto from "./ObraDelProyecto";
 import { esAdmin } from "../../lib/roles";
 import { mensajeError } from "../../lib/sesion";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
@@ -18,7 +19,7 @@ const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
-export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, onCerrar, onGuardado }) {
+export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, onIrAObra, onCerrar, onGuardado }) {
   const editando = !!lead;
   const [form, setForm] = useState(lead ? { ...lead } : {
     nombre: "", contacto: "", telefono: "", email: "", origen: "Referido",
@@ -360,6 +361,10 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             {editando && <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>Normalmente se mueve sola, al marcar una etapa En curso en el Plan.</div>}
           </div>
         </div>
+      )}
+
+      {editando && seccionVisible === "plan" && lead.obra_id && (
+        <ObraDelProyecto obraId={lead.obra_id} onIrAObra={onIrAObra} />
       )}
 
       {editando && (seccionVisible === "plan" || seccionVisible === "gente") && (

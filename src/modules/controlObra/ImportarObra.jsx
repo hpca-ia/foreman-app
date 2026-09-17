@@ -8,6 +8,7 @@ import PreguntasNova from "../../components/PreguntasNova";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
 import { subirArchivo } from "../../lib/archivos";
+import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
 import { interpretarPresupuesto, aplicarDecisiones } from "./leerPresupuesto";
@@ -287,6 +288,10 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
       final.rubros.filter(r => r.origen !== "ajuste").map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
       { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "obra", obraId: obra.id, ivaIncluido: incluyeIva, ivaPct: n(ivaPct), utilidad: preguntas.utilidad });
     if (base.faltaMigracion) faltan.push(`${base.faltaMigracion} (${base.faltaMigracion === "016" ? "origen" : "utilidad"} de los precios)`);
+
+    // Toda obra es un proyecto: así el pipeline muestra la oficina entera y no
+    // solo lo que todavía no se ha ganado.
+    await asegurarProyecto(obra, currentUser);
 
     setGuardando(false);
     if (faltan.length) alert(`La obra se creó, pero falta correr en Supabase la migración ${faltan.join(", ")}.`);

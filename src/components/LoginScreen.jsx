@@ -6,19 +6,25 @@ import { estadoLogin, entrar, haySesion } from "../lib/sesion";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
+const LOGO_HCA = "https://qxoincfvscvbqvoxamdi.supabase.co/storage/v1/object/public/publico/empresa/logo.png";
+
 function Wordmark() {
-  // El logo de la empresa si ya lo subieron; si no, la marca de FOREMAN.
-  let logo = null;
-  try { logo = JSON.parse(localStorage.getItem("foreman_empresa") || "{}").logoUrl || null; } catch {}
+  // El logo de la empresa, del depósito público. Si todavía no lo subieron,
+  // queda la marca de FOREMAN sola.
+  let logo = LOGO_HCA;
+  try { logo = JSON.parse(localStorage.getItem("foreman_empresa") || "{}").logoUrl || LOGO_HCA; } catch {}
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 14 }}>
       {logo
-        ? <img src={logo} alt="" style={{ width: 54, height: 54, objectFit: "contain", borderRadius: 12 }} />
-        : <div style={{ width: 54, height: 54, borderRadius: 14, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: "#fff", fontSize: 28, fontWeight: 700 }}>F</span>
+        ? <img src={logo} alt="HCA Studio" style={{ height: 46, maxWidth: 140, objectFit: "contain" }} onError={e => { e.currentTarget.style.display = "none"; }} />
+        : <div style={{ width: 46, height: 46, borderRadius: 12, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: "#fff", fontSize: 24, fontWeight: 700 }}>F</span>
           </div>}
-      <span style={{ color: colors.ink, fontSize: 30, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
-      <span style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4 }}>BETA</span>
+      <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+        <span style={{ color: colors.ink, fontSize: 28, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
+        <span style={{ color: colors.muted, fontSize: 12 }}>de HCA Studio</span>
+      </span>
+      <span style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4, alignSelf: "flex-start", marginTop: 4 }}>BETA</span>
     </div>
   );
 }
@@ -109,9 +115,13 @@ export default function LoginScreen({ onLogin, users }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ marginBottom: 32, textAlign: "center" }}>
+    <div style={{ minHeight: "100vh", background: colors.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, position: "relative" }}>
+      {/* La marca vive arriba a la izquierda, como en la app: la pantalla de
+          ingreso es la misma casa, no una portada aparte. */}
+      <div style={{ position: "absolute", top: 20, left: 24, right: 24 }}>
         <Wordmark />
+      </div>
+      <div style={{ marginBottom: 26, textAlign: "center" }}>
         <div style={{ fontSize: 12, color: colors.muted, fontFamily: colors.font }}>Sesión guardada por 7 días</div>
       </div>
 

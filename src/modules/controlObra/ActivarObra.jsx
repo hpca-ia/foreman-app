@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
+import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
@@ -75,6 +76,9 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
     await supabase.from("planillas").insert({
       obra_id: obra.id, numero: 1, nombre: "Planilla N°1", fecha_desde: new Date().toISOString().split("T")[0],
     });
+
+    // Toda obra es un proyecto del pipeline, venga de un lead o de un presupuesto.
+    await asegurarProyecto(obra, currentUser);
 
     setGuardando(false);
     onCreada(obra);

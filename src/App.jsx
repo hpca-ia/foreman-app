@@ -323,7 +323,7 @@ export default function App() {
             <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
           )}
           {verPipeline && vista === "leads" && (
-            <ModuloLeads currentUser={usuario} users={users} puede={puede} />
+            <ModuloLeads currentUser={usuario} users={users} puede={puede} onIrAObra={() => setVista("controlObra")} />
           )}
 
           {puede("cajaChica.ver") && vista === "cajaChica" && (

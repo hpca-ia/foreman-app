@@ -7,6 +7,7 @@ import Button from "../../components/ui/Button";
 import { CATALOGO_BASE, etapaInfo, tempInfo, DIAS_SIN_MOVER } from "./constantes";
 import ModalLead from "./ModalLead";
 import NovaLeads from "./NovaLeads";
+import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 
 // El pipeline no es un embudo de casillas fijas: cada proyecto lleva su propio
 // camino —reunión, plan masa, otra reunión— y encajarlo en una columna por
@@ -21,7 +22,7 @@ import NovaLeads from "./NovaLeads";
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { maximumFractionDigits: 0 });
 const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 
-export default function ModuloLeads({ currentUser, users = [], puede = () => true }) {
+export default function ModuloLeads({ currentUser, users = [], puede = () => true, onIrAObra }) {
   const [leads, setLeads] = useState([]);
   // El catálogo vive en la base porque cambia con el tiempo; si la migración
   // todavía no se corrió, se usa el de siempre.
@@ -34,6 +35,9 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const [cargando, setCargando] = useState(true);
   const [verCerrados, setVerCerrados] = useState(false);
   const [convirtiendo, setConvirtiendo] = useState(null);
+  // Obras que entraron directo por Control de Obra y todavía no son proyecto.
+  const [sueltas, setSueltas] = useState([]);
+  const [trayendo, setTrayendo] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -75,8 +79,16 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
     });
 
     setLeads(ls || []); setRutas(porLead); setPlanes(porPlan); setHistoria(lejos);
+    setSueltas(await obrasSueltas());
     setCargando(false);
   }, []);
+
+  async function traerObras() {
+    setTrayendo(true);
+    for (const o of sueltas) await asegurarProyecto(o, currentUser);
+    setTrayendo(false);
+    await cargar();
+  }
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -194,6 +206,18 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
         </div>
       )}
 
+      {puede("leads.ver") && sueltas.length > 0 && (
+        <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 200, fontSize: 12, color: colors.inkSoft }}>
+            <strong style={{ color: colors.brand }}>{sueltas.length} {sueltas.length === 1 ? "obra no está" : "obras no están"} en el pipeline</strong>
+            <div style={{ color: colors.muted, marginTop: 2 }}>{sueltas.slice(0, 3).map(o => o.nombre).join(" · ")}{sueltas.length > 3 ? " · …" : ""}</div>
+          </div>
+          <Button variant="primary" size="sm" onClick={traerObras} disabled={trayendo}>
+            {trayendo ? "Trayendo…" : "Traerlas al pipeline"}
+          </Button>
+        </div>
+      )}
+
       {porArrancar.length > 0 && (
         <div style={{ background: colors.successSoft, border: `1px solid ${colors.success}33`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.success, marginBottom: 7 }}>
@@ -269,6 +293,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
       {(abierto || nuevo) && (
         <ModalLead lead={abierto} currentUser={currentUser} users={users} catalogo={catalogo}
+          onIrAObra={onIrAObra ? () => onIrAObra(abierto.obra_id) : null}
           onCerrar={() => { setAbierto(null); setNuevo(false); }}
           onGuardado={async () => { setAbierto(null); setNuevo(false); await cargar(); }} />
       )}
