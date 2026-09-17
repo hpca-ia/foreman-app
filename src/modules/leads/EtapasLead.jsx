@@ -17,7 +17,7 @@ import { etapaInfo, ESTADOS_ETAPA, SIGUIENTE_ESTADO_ETAPA } from "./constantes";
 
 const vacio = { nombre: "", rol: "cliente", email: "", telefono: "" };
 
-export default function EtapasLead({ lead, catalogo, users = [], currentUser, puedeCompartir, onEtapaCambiada }) {
+export default function EtapasLead({ lead, catalogo, users = [], currentUser, puedeCompartir, onEtapaCambiada, onBitacora }) {
   const [etapas, setEtapas] = useState([]);
   const [invitados, setInvitados] = useState([]);
   const [accesos, setAccesos] = useState([]);
@@ -37,11 +37,14 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
   }, [lead.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
+  // Todo lo que se decide en las etapas queda en la bitácora: el que llegue
+  // después tiene que poder leer la historia sin preguntarle a nadie.
   async function anotar(detalle, extra = {}) {
     await supabase.from("lead_movimientos").insert({
-      lead_id: lead.id, tipo: "etapa", detalle,
+      lead_id: lead.id, tipo: "etapa", detalle, automatico: true,
       autor_id: currentUser?.id, autor_nombre: currentUser?.name, ...extra,
     });
+    onBitacora?.();
   }
 
   // Quien tiene una etapa a su cargo ve el proyecto: la etapa es suya.
@@ -100,6 +103,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
     setOcupado(true);
     const orden = Math.max(0, ...etapas.map(e => e.orden || 0)) + 1;
     await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden });
+    await anotar(`Etapa agregada al plan: ${etapaInfo(etapaId, catalogo).nombre}`);
     setAgregando(false); setOcupado(false);
     await cargar();
   }
@@ -159,6 +163,7 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
   async function borrar(fila) {
     if (fila.tarea_id) await supabase.from("tasks").delete().eq("id", fila.tarea_id);
     await supabase.from("lead_etapas").delete().eq("id", fila.id);
+    await anotar(`Etapa quitada del plan: ${etapaInfo(fila.etapa_id, catalogo).nombre}`);
     await cargar();
   }
 
@@ -170,10 +175,12 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
       await actualizar(fila, { responsable_id: Number(id), invitado_id: null, responsable_nombre: u?.name || null });
       await darAcceso(Number(id));
       avisarPorCorreo({ ...fila, responsable_id: Number(id) });
+      await anotar(`${u?.name || "Alguien"} queda a cargo de ${etapaInfo(fila.etapa_id, catalogo).nombre}`);
       return;
     }
     const inv = invitados.find(x => String(x.id) === id);
-    return actualizar(fila, { invitado_id: Number(id), responsable_id: null, responsable_nombre: inv?.nombre || null });
+    await actualizar(fila, { invitado_id: Number(id), responsable_id: null, responsable_nombre: inv?.nombre || null });
+    await anotar(`${inv?.nombre || "Alguien"} queda a cargo de ${etapaInfo(fila.etapa_id, catalogo).nombre}`);
   }
 
   async function guardarInvitado() {
@@ -274,7 +281,12 @@ export default function EtapasLead({ lead, catalogo, users = [], currentUser, pu
                   </optgroup>
                 )}
               </select>
-              <input type="date" value={e.fecha_objetivo || ""} onChange={ev => actualizar(e, { fecha_objetivo: ev.target.value || null })} style={mini} title="Para cuándo" />
+              <input type="date" value={e.fecha_objetivo || ""} style={mini} title="Para cuándo"
+                onChange={async ev => {
+                  const f = ev.target.value || null;
+                  await actualizar(e, { fecha_objetivo: f });
+                  await anotar(f ? `${etapaInfo(e.etapa_id, catalogo).nombre} para el ${f}` : `${etapaInfo(e.etapa_id, catalogo).nombre} se quedó sin fecha`);
+                }} />
               <button onClick={() => borrar(e)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={11} /></button>
             </div>
           );

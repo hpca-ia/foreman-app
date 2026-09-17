@@ -15,6 +15,7 @@ import EtapasLead from "./EtapasLead";
 import { useDictado } from "../../lib/dictado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
+const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
 export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, onCerrar, onGuardado }) {
@@ -32,6 +33,7 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   const [guardando, setGuardando] = useState(false);
   const [borrar, setBorrar] = useState(false);
   const [verEtapas, setVerEtapas] = useState(false);
+  const [editNota, setEditNota] = useState({ id: null, texto: "" });
   const [informe, setInforme] = useState(false);
   const [error, setError] = useState("");
 
@@ -49,10 +51,33 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
 
   const inp = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  // automatico: lo anotó el sistema —cambió la etapa, se agregó un paso—. Eso
+  // no se edita: si "pasó a Contrato el 12" se pudiera corregir, dejaría de ser
+  // un registro. Lo que uno escribe a mano, sí.
   async function anotar(lead_id, tipo, detalle, extra = {}) {
     await supabase.from("lead_movimientos").insert({
-      lead_id, tipo, detalle, autor_id: currentUser?.id, autor_nombre: currentUser?.name, ...extra,
+      lead_id, tipo, detalle, automatico: true,
+      autor_id: currentUser?.id, autor_nombre: currentUser?.name, ...extra,
     });
+  }
+
+  async function recargarBitacora() {
+    const { data } = await supabase.from("lead_movimientos").select("*").eq("lead_id", lead.id)
+      .order("created_at", { ascending: false }).limit(30);
+    setMovs(data || []);
+  }
+
+  async function guardarNotaEditada(m) {
+    const t = (editNota.texto || "").trim();
+    if (!t) return;
+    await supabase.from("lead_movimientos").update({ detalle: t }).eq("id", m.id);
+    setEditNota({ id: null, texto: "" });
+    await recargarBitacora();
+  }
+
+  async function borrarNota(m) {
+    await supabase.from("lead_movimientos").delete().eq("id", m.id);
+    await recargarBitacora();
   }
 
   async function guardar() {
@@ -106,6 +131,8 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   async function cambiarFecha(t, fecha) {
     await supabase.from("tasks").update({ due_date: fecha || null }).eq("id", t.id);
     setRuta(r => r.map(x => x.id === t.id ? { ...x, due_date: fecha } : x));
+    await anotar(lead.id, "nota", fecha ? `"${t.title}" quedó para el ${fecha}` : `"${t.title}" se quedó sin fecha`);
+    await recargarBitacora();
   }
 
   // Se le dicta a NOVA en el idioma de uno —"enviar portafolio el viernes y
@@ -169,7 +196,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   async function agregarNota() {
     const d = nota.trim();
     if (!d || !lead) return;
-    await anotar(lead.id, "nota", d);
+    await anotar(lead.id, "nota", d, { automatico: false });
     await supabase.from("leads").update({ actualizado_at: new Date().toISOString() }).eq("id", lead.id);
     const { data } = await supabase.from("lead_movimientos").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(30);
     setMovs(data || []); setNota("");
@@ -205,6 +232,12 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   const { grabando, error: errorVoz, dictar } = useDictado({
     onParcial: setNuevoPaso,
     onListo: t => { setNuevoPaso(t); agregarPaso(t); },
+  });
+  // La nota de bitácora no se manda sola al terminar de dictar: es texto libre
+  // y conviene leerlo antes, que es donde el dictado se equivoca.
+  const { grabando: grabandoNota, error: errorVozNota, dictar: dictarNota } = useDictado({
+    onParcial: setNota,
+    onListo: setNota,
   });
 
   const puedeBorrar = editando && esAdmin(currentUser?.role);
@@ -310,9 +343,13 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         <>
           <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
             puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
+            onBitacora={recargarBitacora}
             onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
 
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>Los pasos del día a día</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 2 }}>Los pasos del día a día</div>
+          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6, lineHeight: 1.5 }}>
+            Lo suelto de esta semana: llamar, mandar, pedir. Son tareas de verdad —vencen y aparecen en la lista de quien las tiene— y no mueven al proyecto de etapa. Todo lo que pasa acá queda en la bitácora.
+          </div>
           <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, marginBottom: 12 }}>
             {ruta.length === 0 && <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>Todavía sin pasos. Dictale abajo a NOVA qué sigue y con qué fecha.</div>}
             {ruta.map(t => {
@@ -360,19 +397,57 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             </div>
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>Bitácora</div>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <input value={nota} onChange={e => setNota(e.target.value)} onKeyDown={e => e.key === "Enter" && agregarNota()}
-              placeholder="¿Qué pasó? Una llamada, una visita, lo que dijeron..." style={{ ...mini, flex: 1 }} />
-            <Button variant="outline" size="sm" onClick={agregarNota} disabled={!nota.trim()}><MessageSquare size={12} /></Button>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 2 }}>Bitácora</div>
+          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6, lineHeight: 1.5 }}>
+            Qué pasó, en orden. Se llena sola con las etapas y los pasos, y a mano con lo que se conversó. Lo que escribes tú se puede corregir; lo que anotó el sistema queda como quedó.
           </div>
+          {/* De varias líneas y sin mandar con Enter: en el teléfono el teclado
+              manda Enter antes de que uno termine —dictando, sobre todo— y la
+              nota quedaba cortada a la mitad. Se manda con el botón. */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "flex-end" }}>
+            <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2}
+              onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) agregarNota(); }}
+              placeholder="¿Qué pasó? Una llamada, una visita, lo que dijeron..."
+              style={{ ...mini, flex: 1, resize: "vertical", lineHeight: 1.5 }} />
+            <button onClick={dictarNota} disabled={!lead} title={grabandoNota ? "Tocar para terminar" : "Dictar la nota"}
+              style={{ background: grabandoNota ? colors.danger : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm,
+                width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                color: grabandoNota ? "#fff" : colors.inkSoft, cursor: "pointer" }}>
+              <Mic size={13} />
+            </button>
+            <Button variant="outline" size="sm" onClick={agregarNota} disabled={!nota.trim()}><MessageSquare size={12} /> Anotar</Button>
+          </div>
+          {grabandoNota && <div style={{ fontSize: 11, color: colors.danger, marginBottom: 6 }}>Escuchando… toca el micrófono cuando termines.</div>}
+          {errorVozNota && <div style={{ fontSize: 11, color: colors.warning, marginBottom: 6 }}>{errorVozNota}</div>}
           <div style={{ maxHeight: 150, overflowY: "auto", marginBottom: 12 }}>
-            {movs.map(m => (
-              <div key={m.id} style={{ fontSize: 11, color: colors.inkSoft, padding: "5px 0", borderBottom: `1px solid ${colors.neutralSoft}` }}>
-                <span style={{ color: colors.muted }}>{new Date(m.created_at).toLocaleDateString("es-EC")} · {m.autor_nombre}</span><br />
-                {m.detalle}
-              </div>
-            ))}
+            {movs.map(m => {
+              const mio = !m.automatico && (m.autor_id === currentUser?.id || esAdmin(currentUser?.role));
+              const enEdicion = editNota.id === m.id;
+              return (
+                <div key={m.id} style={{ fontSize: 11, color: colors.inkSoft, padding: "5px 0", borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: colors.muted, flex: 1 }}>
+                      {new Date(m.created_at).toLocaleDateString("es-EC")} · {m.autor_nombre}
+                      {m.automatico && <span style={{ color: colors.border }}> · automático</span>}
+                    </span>
+                    {mio && !enEdicion && (
+                      <>
+                        <button onClick={() => setEditNota({ id: m.id, texto: m.detalle || "" })} style={iconoNota} title="Corregir">✎</button>
+                        <button onClick={() => borrarNota(m)} style={{ ...iconoNota, color: colors.danger }} title="Borrar">×</button>
+                      </>
+                    )}
+                  </div>
+                  {enEdicion ? (
+                    <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                      <input value={editNota.texto} onChange={e => setEditNota(p => ({ ...p, texto: e.target.value }))}
+                        onKeyDown={e => e.key === "Enter" && guardarNotaEditada(m)} style={{ ...mini, flex: 1 }} autoFocus />
+                      <Button variant="primary" size="sm" onClick={() => guardarNotaEditada(m)}>Guardar</Button>
+                      <Button variant="outline" size="sm" onClick={() => setEditNota({ id: null, texto: "" })}>Cancelar</Button>
+                    </div>
+                  ) : m.detalle}
+                </div>
+              );
+            })}
             {movs.length === 0 && <div style={{ fontSize: 11, color: colors.muted }}>Sin movimientos todavía.</div>}
           </div>
         </>
