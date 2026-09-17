@@ -25,13 +25,13 @@ export default function Button({ variant = "primary", size = "md", disabled, sty
         fontFamily: colors.font,
         fontWeight: 600,
         cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.5 : 1,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
         gap: 6,
         whiteSpace: "nowrap",
         ...style,
+        ...(disabled ? { background: colors.neutralSoft, color: colors.muted, border: "1.5px solid transparent" } : null),
       }}
       {...rest}
     >

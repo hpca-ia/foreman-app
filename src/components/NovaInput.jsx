@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { Mic, Square } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import Button from "./ui/Button";
@@ -199,8 +200,10 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
         />
         <button
           onClick={startVoice}
-          style={{ width: 36, background: grabando ? colors.dangerSoft : colors.bg, border: `1.5px solid ${grabando ? colors.danger : colors.border}`, borderRadius: colors.radiusMd, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, animation: grabando ? "pulse 1s infinite" : "none" }}
-          title="Dictar" aria-label="Dictar">🎤</button>
+          style={{ width: 38, background: grabando ? colors.dangerSoft : colors.bg, border: `1.5px solid ${grabando ? colors.danger : colors.border}`, borderRadius: colors.radiusMd, cursor: "pointer", color: grabando ? colors.danger : colors.inkSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, animation: grabando ? "pulse 1s infinite" : "none" }}
+          title={grabando ? "Terminar" : "Dictar"} aria-label="Dictar">
+          {grabando ? <Square size={14} fill="currentColor" /> : <Mic size={16} />}
+        </button>
         <Button onClick={() => procesar()} disabled={!texto.trim() || loading} size="md">
           {loading ? "..." : "Crear →"}
         </Button>
@@ -256,7 +259,7 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
           {result.errorGuardar && <div style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{result.errorGuardar}</div>}
         </div>
       )}
-      {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 2 }}>Escuchando… habla ahora. Se corta solo al callarte, o toca 🎤 para terminar.</div>}
+      {grabando && <div style={{ fontSize: 12, color: colors.danger, marginTop: 2 }}>Escuchando… habla ahora. Se corta solo al callarte, o toca el botón para terminar.</div>}
       {loading && !grabando && <div style={{ fontSize: 12, color: colors.brand, marginTop: 2 }}>NOVA está entendiendo...</div>}
       {vozError && (
         <div style={{ fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "8px 10px", marginTop: 6 }}>

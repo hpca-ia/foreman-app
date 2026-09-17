@@ -55,6 +55,11 @@ input, select, textarea { outline: none; font-family: var(--font); }
 @media (max-width: 640px) {
   .header-search { display: none !important; }
   .header-label { display: none !important; }
+  /* En el teléfono la marca completa empujaba a "Nueva tarea" fuera de la
+     pantalla: la misma marca, más chica, y todo entra. */
+  .app-marca { gap: 7px !important; }
+  .app-marca-logo { height: 18px !important; max-width: 78px !important; }
+  .app-marca-texto { font-size: 14px !important; }
 }
 
 /* Responsive: desktop gets table/kanban + icon rail; mobile gets stacked cards + bottom nav */
@@ -63,7 +68,9 @@ input, select, textarea { outline: none; font-family: var(--font); }
 .app-sidebar { width: 60px; flex-direction: column; border-right: 1px solid var(--border); border-top: none; padding: 16px 0; gap: 6px; position: relative; }
 .app-shell-layout { flex-direction: row; }
 .app-content { padding: 26px 44px 32px; }
-.app-header-inner { padding: 0 44px; }
+/* La marca arranca donde arranca el contenido: el riel de 60 px más el aire
+   de la página. Así todo lo que se lee cae sobre la misma línea. */
+.app-header-inner { padding: 0 44px 0 104px; }
 
 @media (max-width: 768px) {
   .tasks-view-desktop { display: none; }
@@ -79,7 +86,7 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .app-sidebar .app-sidebar-logo,
   .app-sidebar .app-sidebar-spacer { display: none; }
   .app-content { padding: 16px 16px 84px; }
-  .app-header-inner { padding: 0 14px; }
+  .app-header-inner { padding: 0 16px; }
 }
 
 /* Barra de tareas: filtros que se desplazan + interruptor de vista.

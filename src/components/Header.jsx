@@ -11,15 +11,15 @@ export default function Header({ busqueda, setBusqueda, alertCount, onOpenAlerts
   return (
     <div className="app-header" style={{ background: colors.surface, borderBottom: "1.5px solid #F0F1F3", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
       <div className="app-header-inner" style={{ display: "flex", alignItems: "center", height: 54, gap: 12, maxWidth: 1600, margin: "0 auto", width: "100%" }}>
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 9, flexShrink: 0 }}>
+        <div className="app-marca" style={{ display: "inline-flex", alignItems: "center", gap: 9, flexShrink: 0 }}>
           {sinLogo
             ? <div style={{ width: 22, height: 22, borderRadius: 6, background: colors.brand, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>F</span>
               </div>
-            : <img src={logoEmpresa()} alt="HCA Studio" onError={() => setSinLogo(true)}
+            : <img className="app-marca-logo" src={logoEmpresa()} alt="HCA Studio" onError={() => setSinLogo(true)}
                 style={{ height: 22, maxWidth: 96, objectFit: "contain", display: "block" }} />}
           <span style={{ width: 1, height: 18, background: colors.border }} />
-          <span style={{ color: colors.ink, fontSize: 16, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
+          <span className="app-marca-texto" style={{ color: colors.ink, fontSize: 16, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
           <span className="header-label" style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 4 }}>BETA</span>
         </div>
         <div className="header-search" style={{ background: colors.neutralSoft, borderRadius: colors.radiusMd, padding: "4px 12px", display: "flex", alignItems: "center", gap: 8 }}>
