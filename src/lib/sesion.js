@@ -50,6 +50,19 @@ export async function verificarPin(usuarioId, pin) {
   }
 }
 
+/**
+ * La base rechaza con "row-level security" cuando quien escribe no tiene
+ * sesión. Es el mismo mensaje para "venció tu sesión" y para "no te toca",
+ * así que se dice lo primero, que es lo que pasa siempre.
+ */
+export function mensajeError(e) {
+  const m = e?.message || String(e || "");
+  if (/row-level security|JWT|not authenticated/i.test(m)) {
+    return "Tu sesión venció. Sal y vuelve a entrar con tu PIN, y lo guardas de nuevo.";
+  }
+  return m;
+}
+
 export async function salir() {
   try { await supabase.auth.signOut(); } catch {}
 }

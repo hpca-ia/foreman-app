@@ -3,6 +3,7 @@ import { MessageSquare, Send } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import { inputStyle } from "./ui/Input";
+import { mensajeError } from "../lib/sesion";
 
 // El hilo de una tarea. Sirve para lo que hoy se pierde en un WhatsApp suelto:
 // "no puedo avanzar porque no me han dado el plano". No es un cambio de estado
@@ -43,7 +44,7 @@ export default function ComentariosTarea({ taskId, currentUser }) {
     const { error: e } = await supabase.from("tarea_comentarios").insert({
       task_id: taskId, texto: t, autor_id: currentUser?.id, autor_nombre: currentUser?.name,
     });
-    if (e) { setError("No se pudo guardar: " + e.message); setEnviando(false); return; }
+    if (e) { setError("No se pudo guardar: " + mensajeError(e)); setEnviando(false); return; }
     setTexto("");
     await cargar();
     // El aviso va aparte: si el correo falla, el comentario ya quedó guardado.

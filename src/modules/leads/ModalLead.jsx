@@ -9,6 +9,7 @@ import { inputStyle } from "../../components/ui/Input";
 import ConfirmarBorrado from "../../components/ui/ConfirmarBorrado";
 import InformeLead from "./InformeLead";
 import { esAdmin } from "../../lib/roles";
+import { mensajeError } from "../../lib/sesion";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
 import { useDictado } from "../../lib/dictado";
@@ -146,7 +147,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       }));
 
     const { data, error: e } = await supabase.from("tasks").insert(filas).select();
-    if (e) setError("No se pudo agregar el paso: " + e.message);
+    if (e) setError("No se pudo agregar el paso: " + mensajeError(e));
     else {
       setRuta(r => [...r, ...(data || [])]);
       setNuevoPaso("");

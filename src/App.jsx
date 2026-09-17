@@ -9,7 +9,7 @@ import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 
 import LoginScreen from "./components/LoginScreen";
-import { salir } from "./lib/sesion";
+import { salir, mensajeError } from "./lib/sesion";
 import NovaInput from "./components/NovaInput";
 import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
@@ -54,6 +54,16 @@ export default function App() {
   useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, [usuario]);
   useEffect(() => { cargarPermisos().then(setPermisos); }, []);
   useEffect(() => { recargarEquipo(); }, []);
+
+  // Si la sesión se vence, la app lo dice y manda a entrar de nuevo. Antes se
+  // quedaba abierta y todo lo que uno escribía fallaba con un error de la base
+  // que no significa nada para quien lo lee.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((evento, sesion) => {
+      if (!sesion && (evento === "SIGNED_OUT" || evento === "TOKEN_REFRESHED")) setUsuario(null);
+    });
+    return () => data?.subscription?.unsubscribe();
+  }, []);
 
   async function recargarEquipo() {
     const eq = await cargarEquipo();
