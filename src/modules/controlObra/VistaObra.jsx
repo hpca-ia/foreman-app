@@ -128,7 +128,9 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
             />
           )}
           {tab === "planillas" && (
-            <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} onCambio={cargar} />
+            <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones}
+              planillaSel={planillaSel} onCambio={cargar}
+              onAbrir={p => { setPlanillaSel(p.id); setTab("facturas"); }} />
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
