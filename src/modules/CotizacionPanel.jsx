@@ -1,10 +1,17 @@
 import { useState } from "react";
 
+// La cotización de un proveedor, antes de meterla al presupuesto: a qué
+// capítulo va, con cuánta utilidad, y si sus precios quedan en la base de
+// rubros. Eso último se elige: una cotización de prueba, o de un proveedor que
+// no se quiere tener de referencia, no tiene por qué contar.
 export default function CotizacionPanel({ result, clientes, capitulosActivos, onCancelar, onImportar, fmt }) {
-  const [capNombre, setCapNombre] = useState(result.proveedor||"COTIZACIÓN PROVEEDOR");
+  // "" = capítulo nuevo con el nombre de abajo; si no, uno que ya existe.
+  const [destino, setDestino] = useState("");
+  const [capNuevo, setCapNuevo] = useState(result.proveedor||"COTIZACIÓN PROVEEDOR");
+  const capNombre = destino || capNuevo.trim();
   const [utilidadGlobal, setUtilidadGlobal] = useState(0);
   const [rubros, setRubros] = useState(result.rubros?.filter(r=>r.descripcion?.trim())||[]);
-  const [guardarBD, setGuardarBD] = useState(false);
+  const [guardarBD, setGuardarBD] = useState(true);
   const [proveedor, setProveedor] = useState(result.proveedor||"");
   const [clienteNombre, setClienteNombre] = useState("");
   const [fecha, setFecha] = useState(new Date().getFullYear().toString());
@@ -25,6 +32,8 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, on
     }:r));
   }
 
+  const faltaProveedor = guardarBD && !proveedor.trim();
+  const sinCapitulo = !capNombre;
   const iS = {background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--ink)",padding:"5px 8px",fontSize:12,fontFamily:"var(--font)",outline:"none"};
 
   return (
@@ -34,8 +43,12 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, on
       {/* Nombre del capítulo */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
         <div>
-          <label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:3}}>Nombre del capítulo en el presupuesto</label>
-          <input value={capNombre} onChange={e=>setCapNombre(e.target.value)} style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+          <label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:3}}>A qué capítulo va</label>
+          <select value={destino} onChange={e=>setDestino(e.target.value)} style={{...iS,width:"100%",boxSizing:"border-box",marginBottom:destino?0:6}}>
+            <option value="">Capítulo nuevo…</option>
+            {capitulosActivos.map(c=><option key={c.nombre} value={c.nombre}>{c.orden}. {c.nombre}</option>)}
+          </select>
+          {!destino&&<input value={capNuevo} onChange={e=>setCapNuevo(e.target.value)} placeholder="Nombre del capítulo nuevo" style={{...iS,width:"100%",boxSizing:"border-box"}}/>}
         </div>
         <div>
           <label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:3}}>Utilidad global a todos los rubros (%)</label>
@@ -81,13 +94,13 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, on
       <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:8,padding:10,marginBottom:12}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:guardarBD?10:0}}>
           <input type="checkbox" id="guardar-bd" checked={guardarBD} onChange={e=>setGuardarBD(e.target.checked)} style={{cursor:"pointer"}}/>
-          <label htmlFor="guardar-bd" style={{fontSize:12,color:"var(--ink-soft)",cursor:"pointer",fontWeight:500}}>También guardar en base de datos de precios</label>
+          <label htmlFor="guardar-bd" style={{fontSize:12,color:"var(--ink-soft)",cursor:"pointer",fontWeight:500}}>Guardar estos precios en la base de rubros <span style={{fontWeight:400,color:"var(--muted)"}}>· quedan como precio de proveedor, al costo</span></label>
         </div>
         {guardarBD&&(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:8}}>
             <div>
-              <label style={{fontSize:10,color:"var(--ink-soft)",display:"block",marginBottom:2}}>Proveedor</label>
-              <input value={proveedor} onChange={e=>setProveedor(e.target.value)} placeholder="Nombre proveedor" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+              <label style={{fontSize:10,color:faltaProveedor?"var(--warning)":"var(--ink-soft)",display:"block",marginBottom:2}}>Proveedor *</label>
+              <input value={proveedor} onChange={e=>setProveedor(e.target.value)} placeholder="Quién cotiza" style={{...iS,width:"100%",boxSizing:"border-box",borderColor:faltaProveedor?"var(--warning-border)":undefined}}/>
             </div>
             <div>
               <label style={{fontSize:10,color:"var(--ink-soft)",display:"block",marginBottom:2}}>Cliente de referencia</label>
@@ -106,9 +119,10 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, on
 
       <div style={{display:"flex",gap:8}}>
         <button onClick={onCancelar} style={{flex:1,background:"#fff",border:"1px solid var(--border)",borderRadius:8,padding:10,color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-        <button onClick={()=>onImportar(rubros,capNombre,utilidadGlobal,guardarBD,proveedor,clienteNombre,fecha)}
-          style={{flex:2,background:"var(--success)",border:"none",borderRadius:8,padding:10,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-          ✓ Importar {rubros.length} rubros al presupuesto
+        {/* Un precio en la base sin saber quién lo cotizó no sirve de referencia. */}
+        <button onClick={()=>onImportar(rubros,capNombre,utilidadGlobal,guardarBD,proveedor.trim(),clienteNombre,fecha)} disabled={faltaProveedor||sinCapitulo}
+          style={{flex:2,background:faltaProveedor||sinCapitulo?"var(--neutral-soft)":"var(--success)",border:"none",borderRadius:8,padding:10,color:faltaProveedor||sinCapitulo?"var(--muted)":"#fff",fontSize:13,fontWeight:600,cursor:faltaProveedor||sinCapitulo?"default":"pointer"}}>
+          {faltaProveedor ? "Escribe quién cotiza para guardarlo en la base" : sinCapitulo ? "Ponle nombre al capítulo" : `✓ Importar ${rubros.length} rubros ${destino ? `a ${destino}` : "al presupuesto"}`}
         </button>
       </div>
     </div>

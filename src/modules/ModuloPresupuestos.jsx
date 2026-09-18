@@ -11,6 +11,7 @@ import { interpretarPresupuesto } from "./controlObra/leerPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
+import ImportarObra from "./controlObra/ImportarObra";
 
 export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
@@ -289,7 +290,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       } else if (file.type==="application/pdf") {
         msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
       } else if (file.name.match(/\.(xlsx|xls|csv)$/i)) {
-        const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+        const XLSX = await import("xlsx");
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, {type:"array"});
         let csvText = "";
@@ -473,7 +474,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
         <div>
           <div style={{fontSize:17,fontWeight:700,color:"var(--ink)"}}>
-            {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="detalle"?`${presupuestoActivo?.nombre}`:subVista==="baseDatos"?"Base de rubros":"Alimentar BD"}
+            {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="importar"?"Nuevo presupuesto desde Excel":subVista==="detalle"?`${presupuestoActivo?.nombre}`:subVista==="baseDatos"?"Base de rubros":"Alimentar BD"}
           </div>
           {subVista==="detalle"&&presupuestoActivo&&<div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</div>}
         </div>
@@ -483,6 +484,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>{setSubVista("baseDatos");buscarRubros("");}} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>
             <button onClick={()=>setSubVista("alimentarBD")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Alimentar BD</button>
             <button onClick={()=>setShowAdminBD(true)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Admin BD</button>
+            <button onClick={()=>setSubVista("importar")} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Desde Excel</button>
             <button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
@@ -510,9 +512,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           onImportar={(rubros, capNombre, utilidad, guardarBD, proveedor, clienteNombre, fecha)=>{
             // Import to presupuesto
             const capN = capNombre||"COTIZACIÓN PROVEEDOR";
-            if (!capitulosActivos.find(c=>c.nombre===capN)) {
-              setCapitulosActivos(prev=>[...prev,{nombre:capN,orden:prev.length+1}]);
-            }
+            // Al capítulo que ya existe, a continuación de sus rubros; si es
+            // nuevo, después del último. Antes el orden salía de contar los
+            // capítulos y un capítulo nuevo podía caer en el rango de otro.
+            const existente = capitulosActivos.find(c=>c.nombre===capN);
+            const capOrden = existente ? existente.orden : Math.max(0,...capitulosActivos.map(c=>c.orden))+1;
+            const yaEnCap = items.filter(i=>i.capitulo===capN).length;
+            if (!existente) setCapitulosActivos(prev=>[...prev,{nombre:capN,orden:capOrden}]);
             const newItems=[];
             const rubrosValidos=rubros.filter(r=>r.descripcion&&r.descripcion.trim());
             supabase.from("presupuesto_items").insert(rubrosValidos.map((r,idx)=>({
@@ -523,7 +529,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               cantidad:r.cantidad||1,
               precio_unitario:Number(r.precio_unitario_final||r.precio_unitario)||0,
               total:(r.cantidad||1)*(Number(r.precio_unitario_final||r.precio_unitario)||0),
-              orden:(capitulosActivos.length)*1000+idx
+              orden:capOrden*1000+yaEnCap+idx
             }))).select().then(({data})=>{
               if(data){
                 const all=[...items,...data];
@@ -531,11 +537,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                 recalcTotales(all);
               }
             });
-            // Todo lo que entra alimenta la base, sin casilla que marcar: un
-            // precio que no se guarda es un precio que se pierde.
-            // Lo que cotiza un proveedor es costo para HCA: la utilidad se suma aparte en el presupuesto.
-            alimentarBase(rubrosValidos, { tipo: "proveedor", proveedor, cliente: clienteNombre, proyecto: presupuestoActivo?.nombre || proveedor, fecha, fuente: "cotizacion", utilidad: { estado: "costo" } })
-              .then(r => { if (r.rubrosNuevos || r.capitulosNuevos) fetchCapitulosDB(); });
+            // A la base solo si se marcó: hay cotizaciones de prueba, o de un
+            // proveedor que no se quiere tener de referencia. Lo que cotiza un
+            // proveedor es costo para HCA: la utilidad se suma en el presupuesto.
+            if (guardarBD) {
+              alimentarBase(rubrosValidos, { tipo: "proveedor", proveedor, cliente: clienteNombre, proyecto: presupuestoActivo?.nombre || proveedor, fecha, fuente: "cotizacion", utilidad: { estado: "costo" } })
+                .then(r => { if (r.rubrosNuevos || r.capitulosNuevos) fetchCapitulosDB(); });
+            }
             setCotizacionResult(null);
           }}
           fmt={fmt}
@@ -587,9 +595,19 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         </div>
       )}
 
+      {/* DESDE EXCEL: el presupuesto inicial, leído con sus capítulos */}
+      {subVista==="importar"&&(
+        <ImportarObra destino="presupuesto" currentUser={currentUser}
+          onVolver={()=>setSubVista("lista")}
+          onCreada={pre=>{fetchPresupuestos();fetchClientes();setPresupuestoActivo(pre);fetchItems(pre.id);setSubVista("detalle");}}/>
+      )}
+
       {/* NUEVO */}
       {subVista==="nuevo"&&(
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid var(--border)"}}>
+          <div style={{fontSize:12,color:"var(--ink-soft)",background:"var(--bg)",borderRadius:8,padding:"8px 10px",marginBottom:14}}>
+            ¿Ya lo tienes en Excel? <button onClick={()=>setSubVista("importar")} style={{background:"none",border:"none",color:"var(--brand)",fontWeight:600,cursor:"pointer",padding:0,fontSize:12,fontFamily:"var(--font)"}}>Súbelo y NOVA lo lee con sus capítulos →</button>
+          </div>
           <div style={{display:"grid",gap:14}}>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Nombre *</label>
               <input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej: Remodelación BdP Condado" style={iS}/></div>

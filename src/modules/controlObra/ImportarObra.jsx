@@ -32,7 +32,20 @@ Reglas:
 - "q" cantidad, "p" precio unitario, "t" total de la fila. Si falta "t", omítelo.
 - No inventes rubros ni cambies descripciones.`;
 
-export default function ImportarObra({ currentUser, onVolver, onCreada }) {
+// Este mismo lector sirve para el presupuesto inicial, en Presupuestos: se lee
+// igual —formato aprendido, capítulos, revisión de errores, preguntas de
+// NOVA— y lo único que cambia es qué se crea al final. Un presupuesto se sigue
+// trabajando (se ajusta, se completa con cotizaciones, se exporta); una obra se
+// controla.
+const normal = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+const r2 = v => Math.round(v * 100) / 100;
+
+export default function ImportarObra({ currentUser, onVolver, onCreada, destino = "obra" }) {
+  const paraPresupuesto = destino === "presupuesto";
+  // Los precios del presupuesto inicial entran a la base salvo que se diga lo
+  // contrario: un precio que no se guarda es un precio que se pierde, pero hay
+  // presupuestos de prueba que no deben contar.
+  const [guardarEnBase, setGuardarEnBase] = useState(true);
   const [leyendo, setLeyendo] = useState(false);
   const [paso, setPaso] = useState("");
   const [error, setError] = useState("");
@@ -298,6 +311,73 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
     onCreada(obra);
   }
 
+  async function crearPresupuesto() {
+    if (!rubros.length || !nombre.trim() || incluyeIva === null || pendientes || faltanPreguntas.length) return;
+    setGuardando(true); setError("");
+    const faltan = [];
+    const cliente = preguntas.cliente.trim();
+
+    // El cliente de la lista si ya existe, escrito como sea; si no, se crea.
+    let cliente_id = null;
+    if (cliente) {
+      const ya = clientesLista.find(c => normal(c.nombre) === normal(cliente));
+      if (ya) cliente_id = ya.id;
+      else {
+        const { data: nc } = await supabase.from("clientes").insert({ nombre: cliente }).select().single();
+        cliente_id = nc?.id ?? null;
+      }
+    }
+
+    const todos = [
+      ...final.rubros,
+      ...(incluirCargos ? final.cargos.map(c => ({ capitulo: CAP_CARGOS, descripcion: c.descripcion, unidad: "glb", cantidad: 1, precio_unitario: c.total, total: c.total })) : []),
+    ];
+    // Si los precios ya traían IVA, el presupuesto no se lo vuelve a sumar: el
+    // total tiene que ser el mismo del Excel.
+    const pctIva = incluyeIva ? 0 : n(ivaPct);
+    const subtotal = r2(todos.reduce((s, r) => s + n(r.total), 0));
+    const iva_monto = r2(subtotal * pctIva / 100);
+    const { data: pre, error: e1 } = await supabase.from("presupuestos").insert({
+      nombre: nombre.trim(), cliente_id, cliente_nombre: cliente || "Sin cliente",
+      honorarios_pct: 0, iva_pct: pctIva, estado: "borrador", created_by: currentUser.id,
+      notas: incluyeIva ? "Los precios del Excel original ya incluían IVA." : "",
+      subtotal, honorarios_monto: 0, iva_monto, total: r2(subtotal + iva_monto),
+    }).select().single();
+    if (e1 || !pre) { setError("No se pudo crear el presupuesto: " + (e1?.message || "")); setGuardando(false); return; }
+
+    // Mismo orden que al armarlo a mano: capítulo × 1000 + posición.
+    const ordenCap = {}; let capN = 0; const pos = {};
+    const filas = todos.map(r => {
+      if (!(r.capitulo in ordenCap)) ordenCap[r.capitulo] = ++capN;
+      const c = ordenCap[r.capitulo];
+      pos[c] = (pos[c] ?? -1) + 1;
+      return {
+        presupuesto_id: pre.id, capitulo: r.capitulo, descripcion: r.descripcion,
+        unidad: r.unidad === "glb" && r.capitulo === CAP_CARGOS ? "glb" : unidadRespondida(r, preguntas),
+        cantidad: n(r.cantidad), precio_unitario: n(r.precio_unitario), total: r2(n(r.total)),
+        orden: c * 1000 + pos[c],
+      };
+    });
+    for (let i = 0; i < filas.length; i += 100) {
+      const { error: e2 } = await supabase.from("presupuesto_items").insert(filas.slice(i, i + 100));
+      if (e2) { setError("Se creó el presupuesto pero fallaron algunos rubros: " + e2.message); setGuardando(false); return; }
+    }
+
+    const eFormato = await recordarFormato({ filas: filasExcel, mapa: mapaActual, archivo: archivo?.name, usuarioId: currentUser.id });
+    if (eFormato) faltan.push("015 (recordar el formato)");
+
+    if (guardarEnBase) {
+      const base = await alimentarBase(
+        final.rubros.filter(r => r.origen !== "ajuste").map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
+        { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "presupuesto", ivaIncluido: incluyeIva, ivaPct: n(ivaPct), utilidad: preguntas.utilidad });
+      if (base.faltaMigracion) faltan.push(`${base.faltaMigracion} (${base.faltaMigracion === "016" ? "origen" : "utilidad"} de los precios)`);
+    }
+
+    setGuardando(false);
+    if (faltan.length) alert(`El presupuesto se creó, pero falta correr en Supabase la migración ${faltan.join(", ")}.`);
+    onCreada(pre);
+  }
+
   const lbl = { fontSize: 11, color: colors.muted, display: "block", marginBottom: 4 };
   const Linea = ({ t, v, fuerte, color }) => (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: fuerte ? 13 : 12, fontWeight: fuerte ? 700 : 400, color: color || (fuerte ? colors.ink : colors.inkSoft), padding: "3px 0" }}>
@@ -320,13 +400,18 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
 
   return (
     <div style={{ fontFamily: colors.font }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Button variant="secondary" size="sm" onClick={onVolver}><ArrowLeft size={13} /> Volver</Button>
-        <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>Importar presupuesto de obra</div>
-      </div>
+      {/* En Presupuestos el encabezado lo pone el módulo, con su propio "Volver". */}
+      {!paraPresupuesto && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <Button variant="secondary" size="sm" onClick={onVolver}><ArrowLeft size={13} /> Volver</Button>
+          <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>Importar presupuesto de obra</div>
+        </div>
+      )}
 
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 14 }}>
-        Sube el presupuesto que vas a <strong>ejecutar y controlar</strong> — el aprobado por el cliente, el del contratista, el que sea. Se guarda también el archivo original, para verlo tal cual cuando haga falta.
+        {paraPresupuesto
+          ? <>Sube el presupuesto inicial. NOVA lo lee con sus capítulos, lo revisas acá y queda en FOREMAN para <strong>seguir trabajándolo</strong>: ajustar cantidades, completarlo con cotizaciones de proveedores y exportarlo.</>
+          : <>Sube el presupuesto que vas a <strong>ejecutar y controlar</strong> — el aprobado por el cliente, el del contratista, el que sea. Se guarda también el archivo original, para verlo tal cual cuando haga falta.</>}
       </div>
 
       {rubros.length === 0 && !filasExcel && (
@@ -368,7 +453,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
         <>
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16, marginBottom: 14 }}>
             <div style={{ marginBottom: 14 }}>
-              <label style={lbl}>NOMBRE DE LA OBRA</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} />
+              <label style={lbl}>{paraPresupuesto ? "NOMBRE DEL PRESUPUESTO" : "NOMBRE DE LA OBRA"}</label><input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} />
             </div>
 
             {origenTexto && (
@@ -391,7 +476,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
             <div style={{ background: incluyeIva === null ? colors.warningSoft : colors.bg, border: `1.5px solid ${incluyeIva === null ? colors.warningBorder : colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 4 }}>¿Los valores del Excel incluyen IVA?</div>
               <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
-                El control de obra se hace con IVA, porque las facturas lo traen. {sugerenciaIva}
+                {paraPresupuesto ? "Si no lo incluyen, el presupuesto lo suma al final, como en el Excel." : "El control de obra se hace con IVA, porque las facturas lo traen."} {sugerenciaIva}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {[[true, "Sí, ya incluyen IVA"], [false, "No, sumarle IVA"]].map(([v, t]) => (
@@ -426,7 +511,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
                 )}
                 {incluyeIva === false && <Linea t={`IVA ${n(ivaPct)} %`} v={ivaSumado} />}
                 <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: 4, paddingTop: 4 }}>
-                  <Linea t={incluyeIva === null ? "Línea base (falta responder lo del IVA)" : "Línea base con IVA"} v={lineaBase} fuerte color={incluyeIva === null ? colors.warning : undefined} />
+                  <Linea t={incluyeIva === null ? `${paraPresupuesto ? "Total" : "Línea base"} (falta responder lo del IVA)` : paraPresupuesto ? "Total con IVA" : "Línea base con IVA"} v={lineaBase} fuerte color={incluyeIva === null ? colors.warning : undefined} />
                 </div>
               </div>
               {control && (control.subtotal != null || control.total != null) && (
@@ -488,14 +573,22 @@ export default function ImportarObra({ currentUser, onVolver, onCreada }) {
             })}
           </div>
 
+          {paraPresupuesto && (
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: colors.inkSoft, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12, cursor: "pointer" }}>
+              <input type="checkbox" checked={guardarEnBase} onChange={e => setGuardarEnBase(e.target.checked)} style={{ marginTop: 2 }} />
+              <span><strong style={{ color: colors.ink }}>Guardar estos precios en la base de rubros</strong><br />
+                Desmárcalo si es un presupuesto de prueba o con precios que no quieres que cuenten para otros.</span>
+            </label>
+          )}
+
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" style={{ flex: 1 }} onClick={() => { limpiar(); setError(""); }}>Descartar</Button>
-            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={crearObra} disabled={guardando || !nombre.trim() || incluyeIva === null || pendientes > 0 || faltanPreguntas.length > 0}>
-              {guardando ? "Creando obra..."
+            <Button variant="primary" size="lg" style={{ flex: 2 }} onClick={paraPresupuesto ? crearPresupuesto : crearObra} disabled={guardando || !nombre.trim() || incluyeIva === null || pendientes > 0 || faltanPreguntas.length > 0}>
+              {guardando ? (paraPresupuesto ? "Creando presupuesto..." : "Creando obra...")
                 : pendientes ? `Acepta o no acepta ${pendientes === 1 ? "el error" : `los ${pendientes} errores`} para continuar`
                 : faltanPreguntas.length ? "Responde las preguntas de NOVA para continuar"
                 : incluyeIva === null ? "Responde lo del IVA para continuar"
-                : `Crear obra · línea base $${fmt(lineaBase)}`}
+                : paraPresupuesto ? `Crear presupuesto · total $${fmt(lineaBase)}` : `Crear obra · línea base $${fmt(lineaBase)}`}
             </Button>
           </div>
         </>
