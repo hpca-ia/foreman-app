@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { Trash2, Copy } from "lucide-react";
+import { Trash2, Copy, Database } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { supabase } from "../lib/supabase";
-import { alimentarBase, resumenAlimentacion } from "../lib/baseRubros";
+import { alimentarBase, resumenAlimentacion, preciosDeLaBase } from "../lib/baseRubros";
 import AdminBD from "./AdminBD";
 import BaseRubros from "./presupuestos/BaseRubros";
 import PreguntasNova from "../components/PreguntasNova";
@@ -12,7 +12,7 @@ import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preg
 import CotizacionPanel from "./CotizacionPanel";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
-import ActualizarPrecios from "./presupuestos/ActualizarPrecios";
+import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 
 export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
@@ -26,7 +26,11 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [capitulosActivos, setCapitulosActivos] = useState([]);
   const [items, setItems] = useState([]);
   const [exportar, setExportar] = useState(false);
-  const [verPreciosBase, setVerPreciosBase] = useState(false);
+  // El rubro cuyo precio base se está eligiendo de la base de rubros, y la
+  // base leída (se vuelve a leer si pasó más de un minuto: una cotización
+  // recién guardada tiene que aparecer).
+  const [eligiendoPrecio, setEligiendoPrecio] = useState(null);
+  const [baseRubros, setBaseRubros] = useState(null);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
   const [uploadingBD, setUploadingBD] = useState(false);
@@ -110,8 +114,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setPresupuestoActivo(nuevo); fetchItems(nuevo.id); setSubVista("detalle");
   }
 
-  // Precios base traídos de la base de rubros: cambia la base, la utilidad de
-  // cada rubro se conserva y el precio final se recalcula con ella.
+  // Un precio elegido de la base de rubros reemplaza el precio base: la
+  // utilidad del rubro se conserva y el precio final se recalcula con ella.
   async function aplicarPreciosBase(cambios) {
     const porId = new Map(cambios.map(c => [c.id, Number(c.precio_base)]));
     const nuevos = items.map(i => {
@@ -126,7 +130,15 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       .update({ precio_base: i.precio_base, precio_unitario: i.precio_unitario, total: i.total }).eq("id", i.id)));
     const fallo = res.find(r => r.error);
     if (fallo) { alert("No se pudieron actualizar todos los precios: " + fallo.error.message); return; }
-    setItems(nuevos); recalcTotales(nuevos); setVerPreciosBase(false);
+    setItems(nuevos); recalcTotales(nuevos); setEligiendoPrecio(null);
+  }
+
+  function abrirPreciosDeRubro(item) {
+    setEligiendoPrecio(item);
+    if (!baseRubros || Date.now() - baseRubros.leida > 60000) {
+      setBaseRubros(null);
+      preciosDeLaBase().then(b => setBaseRubros({ ...b, leida: Date.now() })).catch(() => setBaseRubros({ buscar: () => null, leida: Date.now() }));
+    }
   }
 
   async function renombrarPresupuesto(nombre) {
@@ -575,9 +587,6 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
-            <button onClick={()=>setVerPreciosBase(true)} disabled={items.length===0}
-              title="Actualizar los precios base con los de la base de rubros"
-              style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Precios de la base</button>
             <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
 
             <button onClick={()=>setExportar(true)} disabled={items.length===0} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>Exportar</button>
@@ -586,7 +595,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
-      {verPreciosBase&&presupuestoActivo&&<ActualizarPrecios items={items} onCerrar={()=>setVerPreciosBase(false)} onAplicar={aplicarPreciosBase}/>}
+      {eligiendoPrecio&&<PreciosDeRubro item={items.find(i=>i.id===eligiendoPrecio.id)||eligiendoPrecio} base={baseRubros}
+        onCerrar={()=>setEligiendoPrecio(null)} onElegir={v=>aplicarPreciosBase([{id:eligiendoPrecio.id,precio_base:v}])}/>}
       {exportar&&presupuestoActivo&&<ExportarPresupuesto presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} currentUser={currentUser}
         onCerrar={()=>setExportar(false)}
         onGuardado={e=>{setPresupuestoActivo(p=>({...p,exportacion:e}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,exportacion:e}:p));}}/>}
@@ -814,18 +824,19 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                             <input type="number" className="num-limpio" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
                               style={{width:"100%",boxSizing:"border-box",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
-                          <td style={{padding:"5px 8px"}}>
-                            {/* La base es la referencia —el costo o el precio original—: no se
-                                mueve al cambiar el precio final. Si cambia de verdad (llegó otra
-                                cotización), se edita acá y la utilidad se conserva. */}
-                            <input type="number" className="num-limpio" value={Number(item.precio_base)>0?item.precio_base:item.precio_unitario}
-                              onChange={e=>{
-                                const base=e.target.value;
-                                const pct=Number(item.utilidad_pct)||0;
-                                actualizarItemMulti(item.id,{precio_base:base,precio_unitario:Math.round(Number(base)*(1+pct/100)*10000)/10000});
-                              }}
-                              title="Precio base: la referencia contra la que se mide la utilidad"
-                              style={{width:"100%",boxSizing:"border-box",background:"transparent",border:"1px dashed var(--border)",borderRadius:6,padding:"4px 6px",fontSize:11,color:"var(--muted)",textAlign:"right"}}/>
+                          <td style={{padding:"5px 6px"}}>
+                            {/* La base es la referencia —el costo o el precio original— y no se
+                                escribe a mano: queda fija hasta que se elige un precio de la
+                                base de rubros. Cambiar el precio final no la mueve. */}
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
+                              <span style={{color:"var(--muted)",fontSize:11,whiteSpace:"nowrap"}}>
+                                {Number(item.precio_base)>0||Number(item.precio_unitario)>0?`$${fmt(Number(item.precio_base)>0?item.precio_base:item.precio_unitario)}`:"—"}
+                              </span>
+                              <button onClick={()=>abrirPreciosDeRubro(item)} title="Elegir un precio de la base de rubros"
+                                style={{background:"none",border:"1px solid var(--border)",borderRadius:5,padding:"2px 3px",cursor:"pointer",color:"var(--ink-soft)",display:"flex",flexShrink:0}}>
+                                <Database size={11}/>
+                              </button>
+                            </div>
                           </td>
                           <td style={{padding:"5px 8px"}}>
                             <input type="number" className="num-limpio" value={Math.round((Number(item.utilidad_pct)||0)*100)/100}
