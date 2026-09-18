@@ -316,13 +316,16 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
 
   async function recalcTotales(itemsList, overrides={}) {
     if (!presupuestoActivo) return;
-    const subtotal=itemsList.reduce((s,i)=>s+(Number(i.total)||0),0);
+    const subtotal=Math.round(itemsList.reduce((s,i)=>s+(Number(i.total)||0),0)*100)/100;
     const hPct = overrides.honorarios_pct ?? presupuestoActivo.honorarios_pct ?? 0;
     const ivaPct = overrides.iva_pct ?? presupuestoActivo.iva_pct ?? 12;
-    const honorarios_monto=subtotal*(Number(hPct)||0)/100;
+    // Plata, a dos decimales: guardar 353,265 de IVA hace que la pantalla y el
+    // documento redondeen distinto.
+    const r2=v=>Math.round(v*100)/100;
+    const honorarios_monto=r2(subtotal*(Number(hPct)||0)/100);
     const base_iva=subtotal+honorarios_monto;
-    const iva_monto=base_iva*(Number(ivaPct)||0)/100;
-    const total=base_iva+iva_monto;
+    const iva_monto=r2(base_iva*(Number(ivaPct)||0)/100);
+    const total=r2(base_iva+iva_monto);
     const upd={...presupuestoActivo,...overrides,subtotal,honorarios_monto,iva_monto,total};
     setPresupuestoActivo(upd);
     await supabase.from("presupuestos").update({subtotal,honorarios_monto,iva_monto,total}).eq("id",presupuestoActivo.id);
@@ -784,9 +787,21 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                             <input type="number" className="num-limpio" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
                               style={{width:"100%",boxSizing:"border-box",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
-                          <td style={{padding:"5px 8px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",textAlign:"right"}}>${fmt(item.precio_base||item.precio_unitario)}</td>
                           <td style={{padding:"5px 8px"}}>
-                            <input type="number" className="num-limpio" value={item.utilidad_pct||0}
+                            {/* La base es la referencia —el costo o el precio original—: no se
+                                mueve al cambiar el precio final. Si cambia de verdad (llegó otra
+                                cotización), se edita acá y la utilidad se conserva. */}
+                            <input type="number" className="num-limpio" value={Number(item.precio_base)>0?item.precio_base:item.precio_unitario}
+                              onChange={e=>{
+                                const base=e.target.value;
+                                const pct=Number(item.utilidad_pct)||0;
+                                actualizarItemMulti(item.id,{precio_base:base,precio_unitario:Math.round(Number(base)*(1+pct/100)*10000)/10000});
+                              }}
+                              title="Precio base: la referencia contra la que se mide la utilidad"
+                              style={{width:"100%",boxSizing:"border-box",background:"transparent",border:"1px dashed var(--border)",borderRadius:6,padding:"4px 6px",fontSize:11,color:"var(--muted)",textAlign:"right"}}/>
+                          </td>
+                          <td style={{padding:"5px 8px"}}>
+                            <input type="number" className="num-limpio" value={Math.round((Number(item.utilidad_pct)||0)*100)/100}
                               onChange={e=>{
                                 const pct=Number(e.target.value);
                                 const base=item.precio_base||item.precio_unitario;
@@ -796,7 +811,26 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                               style={{width:"100%",boxSizing:"border-box",background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px"}}>
-                            <input type="number" className="num-limpio" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
+                            <input type="number" className="num-limpio" value={item.precio_unitario}
+                              onFocus={()=>{
+                                // La primera vez que se toca el precio de un rubro que ya tiene
+                                // precio, ese precio queda como base: desde ahí se mide la variación.
+                                if(!(Number(item.precio_base)>0)&&Number(item.precio_unitario)>0) actualizarItemMulti(item.id,{precio_base:Number(item.precio_unitario)});
+                              }}
+                              onChange={e=>{
+                                const v=e.target.value;
+                                const base=Number(item.precio_base);
+                                // Con base, la utilidad muestra cuánto se apartó el precio final.
+                                // Sin base (rubro que todavía no tenía precio), el primero que se
+                                // escribe es la base.
+                                if(base>0) actualizarItemMulti(item.id,{precio_unitario:v,utilidad_pct:Math.round((Number(v)/base-1)*10000)/100});
+                                else actualizarItemMulti(item.id,{precio_unitario:v});
+                              }}
+                              onBlur={e=>{
+                                // Se fija al salir, no tecla por tecla: si no, el "5" de "50"
+                                // quedaba como base.
+                                if(!(Number(item.precio_base)>0)&&Number(e.target.value)>0) actualizarItemMulti(item.id,{precio_base:Number(e.target.value),utilidad_pct:0});
+                              }}
                               style={{width:"100%",boxSizing:"border-box",background:Number(item.precio_unitario)?"var(--bg)":"var(--warning-soft)",border:`1px solid ${Number(item.precio_unitario)?"var(--border)":"var(--warning-border)"}`,borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px",fontWeight:600,color:"var(--ink)",whiteSpace:"nowrap",textAlign:"right"}}>${fmt(item.total)}</td>
