@@ -10,6 +10,7 @@ import { reconocerExcel, recordarFormato } from "../lib/leerExcelPresupuesto";
 import { interpretarPresupuesto } from "./controlObra/leerPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
+import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 
 export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
@@ -22,7 +23,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // capitulosActivos: [{nombre, orden}] ordenados
   const [capitulosActivos, setCapitulosActivos] = useState([]);
   const [items, setItems] = useState([]);
-  const [exportando, setExportando] = useState(false);
+  const [exportar, setExportar] = useState(false);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
   const [uploadingBD, setUploadingBD] = useState(false);
@@ -463,30 +464,6 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setBdResult(null); setBdLectura(null);
   }
 
-  async function exportarExcel() {
-    if (!presupuestoActivo||items.length===0) return;
-    setExportando(true);
-    let csv=`PRESUPUESTO: ${presupuestoActivo.nombre}\nCLIENTE: ${presupuestoActivo.cliente_nombre}\nFECHA: ${new Date().toLocaleDateString("es-EC")}\n\n`;
-    csv+=`N°\tDESCRIPCIÓN\tUNIDAD\tCANTIDAD\tP.UNITARIO\tTOTAL\n`;
-    for (const cap of capitulosActivos) {
-      const ci=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>a.orden-b.orden);
-      if (ci.length===0) continue;
-      csv+=`\n${cap.orden}. ${cap.nombre}\n`;
-      ci.forEach((it,idx)=>{
-        csv+=`${cap.orden}.${idx+1}\t${it.descripcion}\t${it.unidad}\t${it.cantidad}\t${it.precio_unitario}\t${it.total}\n`;
-      });
-      csv+=`\t\t\t\tSUBTOTAL ${cap.orden}. ${cap.nombre}\t${ci.reduce((s,i)=>s+(Number(i.total)||0),0).toFixed(2)}\n`;
-    }
-    csv+=`\n\t\t\t\tSUBTOTAL\t${(presupuestoActivo.subtotal||0).toFixed(2)}\n`;
-    csv+=`\t\t\t\tHONORARIOS (${presupuestoActivo.honorarios_pct}%)\t${(presupuestoActivo.honorarios_monto||0).toFixed(2)}\n`;
-    csv+=`\t\t\t\tIVA (${presupuestoActivo.iva_pct}%)\t${(presupuestoActivo.iva_monto||0).toFixed(2)}\n`;
-    csv+=`\t\t\t\tTOTAL\t${(presupuestoActivo.total||0).toFixed(2)}\n`;
-    const blob=new Blob(["\uFEFF"+csv],{type:"text/tab-separated-values;charset=utf-8"});
-    const url=URL.createObjectURL(blob); const a=document.createElement("a");
-    a.href=url; a.download=`${presupuestoActivo.nombre.replace(/\s+/g,"_")}.xls`; a.click(); URL.revokeObjectURL(url);
-    setExportando(false);
-  }
-
   const fmt=n=>(Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
   const iS={width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
 
@@ -511,12 +488,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           {subVista==="detalle"&&<>
             <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
 
-            <button onClick={exportarExcel} disabled={exportando||items.length===0} style={{background:"var(--success)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{exportando?"Exportando...":"Exportar Excel"}</button>
+            <button onClick={()=>setExportar(true)} disabled={items.length===0} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>Exportar</button>
           </>}
         </div>
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
+      {exportar&&presupuestoActivo&&<ExportarPresupuesto presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} onCerrar={()=>setExportar(false)}/>}
       <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
 
       {!showAdminBD&&<>

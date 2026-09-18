@@ -170,3 +170,10 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .modal-acciones > * { flex: none; }
   .modal-acciones > *:first-child { grid-column: 1 / -1; }
 }
+
+/* Exportar presupuesto: las opciones a la izquierda y cómo va a salir a la
+   derecha; en el teléfono, la vista previa va abajo. */
+.exportar-pres { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; }
+@media (max-width: 760px) {
+  .exportar-pres { grid-template-columns: 1fr; }
+}
