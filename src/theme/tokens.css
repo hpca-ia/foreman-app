@@ -177,3 +177,11 @@ input, select, textarea { outline: none; font-family: var(--font); }
 @media (max-width: 760px) {
   .exportar-pres { grid-template-columns: 1fr; }
 }
+
+/* Presupuesto: la tabla de rubros se desliza de lado en pantallas angostas en
+   vez de cortar columnas, y las casillas de números no pierden espacio en las
+   flechitas del navegador. */
+.pres-tabla { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.num-limpio { -moz-appearance: textfield; }
+.num-limpio::-webkit-outer-spin-button,
+.num-limpio::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

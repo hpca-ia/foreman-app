@@ -50,11 +50,16 @@ export function estructura({ capitulos = [], items = [] }) {
   return salida;
 }
 
-/** Misma cuenta que la pantalla: honorarios sobre el subtotal, IVA sobre subtotal más honorarios. */
-export function totalesDe(items, presupuesto = {}) {
+/**
+ * Misma cuenta que la pantalla: honorarios sobre el subtotal, IVA sobre
+ * subtotal más honorarios. Sin IVA es una decisión de presentación —hay
+ * clientes a los que se les presenta sin—, no del presupuesto: su tasa no se
+ * toca.
+ */
+export function totalesDe(items, presupuesto = {}, conIva = true) {
   const subtotal = r2(items.reduce((s, i) => s + n(i.total), 0));
   const honorarios_pct = n(presupuesto.honorarios_pct);
-  const iva_pct = presupuesto.iva_pct == null ? 15 : n(presupuesto.iva_pct);
+  const iva_pct = !conIva ? 0 : presupuesto.iva_pct == null ? 15 : n(presupuesto.iva_pct);
   const honorarios = r2(subtotal * honorarios_pct / 100);
   const iva = r2((subtotal + honorarios) * iva_pct / 100);
   return { subtotal, honorarios_pct, honorarios, iva_pct, iva, total: r2(subtotal + honorarios + iva) };
@@ -89,14 +94,14 @@ function tabla(caps, formato) {
   return { columnas: ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"], filas, deCapitulo };
 }
 
-export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", logo, empresa = {}, titulo, validez, condiciones }) {
+export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", logo, empresa = {}, titulo, validez, condiciones, conIva = true }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const M = 42;
   const marca = aRgb(empresa.color);
   const tinta = [17, 24, 39], gris = [107, 114, 128];
   const caps = estructura({ capitulos, items });
-  const tot = totalesDe(items, presupuesto);
+  const tot = totalesDe(items, presupuesto, conIva);
   const nombreEmpresa = empresa.nombre || "HCA Studio";
 
   // ── Encabezado: el logo a la izquierda, la empresa a la derecha ──
@@ -162,7 +167,7 @@ export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detal
     const filas = [
       ["Subtotal", money(tot.subtotal)],
       tot.honorarios_pct > 0 && [`Honorarios (${cantidad(tot.honorarios_pct)}%)`, money(tot.honorarios)],
-      [`IVA (${cantidad(tot.iva_pct)}%)`, money(tot.iva)],
+      conIva && [`IVA (${cantidad(tot.iva_pct)}%)`, money(tot.iva)],
       ["TOTAL", `$ ${money(tot.total)}`],
     ].filter(Boolean);
     if (y > H - 120) { doc.addPage(); y = 50; }
@@ -179,6 +184,11 @@ export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detal
       },
     });
     y = doc.lastAutoTable.finalY + 22;
+    if (!conIva) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...gris);
+      doc.text("Los valores no incluyen IVA.", W - M, y - 10, { align: "right" });
+      y += 6;
+    }
   } else {
     y += 12;
   }
@@ -224,10 +234,10 @@ export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detal
  *
  * ExcelJS se carga recién al exportar: pesa, y el resto de la app no lo usa.
  */
-export async function excelPresupuesto({ presupuesto, capitulos, items, formato = "detallado", logo, empresa = {}, titulo, validez, condiciones }) {
+export async function excelPresupuesto({ presupuesto, capitulos, items, formato = "detallado", logo, empresa = {}, titulo, validez, condiciones, conIva = true }) {
   const ExcelJS = (await import("exceljs")).default;
   const caps = estructura({ capitulos, items });
-  const tot = totalesDe(items, presupuesto);
+  const tot = totalesDe(items, presupuesto, conIva);
   const cotizar = formato === "cotizar";
   const soloCapitulos = formato === "capitulos";
   const hex = aRgb(empresa.color).map(v => v.toString(16).padStart(2, "0")).join("").toUpperCase();
@@ -366,8 +376,15 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
   let hon = null;
   if (!cotizar && tot.honorarios_pct > 0) hon = lineaTotal(`Honorarios (${cantidad(tot.honorarios_pct)}%)`, `${sub}*${tot.honorarios_pct}/100`, tot.honorarios);
   const baseIva = hon ? `(${sub}+${hon})` : sub;
-  const iva = lineaTotal(`IVA (${cantidad(tot.iva_pct)}%)`, `${baseIva}*${tot.iva_pct}/100`, cotizar ? 0 : tot.iva);
-  lineaTotal("TOTAL", hon ? `${sub}+${hon}+${iva}` : `${sub}+${iva}`, cotizar ? 0 : tot.total, { fuerte: true });
+  const iva = conIva ? lineaTotal(`IVA (${cantidad(tot.iva_pct)}%)`, `${baseIva}*${tot.iva_pct}/100`, cotizar ? 0 : tot.iva) : null;
+  lineaTotal("TOTAL", [sub, hon, iva].filter(Boolean).join("+"), cotizar ? 0 : tot.total, { fuerte: true });
+  if (!conIva) {
+    ws.mergeCells(fila, 3, fila, 6);
+    ws.getCell(fila, 3).value = "Los valores no incluyen IVA.";
+    ws.getCell(fila, 3).font = fuente({ size: 9, italic: true, color: { argb: GRIS } });
+    ws.getCell(fila, 3).alignment = { horizontal: "right" };
+    fila++;
+  }
 
   // ── Condiciones ──
   const texto = String(condiciones || "").trim();

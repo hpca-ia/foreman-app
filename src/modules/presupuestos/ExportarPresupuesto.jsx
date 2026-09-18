@@ -25,6 +25,8 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
   const [titulo, setTitulo] = useState(() => FORMATOS[recordado("foreman_pres_formato", "detallado")]?.titulo || "Presupuesto");
   const [tituloTocado, setTituloTocado] = useState(false);
   const [validez, setValidez] = useState("30 días");
+  // Con o sin IVA depende del cliente: se decide al presentar, y se recuerda.
+  const [conIva, setConIva] = useState(() => recordado("foreman_pres_iva", "si") !== "no");
   const [condiciones, setCondiciones] = useState(presupuesto.notas || "");
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -66,7 +68,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
     setLogos(await listarLogos());
   }
 
-  const opciones = { presupuesto, capitulos, items, formato, empresa, titulo, validez, condiciones };
+  const opciones = { presupuesto, capitulos, items, formato, empresa, titulo, validez, condiciones, conIva };
 
   async function bajarPDF() {
     setGenerando("pdf"); setError("");
@@ -160,6 +162,20 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
             </div>
           </div>
 
+          <div>
+            <div style={etiqueta}>IVA</div>
+            <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: colors.radiusSm, padding: 3 }}>
+              {[[true, "Con IVA"], [false, "Sin IVA"]].map(([v, l]) => (
+                <button key={l} onClick={() => { setConIva(v); recordar("foreman_pres_iva", v ? "si" : "no"); }}
+                  style={{ padding: "5px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
+                    background: conIva === v ? colors.surface : "transparent", color: conIva === v ? colors.brand : colors.inkSoft }}>{l}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: colors.muted, marginTop: 4 }}>
+              {conIva ? `Suma el IVA (${presupuesto.iva_pct ?? 15}%) al final.` : "Sin línea de IVA; el documento dice que los valores no lo incluyen."}
+            </div>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: formato === "cotizar" ? "1fr" : "1fr 120px", gap: 8 }}>
             <div>
               <div style={etiqueta}>TÍTULO DEL DOCUMENTO</div>
@@ -179,7 +195,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
           </div>
         </div>
 
-        <Vista presupuesto={presupuesto} capitulos={capitulos} items={items} formato={formato} logo={logo} empresa={empresa} titulo={titulo} validez={validez} />
+        <Vista presupuesto={presupuesto} capitulos={capitulos} items={items} formato={formato} logo={logo} empresa={empresa} titulo={titulo} validez={validez} conIva={conIva} />
       </div>
 
       {error && <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 10, fontSize: 12, color: colors.warning, marginTop: 12 }}>{error}</div>}
@@ -200,9 +216,9 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
 }
 
 /** Cómo va a salir la primera hoja: el encabezado y el comienzo de la tabla. */
-function Vista({ presupuesto, capitulos, items, formato, logo, empresa, titulo, validez }) {
+function Vista({ presupuesto, capitulos, items, formato, logo, empresa, titulo, validez, conIva }) {
   const caps = estructura({ capitulos, items });
-  const tot = totalesDe(items, presupuesto);
+  const tot = totalesDe(items, presupuesto, conIva);
   const marca = /^#[0-9a-f]{6}$/i.test(empresa.color || "") ? empresa.color : colors.brand;
   const conPrecio = formato !== "cotizar";
   const filas = [];
@@ -257,7 +273,7 @@ function Vista({ presupuesto, capitulos, items, formato, logo, empresa, titulo, 
         </table>
         {conPrecio && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-            <div style={{ fontSize: 8, fontWeight: 700, background: `${marca}18`, color: marca, padding: "4px 8px" }}>TOTAL $ {money(tot.total)}</div>
+            <div style={{ fontSize: 8, fontWeight: 700, background: `${marca}18`, color: marca, padding: "4px 8px" }}>TOTAL $ {money(tot.total)}{!conIva && <span style={{ fontWeight: 400, fontStyle: "italic" }}> · sin IVA</span>}</div>
           </div>
         )}
       </div>

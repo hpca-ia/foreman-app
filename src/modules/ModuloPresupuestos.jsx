@@ -75,10 +75,20 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // ajustan cantidades y precios. Duplicar copia los rubros pero no el estado
   // ni los totales del original — el nuevo nace en borrador, como si se
   // hubiera creado a mano.
-  async function duplicarPresupuesto(pre) {
+  // "Casa Fowler" → "Casa Fowler (v2)", y la siguiente "(v3)": el número sale de
+  // las versiones que ya existen, no de contar clics.
+  function siguienteVersion(nombre) {
+    const base = nombre.replace(/\s*\(v\d+\)\s*$/i, "").trim();
+    const esc = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^${esc}(?:\\s*\\(v(\\d+)\\))?$`, "i");
+    const nums = presupuestos.map(p => (p.nombre || "").trim().match(re)).filter(Boolean).map(m => Number(m[1] || 1));
+    return `${base} (v${Math.max(1, ...nums) + 1})`;
+  }
+
+  async function duplicarPresupuesto(pre, nombreNuevo) {
     setDuplicando(pre.id);
     const { data: nuevo, error } = await supabase.from("presupuestos").insert({
-      nombre: `${pre.nombre} (copia)`,
+      nombre: nombreNuevo || `${pre.nombre} (copia)`,
       cliente_id: pre.cliente_id, cliente_nombre: pre.cliente_nombre,
       honorarios_pct: pre.honorarios_pct, iva_pct: pre.iva_pct,
       estado: "borrador", created_by: currentUser.id,
@@ -96,6 +106,15 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setDuplicando(null);
     await fetchPresupuestos();
     setPresupuestoActivo(nuevo); fetchItems(nuevo.id); setSubVista("detalle");
+  }
+
+  async function renombrarPresupuesto(nombre) {
+    const limpio = String(nombre || "").trim();
+    if (!presupuestoActivo || !limpio || limpio === presupuestoActivo.nombre) return;
+    const { error } = await supabase.from("presupuestos").update({ nombre: limpio }).eq("id", presupuestoActivo.id);
+    if (error) { alert("No se pudo cambiar el nombre: " + error.message); return; }
+    setPresupuestoActivo(p => ({ ...p, nombre: limpio }));
+    setPresupuestos(ps => ps.map(p => p.id === presupuestoActivo.id ? { ...p, nombre: limpio } : p));
   }
 
   async function revisarPresupuesto(pre) {
@@ -167,10 +186,38 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     }
   }
 
+  // El orden de los rubros es lo único que se guarda del orden: al volver a
+  // abrir el presupuesto, los capítulos se reconstruyen desde ese número
+  // (capítulo × 1000 + posición). Mover un capítulo solo en pantalla, como
+  // antes, se perdía al recargar.
+  function numerar(caps, lista, secuencias = {}) {
+    const porId = new Map(lista.map(i => [i.id, { ...i }]));
+    caps.forEach(c => {
+      const ids = secuencias[c.nombre] || lista.filter(i => i.capitulo === c.nombre).sort((a, b) => a.orden - b.orden).map(i => i.id);
+      ids.forEach((id, k) => { const x = porId.get(id); if (x) x.orden = c.orden * 1000 + k; });
+    });
+    return lista.map(i => porId.get(i.id));
+  }
+  async function guardarOrden(nuevos) {
+    const antes = new Map(items.map(i => [i.id, i.orden]));
+    setItems(nuevos);
+    const cambios = nuevos.filter(i => antes.get(i.id) !== i.orden);
+    const res = await Promise.all(cambios.map(i => supabase.from("presupuesto_items").update({ orden: i.orden }).eq("id", i.id)));
+    const fallo = res.find(r => r.error);
+    if (fallo) alert("No se pudo guardar el orden: " + fallo.error.message);
+  }
+  async function moverRubro(item, direccion) {
+    const ids = items.filter(i => i.capitulo === item.capitulo).sort((a, b) => a.orden - b.orden).map(i => i.id);
+    const k = ids.indexOf(item.id), j = k + direccion;
+    if (k < 0 || j < 0 || j >= ids.length) return;
+    [ids[k], ids[j]] = [ids[j], ids[k]];
+    await guardarOrden(numerar(capitulosActivos, items, { [item.capitulo]: ids }));
+  }
+
   function agregarCapitulo(nombre) {
     const trimmed = nombre.trim();
     if (!trimmed || capitulosActivos.find(c=>c.nombre===trimmed)) return;
-    const nuevoOrden = capitulosActivos.length + 1;
+    const nuevoOrden = Math.max(0, ...capitulosActivos.map(c=>c.orden)) + 1;
     setCapitulosActivos(prev=>[...prev, { nombre:trimmed, orden:nuevoOrden }]);
     saveCapituloToDB(trimmed);
     setNuevoCapitulo(""); setShowAddCap(false);
@@ -181,6 +228,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     const updated = capitulosActivos.filter(c=>c.nombre!==nombre)
       .map((c,i)=>({...c, orden:i+1}));
     setCapitulosActivos(updated);
+    guardarOrden(numerar(updated, items));
   }
 
   function moverCapitulo(nombre, direccion) {
@@ -192,14 +240,16 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
     const reordered = updated.map((c,i)=>({...c,orden:i+1}));
     setCapitulosActivos(reordered);
+    guardarOrden(numerar(reordered, items));
   }
 
   async function agregarItem(capitulo, rubro) {
     if (!presupuestoActivo) return;
     const capOrden = capitulosActivos.find(c=>c.nombre===capitulo)?.orden || 1;
-    const itemsEnCap = items.filter(i=>i.capitulo===capitulo).length;
-    // orden = capOrden*1000 + itemIdx para mantener orden por capítulo
-    const orden = capOrden * 1000 + itemsEnCap;
+    // Después del último: contar los rubros chocaba con uno existente si se
+    // había borrado alguno del medio.
+    const ultimaPos = Math.max(-1, ...items.filter(i=>i.capitulo===capitulo).map(i=>(Number(i.orden)||0) % 1000));
+    const orden = capOrden * 1000 + ultimaPos + 1;
     const { data } = await supabase.from("presupuesto_items").insert({
       presupuesto_id:presupuestoActivo.id,
       capitulo, rubro_id:rubro.id||null,
@@ -281,7 +331,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   async function leerCotizacion(e) {
     const file=e.target.files[0]; if(!file) return;
     setUploadingCotizacion(true); setCotizacionResult(null);
-    const prompt = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: {"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00}]}';
+    // Los totales escritos en la cotización vienen aparte: son la prueba de que
+    // se leyeron todos los rubros, y se muestran antes de aplicarla.
+    const prompt = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: {"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00}],"subtotal":null,"iva":null,"total":null}. En subtotal, iva y total pon los valores TAL COMO ESTAN ESCRITOS en el documento (subtotal sin IVA, el IVA, y el total a pagar), o null si no aparecen. No los calcules.';
     try {
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       let msgContent;
@@ -473,9 +525,17 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
         <div>
+          {subVista==="detalle"&&presupuestoActivo ? (
+            // El nombre se cambia ahí mismo: al volver a trabajar uno terminado,
+            // lo primero es que no se confunda con el que ya se mandó.
+            <input key={presupuestoActivo.id} defaultValue={presupuestoActivo.nombre} title="Toca para cambiar el nombre"
+              onBlur={e=>renombrarPresupuesto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") e.currentTarget.blur(); }}
+              style={{fontSize:17,fontWeight:700,color:"var(--ink)",background:"transparent",border:"none",borderBottom:"1.5px dashed var(--border)",outline:"none",padding:"0 0 1px",fontFamily:"var(--font)",width:"min(520px, 70vw)"}}/>
+          ) : (
           <div style={{fontSize:17,fontWeight:700,color:"var(--ink)"}}>
-            {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="importar"?"Nuevo presupuesto desde Excel":subVista==="detalle"?`${presupuestoActivo?.nombre}`:subVista==="baseDatos"?"Base de rubros":"Alimentar BD"}
+            {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="importar"?"Nuevo presupuesto desde Excel":subVista==="baseDatos"?"Base de rubros":"Alimentar BD"}
           </div>
+          )}
           {subVista==="detalle"&&presupuestoActivo&&<div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</div>}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -488,6 +548,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
           </>}
           {subVista==="detalle"&&<>
+            <button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
+              title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
+              style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
             <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
 
             <button onClick={()=>setExportar(true)} disabled={items.length===0} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>Exportar</button>
@@ -506,6 +569,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       {cotizacionResult&&!cotizacionResult.error&&(
         <CotizacionPanel
           result={cotizacionResult}
+          presupuesto={presupuestoActivo}
           clientes={clientes}
           capitulosActivos={capitulosActivos}
           onCancelar={()=>setCotizacionResult(null)}
@@ -650,8 +714,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             return(
               <div key={cap.nombre} style={{marginBottom:10,background:"#fff",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
                 {/* Capítulo header */}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",background:"var(--brand-soft)"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"8px 14px",background:"var(--brand-soft)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flex:"1 1 320px",minWidth:0}}>
                     {/* Orden buttons */}
                     <div style={{display:"flex",flexDirection:"column",gap:1}}>
                       <button onClick={()=>moverCapitulo(cap.nombre,-1)} disabled={capIdx===0}
@@ -670,11 +734,12 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                         setCapitulosActivos(prev=>prev.map(c=>c.nombre===cap.nombre?{...c,nombre:nuevoNombre}:c));
                         setItems(prev=>prev.map(i=>i.capitulo===cap.nombre?{...i,capitulo:nuevoNombre}:i));
                       }}
-                      style={{fontSize:13,fontWeight:700,color:"var(--brand)",background:"transparent",border:"none",borderBottom:"1.5px dashed var(--border)",outline:"none",minWidth:100,maxWidth:300,fontFamily:"var(--font)"}}
+                      title={cap.nombre}
+                      style={{fontSize:13,fontWeight:700,color:"var(--brand)",background:"transparent",border:"none",borderBottom:"1.5px dashed var(--border)",outline:"none",flex:1,minWidth:0,width:"100%",fontFamily:"var(--font)"}}
                     />
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)"}}>${fmt(capTotal)}</span>}
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:"auto"}}>
+                    {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",whiteSpace:"nowrap"}}>${fmt(capTotal)}</span>}
                     <div style={{display:"flex",alignItems:"center",gap:4,background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px"}}>
                       <span style={{fontSize:10,color:"var(--brand)"}}>Util%</span>
                       <input type="number" placeholder="0" min="0" max="100"
@@ -688,45 +753,61 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                   </div>
                 </div>
                 {capItems.length>0&&(
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <div className="pres-tabla">
+                  <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
+                    <colgroup>
+                      <col style={{width:70}}/><col/><col style={{width:64}}/><col style={{width:104}}/>
+                      <col style={{width:96}}/><col style={{width:70}}/><col style={{width:112}}/><col style={{width:118}}/><col style={{width:34}}/>
+                    </colgroup>
                     <thead><tr style={{background:"var(--bg)"}}>
-                      {["N°","Descripción","Unidad","Cantidad","P.Base","Util%","P.Final","Total",""].map(h=>(
-                        <th key={h} style={{padding:"6px 8px",textAlign:"left",fontSize:10,color:"var(--ink-soft)",fontWeight:600,borderBottom:"1px solid var(--border)"}}>{h}</th>
+                      {[["N°","left"],["Descripción","left"],["Unidad","left"],["Cantidad","right"],["P.Base","right"],["Util%","right"],["P.Final","right"],["Total","right"],["",""]].map(([h,al])=>(
+                        <th key={h||"x"} style={{padding:"6px 8px",textAlign:al||"left",fontSize:10,color:"var(--ink-soft)",fontWeight:600,borderBottom:"1px solid var(--border)"}}>{h}</th>
                       ))}
                     </tr></thead>
                     <tbody>
                       {capItems.map((item,itemIdx)=>(
                         <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)"}}>
-                          <td style={{padding:"5px 8px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>{cap.orden}.{itemIdx+1}</td>
-                          <td style={{padding:"5px 8px",color:"var(--ink)",maxWidth:180,fontSize:12}}>{item.descripcion}</td>
-                          <td style={{padding:"5px 8px",color:"var(--ink-soft)",whiteSpace:"nowrap"}}>{item.unidad}</td>
-                          <td style={{padding:"5px 8px"}}>
-                            <input type="number" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
-                              style={{width:55,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                          <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>
+                            <div style={{display:"flex",alignItems:"center",gap:4}}>
+                              <div style={{display:"flex",flexDirection:"column"}}>
+                                <button onClick={()=>moverRubro(item,-1)} disabled={itemIdx===0} title="Subir"
+                                  style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===0?"default":"pointer",color:itemIdx===0?"var(--border)":"var(--muted)"}}>▲</button>
+                                <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===capItems.length-1} title="Bajar"
+                                  style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===capItems.length-1?"default":"pointer",color:itemIdx===capItems.length-1?"var(--border)":"var(--muted)"}}>▼</button>
+                              </div>
+                              {cap.orden}.{itemIdx+1}
+                            </div>
                           </td>
-                          <td style={{padding:"5px 8px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap"}}>${fmt(item.precio_base||item.precio_unitario)}</td>
+                          <td style={{padding:"5px 8px",color:"var(--ink)",fontSize:12,lineHeight:1.35,overflowWrap:"anywhere"}}>{item.descripcion}</td>
+                          <td style={{padding:"5px 8px",color:"var(--ink-soft)",overflowWrap:"anywhere"}}>{item.unidad}</td>
                           <td style={{padding:"5px 8px"}}>
-                            <input type="number" value={item.utilidad_pct||0}
+                            <input type="number" className="num-limpio" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
+                              style={{width:"100%",boxSizing:"border-box",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
+                          </td>
+                          <td style={{padding:"5px 8px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",textAlign:"right"}}>${fmt(item.precio_base||item.precio_unitario)}</td>
+                          <td style={{padding:"5px 8px"}}>
+                            <input type="number" className="num-limpio" value={item.utilidad_pct||0}
                               onChange={e=>{
                                 const pct=Number(e.target.value);
                                 const base=item.precio_base||item.precio_unitario;
                                 const nuevo=Number(base)*(1+pct/100);
                                 actualizarItemMulti(item.id,{utilidad_pct:pct,precio_unitario:nuevo,precio_base:base});
                               }}
-                              style={{width:50,background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                              style={{width:"100%",boxSizing:"border-box",background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px"}}>
-                            <input type="number" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
-                              style={{width:75,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                            <input type="number" className="num-limpio" value={item.precio_unitario} onChange={e=>actualizarItem(item.id,"precio_unitario",e.target.value)}
+                              style={{width:"100%",boxSizing:"border-box",background:Number(item.precio_unitario)?"var(--bg)":"var(--warning-soft)",border:`1px solid ${Number(item.precio_unitario)?"var(--border)":"var(--warning-border)"}`,borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
-                          <td style={{padding:"5px 8px",fontWeight:600,color:"var(--ink)",whiteSpace:"nowrap"}}>${fmt(item.total)}</td>
-                          <td style={{padding:"5px 8px"}}>
+                          <td style={{padding:"5px 8px",fontWeight:600,color:"var(--ink)",whiteSpace:"nowrap",textAlign:"right"}}>${fmt(item.total)}</td>
+                          <td style={{padding:"5px 4px",textAlign:"center"}}>
                             <button onClick={()=>eliminarItem(item.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             );
@@ -779,7 +860,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                       await supabase.from("presupuestos").update({honorarios_pct:pct}).eq("id",presupuestoActivo.id);
                       recalcTotales(items, {honorarios_pct:pct});
                     }}
-                    style={{width:50,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
+                    className="num-limpio" style={{width:64,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
                   <span style={{fontSize:11}}>%</span>
                 </div>
                 <span>${fmt(presupuestoActivo.honorarios_monto)}</span>
@@ -794,7 +875,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                       await supabase.from("presupuestos").update({iva_pct:pct}).eq("id",presupuestoActivo.id);
                       recalcTotales(items, {iva_pct:pct});
                     }}
-                    style={{width:50,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
+                    className="num-limpio" style={{width:64,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
                   <span style={{fontSize:11}}>%</span>
                 </div>
                 <span>${fmt(presupuestoActivo.iva_monto)}</span>
