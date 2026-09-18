@@ -94,6 +94,8 @@ export function compararConBase(nuevos = [], base = { rubros: [], precios: [] },
 /** El % de utilidad que lleva un rubro según lo respondido. */
 export function pctUtilidad(r, utilidad) {
   if (utilidad?.estado !== "con_utilidad") return 0;
+  // Un presupuesto trabajado en FOREMAN sabe la utilidad de cada rubro.
+  if (utilidad.porRubro) return Number(r.utilidad_pct) || 0;
   const porCap = utilidad.porCapitulo?.[r.capitulo];
   return Number(porCap ?? utilidad.pct) || 0;
 }

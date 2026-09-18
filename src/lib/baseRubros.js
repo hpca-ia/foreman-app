@@ -41,8 +41,8 @@ async function registrar(tabla, nombre, extra = {}) {
 /**
  * @param rubros  [{ descripcion, unidad, precio_unitario, capitulo, cantidad }]
  * @param origen  { tipo: "cliente" | "proveedor", cliente, proveedor, proyecto, fecha, fuente, obraId,
- *                  ivaIncluido, ivaPct, utilidad: { estado, pct, porCapitulo } }
- * @returns { capitulosNuevos, rubrosNuevos, historial, faltaMigracion: "016" | "017" | null, error }
+ *                  presupuestoId, ivaIncluido, ivaPct, utilidad: { estado, pct, porCapitulo, porRubro } }
+ * @returns { capitulosNuevos, rubrosNuevos, historial, faltaMigracion: "016" | "017" | "027" | null, error }
  */
 export async function alimentarBase(rubros = [], origen = {}) {
   const utiles = rubros.filter(r => r?.descripcion && Number(r.precio_unitario) > 0);
@@ -125,6 +125,7 @@ export async function alimentarBase(rubros = [], origen = {}) {
       fuente: origen.fuente || null,
       obra_id: origen.obraId || null,
     },
+    extra: origen.presupuestoId ? { presupuesto_id: origen.presupuestoId } : {},
     utilidad: {
       utilidad_estado: origen.utilidad?.estado || null,
       utilidad_pct: origen.utilidad?.estado === "costo" ? 0 : origen.utilidad?.estado === "con_utilidad" ? pctUtilidad(r, origen.utilidad) : null,
@@ -133,14 +134,20 @@ export async function alimentarBase(rubros = [], origen = {}) {
   })).filter(h => h.basico.rubro_id);
 
   // Si faltan migraciones el precio se guarda igual, con lo que la base acepte:
-  // sin la 017 va sin utilidad, sin la 016 va también sin origen.
-  const niveles = [h => ({ ...h.basico, ...h.origen, ...h.utilidad }), h => ({ ...h.basico, ...h.origen }), h => h.basico];
-  const faltas = ["", "017", "016"];
+  // sin la 027 va sin el presupuesto de origen, sin la 017 sin utilidad, sin
+  // la 016 también sin origen.
+  const niveles = [
+    h => ({ ...h.basico, ...h.origen, ...h.utilidad, ...h.extra }),
+    h => ({ ...h.basico, ...h.origen, ...h.utilidad }),
+    h => ({ ...h.basico, ...h.origen }),
+    h => h.basico,
+  ];
+  const faltas = ["", "027", "017", "016"];
   let nivel = 0, historial = 0;
   for (let i = 0; i < hist.length; i += 200) {
     const lote = hist.slice(i, i + 200);
     let { error } = await supabase.from("precios_historial").insert(lote.map(niveles[nivel]));
-    while (error && nivel < 2 && /column|schema cache/i.test(error.message)) {
+    while (error && nivel < niveles.length - 1 && /column|schema cache/i.test(error.message)) {
       nivel++;
       ({ error } = await supabase.from("precios_historial").insert(lote.map(niveles[nivel])));
     }
@@ -158,7 +165,7 @@ export function resumenAlimentacion(r) {
   if (r.capitulosNuevos) partes.push(`${r.capitulosNuevos} capítulos nuevos`);
   if (r.historial) partes.push(`${r.historial} precios al historial`);
   let txt = partes.length ? "Base de rubros: " + partes.join(" · ") : "";
-  if (r.faltaMigracion) txt += ` (sin ${r.faltaMigracion === "016" ? "el origen ni la utilidad" : "la utilidad"} de los precios: falta correr la migración ${r.faltaMigracion})`;
+  if (r.faltaMigracion) txt += ` (sin ${r.faltaMigracion === "016" ? "el origen ni la utilidad" : r.faltaMigracion === "017" ? "la utilidad" : "el presupuesto de origen"} de los precios: falta correr la migración ${r.faltaMigracion})`;
   return txt;
 }
 

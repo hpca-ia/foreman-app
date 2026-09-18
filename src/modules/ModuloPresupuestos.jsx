@@ -13,6 +13,7 @@ import CotizacionPanel from "./CotizacionPanel";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
+import PasarABase from "./presupuestos/PasarABase";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
@@ -34,6 +35,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // base leída (se vuelve a leer si pasó más de un minuto: una cotización
   // recién guardada tiene que aparecer).
   const [eligiendoPrecio, setEligiendoPrecio] = useState(null);
+  const [pasarABase, setPasarABase] = useState(false);
   const [baseRubros, setBaseRubros] = useState(null);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
@@ -373,7 +375,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setUploadingCotizacion(true); setCotizacionResult(null);
     // Los totales escritos en la cotización vienen aparte: son la prueba de que
     // se leyeron todos los rubros, y se muestran antes de aplicarla.
-    const prompt = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: {"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00}],"subtotal":null,"iva":null,"total":null}. En subtotal, iva y total pon los valores TAL COMO ESTAN ESCRITOS en el documento (subtotal sin IVA, el IVA, y el total a pagar), o null si no aparecen. No los calcules.';
+    // Muchas proformas traen dos precios por rubro (P.V.P. y con descuento) o
+    // un descuento general al final: NOVA trae los dos y quien importa elige.
+    const prompt = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: {"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00,"precio_pvp":null,"precio_descuento":null}],"subtotal":null,"iva":null,"total":null,"descuento_pct":null,"descuento_monto":null}. Si cada rubro trae DOS precios unitarios (por ejemplo P.V.P. o precio de lista, y precio con descuento o precio neto), pon ambos en precio_pvp y precio_descuento, y en precio_unitario el con descuento; si hay un solo precio, deja precio_pvp y precio_descuento en null. Si al final hay un descuento general, pon su porcentaje en descuento_pct y su monto en descuento_monto. En subtotal, iva y total pon los valores TAL COMO ESTAN ESCRITOS en el documento (subtotal sin IVA, el IVA, y el total a pagar), o null si no aparecen. No los calcules.';
     try {
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       let msgContent;
@@ -592,6 +596,11 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
             <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
+            <button onClick={()=>setPasarABase(true)} disabled={items.length===0}
+              title={presupuestoActivo?.en_base_at?`Pasado a la base el ${new Date(presupuestoActivo.en_base_at).toLocaleDateString("es-EC")}`:"Cuando lo des por bueno: sus precios entran a la base de rubros"}
+              style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              {presupuestoActivo?.en_base_at?"✓ En la base":"Pasar a la base"}
+            </button>
 
             <button onClick={()=>setExportar(true)} disabled={items.length===0} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>Exportar</button>
           </>}
@@ -599,6 +608,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
+      {pasarABase&&presupuestoActivo&&<PasarABase presupuesto={presupuestoActivo} items={items} onCerrar={()=>setPasarABase(false)}
+        onHecho={t=>{setPresupuestoActivo(p=>({...p,en_base_at:t}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,en_base_at:t}:p));}}/>}
       {eligiendoPrecio&&<PreciosDeRubro item={items.find(i=>i.id===eligiendoPrecio.id)||eligiendoPrecio} base={baseRubros}
         onCerrar={()=>setEligiendoPrecio(null)} onElegir={v=>aplicarPreciosBase([{id:eligiendoPrecio.id,precio_base:v}])}/>}
       {exportar&&presupuestoActivo&&<ExportarPresupuesto presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} currentUser={currentUser}

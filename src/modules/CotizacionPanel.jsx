@@ -13,13 +13,31 @@ import { useState } from "react";
 const n = v => Number(v) || 0;
 const r2 = v => Math.round(v * 100) / 100;
 
+// Proformas con dos precios: uno por rubro (P.V.P. y con descuento) o un
+// descuento general al final. Se guardan los dos en cada rubro para poder
+// cambiar de opinión sin volver a leer el documento.
+function conDosPrecios(result) {
+  const lista = result.rubros?.filter(r => r.descripcion?.trim()) || [];
+  const porRubro = lista.some(r => r.precio_pvp != null && r.precio_descuento != null && n(r.precio_pvp) !== n(r.precio_descuento));
+  const pct = !porRubro && n(result.descuento_pct) > 0 ? n(result.descuento_pct) : null;
+  const rubros = lista.map(r => {
+    if (porRubro && r.precio_pvp != null && r.precio_descuento != null) return { ...r, _pvp: n(r.precio_pvp), _desc: n(r.precio_descuento) };
+    if (pct != null) return { ...r, _pvp: n(r.precio_unitario), _desc: r2(n(r.precio_unitario) * (1 - pct / 100)) };
+    return r;
+  });
+  return { rubros, dos: porRubro || pct != null, pctGeneral: pct };
+}
+
 export default function CotizacionPanel({ result, clientes, capitulosActivos, presupuesto, onCancelar, onImportar, fmt }) {
   // "" = capítulo nuevo con el nombre de abajo; si no, uno que ya existe.
   const [destino, setDestino] = useState("");
   const [capNuevo, setCapNuevo] = useState(result.proveedor || "COTIZACIÓN PROVEEDOR");
   const capNombre = destino || capNuevo.trim();
   const [utilidadGlobal, setUtilidadGlobal] = useState(0);
-  const [rubros, setRubros] = useState(result.rubros?.filter(r => r.descripcion?.trim()) || []);
+  const [lectura] = useState(() => conDosPrecios(result));
+  const [rubros, setRubros] = useState(lectura.rubros);
+  // Con dos precios nada se aplica hasta elegir cuál: PVP o con descuento.
+  const [precioElegido, setPrecioElegido] = useState(null);
   const [guardarBD, setGuardarBD] = useState(true);
   const [proveedor, setProveedor] = useState(result.proveedor || "");
   const [clienteNombre, setClienteNombre] = useState("");
@@ -43,18 +61,37 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
     setRevisado(false);
   }
   function quitar(idx) { setRubros(prev => prev.filter((_, i) => i !== idx)); setRevisado(false); }
+  function elegirPrecio(tipo) {
+    setPrecioElegido(tipo);
+    setRubros(prev => prev.map(r => {
+      if (r._pvp == null) return r;
+      const p = tipo === "pvp" ? r._pvp : r._desc;
+      return { ...r, precio_unitario: p, precio_unitario_final: p * (1 + n(r.utilidad_pct) / 100) };
+    }));
+    setRevisado(false);
+  }
+  const totalOpcion = tipo => r2(rubros.reduce((s, r) => s + n(r.cantidad || 1) * (r._pvp == null ? n(r.precio_unitario) : tipo === "pvp" ? r._pvp : r._desc), 0));
 
   // ── La verificación ──
   const leido = r2(rubros.reduce((s, r) => s + n(r.cantidad || 1) * n(r.precio_unitario), 0));
   const conUtilidad = r2(rubros.reduce((s, r) => s + n(r.cantidad || 1) * final(r), 0));
-  const subDoc = result.subtotal != null ? n(result.subtotal) : null;
+  const subEscrito = result.subtotal != null ? n(result.subtotal) : null;
+  const restaDescuento = lectura.pctGeneral != null && precioElegido === "descuento" && subEscrito;
+  const subDoc = restaDescuento
+    ? r2(result.descuento_monto != null ? subEscrito - n(result.descuento_monto) : subEscrito * (1 - lectura.pctGeneral / 100))
+    : subEscrito;
   const totDoc = result.total != null ? n(result.total) : null;
   const ivaDoc = result.iva != null ? n(result.iva) : null;
   const tolerancia = x => Math.max(1, Math.abs(x) * 0.001);
   let chequeo;
+  // Si se eligió el PVP y la proforma suma con descuento, la diferencia es el
+  // descuento, no un rubro perdido: se dice así y no se frena.
+  const pvpContraDescuento = ref => lectura.dos && precioElegido === "pvp" && ref && Math.abs(totalOpcion("descuento") - ref) <= tolerancia(ref);
   if (subDoc) {
     const dif = r2(leido - subDoc);
-    chequeo = { cuadra: Math.abs(dif) <= tolerancia(subDoc), contra: "el subtotal de la cotización", valor: subDoc, dif };
+    chequeo = { cuadra: Math.abs(dif) <= tolerancia(subDoc), contra: restaDescuento ? "el subtotal de la cotización menos su descuento" : "el subtotal de la cotización", valor: subDoc, dif };
+    if (!chequeo.cuadra && pvpContraDescuento(subDoc)) chequeo = { ...chequeo, cuadra: true, nota: `La proforma suma $${fmt(subDoc)} con su descuento; tomaste el PVP, así que los $${fmt(dif)} de diferencia son el descuento.` };
+    else if (!chequeo.cuadra && lectura.pctGeneral != null && precioElegido === "pvp" && Math.abs(leido - subEscrito) <= tolerancia(subEscrito)) chequeo = { ...chequeo, cuadra: true };
   } else if (totDoc) {
     const dif = r2(leido - totDoc);
     const sinIva = ivaDoc != null ? totDoc - ivaDoc : null;
@@ -75,7 +112,8 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
 
   const faltaProveedor = guardarBD && !proveedor.trim();
   const sinCapitulo = !capNombre;
-  const bloqueo = faltaProveedor ? "Escribe quién cotiza para guardarlo en la base"
+  const bloqueo = lectura.dos && !precioElegido ? "Elige qué precio tomar: PVP o con descuento"
+    : faltaProveedor ? "Escribe quién cotiza para guardarlo en la base"
     : sinCapitulo ? "Ponle nombre al capítulo"
     : falta ? "Revisa la diferencia del total para continuar"
     : !rubros.length ? "No quedan rubros para importar" : null;
@@ -86,6 +124,25 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
   return (
     <div style={{ background: "var(--success-soft)", border: "1.5px solid var(--success-border)", borderRadius: 12, padding: 16, marginBottom: 14, fontFamily: "var(--font)" }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--success)", marginBottom: 12 }}>✓ NOVA encontró {rubros.length} rubros — revisa antes de aplicarla</div>
+
+      {lectura.dos && (
+        <div style={{ background: "#fff", border: `1.5px solid ${precioElegido ? "var(--border)" : "var(--warning-border)"}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", marginBottom: 2 }}>
+            {lectura.pctGeneral != null ? `Esta proforma trae un descuento general del ${lectura.pctGeneral} %.` : "Esta proforma trae dos precios por rubro."} ¿Cuál tomo?
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>Se aplica a todos los rubros; después puedes corregir uno por uno en la tabla.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+            {[["pvp", "PVP", "Precio de lista, sin descuento"], ["descuento", "Con descuento", lectura.pctGeneral != null ? `Con el ${lectura.pctGeneral} % aplicado a cada precio` : "El precio neto de la proforma"]].map(([id, label, ayuda]) => (
+              <button key={id} onClick={() => elegirPrecio(id)}
+                style={{ textAlign: "left", cursor: "pointer", fontFamily: "var(--font)", borderRadius: 8, padding: "8px 10px",
+                  border: `1.5px solid ${precioElegido === id ? "var(--ink)" : "var(--border)"}`, background: precioElegido === id ? "var(--neutral-soft)" : "#fff" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{label} · ${fmt(totalOpcion(id))}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{ayuda}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginBottom: 12 }}>
         <div>
@@ -145,7 +202,7 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
             <span>Contra {chequeo.contra}</span><strong style={{ color: "var(--ink)" }}>${fmt(chequeo.valor)}</strong>
           </div>
         )}
-        {chequeo.cuadra === true && <div style={{ color: "var(--success)", fontWeight: 600, marginTop: 4 }}>✓ Cuadra: se leyeron todos los rubros.</div>}
+        {chequeo.cuadra === true && <div style={{ color: "var(--success)", fontWeight: 600, marginTop: 4 }}>✓ {chequeo.nota || "Cuadra: se leyeron todos los rubros."}</div>}
         {chequeo.cuadra === false && (
           <div style={{ marginTop: 6 }}>
             <div style={{ color: "var(--warning)", fontWeight: 600 }}>
