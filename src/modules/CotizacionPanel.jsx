@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { totalesPresupuesto } from "./presupuestos/honorarios";
 
 // La cotización de un proveedor, antes de meterla al presupuesto: a qué
 // capítulo va, con cuánta utilidad, y si sus precios quedan en la base de
@@ -105,8 +106,7 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
   const falta = chequeo.cuadra === false && !revisado;
 
   // ── Cómo queda el presupuesto ──
-  const hPct = n(presupuesto?.honorarios_pct), ivaPct = presupuesto?.iva_pct == null ? 15 : n(presupuesto.iva_pct);
-  const totalCon = sub => r2((sub + sub * hPct / 100) * (1 + ivaPct / 100));
+  const totalCon = sub => totalesPresupuesto(sub, presupuesto || {}).total;
   const subAntes = n(presupuesto?.subtotal);
   const subDespues = r2(subAntes + conUtilidad);
 

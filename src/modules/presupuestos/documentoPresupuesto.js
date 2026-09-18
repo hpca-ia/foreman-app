@@ -17,6 +17,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { money } from "../../lib/exportar";
+import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
 
 export const FORMATOS = {
   detallado: { label: "Detallado", titulo: "Presupuesto", ayuda: "Cada rubro con cantidad, precio unitario y total, agrupado por capítulo." },
@@ -101,12 +102,7 @@ export function estructura({ capitulos = [], items = [] }) {
  * toca.
  */
 export function totalesDe(items, presupuesto = {}, conIva = true) {
-  const subtotal = r2(items.reduce((s, i) => s + n(i.total), 0));
-  const honorarios_pct = n(presupuesto.honorarios_pct);
-  const iva_pct = !conIva ? 0 : presupuesto.iva_pct == null ? 15 : n(presupuesto.iva_pct);
-  const honorarios = r2(subtotal * honorarios_pct / 100);
-  const iva = r2((subtotal + honorarios) * iva_pct / 100);
-  return { subtotal, honorarios_pct, honorarios, iva_pct, iva, total: r2(subtotal + honorarios + iva) };
+  return totalesPresupuesto(items.reduce((s, i) => s + n(i.total), 0), presupuesto, conIva);
 }
 
 const fechaLarga = () => new Date().toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" });
@@ -267,13 +263,14 @@ export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detal
   if (!cotizar) {
     const filas = [
       ["Subtotal", money(tot.subtotal)],
-      tot.honorarios_pct > 0 && [`Honorarios (${cantidad(tot.honorarios_pct)} %)`, money(tot.honorarios)],
+      ...tot.honorarios.map(h => [etiquetaHonorario(h), money(h.monto)]),
       conIva && [`IVA (${cantidad(tot.iva_pct)} %)`, money(tot.iva)],
       ["TOTAL", `$ ${money(tot.total)}`],
     ].filter(Boolean);
     if (y > H - 130) { doc.addPage(); y = 56; }
     autoTable(doc, {
-      startY: y, body: filas, theme: "plain", margin: { left: W - M - 250, right: M },
+      // Ancho para "Honorarios de diseño arquitectónico" en una sola línea.
+      startY: y, body: filas, theme: "plain", margin: { left: W - M - 340, right: M },
       styles: { fontSize: 9, cellPadding: { top: 4, bottom: 4, left: 8, right: 5 }, textColor: t.texto },
       columnStyles: { 0: { halign: "right", textColor: t.gris }, 1: { halign: "right", cellWidth: 110 } },
       didParseCell: d => {
@@ -524,11 +521,11 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     return `F${fila++}`;
   };
   const sub = lineaTotal("Subtotal", celdasSubtotal.length ? celdasSubtotal.join("+") : "0", cotizar ? 0 : tot.subtotal);
-  let hon = null;
-  if (!cotizar && tot.honorarios_pct > 0) hon = lineaTotal(`Honorarios (${cantidad(tot.honorarios_pct)} %)`, `${sub}*${tot.honorarios_pct}/100`, tot.honorarios);
-  const baseIva = hon ? `(${sub}+${hon})` : sub;
+  // Un honorario en porcentaje es fórmula sobre el subtotal; uno fijo, su monto.
+  const hon = cotizar ? [] : tot.honorarios.map(h => lineaTotal(etiquetaHonorario(h), h.tipo === "monto" ? `${Number(h.valor) || 0}` : `${sub}*${Number(h.valor) || 0}/100`, h.monto));
+  const baseIva = hon.length ? `(${[sub, ...hon].join("+")})` : sub;
   const iva = conIva ? lineaTotal(`IVA (${cantidad(tot.iva_pct)} %)`, `${baseIva}*${tot.iva_pct}/100`, cotizar ? 0 : tot.iva) : null;
-  lineaTotal("TOTAL", [sub, hon, iva].filter(Boolean).join("+"), cotizar ? 0 : tot.total, { fuerte: true });
+  lineaTotal("TOTAL", [sub, ...hon, iva].filter(Boolean).join("+"), cotizar ? 0 : tot.total, { fuerte: true });
   if (!conIva) {
     ws.mergeCells(fila, 3, fila, 6);
     ws.getCell(fila, 3).value = "Los valores no incluyen IVA.";

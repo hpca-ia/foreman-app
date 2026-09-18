@@ -14,6 +14,8 @@ import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 import PasarABase from "./presupuestos/PasarABase";
+import EditorHonorarios from "./presupuestos/EditorHonorarios";
+import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
@@ -103,6 +105,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       nombre: nombreNuevo || `${pre.nombre} (copia)`,
       cliente_id: pre.cliente_id, cliente_nombre: pre.cliente_nombre,
       honorarios_pct: pre.honorarios_pct, iva_pct: pre.iva_pct,
+      ...(Array.isArray(pre.honorarios) ? { honorarios: pre.honorarios } : {}),
       estado: "borrador", created_by: currentUser.id,
       subtotal: pre.subtotal, honorarios_monto: pre.honorarios_monto,
       iva_monto: pre.iva_monto, total: pre.total,
@@ -145,6 +148,20 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       setBaseRubros(null);
       preciosDeLaBase().then(b => setBaseRubros({ ...b, leida: Date.now() })).catch(() => setBaseRubros({ buscar: () => null, leida: Date.now() }));
     }
+  }
+
+  // Honorarios: ninguno, de administración, de diseño arquitectónico, los dos
+  // u otros, en % del costo directo o monto fijo. Sin la migración 028 solo
+  // se puede guardar la suma de los porcentajes, y se avisa.
+  async function guardarHonorarios(lista) {
+    const limpia = lista.map(h => ({ nombre: String(h.nombre || "").trim(), tipo: h.tipo === "monto" ? "monto" : "pct", valor: Number(h.valor) || 0 }));
+    const sumaPct = limpia.filter(h => h.tipo === "pct").reduce((s, h) => s + h.valor, 0);
+    const { error } = await supabase.from("presupuestos").update({ honorarios: limpia, honorarios_pct: sumaPct }).eq("id", presupuestoActivo.id);
+    if (error && /column|schema cache/i.test(error.message)) {
+      alert("Falta correr la migración 028 en Supabase para guardar varios honorarios con su nombre. Por ahora se guarda solo la suma de los porcentajes.");
+      await supabase.from("presupuestos").update({ honorarios_pct: sumaPct }).eq("id", presupuestoActivo.id);
+    } else if (error) { alert("No se pudieron guardar los honorarios: " + error.message); return; }
+    recalcTotales(items, { honorarios: limpia, honorarios_pct: sumaPct });
   }
 
   async function renombrarPresupuesto(nombre) {
@@ -355,17 +372,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
 
   async function recalcTotales(itemsList, overrides={}) {
     if (!presupuestoActivo) return;
-    const subtotal=Math.round(itemsList.reduce((s,i)=>s+(Number(i.total)||0),0)*100)/100;
-    const hPct = overrides.honorarios_pct ?? presupuestoActivo.honorarios_pct ?? 0;
-    const ivaPct = overrides.iva_pct ?? presupuestoActivo.iva_pct ?? 12;
-    // Plata, a dos decimales: guardar 353,265 de IVA hace que la pantalla y el
-    // documento redondeen distinto.
-    const r2=v=>Math.round(v*100)/100;
-    const honorarios_monto=r2(subtotal*(Number(hPct)||0)/100);
-    const base_iva=subtotal+honorarios_monto;
-    const iva_monto=r2(base_iva*(Number(ivaPct)||0)/100);
-    const total=r2(base_iva+iva_monto);
-    const upd={...presupuestoActivo,...overrides,subtotal,honorarios_monto,iva_monto,total};
+    // La misma cuenta que el PDF y el Excel (honorarios.js), a centavos:
+    // guardar 353,265 de IVA hacía que la pantalla y el documento redondearan
+    // distinto.
+    const conCambios={...presupuestoActivo,...overrides};
+    const t=totalesPresupuesto(itemsList.reduce((s,i)=>s+(Number(i.total)||0),0),{...conCambios,iva_pct:conCambios.iva_pct??12});
+    const subtotal=t.subtotal, honorarios_monto=t.honorarios_monto, iva_monto=t.iva, total=t.total;
+    const upd={...conCambios,subtotal,honorarios_monto,iva_monto,total};
     setPresupuestoActivo(upd);
     await supabase.from("presupuestos").update({subtotal,honorarios_monto,iva_monto,total}).eq("id",presupuestoActivo.id);
   }
@@ -738,9 +751,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               </select></div>
             {form.cliente_id==="nuevo"&&<div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Nombre del nuevo cliente</label>
               <input value={form.cliente_nombre} onChange={e=>setForm(p=>({...p,cliente_nombre:e.target.value}))} placeholder="Nombre del cliente" style={iS}/></div>}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Honorarios (%)</label>
-                <input type="number" value={form.honorarios_pct} onChange={e=>setForm(p=>({...p,honorarios_pct:e.target.value}))} style={iS}/></div>
+            <div style={{fontSize:11,color:"var(--muted)",marginTop:-6}}>Los honorarios —de administración, de diseño arquitectónico, otros o ninguno— se ponen después, en el recuadro de totales del presupuesto.</div>
+            <div style={{display:"grid",gridTemplateColumns:"minmax(0,160px)",gap:12}}>
+
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>IVA (%)</label>
                 <input type="number" value={form.iva_pct} onChange={e=>setForm(p=>({...p,iva_pct:e.target.value}))} style={iS}/></div>
             </div>
@@ -936,23 +949,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           {items.length>0&&(
             <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:16}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--neutral-soft)",fontSize:13,color:"var(--ink-soft)"}}>
-                <span>Subtotal</span><span>${fmt(presupuestoActivo.subtotal)}</span>
+                <span>Subtotal <span style={{fontSize:11,color:"var(--muted)"}}>· costo directo</span></span><span>${fmt(presupuestoActivo.subtotal)}</span>
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--neutral-soft)",fontSize:13,color:"var(--ink-soft)"}}>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span>Honorarios</span>
-                  <input type="number" defaultValue={presupuestoActivo.honorarios_pct||0}
-                    key={presupuestoActivo.id}
-                    onBlur={async e=>{
-                      const pct=Number(e.target.value);
-                      await supabase.from("presupuestos").update({honorarios_pct:pct}).eq("id",presupuestoActivo.id);
-                      recalcTotales(items, {honorarios_pct:pct});
-                    }}
-                    className="num-limpio" style={{width:64,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontSize:12,textAlign:"right"}}/>
-                  <span style={{fontSize:11}}>%</span>
-                </div>
-                <span>${fmt(presupuestoActivo.honorarios_monto)}</span>
-              </div>
+              <EditorHonorarios lista={lineasHonorarios(presupuestoActivo)} subtotal={presupuestoActivo.subtotal} onCambiar={guardarHonorarios}/>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--neutral-soft)",fontSize:13,color:"var(--ink-soft)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <span>IVA</span>
