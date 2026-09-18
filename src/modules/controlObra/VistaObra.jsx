@@ -7,6 +7,7 @@ import { fmt, calcularControl, agrupar, totalesObra } from "./calculos";
 import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
+import LibroFacturas from "./LibroFacturas";
 import PanelDuplicados from "./PanelDuplicados";
 import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
@@ -93,6 +94,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
+        <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
         <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
@@ -144,11 +146,15 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
               />
             </PanelPlanillas>
           )}
+          {tab === "facturas" && (
+            <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
+              facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar} />
+          )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
-            <ExportarPlanilla obra={obra} planilla={planillaActual} grupos={grupos} porRubro={porRubro}
+            <ExportarPlanilla obra={obra} planilla={planillaActual} planillas={planillas} grupos={grupos} porRubro={porRubro}
               totales={totales} facturas={facturas} asignaciones={asignaciones} rubros={rubros} />
           )}
         </>

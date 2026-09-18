@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Plus, Paperclip, AlertTriangle, Pencil, Trash2 } from "lucide-react";
+import { Plus, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { abrirArchivo } from "../../lib/archivos";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
-import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
+import { fmt, resumenPlanilla } from "./calculos";
 import ModalFactura from "./ModalFactura";
+import FilaFactura from "./FilaFactura";
 
 export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, onCambio, mostrarTitulo = true }) {
   const [modal, setModal] = useState(null); // null | {factura?}
@@ -23,8 +23,6 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
     await supabase.from("obra_facturas").delete().eq("id", f.id);
     onCambio();
   }
-
-  const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id;
 
   return (
     <div>
@@ -71,39 +69,10 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
         {delPeriodo.length === 0 ? (
           <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Sin facturas en este período.</div>
-        ) : delPeriodo.map(f => {
-          const asignado = asignadasPorFactura[f.id] || 0;
-          const pendiente = Math.round((Number(f.total) - asignado) * 100) / 100;
-          return (
-            <div key={f.id} style={{ padding: "10px 14px", borderBottom: `1px solid ${colors.neutralSoft}`, display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {f.razon_social || "Sin proveedor"}
-                  {f.numero_factura && <span style={{ color: colors.muted, fontWeight: 400, marginLeft: 6 }}>#{f.numero_factura}</span>}
-                </div>
-                <div style={{ fontSize: 11, color: colors.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {f.fecha} · {tipoLabel(f.tipo)}{f.detalle ? ` · ${f.detalle}` : ""}
-                </div>
-                {pendiente > 0.009 && (
-                  <div style={{ fontSize: 10, color: colors.warning, marginTop: 3, fontWeight: 600 }}>
-                    ${fmt(pendiente)} sin asignar a rubro
-                  </div>
-                )}
-              </div>
-              {f.archivo_url && (
-                <button onClick={() => abrirArchivo(f.archivo_url)} title={f.archivo_nombre || "Adjunto"}
-                  style={{ color: colors.muted, display: "flex", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-                  <Paperclip size={14} />
-                </button>
-              )}
-              <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>${fmt(f.total)}</div>
-              </div>
-              <button onClick={() => setModal({ factura: f })} style={{ background: colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, padding: "5px 7px", color: colors.inkSoft, cursor: "pointer", display: "flex" }}><Pencil size={12} /></button>
-              <button onClick={() => eliminar(f)} style={{ background: colors.dangerSoft, border: "none", borderRadius: colors.radiusSm, padding: "5px 7px", color: colors.danger, cursor: "pointer", display: "flex" }}><Trash2 size={12} /></button>
-            </div>
-          );
-        })}
+        ) : delPeriodo.map(f => (
+          <FilaFactura key={f.id} f={f} asignado={asignadasPorFactura[f.id] || 0}
+            onEditar={() => setModal({ factura: f })} onEliminar={() => eliminar(f)} />
+        ))}
       </div>
 
       {modal && (
@@ -120,7 +89,7 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
   );
 }
 
-function Mini({ label, valor, moneda = true, destacado }) {
+export function Mini({ label, valor, moneda = true, destacado }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
       <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.3 }}>{label.toUpperCase()}</div>

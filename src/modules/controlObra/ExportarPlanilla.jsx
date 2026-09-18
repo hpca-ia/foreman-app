@@ -9,13 +9,28 @@ import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorConten
 
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
-export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, totales, facturas, asignaciones, rubros }) {
+const opcion = activa => ({
+  display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: colors.ink, cursor: "pointer",
+  border: `1px solid ${activa ? colors.brand : colors.border}`, background: activa ? colors.brandSoft : colors.surface,
+  borderRadius: colors.radiusMd, padding: "9px 12px",
+});
+
+export default function ExportarPlanilla({ obra, planilla, planillas = [], grupos, porRubro, totales, facturas, asignaciones, rubros }) {
   const [generando, setGenerando] = useState("");
   const [progreso, setProgreso] = useState("");
   const [contenido, setContenido] = useState("completo");
+  // El control va siempre; las facturas y las planillas, según para quién es
+  // el reporte. Al cliente se le manda el control con sus planillas; al
+  // contador, las facturas de toda la obra.
+  const [conFacturas, setConFacturas] = useState(true);
+  const [alcanceFacturas, setAlcanceFacturas] = useState("planilla");   // planilla | todo
+  const [conPlanillas, setConPlanillas] = useState(true);
 
   const nombrePlanilla = planilla?.nombre || (planilla ? `Planilla N°${planilla.numero}` : "Acumulado");
-  const delPeriodo = planilla ? facturas.filter(f => f.planilla_id === planilla.id) : facturas;
+  const todoElProyecto = alcanceFacturas === "todo" || !planilla;
+  const delPeriodo = !conFacturas ? [] : todoElProyecto ? facturas : facturas.filter(f => f.planilla_id === planilla.id);
+  const nombreFacturas = todoElProyecto ? "Todo el proyecto" : nombrePlanilla;
+  const planillaDe = id => { const p = planillas.find(x => x.id === id); return p ? p.nombre || `Planilla N°${p.numero}` : "Sin planilla"; };
   const asigPeriodo = asignaciones.filter(a => delPeriodo.some(f => f.id === a.factura_id));
   const resumen = resumenPlanilla({ facturas: delPeriodo, asignaciones: asigPeriodo });
 
@@ -49,21 +64,43 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
   function filasFacturas() {
     const filas = [
       [`COMPENDIO DE FACTURAS — ${obra.nombre}`],
-      [nombrePlanilla],
+      [nombreFacturas],
       [],
-      ["N°", "FECHA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
+      ["N°", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
        "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "RUBRO ASIGNADO", "ORIGEN"],
     ];
     delPeriodo.forEach((f, i) => {
-      filas.push([i + 1, f.fecha, f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
+      filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
         f.detalle || "", f.justificacion || "",
         Number(f.subtotal_0) || 0, Number(f.subtotal_5) || 0, Number(f.subtotal_15) || 0,
         Number(f.iva) || 0, Number(f.total) || 0, tipoLabel(f.tipo),
         rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
     });
     filas.push([]);
-    filas.push(["", "", "", "", "", "", "", "TOTALES",
+    filas.push(["", "", "", "", "", "", "", "", "TOTALES",
       resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", ""]);
+    return filas;
+  }
+
+  // ── Planillas: cada corte con lo que se facturó y lo que quedó suelto ──
+  const porPlanilla = planillas.map(p => {
+    const fs = facturas.filter(f => f.planilla_id === p.id);
+    const r = resumenPlanilla({ facturas: fs, asignaciones: asignaciones.filter(a => fs.some(f => f.id === a.factura_id)) });
+    return { p, cantidad: fs.length, total: r.total, asignado: r.asignado, sinAsignar: r.sinAsignar };
+  });
+  function filasPlanillas() {
+    const filas = [
+      [`PLANILLAS — ${obra.nombre}`],
+      [],
+      ["N°", "PLANILLA", "DESDE", "HASTA", "ESTADO", "FACTURAS", "FACTURADO", "ASIGNADO A RUBROS", "SIN ASIGNAR"],
+    ];
+    porPlanilla.forEach(({ p, cantidad, total, asignado, sinAsignar }) => {
+      filas.push([p.numero, p.nombre || `Planilla N°${p.numero}`, p.fecha_desde || "", p.fecha_hasta || "", p.estado === "cerrada" ? "Cerrada" : "Abierta",
+        cantidad, total, asignado, sinAsignar]);
+    });
+    filas.push([]);
+    filas.push(["", "TOTAL", "", "", "", porPlanilla.reduce((s, x) => s + x.cantidad, 0),
+      porPlanilla.reduce((s, x) => s + x.total, 0), porPlanilla.reduce((s, x) => s + x.asignado, 0), porPlanilla.reduce((s, x) => s + x.sinAsignar, 0)]);
     return filas;
   }
 
@@ -71,7 +108,7 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
   function filasResumen() {
     const filas = [
       ["RESUMEN DE GASTO", ""],
-      [nombrePlanilla, ""],
+      [nombreFacturas, ""],
       [],
       ["Descripción", "Valor"],
       ["Subtotal base 0%", resumen.subtotal_0],
@@ -79,7 +116,7 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
       ["Subtotal base 15%", resumen.subtotal_15],
       ["Subtotal general", resumen.subtotal_0 + resumen.subtotal_5 + resumen.subtotal_15],
       ["IVA", resumen.iva],
-      ["TOTAL PLANILLA", resumen.total],
+      [todoElProyecto ? "TOTAL FACTURADO" : "TOTAL PLANILLA", resumen.total],
       [],
       ["Por tipo de gasto", ""],
     ];
@@ -96,9 +133,10 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
     try {
       exportarExcel(`${obra.nombre} - ${nombrePlanilla}`, [
         { nombre: "Control de Presupuesto", filas: filasControl(), anchos: [8, 52, 8, 11, 12, 14, 14, 14, 14, 14, 10] },
-        { nombre: "Compendio Facturas", filas: filasFacturas(), anchos: [5, 11, 14, 30, 18, 16, 40, 30, 11, 11, 11, 11, 12, 14, 30, 11] },
-        { nombre: "Resumen Gasto", filas: filasResumen(), anchos: [32, 16] },
-      ]);
+        conPlanillas && planillas.length > 0 && { nombre: "Planillas", filas: filasPlanillas(), anchos: [5, 26, 11, 11, 10, 10, 14, 16, 14] },
+        conFacturas && { nombre: "Compendio Facturas", filas: filasFacturas(), anchos: [5, 11, 16, 14, 30, 18, 16, 40, 30, 11, 11, 11, 11, 12, 14, 30, 11] },
+        conFacturas && { nombre: "Resumen Gasto", filas: filasResumen(), anchos: [32, 16] },
+      ].filter(Boolean));
     } finally { setGenerando(""); }
   }
 
@@ -128,13 +166,25 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
         anchos: { 0: { cellWidth: 230 }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" }, 8: { halign: "right" } },
       });
 
+      if (conPlanillas && planillas.length) {
+        bloquesControl.push({
+          titulo: "Planillas",
+          columnas: ["Planilla", "Desde", "Hasta", "Estado", "Facturas", "Facturado", "Sin asignar"],
+          filas: porPlanilla.map(({ p, cantidad, total, sinAsignar }) => [p.nombre || `Planilla N°${p.numero}`, p.fecha_desde || "—", p.fecha_hasta || "—",
+            p.estado === "cerrada" ? "Cerrada" : "Abierta", String(cantidad), money(total), sinAsignar > 0.009 ? money(sinAsignar) : "—"]),
+          anchos: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" } },
+        });
+      }
+
       if (delPeriodo.length) {
         bloquesControl.push({
-          titulo: "Compendio de facturas",
-          columnas: ["Fecha", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"],
-          filas: delPeriodo.map(f => [f.fecha, f.razon_social || "—", f.numero_factura || "—",
+          titulo: todoElProyecto ? "Compendio de facturas — todo el proyecto" : "Compendio de facturas",
+          columnas: todoElProyecto
+            ? ["Fecha", "Planilla", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"]
+            : ["Fecha", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"],
+          filas: delPeriodo.map(f => [f.fecha, ...(todoElProyecto ? [planillaDe(f.planilla_id)] : []), f.razon_social || "—", f.numero_factura || "—",
             (f.detalle || "").slice(0, 60), rubrosDeFactura(f.id) || "SIN ASIGNAR", money(f.total)]),
-          anchos: { 5: { halign: "right" } },
+          anchos: { [todoElProyecto ? 6 : 5]: { halign: "right" } },
         });
       }
 
@@ -145,7 +195,7 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
         .map((f, i) => ({ url: urls[i], titulo: `${f.razon_social || "Factura"} — ${f.numero_factura || f.fecha} — $${money(f.total)}` }))
         .filter(a => a.url);
 
-      const soloAnexos = contenido === "anexos";
+      const soloAnexos = conFacturas && contenido === "anexos";
 
       await exportarPDF({
         nombreArchivo: `${obra.nombre} - ${nombrePlanilla}${soloAnexos ? " (anexos)" : ""}`,
@@ -160,7 +210,7 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
           { label: "Avance", valor: `${(totales.pct * 100).toFixed(1)}%` },
         ],
         bloques: soloAnexos ? [] : bloquesControl,
-        adjuntos: contenido === "reporte" ? [] : adjuntos,
+        adjuntos: !conFacturas || contenido === "reporte" ? [] : adjuntos,
         onProgreso: (i, t) => setProgreso(`Adjuntando facturas ${i}/${t}...`),
       });
     } finally { setGenerando(""); setProgreso(""); }
@@ -172,11 +222,38 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 4 }}>Exportar {nombrePlanilla}</div>
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 14 }}>
-        {delPeriodo.length} factura{delPeriodo.length === 1 ? "" : "s"} · ${fmt(resumen.total)} en el período
-        {conAdjunto > 0 && ` · ${conAdjunto} con factura escaneada`}
+        El control de presupuesto va siempre. Lo demás, según para quién sea el reporte.
       </div>
 
-      <SelectorContenido valor={contenido} onChange={setContenido} conAdjunto={conAdjunto} />
+      <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+        <label style={opcion(conPlanillas)}>
+          <input type="checkbox" checked={conPlanillas} onChange={e => setConPlanillas(e.target.checked)} disabled={!planillas.length} />
+          <span style={{ flex: 1 }}>
+            <strong>Planillas</strong>
+            <span style={{ color: colors.muted }}> · {planillas.length ? `los ${planillas.length} cortes, con lo facturado en cada uno` : "esta obra todavía no tiene planillas"}</span>
+          </span>
+        </label>
+        <div style={opcion(conFacturas)}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1, minWidth: 180 }}>
+            <input type="checkbox" checked={conFacturas} onChange={e => setConFacturas(e.target.checked)} />
+            <span>
+              <strong>Facturas</strong>
+              <span style={{ color: colors.muted }}> · {conFacturas ? `${delPeriodo.length} · $${fmt(resumen.total)}` : "no van"}</span>
+            </span>
+          </label>
+          {conFacturas && planilla && (
+            <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: colors.radiusSm, padding: 3 }}>
+              {[["planilla", `De ${nombrePlanilla}`], ["todo", "De todo el proyecto"]].map(([v, l]) => (
+                <button key={v} onClick={() => setAlcanceFacturas(v)}
+                  style={{ padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 11, fontWeight: 600,
+                    background: alcanceFacturas === v ? colors.surface : "transparent", color: alcanceFacturas === v ? colors.brand : colors.inkSoft }}>{l}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {conFacturas && <SelectorContenido valor={contenido} onChange={setContenido} conAdjunto={conAdjunto} />}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Button variant="outline" onClick={generarExcel} disabled={!!generando}>
@@ -184,13 +261,13 @@ export default function ExportarPlanilla({ obra, planilla, grupos, porRubro, tot
         </Button>
         <Button variant="primary" onClick={generarPDF} disabled={!!generando}>
           {generando === "pdf" ? <Loader2 size={14} /> : <FileText size={14} />}
-          {generando === "pdf" ? (progreso || "Generando...") : `PDF · ${CONTENIDO[contenido].label}`}
+          {generando === "pdf" ? (progreso || "Generando...") : conFacturas ? `PDF · ${CONTENIDO[contenido].label}` : "PDF"}
         </Button>
       </div>
 
       <div style={{ fontSize: 11, color: colors.muted, marginTop: 10, lineHeight: 1.5 }}>
-        El <strong>Excel</strong> trae tres hojas: control de presupuesto por rubro, compendio de facturas y resumen de gasto por tasa de IVA.<br />
-El <strong>PDF</strong> lo armas según lo que elijas arriba: solo el reporte, solo el legajo de anexos, o ambos.
+        El <strong>Excel</strong> trae una hoja por parte: control de presupuesto, planillas, compendio de facturas y resumen de gasto por tasa de IVA — solo las que marques.<br />
+        El <strong>PDF</strong> arma lo mismo en un documento{conFacturas ? ", y con las facturas escaneadas si las pides" : ""}.
       </div>
     </div>
   );
