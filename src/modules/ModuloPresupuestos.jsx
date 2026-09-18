@@ -562,7 +562,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
-      {exportar&&presupuestoActivo&&<ExportarPresupuesto presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} onCerrar={()=>setExportar(false)}/>}
+      {exportar&&presupuestoActivo&&<ExportarPresupuesto presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} currentUser={currentUser}
+        onCerrar={()=>setExportar(false)}
+        onGuardado={e=>{setPresupuestoActivo(p=>({...p,exportacion:e}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,exportacion:e}:p));}}/>}
       <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
 
       {!showAdminBD&&<>

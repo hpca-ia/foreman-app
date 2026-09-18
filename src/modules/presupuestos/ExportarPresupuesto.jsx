@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { FileText, FileSpreadsheet, Plus, X, Check, Loader2, Pencil } from "lucide-react";
+import { FileText, FileSpreadsheet, Plus, X, Check, Loader2 } from "lucide-react";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { colors } from "../../theme/colors";
@@ -7,80 +7,135 @@ import { loadFromStorage } from "../../lib/storage";
 import { listarLogos, subirLogo, borrarLogo, logoParaPDF } from "../../lib/logos";
 import { money } from "../../lib/exportar";
 import { FORMATOS, PLANTILLAS, NOTAS_COTIZAR, estructura, totalesDe, versionDe, pdfPresupuesto, excelPresupuesto } from "./documentoPresupuesto";
-import { GRUPOS_NOTAS, TODAS_LAS_NOTAS } from "./notasContrato";
+import { leerCatalogo, guardarNota, retirarNota, leerPredeterminados, guardarPredeterminados, guardarEleccion } from "./datosExportacion";
+import NotasExportacion from "./NotasExportacion";
 
 // Sacar el presupuesto terminado: con qué plantilla, qué formato, qué logo,
 // qué notas y quién firma.
 //
-// Lo elegido queda recordado en este navegador —la plantilla, las notas que
-// se marcan casi siempre, el nombre de quien firma—: el segundo presupuesto no
-// debería costar lo mismo que el primero. La vista de la derecha muestra cómo
-// va a salir antes de bajarlo.
+// Todo eso vive en la base, no en el navegador: el catálogo de notas lo llena
+// la oficina, lo predeterminado es de la oficina, y cada presupuesto guarda lo
+// que eligió al exportarse —al volver a sacarlo sale igual, y la versión 2
+// tiene su propia firma y sus propias notas—. La vista de la derecha muestra
+// cómo va a salir antes de bajarlo.
 
-const recordar = (k, v) => { try { localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v)); } catch {} };
-const recordado = (k, def) => { try { return localStorage.getItem(k) || def; } catch { return def; } };
-const recordadoJSON = (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } };
 const rgb = c => `rgb(${c.join(",")})`;
 
-export default function ExportarPresupuesto({ presupuesto, capitulos, items, onCerrar }) {
+// Lo que vale cuando ni la oficina ni el presupuesto dijeron nada.
+const DE_FABRICA = {
+  plantilla: "minimalista", formato: "detallado", logo: "empresa", validez: "30 días", conIva: true,
+  membrete: ["", "", ""], firma: { nombre: "", cargo: "" }, aceptacion: true,
+};
+
+export default function ExportarPresupuesto({ presupuesto, capitulos, items, currentUser, onCerrar, onGuardado }) {
   const empresa = loadFromStorage("foreman_empresa", {}) || {};
-  const [plantilla, setPlantilla] = useState(() => PLANTILLAS[recordado("foreman_pres_plantilla", "")] ? recordado("foreman_pres_plantilla", "") : "minimalista");
-  const [formato, setFormato] = useState(() => FORMATOS[recordado("foreman_pres_formato", "")] ? recordado("foreman_pres_formato", "") : "detallado");
+  const [cargado, setCargado] = useState(false);
+  const [catalogo, setCatalogo] = useState([]);
+  const [sinBase, setSinBase] = useState(false);
+  const [plantilla, setPlantilla] = useState(DE_FABRICA.plantilla);
+  const [formato, setFormato] = useState(DE_FABRICA.formato);
   const [logos, setLogos] = useState([]);
-  const [logoSel, setLogoSel] = useState(() => recordado("foreman_pres_logo", "empresa"));
-  const [titulo, setTitulo] = useState(() => FORMATOS[recordado("foreman_pres_formato", "detallado")]?.titulo || "Presupuesto");
+  const [logoSel, setLogoSel] = useState(DE_FABRICA.logo);
+  const [titulo, setTitulo] = useState(FORMATOS.detallado.titulo);
   const [tituloTocado, setTituloTocado] = useState(false);
-  const [validez, setValidez] = useState("30 días");
-  // Con o sin IVA depende del cliente: se decide al presentar, y se recuerda.
-  const [conIva, setConIva] = useState(() => recordado("foreman_pres_iva", "si") !== "no");
-  const [firma, setFirma] = useState(() => recordadoJSON("foreman_pres_firma", { nombre: "", cargo: "" }));
-  // El texto junto al logo: vacío de entrada, porque el logo ya dice quién es.
-  // Lo que se escriba se recuerda.
-  const [membrete, setMembrete] = useState(() => recordadoJSON("foreman_pres_membrete", ["", "", ""]));
-  const [aceptacion, setAceptacion] = useState(() => recordado("foreman_pres_aceptacion", "si") !== "no");
-  // Las notas de contrato: cuáles van y con qué texto. Se recuerdan.
-  const [marcadas, setMarcadas] = useState(() => {
-    const guardadas = recordadoJSON("foreman_pres_notas", null);
-    if (!guardadas) return TODAS_LAS_NOTAS.filter(x => x.marcada).map(x => x.id);
-    const conocidas = recordadoJSON("foreman_pres_notas_conocidas", TODAS_LAS_NOTAS.map(x => x.id));
-    const nuevas = TODAS_LAS_NOTAS.filter(x => x.marcada && !conocidas.includes(x.id)).map(x => x.id);
-    return [...guardadas, ...nuevas];
-  });
-  useEffect(() => { recordar("foreman_pres_notas_conocidas", TODAS_LAS_NOTAS.map(x => x.id)); }, []);
-  const [textos, setTextos] = useState(() => recordadoJSON("foreman_pres_notas_textos", {}));
-  const [editandoNota, setEditandoNota] = useState(null);
+  const [validez, setValidez] = useState(DE_FABRICA.validez);
+  const [conIva, setConIva] = useState(true);
+  const [firma, setFirma] = useState(DE_FABRICA.firma);
+  const [membrete, setMembrete] = useState(DE_FABRICA.membrete);
+  const [aceptacion, setAceptacion] = useState(true);
+  const [marcadas, setMarcadas] = useState([]);
+  // Textos cambiados solo para este presupuesto, por id de nota.
+  const [textos, setTextos] = useState({});
   const [particulares, setParticulares] = useState(presupuesto.notas || "");
   const [paraCotizar, setParaCotizar] = useState(NOTAS_COTIZAR.join("\n"));
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
   const archivoRef = useRef(null);
 
-  useEffect(() => { listarLogos().then(setLogos); }, []);
+  // Primero lo de fábrica, encima lo de la oficina, encima lo de este presupuesto.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const [cat, pred, ls] = await Promise.all([leerCatalogo(), leerPredeterminados(), listarLogos()]);
+      if (!vivo) return;
+      const e = { ...DE_FABRICA, ...(pred || {}), ...(presupuesto.exportacion || {}) };
+      setCatalogo(cat.notas); setSinBase(cat.sinBase); setLogos(ls);
+      setPlantilla(PLANTILLAS[e.plantilla] ? e.plantilla : DE_FABRICA.plantilla);
+      setFormato(FORMATOS[e.formato] ? e.formato : DE_FABRICA.formato);
+      setLogoSel(e.logo || "empresa");
+      if (e.titulo) { setTitulo(e.titulo); setTituloTocado(true); } else setTitulo(FORMATOS[FORMATOS[e.formato] ? e.formato : "detallado"].titulo);
+      setValidez(e.validez ?? DE_FABRICA.validez);
+      setConIva(e.conIva !== false);
+      setFirma({ ...DE_FABRICA.firma, ...(e.firma || {}) });
+      setMembrete([0, 1, 2].map(i => (e.membrete || [])[i] || ""));
+      setAceptacion(e.aceptacion !== false);
+      const propia = presupuesto.exportacion || {};
+      setMarcadas(Array.isArray(propia.notas) ? propia.notas : cat.notas.filter(x => x.marcada && x.activa !== false).map(x => x.id));
+      setTextos(propia.textos || {});
+      if (propia.particulares != null) setParticulares(propia.particulares);
+      if (propia.paraCotizar != null) setParaCotizar(propia.paraCotizar);
+      setCargado(true);
+    })();
+    return () => { vivo = false; };
+  }, [presupuesto.id]);
 
   const logo = logoSel === "ninguno" ? null : logos.find(l => l.id === logoSel) || logos[0] || null;
   const { version } = versionDe(presupuesto.nombre);
-  const textoDe = nota => textos[nota.id] ?? nota.texto;
 
   function elegirFormato(f) {
-    setFormato(f); recordar("foreman_pres_formato", f);
+    setFormato(f);
     if (!tituloTocado) setTitulo(FORMATOS[f].titulo);
   }
-  function elegirPlantilla(p) { setPlantilla(p); recordar("foreman_pres_plantilla", p); }
-  function elegirLogo(id) { setLogoSel(id); recordar("foreman_pres_logo", id); }
-  function cambiarFirma(campo, valor) { const f = { ...firma, [campo]: valor }; setFirma(f); recordar("foreman_pres_firma", f); }
-  function cambiarMembrete(i, valor) { const m = [...membrete]; m[i] = valor; setMembrete(m); recordar("foreman_pres_membrete", m); }
-  function alternarNota(id) {
-    const m = marcadas.includes(id) ? marcadas.filter(x => x !== id) : [...marcadas, id];
-    setMarcadas(m); recordar("foreman_pres_notas", m);
+  function cambiarFirma(campo, valor) { setFirma(f => ({ ...f, [campo]: valor })); }
+  function cambiarMembrete(i, valor) { setMembrete(m => m.map((x, k) => (k === i ? valor : x))); }
+  function alternarNota(id) { setMarcadas(m => (m.includes(id) ? m.filter(x => x !== id) : [...m, id])); }
+  function textoDoc(id, valor) {
+    setTextos(t => { const n = { ...t }; if (valor == null) delete n[id]; else n[id] = valor; return n; });
   }
-  function cambiarTexto(id, valor) {
-    const t = { ...textos, [id]: valor };
-    setTextos(t); recordar("foreman_pres_notas_textos", t);
+
+  // ── El catálogo, para toda la oficina ──
+  async function guardarEnCatalogo(nota) {
+    const r = await guardarNota(nota, currentUser?.id);
+    if (r.error) return "No se pudo guardar la nota: " + r.error;
+    setCatalogo(c => c.map(x => (x.id === nota.id ? r : x)));
+    return null;
   }
-  function restaurarTexto(id) {
-    const t = { ...textos }; delete t[id];
-    setTextos(t); recordar("foreman_pres_notas_textos", t);
+  async function retirar(id) {
+    const e = await retirarNota(id);
+    if (e) return "No se pudo retirar: " + e;
+    setCatalogo(c => c.map(x => (x.id === id ? { ...x, activa: false } : x)));
+    setMarcadas(m => m.filter(x => x !== id));
+    return null;
+  }
+  async function agregarNota({ grupo, texto, marcada }) {
+    const orden = 10 + Math.max(0, ...catalogo.filter(x => x.grupo === grupo).map(x => x.orden || 0));
+    const r = await guardarNota({ grupo, texto, marcada, orden }, currentUser?.id);
+    if (r.error) return "No se pudo agregar la nota: " + r.error;
+    setCatalogo(c => [...c, r]);
+    setMarcadas(m => [...m, r.id]);          // la que se agrega, va en este presupuesto
+    return null;
+  }
+
+  // Lo que se guarda como predeterminado de la oficina: cómo sale un
+  // presupuesto, no qué dice uno en particular.
+  async function guardarComoPredeterminado() {
+    setError(""); setAviso("");
+    const e = await guardarPredeterminados({ plantilla, formato, logo: logoSel, validez, conIva, membrete, firma, aceptacion }, currentUser?.id);
+    if (e) setError(/relation|schema cache|does not exist/i.test(e) ? "Falta correr la migración 026 en Supabase para guardar lo predeterminado." : "No se pudo guardar: " + e);
+    else setAviso("Guardado: así saldrán los presupuestos nuevos de la oficina.");
+  }
+
+  const eleccion = () => ({
+    plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
+    notas: marcadas, textos, particulares, paraCotizar,
+  });
+  // Lo que salió en el documento queda con el presupuesto.
+  async function recordarEleccion() {
+    const e = eleccion();
+    const err = await guardarEleccion(presupuesto.id, e);
+    if (!err) onGuardado?.(e);
   }
 
   async function nuevoLogo(e) {
@@ -94,14 +149,14 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
     setSubiendo(false);
     if (r.error) { setError(r.error); return; }
     setLogos(await listarLogos());
-    elegirLogo(r.id);
+    setLogoSel(r.id);
   }
 
   async function quitarLogo(l) {
     if (!window.confirm(`¿Quitar el logo "${l.nombre}"? Los documentos que ya se bajaron no cambian.`)) return;
     const e = await borrarLogo(l.ruta);
     if (e) { setError(e.message); return; }
-    if (logoSel === l.id) elegirLogo("empresa");
+    if (logoSel === l.id) setLogoSel("empresa");
     setLogos(await listarLogos());
   }
 
@@ -109,7 +164,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
   const lineas = t => String(t || "").split(/\n+/).map(x => x.trim()).filter(Boolean);
   const notas = formato === "cotizar"
     ? lineas(paraCotizar)
-    : [...TODAS_LAS_NOTAS.filter(x => marcadas.includes(x.id)).map(textoDe), ...lineas(particulares)];
+    : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares)];
 
   const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete };
   const nombreArchivo = ext => {
@@ -123,6 +178,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
       const imagen = logo ? await logoParaPDF(logo.url) : null;
       if (logo && !imagen) setError("El logo no cargó: el PDF salió sin logo.");
       pdfPresupuesto({ ...opciones, logo: imagen }).save(nombreArchivo("pdf"));
+      recordarEleccion();
     } catch (e) {
       setError("No se pudo armar el PDF: " + e.message);
     } finally { setGenerando(""); }
@@ -137,6 +193,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = nombreArchivo("xlsx"); a.click();
+      recordarEleccion();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     } catch (e) {
       setError("No se pudo armar el Excel: " + e.message);
@@ -159,6 +216,9 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
         <button onClick={onCerrar} style={{ marginLeft: "auto", background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex" }}><X size={18} /></button>
       </div>
 
+      {!cargado ? (
+        <div style={{ padding: "40px 0", textAlign: "center", color: colors.muted, fontSize: 13 }}><Loader2 size={16} /> Cargando notas y datos de la oficina…</div>
+      ) : (
       <div className="exportar-pres">
         <div style={{ display: "grid", gap: 14, alignContent: "start", minWidth: 0 }}>
           {/* ── Diseño ── */}
@@ -166,7 +226,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
             <div style={etiqueta}>PLANTILLA</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6 }}>
               {Object.entries(PLANTILLAS).map(([id, p]) => (
-                <button key={id} onClick={() => elegirPlantilla(id)} style={tarjeta(plantilla === id)} title={p.ayuda}>
+                <button key={id} onClick={() => setPlantilla(id)} style={tarjeta(plantilla === id)} title={p.ayuda}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ width: 14, height: 14, borderRadius: 3, background: rgb(p.cabeceraFondo || p.primario), border: `2px solid ${rgb(p.acento)}` }} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink, fontFamily: p.fuenteTitulo === "times" ? "Georgia, 'Times New Roman', serif" : colors.font }}>{p.label}</span>
@@ -194,7 +254,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 6 }}>
               {logos.map(l => (
                 <div key={l.id} style={{ position: "relative" }}>
-                  <button onClick={() => elegirLogo(l.id)} title={l.nombre}
+                  <button onClick={() => setLogoSel(l.id)} title={l.nombre}
                     style={{ width: "100%", height: 62, cursor: "pointer", borderRadius: colors.radiusMd, padding: 6, background: "#fff",
                       border: `1.5px solid ${logo?.id === l.id ? colors.ink : colors.border}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
                     <img src={l.url} alt={l.nombre} style={{ maxWidth: "100%", maxHeight: 30, objectFit: "contain" }} />
@@ -209,7 +269,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
                   )}
                 </div>
               ))}
-              <button onClick={() => elegirLogo("ninguno")}
+              <button onClick={() => setLogoSel("ninguno")}
                 style={{ height: 62, cursor: "pointer", borderRadius: colors.radiusMd, fontFamily: colors.font, fontSize: 11, color: colors.inkSoft, background: colors.surface,
                   border: `1.5px solid ${logoSel === "ninguno" ? colors.ink : colors.border}` }}>
                 Sin logo
@@ -249,7 +309,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
               <div style={etiqueta}>IVA</div>
               <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: colors.radiusSm, padding: 3 }}>
                 {[[true, "Con IVA"], [false, "Sin IVA"]].map(([v, l]) => (
-                  <button key={l} onClick={() => { setConIva(v); recordar("foreman_pres_iva", v ? "si" : "no"); }}
+                  <button key={l} onClick={() => setConIva(v)}
                     style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
                       background: conIva === v ? colors.surface : "transparent", color: conIva === v ? colors.ink : colors.inkSoft }}>{l}</button>
                 ))}
@@ -266,7 +326,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
             </div>
             {formato !== "cotizar" && (
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.inkSoft, marginTop: 8, cursor: "pointer" }}>
-                <input type="checkbox" checked={aceptacion} onChange={e => { setAceptacion(e.target.checked); recordar("foreman_pres_aceptacion", e.target.checked ? "si" : "no"); }} />
+                <input type="checkbox" checked={aceptacion} onChange={e => setAceptacion(e.target.checked)} />
                 Espacio para la firma de aceptación del cliente
               </label>
             )}
@@ -285,47 +345,12 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
                   <span>NOTAS Y CONDICIONES</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {GRUPOS_NOTAS.map(g => (
-                    <div key={g.titulo}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: colors.inkSoft, marginBottom: 4 }}>{g.titulo}</div>
-                      <div style={{ display: "grid", gap: 4 }}>
-                        {g.notas.map(nota => {
-                          const activa = marcadas.includes(nota.id);
-                          const cambiada = textos[nota.id] != null && textos[nota.id] !== nota.texto;
-                          return (
-                            <div key={nota.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: activa ? colors.ink : colors.muted, lineHeight: 1.4 }}>
-                              <input type="checkbox" checked={activa} onChange={() => alternarNota(nota.id)} style={{ marginTop: 3, flexShrink: 0 }} />
-                              {editandoNota === nota.id ? (
-                                <div style={{ flex: 1 }}>
-                                  <textarea autoFocus value={textoDe(nota)} onChange={e => cambiarTexto(nota.id, e.target.value)} rows={3} style={{ ...campo, resize: "vertical", lineHeight: 1.45 }} />
-                                  <div style={{ display: "flex", gap: 10, marginTop: 3 }}>
-                                    <button onClick={() => setEditandoNota(null)} style={{ background: "none", border: "none", color: colors.ink, fontWeight: 600, fontSize: 11, cursor: "pointer", padding: 0, fontFamily: colors.font }}>Listo</button>
-                                    {cambiada && <button onClick={() => restaurarTexto(nota.id)} style={{ background: "none", border: "none", color: colors.muted, fontSize: 11, cursor: "pointer", padding: 0, fontFamily: colors.font }}>Volver al texto original</button>}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span style={{ flex: 1, cursor: "pointer" }} onClick={() => alternarNota(nota.id)}>
-                                  {textoDe(nota)}{cambiada && <span style={{ color: colors.muted, fontStyle: "italic" }}> (editada)</span>}
-                                </span>
-                              )}
-                              {editandoNota !== nota.id && (
-                                <button onClick={() => setEditandoNota(nota.id)} title="Cambiar el texto"
-                                  style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", padding: 2, display: "flex", flexShrink: 0 }}><Pencil size={12} /></button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: colors.inkSoft, marginBottom: 4 }}>De este presupuesto</div>
-                    <textarea value={particulares} onChange={e => setParticulares(e.target.value)} rows={3}
-                      placeholder="Plazo de esta obra, qué no incluye, acuerdos con el cliente… Una nota por línea."
-                      style={{ ...campo, resize: "vertical", lineHeight: 1.5 }} />
-                  </div>
-                </div>
+                <NotasExportacion
+                  catalogo={catalogo.filter(x => x.activa !== false || marcadas.includes(x.id))} sinBase={sinBase}
+                  marcadas={marcadas} onAlternar={alternarNota}
+                  textos={textos} onTextoDoc={textoDoc}
+                  onGuardarEnCatalogo={guardarEnCatalogo} onRetirar={retirar} onAgregar={agregarNota}
+                  particulares={particulares} onParticulares={setParticulares} />
               </>
             )}
           </div>
@@ -334,17 +359,21 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, onC
         <Vista presupuesto={presupuesto} capitulos={capitulos} items={items} formato={formato} plantilla={plantilla} logo={logo}
           empresa={empresa} titulo={titulo} validez={validez} conIva={conIva} notas={notas} firma={firma} aceptacion={aceptacion} membrete={membrete} />
       </div>
+      )}
 
       {error && <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 10, fontSize: 12, color: colors.warning, marginTop: 12 }}>{error}</div>}
+      {aviso && <div style={{ background: colors.successSoft, border: `1px solid ${colors.successBorder}`, borderRadius: colors.radiusMd, padding: 10, fontSize: 12, color: colors.success, marginTop: 12 }}>{aviso}</div>}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 11, color: colors.muted, marginRight: "auto" }}>
-          {formato === "cotizar" ? "En el Excel el contratista llena los precios y los totales salen solos." : "El Excel lleva la misma plantilla, con las cuentas en fórmulas."}
-        </span>
-        <Button variant="outline" onClick={bajarExcel} disabled={!items.length || !!generando}>
+        <button onClick={guardarComoPredeterminado} disabled={!cargado}
+          title="Plantilla, formato, logo, texto junto al logo, firma, validez e IVA: así saldrán los presupuestos nuevos"
+          style={{ marginRight: "auto", background: "none", border: "none", color: colors.inkSoft, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, textDecoration: "underline", textUnderlineOffset: 3 }}>
+          Guardar como predeterminado de la oficina
+        </button>
+        <Button variant="outline" onClick={bajarExcel} disabled={!cargado || !items.length || !!generando}>
           {generando === "excel" ? <Loader2 size={14} /> : <FileSpreadsheet size={14} />} {generando === "excel" ? "Armando…" : "Descargar Excel"}
         </Button>
-        <Button variant="primary" onClick={bajarPDF} disabled={!items.length || !!generando} style={{ background: colors.ink }}>
+        <Button variant="primary" onClick={bajarPDF} disabled={!cargado || !items.length || !!generando} style={{ background: colors.ink }}>
           {generando === "pdf" ? <Loader2 size={14} /> : <FileText size={14} />} {generando === "pdf" ? "Armando…" : "Descargar PDF"}
         </Button>
       </div>
