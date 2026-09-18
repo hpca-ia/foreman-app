@@ -354,7 +354,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       return {
         presupuesto_id: pre.id, capitulo: r.capitulo, descripcion: r.descripcion,
         unidad: r.unidad === "glb" && r.capitulo === CAP_CARGOS ? "glb" : unidadRespondida(r, preguntas),
-        cantidad: n(r.cantidad), precio_unitario: n(r.precio_unitario), total: r2(n(r.total)),
+        cantidad: n(r.cantidad), precio_unitario: r2(n(r.precio_unitario)), total: r2(n(r.total)),
         orden: c * 1000 + pos[c],
       };
     });

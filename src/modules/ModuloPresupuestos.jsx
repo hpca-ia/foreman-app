@@ -14,6 +14,10 @@ import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 
+// Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
+// utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
+const centavos = v => Math.round((Number(v) || 0) * 100) / 100;
+
 export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
@@ -122,8 +126,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       if (!porId.has(i.id)) return i;
       const base = porId.get(i.id);
       const pct = Number(i.utilidad_pct) || 0;
-      const precio = Math.round(base * (1 + pct / 100) * 10000) / 10000;
-      return { ...i, precio_base: base, precio_unitario: precio, total: Math.round((Number(i.cantidad) || 0) * precio * 100) / 100 };
+      const precio = centavos(base * (1 + pct / 100));
+      return { ...i, precio_base: base, precio_unitario: precio, total: centavos((Number(i.cantidad) || 0) * precio) };
     });
     const cambiados = nuevos.filter(i => porId.has(i.id));
     const res = await Promise.all(cambiados.map(i => supabase.from("presupuesto_items")
@@ -289,8 +293,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       descripcion:rubro.descripcion,
       unidad:rubro.unidad||"",
       cantidad:Number(rubro.cantidad)||1,
-      precio_unitario:Number(rubro.precio_unitario||rubro.precio_referencia)||0,
-      total:(Number(rubro.cantidad)||1)*(Number(rubro.precio_unitario||rubro.precio_referencia)||0),
+      precio_unitario:centavos(rubro.precio_unitario||rubro.precio_referencia),
+      total:centavos((Number(rubro.cantidad)||1)*centavos(rubro.precio_unitario||rubro.precio_referencia)),
       orden
     }).select().single();
     if (data) { const ni=[...items,data]; setItems(ni); recalcTotales(ni); }
@@ -302,7 +306,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     const updated = items.map(i => {
       if (i.id!==id) return i;
       const u={...i,[campo]:valor};
-      u.total=(Number(u.cantidad)||0)*(Number(u.precio_unitario)||0);
+      u.total=centavos((Number(u.cantidad)||0)*(Number(u.precio_unitario)||0));
       return u;
     });
     setItems(updated);
@@ -315,7 +319,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     const updated = items.map(i => {
       if (i.id!==id) return i;
       const u={...i,...campos};
-      u.total=(Number(u.cantidad)||0)*(Number(u.precio_unitario)||0);
+      u.total=centavos((Number(u.cantidad)||0)*(Number(u.precio_unitario)||0));
       return u;
     });
     setItems(updated);
@@ -328,16 +332,16 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     const updated = items.map(i => {
       if (i.capitulo!==capNombre) return i;
       const base = i.precio_base||i.precio_unitario;
-      const nuevo = Number(base)*(1+pct/100);
+      const nuevo = centavos(Number(base)*(1+pct/100));
       const u={...i,utilidad_pct:pct,precio_base:base,precio_unitario:nuevo};
-      u.total=(Number(u.cantidad)||0)*nuevo;
+      u.total=centavos((Number(u.cantidad)||0)*nuevo);
       return u;
     });
     setItems(updated);
     for (const i of capItems) {
       const base=i.precio_base||i.precio_unitario;
-      const nuevo=Number(base)*(1+pct/100);
-      await supabase.from("presupuesto_items").update({utilidad_pct:pct,precio_base:base,precio_unitario:nuevo,total:(i.cantidad||1)*nuevo}).eq("id",i.id);
+      const nuevo=centavos(Number(base)*(1+pct/100));
+      await supabase.from("presupuesto_items").update({utilidad_pct:pct,precio_base:base,precio_unitario:nuevo,total:centavos((Number(i.cantidad)||0)*nuevo)}).eq("id",i.id);
     }
     recalcTotales(updated);
   }
@@ -445,8 +449,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       const {data}=await supabase.from("presupuesto_items").insert({
         presupuesto_id:presupuestoActivo.id, capitulo:capNombre,
         descripcion:r.descripcion, unidad:r.unidad||"",
-        cantidad:r.cantidad||1, precio_unitario:r.precio_unitario||0,
-        total:(r.cantidad||1)*(r.precio_unitario||0),
+        cantidad:r.cantidad||1, precio_unitario:centavos(r.precio_unitario),
+        total:centavos((r.cantidad||1)*centavos(r.precio_unitario)),
         orden:capOrden*1000+newItems.length
       }).select().single();
       if (data) newItems.push(data);
@@ -631,8 +635,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               descripcion:r.descripcion,
               unidad:r.unidad||"",
               cantidad:r.cantidad||1,
-              precio_unitario:Number(r.precio_unitario_final||r.precio_unitario)||0,
-              total:(r.cantidad||1)*(Number(r.precio_unitario_final||r.precio_unitario)||0),
+              precio_unitario:centavos(r.precio_unitario_final||r.precio_unitario),
+              total:centavos((Number(r.cantidad)||1)*centavos(r.precio_unitario_final||r.precio_unitario)),
               orden:capOrden*1000+yaEnCap+idx
             }))).select().then(({data})=>{
               if(data){
@@ -843,20 +847,19 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                               onChange={e=>{
                                 const pct=Number(e.target.value);
                                 const base=item.precio_base||item.precio_unitario;
-                                const nuevo=Number(base)*(1+pct/100);
+                                const nuevo=centavos(Number(base)*(1+pct/100));
                                 actualizarItemMulti(item.id,{utilidad_pct:pct,precio_unitario:nuevo,precio_base:base});
                               }}
                               style={{width:"100%",boxSizing:"border-box",background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px"}}>
-                            <input type="number" className="num-limpio" value={item.precio_unitario}
-                              onFocus={()=>{
+                            <CampoPrecio valor={item.precio_unitario}
+                              onFoco={()=>{
                                 // La primera vez que se toca el precio de un rubro que ya tiene
                                 // precio, ese precio queda como base: desde ahí se mide la variación.
                                 if(!(Number(item.precio_base)>0)&&Number(item.precio_unitario)>0) actualizarItemMulti(item.id,{precio_base:Number(item.precio_unitario)});
                               }}
-                              onChange={e=>{
-                                const v=e.target.value;
+                              onCambio={v=>{
                                 const base=Number(item.precio_base);
                                 // Con base, la utilidad muestra cuánto se apartó el precio final.
                                 // Sin base (rubro que todavía no tenía precio), el primero que se
@@ -864,10 +867,12 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                                 if(base>0) actualizarItemMulti(item.id,{precio_unitario:v,utilidad_pct:Math.round((Number(v)/base-1)*10000)/100});
                                 else actualizarItemMulti(item.id,{precio_unitario:v});
                               }}
-                              onBlur={e=>{
+                              onSalir={v=>{
                                 // Se fija al salir, no tecla por tecla: si no, el "5" de "50"
                                 // quedaba como base.
-                                if(!(Number(item.precio_base)>0)&&Number(e.target.value)>0) actualizarItemMulti(item.id,{precio_base:Number(e.target.value),utilidad_pct:0});
+                                const base=Number(item.precio_base);
+                                if(!(base>0)&&v>0) actualizarItemMulti(item.id,{precio_unitario:v,precio_base:v,utilidad_pct:0});
+                                else if(v!==Number(item.precio_unitario)) actualizarItemMulti(item.id,{precio_unitario:v,...(base>0?{utilidad_pct:Math.round((v/base-1)*10000)/100}:{})});
                               }}
                               style={{width:"100%",boxSizing:"border-box",background:Number(item.precio_unitario)?"var(--bg)":"var(--warning-soft)",border:`1px solid ${Number(item.precio_unitario)?"var(--border)":"var(--warning-border)"}`,borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
@@ -1127,3 +1132,18 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   );
 }
 
+
+// Un precio con dos decimales a la vista. Mientras se escribe se deja
+// escribir tal cual —formatear tecla por tecla no deja poner "18"—; al salir
+// se redondea a centavos y se guarda así.
+function CampoPrecio({ valor, onCambio, onFoco, onSalir, style }) {
+  const [escribiendo, setEscribiendo] = useState(null);
+  return (
+    <input type="number" className="num-limpio" step="0.01"
+      value={escribiendo ?? (Number(valor) || 0).toFixed(2)}
+      onFocus={() => { setEscribiendo(String(Number(valor) || 0)); onFoco?.(); }}
+      onChange={e => { setEscribiendo(e.target.value); onCambio?.(e.target.value); }}
+      onBlur={e => { const v = centavos(e.target.value); setEscribiendo(null); onSalir?.(v); }}
+      style={style} />
+  );
+}
