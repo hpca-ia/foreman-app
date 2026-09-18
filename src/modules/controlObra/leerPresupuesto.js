@@ -16,6 +16,9 @@
 //     no tienen cantidad ni precio.
 //   · Detalle sin monto (el despiece de ventanas V1, V2…): tiene unidad pero
 //     ningún número. Como rubro sería un $0 que nunca avanza.
+//   · Salvo en un presupuesto a medio trabajar (conPendientes): ahí una fila
+//     con descripción y unidad pero sin precio es un rubro que todavía espera
+//     su cotización, y descartarlo sería perder justo lo que falta completar.
 
 const texto = v => String(v ?? "").trim();
 const esCodigo = s => /^\d+(\.\d+)*\.?$/.test(texto(s));
@@ -76,7 +79,7 @@ export function sanearMapa(filas, mapa) {
   return m;
 }
 
-export function interpretarPresupuesto(filasTodas, mapaNova) {
+export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false } = {}) {
   const m = sanearMapa(filasTodas, mapaNova);
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;
@@ -105,7 +108,9 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
   const esSubtotal = r => /sub\s*-?\s*total/i.test(r.linea);
   const esTotal = r => !esSubtotal(r) && /\btotal\b/i.test(r.linea) && !r.unidad;
   const esIva = r => /\biva\b/i.test(r.linea) && !r.cant && !r.unidad;
-  const ultimoRubro = leidas.reduce((u, r, k) => (esRubro(r) || (r.unidad && r.total) ? k : u), -1);
+  // Rubro sin precio todavía: descripción y unidad, sin total y sin cantidad × precio.
+  const esPendiente = r => conPendientes && !!r.desc && !!r.unidad && !r.total && !(r.cant && r.precio) && !esSubtotal(r) && !esIva(r);
+  const ultimoRubro = leidas.reduce((u, r, k) => (esRubro(r) || (r.unidad && r.total) || esPendiente(r) ? k : u), -1);
 
   // ¿Un título sin código entero es un capítulo nuevo o un subtítulo? No se
   // puede confiar en su numeración: hay Excel que titulan "11.10 INSTALACIONES
@@ -131,11 +136,12 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
     cap = { nombre, codigo, declarado: declarado || null, prefijo: esCodigoCapitulo(codigo) ? prefijo(codigo) : pref, fila };
     capitulos.push(cap);
   };
-  const rubro = (r, cantidad, precio, total, global = false) => {
+  const rubro = (r, cantidad, precio, total, global = false, pendiente = false) => {
     if (cap && !cap.prefijo) cap.prefijo = prefijo(r.codigo);
     return rubros.push({
     capitulo: cap?.nombre || "SIN CAPÍTULO", codigo: r.codigo, descripcion: r.desc,
     unidad: r.unidad, cantidad, precio_unitario: precio, total, fila: r.fila, global,
+    ...(pendiente ? { pendiente: true } : {}),
     });
   };
 
@@ -166,6 +172,8 @@ export function interpretarPresupuesto(filasTodas, mapaNova) {
       const cantidad = r.cant || 1;
       return rubro(r, cantidad, r.precio || r.total / cantidad, r.total, true);
     }
+    // Entra en $0, con la cantidad si ya la tiene y el precio si ya lo tiene.
+    if (esPendiente(r)) return rubro(r, r.cant || 0, r.precio || 0, 0, false, true);
     if (r.unidad) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "detalle" });
     if (m.col_capitulo == null && r.desc && r.desc.length <= 120) {
       if (esCodigoCapitulo(r.codigo)) return abrir(r.desc.toUpperCase(), r.codigo, r.total, null, r.fila);

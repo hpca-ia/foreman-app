@@ -98,7 +98,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
   // Lee las filas con un mapa de columnas y deja todo listo para la vista
   // previa. Se usa al leer, al reconocer un formato y al corregir a mano.
   function aplicarMapa(filas, mapa, origen) {
-    const r = interpretarPresupuesto(filas, mapa);
+    const r = interpretarPresupuesto(filas, mapa, { conPendientes: paraPresupuesto });
     setFilasExcel(filas); setMapaActual(r.mapa); setOrigenMapa(origen);
     setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
     setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
@@ -368,7 +368,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
 
     if (guardarEnBase) {
       const base = await alimentarBase(
-        final.rubros.filter(r => r.origen !== "ajuste").map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
+        final.rubros.filter(r => r.origen !== "ajuste" && !r.pendiente && n(r.precio_unitario) > 0).map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
         { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "presupuesto", ivaIncluido: incluyeIva, ivaPct: n(ivaPct), utilidad: preguntas.utilidad });
       if (base.faltaMigracion) faltan.push(`${base.faltaMigracion} (${base.faltaMigracion === "016" ? "origen" : "utilidad"} de los precios)`);
     }
@@ -531,6 +531,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
               </div>
             )}
 
+            {paraPresupuesto && final.rubros.some(r => r.pendiente) && (
+              <div style={{ marginTop: 12, fontSize: 12, color: colors.inkSoft, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
+                <strong>{final.rubros.filter(r => r.pendiente).length} rubros sin precio todavía.</strong> Entran en $0 para completarlos después con cotizaciones. Si alguno no es un rubro sino una línea de detalle —como el despiece de ventanas—, quítalo con el tacho en la lista de abajo.
+              </div>
+            )}
+
             {/* Las filas con cantidad y precio sin total ya aparecen en la revisión. */}
             {omitidas.filter(o => o.motivo !== "sin_total").length > 0 && (
               <div style={{ marginTop: 12, fontSize: 11, color: colors.inkSoft, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
@@ -556,6 +562,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
                       <span style={{ color: colors.muted, fontSize: 10 }}>{r.codigo}</span>
                       <span style={{ color: r.origen === "ajuste" ? colors.warning : colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
                         {r.origen && r.origen !== "ajuste" && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>{r.origen === "agregado" ? "AGREGADO" : "CORREGIDO"}</span>}
+                        {r.pendiente && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>SIN PRECIO</span>}
                         {r.descripcion}
                       </span>
                       <span style={{ color: colors.muted, fontSize: 11 }}>{r._cargo != null ? r.unidad : unidadRespondida(r, preguntas)}</span>
