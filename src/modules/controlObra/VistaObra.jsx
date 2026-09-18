@@ -22,6 +22,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
   const [cargando, setCargando] = useState(true);
   const [actividades, setActividades] = useState([]);
   const [agruparPor, setAgruparPor] = useState("capitulo");   // capitulo | actividad
+  const [abierta, setAbierta] = useState(null);               // la planilla que se está mirando por dentro
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -72,7 +73,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
           <div style={{ fontSize: 11, color: colors.muted }}>{obra.cliente_nombre || "Sin cliente"} · {rubros.length} rubros</div>
         </div>
         {planillas.length > 0 && (
-          <select value={planillaSel || ""} onChange={e => setPlanillaSel(Number(e.target.value))}
+          <select value={planillaSel || ""} onChange={e => { const id = Number(e.target.value); setPlanillaSel(id); setAbierta(a => (a ? id : a)); }}
             style={{ marginLeft: "auto", background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "7px 12px", fontSize: 12, fontFamily: colors.font, color: colors.ink, cursor: "pointer" }}>
             {planillas.map(p => <option key={p.id} value={p.id}>{p.nombre || `Planilla N°${p.numero}`}{p.estado === "cerrada" ? " (cerrada)" : ""}</option>)}
           </select>
@@ -91,8 +92,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
       <div className="obra-tabs">
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
-        <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
-        <button onClick={() => setTab("planillas")} style={tabS(tab === "planillas")}>Planillas</button>
+        <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
         <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
@@ -118,19 +118,31 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
                 )}
               </div>
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} />
+
+              {/* Lo que el Excel tenía en dos hojas y uno cruzaba a mano: arriba
+                  en qué va cada rubro, abajo las facturas que lo movieron. */}
+              <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
+                <PanelFacturas
+                  obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
+                  facturas={facturas} asignaciones={asignaciones}
+                  currentUser={currentUser} onCambio={cargar}
+                />
+              </div>
             </>
-          )}
-          {tab === "facturas" && (
-            <PanelFacturas
-              obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
-              facturas={facturas} asignaciones={asignaciones}
-              currentUser={currentUser} onCambio={cargar}
-            />
           )}
           {tab === "planillas" && (
             <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones}
               planillaSel={planillaSel} onCambio={cargar}
-              onAbrir={p => { setPlanillaSel(p.id); setTab("facturas"); }} />
+              abierta={planillas.find(p => p.id === abierta) || null}
+              onAbrir={p => { setPlanillaSel(p.id); setAbierta(p.id); }}
+              onVolver={() => setAbierta(null)}>
+              <PanelFacturas
+                obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
+                planillaActual={planillas.find(p => p.id === abierta) || null}
+                facturas={facturas} asignaciones={asignaciones}
+                currentUser={currentUser} onCambio={cargar} mostrarTitulo={false}
+              />
+            </PanelPlanillas>
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
