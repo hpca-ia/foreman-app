@@ -161,3 +161,45 @@ export function resumenAlimentacion(r) {
   if (r.faltaMigracion) txt += ` (sin ${r.faltaMigracion === "016" ? "el origen ni la utilidad" : "la utilidad"} de los precios: falta correr la migración ${r.faltaMigracion})`;
   return txt;
 }
+
+// ── Leer precios de la base para un presupuesto ──────────────────────────
+// Para actualizar los precios base de un presupuesto con lo que ya sabe la
+// oficina: el mismo rubro se reconoce igual que al alimentar la base
+// (descripción en su unidad), así lo que entró por un lado se encuentra por
+// el otro.
+
+export const claveRubro = (descripcion, unidad) => `${norm(descripcion)}|${unidadClave(unidad)}`;
+
+/**
+ * Los rubros de la base con su historial de precios, más reciente primero.
+ * Sin las migraciones 016/017 el historial viene sin origen: se lee igual.
+ * @returns { porClave: Map(clave → rubro), porId: Map(id → rubro) } donde rubro = { id, descripcion, unidad, precios: [...] }
+ */
+export async function preciosDeLaBase() {
+  const completo = "rubro_id,precio_unitario,fecha,cliente_nombre,proveedor_nombre,origen_tipo,utilidad_estado,proyecto_ref";
+  const [{ data: rubros }, hist1] = await Promise.all([
+    todas("rubros", "id,descripcion,unidad,precio_referencia"),
+    todas("precios_historial", completo),
+  ]);
+  let historial = hist1.data;
+  if (hist1.error) historial = (await todas("precios_historial", "rubro_id,precio_unitario,fecha,cliente_nombre,proyecto_ref")).data;
+
+  const porId = new Map();
+  (rubros || []).forEach(r => porId.set(r.id, { ...r, precios: [] }));
+  (historial || []).forEach(h => {
+    const r = porId.get(h.rubro_id);
+    if (r && Number(h.precio_unitario) > 0) r.precios.push(h);
+  });
+  porId.forEach(r => r.precios.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || ""))));
+  const porClave = new Map();
+  const sinUnidad = new Map();
+  porId.forEach(r => {
+    porClave.set(claveRubro(r.descripcion, r.unidad), r);
+    if (!unidadClave(r.unidad)) sinUnidad.set(norm(r.descripcion), r);
+  });
+  const buscar = item => (item.rubro_id != null && porId.get(item.rubro_id))
+    || porClave.get(claveRubro(item.descripcion, item.unidad))
+    || sinUnidad.get(norm(item.descripcion))
+    || null;
+  return { buscar };
+}

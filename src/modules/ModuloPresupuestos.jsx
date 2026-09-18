@@ -12,6 +12,7 @@ import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preg
 import CotizacionPanel from "./CotizacionPanel";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
+import ActualizarPrecios from "./presupuestos/ActualizarPrecios";
 
 export default function ModuloPresupuestos({ currentUser, puede }) {
   const [subVista, setSubVista] = useState("lista");
@@ -25,6 +26,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [capitulosActivos, setCapitulosActivos] = useState([]);
   const [items, setItems] = useState([]);
   const [exportar, setExportar] = useState(false);
+  const [verPreciosBase, setVerPreciosBase] = useState(false);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
   const [uploadingBD, setUploadingBD] = useState(false);
@@ -106,6 +108,25 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setDuplicando(null);
     await fetchPresupuestos();
     setPresupuestoActivo(nuevo); fetchItems(nuevo.id); setSubVista("detalle");
+  }
+
+  // Precios base traídos de la base de rubros: cambia la base, la utilidad de
+  // cada rubro se conserva y el precio final se recalcula con ella.
+  async function aplicarPreciosBase(cambios) {
+    const porId = new Map(cambios.map(c => [c.id, Number(c.precio_base)]));
+    const nuevos = items.map(i => {
+      if (!porId.has(i.id)) return i;
+      const base = porId.get(i.id);
+      const pct = Number(i.utilidad_pct) || 0;
+      const precio = Math.round(base * (1 + pct / 100) * 10000) / 10000;
+      return { ...i, precio_base: base, precio_unitario: precio, total: Math.round((Number(i.cantidad) || 0) * precio * 100) / 100 };
+    });
+    const cambiados = nuevos.filter(i => porId.has(i.id));
+    const res = await Promise.all(cambiados.map(i => supabase.from("presupuesto_items")
+      .update({ precio_base: i.precio_base, precio_unitario: i.precio_unitario, total: i.total }).eq("id", i.id)));
+    const fallo = res.find(r => r.error);
+    if (fallo) { alert("No se pudieron actualizar todos los precios: " + fallo.error.message); return; }
+    setItems(nuevos); recalcTotales(nuevos); setVerPreciosBase(false);
   }
 
   async function renombrarPresupuesto(nombre) {
@@ -554,6 +575,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
+            <button onClick={()=>setVerPreciosBase(true)} disabled={items.length===0}
+              title="Actualizar los precios base con los de la base de rubros"
+              style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Precios de la base</button>
             <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
 
             <button onClick={()=>setExportar(true)} disabled={items.length===0} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>Exportar</button>
@@ -562,6 +586,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       </div>
 
       {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
+      {verPreciosBase&&presupuestoActivo&&<ActualizarPrecios items={items} onCerrar={()=>setVerPreciosBase(false)} onAplicar={aplicarPreciosBase}/>}
       {exportar&&presupuestoActivo&&<ExportarPresupuesto presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} currentUser={currentUser}
         onCerrar={()=>setExportar(false)}
         onGuardado={e=>{setPresupuestoActivo(p=>({...p,exportacion:e}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,exportacion:e}:p));}}/>}
