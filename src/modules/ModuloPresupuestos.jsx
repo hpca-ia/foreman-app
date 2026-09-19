@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Trash2, Copy, Database } from "lucide-react";
+import { Trash2, Copy, Database, Archive, ArchiveRestore, Search } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { supabase } from "../lib/supabase";
 import { alimentarBase, resumenAlimentacion, preciosDeLaBase } from "../lib/baseRubros";
@@ -43,6 +43,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // Armar: capítulos y rubros en su orden. Revisar: la misma información en
   // una tabla que se ordena por precio, cantidad o total, con alertas y NOVA.
   const [modoDetalle, setModoDetalle] = useState("armar");
+  // La lista: los que se trabajan y los históricos, que quedan de referencia.
+  const [pestanaLista, setPestanaLista] = useState("activos");
+  const [busquedaLista, setBusquedaLista] = useState("");
   const [baseRubros, setBaseRubros] = useState(null);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
@@ -188,6 +191,19 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     const { error } = await supabase.from("presupuestos").update({ area_m2: area }).eq("id", presupuestoActivo.id);
     if (error && /column|schema cache/i.test(error.message)) alert("Falta correr la migración 029 en Supabase para guardar el área. Por ahora el valor por m² se ve, pero no queda guardado.");
     else if (error) alert("No se pudo guardar el área: " + error.message);
+  }
+
+  // Pasar a históricos no borra ni cambia nada del presupuesto: deja de estar
+  // entre los que se trabajan y queda de referencia, de solo lectura.
+  async function archivarPresupuesto(pre, archivar) {
+    const archivado_at = archivar ? new Date().toISOString() : null;
+    const { error } = await supabase.from("presupuestos").update({ archivado_at }).eq("id", pre.id);
+    if (error) {
+      alert(/column|schema cache/i.test(error.message) ? "Falta correr la migración 030 en Supabase para separar activos y pasados." : "No se pudo mover: " + error.message);
+      return;
+    }
+    setPresupuestos(ps => ps.map(p => p.id === pre.id ? { ...p, archivado_at } : p));
+    if (presupuestoActivo?.id === pre.id) setPresupuestoActivo(p => ({ ...p, archivado_at }));
   }
 
   async function renombrarPresupuesto(nombre) {
@@ -615,7 +631,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           {subVista==="detalle"&&presupuestoActivo ? (
             // El nombre se cambia ahí mismo: al volver a trabajar uno terminado,
             // lo primero es que no se confunda con el que ya se mandó.
-            <input key={presupuestoActivo.id} defaultValue={presupuestoActivo.nombre} title="Toca para cambiar el nombre"
+            <input key={presupuestoActivo.id} defaultValue={presupuestoActivo.nombre} title="Toca para cambiar el nombre" disabled={!!presupuestoActivo.archivado_at}
               onBlur={e=>renombrarPresupuesto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") e.currentTarget.blur(); }}
               style={{fontSize:17,fontWeight:700,color:"var(--ink)",background:"transparent",border:"none",borderBottom:"1.5px dashed var(--border)",outline:"none",padding:"0 0 1px",fontFamily:"var(--font)",width:"min(520px, 70vw)"}}/>
           ) : (
@@ -638,7 +654,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
-            <button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>
+            {!presupuestoActivo?.archivado_at&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
             <button onClick={()=>setPasarABase(true)} disabled={items.length===0}
               title={presupuestoActivo?.en_base_at?`Pasado a la base el ${new Date(presupuestoActivo.en_base_at).toLocaleDateString("es-EC")}`:"Cuando lo des por bueno: sus precios entran a la base de rubros"}
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
@@ -724,18 +740,40 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         />
       )}
 
-      {subVista==="lista"&&(
+      {subVista==="lista"&&(()=>{
+        const q=busquedaLista.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+        const coincide=p=>!q||`${p.nombre} ${p.cliente_nombre||""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").includes(q);
+        const activos=presupuestos.filter(p=>!p.archivado_at), pasados=presupuestos.filter(p=>p.archivado_at);
+        const lista=(pestanaLista==="activos"?activos:pasados).filter(coincide);
+        return (
         <div>
-          {presupuestos.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)"}}><div style={{fontSize:40,marginBottom:12}}>💼</div>Sin presupuestos aún.</div>
-          :presupuestos.map(p=>(
-            <div key={p.id} onClick={()=>{setPresupuestoActivo(p);fetchItems(p.id);setSubVista("detalle");}}
-              style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+            <div style={{display:"inline-flex",gap:3,background:"var(--neutral-soft)",borderRadius:8,padding:3}}>
+              {[["activos",`Activos (${activos.length})`],["pasados",`Pasados (${pasados.length})`]].map(([k,l])=>(
+                <button key={k} onClick={()=>setPestanaLista(k)}
+                  style={{padding:"6px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"var(--font)",fontSize:12,fontWeight:600,
+                    background:pestanaLista===k?"#fff":"transparent",color:pestanaLista===k?"var(--ink)":"var(--ink-soft)"}}>{l}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:"#fff",border:"1px solid var(--border)",borderRadius:8,padding:"6px 10px",flex:"1 1 220px",maxWidth:360}}>
+              <Search size={13} color="var(--muted)"/>
+              <input value={busquedaLista} onChange={e=>setBusquedaLista(e.target.value)} placeholder="Buscar por nombre o cliente"
+                style={{border:"none",outline:"none",background:"transparent",fontSize:12,fontFamily:"var(--font)",color:"var(--ink)",flex:1,minWidth:0}}/>
+            </div>
+          </div>
+          {pestanaLista==="pasados"&&<div style={{fontSize:11,color:"var(--muted)",marginBottom:10}}>Presupuestos que ya no se trabajan y quedan de referencia: se abren, se exportan y se copian, pero no se editan.</div>}
+          {lista.length===0?<div style={{textAlign:"center",padding:"50px 0",color:"var(--muted)",fontSize:13}}>
+            {q?"Ningún presupuesto coincide con la búsqueda.":pestanaLista==="activos"?<><div style={{fontSize:40,marginBottom:12}}>💼</div>Sin presupuestos activos.</>:"Todavía no hay presupuestos pasados."}
+          </div>
+          :lista.map(p=>(
+            <div key={p.id} onClick={()=>{setPresupuestoActivo(p);fetchItems(p.id);setSubVista("detalle");setModoDetalle("armar");}}
+              style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,opacity:p.archivado_at?0.85:1}}
               onMouseEnter={e=>e.currentTarget.style.borderColor="var(--brand)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
-              <div>
+              <div style={{minWidth:0}}>
                 <div style={{fontWeight:600,color:"var(--ink)",fontSize:14}}>{p.nombre}</div>
-                <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{p.cliente_nombre} · {new Date(p.created_at).toLocaleDateString("es-EC")}</div>
+                <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{p.cliente_nombre} · {new Date(p.created_at).toLocaleDateString("es-EC")}{p.archivado_at&&<> · histórico desde el {new Date(p.archivado_at).toLocaleDateString("es-EC")}</>}</div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontWeight:700,color:"var(--brand)",fontSize:16}}>${fmt(p.total)}</div>
                   <div style={{fontSize:10,color:"var(--muted)",background:"var(--neutral-soft)",borderRadius:20,padding:"1px 8px",display:"inline-block",marginTop:2}}>{p.estado}</div>
@@ -744,6 +782,11 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                   title="Duplicar para partir de este"
                   style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>
                   <Copy size={13}/>
+                </button>
+                <button onClick={e=>{e.stopPropagation();archivarPresupuesto(p,!p.archivado_at);}}
+                  title={p.archivado_at?"Reactivar: volver a los que se trabajan":"Pasar a históricos: queda de referencia, sin editarse"}
+                  style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>
+                  {p.archivado_at?<ArchiveRestore size={13}/>:<Archive size={13}/>}
                 </button>
                 {puede?.("borrar.definitivo")&&(
                   <button onClick={e=>{e.stopPropagation();setBorrarPre(p);}} title="Borrar este presupuesto"
@@ -755,7 +798,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             </div>
           ))}
         </div>
-      )}
+        );
+      })()}
 
       {/* DESDE EXCEL: el presupuesto inicial, leído con sus capítulos */}
       {subVista==="importar"&&(
@@ -808,12 +852,25 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             ))}
           </div>
 
-          {modoDetalle==="revisar"&&(
-            <div style={{marginBottom:14}}>
-              <RevisarPresupuesto items={items} capitulos={capitulosActivos} onActualizar={(id,campos)=>actualizarItemMulti(id,campos)}/>
+          {presupuestoActivo.archivado_at&&(
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",background:"var(--neutral-soft)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--ink-soft)"}}>
+              <Archive size={14}/>
+              <span style={{flex:1,minWidth:200}}><strong style={{color:"var(--ink)"}}>Presupuesto histórico, de solo lectura.</strong> Para trabajarlo, reactívalo o haz una nueva versión.</span>
+              <button onClick={()=>archivarPresupuesto(presupuestoActivo,false)}
+                style={{background:"#fff",border:"1px solid var(--border)",borderRadius:6,padding:"5px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:"var(--ink)",fontFamily:"var(--font)"}}>Reactivar</button>
             </div>
           )}
 
+          {modoDetalle==="revisar"&&(
+            <div style={{marginBottom:14}}>
+              <RevisarPresupuesto items={items} capitulos={capitulosActivos}
+                onActualizar={(id,campos)=>presupuestoActivo.archivado_at?alert("Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."):actualizarItemMulti(id,campos)}/>
+            </div>
+          )}
+
+          {/* Un histórico se mira, no se toca: el fieldset deshabilita cada
+              casilla y cada botón de adentro de una vez. */}
+          <fieldset disabled={!!presupuestoActivo.archivado_at} style={{border:0,padding:0,margin:0,minWidth:0}}>
           {modoDetalle==="armar"&&<>
           {capitulosActivos.length===0&&(
             <div style={{textAlign:"center",padding:"30px 0",color:"var(--muted)",fontSize:13}}>
@@ -1048,6 +1105,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               </div>
             </div>
           )}
+          </fieldset>
         </div>
       )}
 
