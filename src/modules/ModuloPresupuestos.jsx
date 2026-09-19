@@ -16,7 +16,7 @@ import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 import PasarABase from "./presupuestos/PasarABase";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
-import { UNIDADES, normalizarUnidad, etiquetaUnidad } from "../lib/unidades";
+import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRubro";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
@@ -34,6 +34,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // capitulosActivos: [{nombre, orden}] ordenados
   const [capitulosActivos, setCapitulosActivos] = useState([]);
   const [items, setItems] = useState([]);
+  // Lo último de los rubros, para cambios seguidos (aplicar varias correcciones
+  // de NOVA de una vez): cada uno parte del anterior, no de una copia vieja.
+  const itemsRef = useRef(items); itemsRef.current = items;
   const [exportar, setExportar] = useState(false);
   // El rubro cuyo precio base se está eligiendo de la base de rubros, y la
   // base leída (se vuelve a leer si pasó más de un minuto: una cotización
@@ -377,12 +380,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   }
 
   async function actualizarItemMulti(id, campos) {
-    const updated = items.map(i => {
+    const updated = itemsRef.current.map(i => {
       if (i.id!==id) return i;
       const u={...i,...campos};
       u.total=centavos((Number(u.cantidad)||0)*(Number(u.precio_unitario)||0));
       return u;
     });
+    itemsRef.current = updated;
     setItems(updated);
     await supabase.from("presupuesto_items").update({...campos,total:updated.find(i=>i.id===id)?.total}).eq("id",id);
     recalcTotales(updated);
@@ -863,7 +867,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
 
           {modoDetalle==="revisar"&&(
             <div style={{marginBottom:14}}>
-              <RevisarPresupuesto items={items} capitulos={capitulosActivos}
+              <RevisarPresupuesto items={items} capitulos={capitulosActivos} presupuesto={presupuestoActivo} soloLectura={!!presupuestoActivo.archivado_at}
                 onActualizar={(id,campos)=>presupuestoActivo.archivado_at?alert("Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."):actualizarItemMulti(id,campos)}/>
             </div>
           )}
@@ -1273,66 +1277,5 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       )}
       </>}
     </div>
-  );
-}
-
-
-// Un precio con dos decimales a la vista. Mientras se escribe se deja
-// escribir tal cual —formatear tecla por tecla no deja poner "18"—; al salir
-// se redondea a centavos y se guarda así.
-function CampoPrecio({ valor, onCambio, onFoco, onSalir, style }) {
-  const [escribiendo, setEscribiendo] = useState(null);
-  return (
-    <input type="number" className="num-limpio" step="0.01"
-      value={escribiendo ?? (Number(valor) || 0).toFixed(2)}
-      onFocus={() => { setEscribiendo(String(Number(valor) || 0)); onFoco?.(); }}
-      onChange={e => { setEscribiendo(e.target.value); onCambio?.(e.target.value); }}
-      onBlur={e => { const v = centavos(e.target.value); setEscribiendo(null); onSalir?.(v); }}
-      style={style} />
-  );
-}
-
-// Un texto de la tabla que se edita ahí mismo: se ve como texto, al tocarlo se
-// escribe, y se guarda al salir (Enter también, salvo en la descripción, que
-// puede llevar varias líneas; ahí Escape cancela).
-function CampoTexto({ valor, onGuardar, multilinea, titulo, style }) {
-  const [texto, setTexto] = useState(valor || "");
-  useEffect(() => { setTexto(valor || ""); }, [valor]);
-  const guardar = () => { const v = texto.trim(); if (v !== String(valor || "").trim()) onGuardar(v); };
-  const base = { width: "100%", boxSizing: "border-box", border: "1px solid transparent", borderRadius: 5, background: "transparent",
-    padding: "3px 4px", fontFamily: "var(--font)", outline: "none", resize: "none", ...style };
-  const foco = e => { e.target.style.borderColor = "var(--border)"; e.target.style.background = "var(--bg)"; };
-  const fuera = e => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; guardar(); };
-  if (multilinea) {
-    return (
-      <textarea value={texto} title={titulo} rows={Math.max(1, Math.ceil(texto.length / 60))}
-        onChange={e => setTexto(e.target.value)} onFocus={foco} onBlur={fuera}
-        onKeyDown={e => { if (e.key === "Escape") { setTexto(valor || ""); e.currentTarget.blur(); } }}
-        style={base} />
-    );
-  }
-  return (
-    <input value={texto} title={titulo} onChange={e => setTexto(e.target.value)} onFocus={foco} onBlur={fuera}
-      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setTexto(valor || ""); } }}
-      style={base} />
-  );
-}
-
-// La unidad se elige de la lista de FOREMAN: escrita a mano salían "m2",
-// "m²", "M2" y "mt2" para lo mismo, y la base de rubros no los podía comparar.
-// Una unidad vieja que no calza con ninguna se muestra para revisarla, sin
-// perderla.
-function SelectorUnidad({ valor, onCambiar, grande }) {
-  const { canon } = normalizarUnidad(valor);
-  const crudo = String(valor || "").trim();
-  return (
-    <select value={canon || crudo} onChange={e => onCambiar(e.target.value)}
-      title={canon ? UNIDADES.find(u => u.id === canon)?.nombre : crudo ? "Unidad sin reconocer: elige una de la lista" : "Elige la unidad"}
-      style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${!canon && crudo ? "var(--warning-border)" : grande ? "var(--border)" : "transparent"}`,
-        background: !canon && crudo ? "var(--warning-soft)" : grande ? "var(--bg)" : "transparent", borderRadius: grande ? 8 : 5,
-        padding: grande ? "9px 10px" : "3px 2px", fontSize: grande ? 13 : 12, color: "var(--ink-soft)", fontFamily: "var(--font)", cursor: "pointer" }}>
-      {!canon && <option value={crudo}>{crudo ? `${crudo} (revisar)` : "—"}</option>}
-      {UNIDADES.map(u => <option key={u.id} value={u.id}>{etiquetaUnidad(u.id)} · {u.nombre}</option>)}
-    </select>
   );
 }

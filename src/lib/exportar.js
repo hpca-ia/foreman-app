@@ -34,11 +34,12 @@ export function exportarExcel(nombreArchivo, hojas) {
  * @param titulo      título del documento
  * @param subtitulo   línea bajo el título (obra, período…)
  * @param resumen     [{label, valor}] tarjetas de totales
- * @param bloques     [{titulo, columnas, filas, anchos?}]
+ * @param bloques     [{titulo, columnas, filas, anchos?, filasDestacadas?, destacarSinNegrita?}]
  * @param adjuntos    [{titulo, url}] imágenes de facturas
  * @param indiceAdjuntos  agrega un índice de los anexos antes de las imágenes
  */
-export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso }) {
+export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso, tono }) {
+  const FUERTE = tono?.fuerte || MARCA, SUAVE = tono?.suave || [231, 241, 239];
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
   let y = 42;
@@ -70,7 +71,7 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
 
   for (const b of bloques) {
     if (b.titulo) {
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...MARCA);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...FUERTE);
       doc.text(b.titulo, 40, y); y += 8;
     }
     autoTable(doc, {
@@ -79,13 +80,14 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
       body: b.filas,
       margin: { left: 40, right: 40 },
       styles: { fontSize: 7.5, cellPadding: 4, textColor: TINTA, lineColor: [235, 235, 232], lineWidth: 0.5 },
-      headStyles: { fillColor: [231, 241, 239], textColor: MARCA, fontStyle: "bold", fontSize: 7 },
+      headStyles: { fillColor: SUAVE, textColor: FUERTE, fontStyle: "bold", fontSize: 7 },
       alternateRowStyles: { fillColor: [252, 252, 251] },
       columnStyles: b.anchos || {},
+      rowPageBreak: "avoid",   // una fila no se parte entre dos páginas
       didParseCell: d => {
         if (d.section === "body" && b.filasDestacadas?.includes(d.row.index)) {
-          d.cell.styles.fillColor = [231, 241, 239];
-          d.cell.styles.fontStyle = "bold";
+          d.cell.styles.fillColor = SUAVE;
+          if (!b.destacarSinNegrita) d.cell.styles.fontStyle = "bold";
         }
       },
     });
@@ -95,7 +97,7 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
 
   // Índice de anexos: útil cuando el PDF es solo el legajo de facturas
   if (indiceAdjuntos && adjuntos.length) {
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...MARCA);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...FUERTE);
     doc.text(`Anexos (${adjuntos.length})`, 40, y); y += 8;
     autoTable(doc, {
       startY: y,
@@ -103,7 +105,7 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
       body: adjuntos.map((a, i) => [i + 1, a.titulo || `Anexo ${i + 1}`]),
       margin: { left: 40, right: 40 },
       styles: { fontSize: 8, cellPadding: 4, textColor: TINTA, lineColor: [235, 235, 232], lineWidth: 0.5 },
-      headStyles: { fillColor: [231, 241, 239], textColor: MARCA, fontStyle: "bold", fontSize: 7 },
+      headStyles: { fillColor: SUAVE, textColor: FUERTE, fontStyle: "bold", fontSize: 7 },
       columnStyles: { 0: { cellWidth: 30 } },
     });
   }
