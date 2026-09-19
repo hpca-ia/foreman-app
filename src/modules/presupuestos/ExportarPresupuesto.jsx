@@ -47,6 +47,9 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // Textos cambiados solo para este presupuesto, por id de nota.
   const [textos, setTextos] = useState({});
   const [particulares, setParticulares] = useState(presupuesto.notas || "");
+  // El costo directo por m² va en las notas si hay área; se puede sacar para
+  // un cliente al que no se le quiere mostrar.
+  const [conM2, setConM2] = useState(true);
   const [paraCotizar, setParaCotizar] = useState(NOTAS_COTIZAR.join("\n"));
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -76,6 +79,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       setTextos(propia.textos || {});
       if (propia.particulares != null) setParticulares(propia.particulares);
       if (propia.paraCotizar != null) setParaCotizar(propia.paraCotizar);
+      if (propia.conM2 != null) setConM2(propia.conM2 !== false);
       setCargado(true);
     })();
     return () => { vivo = false; };
@@ -129,7 +133,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
 
   const eleccion = () => ({
     plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
-    notas: marcadas, textos, particulares, paraCotizar,
+    notas: marcadas, textos, particulares, paraCotizar, conM2,
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -162,9 +166,14 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
 
   // Las notas en el orden del catálogo, y después las de este presupuesto.
   const lineas = t => String(t || "").split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const area = Number(presupuesto.area_m2) || 0;
+  const costoDirecto = totalesDe(items, presupuesto).subtotal;
+  const porM2 = area > 0 && costoDirecto > 0 ? costoDirecto / area : 0;
+  const fmtM = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const notaM2 = porM2 ? `Valor referencial del costo directo: $${fmtM(porM2)} por m², sobre un área de ${area.toLocaleString("es-EC", { maximumFractionDigits: 2 })} m², antes de honorarios e IVA.` : null;
   const notas = formato === "cotizar"
     ? lineas(paraCotizar)
-    : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares)];
+    : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
   const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete };
   const nombreArchivo = ext => {
@@ -345,6 +354,14 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
                   <span>NOTAS Y CONDICIONES</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
+                {notaM2 ? (
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: conM2 ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
+                    <input type="checkbox" checked={conM2} onChange={e => setConM2(e.target.checked)} style={{ marginTop: 2 }} />
+                    <span><strong>Costo directo por m²: ${fmtM(porM2)}</strong> — sale como nota al final.</span>
+                  </label>
+                ) : (
+                  <div style={{ fontSize: 11, color: colors.muted, marginBottom: 10 }}>Para incluir el costo directo por m², pon el área en el presupuesto (abajo, en Información general).</div>
+                )}
                 <NotasExportacion
                   catalogo={catalogo.filter(x => x.activa !== false || marcadas.includes(x.id))} sinBase={sinBase}
                   marcadas={marcadas} onAlternar={alternarNota}

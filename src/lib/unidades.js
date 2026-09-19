@@ -62,4 +62,10 @@ export function normalizarUnidad(u) {
   return { canon: null, estado: "desconocida" };
 }
 
-export const etiquetaUnidad = id => ({ m2: "m²", m3: "m³" }[id] || id || "");
+
+/** Para mostrar: "m2" → "m²", "m3" → "m³"; las demás como su código. Una unidad que no se reconoce, tal cual. */
+export function etiquetaUnidad(u) {
+  const { canon } = normalizarUnidad(u);
+  if (!canon) return String(u || "").trim();
+  return canon === "m2" ? "m²" : canon === "m3" ? "m³" : canon;
+}

@@ -18,6 +18,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { money } from "../../lib/exportar";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
+import { etiquetaUnidad } from "../../lib/unidades";
 
 export const FORMATOS = {
   detallado: { label: "Detallado", titulo: "Presupuesto", ayuda: "Cada rubro con cantidad, precio unitario y total, agrupado por capítulo." },
@@ -87,7 +88,7 @@ export function estructura({ capitulos = [], items = [] }) {
       nombre: nombre || "OTROS",
       subtotal: r2(suyos.reduce((s, i) => s + n(i.total), 0)),
       rubros: suyos.map((i, k) => ({
-        numero: `${num}.${k + 1}`, descripcion: i.descripcion || "", unidad: i.unidad || "",
+        numero: `${num}.${k + 1}`, descripcion: i.descripcion || "", unidad: etiquetaUnidad(i.unidad),
         cantidad: n(i.cantidad), precio_unitario: n(i.precio_unitario), total: n(i.total),
       })),
     });

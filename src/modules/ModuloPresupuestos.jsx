@@ -15,6 +15,8 @@ import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 import PasarABase from "./presupuestos/PasarABase";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
+import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
+import { UNIDADES, normalizarUnidad, etiquetaUnidad } from "../lib/unidades";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
@@ -38,6 +40,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // recién guardada tiene que aparecer).
   const [eligiendoPrecio, setEligiendoPrecio] = useState(null);
   const [pasarABase, setPasarABase] = useState(false);
+  // Armar: capítulos y rubros en su orden. Revisar: la misma información en
+  // una tabla que se ordena por precio, cantidad o total, con alertas y NOVA.
+  const [modoDetalle, setModoDetalle] = useState("armar");
   const [baseRubros, setBaseRubros] = useState(null);
   const [uploadingCotizacion, setUploadingCotizacion] = useState(false);
   const [cotizacionResult, setCotizacionResult] = useState(null);
@@ -65,6 +70,17 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const fileBDRef = useRef(null);
 
   useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchProveedores(); fetchCapitulosDB(); }, []);
+
+  // Si el total guardado quedó atrás de sus rubros —un cambio que no alcanzó a
+  // recalcular—, se corrige al abrirlo. Solo con los rubros de este mismo
+  // presupuesto: al cambiar de uno a otro, un instante se ven los del anterior,
+  // y recalcular ahí le escribiría a uno los totales del otro.
+  useEffect(() => {
+    if (subVista !== "detalle" || !presupuestoActivo || !items.length) return;
+    if (!items.every(i => i.presupuesto_id === presupuestoActivo.id)) return;
+    const suma = Math.round(items.reduce((s, i) => s + (Number(i.total) || 0), 0) * 100) / 100;
+    if (Math.abs((Number(presupuestoActivo.subtotal) || 0) - suma) > 0.01) recalcTotales(items);
+  }, [items, presupuestoActivo?.id, presupuestoActivo?.subtotal, subVista]); // eslint-disable-line
 
   async function fetchPresupuestos() {
     const { data } = await supabase.from("presupuestos").select("*").order("created_at",{ascending:false});
@@ -162,6 +178,16 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       await supabase.from("presupuestos").update({ honorarios_pct: sumaPct }).eq("id", presupuestoActivo.id);
     } else if (error) { alert("No se pudieron guardar los honorarios: " + error.message); return; }
     recalcTotales(items, { honorarios: limpia, honorarios_pct: sumaPct });
+  }
+
+  // El área la escribe quien arma el presupuesto: no sale de los rubros.
+  async function guardarArea(valor) {
+    const area = Number(valor) > 0 ? Number(valor) : null;
+    if ((presupuestoActivo.area_m2 ?? null) === area) return;
+    setPresupuestoActivo(p => ({ ...p, area_m2: area }));
+    const { error } = await supabase.from("presupuestos").update({ area_m2: area }).eq("id", presupuestoActivo.id);
+    if (error && /column|schema cache/i.test(error.message)) alert("Falta correr la migración 029 en Supabase para guardar el área. Por ahora el valor por m² se ve, pero no queda guardado.");
+    else if (error) alert("No se pudo guardar el área: " + error.message);
   }
 
   async function renombrarPresupuesto(nombre) {
@@ -575,6 +601,10 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   }
 
   const fmt=n=>(Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
+  // El costo directo de lo que está en pantalla: la suma de los rubros, no el
+  // subtotal guardado, que puede haber quedado atrás si algo cambió sin
+  // recalcular.
+  const costoDirecto=items.reduce((s,i)=>s+(Number(i.total)||0),0);
   const iS={width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
 
   return (
@@ -770,6 +800,21 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       {/* DETALLE */}
       {subVista==="detalle"&&presupuestoActivo&&(
         <div>
+          <div style={{display:"inline-flex",gap:3,background:"var(--neutral-soft)",borderRadius:8,padding:3,marginBottom:12}}>
+            {[["armar","Armar"],["revisar","Revisar"]].map(([m,l])=>(
+              <button key={m} onClick={()=>setModoDetalle(m)}
+                style={{padding:"6px 16px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"var(--font)",fontSize:12,fontWeight:600,
+                  background:modoDetalle===m?"#fff":"transparent",color:modoDetalle===m?"var(--ink)":"var(--ink-soft)"}}>{l}</button>
+            ))}
+          </div>
+
+          {modoDetalle==="revisar"&&(
+            <div style={{marginBottom:14}}>
+              <RevisarPresupuesto items={items} capitulos={capitulosActivos} onActualizar={(id,campos)=>actualizarItemMulti(id,campos)}/>
+            </div>
+          )}
+
+          {modoDetalle==="armar"&&<>
           {capitulosActivos.length===0&&(
             <div style={{textAlign:"center",padding:"30px 0",color:"var(--muted)",fontSize:13}}>
               <div style={{fontSize:28,marginBottom:8}}>📋</div>Sin capítulos aún. Agrega el primero abajo.
@@ -808,6 +853,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:"auto"}}>
                     {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",whiteSpace:"nowrap"}}>${fmt(capTotal)}</span>}
+                    {/* Cuánto pesa el capítulo en el costo directo (sin honorarios ni IVA). */}
+                    {capTotal>0&&costoDirecto>0&&(
+                      <span title="Peso del capítulo en el costo directo, sin honorarios ni IVA"
+                        style={{fontSize:11,fontWeight:700,color:"var(--ink)",background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"1px 7px",whiteSpace:"nowrap"}}>
+                        {(capTotal/costoDirecto*100).toLocaleString("es-EC",{maximumFractionDigits:1})} %
+                      </span>
+                    )}
                     <div style={{display:"flex",alignItems:"center",gap:4,background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px"}}>
                       <span style={{fontSize:10,color:"var(--brand)"}}>Util%</span>
                       <input type="number" placeholder="0" min="0" max="100"
@@ -846,8 +898,14 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                               {cap.orden}.{itemIdx+1}
                             </div>
                           </td>
-                          <td style={{padding:"5px 8px",color:"var(--ink)",fontSize:12,lineHeight:1.35,overflowWrap:"anywhere"}}>{item.descripcion}</td>
-                          <td style={{padding:"5px 8px",color:"var(--ink-soft)",overflowWrap:"anywhere"}}>{item.unidad}</td>
+                          <td style={{padding:"3px 4px"}}>
+                            <CampoTexto valor={item.descripcion} multilinea titulo="Toca para editar la descripción"
+                              onGuardar={v=>actualizarItemMulti(item.id,{descripcion:v})}
+                              style={{color:"var(--ink)",fontSize:12,lineHeight:1.35}}/>
+                          </td>
+                          <td style={{padding:"3px 4px"}}>
+                            <SelectorUnidad valor={item.unidad} onCambiar={v=>actualizarItemMulti(item.id,{unidad:v})}/>
+                          </td>
                           <td style={{padding:"5px 8px"}}>
                             <input type="number" className="num-limpio" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
                               style={{width:"100%",boxSizing:"border-box",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
@@ -945,6 +1003,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             )}
           </div>
 
+          </>}
+
           {/* Totales */}
           {items.length>0&&(
             <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:16}}>
@@ -969,6 +1029,22 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               </div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 0",fontSize:16,fontWeight:700,color:"var(--ink)"}}>
                 <span>TOTAL</span><span style={{color:"var(--brand)"}}>${fmt(presupuestoActivo.total)}</span>
+              </div>
+              {/* Información general: el costo directo por m², para vender. */}
+              <div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed var(--border)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:12,color:"var(--ink-soft)"}}>
+                <span style={{fontSize:10,fontWeight:700,letterSpacing:0.4,color:"var(--muted)"}}>INFORMACIÓN GENERAL</span>
+                <label style={{display:"flex",alignItems:"center",gap:6}}>
+                  Área
+                  <input type="number" className="num-limpio" key={`area-${presupuestoActivo.id}`} defaultValue={presupuestoActivo.area_m2||""} placeholder="0"
+                    onBlur={e=>guardarArea(e.target.value)}
+                    style={{width:80,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 6px",fontSize:12,textAlign:"right"}}/>
+                  m²
+                </label>
+                {Number(presupuestoActivo.area_m2)>0&&costoDirecto>0?(
+                  <span style={{marginLeft:"auto"}}>Costo directo por m² <span style={{fontSize:11,color:"var(--muted)"}}>(sin honorarios ni IVA)</span> <strong style={{color:"var(--ink)",fontSize:14}}>${fmt(costoDirecto/Number(presupuestoActivo.area_m2))}/m²</strong></span>
+                ):(
+                  <span style={{marginLeft:"auto",fontSize:11,color:"var(--muted)"}}>Pon los m² del proyecto para ver el costo directo por m².</span>
+                )}
               </div>
             </div>
           )}
@@ -1119,7 +1195,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                   <input value={manualRubro.descripcion} onChange={e=>setManualRubro(p=>({...p,descripcion:e.target.value}))} placeholder="Descripción del rubro" style={iS}/></div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                   <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Unidad</label>
-                    <input value={manualRubro.unidad} onChange={e=>setManualRubro(p=>({...p,unidad:e.target.value}))} placeholder="m², ml, glb..." style={iS}/></div>
+                    <SelectorUnidad valor={manualRubro.unidad} onCambiar={v=>setManualRubro(p=>({...p,unidad:v}))} grande/></div>
                   <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Cantidad</label>
                     <input type="number" value={manualRubro.cantidad} onChange={e=>setManualRubro(p=>({...p,cantidad:e.target.value}))} style={iS}/></div>
                   <div><label style={{fontSize:11,color:"var(--ink-soft)",display:"block",marginBottom:4}}>Precio unit.</label>
@@ -1155,5 +1231,50 @@ function CampoPrecio({ valor, onCambio, onFoco, onSalir, style }) {
       onChange={e => { setEscribiendo(e.target.value); onCambio?.(e.target.value); }}
       onBlur={e => { const v = centavos(e.target.value); setEscribiendo(null); onSalir?.(v); }}
       style={style} />
+  );
+}
+
+// Un texto de la tabla que se edita ahí mismo: se ve como texto, al tocarlo se
+// escribe, y se guarda al salir (Enter también, salvo en la descripción, que
+// puede llevar varias líneas; ahí Escape cancela).
+function CampoTexto({ valor, onGuardar, multilinea, titulo, style }) {
+  const [texto, setTexto] = useState(valor || "");
+  useEffect(() => { setTexto(valor || ""); }, [valor]);
+  const guardar = () => { const v = texto.trim(); if (v !== String(valor || "").trim()) onGuardar(v); };
+  const base = { width: "100%", boxSizing: "border-box", border: "1px solid transparent", borderRadius: 5, background: "transparent",
+    padding: "3px 4px", fontFamily: "var(--font)", outline: "none", resize: "none", ...style };
+  const foco = e => { e.target.style.borderColor = "var(--border)"; e.target.style.background = "var(--bg)"; };
+  const fuera = e => { e.target.style.borderColor = "transparent"; e.target.style.background = "transparent"; guardar(); };
+  if (multilinea) {
+    return (
+      <textarea value={texto} title={titulo} rows={Math.max(1, Math.ceil(texto.length / 60))}
+        onChange={e => setTexto(e.target.value)} onFocus={foco} onBlur={fuera}
+        onKeyDown={e => { if (e.key === "Escape") { setTexto(valor || ""); e.currentTarget.blur(); } }}
+        style={base} />
+    );
+  }
+  return (
+    <input value={texto} title={titulo} onChange={e => setTexto(e.target.value)} onFocus={foco} onBlur={fuera}
+      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setTexto(valor || ""); } }}
+      style={base} />
+  );
+}
+
+// La unidad se elige de la lista de FOREMAN: escrita a mano salían "m2",
+// "m²", "M2" y "mt2" para lo mismo, y la base de rubros no los podía comparar.
+// Una unidad vieja que no calza con ninguna se muestra para revisarla, sin
+// perderla.
+function SelectorUnidad({ valor, onCambiar, grande }) {
+  const { canon } = normalizarUnidad(valor);
+  const crudo = String(valor || "").trim();
+  return (
+    <select value={canon || crudo} onChange={e => onCambiar(e.target.value)}
+      title={canon ? UNIDADES.find(u => u.id === canon)?.nombre : crudo ? "Unidad sin reconocer: elige una de la lista" : "Elige la unidad"}
+      style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${!canon && crudo ? "var(--warning-border)" : grande ? "var(--border)" : "transparent"}`,
+        background: !canon && crudo ? "var(--warning-soft)" : grande ? "var(--bg)" : "transparent", borderRadius: grande ? 8 : 5,
+        padding: grande ? "9px 10px" : "3px 2px", fontSize: grande ? 13 : 12, color: "var(--ink-soft)", fontFamily: "var(--font)", cursor: "pointer" }}>
+      {!canon && <option value={crudo}>{crudo ? `${crudo} (revisar)` : "—"}</option>}
+      {UNIDADES.map(u => <option key={u.id} value={u.id}>{etiquetaUnidad(u.id)} · {u.nombre}</option>)}
+    </select>
   );
 }
