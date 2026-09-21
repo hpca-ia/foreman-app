@@ -32,16 +32,22 @@ export default function EditorHonorarios({ lista, subtotal, onCambiar }) {
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", flexWrap: "wrap" }}>
           <input value={h.nombre} onChange={e => cambiar(i, "nombre", e.target.value)} onBlur={() => guardar(filas)}
             placeholder="Nombre del honorario" style={{ ...campo, flex: "1 1 200px", minWidth: 0 }} />
+          {/* Un honorario se cobra como porcentaje del costo directo o como un
+              monto fijo acordado con el cliente. */}
           <div style={{ display: "inline-flex", background: "var(--neutral-soft)", borderRadius: 6, padding: 2 }}>
-            {[["pct", "%"], ["monto", "$"]].map(([t, l]) => (
+            {[["pct", "% del costo"], ["monto", "$ fijo"]].map(([t, l]) => (
               <button key={t} onClick={() => guardar(filas.map((x, k) => (k === i ? { ...x, tipo: t } : x)))}
-                title={t === "pct" ? "Porcentaje del costo directo" : "Monto fijo"}
-                style={{ border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                title={t === "pct" ? "Un porcentaje del costo directo" : "Un monto fijo, el costo directo que sea"}
+                style={{ border: "none", borderRadius: 4, padding: "3px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font)",
                   background: (h.tipo || "pct") === t ? "#fff" : "transparent", color: (h.tipo || "pct") === t ? "var(--ink)" : "var(--muted)" }}>{l}</button>
             ))}
           </div>
-          <input type="number" className="num-limpio" value={h.valor} onChange={e => cambiar(i, "valor", e.target.value)} onBlur={() => guardar(filas)}
-            style={{ ...campo, width: h.tipo === "monto" ? 96 : 60, textAlign: "right" }} />
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            {h.tipo === "monto" && <span style={{ color: "var(--muted)", fontSize: 12 }}>$</span>}
+            <input type="number" className="num-limpio" value={h.valor} onChange={e => cambiar(i, "valor", e.target.value)} onBlur={() => guardar(filas)}
+              placeholder="0" style={{ ...campo, width: h.tipo === "monto" ? 96 : 60, textAlign: "right" }} />
+            {h.tipo !== "monto" && <span style={{ color: "var(--muted)", fontSize: 12 }}>%</span>}
+          </div>
           {/* En % se ve cuánto es en plata; en monto fijo, qué porcentaje
               representa: las dos formas de mirar el mismo honorario. */}
           <span style={{ marginLeft: "auto", minWidth: 130, textAlign: "right" }}>

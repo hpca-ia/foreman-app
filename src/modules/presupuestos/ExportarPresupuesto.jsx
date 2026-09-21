@@ -140,7 +140,37 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     const e = eleccion();
     const err = await guardarEleccion(presupuesto.id, e);
     if (!err) onGuardado?.(e);
+    return err;
   }
+
+  // Lo que se llena acá se guarda solo, sin botón: se llenaba el título, las
+  // notas y el pie de firma, se cerraba la pantalla y volvía todo atrás porque
+  // solo se guardaba al generar el documento.
+  const [guardado, setGuardado] = useState("");
+  const loGuardado = useRef(null);
+  useEffect(() => {
+    if (!cargado) return;
+    const e = eleccion();
+    const texto = JSON.stringify(e);
+    if (loGuardado.current === null) { loGuardado.current = texto; return; }   // lo recién leído no se reescribe
+    if (loGuardado.current === texto) return;
+    setGuardado("guardando");
+    const t = setTimeout(async () => {
+      const err = await guardarEleccion(presupuesto.id, e);
+      if (err) {
+        setGuardado("error");
+        setError(/column|schema cache|does not exist/i.test(err)
+          ? "Falta correr la migración 026 en Supabase: por ahora esto no se guarda y se pierde al cerrar."
+          : "No se pudo guardar: " + err);
+        return;
+      }
+      loGuardado.current = texto;
+      onGuardado?.(e);
+      setGuardado("guardado");
+    }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -222,6 +252,10 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
           <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>Exportar presupuesto</div>
           <div style={{ fontSize: 12, color: colors.muted }}>{presupuesto.nombre} · {presupuesto.cliente_nombre} · Versión {version}</div>
         </div>
+        {/* Se guarda solo: acá se ve cuándo. */}
+        <span style={{ marginLeft: 14, fontSize: 11, color: guardado === "error" ? colors.danger : colors.muted, whiteSpace: "nowrap" }}>
+          {guardado === "guardando" ? "Guardando…" : guardado === "guardado" ? "✓ Guardado en este presupuesto" : guardado === "error" ? "No se guardó" : ""}
+        </span>
         <button onClick={onCerrar} style={{ marginLeft: "auto", background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex" }}><X size={18} /></button>
       </div>
 
