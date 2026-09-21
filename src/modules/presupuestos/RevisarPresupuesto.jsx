@@ -516,7 +516,7 @@ ${JSON.stringify(lista)}`;
       </div>
 
       {/* ── Repetidos ── */}
-      {onUnificar && <RubrosRepetidos items={items} grupos={grupos} minimo={minRepetidos} onMinimo={setMinRepetidos}
+      {onUnificar && <RubrosRepetidos items={items} grupos={grupos} minimo={minRepetidos} onMinimo={setMinRepetidos} presupuestoId={presupuesto.id}
         soloLectura={soloLectura} onUnificar={onUnificar} numeroDe={id => filas.find(f => f.id === id)?.numero} />}
 
       {/* ── Peso de cada capítulo ── */}

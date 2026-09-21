@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Copy, Sparkles, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { principalDe } from "../../lib/agruparRepetidos";
+import { principalDe, leerSeparados, guardarSeparados } from "../../lib/agruparRepetidos";
 import { pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { normalizarUnidad, etiquetaUnidad, UNIDADES } from "../../lib/unidades";
 import { SelectorUnidad } from "./camposRubro";
@@ -22,15 +22,22 @@ const fmt = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximu
 const cant = v => n(v).toLocaleString("es-EC", { maximumFractionDigits: 2 });
 const claveDe = g => g.items.map(i => i.id).sort().join("-");
 
-const SENSIBILIDAD = [[100, "Iguales"], [80, "Muy parecidos"], [65, "Parecidos"], [50, "De lejos"]];
+const SENSIBILIDAD = [[100, "Iguales"], [80, "Muy parecidos"], [70, "Parecidos"], [55, "De lejos"]];
 
-export default function RubrosRepetidos({ items, grupos, minimo, onMinimo, numeroDe, soloLectura, onUnificar }) {
-  const [ignorados, setIgnorados] = useState({});
+export default function RubrosRepetidos({ items, grupos, minimo, onMinimo, numeroDe, soloLectura, onUnificar, presupuestoId }) {
+  // Lo que ya se decidió dejar separado no se vuelve a preguntar.
+  const [separados, setSeparados] = useState(() => leerSeparados(presupuestoId));
+  const dejarSeparados = g => {
+    const c = new Set(separados).add(claveDe(g));
+    setSeparados(c);
+    guardarSeparados(presupuestoId, c);
+  };
   const [formularios, setFormularios] = useState({});
   const [nova, setNova] = useState({ estado: "nada", propuestas: {} });
   const [trabajando, setTrabajando] = useState("");
 
-  const visibles = grupos.filter(g => !ignorados[claveDe(g)]);
+  const visibles = grupos.filter(g => !separados.has(claveDe(g)));
+  const guardados = grupos.length - visibles.length;
 
   // Lo que quedaría al unificar un grupo, antes de que nadie lo toque.
   function porDefecto(g) {
@@ -144,6 +151,13 @@ ${JSON.stringify(lista)}`;
         ))}
       </div>
       {nova.estado === "error" && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>NOVA no pudo revisarlos: {nova.error}</div>}
+      {guardados > 0 && (
+        <div style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
+          {guardados === 1 ? "1 grupo que dejaste separado no se muestra." : `${guardados} grupos que dejaste separados no se muestran.`}{" "}
+          <button onClick={() => { setSeparados(new Set()); guardarSeparados(presupuestoId, []); }}
+            style={{ background: "none", border: "none", padding: 0, color: colors.ink, cursor: "pointer", fontSize: 11, textDecoration: "underline", fontFamily: colors.font }}>Volver a mostrarlos</button>
+        </div>
+      )}
       {!visibles.length && (
         <div style={{ fontSize: 12, color: colors.success, marginTop: 8 }}>
           ✓ Ningún rubro repetido{minimo === 100 ? " escrito igual" : ""}.
@@ -160,7 +174,10 @@ ${JSON.stringify(lista)}`;
             <div key={clave} style={{ border: `1px solid ${colors.border}`, borderRadius: 8, overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "8px 10px", background: colors.bg, borderBottom: `1px solid ${colors.border}` }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 180, overflowWrap: "anywhere" }}>{v.descripcion}</span>
-                <span style={{ fontSize: 11, color: colors.muted }}>{g.items.length} veces{g.iguales ? "" : " · escritos distinto"}</span>
+                <span style={{ fontSize: 11, color: colors.muted }} title={g.comunes?.length ? `Comparten: ${g.comunes.join(", ")}` : ""}>
+                  {g.items.length} veces{g.iguales ? " · escritos igual" : ` · se parecen ${g.parecido} %`}
+                  {!g.iguales && g.comunes?.length ? ` · comparten ${g.comunes.slice(0, 4).join(", ")}` : ""}
+                </span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: colors.ink }}>${fmt(g.monto)}</span>
               </div>
 
@@ -213,7 +230,7 @@ ${JSON.stringify(lista)}`;
                       {p.unificar && <button onClick={() => aceptarPropuesta(g, p)} disabled={ocupado} style={{ ...chip(true), padding: "3px 10px", fontSize: 11 }}>{ocupado ? <Loader2 size={11} /> : <Check size={11} />} Aceptar y unificar</button>}
                       {p.unificar && <button onClick={() => cambiar(g, { descripcion: p.descripcion || v.descripcion, unidad: p.unidad || v.unidad, cantidad: p.cantidad != null ? p.cantidad : v.cantidad, precio: p.precio != null ? p.precio : v.precio })}
                         style={{ ...chip(false), padding: "3px 10px", fontSize: 11 }}>Retocar antes</button>}
-                      <button onClick={() => setIgnorados(x => ({ ...x, [clave]: true }))} style={{ ...chip(false), padding: "3px 10px", fontSize: 11 }}><X size={11} /> Dejarlos separados</button>
+                      <button onClick={() => dejarSeparados(g)} title="No se vuelven a mostrar como repetidos" style={{ ...chip(false), padding: "3px 10px", fontSize: 11 }}><X size={11} /> Dejarlos separados</button>
                     </div>
                   )}
                 </div>
@@ -232,7 +249,7 @@ ${JSON.stringify(lista)}`;
                     <button onClick={() => unificar(g, v)} disabled={ocupado || !String(v.descripcion || "").trim()} style={{ ...chip(true), padding: "5px 12px" }}>
                       {ocupado ? <Loader2 size={12} /> : <Check size={12} />} Unificar en uno
                     </button>
-                    <button onClick={() => setIgnorados(x => ({ ...x, [clave]: true }))} style={{ ...chip(false), padding: "5px 12px" }}>Dejarlos separados</button>
+                    <button onClick={() => dejarSeparados(g)} title="No se vuelven a mostrar como repetidos" style={{ ...chip(false), padding: "5px 12px" }}>Dejarlos separados</button>
                     <span style={{ fontSize: 11, color: colors.muted }}>
                       Total: ${fmt(n(v.cantidad) * n(v.precio))} {n(v.cantidad) * n(v.precio) !== g.monto && <>· ahora suman ${fmt(g.monto)}</>}
                     </span>
