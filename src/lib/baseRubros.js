@@ -180,14 +180,15 @@ export const claveRubro = (descripcion, unidad) => `${norm(descripcion)}|${unida
 /**
  * Los rubros de la base con su historial de precios, más reciente primero.
  * Sin las migraciones 016/017 el historial viene sin origen: se lee igual.
- * @returns { porClave: Map(clave → rubro), porId: Map(id → rubro) } donde rubro = { id, descripcion, unidad, precios: [...] }
+ * @returns { buscar(item), todos: [rubro], error } donde rubro = { id, descripcion, unidad, precio_referencia, precios: [...] }
  */
 export async function preciosDeLaBase() {
   const completo = "rubro_id,precio_unitario,fecha,cliente_nombre,proveedor_nombre,origen_tipo,utilidad_estado,proyecto_ref";
-  const [{ data: rubros }, hist1] = await Promise.all([
+  const [r1, hist1] = await Promise.all([
     todas("rubros", "id,descripcion,unidad,precio_referencia"),
     todas("precios_historial", completo),
   ]);
+  const rubros = r1.data;
   let historial = hist1.data;
   if (hist1.error) historial = (await todas("precios_historial", "rubro_id,precio_unitario,fecha,cliente_nombre,proyecto_ref")).data;
 
@@ -208,5 +209,7 @@ export async function preciosDeLaBase() {
     || porClave.get(claveRubro(item.descripcion, item.unidad))
     || sinUnidad.get(norm(item.descripcion))
     || null;
-  return { buscar };
+  // El error se devuelve, no se traga: una base vacía por una consulta que
+  // falló se veía igual que una base sin rubros.
+  return { buscar, todos: [...porId.values()], error: r1.error?.message || null };
 }

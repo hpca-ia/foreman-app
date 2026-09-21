@@ -17,6 +17,8 @@ import PasarABase from "./presupuestos/PasarABase";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
 import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRubro";
+import ResultadosBase from "./presupuestos/ResultadosBase";
+import { puntaje } from "../lib/buscarRubros";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
@@ -64,9 +66,11 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [guardandoBD, setGuardandoBD] = useState(false);
   const [proveedores, setProveedores] = useState([]);
   const [modalRubro, setModalRubro] = useState(null);
-  const [rubroSeleccionado, setRubroSeleccionado] = useState(null); // rubro with historial expanded
   const [busquedaRubro, setBusquedaRubro] = useState("");
-  const [rubrosDB, setRubrosDB] = useState([]);
+  // Buscar un rubro por nombre dentro del presupuesto y, a la vez, en la base
+  // de rubros para agregarlo sin salir de la tabla.
+  const [buscaArmar, setBuscaArmar] = useState("");
+  const [capDestino, setCapDestino] = useState("");
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
   const [showAddCap, setShowAddCap] = useState(false);
   const [showAdminBD, setShowAdminBD] = useState(false);
@@ -164,12 +168,26 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     setItems(nuevos); recalcTotales(nuevos); setEligiendoPrecio(null);
   }
 
+  // La base de rubros se lee entera una vez y se busca en memoria: son unos
+  // cientos de rubros y así la búsqueda responde tecla por tecla. Se vuelve a
+  // leer al minuto: una cotización recién guardada tiene que aparecer.
+  function cargarBase(forzar) {
+    if (!forzar && baseRubros && Date.now() - baseRubros.leida < 60000) return;
+    if (baseRubros?.leyendo) return;
+    setBaseRubros({ leyendo: true, leida: Date.now(), buscar: () => null, todos: [] });
+    preciosDeLaBase()
+      .then(b => setBaseRubros({ ...b, leida: Date.now() }))
+      .catch(e => setBaseRubros({ buscar: () => null, todos: [], error: e.message || String(e), leida: Date.now() }));
+  }
+
+  // Un rubro del presupuesto responde a la búsqueda igual que uno de la base:
+  // por partes del nombre, sin tildes y en cualquier orden.
+  const coincideBusqueda = i => puntaje(i.descripcion, buscaArmar) > 0 || puntaje(i.capitulo, buscaArmar) > 0;
+  const itemsFiltrados = buscaArmar ? items.filter(coincideBusqueda) : items;
+
   function abrirPreciosDeRubro(item) {
     setEligiendoPrecio(item);
-    if (!baseRubros || Date.now() - baseRubros.leida > 60000) {
-      setBaseRubros(null);
-      preciosDeLaBase().then(b => setBaseRubros({ ...b, leida: Date.now() })).catch(() => setBaseRubros({ buscar: () => null, leida: Date.now() }));
-    }
+    cargarBase();
   }
 
   // Honorarios: ninguno, de administración, de diseño arquitectónico, los dos
@@ -248,12 +266,6 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       }
     });
     setCapitulosActivos(caps.sort((a,b)=>a.orden-b.orden));
-  }
-  async function buscarRubros(q) {
-    let query = supabase.from("rubros").select("*, capitulos(nombre), precios_historial(precio_unitario,cliente_nombre,fecha)").eq("activo",true);
-    if (q) query = query.ilike("descripcion",`%${q}%`);
-    const { data } = await query.order("descripcion").limit(60);
-    setRubrosDB(data||[]);
   }
   async function saveCapituloToDB(nombre) {
     if (!capitulosDB.includes(nombre)) {
@@ -358,6 +370,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       unidad:rubro.unidad||"",
       cantidad:Number(rubro.cantidad)||1,
       precio_unitario:centavos(rubro.precio_unitario||rubro.precio_referencia),
+      // El precio con que entra es su base: desde ahí se mide la utilidad.
+      precio_base:centavos(rubro.precio_unitario||rubro.precio_referencia),
+      utilidad_pct:0,
       total:centavos((Number(rubro.cantidad)||1)*centavos(rubro.precio_unitario||rubro.precio_referencia)),
       orden
     }).select().single();
@@ -648,7 +663,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>setSubVista("lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&<>
-            <button onClick={()=>{setSubVista("baseDatos");buscarRubros("");}} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>
+            <button onClick={()=>setSubVista("baseDatos")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>
             <button onClick={()=>setSubVista("alimentarBD")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Alimentar BD</button>
             <button onClick={()=>setShowAdminBD(true)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Admin BD</button>
             <button onClick={()=>setSubVista("importar")} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Desde Excel</button>
@@ -876,6 +891,39 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               casilla y cada botón de adentro de una vez. */}
           <fieldset disabled={!!presupuestoActivo.archivado_at} style={{border:0,padding:0,margin:0,minWidth:0}}>
           {modoDetalle==="armar"&&<>
+          {/* Buscar un rubro por nombre: arriba los de este presupuesto —la
+              tabla se filtra— y abajo los de la base, para agregarlos. */}
+          <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <Search size={15} color="var(--muted)"/>
+              <input value={buscaArmar} onChange={e=>{setBuscaArmar(e.target.value);cargarBase();}}
+                placeholder="Buscar un rubro por nombre, en este presupuesto y en la base"
+                style={{flex:"1 1 260px",minWidth:0,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"var(--font)",color:"var(--ink)",outline:"none"}}/>
+              {buscaArmar&&(
+                <>
+                  <span style={{fontSize:12,color:"var(--ink-soft)"}}>{itemsFiltrados.length} {itemsFiltrados.length===1?"rubro":"rubros"} en el presupuesto</span>
+                  <button onClick={()=>setBuscaArmar("")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",fontSize:12,color:"var(--ink-soft)",cursor:"pointer",fontFamily:"var(--font)"}}>Ver todo</button>
+                </>
+              )}
+            </div>
+            {buscaArmar&&(
+              <div style={{marginTop:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"var(--ink)"}}>En la base de rubros</span>
+                  <span style={{fontSize:11,color:"var(--muted)"}}>Agregar a</span>
+                  <select value={capDestino||capitulosActivos[0]?.nombre||""} onChange={e=>setCapDestino(e.target.value)}
+                    style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 8px",fontSize:12,color:"var(--ink)",fontFamily:"var(--font)",maxWidth:280}}>
+                    {capitulosActivos.map(c=><option key={c.nombre} value={c.nombre}>{c.orden}. {c.nombre}</option>)}
+                  </select>
+                </div>
+                {capitulosActivos.length===0
+                  ?<div style={{fontSize:12,color:"var(--muted)",padding:"8px 0"}}>Primero crea un capítulo para poder agregar rubros.</div>
+                  :<ResultadosBase base={baseRubros} texto={buscaArmar} alto={300}
+                     onAgregar={(r,precio)=>agregarItem(capDestino||capitulosActivos[0].nombre,{...r,precio_unitario:precio})}/>}
+              </div>
+            )}
+          </div>
+
           {capitulosActivos.length===0&&(
             <div style={{textAlign:"center",padding:"30px 0",color:"var(--muted)",fontSize:13}}>
               <div style={{fontSize:28,marginBottom:8}}>📋</div>Sin capítulos aún. Agrega el primero abajo.
@@ -883,8 +931,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           )}
 
           {capitulosActivos.map((cap,capIdx)=>{
-            const capItems=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>a.orden-b.orden);
-            const capTotal=capItems.reduce((s,i)=>s+(Number(i.total)||0),0);
+            const todosDelCap=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>a.orden-b.orden);
+            const capTotal=todosDelCap.reduce((s,i)=>s+(Number(i.total)||0),0);
+            // Buscando se ven solo los que calzan, pero el número y las flechas
+            // siguen siendo los de su sitio real en el capítulo.
+            const posEnCap=new Map(todosDelCap.map((i,k)=>[i.id,k]));
+            const capItems=buscaArmar?todosDelCap.filter(i=>coincideBusqueda(i)):todosDelCap;
+            if(buscaArmar&&capItems.length===0) return null;
             return(
               <div key={cap.nombre} style={{marginBottom:10,background:"#fff",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
                 {/* Capítulo header */}
@@ -928,7 +981,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                         onKeyDown={e=>{if(e.key==="Enter")aplicarUtilidadCapitulo(cap.nombre,Number(e.target.value));}}
                         onBlur={e=>{if(e.target.value)aplicarUtilidadCapitulo(cap.nombre,Number(e.target.value));}}/>
                     </div>
-                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"bd"});setBusquedaRubro("");buscarRubros("");fetchCapitulosDB();}} style={{background:"var(--brand)",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
+                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"bd"});setBusquedaRubro("");cargarBase();fetchCapitulosDB();}} style={{background:"var(--brand)",border:"none",borderRadius:6,padding:"3px 10px",color:"#fff",fontSize:11,cursor:"pointer",fontWeight:500}}>+ BD</button>
                     <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"manual"});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}} style={{background:"var(--neutral-soft)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 10px",color:"var(--ink-soft)",fontSize:11,cursor:"pointer"}}>+ Manual</button>
                     <button onClick={()=>eliminarCapitulo(cap.nombre)} style={{background:"none",border:"none",color:"var(--danger)",fontSize:14,cursor:"pointer",padding:"0 2px"}}>✕</button>
                   </div>
@@ -946,15 +999,17 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                       ))}
                     </tr></thead>
                     <tbody>
-                      {capItems.map((item,itemIdx)=>(
+                      {capItems.map(item=>{
+                      const itemIdx=posEnCap.get(item.id);
+                      return(
                         <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)"}}>
                           <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>
                             <div style={{display:"flex",alignItems:"center",gap:4}}>
                               <div style={{display:"flex",flexDirection:"column"}}>
                                 <button onClick={()=>moverRubro(item,-1)} disabled={itemIdx===0} title="Subir"
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===0?"default":"pointer",color:itemIdx===0?"var(--border)":"var(--muted)"}}>▲</button>
-                                <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===capItems.length-1} title="Bajar"
-                                  style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===capItems.length-1?"default":"pointer",color:itemIdx===capItems.length-1?"var(--border)":"var(--muted)"}}>▼</button>
+                                <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===todosDelCap.length-1} title="Bajar"
+                                  style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===todosDelCap.length-1?"default":"pointer",color:itemIdx===todosDelCap.length-1?"var(--border)":"var(--muted)"}}>▼</button>
                               </div>
                               {cap.orden}.{itemIdx+1}
                             </div>
@@ -1024,7 +1079,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                             <button onClick={()=>eliminarItem(item.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
                           </td>
                         </tr>
-                      ))}
+                      );})}
                     </tbody>
                   </table>
                   </div>
@@ -1205,49 +1260,16 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               <button onClick={()=>setModalRubro(null)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:6,width:28,height:28,color:"var(--ink-soft)",cursor:"pointer",fontSize:15}}>×</button>
             </div>
             <div style={{display:"flex",gap:4,marginBottom:12,background:"var(--neutral-soft)",borderRadius:8,padding:4}}>
-              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));setBusquedaRubro("");buscarRubros("");fetchCapitulosDB();}} style={{flex:1,background:modalRubro.modo==="bd"?"var(--brand)":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>De la BD</button>
+              <button onClick={()=>{setModalRubro(p=>({...p,modo:"bd"}));setBusquedaRubro("");cargarBase();fetchCapitulosDB();}} style={{flex:1,background:modalRubro.modo==="bd"?"var(--brand)":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="bd"?"#fff":"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>De la BD</button>
               <button onClick={()=>setModalRubro(p=>({...p,modo:"manual"}))} style={{flex:1,background:modalRubro.modo==="manual"?"var(--brand)":"transparent",border:"none",borderRadius:6,padding:"6px",color:modalRubro.modo==="manual"?"#fff":"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Manual</button>
             </div>
             {modalRubro.modo==="bd"&&(
-              <div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden"}}>
-                <input value={busquedaRubro} onChange={e=>{setBusquedaRubro(e.target.value);buscarRubros(e.target.value);}} placeholder="Buscar rubro..." style={{...iS,marginBottom:10}}/>
-                <div style={{overflowY:"auto",flex:1,border:"1px solid var(--neutral-soft)",borderRadius:8}}>
-                  {rubrosDB.length===0?<div style={{textAlign:"center",color:"var(--muted)",padding:"20px 0",fontSize:13}}>Escribe para buscar en la base de datos</div>
-                  :rubrosDB.map(r=>(
-                    <div key={r.id} style={{borderBottom:"1px solid var(--neutral-soft)"}}>
-                      <div onClick={()=>setRubroSeleccionado(rubroSeleccionado?.id===r.id?null:r)}
-                        style={{padding:"10px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}
-                        onMouseEnter={e=>e.currentTarget.style.background="var(--brand-soft)"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                        <div>
-                          <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{r.descripcion}</div>
-                          <div style={{fontSize:11,color:"var(--muted)"}}>{r.capitulos?.nombre} · {r.unidad}</div>
-                        </div>
-                        <div style={{textAlign:"right",marginLeft:10,flexShrink:0}}>
-                          <div style={{fontSize:13,fontWeight:600,color:"var(--brand)"}}>${fmt(r.precio_referencia)}</div>
-                          <div style={{fontSize:10,color:"var(--muted)"}}>{r.precios_historial?.length||0} precios · {rubroSeleccionado?.id===r.id?"▲":"▼"}</div>
-                        </div>
-                      </div>
-                      {rubroSeleccionado?.id===r.id&&(
-                        <div style={{background:"var(--bg)",padding:"8px 12px",borderTop:"1px solid var(--neutral-soft)"}}>
-                          <div style={{fontSize:10,fontWeight:600,color:"var(--ink-soft)",marginBottom:6,letterSpacing:0.5}}>PRECIOS POR CLIENTE</div>
-                          {r.precios_historial?.length===0&&<div style={{fontSize:11,color:"var(--muted)"}}>Sin historial de precios.</div>}
-                          {[...new Map(r.precios_historial?.map(h=>[h.cliente_nombre,h])).values()].map((h,i)=>(
-                            <div key={i} onClick={()=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:h.precio_unitario})}
-                              style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",borderRadius:6,marginBottom:3,cursor:"pointer",background:"#fff",border:"1px solid var(--border)"}}
-                              onMouseEnter={e=>e.currentTarget.style.borderColor="var(--brand)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
-                              <div style={{fontSize:11,color:"var(--ink-soft)"}}>{h.cliente_nombre||"Sin cliente"} <span style={{color:"var(--muted)"}}>({h.fecha})</span></div>
-                              <div style={{fontWeight:600,color:"var(--brand)",fontSize:12}}>${fmt(h.precio_unitario)} <span style={{fontSize:9,color:"var(--muted)"}}>usar este</span></div>
-                            </div>
-                          ))}
-                          <div onClick={()=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:r.precio_referencia})}
-                            style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",borderRadius:6,cursor:"pointer",background:"var(--brand-soft)",border:"1px solid var(--border)",marginTop:4}}>
-                            <div style={{fontSize:11,color:"var(--brand)",fontWeight:500}}>Precio promedio / referencia</div>
-                            <div style={{fontWeight:600,color:"var(--brand)",fontSize:12}}>${fmt(r.precio_referencia)} <span style={{fontSize:9}}>usar</span></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+              <div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden",gap:10}}>
+                <input value={busquedaRubro} onChange={e=>setBusquedaRubro(e.target.value)} autoFocus
+                  placeholder="Buscar por nombre o parte del nombre" style={iS}/>
+                <div style={{overflowY:"auto",flex:1}}>
+                  <ResultadosBase base={baseRubros} texto={busquedaRubro} alto={9999}
+                    onAgregar={(r,precio)=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:precio})}/>
                 </div>
               </div>
             )}
