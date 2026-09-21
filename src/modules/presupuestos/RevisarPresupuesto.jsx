@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Sparkles, AlertTriangle, ArrowUp, ArrowDown, Check, X, Loader2, Printer, FileSpreadsheet, RefreshCw, Pencil } from "lucide-react";
 import { CampoTexto, CampoNumero, CampoPrecio, SelectorUnidad, camposDePrecio, camposDeUtilidad } from "./camposRubro";
+import RubrosRepetidos from "./RubrosRepetidos";
+import { gruposRepetidos } from "../../lib/agruparRepetidos";
 import { exportarPDF, exportarExcel, money } from "../../lib/exportar";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
 import { colors } from "../../theme/colors";
@@ -35,9 +37,9 @@ const mediana = a => { const s = [...a].sort((x, y) => x - y); const m = Math.fl
 const TIPOS_NOVA = { ortografia: "Ortografía", descripcion: "Descripción", unidad: "Unidad", cantidad: "Cantidad", precio: "Precio", otro: "Otro" };
 
 const NOMBRES_ORDEN = { numero: "número", descripcion: "descripción", precio: "precio final", base: "precio base", util: "utilidad", cantidad: "cantidad", total: "total" };
-const NOMBRES_FILTRO = { todos: "todos los rubros", alertas: "solo con alertas", nova: "solo con observaciones de NOVA" };
+const NOMBRES_FILTRO = { todos: "todos los rubros", alertas: "solo con alertas", nova: "solo con observaciones de NOVA", repetidos: "solo los repetidos" };
 
-export default function RevisarPresupuesto({ items, capitulos, presupuesto = {}, soloLectura = false, onActualizar }) {
+export default function RevisarPresupuesto({ items, capitulos, presupuesto = {}, soloLectura = false, onActualizar, onUnificar }) {
   const [orden, setOrden] = useState({ campo: "total", dir: "desc" });
   const [filtro, setFiltro] = useState("todos");        // todos | alertas | nova
   const [base, setBase] = useState(null);
@@ -88,10 +90,15 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
     return m;
   }, [nova.obs, resueltas]);
 
+  // Los repetidos, agrupados: se revisan juntos y se unifican desde ahí.
+  const grupos = useMemo(() => gruposRepetidos(items), [items]);
+  const idsRepetidos = useMemo(() => new Set(grupos.flatMap(g => g.items.map(i => i.id))), [grupos]);
+
   const frescas = useMemo(() => {
     let v = filas;
     if (filtro === "alertas") v = v.filter(f => f.alertas.length);
     if (filtro === "nova") v = v.filter(f => obsPorId[f.id]);
+    if (filtro === "repetidos") v = v.filter(f => idsRepetidos.has(f.id));
     const val = f => orden.campo === "numero" ? f.capOrden * 10000 + f.pos
       : orden.campo === "descripcion" ? pelado(f.descripcion)
       : orden.campo === "precio" ? n(f.precio_unitario)
@@ -100,7 +107,7 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
       : orden.campo === "cantidad" ? n(f.cantidad)
       : n(f.total);
     return [...v].sort((a, b) => { const x = val(a), y = val(b); const c = x < y ? -1 : x > y ? 1 : 0; return orden.dir === "asc" ? c : -c; });
-  }, [filas, filtro, orden, obsPorId]);
+  }, [filas, filtro, orden, obsPorId, idsRepetidos]);
 
   // El orden queda fijo mientras se edita: solo se rehace al tocar una columna,
   // cambiar el filtro, cuando NOVA termina o con "Reordenar".
@@ -123,6 +130,18 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
   const mayor = Math.max(1, ...pesos.map(p => p.pct));
 
   const conAlertas = filas.filter(f => f.alertas.length).length;
+
+  // Unidades escritas a mano —"U", "M2", "mt2"— que son de la lista pero no
+  // están escritas como la lista. Se enderezan todas juntas; si no, NOVA las
+  // marca una y otra vez en cada revisión.
+  const porEnderezar = filas.filter(f => {
+    const cruda = String(f.unidad || "").trim();
+    const canon = normalizarUnidad(cruda).canon;
+    return cruda && canon && cruda !== canon;
+  });
+  async function enderezarUnidades() {
+    for (const f of porEnderezar) await onActualizar(f.id, { unidad: normalizarUnidad(f.unidad).canon });
+  }
 
   // ── Imprimir lo que se está viendo: mismo orden, mismo filtro ──
   const sugerencia = o => [o.descripcion, o.unidad && `Unidad: ${etiquetaUnidad(o.unidad)}`, o.cantidad != null && `Cantidad: ${cant(o.cantidad)}`,
@@ -175,6 +194,14 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
             anchos: { 0: { cellWidth: 30 }, 2: { cellWidth: 30 }, 3: { halign: "right", cellWidth: 44 }, 4: { halign: "right", cellWidth: 50 },
               5: { halign: "right", cellWidth: 34 }, 6: { halign: "right", cellWidth: 50 }, 7: { halign: "right", cellWidth: 58 }, 8: { halign: "right", cellWidth: 30 }, 9: { cellWidth: 150 } },
           },
+          ...(grupos.length ? [{
+            titulo: `Rubros repetidos (${grupos.length} ${grupos.length === 1 ? "grupo" : "grupos"})`,
+            columnas: ["Grupo", "N°", "Descripción", "Capítulo", "Und", "Cant", "P.Final", "Total"],
+            filas: grupos.flatMap((g, k) => g.items.map(i => [`${k + 1}`, filas.find(f => f.id === i.id)?.numero || "", i.descripcion, i.capitulo,
+              etiquetaUnidad(i.unidad), cant(i.cantidad), fmt(i.precio_unitario), fmt(i.total)])),
+            anchos: { 0: { cellWidth: 36 }, 1: { cellWidth: 30 }, 3: { cellWidth: 120 }, 4: { cellWidth: 30 }, 5: { halign: "right", cellWidth: 50 },
+              6: { halign: "right", cellWidth: 55 }, 7: { halign: "right", cellWidth: 60 } },
+          }] : []),
           ...(pendientesNova.length ? [{
             titulo: `Observaciones de NOVA (${pendientesNova.length})`,
             columnas: ["N°", "Tipo", "Observación", "Sugerencia"],
@@ -243,8 +270,11 @@ ${JSON.stringify(lista)}`;
           const actual = filas.find(f => f.id === id);
           // Una "corrección" igual al original no es una corrección.
           const descripcion = o.descripcion && String(o.descripcion).trim() !== String(actual.descripcion || "").trim() ? String(o.descripcion).trim() : null;
+          // Contra lo que está escrito, no contra su equivalente: "U" y "u" son
+          // la misma unidad para FOREMAN, pero si no se reescribe el rubro sigue
+          // diciendo "U" y NOVA lo vuelve a marcar en cada revisión.
           const sugerida = o.unidad ? normalizarUnidad(o.unidad).canon : null;
-          const unidad = sugerida && sugerida !== normalizarUnidad(actual.unidad).canon ? sugerida : null;
+          const unidad = sugerida && sugerida !== String(actual.unidad || "").trim() ? sugerida : null;
           const numero = (v, actualV) => { const x = Number(v); return v != null && v !== "" && Number.isFinite(x) && x > 0 && Math.abs(x - n(actualV)) > 0.0001 ? x : null; };
           obs.push({ ...o, _id: id, descripcion, unidad, cantidad: numero(o.cantidad, actual.cantidad), precio: numero(o.precio, actual.precio_unitario), tipo: TIPOS_NOVA[o.tipo] ? o.tipo : "otro" });
         });
@@ -283,10 +313,40 @@ ${JSON.stringify(lista)}`;
     setEditando({ idx: o.idx, descripcion: o.descripcion || f.descripcion || "", unidad: o.unidad || f.unidad || "",
       cantidad: o.cantidad ?? n(f.cantidad), precio: o.precio ?? n(f.precio_unitario) });
   }
-  async function aplicarOrtografia() {
-    const todas = Object.values(obsPorId).flat().filter(o => o.tipo === "ortografia" && o.descripcion);
-    for (const o of todas) await aplicar(o);
+  // Aplicar de una vez todas las de un mismo tipo: revisar 300 rubros deja
+  // decenas de tildes, y aceptarlas de a una no tiene sentido.
+  async function aplicarTipo(tipo) {
+    for (const o of Object.values(obsPorId).flat().filter(o => o.tipo === tipo && tieneArreglo(o))) await aplicar(o);
   }
+
+  // Lo que NOVA corrige en un rubro casi nunca pasa en un solo rubro: una
+  // unidad mal escrita —"U" por "u"— o una descripción repetida están en
+  // varios. Estos son los demás rubros a los que le cabe la misma corrección,
+  // los haya mirado NOVA o no.
+  function igualesA(o) {
+    const f = porId.get(o._id);
+    if (!f) return [];
+    const suUnidad = String(f.unidad || "").trim();
+    const suTexto = pelado(f.descripcion);
+    const iguales = [];
+    filas.forEach(x => {
+      if (x.id === o._id) return;
+      const campos = {};
+      if (o.descripcion && suTexto && pelado(x.descripcion) === suTexto) campos.descripcion = o.descripcion;
+      if (o.unidad && suUnidad && String(x.unidad || "").trim() === suUnidad) campos.unidad = o.unidad;
+      if (Object.keys(campos).length) iguales.push({ id: x.id, campos });
+    });
+    return iguales;
+  }
+  async function aplicarAIguales(o) {
+    const otros = igualesA(o);
+    await aplicar(o);
+    for (const x of otros) await onActualizar(x.id, x.campos);
+  }
+  const queIguala = o => {
+    const f = porId.get(o._id);
+    return o.unidad && String(f?.unidad || "").trim() ? `la unidad "${String(f.unidad).trim()}"` : "la misma descripción";
+  };
 
   const cab = (campo, label, al = "right") => (
     <th onClick={() => setOrden(o => ({ campo, dir: o.campo === campo && o.dir === "desc" ? "asc" : "desc" }))}
@@ -299,7 +359,6 @@ ${JSON.stringify(lista)}`;
     borderRadius: 6, padding: "4px 6px", fontSize: 12, textAlign: "right", fontFamily: colors.font, color: colors.ink });
   const chip = activo => ({ padding: "5px 12px", borderRadius: 16, border: `1px solid ${activo ? colors.ink : colors.border}`, background: activo ? colors.ink : colors.surface, color: activo ? "#fff" : colors.inkSoft, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font });
   const pendientes = Object.values(obsPorId).flat();
-  const deOrtografia = pendientes.filter(o => o.tipo === "ortografia" && o.descripcion).length;
 
   return (
     <div>
@@ -323,7 +382,12 @@ ${JSON.stringify(lista)}`;
               <span style={{ fontSize: 12, color: pendientes.length ? colors.ink : colors.success, fontWeight: 600 }}>
                 {pendientes.length ? `${pendientes.length} ${pendientes.length === 1 ? "observación pendiente" : "observaciones pendientes"}` : "✓ Sin observaciones pendientes"}
               </span>
-              {deOrtografia > 1 && !soloLectura && <button onClick={aplicarOrtografia} style={{ ...chip(false), padding: "3px 10px", fontSize: 11 }}>Aplicar las {deOrtografia} de ortografía</button>}
+              {!soloLectura && Object.keys(TIPOS_NOVA).map(t => {
+                const cuantas = pendientes.filter(o => o.tipo === t && tieneArreglo(o)).length;
+                return cuantas > 1 && <button key={t} onClick={() => aplicarTipo(t)} style={{ ...chip(false), padding: "3px 10px", fontSize: 11 }}>
+                  Aplicar las {cuantas} de {TIPOS_NOVA[t].toLowerCase()}
+                </button>;
+              })}
             </div>
             <div style={{ display: "grid", gap: 6, maxHeight: 320, overflowY: "auto" }}>
               {pendientes.map(o => {
@@ -338,7 +402,9 @@ ${JSON.stringify(lista)}`;
                     {tieneArreglo(o) && editando?.idx !== o.idx && (
                       <div style={{ marginTop: 5, lineHeight: 1.45 }}>
                         {o.descripcion && <><div style={{ color: colors.muted, textDecoration: "line-through" }}>{f?.descripcion}</div><div style={{ color: colors.ink }}>{o.descripcion}</div></>}
-                        {o.unidad && <div style={{ color: colors.ink }}>Unidad: <span style={{ color: colors.muted, textDecoration: "line-through" }}>{etiquetaUnidad(f?.unidad) || "—"}</span> → {etiquetaUnidad(o.unidad)}</div>}
+                        {/* Lo que está escrito hoy, tal cual: si se muestra su equivalente,
+                            "U" se ve igual que "u" y la corrección parece no hacer nada. */}
+                        {o.unidad && <div style={{ color: colors.ink }}>Unidad: <span style={{ color: colors.muted, textDecoration: "line-through" }}>{String(f?.unidad || "").trim() || "—"}</span> → {etiquetaUnidad(o.unidad)}</div>}
                         {o.cantidad != null && <div style={{ color: colors.ink }}>Cantidad: <span style={{ color: colors.muted, textDecoration: "line-through" }}>{cant(f?.cantidad)}</span> → {cant(o.cantidad)}</div>}
                         {o.precio != null && <div style={{ color: colors.ink }}>Precio final: <span style={{ color: colors.muted, textDecoration: "line-through" }}>${fmt(f?.precio_unitario)}</span> → ${fmt(o.precio)}</div>}
                       </div>
@@ -366,6 +432,12 @@ ${JSON.stringify(lista)}`;
                         ) : (
                           <>
                             {tieneArreglo(o) && <button onClick={() => aplicar(o)} style={{ ...chip(true), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><Check size={11} /> Aplicar lo que propone</button>}
+                            {igualesA(o).length > 0 && (
+                              <button onClick={() => aplicarAIguales(o)} title={`Aplica la misma corrección a todos los rubros con ${queIguala(o)}`}
+                                style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                                <Check size={11} /> Aplicar también a los {igualesA(o).length} con {queIguala(o)}
+                              </button>
+                            )}
                             <button onClick={() => abrirEditor(o)} style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><Pencil size={11} /> {tieneArreglo(o) ? "Retocar y aplicar" : "Corregir"}</button>
                             <button onClick={() => setResueltas(r => ({ ...r, [o.idx]: "ignorada" }))} style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><X size={11} /> {tieneArreglo(o) ? "Ignorar" : "Está bien así"}</button>
                           </>
@@ -379,6 +451,10 @@ ${JSON.stringify(lista)}`;
           </div>
         )}
       </div>
+
+      {/* ── Repetidos ── */}
+      {onUnificar && <RubrosRepetidos items={items} soloLectura={soloLectura} onUnificar={onUnificar}
+        numeroDe={id => filas.find(f => f.id === id)?.numero} />}
 
       {/* ── Peso de cada capítulo ── */}
       {pesos.length > 0 && (
@@ -402,6 +478,11 @@ ${JSON.stringify(lista)}`;
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
         <button onClick={() => setFiltro("todos")} style={chip(filtro === "todos")}>Todos ({filas.length})</button>
         <button onClick={() => setFiltro("alertas")} style={chip(filtro === "alertas")}>Con alertas ({conAlertas})</button>
+        {idsRepetidos.size > 0 && <button onClick={() => setFiltro("repetidos")} style={chip(filtro === "repetidos")}>Repetidos ({idsRepetidos.size})</button>}
+        {!soloLectura && porEnderezar.length > 0 && (
+          <button onClick={enderezarUnidades} title={`Deja escritas como la lista de FOREMAN las unidades de ${porEnderezar.length} rubros: ${[...new Set(porEnderezar.map(f => String(f.unidad).trim()))].slice(0, 6).join(", ")}`}
+            style={{ ...chip(false), borderStyle: "dashed" }}>Enderezar {porEnderezar.length} unidades</button>
+        )}
         {nova.estado === "listo" && <button onClick={() => setFiltro("nova")} style={chip(filtro === "nova")}>Con observaciones de NOVA ({conNova})</button>}
         <span style={{ fontSize: 11, color: colors.muted, marginLeft: "auto" }}>
           {soloLectura ? "Toca una columna para ordenar." : "Toca una columna para ordenar. Corrige en la tabla: se guarda al salir de la casilla."}

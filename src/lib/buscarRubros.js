@@ -61,15 +61,25 @@ export function buscarRubros(lista = [], texto, { limite = 40 } = {}) {
 // mismo trabajo. Se comparan las palabras que comparten, no el texto entero.
 
 const VACIAS = new Set(["de", "del", "la", "el", "los", "las", "en", "con", "y", "a", "para", "por", "un", "una", "e", "o", "al", "sobre", "tipo", "incluye"]);
-const utiles = s => new Set(terminos(s).filter(p => !VACIAS.has(p)));
 
-/** Qué tanto se parecen dos descripciones, de 0 a 100. */
-export function parecido(a, b) {
-  const x = utiles(a), y = utiles(b);
+// Al comparar rubros, singular y plural son la misma palabra: "Pintura en
+// paredes interiores" y "Pintura en pared interior" son el mismo trabajo.
+const raiz = p => (p.length > 5 && p.endsWith("es") ? p.slice(0, -2) : p.length > 3 && p.endsWith("s") ? p.slice(0, -1) : p);
+
+/** Las palabras que dicen algo de una descripción, sin artículos ni muletillas. */
+export const palabrasClave = s => new Set(terminos(s).filter(p => !VACIAS.has(p)).map(raiz));
+
+/** Qué tanto se parecen dos conjuntos de palabras, de 0 a 100. */
+export function parecidoDePalabras(x, y) {
   if (!x.size || !y.size) return 0;
   let comunes = 0;
   x.forEach(p => { if (y.has(p)) comunes++; });
   return Math.round((2 * comunes) / (x.size + y.size) * 100);
+}
+
+/** Qué tanto se parecen dos descripciones, de 0 a 100. */
+export function parecido(a, b) {
+  return parecidoDePalabras(palabrasClave(a), palabrasClave(b));
 }
 
 /**

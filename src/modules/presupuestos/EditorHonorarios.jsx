@@ -11,6 +11,8 @@ import { HONORARIOS_COMUNES, totalesPresupuesto } from "./honorarios";
 const fmt = n => (Number(n) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function EditorHonorarios({ lista, subtotal, onCambiar }) {
+  // "%" cobra un porcentaje del costo directo; "$" cobra un monto fijo, se
+  // acuerde como se acuerde con el cliente.
   const [filas, setFilas] = useState(lista);
   useEffect(() => { setFilas(lista); }, [lista]);
 
@@ -40,7 +42,14 @@ export default function EditorHonorarios({ lista, subtotal, onCambiar }) {
           </div>
           <input type="number" className="num-limpio" value={h.valor} onChange={e => cambiar(i, "valor", e.target.value)} onBlur={() => guardar(filas)}
             style={{ ...campo, width: h.tipo === "monto" ? 96 : 60, textAlign: "right" }} />
-          <span style={{ marginLeft: "auto", minWidth: 90, textAlign: "right" }}>${fmt(montos[i]?.monto)}</span>
+          {/* En % se ve cuánto es en plata; en monto fijo, qué porcentaje
+              representa: las dos formas de mirar el mismo honorario. */}
+          <span style={{ marginLeft: "auto", minWidth: 130, textAlign: "right" }}>
+            ${fmt(montos[i]?.monto)}
+            {h.tipo === "monto" && Number(subtotal) > 0 && (
+              <span style={{ color: "var(--muted)", fontSize: 11 }}> · {(Number(h.valor) / Number(subtotal) * 100).toFixed(1)} %</span>
+            )}
+          </span>
           <button onClick={() => guardar(filas.filter((_, k) => k !== i))} title="Quitar este honorario"
             style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", fontSize: 13, padding: "0 2px" }}>✕</button>
         </div>

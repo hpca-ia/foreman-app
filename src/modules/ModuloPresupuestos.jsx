@@ -431,6 +431,22 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     const u=items.filter(i=>i.id!==id); setItems(u); recalcTotales(u);
   }
 
+  // Unificar rubros repetidos: queda uno con la descripción, la unidad, la
+  // cantidad y el precio que se aprobaron, y los demás se borran. Todo en una
+  // pasada: borrar de a uno dejaba los totales a medio recalcular.
+  async function unificarRubros(idConservar, idsQuitar, campos) {
+    const total = centavos((Number(campos.cantidad)||0)*(Number(campos.precio_unitario)||0));
+    const { error } = await supabase.from("presupuesto_items").update({...campos,total}).eq("id",idConservar);
+    if (error) { alert("No se pudo unificar: "+error.message); return; }
+    if (idsQuitar.length) {
+      const { error: e2 } = await supabase.from("presupuesto_items").delete().in("id",idsQuitar);
+      if (e2) alert("El rubro quedó unificado, pero no se pudieron borrar los repetidos: "+e2.message);
+    }
+    const quitar = new Set(idsQuitar);
+    const nuevos = itemsRef.current.filter(i=>!quitar.has(i.id)).map(i=>i.id===idConservar?{...i,...campos,total}:i);
+    itemsRef.current = nuevos; setItems(nuevos); recalcTotales(nuevos);
+  }
+
   async function recalcTotales(itemsList, overrides={}) {
     if (!presupuestoActivo) return;
     // La misma cuenta que el PDF y el Excel (honorarios.js), a centavos:
@@ -883,7 +899,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           {modoDetalle==="revisar"&&(
             <div style={{marginBottom:14}}>
               <RevisarPresupuesto items={items} capitulos={capitulosActivos} presupuesto={presupuestoActivo} soloLectura={!!presupuestoActivo.archivado_at}
-                onActualizar={(id,campos)=>presupuestoActivo.archivado_at?alert("Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."):actualizarItemMulti(id,campos)}/>
+                onActualizar={(id,campos)=>presupuestoActivo.archivado_at?alert("Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."):actualizarItemMulti(id,campos)}
+                onUnificar={unificarRubros}/>
             </div>
           )}
 
