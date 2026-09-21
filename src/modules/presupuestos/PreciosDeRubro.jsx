@@ -4,7 +4,7 @@ import Modal from "../../components/ui/Modal";
 import { colors } from "../../theme/colors";
 import { parecidosA } from "../../lib/buscarRubros";
 import { normalizarUnidad, etiquetaUnidad } from "../../lib/unidades";
-import ResultadosBase from "./ResultadosBase";
+import ResultadosBase, { origenDe, cuando } from "./ResultadosBase";
 
 // Los precios que la base de rubros conoce para un rubro del presupuesto.
 //
@@ -108,6 +108,8 @@ export default function PreciosDeRubro({ item, base, onElegir, onCerrar }) {
                     <div style={{ fontSize: 12.5, color: colors.ink, overflowWrap: "anywhere" }}>{r.descripcion}</div>
                     <div style={{ fontSize: 10.5, color: otraUnidad ? colors.warning : colors.muted }}>
                       {etiquetaUnidad(r.unidad) || "sin unidad"}{otraUnidad && " · otra unidad"} · se parece {r.parecido} %
+                      {r.precios?.[0] && <> · {origenDe(r.precios[0])}{cuando(r.precios[0].fecha) && ` · ${cuando(r.precios[0].fecha)}`}</>}
+                      {r.precios?.length > 1 && ` · ${r.precios.length} precios`}
                     </div>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap" }}>${fmt(valor)}</div>

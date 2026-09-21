@@ -45,6 +45,12 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
   const [base, setBase] = useState(null);
   const [nova, setNova] = useState({ estado: "nada", obs: [] });
   const [resueltas, setResueltas] = useState({});       // índice de observación → "aplicada" | "ignorada"
+  // Lo ya resuelto en revisiones anteriores, para no volver a pedir lo mismo:
+  // lo aplicado por su huella (rubro + tipo + lo que proponía) y lo descartado
+  // por rubro y tipo, que es lo que quiso decir "está bien así".
+  const [yaAplicadas, setYaAplicadas] = useState(new Set());
+  const [descartadas, setDescartadas] = useState(new Set());
+  const [aplicando, setAplicando] = useState(false);
 
   useEffect(() => { preciosDeLaBase().then(setBase).catch(() => setBase({ buscar: () => null })); }, []);
 
@@ -90,8 +96,11 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
     return m;
   }, [nova.obs, resueltas]);
 
-  // Los repetidos, agrupados: se revisan juntos y se unifican desde ahí.
-  const grupos = useMemo(() => gruposRepetidos(items), [items]);
+  // Los repetidos, agrupados: se revisan juntos y se unifican desde ahí. Qué
+  // tanto se tienen que parecer para caer en el mismo grupo lo decide quien
+  // revisa: hay presupuestos donde el mismo rubro está escrito muy distinto.
+  const [minRepetidos, setMinRepetidos] = useState(70);
+  const grupos = useMemo(() => gruposRepetidos(items, { minimo: minRepetidos }), [items, minRepetidos]);
   const idsRepetidos = useMemo(() => new Set(grupos.flatMap(g => g.items.map(i => i.id))), [grupos]);
 
   const frescas = useMemo(() => {
@@ -251,13 +260,17 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
 Devuelve SOLO JSON, sin markdown: {"obs":[{"n":"1.2","tipo":"ortografia|descripcion|unidad|cantidad|precio|otro","mensaje":"qué pasa, en una línea","descripcion":"texto completo corregido o null","unidad":"unidad sugerida o null","cantidad":número sugerido o null,"precio":número sugerido o null}]}
 
 Qué revisar:
-- ortografia: faltas de ortografía, tildes, gramática, mayúsculas incoherentes. En "descripcion" pon la descripción completa ya corregida.
+- ortografia: faltas de ortografía y de tildes, y errores de gramática. En "descripcion" pon la descripción completa ya corregida.
 - descripcion: descripciones ambiguas o incompletas que no dicen material, espesor, dimensión o acabado cuando hace falta para cotizar. Propón una redacción técnica clara en "descripcion", sin inventar especificaciones que no se deduzcan.
 - unidad: la unidad no corresponde al rubro (por ejemplo pintura por "u" en vez de "m2"). Pon la sugerida en "unidad", SOLO una de estas: ${UNIDADES.map(u => u.id).join(", ")}.
 - cantidad o precio: valores atípicos para ese tipo de rubro o incoherentes con el resto del presupuesto. Explícalo en "mensaje". Pon un valor en "cantidad" o "precio" SOLO si el error es evidente (una coma corrida, un cero de más, una cantidad que no cuadra con otro rubro del mismo presupuesto); si no, null. No inventes precios de mercado.
 - otro: cualquier otra cosa rara (rubros que parecen duplicados con otra redacción, un rubro en el capítulo equivocado).
 
-Reglas: no incluyas rubros que estén bien. No reescribas por gusto una descripción correcta. Mantén el estilo del presupuesto. Si todo está bien, devuelve {"obs":[]}.
+Reglas:
+- No incluyas rubros que estén bien. Ante la duda, déjalo fuera: esta revisión se corre varias veces sobre el mismo presupuesto, y sacar cada vez observaciones nuevas de estilo la vuelve inútil.
+- Nada de estilo: no propongas agregar ni quitar el punto final, no cambies mayúsculas por minúsculas ni al revés salvo que sea una falta clara, no reordenes palabras, no cambies unas palabras por sus sinónimos, no "mejores" una descripción que ya se entiende y permite cotizar.
+- Una descripción solo se corrige si tiene una falta de ortografía real, o si le falta un dato sin el cual no se puede cotizar.
+- Mantén el estilo del presupuesto. Si todo está bien, devuelve {"obs":[]}.
 
 Rubros (n = número, cap = capítulo, d = descripción, u = unidad, q = cantidad, p = precio unitario):
 ${JSON.stringify(lista)}`;
@@ -276,7 +289,15 @@ ${JSON.stringify(lista)}`;
           const sugerida = o.unidad ? normalizarUnidad(o.unidad).canon : null;
           const unidad = sugerida && sugerida !== String(actual.unidad || "").trim() ? sugerida : null;
           const numero = (v, actualV) => { const x = Number(v); return v != null && v !== "" && Number.isFinite(x) && x > 0 && Math.abs(x - n(actualV)) > 0.0001 ? x : null; };
-          obs.push({ ...o, _id: id, descripcion, unidad, cantidad: numero(o.cantidad, actual.cantidad), precio: numero(o.precio, actual.precio_unitario), tipo: TIPOS_NOVA[o.tipo] ? o.tipo : "otro" });
+          const nueva = { ...o, _id: id, descripcion, unidad, cantidad: numero(o.cantidad, actual.cantidad), precio: numero(o.precio, actual.precio_unitario), tipo: TIPOS_NOVA[o.tipo] ? o.tipo : "otro" };
+          // Una corrección que ya está hecha no es una observación: el rubro
+          // corregido salía otra vez en cada revisión, ahora como un aviso sin
+          // nada que aplicar. Los avisos de precio o cantidad sí se quedan,
+          // porque ahí no hay nada que "aplicar" y se leen igual.
+          const hayQueCambiar = nueva.descripcion || nueva.unidad || nueva.cantidad != null || nueva.precio != null;
+          if (!hayQueCambiar && ["ortografia", "descripcion", "unidad"].includes(nueva.tipo)) return;
+          if (descartadas.has(`${id}|${nueva.tipo}`) || yaAplicadas.has(huella(nueva))) return;
+          obs.push(nueva);
         });
       }
       setNova({ estado: "listo", obs, hechos: lotes.length, lotes: lotes.length });
@@ -296,12 +317,22 @@ ${JSON.stringify(lista)}`;
   }
   const tieneArreglo = o => !!(o.descripcion || o.unidad || o.cantidad != null || o.precio != null);
 
+  // Una observación es "la misma" si habla del mismo rubro, del mismo asunto
+  // y propone lo mismo.
+  const huella = o => [o._id, o.tipo, pelado(o.descripcion || ""), o.unidad || "", o.cantidad ?? "", o.precio ?? ""].join("|");
+
   async function aplicar(o, c = o) {
     const item = porId.get(o._id);
     const campos = item ? camposDe(item, c) : {};
     if (Object.keys(campos).length) await onActualizar(o._id, campos);
     setResueltas(r => ({ ...r, [o.idx]: "aplicada" }));
+    setYaAplicadas(s => new Set(s).add(huella(o)));
     setEditando(e => (e?.idx === o.idx ? null : e));
+  }
+
+  function descartar(o) {
+    setResueltas(r => ({ ...r, [o.idx]: "ignorada" }));
+    setDescartadas(s => new Set(s).add(`${o._id}|${o.tipo}`));
   }
 
   // Corregir a mano desde la observación: se abre con lo que propone NOVA (o
@@ -316,7 +347,10 @@ ${JSON.stringify(lista)}`;
   // Aplicar de una vez todas las de un mismo tipo: revisar 300 rubros deja
   // decenas de tildes, y aceptarlas de a una no tiene sentido.
   async function aplicarTipo(tipo) {
-    for (const o of Object.values(obsPorId).flat().filter(o => o.tipo === tipo && tieneArreglo(o))) await aplicar(o);
+    setAplicando(true);
+    try {
+      for (const o of Object.values(obsPorId).flat().filter(o => (!tipo || o.tipo === tipo) && tieneArreglo(o))) await aplicarAIguales(o);
+    } finally { setAplicando(false); }
   }
 
   // Lo que NOVA corrige en un rubro casi nunca pasa en un solo rubro: una
@@ -326,22 +360,40 @@ ${JSON.stringify(lista)}`;
   function igualesA(o) {
     const f = porId.get(o._id);
     if (!f) return [];
-    const suUnidad = String(f.unidad || "").trim();
+    // La misma unidad aunque esté escrita distinto: "U", "u", "Und" y "UND"
+    // son la misma, y todas tienen que quedar corregidas de una vez.
+    const suUnidad = normalizarUnidad(f.unidad).canon || pelado(f.unidad);
     const suTexto = pelado(f.descripcion);
     const iguales = [];
     filas.forEach(x => {
       if (x.id === o._id) return;
       const campos = {};
       if (o.descripcion && suTexto && pelado(x.descripcion) === suTexto) campos.descripcion = o.descripcion;
-      if (o.unidad && suUnidad && String(x.unidad || "").trim() === suUnidad) campos.unidad = o.unidad;
+      if (o.unidad && suUnidad && (normalizarUnidad(x.unidad).canon || pelado(x.unidad)) === suUnidad && String(x.unidad || "").trim() !== o.unidad) campos.unidad = o.unidad;
       if (Object.keys(campos).length) iguales.push({ id: x.id, campos });
     });
     return iguales;
   }
-  async function aplicarAIguales(o) {
+  async function aplicarAIguales(o, preguntar = false) {
     const otros = igualesA(o);
+    // Cambiar la unidad de varios rubros de un golpe se deshace de a uno: se
+    // pregunta antes, diciendo exactamente qué va a pasar.
+    if (preguntar && o.unidad && otros.length >= 2) {
+      const f = porId.get(o._id);
+      if (!window.confirm(`Se cambia la unidad de ${otros.length + 1} rubros: de "${String(f?.unidad || "").trim()}" a "${etiquetaUnidad(o.unidad)}".\n\n¿Seguir?`)) return;
+    }
     await aplicar(o);
     for (const x of otros) await onActualizar(x.id, x.campos);
+    // Las observaciones que hablaban de esos mismos rubros ya quedaron
+    // resueltas: seguir pidiéndolas de a una es hacer dos veces el trabajo.
+    const tocados = new Set(otros.map(x => x.id));
+    setResueltas(r => {
+      const nuevo = { ...r };
+      Object.values(obsPorId).flat().forEach(otra => {
+        if (otra.idx !== o.idx && otra.tipo === o.tipo && tocados.has(otra._id)) nuevo[otra.idx] = "aplicada";
+      });
+      return nuevo;
+    });
   }
   const queIguala = o => {
     const f = porId.get(o._id);
@@ -382,6 +434,13 @@ ${JSON.stringify(lista)}`;
               <span style={{ fontSize: 12, color: pendientes.length ? colors.ink : colors.success, fontWeight: 600 }}>
                 {pendientes.length ? `${pendientes.length} ${pendientes.length === 1 ? "observación pendiente" : "observaciones pendientes"}` : "✓ Sin observaciones pendientes"}
               </span>
+              {!soloLectura && pendientes.filter(tieneArreglo).length > 1 && (
+                <button onClick={() => aplicarTipo(null)} disabled={aplicando}
+                  title="Aplica de una vez todo lo que NOVA propone, en este rubro y en los demás rubros iguales"
+                  style={{ ...chip(true), padding: "3px 12px", fontSize: 11 }}>
+                  {aplicando ? <Loader2 size={11} /> : <Check size={11} />} Aplicar las {pendientes.filter(tieneArreglo).length} correcciones
+                </button>
+              )}
               {!soloLectura && Object.keys(TIPOS_NOVA).map(t => {
                 const cuantas = pendientes.filter(o => o.tipo === t && tieneArreglo(o)).length;
                 return cuantas > 1 && <button key={t} onClick={() => aplicarTipo(t)} style={{ ...chip(false), padding: "3px 10px", fontSize: 11 }}>
@@ -431,15 +490,19 @@ ${JSON.stringify(lista)}`;
                           </>
                         ) : (
                           <>
-                            {tieneArreglo(o) && <button onClick={() => aplicar(o)} style={{ ...chip(true), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><Check size={11} /> Aplicar lo que propone</button>}
                             {igualesA(o).length > 0 && (
-                              <button onClick={() => aplicarAIguales(o)} title={`Aplica la misma corrección a todos los rubros con ${queIguala(o)}`}
-                                style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-                                <Check size={11} /> Aplicar también a los {igualesA(o).length} con {queIguala(o)}
+                              <button onClick={() => aplicarAIguales(o, true)} title={`Corrige este rubro y los ${igualesA(o).length} que tienen ${queIguala(o)}`}
+                                style={{ ...chip(true), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                                <Check size={11} /> Aplicar a los {igualesA(o).length + 1} con {queIguala(o)}
                               </button>
                             )}
+                            {tieneArreglo(o) && <button onClick={() => aplicar(o)}
+                              style={{ ...chip(igualesA(o).length === 0), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                              <Check size={11} /> {igualesA(o).length > 0 ? "Solo en este" : "Aplicar lo que propone"}
+                            </button>}
                             <button onClick={() => abrirEditor(o)} style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><Pencil size={11} /> {tieneArreglo(o) ? "Retocar y aplicar" : "Corregir"}</button>
-                            <button onClick={() => setResueltas(r => ({ ...r, [o.idx]: "ignorada" }))} style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><X size={11} /> {tieneArreglo(o) ? "Ignorar" : "Está bien así"}</button>
+                            <button onClick={() => descartar(o)} title="No la vuelve a proponer en las próximas revisiones"
+                              style={{ ...chip(false), padding: "3px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><X size={11} /> {tieneArreglo(o) ? "Ignorar" : "Está bien así"}</button>
                           </>
                         )}
                       </div>
@@ -453,8 +516,8 @@ ${JSON.stringify(lista)}`;
       </div>
 
       {/* ── Repetidos ── */}
-      {onUnificar && <RubrosRepetidos items={items} soloLectura={soloLectura} onUnificar={onUnificar}
-        numeroDe={id => filas.find(f => f.id === id)?.numero} />}
+      {onUnificar && <RubrosRepetidos items={items} grupos={grupos} minimo={minRepetidos} onMinimo={setMinRepetidos}
+        soloLectura={soloLectura} onUnificar={onUnificar} numeroDe={id => filas.find(f => f.id === id)?.numero} />}
 
       {/* ── Peso de cada capítulo ── */}
       {pesos.length > 0 && (

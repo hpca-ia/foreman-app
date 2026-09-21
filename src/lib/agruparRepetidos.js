@@ -38,7 +38,11 @@ export function gruposRepetidos(items = [], { minimo = 70 } = {}) {
     d.palabras.forEach(p => (porPalabra.get(p) || []).forEach(k => { if (k > idx && grupoDe[k] === -1) candidatos.add(k); }));
     candidatos.forEach(k => {
       const o = datos[k];
-      if (o.clave === d.clave || parecidoDePalabras(d.palabras, o.palabras) >= minimo) {
+      // Con el mínimo en 100 se piden los escritos exactamente igual: dos
+      // rubros pueden compartir todas sus palabras y aun así estar redactados
+      // distinto, y a veces se quiere ver solo lo idéntico.
+      const calza = minimo >= 100 ? o.clave === d.clave : (o.clave === d.clave || parecidoDePalabras(d.palabras, o.palabras) >= minimo);
+      if (calza) {
         grupoDe[k] = grupos.length;
         grupo.push(k);
       }

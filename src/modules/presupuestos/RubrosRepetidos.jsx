@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Copy, Sparkles, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { gruposRepetidos, principalDe } from "../../lib/agruparRepetidos";
+import { principalDe } from "../../lib/agruparRepetidos";
 import { pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { normalizarUnidad, etiquetaUnidad, UNIDADES } from "../../lib/unidades";
 import { SelectorUnidad } from "./camposRubro";
@@ -22,15 +22,15 @@ const fmt = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximu
 const cant = v => n(v).toLocaleString("es-EC", { maximumFractionDigits: 2 });
 const claveDe = g => g.items.map(i => i.id).sort().join("-");
 
-export default function RubrosRepetidos({ items, numeroDe, soloLectura, onUnificar }) {
-  const grupos = useMemo(() => gruposRepetidos(items), [items]);
+const SENSIBILIDAD = [[100, "Iguales"], [80, "Muy parecidos"], [65, "Parecidos"], [50, "De lejos"]];
+
+export default function RubrosRepetidos({ items, grupos, minimo, onMinimo, numeroDe, soloLectura, onUnificar }) {
   const [ignorados, setIgnorados] = useState({});
   const [formularios, setFormularios] = useState({});
   const [nova, setNova] = useState({ estado: "nada", propuestas: {} });
   const [trabajando, setTrabajando] = useState("");
 
   const visibles = grupos.filter(g => !ignorados[claveDe(g)]);
-  if (!grupos.length) return null;
 
   // Lo que quedaría al unificar un grupo, antes de que nadie lo toque.
   function porDefecto(g) {
@@ -126,7 +126,7 @@ ${JSON.stringify(lista)}`;
         <Copy size={16} color={colors.ink} />
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Rubros repetidos ({visibles.length})</div>
-          <div style={{ fontSize: 11, color: colors.muted }}>Escritos igual o casi igual. Míralos juntos, revisa las cantidades y déjalos en uno solo si son el mismo trabajo.</div>
+          <div style={{ fontSize: 11, color: colors.muted }}>Escritos igual o casi igual, entre los {items.length} rubros del presupuesto. Míralos juntos, revisa las cantidades y déjalos en uno solo si son el mismo trabajo.</div>
         </div>
         {!soloLectura && !!visibles.length && (
           <button onClick={pedirPropuestas} disabled={nova.estado === "pensando"}
@@ -135,8 +135,21 @@ ${JSON.stringify(lista)}`;
           </button>
         )}
       </div>
+      {/* Qué tanto se tienen que parecer dos rubros para caer en el mismo grupo. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: visibles.length ? 10 : 0 }}>
+        <span style={{ fontSize: 11, color: colors.muted }}>Buscar los</span>
+        {SENSIBILIDAD.map(([v, l]) => (
+          <button key={v} onClick={() => onMinimo(v)} title={v === 100 ? "Solo los escritos exactamente igual" : `Rubros que comparten al menos el ${v} % de sus palabras`}
+            style={{ ...chip(minimo === v), padding: "3px 10px", fontSize: 11 }}>{l}</button>
+        ))}
+      </div>
       {nova.estado === "error" && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>NOVA no pudo revisarlos: {nova.error}</div>}
-      {!visibles.length && <div style={{ fontSize: 12, color: colors.success }}>✓ Ningún grupo pendiente de revisar.</div>}
+      {!visibles.length && (
+        <div style={{ fontSize: 12, color: colors.success, marginTop: 8 }}>
+          ✓ Ningún rubro repetido{minimo === 100 ? " escrito igual" : ""}.
+          {minimo > 50 && <span style={{ color: colors.muted }}> Si crees que hay alguno escrito de otra forma, prueba con "{SENSIBILIDAD.find(([v]) => v < minimo)?.[1]}".</span>}
+        </div>
+      )}
 
       <div style={{ display: "grid", gap: 10 }}>
         {visibles.map(g => {
