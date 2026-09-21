@@ -103,15 +103,17 @@ export function principalDe(grupo) {
 
 // ── Los que ya se decidió dejar separados ────────────────────────────────
 // La decisión se queda: "estos dos son distintos" no se vuelve a preguntar en
-// cada revisión. Se guarda en este navegador, por presupuesto.
+// cada revisión. Vive en el presupuesto, en la base, para que valga desde
+// cualquier equipo; el navegador guarda una copia por si la base todavía no
+// tiene la columna (migración 031) o falla la conexión.
 
 const LLAVE = id => `foreman_separados_${id}`;
 
-export function leerSeparados(presupuestoId) {
-  try { return new Set(JSON.parse(localStorage.getItem(LLAVE(presupuestoId)) || "[]")); }
-  catch { return new Set(); }
+export function leerLocales(presupuestoId) {
+  try { return JSON.parse(localStorage.getItem(LLAVE(presupuestoId)) || "[]"); }
+  catch { return []; }
 }
 
-export function guardarSeparados(presupuestoId, claves) {
-  try { localStorage.setItem(LLAVE(presupuestoId), JSON.stringify([...claves])); } catch { /* sin memoria del navegador, se olvida al salir */ }
+export function guardarLocales(presupuestoId, claves) {
+  try { localStorage.setItem(LLAVE(presupuestoId), JSON.stringify([...claves])); } catch { /* sin memoria del navegador, queda solo en la base */ }
 }

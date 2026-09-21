@@ -447,6 +447,17 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
     itemsRef.current = nuevos; setItems(nuevos); recalcTotales(nuevos);
   }
 
+  // Los grupos de repetidos que se decidió dejar separados viven con el
+  // presupuesto. Sin la migración 031 la base no los acepta: ahí se avisa y
+  // quedan guardados solo en este equipo.
+  async function guardarSeparados(claves) {
+    const { error } = await supabase.from("presupuestos").update({ separados: claves }).eq("id", presupuestoActivo.id);
+    if (error) return error.message;
+    setPresupuestoActivo(p=>({...p,separados:claves}));
+    setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,separados:claves}:p));
+    return null;
+  }
+
   async function recalcTotales(itemsList, overrides={}) {
     if (!presupuestoActivo) return;
     // La misma cuenta que el PDF y el Excel (honorarios.js), a centavos:
@@ -900,7 +911,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <div style={{marginBottom:14}}>
               <RevisarPresupuesto items={items} capitulos={capitulosActivos} presupuesto={presupuestoActivo} soloLectura={!!presupuestoActivo.archivado_at}
                 onActualizar={(id,campos)=>presupuestoActivo.archivado_at?alert("Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."):actualizarItemMulti(id,campos)}
-                onUnificar={unificarRubros}/>
+                onUnificar={unificarRubros} onSeparados={guardarSeparados}/>
             </div>
           )}
 

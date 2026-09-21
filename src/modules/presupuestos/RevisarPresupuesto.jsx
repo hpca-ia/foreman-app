@@ -39,7 +39,7 @@ const TIPOS_NOVA = { ortografia: "Ortografía", descripcion: "Descripción", uni
 const NOMBRES_ORDEN = { numero: "número", descripcion: "descripción", precio: "precio final", base: "precio base", util: "utilidad", cantidad: "cantidad", total: "total" };
 const NOMBRES_FILTRO = { todos: "todos los rubros", alertas: "solo con alertas", nova: "solo con observaciones de NOVA", repetidos: "solo los repetidos" };
 
-export default function RevisarPresupuesto({ items, capitulos, presupuesto = {}, soloLectura = false, onActualizar, onUnificar }) {
+export default function RevisarPresupuesto({ items, capitulos, presupuesto = {}, soloLectura = false, onActualizar, onUnificar, onSeparados }) {
   const [orden, setOrden] = useState({ campo: "total", dir: "desc" });
   const [filtro, setFiltro] = useState("todos");        // todos | alertas | nova
   const [base, setBase] = useState(null);
@@ -516,7 +516,8 @@ ${JSON.stringify(lista)}`;
       </div>
 
       {/* ── Repetidos ── */}
-      {onUnificar && <RubrosRepetidos items={items} grupos={grupos} minimo={minRepetidos} onMinimo={setMinRepetidos} presupuestoId={presupuesto.id}
+      {onUnificar && <RubrosRepetidos items={items} grupos={grupos} minimo={minRepetidos} onMinimo={setMinRepetidos}
+        presupuestoId={presupuesto.id} separadosBD={presupuesto.separados} onSeparados={onSeparados}
         soloLectura={soloLectura} onUnificar={onUnificar} numeroDe={id => filas.find(f => f.id === id)?.numero} />}
 
       {/* ── Peso de cada capítulo ── */}

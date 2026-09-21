@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Copy, Sparkles, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { principalDe, leerSeparados, guardarSeparados } from "../../lib/agruparRepetidos";
+import { principalDe, leerLocales, guardarLocales } from "../../lib/agruparRepetidos";
 import { pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { normalizarUnidad, etiquetaUnidad, UNIDADES } from "../../lib/unidades";
 import { SelectorUnidad } from "./camposRubro";
@@ -24,14 +24,19 @@ const claveDe = g => g.items.map(i => i.id).sort().join("-");
 
 const SENSIBILIDAD = [[100, "Iguales"], [80, "Muy parecidos"], [70, "Parecidos"], [55, "De lejos"]];
 
-export default function RubrosRepetidos({ items, grupos, minimo, onMinimo, numeroDe, soloLectura, onUnificar, presupuestoId }) {
-  // Lo que ya se decidió dejar separado no se vuelve a preguntar.
-  const [separados, setSeparados] = useState(() => leerSeparados(presupuestoId));
-  const dejarSeparados = g => {
-    const c = new Set(separados).add(claveDe(g));
+export default function RubrosRepetidos({ items, grupos, minimo, onMinimo, numeroDe, soloLectura, onUnificar, presupuestoId, separadosBD, onSeparados }) {
+  // Lo que ya se decidió dejar separado no se vuelve a preguntar. Lo de la
+  // base manda; lo del navegador es lo que se decidió antes de que la base
+  // pudiera guardarlo.
+  const [separados, setSeparados] = useState(() => new Set([...(separadosBD || []), ...leerLocales(presupuestoId)]));
+  const [soloAqui, setSoloAqui] = useState(false);
+  async function guardarDecision(c) {
     setSeparados(c);
-    guardarSeparados(presupuestoId, c);
-  };
+    guardarLocales(presupuestoId, c);
+    const err = await onSeparados?.([...c]);
+    setSoloAqui(!!err);
+  }
+  const dejarSeparados = g => guardarDecision(new Set(separados).add(claveDe(g)));
   const [formularios, setFormularios] = useState({});
   const [nova, setNova] = useState({ estado: "nada", propuestas: {} });
   const [trabajando, setTrabajando] = useState("");
@@ -151,10 +156,15 @@ ${JSON.stringify(lista)}`;
         ))}
       </div>
       {nova.estado === "error" && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>NOVA no pudo revisarlos: {nova.error}</div>}
+      {soloAqui && (
+        <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
+          Esta decisión quedó guardada solo en este equipo: falta correr la migración 031 en Supabase para que valga desde cualquiera.
+        </div>
+      )}
       {guardados > 0 && (
         <div style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
           {guardados === 1 ? "1 grupo que dejaste separado no se muestra." : `${guardados} grupos que dejaste separados no se muestran.`}{" "}
-          <button onClick={() => { setSeparados(new Set()); guardarSeparados(presupuestoId, []); }}
+          <button onClick={() => guardarDecision(new Set())}
             style={{ background: "none", border: "none", padding: 0, color: colors.ink, cursor: "pointer", fontSize: 11, textDecoration: "underline", fontFamily: colors.font }}>Volver a mostrarlos</button>
         </div>
       )}
