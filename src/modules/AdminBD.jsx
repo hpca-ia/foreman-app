@@ -75,7 +75,10 @@ export default function AdminBD({ onVolver, currentUser }) {
         <button onClick={() => setTab("rubros")} style={tabS(tab === "rubros")}>Rubros</button>
         <button onClick={() => setTab("capitulos")} style={tabS(tab === "capitulos")}>Capítulos</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
+        <button onClick={() => setTab("respaldo")} style={tabS(tab === "respaldo")}>Respaldo</button>
       </div>
+
+      {tab === "respaldo" && <Respaldo />}
 
       {tab === "rubros" && (
         <div>
@@ -166,6 +169,63 @@ export default function AdminBD({ onVolver, currentUser }) {
       )}
 
       {tab === "duplicados" && <DuplicadosRubros currentUser={currentUser} />}
+    </div>
+  );
+}
+
+// Sacar una copia de todo, ahora mismo.
+//
+// Cada noche se hace sola (ver api/cron-respaldo.js). Este botón sirve para
+// comprobar que está bien configurada sin esperar a la madrugada, y para
+// tener una copia fresca antes de tocar algo delicado.
+function Respaldo() {
+  const [trabajando, setTrabajando] = useState(false);
+  const [r, setR] = useState(null);
+  const [error, setError] = useState("");
+
+  async function respaldar(conCorreo) {
+    setTrabajando(true); setError(""); setR(null);
+    try {
+      const res = await fetch("/api/respaldo", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ correo: conCorreo }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) setError(d.error || `El servidor respondió ${res.status}`);
+      else setR(d);
+    } catch (e) {
+      setError("No se pudo hablar con el servidor: " + e.message);
+    } finally { setTrabajando(false); }
+  }
+
+  const caja = { background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "14px 16px", marginBottom: 10 };
+  return (
+    <div>
+      <div style={caja}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>Copia de seguridad</div>
+        <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+          Cada madrugada FOREMAN saca una copia de la base entera y la guarda en Dropbox, fuera de Supabase. Los archivos
+          —facturas, logos, adjuntos— se van copiando de a poco. Los lunes, además, la copia llega por correo.
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <Button size="sm" onClick={() => respaldar(false)} disabled={trabajando}>{trabajando ? "Respaldando…" : "Respaldar ahora"}</Button>
+          <Button size="sm" variant="secondary" onClick={() => respaldar(true)} disabled={trabajando}>Respaldar y mandármelo por correo</Button>
+        </div>
+      </div>
+
+      {error && <div style={{ ...caja, borderColor: "var(--danger)", color: "var(--danger)", fontSize: 13 }}>{error}</div>}
+
+      {r && (
+        <div style={caja}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: r.ok ? "var(--success)" : "var(--warning)", marginBottom: 6 }}>
+            {r.ok ? "✓ Respaldo hecho" : "Respaldo hecho, con avisos"} · {r.segundos}s
+          </div>
+          {r.paso?.map((p, i) => <div key={i} style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>• {p}</div>)}
+          {r.correo && r.correo !== "no" && <div style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>• Correo {r.correo}</div>}
+          {[...(r.problemas || []), ...(r.avisos || [])].map((p, i) => (
+            <div key={i} style={{ fontSize: 12, color: "var(--warning)", padding: "2px 0" }}>• {p}</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

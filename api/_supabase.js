@@ -4,7 +4,8 @@
 // La llave secreta vive en las variables de entorno de Vercel, nunca en la app
 // ni en el repositorio: con ella se salta cualquier regla de la base.
 
-export const SUPABASE_URL = "https://qxoincfvscvbqvoxamdi.supabase.co";
+// La de siempre; se puede apuntar a otra para probar sin tocar la de verdad.
+export const SUPABASE_URL = process.env.SUPABASE_URL || "https://qxoincfvscvbqvoxamdi.supabase.co";
 const secreta = () => process.env.SUPABASE_SECRET_KEY || "";
 
 export const configurado = () => !!secreta();

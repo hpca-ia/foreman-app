@@ -1,7 +1,7 @@
 // Enviar correo desde el servidor. Lo comparten el informe del pipeline y el
 // resumen diario; el módulo de caja chica tiene el suyo de antes.
 
-export async function enviarCorreo({ to, subject, html }) {
+export async function enviarCorreo({ to, subject, html, adjuntos }) {
   const destinatarios = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!destinatarios.length) return { ok: false, error: "sin destinatarios" };
   if (!process.env.RESEND_API_KEY) return { ok: false, error: "falta RESEND_API_KEY" };
@@ -9,7 +9,8 @@ export async function enviarCorreo({ to, subject, html }) {
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.RESEND_API_KEY },
-    body: JSON.stringify({ from: "FOREMAN <notificaciones@hcastudio.com>", to: destinatarios, subject, html }),
+    // adjuntos: [{ filename, content }] con el contenido en base64.
+    body: JSON.stringify({ from: "FOREMAN <notificaciones@hcastudio.com>", to: destinatarios, subject, html, ...(adjuntos?.length ? { attachments: adjuntos } : {}) }),
   });
   const datos = await r.json().catch(() => ({}));
   return r.ok ? { ok: true, enviadoA: destinatarios, id: datos.id } : { ok: false, error: datos.message || "Resend rechazó el envío" };
