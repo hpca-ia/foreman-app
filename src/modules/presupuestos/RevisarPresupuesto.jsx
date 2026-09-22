@@ -177,6 +177,7 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
           { label: "Total", valor: `$${money(tot.total)}` },
           ...(area > 0 ? [{ label: "Costo directo por m²", valor: `$${money(tot.subtotal / area)}` }] : []),
           { label: "Rubros con alertas", valor: `${conAlertas} de ${filas.length}` },
+          { label: "Rubros listos", valor: `${filas.filter(f => f.listo).length} de ${filas.length}` },
         ],
         bloques: [
           {
@@ -196,8 +197,9 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
             // Sin columna de capítulo: el N° ya dice de cuál es, y el nombre largo
             // hacía cada fila de cuatro renglones.
             columnas: ["N°", "Descripción", "Und", "Cant", "P.Base", "Util%", "P.Final", "Total", "%", "Alertas"],
-            filas: vistas.map(f => [f.numero, f.descripcion, etiquetaUnidad(f.unidad), cant(f.cantidad), fmt(f.precioBase), f.util ? f.util.toFixed(1) : "0",
-              fmt(f.precio_unitario), fmt(f.total), f.pct.toFixed(1), f.alertas.join(" · ")]),
+            filas: vistas.map(f => [f.numero, String(f.nota || "").trim() ? `${f.descripcion}\n⚠ ${String(f.nota).trim()}` : f.descripcion,
+              etiquetaUnidad(f.unidad), cant(f.cantidad), fmt(f.precioBase), f.util ? f.util.toFixed(1) : "0",
+              fmt(f.precio_unitario), fmt(f.total), f.pct.toFixed(1), [f.listo ? "" : "en proceso", ...f.alertas].filter(Boolean).join(" · ")]),
             filasDestacadas: vistas.map((f, i) => (f.alertas.length ? i : -1)).filter(i => i >= 0),
             destacarSinNegrita: true,
             anchos: { 0: { cellWidth: 30 }, 2: { cellWidth: 30 }, 3: { halign: "right", cellWidth: 44 }, 4: { halign: "right", cellWidth: 50 },
@@ -229,7 +231,7 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
       { nombre: "Rubros", anchos: [7, 50, 30, 7, 10, 11, 8, 11, 12, 7, 45], filas: [
         [`REVISIÓN — ${presupuesto.nombre || ""}`], ["Documento de revisión interna, no es el presupuesto para el cliente"], [comoSeVe], [],
         ["N°", "DESCRIPCIÓN", "CAPÍTULO", "UND", "CANTIDAD", "P. BASE", "UTIL %", "P. FINAL", "TOTAL", "% TOTAL", "ALERTAS"],
-        ...vistas.map(f => [f.numero, f.descripcion, f.capitulo, etiquetaUnidad(f.unidad), n(f.cantidad), f.precioBase, Math.round(f.util * 10) / 10, n(f.precio_unitario), n(f.total), Math.round(f.pct * 10) / 10, f.alertas.join(" · ")]),
+        ...vistas.map(f => [f.numero, f.descripcion, f.capitulo, etiquetaUnidad(f.unidad), n(f.cantidad), f.precioBase, Math.round(f.util * 10) / 10, n(f.precio_unitario), n(f.total), Math.round(f.pct * 10) / 10, [f.listo ? "" : "en proceso", String(f.nota || "").trim() ? `Nota: ${f.nota}` : "", ...f.alertas].filter(Boolean).join(" · ")]),
       ] },
       { nombre: "Capítulos", anchos: [50, 14, 8], filas: [
         ["CAPÍTULO", "MONTO", "%"],
@@ -589,7 +591,22 @@ ${JSON.stringify(lista)}`;
                       style={{ color: colors.ink, fontSize: 12, lineHeight: 1.35 }} />
                     {obsPorId[f.id] && <Sparkles size={11} color={colors.ink} style={{ flexShrink: 0, marginTop: 6 }} title="NOVA tiene una observación" />}
                   </div>
-                  <div style={{ fontSize: 10, color: colors.muted, padding: "0 5px" }}>{f.capitulo}</div>
+                  {/* La advertencia propia del rubro, escrita al armarlo. */}
+                  {String(f.nota || "").trim() && (
+                    <div style={{ display: "flex", gap: 4, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: 6,
+                      padding: "2px 5px", margin: "2px 4px", fontSize: 10.5, color: colors.warning, lineHeight: 1.35 }}>
+                      <span style={{ flexShrink: 0 }}>⚠</span><span style={{ overflowWrap: "anywhere" }}>{f.nota}</span>
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10, color: colors.muted, padding: "0 5px" }}>
+                    {f.capitulo}{!soloLectura && " · "}
+                    {!soloLectura && (
+                      <label style={{ marginLeft: 8, cursor: "pointer", color: f.listo ? colors.success : colors.muted }} title={f.listo ? "Rubro listo" : "En proceso"}>
+                        <input type="checkbox" checked={!!f.listo} onChange={e => onActualizar(f.id, { listo: e.target.checked })} style={{ accentColor: colors.ink, marginRight: 3 }} />
+                        {f.listo ? "listo" : "en proceso"}
+                      </label>
+                    )}
+                  </div>
                 </td>
                 <td style={{ ...celda, padding: "3px 2px" }}>
                   <SelectorUnidad valor={f.unidad} onCambiar={v => onActualizar(f.id, { unidad: v })} />

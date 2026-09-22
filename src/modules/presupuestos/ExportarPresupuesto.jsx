@@ -50,6 +50,8 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // El costo directo por m² va en las notas si hay área; se puede sacar para
   // un cliente al que no se le quiere mostrar.
   const [conM2, setConM2] = useState(true);
+  // Las advertencias propias de cada rubro ("rubro aproximado", "falta estudio").
+  const [notasRubro, setNotasRubro] = useState(true);
   const [paraCotizar, setParaCotizar] = useState(NOTAS_COTIZAR.join("\n"));
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -80,6 +82,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       if (propia.particulares != null) setParticulares(propia.particulares);
       if (propia.paraCotizar != null) setParaCotizar(propia.paraCotizar);
       if (propia.conM2 != null) setConM2(propia.conM2 !== false);
+      if (propia.notasRubro != null) setNotasRubro(propia.notasRubro !== false);
       setCargado(true);
     })();
     return () => { vivo = false; };
@@ -133,7 +136,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
 
   const eleccion = () => ({
     plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
-    notas: marcadas, textos, particulares, paraCotizar, conM2,
+    notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro,
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -170,7 +173,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line
-  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2]);
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -205,7 +208,8 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     ? lineas(paraCotizar)
     : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
-  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete };
+  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro };
+  const conNotaPropia = items.filter(i => String(i.nota || "").trim()).length;
   const nombreArchivo = ext => {
     const { base } = versionDe(presupuesto.nombre);
     return `${(base || "Presupuesto").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim()} - ${FORMATOS[formato].label} v${version}.${ext}`;
@@ -388,6 +392,12 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
                   <span>NOTAS Y CONDICIONES</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
+                {conNotaPropia > 0 && (
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: notasRubro ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
+                    <input type="checkbox" checked={notasRubro} onChange={e => setNotasRubro(e.target.checked)} style={{ marginTop: 2 }} />
+                    <span><strong>Las notas de los rubros</strong> — {conNotaPropia} {conNotaPropia === 1 ? "rubro tiene" : "rubros tienen"} una advertencia propia. Sale debajo de su descripción.</span>
+                  </label>
+                )}
                 {notaM2 ? (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: conM2 ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
                     <input type="checkbox" checked={conM2} onChange={e => setConM2(e.target.checked)} style={{ marginTop: 2 }} />

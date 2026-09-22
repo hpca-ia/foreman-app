@@ -1048,12 +1048,20 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===todosDelCap.length-1?"default":"pointer",color:itemIdx===todosDelCap.length-1?"var(--border)":"var(--muted)"}}>▼</button>
                               </div>
                               {cap.orden}.{itemIdx+1}
+                              {/* Listo o todavía en proceso. */}
+                              <input type="checkbox" checked={!!item.listo} onChange={e=>actualizarItemMulti(item.id,{listo:e.target.checked})}
+                                title={item.listo?"Rubro listo":"En proceso: todavía se está trabajando"}
+                                style={{margin:"0 0 0 3px",cursor:"pointer",accentColor:"var(--ink)"}}/>
                             </div>
                           </td>
                           <td style={{padding:"3px 4px"}}>
                             <CampoTexto valor={item.descripcion} multilinea titulo="Toca para editar la descripción"
                               onGuardar={v=>actualizarItemMulti(item.id,{descripcion:v})}
                               style={{color:"var(--ink)",fontSize:12,lineHeight:1.35}}/>
+                            {/* Lo que hay que advertir de este rubro: que es
+                                aproximado, que falta el estudio, que la cotización
+                                no llegó. Se escribe a mano, no hay lista. */}
+                            <NotaDeRubro item={item} onGuardar={v=>actualizarItemMulti(item.id,{nota:v})}/>
                           </td>
                           <td style={{padding:"3px 4px"}}>
                             <SelectorUnidad valor={item.unidad} onCambiar={v=>actualizarItemMulti(item.id,{unidad:v})}/>
@@ -1335,5 +1343,37 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       )}
       </>}
     </div>
+  );
+}
+
+// La nota de un rubro: una advertencia escrita a mano que tiene que verse.
+//
+// Cuando la hay, se muestra destacada debajo de la descripción; cuando no, un
+// enlace chiquito para ponerla, que no estorbe en los rubros que no la
+// necesitan —que son casi todos—.
+function NotaDeRubro({ item, onGuardar }) {
+  const [abierta, setAbierta] = useState(false);
+  const hay = !!String(item.nota || "").trim();
+  if (!abierta && !hay) {
+    return (
+      <button onClick={()=>setAbierta(true)} title="Agregar una nota a este rubro"
+        style={{background:"none",border:"none",padding:"1px 4px",fontSize:10,color:"var(--muted)",cursor:"pointer",fontFamily:"var(--font)"}}>+ nota</button>
+    );
+  }
+  if (!abierta) {
+    return (
+      <div onClick={()=>setAbierta(true)} title="Toca para cambiar la nota"
+        style={{display:"flex",gap:4,alignItems:"flex-start",cursor:"pointer",background:"var(--warning-soft)",border:"1px solid var(--warning-border)",
+          borderRadius:6,padding:"3px 6px",margin:"3px 4px 1px",fontSize:11,color:"var(--warning)",lineHeight:1.35}}>
+        <span style={{flexShrink:0}}>⚠</span><span style={{overflowWrap:"anywhere"}}>{item.nota}</span>
+      </div>
+    );
+  }
+  return (
+    <textarea autoFocus defaultValue={item.nota || ""} rows={2} placeholder="Rubro aproximado, falta estudio, sin cotización…"
+      onBlur={e=>{ const v=e.target.value.trim(); setAbierta(false); if(v!==String(item.nota||"").trim()) onGuardar(v||null); }}
+      onKeyDown={e=>{ if(e.key==="Escape"){ e.currentTarget.value=item.nota||""; e.currentTarget.blur(); } }}
+      style={{width:"100%",boxSizing:"border-box",margin:"3px 0 1px",background:"var(--warning-soft)",border:"1px solid var(--warning-border)",
+        borderRadius:6,padding:"4px 6px",fontSize:11,color:"var(--ink)",fontFamily:"var(--font)",outline:"none",resize:"vertical",lineHeight:1.35}}/>
   );
 }

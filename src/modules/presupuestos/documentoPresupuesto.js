@@ -112,7 +112,11 @@ const cantidad = v => (Number(v) || 0).toLocaleString("es-EC", { maximumFraction
 const lugarYFecha = e => `${e?.ciudad ? e.ciudad.split(",")[0] + ", " : ""}${fechaLarga()}`;
 
 /** Las filas de la tabla principal según el formato: [celdas], y cuáles son de capítulo. */
-function tabla(caps, formato) {
+// La nota de un rubro va con su descripción, no en una columna aparte: es una
+// advertencia sobre ese rubro y tiene que leerse pegada a él.
+const conNota = (r, incluir) => (incluir && String(r.nota || "").trim() ? `${r.descripcion}\n⚠ ${String(r.nota).trim()}` : r.descripcion);
+
+function tabla(caps, formato, notasRubro = true) {
   if (formato === "capitulos") {
     return { columnas: ["N°", "Capítulo", "Total"], filas: caps.map(c => [c.numero, c.nombre, money(c.subtotal)]), deCapitulo: [] };
   }
@@ -121,7 +125,7 @@ function tabla(caps, formato) {
   caps.forEach(c => {
     deCapitulo.push(filas.length);
     filas.push([c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.subtotal) : ""]);
-    c.rubros.forEach(r => filas.push([r.numero, r.descripcion, r.unidad, cantidad(r.cantidad),
+    c.rubros.forEach(r => filas.push([r.numero, conNota(r, notasRubro), r.unidad, cantidad(r.cantidad),
       conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : ""]));
   });
   return { columnas: ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"], filas, deCapitulo };
@@ -133,7 +137,7 @@ function tabla(caps, formato) {
  * @param aceptacion  espacio para que firme el cliente
  */
 export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true }) {
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
@@ -231,7 +235,7 @@ export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detal
   if (t.encabezado === "limpio") { doc.setDrawColor(...t.linea); doc.setLineWidth(0.6); doc.line(M, y - 8, W - M, y - 8); y += 6; }
 
   // ── Los rubros ──
-  const tb = tabla(caps, formato);
+  const tb = tabla(caps, formato, notasRubro);
   const soloCaps = formato === "capitulos";
   const anchos = soloCaps
     ? { 0: { cellWidth: 36 }, 2: { cellWidth: 100, halign: "right" } }
@@ -368,7 +372,7 @@ const argb = c => "FF" + c.map(v => v.toString(16).padStart(2, "0")).join("").to
  * ExcelJS se carga recién al exportar: pesa, y el resto de la app no lo usa.
  */
 export async function excelPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true }) {
   const ExcelJS = (await import("exceljs")).default;
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const caps = estructura({ capitulos, items });
@@ -485,7 +489,7 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     if (soloCapitulos) return;
 
     c.rubros.forEach(r => {
-      const valores = [r.numero, r.descripcion, r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
+      const valores = [r.numero, conNota(r, notasRubro), r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
         { formula: `D${fila}*E${fila}`, result: cotizar ? 0 : r2(r.cantidad * r.precio_unitario) }];
       valores.forEach((v, i) => {
         const x = ws.getCell(fila, i + 1);
