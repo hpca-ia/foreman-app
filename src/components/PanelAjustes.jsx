@@ -6,6 +6,7 @@ import { BUCKET_PUBLICO } from "../lib/archivos";
 import { saveToStorage } from "../lib/storage";
 import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
+import { avisarPinNuevo, avisarPermisos } from "../lib/avisoCuenta";
 import { rolInfo } from "../lib/roles";
 import Modal from "./ui/Modal";
 import Avatar from "./ui/Avatar";
@@ -26,6 +27,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
   const emptyUser = { id: Date.now(), name: "", role: "residente", pin: "", avatar: "", color: "#0F3D3E" };
   const emptyProject = { id: Date.now(), name: "", color: "#0F3D3E", tipo: "otro", miembros: [] };
   const [errEquipo, setErrEquipo] = useState("");
+  const [okEquipo, setOkEquipo] = useState("");
 
   function saveEmpresa(updated) { setEmpresa(updated); saveToStorage("foreman_empresa", updated); }
 
@@ -51,10 +53,21 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
   // cambia acá lo ven todos los equipos al refrescar.
   async function saveUser(u) {
     setErrEquipo("");
-    const existe = users.some(x => x.id === u.id);
+    const antes = users.find(x => x.id === u.id);
+    const existe = !!antes;
     const id = existe ? u.id : Date.now();
     const { error } = await guardarUsuario({ ...u, id });
     if (error) { setErrEquipo("No se pudo guardar el usuario: " + error.message); return; }
+
+    // Su clave y lo que puede hacer son cosas que tiene que saber. El PIN solo
+    // se puede mandar ahora: en la base queda cifrado y no hay cómo volver a
+    // leerlo.
+    const avisos = [];
+    if (u.pin) avisos.push(await avisarPinNuevo(id, u.pin));
+    if (existe && antes.role !== u.role) avisos.push(await avisarPermisos(id, rolInfo(u.role).label, [`Ahora entras como ${rolInfo(u.role).label}, antes eras ${rolInfo(antes.role).label}.`]));
+    const falla = avisos.find(a => a && a.ok === false);
+    if (falla) setErrEquipo("El usuario se guardó, pero no se pudo avisar por correo: " + falla.error);
+    else if (avisos.length) setOkEquipo(`Se le mandó el correo a ${u.name}.`);
     // Los admins ven todo: sus membresías no se tocan desde acá.
     if (!esAdmin(u.role) && Array.isArray(u.proyectos)) {
       const r = await asignarProyectosAUsuario(id, u.proyectos, projects.map(p => p.id));
@@ -108,6 +121,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
         </div>
       )}
       {errEquipo && <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 10 }}>{errEquipo}</div>}
+      {okEquipo && <div style={{ color: "var(--success)", fontSize: 12, marginBottom: 10 }}>{okEquipo}</div>}
     </>
   );
 
@@ -130,7 +144,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
         {usuario?.role === "owner" && <button onClick={() => setTab("etapas")} style={tabS(tab === "etapas")}>Etapas</button>}
       </div>
 
-      {tab === "permisos" && usuario?.role === "owner" && <PanelPermisos permisos={permisos} setPermisos={setPermisos} />}
+      {tab === "permisos" && usuario?.role === "owner" && <PanelPermisos permisos={permisos} setPermisos={setPermisos} usuarios={users} />}
       {tab === "etapas" && usuario?.role === "owner" && <EtapasCatalogo />}
 
       {tab === "empresa" && (

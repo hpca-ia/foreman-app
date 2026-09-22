@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Lock } from "lucide-react";
-import { GRUPOS_PERMISOS, ROLES_EDITABLES, guardarPermiso } from "../lib/permisos";
+import { GRUPOS_PERMISOS, ROLES_EDITABLES, guardarPermiso, TODOS_LOS_PERMISOS } from "../lib/permisos";
+import { avisarPermisos } from "../lib/avisoCuenta";
 import { rolInfo } from "../lib/roles";
 import { colors } from "../theme/colors";
 
@@ -12,10 +13,11 @@ import { colors } from "../theme/colors";
 // lee como lo que es —"qué puede hacer un residente"— en vez de como una
 // cuadrícula que hay que cruzar con el dedo.
 
-export default function PanelPermisos({ permisos, setPermisos }) {
+export default function PanelPermisos({ permisos, setPermisos, usuarios = [] }) {
   const [rol, setRol] = useState(ROLES_EDITABLES[0]);
   const [guardando, setGuardando] = useState(null);
   const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
 
   async function alternar(permiso) {
     const valor = !permisos?.[rol]?.[permiso];
@@ -26,7 +28,21 @@ export default function PanelPermisos({ permisos, setPermisos }) {
     if (e) {
       setError("No se pudo guardar. " + e.message);
       setPermisos(prev => ({ ...prev, [rol]: { ...prev[rol], [permiso]: !valor } }));
+      setGuardando(null);
+      return;
     }
+    // A quien le cambió lo que puede hacer, se le dice. Enterarse por toparse
+    // con un botón que ya no está es la peor forma.
+    const que = TODOS_LOS_PERMISOS.find(p => p.id === permiso)?.label || permiso;
+    const suyos = usuarios.filter(u => u.role === rol && u.activo !== false);
+    const fallas = [];
+    for (const u of suyos) {
+      const r = await avisarPermisos(u.id, rolInfo(rol).label, [`${valor ? "Ahora puedes" : "Ya no puedes"}: ${que}`]);
+      if (r && r.ok === false) fallas.push(`${u.name || u.nombre}: ${r.error}`);
+    }
+    setAviso(suyos.length
+      ? (fallas.length ? `Guardado. No se pudo avisar a ${fallas.join("; ")}` : `Guardado y avisado a ${suyos.length} ${suyos.length === 1 ? "persona" : "personas"}.`)
+      : "Guardado. Nadie tiene ese rol todavía.");
     setGuardando(null);
   }
 
@@ -60,6 +76,7 @@ export default function PanelPermisos({ permisos, setPermisos }) {
       </div>
 
       {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
+      {aviso && <div style={{ color: colors.inkSoft, fontSize: 12, marginBottom: 10 }}>{aviso}</div>}
 
       {GRUPOS_PERMISOS.map(g => (
         <div key={g.titulo} style={{ marginBottom: 14 }}>
