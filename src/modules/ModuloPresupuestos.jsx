@@ -15,6 +15,8 @@ import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 import PasarABase from "./presupuestos/PasarABase";
 import ArchivosPresupuesto from "./presupuestos/ArchivosPresupuesto";
+import EstadoPresupuesto from "./presupuestos/EstadoPresupuesto";
+import { congelado, anotarPresencia, soltarPresencia, otrosEnElPresupuesto } from "./presupuestos/cicloPresupuesto";
 import { guardarOriginal } from "../lib/archivosPresupuesto";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
@@ -73,6 +75,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // de rubros para agregarlo sin salir de la tabla.
   const [buscaArmar, setBuscaArmar] = useState("");
   const [archivosVersion, setArchivosVersion] = useState(0);
+  // Quién más está en este presupuesto ahora, y si decidí trabajarlo igual.
+  const [otros, setOtros] = useState([]);
+  const [tomado, setTomado] = useState(false);
   const [capDestino, setCapDestino] = useState("");
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
   const [showAddCap, setShowAddCap] = useState(false);
@@ -83,6 +88,25 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const fileBDRef = useRef(null);
 
   useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchProveedores(); fetchCapitulosDB(); }, []);
+
+  // Mientras el presupuesto está abierto se anota que alguien lo trabaja, y se
+  // mira quién más lo tiene abierto. Es un aviso, no un candado: la marca se
+  // vence sola a los diez minutos.
+  useEffect(() => {
+    const p = subVista === "detalle" ? presupuestoActivo : null;
+    if (!p?.id) { setOtros([]); return; }
+    setTomado(false);
+    let vivo = true;
+    const latir = async () => {
+      await anotarPresencia(p.id, currentUser);
+      const o = await otrosEnElPresupuesto(p.id, currentUser);
+      if (vivo) setOtros(o);
+    };
+    latir();
+    const reloj = setInterval(latir, 60000);
+    return () => { vivo = false; clearInterval(reloj); soltarPresencia(p.id, currentUser); };
+    // eslint-disable-next-line
+  }, [presupuestoActivo?.id, subVista]);
 
   // Si el total guardado quedó atrás de sus rubros —un cambio que no alcanzó a
   // recalcular—, se corrige al abrirlo. Solo con los rubros de este mismo
@@ -672,6 +696,15 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // subtotal guardado, que puede haber quedado atrás si algo cambió sin
   // recalcular.
   const costoDirecto=items.reduce((s,i)=>s+(Number(i.total)||0),0);
+
+  // Por qué no se puede tocar: es histórico, ya salió al cliente, o lo está
+  // trabajando alguien más en este momento.
+  const bloqueado = !!presupuestoActivo && (congelado(presupuestoActivo) || (otros.length > 0 && !tomado));
+  const motivoBloqueo = presupuestoActivo?.archivado_at
+    ? "Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."
+    : otros.length && !tomado
+      ? `${otros.map(o=>o.nombre).join(", ")} lo está trabajando ahora mismo. Si ya terminó, usa "Trabajarlo igual".`
+      : "Este presupuesto ya salió al cliente. Para cambiarlo, crea la versión siguiente.";
   const iS={width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
 
   return (
@@ -705,7 +738,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
-            {!presupuestoActivo?.archivado_at&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
+            {!bloqueado&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
             <button onClick={()=>setPasarABase(true)} disabled={items.length===0}
               title={presupuestoActivo?.en_base_at?`Pasado a la base el ${new Date(presupuestoActivo.en_base_at).toLocaleDateString("es-EC")}`:"Cuando lo des por bueno: sus precios entran a la base de rubros"}
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
@@ -903,6 +936,12 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             ))}
           </div>
 
+          <EstadoPresupuesto presupuesto={presupuestoActivo} currentUser={currentUser} otros={otros}
+            soloLectura={!!presupuestoActivo.archivado_at}
+            onTomar={()=>setTomado(true)}
+            onNuevaVersion={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))}
+            onCambiado={campos=>{setPresupuestoActivo(p=>({...p,...campos}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,...campos}:p));}}/>
+
           {presupuestoActivo.archivado_at&&(
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",background:"var(--neutral-soft)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--ink-soft)"}}>
               <Archive size={14}/>
@@ -914,18 +953,18 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
 
           {modoDetalle==="revisar"&&(
             <div style={{marginBottom:14}}>
-              <RevisarPresupuesto items={items} capitulos={capitulosActivos} presupuesto={presupuestoActivo} soloLectura={!!presupuestoActivo.archivado_at}
-                onActualizar={(id,campos)=>presupuestoActivo.archivado_at?alert("Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."):actualizarItemMulti(id,campos)}
+              <RevisarPresupuesto items={items} capitulos={capitulosActivos} presupuesto={presupuestoActivo} soloLectura={bloqueado}
+                onActualizar={(id,campos)=>bloqueado?alert(motivoBloqueo):actualizarItemMulti(id,campos)}
                 onUnificar={unificarRubros} onSeparados={guardarSeparados}/>
             </div>
           )}
 
           {/* Un histórico se mira, no se toca: el fieldset deshabilita cada
               casilla y cada botón de adentro de una vez. */}
-          <fieldset disabled={!!presupuestoActivo.archivado_at} style={{border:0,padding:0,margin:0,minWidth:0}}>
+          <fieldset disabled={bloqueado} style={{border:0,padding:0,margin:0,minWidth:0}}>
           {modoDetalle==="armar"&&<>
           <ArchivosPresupuesto presupuestoId={presupuestoActivo.id} currentUser={currentUser}
-            soloLectura={!!presupuestoActivo.archivado_at} version={archivosVersion}/>
+            soloLectura={bloqueado} version={archivosVersion}/>
 
           {/* Buscar un rubro por nombre: arriba los de este presupuesto —la
               tabla se filtra— y abajo los de la base, para agregarlos. */}
