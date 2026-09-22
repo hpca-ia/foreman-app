@@ -14,7 +14,8 @@ export default function TareasListaMovil({ tasks, users, projects, leads = {}, c
       {tasks.map((t, i) => {
         const listo = t.status === "listo";
         const pri = PRIORIDAD[t.priority] || PRIORIDAD.media;
-        const proyecto = t.lead_id ? (leads[t.lead_id] || "Pipeline") : projects.find(p => p.id === t.project_id)?.name;
+        const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline", color: null } : projects.find(p => p.id === t.project_id);
+        const proyecto = proy?.name;
         const persona = users.find(u => u.id === t.assignee_id)?.name;
 
         return (
@@ -24,7 +25,9 @@ export default function TareasListaMovil({ tasks, users, projects, leads = {}, c
               borderTop: i === 0 ? "none" : `1px solid ${colors.neutralSoft}`,
               cursor: "pointer", opacity: listo ? 0.6 : 1,
             }}>
-            <span style={{ width: 4, alignSelf: "stretch", borderRadius: 3, background: pri.color || colors.border, flexShrink: 0 }} />
+            {/* La barra es del color del proyecto: de un vistazo se ve de cuál
+                es cada tarea. La urgencia ya se ve en su etiqueta. */}
+            <span style={{ width: 4, alignSelf: "stretch", borderRadius: 3, background: proy?.color || pri.color || colors.border, flexShrink: 0 }} />
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{

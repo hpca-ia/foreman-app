@@ -9,9 +9,20 @@ export const PRIORIDAD = {
   baja: { label: "Baja", color: colors.muted, bg: colors.neutralSoft },
 };
 
+// Una tarea que se acaba de crear ya está en proceso: nadie la anota para
+// dejarla quieta. Lo que sí pasa es que se pause, que se atrase —eso no se
+// elige, se calcula de la fecha— o que se termine.
+//
+// "pendiente" es de antes y se deja para las tareas viejas: no se ofrece al
+// cambiar de estado, pero si una lo tiene se sigue viendo bien.
 export const ESTADO = {
-  pendiente: { label: "Pendiente", color: colors.muted },
-  "en-progreso": { label: "En progreso", color: colors.warning },
-  listo: { label: "Listo", color: colors.success },
-  bloqueado: { label: "Bloqueado", color: colors.danger },
+  "en-progreso": { label: "En proceso", color: colors.warning },
+  bloqueado: { label: "Pausada", color: colors.danger, ayuda: "Detenida: espera algo de alguien" },
+  listo: { label: "Completada", color: colors.success },
+  pendiente: { label: "Sin empezar", color: colors.muted, viejo: true },
 };
+
+export const ESTADO_NUEVO = "en-progreso";
+/** Los que se pueden elegir; los de antes solo se muestran si ya los tenía. */
+export const estadosElegibles = actual =>
+  Object.entries(ESTADO).filter(([k, v]) => !v.viejo || k === actual);

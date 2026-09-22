@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { guardarProyecto } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
-import { TIPOS, PRIORIDAD } from "../theme/constants";
+import { TIPOS, PRIORIDAD, ESTADO_NUEVO } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
@@ -14,7 +14,7 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
     status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada,
-  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: "pendiente", notes: "", privada: false });
+  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   const soyAdmin = esAdmin(currentUser.role);
   // A quién se puede asignar. Con el permiso de asignar, a cualquiera. Sin él,

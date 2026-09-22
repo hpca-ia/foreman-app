@@ -167,7 +167,7 @@ const ACCIONES = {
       due_date: /^\d{4}-\d{2}-\d{2}$/.test(fecha || "") ? fecha : null,
       priority: ["urgente", "alta", "media", "baja"].includes(prioridad) ? prioridad : "media",
       notes: nota || null,
-      status: "pendiente",
+      status: "en-progreso",   // una tarea recién creada ya está en proceso
       created_by: usuario.id,
     };
     const r = await rest("tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(fila) });

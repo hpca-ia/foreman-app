@@ -42,6 +42,7 @@ export default function App() {
   const [cargando, setCargando] = useState(false);
   const [vista, setVista] = useState("tareas");
   const [vistaTareas, setVistaTareas] = useState("lista");
+  const [orden, setOrden] = useState("fecha");
   const [filtro, setFiltro] = useState("todas");
   const [filtroP, setFiltroP] = useState("all");
   const [showModal, setShowModal] = useState(false);
@@ -238,12 +239,21 @@ export default function App() {
   if (filtro === "urgentes") visibles = visibles.filter(t => t.status !== "listo" && t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
   if (filtroP !== "all") visibles = visibles.filter(t => t.project_id === Number(filtroP));
 
-  // Un solo orden para las tres vistas: lo terminado al fondo, y arriba lo más
-  // urgente y lo que vence antes.
+  // Un solo orden para las tres vistas, y se elige por qué: lo terminado
+  // siempre al fondo, y dentro de eso lo que se haya pedido. Empatando, manda
+  // lo que vence antes: una lista de tareas que no mira la fecha no sirve.
+  const nombreDe = (lista, id) => (lista.find(x => x.id === id)?.name || "").toLowerCase();
+  const porFecha = (a, b) => (daysUntil(a.due_date) - daysUntil(b.due_date)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
+  const comparar = {
+    fecha: porFecha,
+    urgencia: (a, b) => (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]) || porFecha(a, b),
+    proyecto: (a, b) => (nombreDe(projects, a.project_id).localeCompare(nombreDe(projects, b.project_id))) || porFecha(a, b),
+    responsable: (a, b) => (nombreDe(users, a.assignee_id).localeCompare(nombreDe(users, b.assignee_id))) || porFecha(a, b),
+  };
   const ordenadas = visibles.slice().sort((a, b) => {
     if (a.status === "listo" && b.status !== "listo") return 1;
     if (b.status === "listo" && a.status !== "listo") return -1;
-    return (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]) || (daysUntil(a.due_date) - daysUntil(b.due_date));
+    return (comparar[orden] || porFecha)(a, b);
   });
 
   const filtS = a => ({ padding: "6px 14px", borderRadius: 20, border: a ? "none" : `1px solid ${colors.border}`, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: a ? colors.ink : "#fff", color: a ? "#fff" : colors.inkSoft, flexShrink: 0 });
@@ -282,6 +292,10 @@ export default function App() {
                 {[["todas", "Todas"], ["urgente", "Urgentes"], ["pendiente", "Pendientes"], ["listo", "Completadas"]].map(([f, l]) => (
                   <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
                 ))}
+                <select value={orden} onChange={e => setOrden(e.target.value)} title="Por qué se ordenan"
+                  style={{ background: "#fff", border: `1px solid ${orden !== "fecha" ? colors.brand : colors.border}`, borderRadius: 20, color: orden !== "fecha" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
+                  {[["fecha", "Por fecha"], ["urgencia", "Por urgencia"], ["proyecto", "Por proyecto"], ["responsable", "Por responsable"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
                 {proyectosElegibles.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
                   <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
                   {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -302,7 +316,7 @@ export default function App() {
                   <div className="tasks-view-desktop">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "tablero"
-                        ? <TareasKanban tasks={visibles} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                         : <TareasTabla tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
                   </div>
                   <div className="tasks-view-mobile">

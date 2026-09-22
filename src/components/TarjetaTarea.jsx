@@ -1,5 +1,5 @@
 import { Pencil, Trash2, MessageSquare } from "lucide-react";
-import { PRIORIDAD, ESTADO } from "../theme/constants";
+import { PRIORIDAD, ESTADO, estadosElegibles } from "../theme/constants";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
 import MarcaPrivada from "./ui/MarcaPrivada";
@@ -60,7 +60,7 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", paddingTop: 6, borderTop: "1px solid #F3F4F6", marginTop: 4 }}>
         {puedeCambiar && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {Object.entries(ESTADO).map(([k, v]) => (
+            {estadosElegibles(task.status).map(([k, v]) => (
               <button key={k} onClick={() => handleEstado(k)}
                 style={{ background: task.status === k ? v.color : colors.neutralSoft, border: `1px solid ${task.status === k ? v.color : colors.border}`, borderRadius: colors.radiusSm, padding: "4px 8px", color: task.status === k ? "#fff" : colors.inkSoft, fontSize: 10, fontWeight: task.status === k ? 600 : 400, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap", transition: "all 0.15s" }}>
                 {v.label}
