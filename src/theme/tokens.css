@@ -182,6 +182,11 @@ input, select, textarea { outline: none; font-family: var(--font); }
    vez de cortar columnas, y las casillas de números no pierden espacio en las
    flechitas del navegador. */
 .pres-tabla { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.num-limpio { -moz-appearance: textfield; }
+/* Las flechitas de las casillas numéricas se quitan en toda la app: están
+   pegadas al borde derecho del campo y se pulsaban sin querer al hacer clic
+   en un precio, cambiándolo de a centavo. */
+input[type="number"], .num-limpio { -moz-appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button,
 .num-limpio::-webkit-outer-spin-button,
 .num-limpio::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
