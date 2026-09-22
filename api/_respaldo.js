@@ -96,6 +96,11 @@ export async function listarArchivos(deposito, prefijo = "", encontrados = []) {
   return encontrados;
 }
 
+export async function borrarArchivo(deposito, ruta) {
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${deposito}/${ruta}`, { method: "DELETE", headers: cabecerasStorage() });
+  return r.ok;
+}
+
 export async function bajarArchivo(deposito, ruta) {
   const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${deposito}/${ruta}`, { headers: cabecerasStorage() });
   if (!r.ok) throw new Error(`${deposito}/${ruta}: ${r.status}`);

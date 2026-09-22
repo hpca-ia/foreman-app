@@ -8,6 +8,7 @@ import PreguntasNova from "../../components/PreguntasNova";
 import { fmt } from "./calculos";
 import { alimentarBase } from "../../lib/baseRubros";
 import { subirArchivo } from "../../lib/archivos";
+import { guardarOriginal } from "../../lib/archivosPresupuesto";
 import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
@@ -371,6 +372,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
         final.rubros.filter(r => r.origen !== "ajuste" && !r.pendiente && n(r.precio_unitario) > 0).map(r => ({ ...r, unidad: unidadParaBase(r, preguntas) })),
         { tipo: preguntas.tipo, cliente, proveedor: preguntas.proveedor, proyecto: nombre.trim(), fuente: "presupuesto", ivaIncluido: incluyeIva, ivaPct: n(ivaPct), utilidad: preguntas.utilidad });
       if (base.faltaMigracion) faltan.push(`${base.faltaMigracion} (${base.faltaMigracion === "016" ? "origen" : "utilidad"} de los precios)`);
+    }
+
+    // El archivo con que se armó queda guardado: es la prueba de qué se leyó.
+    if (archivo) {
+      const g = await guardarOriginal(pre.id, archivo, "presupuesto", currentUser);
+      if (g.faltaMigracion) faltan.push("032 (guardar el archivo original)");
     }
 
     setGuardando(false);

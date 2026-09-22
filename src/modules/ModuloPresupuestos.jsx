@@ -14,6 +14,8 @@ import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 import PasarABase from "./presupuestos/PasarABase";
+import ArchivosPresupuesto from "./presupuestos/ArchivosPresupuesto";
+import { guardarOriginal } from "../lib/archivosPresupuesto";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
 import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRubro";
@@ -70,6 +72,7 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // Buscar un rubro por nombre dentro del presupuesto y, a la vez, en la base
   // de rubros para agregarlo sin salir de la tabla.
   const [buscaArmar, setBuscaArmar] = useState("");
+  const [archivosVersion, setArchivosVersion] = useState(0);
   const [capDestino, setCapDestino] = useState("");
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
   const [showAddCap, setShowAddCap] = useState(false);
@@ -474,6 +477,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   async function leerCotizacion(e) {
     const file=e.target.files[0]; if(!file) return;
     setUploadingCotizacion(true); setCotizacionResult(null);
+    // La proforma se guarda tal como llegó, aunque después se aplique o no.
+    if (presupuestoActivo) guardarOriginal(presupuestoActivo.id, file, "cotizacion", currentUser).then(g => { if (g.archivo) setArchivosVersion(v => v + 1); });
     // Los totales escritos en la cotización vienen aparte: son la prueba de que
     // se leyeron todos los rubros, y se muestran antes de aplicarla.
     // Muchas proformas traen dos precios por rubro (P.V.P. y con descuento) o
@@ -919,6 +924,9 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
               casilla y cada botón de adentro de una vez. */}
           <fieldset disabled={!!presupuestoActivo.archivado_at} style={{border:0,padding:0,margin:0,minWidth:0}}>
           {modoDetalle==="armar"&&<>
+          <ArchivosPresupuesto presupuestoId={presupuestoActivo.id} currentUser={currentUser}
+            soloLectura={!!presupuestoActivo.archivado_at} version={archivosVersion}/>
+
           {/* Buscar un rubro por nombre: arriba los de este presupuesto —la
               tabla se filtra— y abajo los de la base, para agregarlos. */}
           <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>

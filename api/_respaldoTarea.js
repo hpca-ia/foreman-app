@@ -15,7 +15,7 @@
 // solo se suben los nuevos.
 
 import { rest } from "./_supabase.js";
-import { respaldoDeLaBase, listarDepositos, listarArchivos, bajarArchivo } from "./_respaldo.js";
+import { respaldoDeLaBase, listarDepositos, listarArchivos, bajarArchivo, borrarArchivo } from "./_respaldo.js";
 import { configuradoDropbox, subir, listar, borrar } from "./_dropbox.js";
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
 
@@ -23,6 +23,7 @@ const CARPETA = "/FOREMAN/respaldos";
 const TOPE_ARCHIVOS = 25;                 // por corrida
 const ARCHIVO_MUY_GRANDE = 60 * 1024 * 1024;
 const DIAS_QUE_SE_GUARDAN = 40;
+const DIAS_PARA_SOLTAR = 120;             // un archivo de un presupuesto histórico
 const CORREO_MAXIMO = 18 * 1024 * 1024;   // lo que aguanta un adjunto
 
 const kb = b => (b / 1024).toLocaleString("es-EC", { maximumFractionDigits: 0 }) + " KB";
@@ -94,6 +95,36 @@ export async function correrRespaldo({ archivos = true, correo = "auto" } = {}) 
     problemas.push("Dropbox no está configurado: el respaldo va solo por correo.");
   }
 
+  // ── Soltar del depósito lo viejo que ya está respaldado ──
+  //
+  // Un presupuesto pasado a histórico hace meses no necesita su Excel a mano
+  // en Supabase, que se llena; con la copia guardada en Dropbox alcanza. Se
+  // suelta el archivo y queda anotado dónde está, para no perder el rastro.
+  let soltados = 0;
+  if (hayDropbox && archivos) {
+    try {
+      const enDropbox = await listar(`${CARPETA}/archivos`);
+      const r = await rest("presupuesto_archivos?soltado_at=is.null&select=id,ruta,created_at,presupuestos(archivado_at)&limit=500");
+      const filas = r.ok ? await r.json() : [];
+      const limite = new Date(Date.now() - DIAS_PARA_SOLTAR * 86400000).toISOString();
+      for (const a of filas) {
+        const historico = a.presupuestos?.archivado_at && a.presupuestos.archivado_at < limite;
+        if (!historico || !a.ruta) continue;
+        // Solo si la copia está de verdad en Dropbox: soltar algo sin respaldo
+        // sería perderlo.
+        if (!enDropbox.has(`${CARPETA}/archivos/task-files/${a.ruta}`.toLowerCase())) continue;
+        if (await borrarArchivo("task-files", a.ruta)) {
+          await rest(`presupuesto_archivos?id=eq.${a.id}`, { method: "PATCH", body: JSON.stringify({ soltado_at: new Date().toISOString() }) });
+          soltados++;
+        }
+      }
+      if (soltados) paso.push(`Se soltaron ${soltados} archivos de presupuestos históricos, ya guardados en Dropbox`);
+    } catch (e) {
+      // Sin la migración 032 esa tabla no existe todavía: no es un problema.
+      if (!/relation|does not exist|schema cache/i.test(e.message)) problemas.push(`Al soltar archivos viejos: ${e.message}`);
+    }
+  }
+
   // ── El correo, con la copia de la base adjunta ──
   const lunes = new Date().getUTCDay() === 1;
   const mandar = correo === true || (correo === "auto" && (lunes || !hayDropbox));
@@ -124,7 +155,7 @@ export async function correrRespaldo({ archivos = true, correo = "auto" } = {}) 
     ok: problemas.length === 0,
     segundos: Math.round((Date.now() - inicio) / 1000),
     base: { archivo: base.nombre, ...base.resumen },
-    dropbox: hayDropbox ? { carpeta: CARPETA, archivosCopiados: subidos, archivosPendientes: faltan, copiasViejasBorradas: borrados } : "sin configurar",
+    dropbox: hayDropbox ? { carpeta: CARPETA, archivosCopiados: subidos, archivosPendientes: faltan, copiasViejasBorradas: borrados, archivosSoltados: soltados } : "sin configurar",
     correo: aviso,
     paso,
     problemas,
