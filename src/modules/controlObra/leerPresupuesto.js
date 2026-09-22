@@ -79,8 +79,49 @@ export function sanearMapa(filas, mapa) {
   return m;
 }
 
+/**
+ * ¿De qué columna sale el total de cada fila?
+ *
+ * Muchos presupuestos traen el precio unitario sin IVA, el IVA aparte y el
+ * precio con IVA, y el TOTAL de la fila se calcula con el precio CON IVA. Si
+ * se toma el precio sin IVA, cantidad × precio no da el total en ninguna fila
+ * y todo lo que se recalcule después queda mal. Acá se mira qué columna
+ * reproduce el total y, si no es la elegida, se dice con cuánto de recargo.
+ */
+export function precioQueCuadra(filasTodas, m) {
+  if (m.col_cantidad == null || m.col_total == null || m.col_precio == null) return null;
+  const inicio = (m.fila_encabezado ?? 0) + 1;
+  const filas = filasTodas.slice(inicio)
+    .map(f => ({ cant: num(f[m.col_cantidad]), total: num(f[m.col_total]), celdas: f }))
+    .filter(x => x.cant > 0 && x.total > 0);
+  if (filas.length < 5) return null;
+
+  const cuantasCalzan = col => filas.filter(x => {
+    const p = num(x.celdas[col]);
+    return p > 0 && Math.abs(x.cant * p - x.total) <= Math.max(0.02, x.total * 0.0005);
+  }).length;
+
+  const columnas = Math.max(...filas.map(x => x.celdas.length));
+  let mejor = { col: m.col_precio, calzan: cuantasCalzan(m.col_precio) };
+  for (let c = 0; c < columnas; c++) {
+    if (c === m.col_cantidad || c === m.col_total) continue;
+    const calzan = cuantasCalzan(c);
+    if (calzan > mejor.calzan) mejor = { col: c, calzan };
+  }
+  if (mejor.col === m.col_precio || mejor.calzan < filas.length * 0.6) return null;
+
+  // Cuánto más caro es ese precio que el elegido: si da 15 %, el total lleva IVA.
+  const recargos = filas
+    .map(x => (num(x.celdas[m.col_precio]) > 0 ? num(x.celdas[mejor.col]) / num(x.celdas[m.col_precio]) - 1 : null))
+    .filter(v => v != null && v > 0.001 && v < 1)
+    .sort((a, b) => a - b);
+  const medio = recargos.length ? recargos[Math.floor(recargos.length / 2)] : null;
+  return { columna: mejor.col, filas: mejor.calzan, de: filas.length, pct: medio == null ? null : Math.round(medio * 1000) / 10 };
+}
+
 export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false } = {}) {
   const m = sanearMapa(filasTodas, mapaNova);
+  m.ivaEnFilas = precioQueCuadra(filasTodas, m);
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;
 
@@ -105,8 +146,17 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
   });
 
   const esRubro = r => r.cant && r.precio && !r.totalVacio;
+  // ¿Los códigos dicen a qué capítulo pertenece cada rubro ("8.17" → capítulo
+  // 8), o el presupuesto numera los rubros de corrido (1, 2, 3… hasta el
+  // final)? Con numeración corrida el código no dice nada del capítulo, y
+  // usarlo para adivinar hacía que un capítulo nuevo se leyera como subtítulo
+  // del anterior: sus rubros se le colgaban al capítulo equivocado.
+  const codigosDeRubros = filasTodas.slice(inicio).map(f => texto(val(f, m.col_item))).filter(esCodigo);
+  const usarPrefijos = codigosDeRubros.length > 0 && codigosDeRubros.filter(c => c.includes(".")).length / codigosDeRubros.length > 0.5;
   const esSubtotal = r => /sub\s*-?\s*total/i.test(r.linea);
-  const esTotal = r => !esSubtotal(r) && /\btotal\b/i.test(r.linea) && !r.unidad;
+  // "TOTALES GENERALES" es tan total como "TOTAL": sin la S se colaba como
+  // un cargo suelto de varios millones.
+  const esTotal = r => !esSubtotal(r) && /\btotal(es)?\b/i.test(r.linea) && !r.unidad;
   const esIva = r => /\biva\b/i.test(r.linea) && !r.cant && !r.unidad;
   // Rubro sin precio todavía: descripción y unidad, sin total y sin cantidad × precio.
   const esPendiente = r => conPendientes && !!r.desc && !!r.unidad && !r.total && !(r.cant && r.precio) && !esSubtotal(r) && !esIva(r);
@@ -130,14 +180,28 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     return null;
   };
 
-  const rubros = [], omitidas = [], cargos = [], capitulos = [];
-  let cap = null, subtotalExcel = null, totalExcel = null, ivaExcel = null;
+  const rubros = [], omitidas = [], cargos = [], capitulos = [], subtotalesDeBloque = [];
+  let cap = null, subtotalExcel = null, totalExcel = null, ivaExcel = null, bloque = null;
   const abrir = (nombre, codigo, declarado, pref = null, fila = null) => {
-    cap = { nombre, codigo, declarado: declarado || null, prefijo: esCodigoCapitulo(codigo) ? prefijo(codigo) : pref, fila };
+    // Un título que no llegó a tener rubros propios ni subtotal y ya viene
+    // otro título encima no es un capítulo: es un bloque —"CASA DE SEGURIDAD",
+    // "AMPLIACIÓN CABALLERIZAS"— que adentro repite los capítulos del
+    // presupuesto principal (otra ESTRUCTURA, otra ALBAÑILERÍA). Sin esto los
+    // dos se sumaban como si fueran el mismo capítulo.
+    if (cap && !cap.rubros && cap.declarado == null && capitulos[capitulos.length - 1] === cap) {
+      capitulos.pop();
+      // "A" o "B" son rótulos de columna de una planilla de control, no una
+      // sub-obra: solo un nombre de verdad abre bloque.
+      if (cap.nombreSolo.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, "").length >= 4) bloque = cap.nombreSolo;
+    }
+    const nombreSolo = nombre;
+    cap = { nombre: bloque ? `${bloque} · ${nombre}` : nombre, nombreSolo, bloque, codigo,
+      declarado: declarado || null, prefijo: esCodigoCapitulo(codigo) ? prefijo(codigo) : pref, fila, rubros: 0, suma: 0 };
     capitulos.push(cap);
   };
   const rubro = (r, cantidad, precio, total, global = false, pendiente = false) => {
     if (cap && !cap.prefijo) cap.prefijo = prefijo(r.codigo);
+    if (cap) { cap.rubros++; cap.suma += total || 0; }
     return rubros.push({
     capitulo: cap?.nombre || "SIN CAPÍTULO", codigo: r.codigo, descripcion: r.desc,
     unidad: r.unidad, cantidad, precio_unitario: precio, total, fila: r.fila, global,
@@ -154,10 +218,17 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
 
     if (esSubtotal(r)) {
       if (k > ultimoRubro || /general/i.test(r.linea)) { if (r.total) subtotalExcel = r.total; }
-      else if (cap && cap.declarado == null) cap.declarado = r.total || null;
+      // El subtotal de un bloque entero cae en medio del presupuesto y no es
+      // el del capítulo que se está leyendo: si no se parece a lo que ese
+      // capítulo lleva sumado, es de otra cosa y tomarlo por suyo inventaba
+      // descuadres de millones.
+      else if (cap && cap.declarado == null && cap.rubros && Math.abs(r.total - cap.suma) <= Math.max(1, cap.suma * 0.25)) cap.declarado = r.total || null;
+      else if (r.total) subtotalesDeBloque.push({ descripcion: r.desc || texto(r.linea).slice(0, 60), total: r.total, fila: r.fila });
       return;
     }
-    if (esTotal(r)) { if (r.total) totalExcel = r.total; return; }
+    // Un total con nombre cierra su bloque: lo que viene después ya no es de
+    // la casa de seguridad ni de las caballerizas.
+    if (esTotal(r)) { if (r.total) totalExcel = r.total; bloque = null; return; }
     if (esIva(r)) {
       if (r.total) {
         const pct = (r.linea.match(/(\d+(?:[.,]\d+)?)\s*%/) || [])[1];
@@ -178,11 +249,17 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     if (m.col_capitulo == null && r.desc && r.desc.length <= 120) {
       if (esCodigoCapitulo(r.codigo)) return abrir(r.desc.toUpperCase(), r.codigo, r.total, null, r.fila);
       const p = siguientePrefijo(k);
-      if (cap && (p === "mismo" || (cap.prefijo && p && p === cap.prefijo))) return;   // subtítulo o nota dentro del capítulo
+      if (cap && (p === "mismo" || (usarPrefijos && cap.prefijo && p && p === cap.prefijo))) return;   // subtítulo o nota dentro del capítulo
       return abrir(r.desc.toUpperCase(), r.codigo, r.total, p, r.fila);
     }
     if (r.desc) omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "otra" });
   });
+
+  // "IMPREVISTOS OBRA CIVIL $54.494" en medio del presupuesto: título con
+  // monto propio y sin rubros debajo. No es un capítulo vacío, es una línea
+  // de plata; dejarla fuera abría un hueco del tamaño de su monto.
+  capitulos.filter(c => !c.rubros && c.declarado).forEach(c =>
+    cargos.push({ descripcion: c.nombreSolo, total: c.declarado, fila: c.fila, deCapitulo: true }));
 
   const suma = a => a.reduce((s, x) => s + x.total, 0);
   const sumaRubros = suma(rubros), sumaCargos = suma(cargos);
@@ -193,10 +270,10 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     .filter(c => c.declarado != null && Math.abs((porCap[c.nombre] || 0) - c.declarado) > 1)
     .map(c => ({ capitulo: c.nombre, excel: c.declarado, importado: porCap[c.nombre] || 0 }));
 
-  const advertencias = revisar({ rubros, omitidas, cargos, capitulos: conRubros, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres });
+  const advertencias = revisar({ rubros, omitidas, cargos, capitulos: conRubros, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, ivaEnFilas: m.ivaEnFilas, usarPrefijos });
 
   return {
-    mapa: m, rubros, omitidas, cargos, capitulos: conRubros,
+    mapa: m, rubros, omitidas, cargos, capitulos: conRubros, subtotalesDeBloque, ivaEnFilas: m.ivaEnFilas || null,
     subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, advertencias,
     preciosIncluyenIva: typeof mapaNova.precios_incluyen_iva === "boolean" ? mapaNova.precios_incluyen_iva : null,
   };
@@ -217,7 +294,7 @@ const moda = a => {
 };
 const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
-export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres }) {
+export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, ivaEnFilas , usarPrefijos }) {
   const adv = [];
   // "datos" lleva lo necesario para corregir, si quien importa no acepta el error.
   const add = (tipo, nivel, titulo, filas = [], datos = null) => adv.push({ tipo, nivel, titulo, filas, datos });
@@ -255,8 +332,15 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
     if (a) a.titulo += " Por esa misma diferencia tampoco cuadran el subtotal y el total del Excel.";
   }
 
-  // Sumas por fila: cantidad × precio contra el total escrito
-  const malas = rubros.filter(x => !x.global && x.cantidad && x.precio_unitario
+  // Sumas por fila: cantidad × precio contra el total escrito.
+  //
+  // Cuando el Excel trae el precio sin IVA y el total con IVA, ninguna fila
+  // "cuadra" y sale un error por cada una. No es un error del presupuesto: es
+  // cómo está hecho. Se dice una vez, y claro.
+  if (ivaEnFilas) add("total_con_iva", "aviso",
+    `El TOTAL de cada fila incluye IVA${ivaEnFilas.pct ? ` del ${ivaEnFilas.pct} %` : ""}: sale de multiplicar la cantidad por el precio CON IVA (${ivaEnFilas.filas} de ${ivaEnFilas.de} filas). El precio unitario que se importa es el de sin IVA.`,
+    [], ivaEnFilas);
+  const malas = ivaEnFilas ? [] : rubros.filter(x => !x.global && x.cantidad && x.precio_unitario
     && Math.abs(x.total - x.cantidad * x.precio_unitario) > Math.max(0.02, Math.abs(x.total) * 0.0005));
   if (malas.length) add("suma_fila", "error",
     `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito. Se importa el total del Excel.`,
@@ -298,8 +382,9 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
       add("capitulo_numeracion", "aviso", `El capítulo "${c.nombre}" no tiene número${pr ? `; sus rubros son ${pr}.x` : ""}.`, donde);
   });
 
-  // Numeración de rubros
-  const fuera = rubros.filter(x => {
+  // Numeración de rubros. Con numeración corrida (1, 2, 3… para todo el
+  // presupuesto) el código no tiene por qué coincidir con el capítulo.
+  const fuera = !usarPrefijos ? [] : rubros.filter(x => {
     const c = capitulos.find(k => k.nombre === x.capitulo);
     const pc = c && (esCodigoCapitulo(c.codigo) ? prefijo(c.codigo) : prefDe[c.nombre]);
     return pc && prefijo(x.codigo) && prefijo(x.codigo) !== pc;
