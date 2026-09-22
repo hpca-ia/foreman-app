@@ -7,8 +7,10 @@ import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 import ComentariosTarea from "./ComentariosTarea";
+import DependenciasTarea from "./DependenciasTarea";
+import Avatar from "./ui/Avatar";
 
-export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar }) {
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar, acompanantes = [], tareas = [], onCambio }) {
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
@@ -16,6 +18,9 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
     status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada,
   } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
+  // Los que acompañan al responsable principal: el plano lo hacen dos.
+  const [conmigo, setConmigo] = useState(acompanantes);
+  const alternarAcompanante = id => setConmigo(x => (x.includes(id) ? x.filter(i => i !== id) : [...x, id]));
   const soyAdmin = esAdmin(currentUser.role);
   // A quién se puede asignar. Con el permiso de asignar, a cualquiera. Sin él,
   // manda el proyecto: si hay uno elegido, solo sus miembros —para no mandarle
@@ -104,6 +109,23 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
             <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>El tipo y los miembros se ajustan después en Ajustes → Proyectos.</div>
           </div>
         )}
+        <div>
+          <label style={lS}>Con quién más</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {asignables.filter(u => u.id !== form.assignee_id).map(u => {
+              const on = conmigo.includes(u.id);
+              return (
+                <button key={u.id} type="button" onClick={() => alternarAcompanante(u.id)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${on ? colors.ink : colors.border}`, background: on ? colors.ink : "#fff",
+                    color: on ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "3px 10px 3px 4px", fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
+                  <Avatar name={u.name} size={16} color={u.color || colors.brand} /> {u.name}
+                </button>
+              );
+            })}
+            {!asignables.filter(u => u.id !== form.assignee_id).length && <span style={{ fontSize: 11, color: colors.muted }}>No hay más gente a quien sumar.</span>}
+          </div>
+          <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Los recordatorios y la carga se cuentan al responsable principal; los demás la ven como suya y la pueden mover.</div>
+        </div>
         <div><label style={lS}>Fecha límite *</label><input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} style={inputStyle} /></div>
         {soyAdmin && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
@@ -118,6 +140,13 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           es el que más necesita decir por qué está parada. */}
       {editTask && (
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${colors.neutralSoft}` }}>
+          <DependenciasTarea tarea={editTask} currentUser={currentUser} users={asignables} tareas={tareas}
+            soloLectura={soloLectura} onCambio={onCambio} />
+        </div>
+      )}
+
+      {editTask && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${colors.neutralSoft}` }}>
           <ComentariosTarea taskId={editTask.id} currentUser={currentUser} />
         </div>
       )}
@@ -127,7 +156,7 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           Solo lectura: es una tarea de {users.find(u => u.id === editTask.assignee_id)?.name || "otra persona"}. La puede cambiar esa persona o un admin.
         </div>
       ) : (!form.title || !form.due_date) ? <div style={{ color: colors.muted, fontSize: 11, marginTop: 12, textAlign: "center" }}>Completa título y fecha</div>
-        : <Button variant="primary" size="lg" style={{ width: "100%", marginTop: 16 }} onClick={() => { onGuardar(form, editTask?.id); onCerrar(); }}>
+        : <Button variant="primary" size="lg" style={{ width: "100%", marginTop: 16 }} onClick={() => { onGuardar({ ...form, _acompanantes: conmigo }, editTask?.id); onCerrar(); }}>
             {editTask ? "Guardar cambios" : "Agregar tarea"}
           </Button>}
       {editTask && soyAdmin && onEliminar && (

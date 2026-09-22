@@ -1,4 +1,4 @@
-import { Pencil, Trash2, MessageSquare } from "lucide-react";
+import { Pencil, Trash2, MessageSquare, Clock } from "lucide-react";
 import { PRIORIDAD, ESTADO, estadosElegibles } from "../theme/constants";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
@@ -8,7 +8,7 @@ import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
 import WhatsAppDraftModal from "./WhatsAppDraftModal";
 
-export default function TarjetaTarea({ puede, task, currentUser, users, projects, leads = {}, comentarios = 0, onCambiarEstado, onEditar, onEliminar }) {
+export default function TarjetaTarea({ puede, task, currentUser, users, projects, leads = {}, comentarios = 0, acompanantes = [], espera = [], onCambiarEstado, onEditar, onEliminar }) {
   const gP = id => projects.find(p => p.id === id);
   const gU = id => users.find(u => u.id === id);
   // Una etapa del pipeline es una tarea sin proyecto de Ajustes: su nombre
@@ -22,7 +22,8 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
   // tenga permiso de asignar: un gerente ve la tarea de su par, no la toca.
   const admin = esAdmin(currentUser.role);
   // Solo el asignado puede cambiar SU tarea. Admins pueden todo. Nadie puede cambiar la tarea de otro miembro.
-  const esMiTarea = task.assignee_id === currentUser.id;
+  const conmigo = acompanantes.map(id => gU(id)).filter(Boolean);
+  const esMiTarea = task.assignee_id === currentUser.id || acompanantes.includes(currentUser.id);
   const puedeCambiar = admin || esMiTarea;
   const esListo = task.status === "listo";
 
@@ -43,10 +44,26 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: task.notes ? 4 : 6, lineHeight: 1.3 }}>{task.privada && <MarcaPrivada />}{task.title}</div>
       {task.notes && <div style={{ color: colors.inkSoft, fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>{task.notes}</div>}
+      {/* Por qué está parada: qué está esperando y de quién. */}
+      {espera.length > 0 && (
+        <div style={{ display: "flex", gap: 5, alignItems: "flex-start", background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`,
+          borderRadius: colors.radiusSm, padding: "4px 8px", marginBottom: 8, fontSize: 11, color: colors.warning, lineHeight: 1.35 }}>
+          <Clock size={11} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span style={{ overflowWrap: "anywhere" }}>
+            Espera {espera.map(t => `"${t.title}"${gU(t.assignee_id) ? ` (${gU(t.assignee_id).name})` : ""}`).join(" y ")}
+          </span>
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
         <span style={{ background: `${proy?.color}18`, color: proy?.color, fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>{proy?.name}</span>
         {asig ? <div style={{ display: "flex", alignItems: "center", gap: 4 }}><Avatar name={asig.name} size={18} color={asig.color || proy?.color} /><span style={{ color: colors.inkSoft, fontSize: 12 }}>{asig.name}</span></div>
           : <span style={{ color: colors.danger, fontSize: 11 }}>Sin asignar</span>}
+        {/* Los que van con él: la tarea es de varios. */}
+        {conmigo.map(u => (
+          <span key={u.id} title={`${u.name} también la trabaja`} style={{ display: "inline-flex" }}>
+            <Avatar name={u.name} size={18} color={u.color || colors.brand} />
+          </span>
+        ))}
         {!esListo && admin && <span style={{ color: colors.border, fontSize: 10 }}>{task.priority === "urgente" ? "c/3h" : task.priority === "alta" ? "c/6h" : "diario"}</span>}
         {crea && <span style={{ color: colors.border, fontSize: 10 }}>por {crea.name}</span>}
         {comentarios > 0 && (

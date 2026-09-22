@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ListTodo } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
@@ -18,6 +18,7 @@ import AvisoTareas from "./components/AvisoTareas";
 import ModuloLeads from "./modules/leads/ModuloLeads";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
+import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import PanelAjustes from "./components/PanelAjustes";
 import Header from "./components/Header";
@@ -42,6 +43,12 @@ export default function App() {
   const [cargando, setCargando] = useState(false);
   const [vista, setVista] = useState("tareas");
   const [vistaTareas, setVistaTareas] = useState("lista");
+  // Quién acompaña a cada tarea, y qué tarea espera a cuál.
+  const [acompanantes, setAcompanantes] = useState(new Map());
+  // Lo último de las tareas, para poder leer sus acompañantes sin volver a
+  // armar la función cada vez que cambia la lista.
+  const tareasRef = useRef([]);
+  const [dependencias, setDependencias] = useState({ espera: new Map(), destraba: new Map() });
   const [orden, setOrden] = useState("fecha");
   const [filtro, setFiltro] = useState("todas");
   const [filtroP, setFiltroP] = useState("all");
@@ -115,6 +122,20 @@ export default function App() {
     return () => { supabase.removeChannel(tCh); clearInterval(poll); };
   }, [usuario]);
 
+  // Quién acompaña cada tarea y qué espera a qué. Va aparte de las tareas
+  // porque son sus propias tablas, y sin la migración 035 devuelven vacío.
+  const cargarEquipoDeTareas = useCallback(async () => {
+    const ids = tareasRef.current.map(t => t.id);
+    if (!ids.length) return;
+    const [resp, dep] = await Promise.all([leerResponsables(ids), leerDependencias(ids)]);
+    setAcompanantes(resp);
+    setDependencias(dep);
+    // eslint-disable-next-line
+  }, []);
+
+  useEffect(() => { tareasRef.current = tareas; }, [tareas]);
+  useEffect(() => { if (tareas.length) cargarEquipoDeTareas(); }, [tareas.length, cargarEquipoDeTareas]);
+
   async function fetchTareas() {
     setCargando(true);
     const { data } = await supabase.from("tasks").select("*").order("created_at", { ascending: false });
@@ -151,6 +172,12 @@ export default function App() {
     const { error } = await supabase.from("tasks").update({ status: estado }).eq("id", id);
     if (error) { console.error("Error updating status:", error); fetchTareas(); return; }
 
+    // Al completarla, las que la estaban esperando se destraban solas.
+    if (estado === "listo") {
+      const destrabadas = await destrabarLasQueEsperaban(id);
+      if (destrabadas.length) fetchTareas();
+    }
+
     // Si la tarea es de un proyecto del pipeline, su bitácora se entera: quien
     // la trabaja la marca desde sus tareas, no entrando al proyecto.
     if (tarea?.lead_id && estado !== "pendiente") {
@@ -162,13 +189,18 @@ export default function App() {
     }
   }
 
-  async function guardarTarea(form, id) {
+  async function guardarTarea(formEntero, id) {
+    // Los acompañantes no son columnas de la tarea: van en su propia tabla.
+    const { _acompanantes: conmigo = [], ...form } = formEntero;
     if (id) {
       const { error } = await supabase.from("tasks").update(form).eq("id", id);
       if (error) { alert(mensajeErrorTarea(error)); return; }
+      await guardarResponsables(id, conmigo, form.assignee_id);
+      cargarEquipoDeTareas();
     } else {
-      const { error } = await supabase.from("tasks").insert({ ...form, created_by: usuario.id });
+      const { data: creada, error } = await supabase.from("tasks").insert({ ...form, created_by: usuario.id }).select().single();
       if (error) { alert(mensajeErrorTarea(error)); return; }
+      if (creada && conmigo.length) { await guardarResponsables(creada.id, conmigo, form.assignee_id); cargarEquipoDeTareas(); }
       if (form.assignee_id) {
         const asignado = users.find(u => u.id === form.assignee_id);
         const proyecto = projects.find(p => p.id === form.project_id);
@@ -208,7 +240,9 @@ export default function App() {
   // Quien no es admin ve lo suyo en "Mis tareas". Al elegir uno de sus
   // proyectos ve también lo de sus compañeros ahí —para coordinarse—, salvo lo
   // marcado como privado. Lo privado solo lo ven los admins y el asignado.
-  const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id;
+  // Mía es también la que me sumaron como acompañante: si la puedo mover, la
+  // tengo que ver.
+  const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
   const misProyectos = new Set(proyectosElegibles.map(p => p.id));
   let visibles = veTodo
     ? tareas.filter(t => !t.privada || admin || esMia(t))
@@ -323,7 +357,10 @@ export default function App() {
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "lista"
                         ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
+                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0}
+                            acompanantes={acompanantes.get(t.id) || []}
+                            espera={(dependencias.espera.get(t.id) || []).map(id => tareas.find(x => x.id === id)).filter(x => x && x.status !== "listo")}
+                            onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
                   </div>
                 </>
               )}
@@ -383,7 +420,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showModal && <ModalTarea editTask={editTask} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
       {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
     </div>
   );
