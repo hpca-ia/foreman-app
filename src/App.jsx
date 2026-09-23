@@ -96,12 +96,21 @@ export default function App() {
   // Los proyectos del pipeline no están en Ajustes, pero sus etapas son tareas
   // de alguien: sin su nombre, esas tareas aparecían sin proyecto.
   const [leadsPorId, setLeadsPorId] = useState({});
+  const [proyectosPipeline, setProyectosPipeline] = useState([]);
   const [comentarios, setComentarios] = useState({});   // task_id -> cuántos
   const tienePipeline = Object.keys(leadsPorId).length > 0;
   useEffect(() => {
     if (!usuario) return;
-    supabase.from("leads").select("id,nombre")
-      .then(({ data }) => setLeadsPorId(Object.fromEntries((data || []).map(l => [l.id, l.nombre]))));
+    // El pipeline es la lista de proyectos de la oficina: los que se persiguen
+    // y los que se están haciendo. Las tareas se cuelgan de ahí igual que de
+    // los proyectos de Ajustes, para que no haya dos listas con el mismo
+    // nombre y haya que adivinar cuál elegir.
+    supabase.from("leads").select("id,nombre,tunel,es_lead,resultado")
+      .then(({ data, error }) => {
+        const filas = error ? [] : data || [];
+        setLeadsPorId(Object.fromEntries(filas.map(l => [l.id, l.nombre])));
+        setProyectosPipeline(filas.filter(l => l.resultado !== "perdido"));
+      });
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
       const c = {};
       (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; });
@@ -527,7 +536,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showModal && <ModalTarea editTask={editTask} pipeline={proyectosPipeline} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
       {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
     </div>
   );

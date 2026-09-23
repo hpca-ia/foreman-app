@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import { daysUntil } from "../../lib/dates";
 import Button from "../../components/ui/Button";
 import { CATALOGO_BASE, etapaInfo, tempInfo, DIAS_SIN_MOVER } from "./constantes";
+import { TUNELES } from "./tubo";
 import ModalLead from "./ModalLead";
 import NovaLeads from "./NovaLeads";
 import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
@@ -34,6 +35,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const [nuevo, setNuevo] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [verCerrados, setVerCerrados] = useState(false);
+  const [tubo, setTubo] = useState("todos");
   const [convirtiendo, setConvirtiendo] = useState(null);
   // Obras que entraron directo por Control de Obra y todavía no son proyecto.
   const [sueltas, setSueltas] = useState([]);
@@ -111,10 +113,18 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
     setConvirtiendo(null);
   }
 
+  // Los tres tubos, cada uno con lo suyo: lo que se persigue por un lado, y
+  // los proyectos que ya se están haciendo por el otro. Todo es el mismo
+  // proyecto en distintos momentos, pero mezclarlos en una sola lista era
+  // justamente lo que no dejaba ver en qué anda la oficina.
+  const delTunel = l => (l.tunel || "lead");
+  const cuantos = t => leads.filter(l => delTunel(l) === t && !l.resultado && !etapaInfo(l.etapa, catalogo).cierra).length;
+  const enTubo = l => tubo === "todos" || delTunel(l) === tubo;
+
   // Un proyecto sigue abierto mientras no se haya ganado ni perdido: ganarlo
   // no lo saca de la lista, lo manda a ejecución.
-  const abiertos = leads.filter(l => !l.resultado && !etapaInfo(l.etapa, catalogo).cierra);
-  const cerrados = leads.filter(l => l.resultado || etapaInfo(l.etapa, catalogo).cierra);
+  const abiertos = leads.filter(l => enTubo(l) && !l.resultado && !etapaInfo(l.etapa, catalogo).cierra);
+  const cerrados = leads.filter(l => enTubo(l) && (l.resultado || etapaInfo(l.etapa, catalogo).cierra));
 
   // Lo que manda en la lista: la fecha más cercana entre el próximo paso y la
   // etapa en curso. Sin fecha, el proyecto se va al final: no está corriendo.
@@ -181,6 +191,23 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           {puede("leads.ver") && <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo proyecto</Button>}
         </div>
+      </div>
+
+      {/* Un botón por tubo: Leads es lo que se persigue, los otros dos son los
+          proyectos andando. Cada uno con su cuenta, para saber dónde mirar. */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {[["todos", "Todos"], ...Object.entries(TUNELES).map(([id, t]) => [id, t.label])].map(([id, label]) => {
+          const n = id === "todos" ? leads.filter(l => !l.resultado && !etapaInfo(l.etapa, catalogo).cierra).length : cuantos(id);
+          const activo = tubo === id;
+          return (
+            <button key={id} onClick={() => setTubo(id)}
+              style={{ border: `1px solid ${activo ? colors.ink : colors.border}`, background: activo ? colors.ink : "#fff",
+                color: activo ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
+                cursor: "pointer", fontFamily: colors.font, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {label} <span style={{ opacity: 0.7, fontWeight: 400 }}>{n}</span>
+            </button>
+          );
+        })}
       </div>
 
       {puede("leads.ver") && <NovaLeads leads={leads} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />}
@@ -339,6 +366,12 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = t
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {lead.nombre}
+          {/* La (L) dice que todavía se está persiguiendo: es el mismo
+              proyecto, pero aún no es trabajo firmado. */}
+          {(lead.tunel || "lead") === "lead" && (
+            <span title="Lead: todavía se está persiguiendo"
+              style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: colors.muted, border: `1px solid ${colors.border}`, borderRadius: 4, padding: "0 4px" }}>L</span>
+          )}
         </div>
         <div style={{ fontSize: 11, color: colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {[lead.contacto, temp?.label].filter(Boolean).join(" · ") || "Sin contacto"}

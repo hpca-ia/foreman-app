@@ -108,7 +108,7 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
               <Button variant="outline" size="sm" onClick={() => { setCreandoP(false); setErrP(""); }}>×</Button>
             </div>
             {errP && <div style={{ color: colors.danger, fontSize: 11, marginTop: 5 }}>{errP}</div>}
-            <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>El tipo y los miembros se ajustan después en Ajustes → Proyectos.</div>
+            <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Nace en el pipeline como lead (L). Ahí se le pone el tubo —Arquitectura o Construcción— cuando corresponda.</div>
           </div>
         )}
         <div>
