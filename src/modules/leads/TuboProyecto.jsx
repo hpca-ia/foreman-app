@@ -7,7 +7,7 @@ import Avatar from "../../components/ui/Avatar";
 import { etapaInfo } from "./constantes";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
-  agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, cambiarEstadoEtapa, avanceDe,
+  agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, asegurarTarea, cambiarEstadoEtapa, avanceDe,
 } from "./tubo";
 
 // El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
@@ -115,16 +115,15 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     await hacer(async () => {
       const r = await agregarItem(lead, etapa, texto, cuantas + 1);
       if (r?.error) { setErrores(e => ({ ...e, [etapa.id]: r.error })); return; }
-      // Si le pusieron responsable o fecha, nace además como tarea del equipo
-      // o de alguien de afuera.
-      if (t?.on && (t.assignee_id || t.due_date)) {
-        const externo = String(t.assignee_id || "").startsWith("x:") ? String(t.assignee_id).slice(2) : null;
-        await itemATarea(r.item, {
-          lead, titulo: texto, due_date: t.due_date || null, creadoPor: currentUser?.id,
-          assignee_id: externo || !t.assignee_id ? null : Number(t.assignee_id),
-          responsable_externo: externo,
-        });
-      }
+      // Toda actividad entra también a las tareas del proyecto, tenga dueño o
+      // no: una actividad sin responsable igual es algo pendiente, y el tablero
+      // tiene que decirlo.
+      const externo = t?.on && String(t.assignee_id || "").startsWith("x:") ? String(t.assignee_id).slice(2) : null;
+      await itemATarea(r.item, {
+        lead, titulo: texto, due_date: (t?.on && t.due_date) || null, creadoPor: currentUser?.id,
+        assignee_id: t?.on && t.assignee_id && !externo ? Number(t.assignee_id) : null,
+        responsable_externo: externo,
+      });
       setNuevo(n => ({ ...n, [etapa.id]: "" }));
       setConTarea(c => ({ ...c, [etapa.id]: { on: t?.on, assignee_id: "", due_date: "" } }));
     });
@@ -211,7 +210,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser}
-                    onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })} />
+                    onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: tareas[item.tarea_id]?.assignee_id || etapa.responsable_id || "", due_date: tareas[item.tarea_id]?.due_date || etapa.fecha_objetivo || "" })} />
                 ))}
 
                 {/* Lo hecho, contado y guardado: se abre si alguien lo busca. */}
@@ -337,7 +336,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       {/* Volver un paso en tarea del equipo: quién y para cuándo. */}
       {aTarea && (
         <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginTop: 4 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, marginBottom: 8 }}>Convertir en tarea</div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, marginBottom: 8 }}>¿Quién y para cuándo?</div>
           <div style={{ display: "grid", gap: 8 }}>
             <input value={aTarea.titulo} onChange={e => setATarea(a => ({ ...a, titulo: e.target.value }))} style={inputStyle} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -359,13 +358,13 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => hacer(async () => {
                 const externo = String(aTarea.assignee_id).startsWith("x:") ? String(aTarea.assignee_id).slice(2) : null;
-                await itemATarea(aTarea.item, {
+                await asegurarTarea(aTarea.item, {
                   lead, titulo: aTarea.titulo, due_date: aTarea.due_date || null, creadoPor: currentUser?.id,
                   assignee_id: externo || !aTarea.assignee_id ? null : Number(aTarea.assignee_id),
                   responsable_externo: externo,
                 });
                 setATarea(null);
-              })} disabled={ocupado || !aTarea.titulo.trim()} style={boton(true)}>Crear tarea</button>
+              })} disabled={ocupado || !aTarea.titulo.trim()} style={boton(true)}>Guardar</button>
               <button onClick={() => setATarea(null)} style={boton(false)}>Cancelar</button>
             </div>
           </div>
@@ -396,6 +395,10 @@ function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, 
   const cuando = f => (f ? new Date(String(f).length === 10 ? `${f}T12:00:00` : f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
   // De quién es la tarea que salió de esta actividad.
   const deQuien = t => t?.responsable_externo || users.find(u => u.id === t?.assignee_id)?.name || "sin responsable";
+  // Toda actividad tiene su fila en tareas para que el proyecto muestre sus
+  // pendientes. Solo las que alguien tomó se anuncian como "tarea de fulano":
+  // las demás son actividades, y decir "tarea de sin responsable" sería ruido.
+  const tomada = t => !!(t?.assignee_id || t?.responsable_externo);
 
   return (
     <div style={{ borderRadius: 6, background: abierta ? colors.bg : "transparent", padding: abierta ? "4px 6px" : 0, margin: abierta ? "2px -6px" : 0 }}>
@@ -413,7 +416,8 @@ function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, 
             <div style={{ fontSize: 9.5, color: item.espera && !item.hecho ? colors.warning : colors.muted }}>
               {item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
                 : item.espera ? "esperando respuesta"
-                : tarea ? `tarea de ${deQuien(tarea)}${tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}`
+                : tomada(tarea) ? `tarea de ${deQuien(tarea)}${tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}`
+                : tarea?.due_date ? `para ${cuando(tarea.due_date)}`
                 : ""}
             </div>
           )}
@@ -428,13 +432,15 @@ function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, 
               ? `Hecha${item.hecho_por ? ` por ${item.hecho_por}` : ""}${item.hecho_at ? ` el ${cuando(item.hecho_at)}` : ""}.`
               : item.espera ? "Ya se hizo lo nuestro: espera a un tercero."
               : "Todavía por hacer."}
-            {tarea && (
+            {tomada(tarea) ? (
               <> Salió una tarea: <strong style={{ color: colors.ink }}>{tarea.title}</strong>
                 {` · ${deQuien(tarea)}${tarea.responsable_externo ? " (de afuera)" : ""}`}
                 {tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}
                 {tarea.status === "listo" ? " · completada" : tarea.status === "bloqueado" ? " · pausada" : " · en proceso"}.
               </>
-            )}
+            ) : tarea ? (
+              <> Está en las tareas del proyecto, todavía sin responsable.</>
+            ) : null}
           </div>
 
           {/* Lo que solo sabe quien la trabajó. */}
@@ -449,8 +455,10 @@ function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, 
                 <Hourglass size={11} /> {item.espera ? "Ya no espera" : "Queda esperando"}
               </button>
             )}
-            {!item.hecho && !item.tarea_id && (
-              <button onClick={onTarea} style={mini(false)}><ListTodo size={11} /> Volverla tarea</button>
+            {!item.hecho && (
+              <button onClick={onTarea} style={mini(false)}>
+                <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar responsable" : "Asignar a alguien"}
+              </button>
             )}
             <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado} style={mini(false)}>
               <Check size={11} /> {item.hecho ? "Desmarcar" : "Marcar hecha"}

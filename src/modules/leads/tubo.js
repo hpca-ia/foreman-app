@@ -77,7 +77,32 @@ export async function agregarItem(lead, etapa, texto, orden) {
 export async function marcarItem(item, hecho, quien) {
   const campos = { hecho, hecho_at: hecho ? new Date().toISOString() : null, hecho_por: hecho ? quien || null : null };
   const { error } = await supabase.from("lead_etapa_items").update(campos).eq("id", item.id);
+  // Su tarea va con ella: marcar la actividad y que la tarea siga abierta en el
+  // tablero de alguien es la forma de que nadie vuelva a confiar en el tablero.
+  if (!error && item.tarea_id) {
+    await supabase.from("tasks").update({ status: hecho ? "listo" : "en-progreso" }).eq("id", item.tarea_id);
+  }
   return error ? error.message : null;
+}
+
+/**
+ * La tarea de una actividad: se crea si no la tiene, se actualiza si ya existe.
+ * @returns { tarea } o { error }
+ */
+export async function asegurarTarea(item, datos) {
+  if (!item.tarea_id) return itemATarea(item, datos);
+  const campos = {
+    title: datos.titulo || item.texto,
+    assignee_id: datos.assignee_id || null,
+    due_date: datos.due_date || null,
+    ...(datos.responsable_externo !== undefined ? { responsable_externo: datos.responsable_externo } : {}),
+  };
+  let { data, error } = await supabase.from("tasks").update(campos).eq("id", item.tarea_id).select().single();
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { responsable_externo, ...resto } = campos;
+    ({ data, error } = await supabase.from("tasks").update(resto).eq("id", item.tarea_id).select().single());
+  }
+  return error ? { error: error.message } : { tarea: data };
 }
 
 /**
@@ -102,9 +127,16 @@ export async function borrarItem(id) {
 }
 
 /**
- * Un punto del checklist que necesita que alguien haga algo se vuelve tarea,
- * con su responsable y su fecha. Al completarse la tarea, el ítem se marca
- * solo (lo hace el módulo de tareas al cerrar una que tiene ítem).
+ * Toda actividad es también una tarea del proyecto, tenga responsable o no.
+ *
+ * Una actividad sin dueño igual es algo pendiente de ese proyecto, y tiene que
+ * verse entre las tareas: si solo aparecieran las asignadas, el tablero diría
+ * que el proyecto está limpio cuando en realidad le faltan seis cosas.
+ *
+ * Con responsable y fecha es una tarea como cualquier otra; sin ellos es una
+ * actividad del proyecto esperando que alguien la tome. Al completarse la
+ * tarea, la actividad se marca sola, y al marcar la actividad, la tarea se
+ * cierra.
  */
 export async function itemATarea(item, { lead, titulo, assignee_id, due_date, creadoPor, responsable_externo = null }) {
   const fila = {

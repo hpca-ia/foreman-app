@@ -21,6 +21,7 @@ import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
+import PendientesDeProyectos from "./components/PendientesDeProyectos";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import PanelAjustes from "./components/PanelAjustes";
@@ -294,20 +295,26 @@ export default function App() {
   // gente de otras obras.
   const compañeros = new Set(projects.filter(p => (p.miembros || []).includes(usuario.id)).flatMap(p => p.miembros || []));
   const asignables = puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id || compañeros.has(u.id));
+  // Una actividad de proyecto que nadie tomó no es tarea de nadie: no entra a
+  // "Mis tareas" por haberla escrito yo —eso llenaría la lista de cosas que no
+  // me tocan—, pero tampoco se pierde: vive en "Pendientes de proyectos".
+  const sinDueño = t => t.lead_id && !t.assignee_id && !t.responsable_externo && t.status !== "listo";
+  const pendientesSinDueño = tareas.filter(sinDueño);
   const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
-    : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
+    : tareas.filter(t => (t.assignee_id === usuario.id || (!sinDueño(t) && t.created_by === usuario.id)) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
   const alertCount = misAlertasTareas.length;
   // Quien no es admin ve lo suyo en "Mis tareas". Al elegir uno de sus
   // proyectos ve también lo de sus compañeros ahí —para coordinarse—, salvo lo
   // marcado como privado. Lo privado solo lo ven los admins y el asignado.
   // Mía es también la que me sumaron como acompañante: si la puedo mover, la
   // tengo que ver.
-  const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
+  const esMia = t => t.assignee_id === usuario.id || (!sinDueño(t) && t.created_by === usuario.id) || (acompanantes.get(t.id) || []).includes(usuario.id);
   const misProyectos = new Set(proyectosElegibles.map(p => p.id));
-  let visibles = veTodo
+  let visibles = (veTodo
     ? tareas.filter(t => !t.privada || admin || esMia(t))
-    : tareas.filter(t => esMia(t) || (filtroP !== "all" && !t.privada && misProyectos.has(t.project_id) && t.project_id === Number(filtroP)));
+    : tareas.filter(t => esMia(t) || (filtroP !== "all" && !t.privada && misProyectos.has(t.project_id) && t.project_id === Number(filtroP)))
+  ).filter(t => !sinDueño(t));
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -465,6 +472,10 @@ export default function App() {
                   <TareasDeLosDemas
                     tasks={tareas.filter(t => t.assignee_id !== usuario.id && (!t.privada || admin || t.created_by === usuario.id))}
                     users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
+                    onEditar={t => { setEditTask(t); setShowModal(true); }} />
+
+                  {/* Y lo que ningún proyecto tiene repartido todavía. */}
+                  <PendientesDeProyectos tasks={pendientesSinDueño} projects={projects} leads={leadsPorId}
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 
                   <div className="tasks-view-mobile">
