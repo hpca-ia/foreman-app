@@ -1,11 +1,23 @@
+import { useState } from "react";
 import { daysUntil } from "../lib/dates";
+import CompletarTarea from "./CompletarTarea";
 import { esAdmin } from "../lib/roles";
 import MarcaPrivada from "./ui/MarcaPrivada";
-import { PRIORIDAD, ESTADO } from "../theme/constants";
+import { PRIORIDAD } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 
-const COLUMNAS = ["pendiente", "en-progreso", "bloqueado", "listo"];
+// Las columnas son como se trabaja: lo que está andando, lo que está parado,
+// lo que se pasó de fecha y lo que ya se hizo. "Atrasada" no es un estado que
+// alguien elija —sale de la fecha—, pero es la columna que primero se mira.
+const COLUMNAS = [
+  { id: "atrasada", label: "Atrasadas", color: colors.danger, de: t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0 },
+  { id: "en-progreso", label: "En proceso", color: colors.warning, de: t => t.status !== "listo" && t.status !== "bloqueado" && !(t.due_date && daysUntil(t.due_date) < 0) },
+  { id: "bloqueado", label: "Pausadas", color: colors.inkSoft, de: t => t.status === "bloqueado" && !(t.due_date && daysUntil(t.due_date) < 0) },
+  { id: "listo", label: "Completadas", color: colors.success, de: t => t.status === "listo" },
+];
+// A qué estado se puede mandar una tarea desde el tablero: atrasada no es uno.
+const MOVIBLES = [["en-progreso", "En proceso"], ["bloqueado", "Pausada"], ["listo", "Completada"]];
 const MAX_VISIBLE = 8;
 
 function fechaLabel(t) {
@@ -18,19 +30,22 @@ function fechaLabel(t) {
 export default function TareasKanban({ tasks, users, projects, leads = {}, currentUser, onCambiarEstado, onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
+  // Completar pide la prueba también acá: si no, según por dónde se cierre la
+  // tarea se pide o no se pide, y eso no se entiende.
+  const [completando, setCompletando] = useState(null);
+  const mover = (t, estado) => (estado === "listo" ? setCompletando(t) : onCambiarEstado(t.id, estado));
 
   return (
     <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
-      {COLUMNAS.map(status => {
-        const eC = ESTADO[status];
+      {COLUMNAS.map(col => {
         const enColumna = tasks
-          .filter(t => t.status === status)
+          .filter(col.de)
           .sort((a, b) => daysUntil(a.due_date) - daysUntil(b.due_date));
         return (
-          <div key={status} style={{ width: 270, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+          <div key={col.id} style={{ width: 270, flexShrink: 0, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 4px", marginBottom: 8 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: eC.color }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{eC.label}</span>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: col.color }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{col.label}</span>
               <span style={{ fontSize: 12, color: colors.muted }}>{enColumna.length}</span>
             </div>
             <div className="kanban-col" style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "calc(100vh - 230px)", overflowY: "auto", paddingRight: 2 }}>
@@ -57,9 +72,9 @@ export default function TareasKanban({ tasks, users, projects, leads = {}, curre
                     </div>
                     {puedeCambiar && (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }} onClick={e => e.stopPropagation()}>
-                        {COLUMNAS.filter(c => c !== status).map(c => (
-                          <button key={c} onClick={() => onCambiarEstado(t.id, c)} style={{ background: colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, padding: "3px 7px", fontSize: 9, color: colors.inkSoft, cursor: "pointer" }}>
-                            → {ESTADO[c].label}
+                        {MOVIBLES.filter(([id]) => id !== t.status).map(([id, label]) => (
+                          <button key={id} onClick={() => mover(t, id)} style={{ background: colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, padding: "3px 7px", fontSize: 9, color: colors.inkSoft, cursor: "pointer" }}>
+                            → {label}
                           </button>
                         ))}
                       </div>
@@ -77,6 +92,10 @@ export default function TareasKanban({ tasks, users, projects, leads = {}, curre
           </div>
         );
       })}
+      {completando && (
+        <CompletarTarea tarea={completando} modo="completar" onCerrar={() => setCompletando(null)}
+          onConfirmar={datos => onCambiarEstado(completando.id, "listo", { ...datos, decision: "completar" })} />
+      )}
     </div>
   );
 }

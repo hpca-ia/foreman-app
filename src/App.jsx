@@ -308,7 +308,8 @@ export default function App() {
   const baseAviso = veTodo ? visibles : visibles.filter(esMia);
   const paraAvisar = filtroP === "all" ? baseAviso : baseAviso.filter(t => t.project_id === Number(filtroP));
 
-  if (filtro === "pendiente") visibles = visibles.filter(t => t.status === "pendiente");
+  if (filtro === "atrasadas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
+  if (filtro === "pausadas") visibles = visibles.filter(t => t.status === "bloqueado");
   if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
   if (filtro === "listo") visibles = visibles.filter(t => t.status === "listo");
   // Los que se activan tocando los avisos de arriba: mismas reglas que sus conteos.
@@ -392,28 +393,33 @@ export default function App() {
                 onCambiarEstado={cambiarEstado} onTaskCreated={fetchTareas} />
               {admin && <AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} />}
 
+              {/* La barra, en dos renglones y en el orden en que se piensa:
+                  primero cómo quiero verlas, después cuáles quiero ver. Antes
+                  los filtros, el orden, el proyecto y las vistas estaban todos
+                  mezclados en la misma fila y no se sabía qué hacía qué. */}
               <div className="tareas-barra">
-                <div className="tareas-filtros">
-                {[["todas", "Todas"], ["urgente", "Urgentes"], ["pendiente", "Pendientes"], ["listo", "Completadas"]].map(([f, l]) => (
-                  <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
-                ))}
-                <select value={orden} onChange={e => setOrden(e.target.value)} title="Por qué se ordenan"
-                  style={{ background: "#fff", border: `1px solid ${orden !== "fecha" ? colors.brand : colors.border}`, borderRadius: 20, color: orden !== "fecha" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
-                  {[["fecha", "Por fecha"], ["urgencia", "Por urgencia"], ["proyecto", "Por proyecto"], ["responsable", "Por responsable"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-                {proyectosElegibles.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
-                  <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
-                  {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>}
-                </div>
-                {/* El interruptor tenía display:flex inline, que le gana a la clase
-                    que lo ocultaba en móvil: se veía pero no mandaba sobre nada,
-                    porque el contenido que controlaba sí estaba oculto. */}
                 <div className="tareas-vistas">
                   {[["lista", "Lista"], ["tablero", "Tablero"], ["calendario", "Calendario"]].map(([v, l]) => (
                     <button key={v} onClick={() => setVistaTareas(v)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: vistaTareas === v ? colors.surface : "transparent", color: vistaTareas === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
                 </div>
+                {/* Agrupar solo tiene sentido en la lista: el tablero ya está
+                    partido por estado y el calendario por día. */}
+                {vistaTareas === "lista" && (
+                  <select value={orden} onChange={e => setOrden(e.target.value)} title="Cómo se agrupa la lista"
+                    style={{ background: "#fff", border: `1px solid ${orden !== "fecha" ? colors.brand : colors.border}`, borderRadius: 20, color: orden !== "fecha" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
+                    {[["fecha", "Ordenar por fecha"], ["urgencia", "Agrupar por urgencia"], ["proyecto", "Agrupar por proyecto"], ["responsable", "Agrupar por responsable"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                )}
+                {proyectosElegibles.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
+                  <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
+                  {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>}
+              </div>
+              <div className="tareas-filtros" style={{ marginBottom: 10 }}>
+                {[["todas", "Todas"], ["urgente", "Urgentes"], ["atrasadas", "Atrasadas"], ["pausadas", "Pausadas"], ["listo", "Completadas"]].map(([f, l]) => (
+                  <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
+                ))}
               </div>
 
               {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
