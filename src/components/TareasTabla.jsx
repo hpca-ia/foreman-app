@@ -19,7 +19,7 @@ function fechaColor(t) {
   return colors.muted;
 }
 
-export default function TareasTabla({ tasks, users, projects, leads = {}, onEditar }) {
+export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
@@ -34,7 +34,18 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, onEdit
         ))}
       </div>
       {tasks.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", color: colors.muted, fontSize: 13 }}>Sin tareas.</div>}
-      {tasks.map(t => {
+      {/* Cuando se ordena por proyecto, urgencia o responsable, cada grupo
+          lleva su título: si no, el orden está pero no se ve. */}
+      {(grupos || [{ tareas: tasks }]).map((g, gi) => (
+      <div key={g.clave || gi}>
+      {g.titulo && (
+        <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 16px", background: colors.bg, borderBottom: `1px solid ${colors.neutralSoft}`, borderTop: gi ? `1px solid ${colors.border}` : "none" }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: g.color || colors.brand }} />
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: colors.ink }}>{g.titulo}</span>
+          <span style={{ fontSize: 11, color: colors.muted }}>{g.tareas.length}</span>
+        </div>
+      )}
+      {g.tareas.map(t => {
         const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline" } : gP(t.project_id);
         const asig = t.assignee_id ? gU(t.assignee_id) : null;
         const pC = PRIORIDAD[t.priority] || PRIORIDAD.media;
@@ -62,6 +73,8 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, onEdit
           </div>
         );
       })}
+      </div>
+      ))}
     </div>
   );
 }

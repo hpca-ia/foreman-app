@@ -1,4 +1,4 @@
-import { Pencil, Trash2, MessageSquare, Clock } from "lucide-react";
+import { Pencil, Trash2, MessageSquare, Clock, Link as Enlace } from "lucide-react";
 import { PRIORIDAD, ESTADO, estadosElegibles } from "../theme/constants";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
@@ -73,6 +73,12 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
           </span>
         )}
       </div>
+      {task.enlace && (
+        <a href={task.enlace} target="_blank" rel="noreferrer noopener" onClick={e => e.stopPropagation()}
+          style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: colors.brand, textDecoration: "none", marginBottom: 6, overflowWrap: "anywhere" }}>
+          <Enlace size={11} /> {task.enlace.replace(/^https?:\/\//, "").slice(0, 48)}
+        </a>
+      )}
       <InlineFiles taskId={task.id} />
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", paddingTop: 6, borderTop: "1px solid #F3F4F6", marginTop: 4 }}>
         {puedeCambiar && (

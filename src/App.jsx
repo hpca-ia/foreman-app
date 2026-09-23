@@ -7,6 +7,7 @@ import { esAdmin } from "./lib/roles";
 import { cargarPermisos, crearPuede } from "./lib/permisos";
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
+import { PRIORIDAD } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
 import { salir, mensajeError } from "./lib/sesion";
@@ -19,6 +20,7 @@ import ModuloLeads from "./modules/leads/ModuloLeads";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import TareasCalendario from "./components/TareasCalendario";
+import TareasDeLosDemas from "./components/TareasDeLosDemas";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import PanelAjustes from "./components/PanelAjustes";
@@ -291,6 +293,33 @@ export default function App() {
     return (comparar[orden] || porFecha)(a, b);
   });
 
+  // Ordenar sin que se note no sirve de nada: cuando se ordena por proyecto,
+  // por urgencia o por responsable, la lista se parte en grupos con su título.
+  // Por fecha no se agrupa: la fecha ya se lee en cada fila.
+  const grupoDe = {
+    proyecto: t => {
+      const p = t.lead_id ? { name: leadsPorId[t.lead_id] || "Pipeline", color: null } : projects.find(x => x.id === t.project_id);
+      return { clave: `p${t.project_id || t.lead_id || 0}`, titulo: p?.name || "Sin proyecto", color: p?.color };
+    },
+    urgencia: t => ({ clave: t.priority, titulo: (PRIORIDAD[t.priority] || PRIORIDAD.media).label, color: (PRIORIDAD[t.priority] || PRIORIDAD.media).color }),
+    responsable: t => {
+      const u = users.find(x => x.id === t.assignee_id);
+      return { clave: `u${t.assignee_id || 0}`, titulo: u?.name || "Sin asignar", color: u?.color };
+    },
+  };
+  const agrupadas = (() => {
+    const de = grupoDe[orden];
+    if (!de) return null;
+    const grupos = [];
+    ordenadas.forEach(t => {
+      const g = de(t);
+      const ultimo = grupos[grupos.length - 1];
+      if (ultimo && ultimo.clave === g.clave) ultimo.tareas.push(t);
+      else grupos.push({ ...g, tareas: [t] });
+    });
+    return grupos;
+  })();
+
   const filtS = a => ({ padding: "6px 14px", borderRadius: 20, border: a ? "none" : `1px solid ${colors.border}`, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: a ? colors.ink : "#fff", color: a ? "#fff" : colors.inkSoft, flexShrink: 0 });
 
   return (
@@ -354,14 +383,21 @@ export default function App() {
                         ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "tablero"
                         ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : <TareasTabla tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
+                        : <TareasTabla tasks={ordenadas} grupos={agrupadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
                   </div>
+                  {/* Lo primero son las tareas de uno; en qué anda el resto va
+                      abajo, en su propio cuadro, sin lo marcado como privado. */}
+                  <TareasDeLosDemas
+                    tasks={tareas.filter(t => t.assignee_id !== usuario.id && (!t.privada || admin || t.created_by === usuario.id))}
+                    users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
+                    onEditar={t => { setEditTask(t); setShowModal(true); }} />
+
                   <div className="tasks-view-mobile">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
                       : vistaTareas === "calendario"
                         ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "lista"
-                        ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasListaMovil tasks={ordenadas} grupos={agrupadas} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                         : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0}
                             acompanantes={acompanantes.get(t.id) || []}
                             espera={(dependencias.espera.get(t.id) || []).map(id => tareas.find(x => x.id === id)).filter(x => x && x.status !== "listo")}

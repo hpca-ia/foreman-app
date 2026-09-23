@@ -7,6 +7,7 @@ import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 import ComentariosTarea from "./ComentariosTarea";
+import InlineFiles from "./InlineFiles";
 import DependenciasTarea from "./DependenciasTarea";
 import Avatar from "./ui/Avatar";
 
@@ -15,8 +16,8 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
-    status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada,
-  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false });
+    status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada, enlace: editTask.enlace || "",
+  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "" });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   // Los que acompañan al responsable principal: el plano lo hacen dos.
   const [conmigo, setConmigo] = useState(acompanantes);
@@ -134,7 +135,22 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           </label>
         )}
         <div><label style={lS}>Notas</label><textarea value={form.notes} onChange={e => inp("notes", e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
+        {/* Lo que hace falta para hacerla: un enlace a Drive o Dropbox, o el
+            del proveedor. Subirlo otra vez sería duplicarlo. */}
+        <div>
+          <label style={lS}>Enlace</label>
+          <input value={form.enlace || ""} onChange={e => inp("enlace", e.target.value)} placeholder="https://… plano, carpeta o documento" style={inputStyle} />
+        </div>
       </fieldset>
+
+      {/* Fotos y PDF de la tarea. Necesitan que la tarea exista: un archivo se
+          guarda con su número, y una tarea sin guardar todavía no lo tiene. */}
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${colors.neutralSoft}` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink, marginBottom: 6 }}>Archivos</div>
+        {editTask
+          ? <InlineFiles taskId={editTask.id} />
+          : <div style={{ fontSize: 11.5, color: colors.muted }}>Guarda la tarea y acá mismo podrás subir fotos y PDF. Mientras tanto, puedes dejar un enlace arriba.</div>}
+      </div>
 
       {/* Comentar se puede siempre: justamente el que no puede editar la tarea
           es el que más necesita decir por qué está parada. */}
