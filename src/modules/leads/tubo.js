@@ -80,6 +80,16 @@ export async function marcarItem(item, hecho, quien) {
   return error ? error.message : null;
 }
 
+/**
+ * Una actividad que ya se hizo de nuestro lado y ahora depende de un tercero:
+ * el permiso pedido, la respuesta del cliente, la muestra del proveedor. No es
+ * pendiente —no hay nada que hacer— ni hecha —todavía no llega—.
+ */
+export async function marcarEspera(item, espera) {
+  const { error } = await supabase.from("lead_etapa_items").update({ espera }).eq("id", item.id);
+  return error ? (falta(error) ? "falta_migracion" : error.message) : null;
+}
+
 export async function borrarItem(id) {
   const { error } = await supabase.from("lead_etapa_items").delete().eq("id", id);
   return error ? error.message : null;
@@ -122,7 +132,7 @@ export async function cambiarEstadoEtapa(etapa, estado, quien) {
   return null;
 }
 
-/** Cuánto lleva hecho un hito, según su checklist. */
+/** Cuánto lleva hecho un hito, según sus actividades. */
 export function avanceDe(items = []) {
   if (!items.length) return null;
   return Math.round(items.filter(i => i.hecho).length / items.length * 100);

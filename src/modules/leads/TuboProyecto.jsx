@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Circle, CircleDot, RotateCcw, Trash2, Loader2 } from "lucide-react";
+import { Check, Plus, X, ListTodo, Circle, CircleDot, RotateCcw, Trash2, Loader2, Hourglass } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -7,7 +7,7 @@ import Avatar from "../../components/ui/Avatar";
 import { etapaInfo } from "./constantes";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
-  agregarItem, marcarItem, borrarItem, itemATarea, cambiarEstadoEtapa, avanceDe,
+  agregarItem, marcarItem, marcarEspera, borrarItem, itemATarea, cambiarEstadoEtapa, avanceDe,
 } from "./tubo";
 
 // El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
@@ -83,9 +83,12 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     <div>
       {/* Dos cosas distintas y hay que verlas distintas: arriba las ETAPAS
           —los hitos del proyecto— y dentro de cada una sus ACTIVIDADES. */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 }}>ETAPAS DEL PROYECTO</span>
-        <span style={{ fontSize: 11, color: colors.muted }}>· dentro de cada una, sus actividades</span>
+        <span style={{ fontSize: 11, color: colors.muted }}>
+          · dentro de cada una, sus actividades: se marcan, quedan esperando (⧗) si dependen de un tercero,
+          o se vuelven tarea de alguien si hay que hacerlas
+        </span>
       </div>
 
       <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8, alignItems: "flex-start" }}>
@@ -107,7 +110,12 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   {hecha ? <Check size={13} color={colors.success} /> : enCurso ? <CircleDot size={13} color={cat.color || colors.brand} /> : <Circle size={13} color={colors.muted} />}
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: hecha ? colors.muted : colors.ink,
                     textDecoration: hecha ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat.nombre}</span>
-                  {suyos.length > 0 && <span style={{ fontSize: 10.5, color: colors.muted }}>{suyos.filter(i => i.hecho).length}/{suyos.length}</span>}
+                  {suyos.length > 0 && (
+                    <span style={{ fontSize: 10.5, color: colors.muted, whiteSpace: "nowrap" }}>
+                      {suyos.filter(i => i.hecho).length}/{suyos.length}
+                      {suyos.some(i => i.espera && !i.hecho) && <span style={{ color: colors.warning }}> · {suyos.filter(i => i.espera && !i.hecho).length} esperando</span>}
+                    </span>
+                  )}
                   {!info.enOrden && (
                     <button onClick={() => quitarEtapa(etapa)} title="Quitar esta etapa"
                       style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 0 }}><Trash2 size={12} /></button>
@@ -147,11 +155,17 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
+                      {item.espera && !item.hecho && <div style={{ fontSize: 9.5, color: colors.warning }}>esperando respuesta</div>}
                       {item.tarea_id && <div style={{ fontSize: 9.5, color: colors.muted }}>es una tarea</div>}
                     </div>
+                    {!item.hecho && (
+                      <button onClick={() => hacer(() => marcarEspera(item, !item.espera))} disabled={ocupado}
+                        title={item.espera ? "Ya no está esperando" : "Ya se hizo lo nuestro: queda esperando a un tercero"}
+                        style={{ background: "none", border: "none", color: item.espera ? colors.warning : colors.border, cursor: "pointer", display: "flex", padding: 1 }}><Hourglass size={12} /></button>
+                    )}
                     {!item.tarea_id && !item.hecho && (
                       <button onClick={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })}
-                        title="Convertirlo en tarea del equipo"
+                        title="Si alguien tiene que hacerla, convertirla en tarea"
                         style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 1 }}><ListTodo size={13} /></button>
                     )}
                     <button onClick={() => hacer(() => borrarItem(item.id))} disabled={ocupado} title="Quitar"

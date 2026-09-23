@@ -14,7 +14,7 @@ import { mensajeError } from "../../lib/sesion";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
 import TuboProyecto from "./TuboProyecto";
-import { TUNELES } from "./tubo";
+import { TUNELES, asegurarEtapas } from "./tubo";
 import { useDictado } from "../../lib/dictado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
@@ -100,11 +100,17 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
       responsable_id: Number(form.responsable_id) || null,
       responsable_nombre: users.find(u => u.id === Number(form.responsable_id))?.name || form.responsable_nombre || null,
       motivo_perdida: form.resultado === "perdido" ? (form.motivo_perdida || null) : null,
+      // De qué es el proyecto: eso decide con qué etapas arranca.
+      tunel: form.tunel || "lead",
+      es_lead: (form.tunel || "lead") === "lead",
       actualizado_at: new Date().toISOString(),
     };
+    // Sin la migración 040 esas dos columnas no existen todavía.
+    const sinTubo = ({ tunel, es_lead, ...resto }) => resto;
 
     if (editando) {
-      const { error: e } = await supabase.from("leads").update(payload).eq("id", lead.id);
+      let { error: e } = await supabase.from("leads").update(payload).eq("id", lead.id);
+      if (e && /column|schema cache/i.test(e.message)) ({ error: e } = await supabase.from("leads").update(sinTubo(payload)).eq("id", lead.id));
       if (e) { setError(e.message); setGuardando(false); return; }
       if (lead.etapa !== form.etapa) {
         await anotar(lead.id, "etapa", `${etapaInfo(lead.etapa, catalogo).nombre} → ${etapaInfo(form.etapa, catalogo).nombre}`,
@@ -113,9 +119,16 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
       setGuardando(false); onGuardado(); return;
     }
 
-    const { data: creado, error: e } = await supabase.from("leads")
+    let { data: creado, error: e } = await supabase.from("leads")
       .insert({ ...payload, created_by: currentUser?.id }).select().single();
+    if (e && /column|schema cache/i.test(e.message)) {
+      ({ data: creado, error: e } = await supabase.from("leads").insert({ ...sinTubo(payload), created_by: currentUser?.id }).select().single());
+    }
     if (e || !creado) { setError(e?.message || "No se pudo crear"); setGuardando(false); return; }
+
+    // Un proyecto de Arquitectura o de Construcción arranca con sus etapas
+    // puestas, en orden: para eso están predeterminadas.
+    if ((form.tunel || "lead") !== "lead") await asegurarEtapas(creado, catalogo);
 
     // El lead nace en blanco: su ruta la va escribiendo NOVA a medida que
     // aparecen los pasos. Una ruta de plantilla se llena de pasos que nadie
@@ -297,6 +310,28 @@ Si no se dice cuándo, pon la fecha de hoy.`,
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={lbl}>NOMBRE DEL PROYECTO</label>
             <input value={form.nombre} onChange={e => inp("nombre", e.target.value)} placeholder="Ej: Plaza Comercial Puembo" style={mini} autoFocus />
+          </div>
+
+          {/* De qué es el proyecto: eso decide sus etapas. Arquitectura y
+              Construcción vienen con las suyas puestas, en orden; un lead es
+              lo que todavía se persigue y suma etapas cuando pasan. */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={lbl}>TIPO DE PROYECTO</label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Object.entries(TUNELES).map(([id, t]) => (
+                <button key={id} type="button" onClick={() => setForm(p => ({ ...p, tunel: id, es_lead: id === "lead" }))}
+                  style={{ border: `1px solid ${(form.tunel || "lead") === id ? colors.ink : colors.border}`, borderRadius: 20, padding: "5px 13px",
+                    background: (form.tunel || "lead") === id ? colors.ink : "#fff", color: (form.tunel || "lead") === id ? "#fff" : colors.inkSoft,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 4 }}>
+              {(form.tunel || "lead") === "lead"
+                ? "Lead: todavía se persigue. Sale con una (L) y sus etapas se suman cuando pasan."
+                : `Arranca con las etapas de ${TUNELES[form.tunel].label}, en orden. Se editan en Ajustes → Etapas.`}
+            </div>
           </div>
           <div><label style={lbl}>CONTACTO</label><input value={form.contacto || ""} onChange={e => inp("contacto", e.target.value)} style={mini} /></div>
           <div><label style={lbl}>TELÉFONO</label><input value={form.telefono || ""} onChange={e => inp("telefono", e.target.value)} style={mini} /></div>
