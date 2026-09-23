@@ -39,6 +39,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const [abierta, setAbierta] = useState(null);
   const [tareas, setTareas] = useState({});
   const [errores, setErrores] = useState({});
+  // Cuántas actividades predeterminadas tiene cada etapa en Ajustes: si no
+  // tiene ninguna, no se ofrece traerlas y no hay botón que no haga nada.
+  const [predeterminadas, setPredeterminadas] = useState({});
   // Al agregar: o es una actividad que se marca y ya, o es una tarea con
   // responsable y fecha. Se decide en el momento, no después.
   const [conTarea, setConTarea] = useState({});   // etapa → { on, assignee_id, due_date }
@@ -58,6 +61,15 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
     // En qué va la tarea que salió de una actividad: decirlo acá evita ir a
     // buscarla a la lista de tareas.
+    const etapasDelProyecto = [...new Set((r.etapas || []).map(e => e.etapa_id))];
+    if (etapasDelProyecto.length) {
+      const { data: plantillas } = await supabase.from("pipeline_etapa_items")
+        .select("etapa_id").eq("activo", true).in("etapa_id", etapasDelProyecto);
+      const cuenta = {};
+      (plantillas || []).forEach(p => { cuenta[p.etapa_id] = (cuenta[p.etapa_id] || 0) + 1; });
+      setPredeterminadas(cuenta);
+    }
+
     const ids = (r.items || []).map(i => i.tarea_id).filter(Boolean);
     if (ids.length) {
       const { data: ts } = await supabase.from("tasks").select("id,title,status,due_date,assignee_id,responsable_externo").in("id", ids);
@@ -215,14 +227,16 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser} onTarea={() => {}} />
                 ))}
 
-                {!suyos.length && (
-                  <button onClick={() => hacer(async () => {
-                    const traidas = await sembrarChecklist(lead, etapa);
-                    if (!traidas.length) setErrores(e => ({ ...e, [etapa.id]: "Esta etapa todavía no tiene actividades de fábrica. Se ponen en Ajustes → Etapas." }));
-                  })} disabled={ocupado}
-                    style={{ background: "none", border: "none", padding: "4px 0", textAlign: "left", fontSize: 11, color: colors.muted, cursor: "pointer", fontFamily: colors.font }}>
-                    Sin actividades · traer las de fábrica
+                {/* Las que esa etapa trae predeterminadas desde Ajustes, si tiene. */}
+                {!suyos.length && predeterminadas[etapa.etapa_id] > 0 && (
+                  <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
+                    style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", textAlign: "left",
+                      fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, marginBottom: 2 }}>
+                    Usar las {predeterminadas[etapa.etapa_id]} actividades que esta etapa trae de Ajustes
                   </button>
+                )}
+                {!suyos.length && !predeterminadas[etapa.etapa_id] && (
+                  <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin actividades.</div>
                 )}
 
                 {/* Con Enter o con el botón, y también al salir de la casilla: un
