@@ -200,6 +200,14 @@ export default function App() {
     }
     if (error) { console.error("Error updating status:", error); fetchTareas(); return; }
 
+    // Si la tarea salió de un punto del checklist de un proyecto, ese punto
+    // queda marcado: si no, habría que acordarse de ir a marcarlo a mano.
+    if (estado === "listo") {
+      await supabase.from("lead_etapa_items")
+        .update({ hecho: true, hecho_at: new Date().toISOString(), hecho_por: usuario.name })
+        .eq("tarea_id", id);
+    }
+
     // Al completarla, las que la estaban esperando se destraban solas.
     if (estado === "listo") {
       const destrabadas = await destrabarLasQueEsperaban(id);

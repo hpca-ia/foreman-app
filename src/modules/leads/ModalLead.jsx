@@ -13,6 +13,8 @@ import { esAdmin } from "../../lib/roles";
 import { mensajeError } from "../../lib/sesion";
 import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
+import TuboProyecto from "./TuboProyecto";
+import { TUNELES } from "./tubo";
 import { useDictado } from "../../lib/dictado";
 
 const hoy = () => new Date().toISOString().split("T")[0];
@@ -359,6 +361,28 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               ))}
             </div>
             {editando && <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>Normalmente se mueve sola, al marcar una etapa En curso en el Plan.</div>}
+
+            {/* En qué tubo va: mientras se persigue es un lead, y al ganarlo
+                recorre los hitos de Arquitectura o de Construcción. Es el mismo
+                proyecto, en otro momento. */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 5 }}>TUBO</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {Object.entries(TUNELES).map(([id, t]) => (
+                  <button key={id} type="button" onClick={() => setForm(p => ({ ...p, tunel: id, es_lead: id === "lead" }))}
+                    style={{ border: `1px solid ${(form.tunel || "lead") === id ? colors.ink : colors.border}`, borderRadius: 16, padding: "4px 12px",
+                      background: (form.tunel || "lead") === id ? colors.ink : "#fff", color: (form.tunel || "lead") === id ? "#fff" : colors.inkSoft,
+                      fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>
+                {(form.tunel || "lead") === "lead"
+                  ? "Se está persiguiendo: sus etapas pasan sin orden y aparece con una (L)."
+                  : "Recorre los hitos en orden, uno detrás de otro."}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -367,7 +391,16 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         <ObraDelProyecto obraId={lead.obra_id} onIrAObra={onIrAObra} />
       )}
 
-      {editando && (seccionVisible === "plan" || seccionVisible === "gente") && (
+      {/* El tubo: los hitos del proyecto y qué le falta a cada uno. En los
+          tubos con orden —Arquitectura, Construcción— se ve el camino entero.
+          Un lead va sin orden, así que ahí manda la lista de abajo. */}
+      {editando && seccionVisible === "plan" && (form.tunel || "lead") !== "lead" && (
+        <div style={{ marginBottom: 14 }}>
+          <TuboProyecto lead={{ ...lead, tunel: form.tunel }} catalogo={catalogo} users={users} currentUser={currentUser} onBitacora={recargarBitacora} />
+        </div>
+      )}
+
+      {editando && (seccionVisible === "plan" || seccionVisible === "gente") && (form.tunel || "lead") === "lead" && (
         <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
           parte={seccionVisible === "plan" ? "etapas" : "gente"}
           puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
