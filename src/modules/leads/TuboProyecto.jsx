@@ -230,9 +230,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {/* Las que esa etapa trae predeterminadas desde Ajustes, si tiene. */}
                 {!suyos.length && predeterminadas[etapa.etapa_id] > 0 && (
                   <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
+                    title={`Trae las ${predeterminadas[etapa.etapa_id]} actividades que esta etapa tiene puestas en Ajustes`}
                     style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", textAlign: "left",
                       fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, marginBottom: 2 }}>
-                    Usar las {predeterminadas[etapa.etapa_id]} actividades que esta etapa trae de Ajustes
+                    Traer manualmente ({predeterminadas[etapa.etapa_id]})
                   </button>
                 )}
                 {!suyos.length && !predeterminadas[etapa.etapa_id] && (

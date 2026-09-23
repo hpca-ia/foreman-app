@@ -4,7 +4,7 @@ import { colors } from "../theme/colors";
 import { daysUntil } from "../lib/dates";
 import Avatar from "./ui/Avatar";
 
-// En qué anda el resto.
+// El equipo: en qué anda cada quien.
 //
 // Lo primero de la pantalla son las tareas de uno. Esto es lo otro: una línea
 // por persona, con cuántas tiene encima, cuántas se le pasaron y qué es lo
@@ -62,7 +62,7 @@ export default function TareasDeLosDemas({ tasks = [], users = [], projects = []
       <button onClick={alternar}
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", fontFamily: colors.font, textAlign: "left" }}>
         {abierto ? <ChevronDown size={14} color={colors.muted} /> : <ChevronRight size={14} color={colors.muted} />}
-        <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>En qué anda el resto</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>El equipo</span>
         <span style={{ fontSize: 11.5, color: colors.muted }}>{gente.length} {gente.length === 1 ? "persona" : "personas"} · {total} {total === 1 ? "tarea abierta" : "tareas abiertas"}</span>
       </button>
 
