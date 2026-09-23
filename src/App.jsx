@@ -18,6 +18,7 @@ import AvisoTareas from "./components/AvisoTareas";
 import ModuloLeads from "./modules/leads/ModuloLeads";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
+import TareasCalendario from "./components/TareasCalendario";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import PanelAjustes from "./components/PanelAjustes";
@@ -339,7 +340,7 @@ export default function App() {
                     que lo ocultaba en móvil: se veía pero no mandaba sobre nada,
                     porque el contenido que controlaba sí estaba oculto. */}
                 <div className="tareas-vistas">
-                  {[["lista", "Lista"], ["tablero", "Tablero"]].map(([v, l]) => (
+                  {[["lista", "Lista"], ["tablero", "Tablero"], ["calendario", "Calendario"]].map(([v, l]) => (
                     <button key={v} onClick={() => setVistaTareas(v)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: vistaTareas === v ? colors.surface : "transparent", color: vistaTareas === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
                 </div>
@@ -349,12 +350,16 @@ export default function App() {
                 <>
                   <div className="tasks-view-desktop">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
+                      : vistaTareas === "calendario"
+                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "tablero"
                         ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                         : <TareasTabla tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
                   </div>
                   <div className="tasks-view-mobile">
                     {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
+                      : vistaTareas === "calendario"
+                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "lista"
                         ? <TareasListaMovil tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                         : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0}
