@@ -19,7 +19,9 @@ export const ESTADO = {
   "en-progreso": { label: "En proceso", color: colors.warning },
   bloqueado: { label: "Pausada", color: colors.danger, ayuda: "Detenida: espera algo de alguien" },
   listo: { label: "Completada", color: colors.success },
-  pendiente: { label: "Sin empezar", color: colors.muted, viejo: true },
+  // Las de antes: se leen como lo que son, en proceso. No se ofrecen al
+  // cambiar de estado, y la migración 039 las pasa de una vez.
+  pendiente: { label: "En proceso", color: colors.warning, viejo: true },
 };
 
 export const ESTADO_NUEVO = "en-progreso";

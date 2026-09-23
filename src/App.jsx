@@ -326,7 +326,11 @@ export default function App() {
   const comparar = {
     fecha: porFecha,
     urgencia: (a, b) => (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]) || porFecha(a, b),
-    proyecto: (a, b) => (nombreDe(projects, a.project_id).localeCompare(nombreDe(projects, b.project_id))) || porFecha(a, b),
+    // Por el nombre que se ve en la fila, venga de un proyecto de Ajustes o de
+    // un proyecto del pipeline. Antes miraba solo los de Ajustes: una tarea de
+    // pipeline no tiene project_id, así que todas quedaban iguales y no se
+    // ordenaba nada —justo lo que pasa con casi todas las tareas de la oficina—.
+    proyecto: (a, b) => (nombreProyecto(a).toLowerCase().localeCompare(nombreProyecto(b).toLowerCase())) || porFecha(a, b),
     responsable: (a, b) => (nombreDe(users, a.assignee_id).localeCompare(nombreDe(users, b.assignee_id))) || porFecha(a, b),
   };
   const ordenadas = visibles.slice().sort((a, b) => {
@@ -339,9 +343,12 @@ export default function App() {
   // por urgencia o por responsable, la lista se parte en grupos con su título.
   // Por fecha no se agrupa: la fecha ya se lee en cada fila.
   const grupoDe = {
+    // El grupo es el nombre, no el número: dos tareas del mismo proyecto del
+    // pipeline caían en grupos distintos y se veía el título repetido.
     proyecto: t => {
-      const p = t.lead_id ? { name: leadsPorId[t.lead_id] || "Pipeline", color: null } : projects.find(x => x.id === t.project_id);
-      return { clave: `p${t.project_id || t.lead_id || 0}`, titulo: p?.name || "Sin proyecto", color: p?.color };
+      const nombre = nombreProyecto(t);
+      const p = t.lead_id ? null : projects.find(x => x.id === t.project_id);
+      return { clave: `p${nombre.toLowerCase()}`, titulo: nombre || "Sin proyecto", color: p?.color };
     },
     urgencia: t => ({ clave: t.priority, titulo: (PRIORIDAD[t.priority] || PRIORIDAD.media).label, color: (PRIORIDAD[t.priority] || PRIORIDAD.media).color }),
     responsable: t => {
