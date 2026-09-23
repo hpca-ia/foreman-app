@@ -85,6 +85,12 @@ export async function marcarItem(item, hecho, quien) {
  * el permiso pedido, la respuesta del cliente, la muestra del proveedor. No es
  * pendiente —no hay nada que hacer— ni hecha —todavía no llega—.
  */
+/** Lo que hay que saber de esa actividad y solo sabe quien la trabajó. */
+export async function guardarNota(item, nota) {
+  const { error } = await supabase.from("lead_etapa_items").update({ nota: nota || null }).eq("id", item.id);
+  return error ? (falta(error) ? "falta_migracion" : error.message) : null;
+}
+
 export async function marcarEspera(item, espera) {
   const { error } = await supabase.from("lead_etapa_items").update({ espera }).eq("id", item.id);
   return error ? (falta(error) ? "falta_migracion" : error.message) : null;

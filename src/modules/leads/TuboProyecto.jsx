@@ -7,7 +7,7 @@ import Avatar from "../../components/ui/Avatar";
 import { etapaInfo } from "./constantes";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
-  agregarItem, marcarItem, marcarEspera, borrarItem, itemATarea, cambiarEstadoEtapa, avanceDe,
+  agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, cambiarEstadoEtapa, avanceDe,
 } from "./tubo";
 
 // El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
@@ -31,6 +31,13 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const [agregando, setAgregando] = useState(false);
   const [aTarea, setATarea] = useState(null);
   const [ocupado, setOcupado] = useState(false);
+  // Con muchas actividades, lo hecho se acumula y tapa lo que falta: se guarda
+  // al fondo, contado, y se abre cuando alguien quiere mirarlo.
+  const [verHechas, setVerHechas] = useState({});
+  // La actividad abierta: al tocarla cuenta qué se hizo, quién y cuándo, y
+  // ofrece lo que se puede hacer con ella, con botones que dicen su nombre.
+  const [abierta, setAbierta] = useState(null);
+  const [tareas, setTareas] = useState({});
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una actividad puede ser de ellos aunque no entren a FOREMAN.
   const [invitados, setInvitados] = useState([]);
@@ -44,6 +51,14 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     setEtapas(r.etapas);
     setItems(r.items);
     setInvitados(inv || []);
+
+    // En qué va la tarea que salió de una actividad: decirlo acá evita ir a
+    // buscarla a la lista de tareas.
+    const ids = (r.items || []).map(i => i.tarea_id).filter(Boolean);
+    if (ids.length) {
+      const { data: ts } = await supabase.from("tasks").select("id,title,status,due_date,assignee_id,responsable_externo").in("id", ids);
+      setTareas(Object.fromEntries((ts || []).map(t => [t.id, t])));
+    } else setTareas({});
   }, [lead.id]);
 
   useEffect(() => {
@@ -95,6 +110,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
         {columnas.map(etapa => {
           const cat = etapaInfo(etapa.etapa_id, catalogo);
           const suyos = itemsDe(etapa.id);
+          // Lo que falta arriba —y dentro de eso, lo que espera a un tercero
+          // después de lo que hay que ponerse a hacer—; lo hecho, al fondo.
+          const porHacer = suyos.filter(i => !i.hecho).sort((a, b) => (a.espera ? 1 : 0) - (b.espera ? 1 : 0));
+          const hechas = suyos.filter(i => i.hecho);
           const hecha = etapa.estado === "hecha";
           const enCurso = etapa.estado === "en_curso";
           const avance = avanceDe(suyos);
@@ -108,8 +127,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               <div style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {hecha ? <Check size={13} color={colors.success} /> : enCurso ? <CircleDot size={13} color={cat.color || colors.brand} /> : <Circle size={13} color={colors.muted} />}
+                  {/* El nombre entero del hito: cortado con puntos suspensivos,
+                      "Permisos y ap…" no dice nada. */}
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: hecha ? colors.muted : colors.ink,
-                    textDecoration: hecha ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat.nombre}</span>
+                    textDecoration: hecha ? "line-through" : "none", lineHeight: 1.25, overflowWrap: "anywhere" }}>{cat.nombre}</span>
                   {suyos.length > 0 && (
                     <span style={{ fontSize: 10.5, color: colors.muted, whiteSpace: "nowrap" }}>
                       {suyos.filter(i => i.hecho).length}/{suyos.length}
@@ -141,36 +162,28 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 </div>
               </div>
 
-              {/* Las actividades de esta etapa, una debajo de la otra. */}
-              <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: 320, overflowY: "auto" }}>
+              {/* Las actividades de esta etapa, una debajo de la otra: primero lo
+                  que falta, al fondo lo hecho. Una etapa puede tener muchas. */}
+              <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: "60vh", overflowY: "auto" }}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>ACTIVIDADES</div>
-                {suyos.map(item => (
-                  <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "5px 0" }}>
-                    <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado}
-                      title={item.hecho ? "Desmarcar" : "Marcar como hecho"}
-                      style={{ width: 16, height: 16, flexShrink: 0, marginTop: 1, borderRadius: 4, cursor: "pointer", padding: 0,
-                        border: `1.5px solid ${item.hecho ? colors.success : colors.border}`, background: item.hecho ? colors.success : "#fff",
-                        display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {item.hecho && <Check size={11} color="#fff" />}
-                    </button>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
-                      {item.espera && !item.hecho && <div style={{ fontSize: 9.5, color: colors.warning }}>esperando respuesta</div>}
-                      {item.tarea_id && <div style={{ fontSize: 9.5, color: colors.muted }}>es una tarea</div>}
-                    </div>
-                    {!item.hecho && (
-                      <button onClick={() => hacer(() => marcarEspera(item, !item.espera))} disabled={ocupado}
-                        title={item.espera ? "Ya no está esperando" : "Ya se hizo lo nuestro: queda esperando a un tercero"}
-                        style={{ background: "none", border: "none", color: item.espera ? colors.warning : colors.border, cursor: "pointer", display: "flex", padding: 1 }}><Hourglass size={12} /></button>
-                    )}
-                    {!item.tarea_id && !item.hecho && (
-                      <button onClick={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })}
-                        title="Si alguien tiene que hacerla, convertirla en tarea"
-                        style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 1 }}><ListTodo size={13} /></button>
-                    )}
-                    <button onClick={() => hacer(() => borrarItem(item.id))} disabled={ocupado} title="Quitar"
-                      style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 1 }}><X size={12} /></button>
-                  </div>
+                {porHacer.map(item => (
+                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]}
+                    abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
+                    ocupado={ocupado} hacer={hacer} currentUser={currentUser}
+                    onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })} />
+                ))}
+
+                {/* Lo hecho, contado y guardado: se abre si alguien lo busca. */}
+                {hechas.length > 0 && (
+                  <button onClick={() => setVerHechas(v => ({ ...v, [etapa.id]: !v[etapa.id] }))}
+                    style={{ background: "none", border: "none", padding: "5px 0", textAlign: "left", fontSize: 11, color: colors.muted, cursor: "pointer", fontFamily: colors.font }}>
+                    {verHechas[etapa.id] ? "Ocultar" : "Ver"} {hechas.length} {hechas.length === 1 ? "hecha" : "hechas"}
+                  </button>
+                )}
+                {verHechas[etapa.id] && hechas.map(item => (
+                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]}
+                    abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
+                    ocupado={ocupado} hacer={hacer} currentUser={currentUser} onTarea={() => {}} />
                 ))}
 
                 {!suyos.length && (
@@ -288,4 +301,88 @@ const boton = fuerte => ({
   display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
   border: `1px solid ${fuerte ? colors.ink : colors.border}`, background: fuerte ? colors.ink : "#fff",
   color: fuerte ? "#fff" : colors.inkSoft, borderRadius: 8, padding: "5px 11px",
+});
+
+// Una actividad: se toca y cuenta lo suyo.
+//
+// Cerrada es una línea con su casilla. Abierta dice qué se hizo, quién la
+// marcó y cuándo, si está esperando a alguien, en qué va la tarea que salió de
+// ella, y deja escribir lo que solo sabe quien la trabajó. Los botones dicen
+// su nombre: un ⧗ y un ✓ sueltos no le enseñan a nadie cómo se usa esto.
+function Actividad({ item, etapa, tarea, abierta, onAbrir, ocupado, hacer, currentUser, onTarea }) {
+  const [nota, setNota] = useState(item.nota || "");
+  useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
+  const cuando = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
+
+  return (
+    <div style={{ borderRadius: 6, background: abierta ? colors.bg : "transparent", padding: abierta ? "4px 6px" : 0, margin: abierta ? "2px -6px" : 0 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "5px 0" }}>
+        <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado}
+          title={item.hecho ? "Desmarcar" : "Marcar como hecha"}
+          style={{ width: 16, height: 16, flexShrink: 0, marginTop: 1, borderRadius: 4, cursor: "pointer", padding: 0,
+            border: `1.5px solid ${item.hecho ? colors.success : colors.border}`, background: item.hecho ? colors.success : "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {item.hecho && <Check size={11} color="#fff" />}
+        </button>
+        <div onClick={onAbrir} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+          <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
+          {!abierta && (
+            <div style={{ fontSize: 9.5, color: item.espera && !item.hecho ? colors.warning : colors.muted }}>
+              {item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
+                : item.espera ? "esperando respuesta"
+                : tarea ? `tarea de ${tarea.responsable_externo || "alguien"}${tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}`
+                : ""}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {abierta && (
+        <div style={{ paddingLeft: 23, paddingBottom: 6, display: "grid", gap: 6 }}>
+          {/* Qué pasó con esta actividad, en una línea. */}
+          <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
+            {item.hecho
+              ? `Hecha${item.hecho_por ? ` por ${item.hecho_por}` : ""}${item.hecho_at ? ` el ${cuando(item.hecho_at)}` : ""}.`
+              : item.espera ? "Ya se hizo lo nuestro: espera a un tercero."
+              : "Todavía por hacer."}
+            {tarea && (
+              <> Salió una tarea: <strong style={{ color: colors.ink }}>{tarea.title}</strong>
+                {tarea.responsable_externo ? ` · ${tarea.responsable_externo} (de afuera)` : ""}
+                {tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}
+                {tarea.status === "listo" ? " · completada" : tarea.status === "bloqueado" ? " · pausada" : " · en proceso"}.
+              </>
+            )}
+          </div>
+
+          {/* Lo que solo sabe quien la trabajó. */}
+          <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2}
+            onBlur={() => { if ((item.nota || "") !== nota) hacer(() => guardarNota(item, nota.trim())); }}
+            placeholder="Qué pasó, con quién, qué falta…"
+            style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
+
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {!item.hecho && (
+              <button onClick={() => hacer(() => marcarEspera(item, !item.espera))} disabled={ocupado} style={mini(item.espera)}>
+                <Hourglass size={11} /> {item.espera ? "Ya no espera" : "Queda esperando"}
+              </button>
+            )}
+            {!item.hecho && !item.tarea_id && (
+              <button onClick={onTarea} style={mini(false)}><ListTodo size={11} /> Volverla tarea</button>
+            )}
+            <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado} style={mini(false)}>
+              <Check size={11} /> {item.hecho ? "Desmarcar" : "Marcar hecha"}
+            </button>
+            <button onClick={() => { if (window.confirm("¿Quitar esta actividad?")) hacer(() => borrarItem(item.id)); }} disabled={ocupado}
+              style={{ ...mini(false), color: colors.danger, marginLeft: "auto" }}><X size={11} /> Quitar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const mini = activo => ({
+  display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+  border: `1px solid ${activo ? colors.warning : colors.border}`, background: activo ? colors.warningSoft : "#fff",
+  color: activo ? colors.warning : colors.inkSoft, borderRadius: 14, padding: "3px 9px",
 });
