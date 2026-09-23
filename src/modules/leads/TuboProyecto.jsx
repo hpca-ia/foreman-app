@@ -240,21 +240,12 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin actividades.</div>
                 )}
 
-                {/* Con Enter o con el botón, y también al salir de la casilla: un
-                    campo que solo guarda con Enter parece roto, porque se escribe,
-                    se toca otra cosa y lo escrito se pierde. */}
-                <div style={{ display: "flex", gap: 5, marginTop: 6 }}>
-                  <input value={nuevo[etapa.id] || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: e.target.value }))}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(etapa, suyos.length); } }}
-                    onBlur={() => sumar(etapa, suyos.length)}
-                    placeholder="Escribe una actividad" style={{ ...chico, flex: 1, minWidth: 0 }} />
-                  <button onClick={() => sumar(etapa, suyos.length)} disabled={ocupado || !(nuevo[etapa.id] || "").trim()}
-                    style={{ ...mini(false), padding: "4px 9px", opacity: (nuevo[etapa.id] || "").trim() ? 1 : 0.5 }}>
-                    <Plus size={11} /> Agregar
-                  </button>
-                </div>
-                {/* Actividad a secas, o tarea de alguien con fecha. */}
-                <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap", alignItems: "center" }}>
+                {/* Primero se elige qué se está agregando y después se escribe:
+                    al revés, tocar "Tarea de alguien" sacaba el foco del campo y
+                    lo escrito se guardaba como actividad antes de tiempo. Por eso
+                    tampoco se guarda al salir de la casilla: se guarda con el
+                    botón o con Enter, y lo escrito se queda hasta entonces. */}
+                <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {[[false, "Actividad"], [true, "Tarea de alguien"]].map(([on, label]) => (
                     <button key={label} onClick={() => setConTarea(c => ({ ...c, [etapa.id]: { ...(c[etapa.id] || {}), on } }))}
                       style={{ ...mini(false), borderColor: !!conTarea[etapa.id]?.on === on ? colors.ink : colors.border,
@@ -264,11 +255,23 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     </button>
                   ))}
                 </div>
+
+                <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
+                  <input value={nuevo[etapa.id] || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(etapa, suyos.length); } }}
+                    placeholder={conTarea[etapa.id]?.on ? "¿Qué hay que hacer?" : "¿Qué actividad?"}
+                    style={{ ...chico, flex: 1, minWidth: 0 }} />
+                  <button onClick={() => sumar(etapa, suyos.length)} disabled={ocupado || !(nuevo[etapa.id] || "").trim()}
+                    style={{ ...mini(false), padding: "4px 9px", opacity: (nuevo[etapa.id] || "").trim() ? 1 : 0.5 }}>
+                    <Plus size={11} /> Agregar
+                  </button>
+                </div>
+
                 {conTarea[etapa.id]?.on && (
                   <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
                     <select value={conTarea[etapa.id]?.assignee_id || ""} onChange={e => setConTarea(c => ({ ...c, [etapa.id]: { ...c[etapa.id], assignee_id: e.target.value } }))}
                       style={{ ...chico, flex: 1, minWidth: 0 }}>
-                      <option value="">¿Quién?</option>
+                      <option value="">¿Quién la hace?</option>
                       <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
                       {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
                     </select>
