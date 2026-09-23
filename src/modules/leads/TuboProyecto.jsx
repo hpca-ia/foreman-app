@@ -38,6 +38,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   // ofrece lo que se puede hacer con ella, con botones que dicen su nombre.
   const [abierta, setAbierta] = useState(null);
   const [tareas, setTareas] = useState({});
+  const [errores, setErrores] = useState({});
+  // Al agregar: o es una actividad que se marca y ya, o es una tarea con
+  // responsable y fecha. Se decide en el momento, no después.
+  const [conTarea, setConTarea] = useState({});   // etapa → { on, assignee_id, due_date }
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una actividad puede ser de ellos aunque no entren a FOREMAN.
   const [invitados, setInvitados] = useState([]);
@@ -89,6 +93,31 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden: (etapas.length + 1) * 10, estado: "pendiente" });
     setAgregando(false);
   });
+  // Sumar una actividad a una etapa, diciendo si algo salió mal en vez de
+  // quedarse callado.
+  async function sumar(etapa, cuantas) {
+    const texto = (nuevo[etapa.id] || "").trim();
+    if (!texto) return;
+    setErrores(e => ({ ...e, [etapa.id]: "" }));
+    const t = conTarea[etapa.id];
+    await hacer(async () => {
+      const r = await agregarItem(lead, etapa, texto, cuantas + 1);
+      if (r?.error) { setErrores(e => ({ ...e, [etapa.id]: r.error })); return; }
+      // Si le pusieron responsable o fecha, nace además como tarea del equipo
+      // o de alguien de afuera.
+      if (t?.on && (t.assignee_id || t.due_date)) {
+        const externo = String(t.assignee_id || "").startsWith("x:") ? String(t.assignee_id).slice(2) : null;
+        await itemATarea(r.item, {
+          lead, titulo: texto, due_date: t.due_date || null, creadoPor: currentUser?.id,
+          assignee_id: externo || !t.assignee_id ? null : Number(t.assignee_id),
+          responsable_externo: externo,
+        });
+      }
+      setNuevo(n => ({ ...n, [etapa.id]: "" }));
+      setConTarea(c => ({ ...c, [etapa.id]: { on: t?.on, assignee_id: "", due_date: "" } }));
+    });
+  }
+
   const quitarEtapa = etapa => {
     if (!window.confirm("¿Quitar esta etapa del proyecto? Se va con sus pasos.")) return;
     hacer(async () => { await supabase.from("lead_etapas").delete().eq("id", etapa.id); });
@@ -167,7 +196,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: "60vh", overflowY: "auto" }}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>ACTIVIDADES</div>
                 {porHacer.map(item => (
-                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]}
+                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser}
                     onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })} />
@@ -181,26 +210,58 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   </button>
                 )}
                 {verHechas[etapa.id] && hechas.map(item => (
-                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]}
+                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser} onTarea={() => {}} />
                 ))}
 
                 {!suyos.length && (
-                  <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
+                  <button onClick={() => hacer(async () => {
+                    const traidas = await sembrarChecklist(lead, etapa);
+                    if (!traidas.length) setErrores(e => ({ ...e, [etapa.id]: "Esta etapa todavía no tiene actividades de fábrica. Se ponen en Ajustes → Etapas." }));
+                  })} disabled={ocupado}
                     style={{ background: "none", border: "none", padding: "4px 0", textAlign: "left", fontSize: 11, color: colors.muted, cursor: "pointer", fontFamily: colors.font }}>
                     Sin actividades · traer las de fábrica
                   </button>
                 )}
 
-                <form onSubmit={e => {
-                  e.preventDefault();
-                  const t = (nuevo[etapa.id] || "").trim();
-                  if (t) hacer(async () => { await agregarItem(lead, etapa, t, suyos.length + 1); setNuevo(n => ({ ...n, [etapa.id]: "" })); });
-                }}>
+                {/* Con Enter o con el botón, y también al salir de la casilla: un
+                    campo que solo guarda con Enter parece roto, porque se escribe,
+                    se toca otra cosa y lo escrito se pierde. */}
+                <div style={{ display: "flex", gap: 5, marginTop: 6 }}>
                   <input value={nuevo[etapa.id] || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: e.target.value }))}
-                    placeholder="+ actividad" style={{ ...chico, width: "100%", marginTop: 4 }} />
-                </form>
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(etapa, suyos.length); } }}
+                    onBlur={() => sumar(etapa, suyos.length)}
+                    placeholder="Escribe una actividad" style={{ ...chico, flex: 1, minWidth: 0 }} />
+                  <button onClick={() => sumar(etapa, suyos.length)} disabled={ocupado || !(nuevo[etapa.id] || "").trim()}
+                    style={{ ...mini(false), padding: "4px 9px", opacity: (nuevo[etapa.id] || "").trim() ? 1 : 0.5 }}>
+                    <Plus size={11} /> Agregar
+                  </button>
+                </div>
+                {/* Actividad a secas, o tarea de alguien con fecha. */}
+                <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap", alignItems: "center" }}>
+                  {[[false, "Actividad"], [true, "Tarea de alguien"]].map(([on, label]) => (
+                    <button key={label} onClick={() => setConTarea(c => ({ ...c, [etapa.id]: { ...(c[etapa.id] || {}), on } }))}
+                      style={{ ...mini(false), borderColor: !!conTarea[etapa.id]?.on === on ? colors.ink : colors.border,
+                        background: !!conTarea[etapa.id]?.on === on ? colors.ink : "#fff",
+                        color: !!conTarea[etapa.id]?.on === on ? "#fff" : colors.inkSoft }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {conTarea[etapa.id]?.on && (
+                  <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
+                    <select value={conTarea[etapa.id]?.assignee_id || ""} onChange={e => setConTarea(c => ({ ...c, [etapa.id]: { ...c[etapa.id], assignee_id: e.target.value } }))}
+                      style={{ ...chico, flex: 1, minWidth: 0 }}>
+                      <option value="">¿Quién?</option>
+                      <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
+                      {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
+                    </select>
+                    <input type="date" value={conTarea[etapa.id]?.due_date || ""} onChange={e => setConTarea(c => ({ ...c, [etapa.id]: { ...c[etapa.id], due_date: e.target.value } }))}
+                      style={{ ...chico, width: 116 }} />
+                  </div>
+                )}
+                {errores[etapa.id] && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 4 }}>{errores[etapa.id]}</div>}
               </div>
 
               <div style={{ padding: "8px 10px", borderTop: `1px solid ${colors.neutralSoft}` }}>
@@ -309,10 +370,14 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, en qué va la tarea que salió de
 // ella, y deja escribir lo que solo sabe quien la trabajó. Los botones dicen
 // su nombre: un ⧗ y un ✓ sueltos no le enseñan a nadie cómo se usa esto.
-function Actividad({ item, etapa, tarea, abierta, onAbrir, ocupado, hacer, currentUser, onTarea }) {
+function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, onTarea }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
-  const cuando = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
+  // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
+  // Ecuador eso es el día anterior: por eso se lee al mediodía.
+  const cuando = f => (f ? new Date(String(f).length === 10 ? `${f}T12:00:00` : f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
+  // De quién es la tarea que salió de esta actividad.
+  const deQuien = t => t?.responsable_externo || users.find(u => u.id === t?.assignee_id)?.name || "sin responsable";
 
   return (
     <div style={{ borderRadius: 6, background: abierta ? colors.bg : "transparent", padding: abierta ? "4px 6px" : 0, margin: abierta ? "2px -6px" : 0 }}>
@@ -330,7 +395,7 @@ function Actividad({ item, etapa, tarea, abierta, onAbrir, ocupado, hacer, curre
             <div style={{ fontSize: 9.5, color: item.espera && !item.hecho ? colors.warning : colors.muted }}>
               {item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
                 : item.espera ? "esperando respuesta"
-                : tarea ? `tarea de ${tarea.responsable_externo || "alguien"}${tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}`
+                : tarea ? `tarea de ${deQuien(tarea)}${tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}`
                 : ""}
             </div>
           )}
@@ -347,7 +412,7 @@ function Actividad({ item, etapa, tarea, abierta, onAbrir, ocupado, hacer, curre
               : "Todavía por hacer."}
             {tarea && (
               <> Salió una tarea: <strong style={{ color: colors.ink }}>{tarea.title}</strong>
-                {tarea.responsable_externo ? ` · ${tarea.responsable_externo} (de afuera)` : ""}
+                {` · ${deQuien(tarea)}${tarea.responsable_externo ? " (de afuera)" : ""}`}
                 {tarea.due_date ? ` · ${cuando(tarea.due_date)}` : ""}
                 {tarea.status === "listo" ? " · completada" : tarea.status === "bloqueado" ? " · pausada" : " · en proceso"}.
               </>
