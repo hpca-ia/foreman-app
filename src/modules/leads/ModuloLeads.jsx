@@ -143,7 +143,11 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // la ruta estándar; si no tiene plan, se compara contra la ruta estándar.
   // Cuánto vale el negocio lo ve el Director y quien lo abrió. Al resto le
   // toca su etapa, no la plata.
-  const verMonto = l => currentUser?.role === "owner" || l.created_by === currentUser?.id;
+  // Cuánto vale el negocio lo ve el Director, quien abrió el proyecto y quien
+  // tenga el permiso de montos: así se decide en Ajustes y no por código.
+  const verMonto = l => currentUser?.role === "owner" || puede("montos.ver") || l.created_by === currentUser?.id;
+  const verTotales = currentUser?.role === "owner" || puede("montos.ver");
+  const puedeEditar = puede("leads.editar");
 
   const retrocedio = l => {
     const plan = planes[l.id];
@@ -188,7 +192,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Pipeline</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          {puede("leads.ver") && <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo proyecto</Button>}
+          {puedeEditar && <Button variant="primary" size="md" onClick={() => setNuevo(true)}><Plus size={14} /> Nuevo proyecto</Button>}
         </div>
       </div>
 
@@ -262,7 +266,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
       <div style={{ display: "flex", gap: 22, marginBottom: 14, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft }}>
         <span><strong style={{ color: colors.ink, fontSize: 15 }}>{abiertos.length}</strong> en curso</span>
-        {currentUser?.role === "owner" && <>
+        {verTotales && <>
           <span>En juego <strong style={{ color: colors.ink, fontSize: 15 }}>${fmt(enJuego)}</strong></span>
           <span>Ponderado <strong style={{ color: colors.brand, fontSize: 15 }}>${fmt(ponderado)}</strong></span>
         </>}
@@ -318,7 +322,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
         )}
 
       {(abierto || nuevo) && (
-        <ModalLead lead={abierto} currentUser={currentUser} users={users} catalogo={catalogo}
+        <ModalLead lead={abierto} currentUser={currentUser} users={users} catalogo={catalogo} puede={puede} editable={puedeEditar}
           onIrAObra={onIrAObra ? () => onIrAObra(abierto.obra_id) : null}
           onCerrar={() => { setAbierto(null); setNuevo(false); }}
           onGuardado={async () => { setAbierto(null); setNuevo(false); await cargar(); }} />
@@ -379,10 +383,16 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = t
 
       <div style={{ textAlign: "right", fontSize: 12, color: vencido ? colors.danger : colors.muted, fontWeight: vencido ? 700 : 400, whiteSpace: "nowrap" }}>
         {cuandoTxt}
-        {verMonto && Number(lead.valor_estimado) > 0 && (
-          <div style={{ fontSize: 11, color: colors.muted, fontWeight: 400 }}>${fmt(lead.valor_estimado)}</div>
-        )}
       </div>
+
+      {/* Cuánto vale, en su propia columna. Metido debajo de la fecha y en
+          gris chiquito no se leía, y cuando está en cero conviene que se note:
+          es un dato que falta, no un proyecto que no vale nada. */}
+      {verMonto && (
+        <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 600, color: Number(lead.valor_estimado) > 0 ? colors.ink : colors.border, whiteSpace: "nowrap" }}>
+          {Number(lead.valor_estimado) > 0 ? `$${fmt(lead.valor_estimado)}` : "—"}
+        </div>
+      )}
     </div>
   );
 }

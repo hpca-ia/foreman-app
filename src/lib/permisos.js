@@ -27,6 +27,8 @@ export const GRUPOS_PERMISOS = [
     titulo: "Qué puede hacer",
     permisos: [
       { id: "tareas.asignar", label: "Asignar tareas a otros" },
+      { id: "tareas.fechas", label: "Mover fechas de tareas", nota: "Cambiar la fecha de una tarea o actividad ya creada. Sin esto la pone al crearla, pero después no la corre solo" },
+      { id: "leads.editar", label: "Editar el pipeline", nota: "Crear proyectos, mover etapas y cargar actividades. Sin esto los ve pero no los toca" },
       { id: "presupuestos.crear", label: "Crear y editar presupuestos" },
       { id: "obras.crear", label: "Activar una obra para controlarla" },
       { id: "facturas.registrar", label: "Registrar facturas y gastos" },
@@ -47,20 +49,20 @@ export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitect
 // no existan en la base.
 export const POR_DEFECTO = {
   assistant: {
-    "tareas.ver": true, "tareas.todas": true, "tareas.asignar": true,
+    "tareas.ver": true, "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.todas": true, "obras.crear": true,
     "facturas.registrar": true, "planillas.cerrar": true,
-    "cajaChica.ver": true, "cajaChica.todas": true, "leads.ver": false,
+    "cajaChica.ver": true, "cajaChica.todas": true, "leads.ver": false, "leads.editar": false,
     "montos.ver": true, "gastos.anular": true, "ajustes.ver": true,
     "borrar.definitivo": false,
   },
   gerente: {
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true,
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
     "facturas.registrar": true, "planillas.cerrar": true,
-    "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": false,
+    "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": false, "leads.editar": false,
     "montos.ver": true, "gastos.anular": true, "ajustes.ver": false,
     "borrar.definitivo": false,
   },
@@ -68,30 +70,30 @@ export const POR_DEFECTO = {
   // presupuesto. Del pipeline ve solo los proyectos que le tocan, no todo lo
   // comercial. Todo esto se puede cambiar en Ajustes.
   arquitecto: {
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true,
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false,
+    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false, "leads.editar": true,
     "montos.ver": true, "gastos.anular": false, "ajustes.ver": false,
     "borrar.definitivo": false,
   },
   // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros ni ve montos.
   arquitecto_jr: {
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false,
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false,
+    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false, "leads.editar": false,
     "montos.ver": false, "gastos.anular": false, "ajustes.ver": false,
     "borrar.definitivo": false,
   },
   residente: {
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false,
+    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": false, "obras.todas": false, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": false,
+    "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": false, "leads.editar": false,
     "montos.ver": false, "gastos.anular": false, "ajustes.ver": false,
     "borrar.definitivo": false,
   },

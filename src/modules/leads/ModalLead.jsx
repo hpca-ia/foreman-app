@@ -21,7 +21,7 @@ const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
-export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, onIrAObra, onCerrar, onGuardado }) {
+export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, puede = () => true, editable = true, onIrAObra, onCerrar, onGuardado }) {
   const editando = !!lead;
   const [form, setForm] = useState(lead ? { ...lead } : {
     nombre: "", contacto: "", telefono: "", email: "", origen: "Referido",
@@ -267,6 +267,14 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
 
   const etapaActual = etapaInfo(form.etapa, catalogo);
+  // El rótulo de la esquina dice qué es el proyecto: Arquitectura, Construcción
+  // o Lead. Antes decía la etapa guardada en `leads.etapa`, que nace en "lead"
+  // para todos, y un proyecto de Construcción aparecía marcado como Lead.
+  const tuboActual = TUNELES[form.tunel || "lead"] || TUNELES.lead;
+  // La etapa solo se muestra cuando es una del tubo de este proyecto: la del
+  // tubo en orden se ve en "El proyecto", hito por hito, y repetirla mal
+  // confunde más que no ponerla.
+  const etapaDelTubo = catalogo.some(e => e.id === form.etapa && (e.tunel || "lead") === (form.tunel || "lead"));
   const temp = TEMPERATURAS.find(t => t.id === form.temperatura);
   // Los datos del proyecto —valor, contacto, origen, resultado— son del
   // Director y de quien lo abrió. Quien trabaja una etapa ve el plan y lo suyo,
@@ -285,9 +293,14 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         {editando && (
           <>
             {temp && <span title={temp.label} style={{ width: 8, height: 8, borderRadius: "50%", background: temp.color }} />}
-            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: etapaActual.color || colors.muted }}>
-              {etapaActual.nombre}
+            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: tuboActual.color }}>
+              {tuboActual.label}
             </span>
+            {etapaDelTubo && (
+              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: etapaActual.color || colors.muted }}>
+                {etapaActual.nombre}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -394,7 +407,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
           cuando pasan; en Arquitectura y Construcción vienen puestas, en orden. */}
       {editando && seccionVisible === "plan" && (
         <div style={{ marginBottom: 14 }}>
-          <TuboProyecto lead={{ ...lead, tunel: form.tunel }} catalogo={catalogo} users={users} currentUser={currentUser} onBitacora={recargarBitacora} />
+          <TuboProyecto lead={{ ...lead, tunel: form.tunel }} catalogo={catalogo} users={users} currentUser={currentUser} puede={puede} editable={editable} onBitacora={recargarBitacora} />
         </div>
       )}
 
@@ -432,7 +445,9 @@ Si no se dice cuándo, pon la fecha de hoy.`,
                     {t.title}
                   </span>
                   <input type="date" value={t.due_date || ""} onChange={e => cambiarFecha(t, e.target.value)}
-                    style={{ ...mini, width: 130, padding: "4px 6px", fontSize: 11, color: vencido ? colors.danger : colors.inkSoft, borderColor: vencido ? colors.dangerBorder : colors.border }} />
+                    disabled={!puede("tareas.fechas")} title={puede("tareas.fechas") ? "" : "La fecha la mueve el Director o quien tenga ese permiso"}
+                    style={{ ...mini, width: 130, padding: "4px 6px", fontSize: 11, color: vencido ? colors.danger : colors.inkSoft, borderColor: vencido ? colors.dangerBorder : colors.border,
+                      ...(puede("tareas.fechas") ? {} : { background: colors.bg, cursor: "not-allowed" }) }} />
                   <button onClick={() => borrarPaso(t)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={12} /></button>
                 </div>
               );
@@ -522,9 +537,13 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
       <div className="modal-acciones">
-        <Button variant="primary" onClick={guardar} disabled={guardando}>
-          {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
-        </Button>
+        {/* Quien solo mira el pipeline no lo cambia: ve el proyecto entero, sin
+            el botón que lo guarda. */}
+        {editable && (
+          <Button variant="primary" onClick={guardar} disabled={guardando}>
+            {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
+          </Button>
+        )}
         <Button variant="outline" onClick={onCerrar}>Cerrar</Button>
         {editando && (
           <Button variant="outline" onClick={() => setInforme(true)} title="Mandar un informe de avance por correo">

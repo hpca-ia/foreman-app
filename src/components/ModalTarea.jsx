@@ -30,6 +30,10 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   // todos sus compañeros, la misma lista que usa NOVA. Al editar se agrega el
   // asignado actual para que el menú no lo muestre en blanco.
   const puedeAsignarATodos = puede("tareas.asignar");
+  // La fecha se pone al crear la tarea; correrla después es decisión de quien
+  // lleva el proyecto. Sin el permiso, el campo queda a la vista pero cerrado:
+  // esconderlo haría creer que la tarea no tiene fecha.
+  const puedeMoverFecha = !editTask || puede("tareas.fechas");
   const asignablesPara = projectId => {
     if (puedeAsignarATodos) return users;
     const p = projects.find(x => x.id === projectId);
@@ -128,7 +132,13 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           </div>
           <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Los recordatorios y la carga se cuentan al responsable principal; los demás la ven como suya y la pueden mover.</div>
         </div>
-        <div><label style={lS}>Fecha límite *</label><input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} style={inputStyle} /></div>
+        <div>
+          <label style={lS}>Fecha límite *</label>
+          <input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} disabled={!puedeMoverFecha}
+            title={puedeMoverFecha ? "" : "La fecha la mueve el Director o quien tenga ese permiso"}
+            style={{ ...inputStyle, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }} />
+          {!puedeMoverFecha && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>La mueve el Director o quien tenga ese permiso.</div>}
+        </div>
         {/* Pedir una aprobación es pedir una tarea: la misma lista, la misma
             fecha, pero se cierra aprobando o devolviendo, no con un check. */}
         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer", background: form.es_aprobacion ? colors.brandSoft : colors.bg, borderRadius: colors.radiusSm, padding: "8px 10px", lineHeight: 1.4 }}>

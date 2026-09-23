@@ -34,11 +34,24 @@ export async function cargarTubo(leadId) {
   return { etapas: etapas || [], items: falta(e2) ? [] : items || [], sinTablas: false };
 }
 
+// Dos llamadas a la vez ponían las etapas dos veces: las dos leían "faltan" y
+// las dos insertaban. Pasa al abrir y cerrar rápido un proyecto, o con la app
+// abierta en dos pestañas. Mientras una está trabajando, la otra espera su
+// resultado en vez de empezar de nuevo.
+const enCurso = new Map();
+
 /**
  * Un proyecto de un tubo en orden tiene todas sus etapas desde el principio:
  * así se ve el camino completo y cuánto falta, no solo dónde se está.
  */
-export async function asegurarEtapas(lead, catalogo) {
+export function asegurarEtapas(lead, catalogo) {
+  if (enCurso.has(lead.id)) return enCurso.get(lead.id);
+  const trabajo = ponerEtapasQueFaltan(lead, catalogo).finally(() => enCurso.delete(lead.id));
+  enCurso.set(lead.id, trabajo);
+  return trabajo;
+}
+
+async function ponerEtapasQueFaltan(lead, catalogo) {
   const tunel = lead.tunel || "lead";
   if (!TUNELES[tunel]?.enOrden) return null;
   const delTunel = etapasDelTunel(catalogo, tunel);
@@ -91,6 +104,11 @@ export async function marcarItem(item, hecho, quien) {
  */
 export async function asegurarTarea(item, datos) {
   if (!item.tarea_id) return itemATarea(item, datos);
+  // Si le corrigieron el texto, la actividad se llama igual que su tarea: dos
+  // nombres para la misma cosa es cómo se pierde la pista de qué se arregló.
+  if (datos.titulo && datos.titulo !== item.texto) {
+    await supabase.from("lead_etapa_items").update({ texto: datos.titulo }).eq("id", item.id);
+  }
   const campos = {
     title: datos.titulo || item.texto,
     assignee_id: datos.assignee_id || null,
@@ -157,17 +175,68 @@ export async function itemATarea(item, { lead, titulo, assignee_id, due_date, cr
   return e2 ? { tarea, error: e2.message } : { tarea };
 }
 
+/**
+ * Lo que se corrigió, a la bitácora.
+ *
+ * Equivocarse escribiendo es normal y arreglarlo tiene que ser fácil; lo que
+ * no puede pasar es que la tarea cambie de dueño o de fecha y nadie sepa quién
+ * la movió. Por eso el arreglo se anota con nombre y hora.
+ */
+export async function anotarCorreccion(lead, detalle, quien) {
+  const { error } = await supabase.from("lead_movimientos").insert({
+    lead_id: lead.id, tipo: "actividad", automatico: true, detalle,
+    autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null,
+  });
+  return error ? error.message : null;
+}
+
+/**
+ * Mover un hito a la izquierda o a la derecha dentro de este proyecto.
+ *
+ * El orden de Ajustes es el predeterminado, no una ley: un proyecto puede
+ * hacer las ingenierías antes que el anteproyecto, o volver a una etapa
+ * anterior. El orden es de cada proyecto, y por eso se guarda acá y no en el
+ * catálogo, que es de toda la oficina.
+ */
+export async function moverEtapa(etapa, vecina) {
+  if (!vecina) return null;
+  const [{ error: e1 }, { error: e2 }] = await Promise.all([
+    supabase.from("lead_etapas").update({ orden: vecina.orden }).eq("id", etapa.id),
+    supabase.from("lead_etapas").update({ orden: etapa.orden }).eq("id", vecina.id),
+  ]);
+  return e1?.message || e2?.message || null;
+}
+
 /** Cerrar un hito, o volver a abrirlo. */
 export async function cambiarEstadoEtapa(etapa, estado, quien) {
   const campos = { estado, hecha_at: estado === "hecha" ? new Date().toISOString() : null };
   const { error } = await supabase.from("lead_etapas").update(campos).eq("id", etapa.id);
   if (error) return error.message;
+  // En qué va el proyecto lo dice el tubo, y de ahí lo lee la lista del
+  // pipeline. Sin este empate, un proyecto de Construcción seguía figurando en
+  // la etapa con la que nació —"Lead"— aunque ya estuviera en obra gris.
+  await alDiaLaEtapaDelProyecto(etapa, estado);
   await supabase.from("lead_movimientos").insert({
     lead_id: etapa.lead_id, tipo: "etapa", automatico: true,
     detalle: `${estado === "hecha" ? "Cerró" : estado === "en_curso" ? "Arrancó" : estado === "omitida" ? "Omitió" : "Reabrió"} la etapa`,
     autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null,
   }).select();
   return null;
+}
+
+/**
+ * La etapa del proyecto sigue al hito: al arrancar uno, ese es; al cerrarlo,
+ * pasa al primero que quede abierto.
+ */
+async function alDiaLaEtapaDelProyecto(etapa, estado) {
+  let etapaId = null;
+  if (estado === "en_curso") etapaId = etapa.etapa_id;
+  else if (estado === "hecha") {
+    const { data } = await supabase.from("lead_etapas")
+      .select("etapa_id,estado,orden").eq("lead_id", etapa.lead_id).order("orden");
+    etapaId = (data || []).find(e => e.id !== etapa.id && e.estado !== "hecha" && e.estado !== "omitida")?.etapa_id || null;
+  }
+  if (etapaId) await supabase.from("leads").update({ etapa: etapaId }).eq("id", etapa.lead_id);
 }
 
 /** Cuánto lleva hecho un hito, según sus actividades. */
