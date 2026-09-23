@@ -126,12 +126,11 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const abiertos = leads.filter(l => enTubo(l) && !l.resultado && !etapaInfo(l.etapa, catalogo).cierra);
   const cerrados = leads.filter(l => enTubo(l) && (l.resultado || etapaInfo(l.etapa, catalogo).cierra));
 
-  // Lo que manda en la lista: la fecha más cercana entre el próximo paso y la
-  // etapa en curso. Sin fecha, el proyecto se va al final: no está corriendo.
-  const cuando = l => {
-    const f = [rutas[l.id]?.siguiente?.due_date, planes[l.id]?.actual?.fecha_objetivo].filter(Boolean).sort();
-    return f[0] || null;
-  };
+  // Lo que manda en la lista: cuándo vence el próximo paso. Las etapas ya no
+  // llevan fecha —un hito no se entrega un día, lo entregan sus actividades—,
+  // así que ordenar por una fecha de etapa sería ordenar por algo que nadie ve
+  // ni puede cambiar. Sin fecha, el proyecto se va al final: no está corriendo.
+  const cuando = l => rutas[l.id]?.siguiente?.due_date || null;
   const orden = (a, b) => {
     const fa = cuando(a), fb = cuando(b);
     if (fa && fb) return fa.localeCompare(fb);

@@ -100,7 +100,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     setOcupado(true);
     try { await fn(); await cargar(); } finally { setOcupado(false); }
   }
-  const guardarEtapa = (etapa, campos) => hacer(async () => { await supabase.from("lead_etapas").update(campos).eq("id", etapa.id); });
   const agregarEtapa = etapaId => hacer(async () => {
     await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden: (etapas.length + 1) * 10, estado: "pendiente" });
     setAgregando(false);
@@ -163,7 +162,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
             <div key={etapa.id} style={{ width: 236, flexShrink: 0, background: colors.surface, border: `1px solid ${colors.border}`,
               borderTop: `3px solid ${tono}`, borderRadius: colors.radiusMd, display: "flex", flexDirection: "column", opacity: hecha ? 0.75 : 1 }}>
 
-              {/* La cabeza de la etapa: cómo va, quién y para cuándo. */}
+              {/* La cabeza de la etapa: el hito y cómo va. Sin responsable ni
+                  fecha: un hito no lo hace nadie ni se entrega un día. Quien
+                  hace y para cuándo son de cada actividad de abajo. */}
               <div style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {hecha ? <Check size={13} color={colors.success} /> : enCurso ? <CircleDot size={13} color={cat.color || colors.brand} /> : <Circle size={13} color={colors.muted} />}
@@ -189,17 +190,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   </div>
                 )}
 
-                <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-                  <select value={etapa.responsable_id || ""} title="Quién la tiene a cargo"
-                    onChange={e => { const u = users.find(x => String(x.id) === e.target.value); guardarEtapa(etapa, { responsable_id: u?.id ?? null, responsable_nombre: u?.name ?? null }); }}
-                    style={{ ...chico, flex: 1, minWidth: 0 }}>
-                    <option value="">Sin responsable</option>
-                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                  <input type="date" value={etapa.fecha_objetivo || ""} title="Para cuándo"
-                    onChange={e => guardarEtapa(etapa, { fecha_objetivo: e.target.value || null })}
-                    style={{ ...chico, width: 112 }} />
-                </div>
               </div>
 
               {/* Las actividades de esta etapa, una debajo de la otra: primero lo
@@ -210,7 +200,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser}
-                    onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: tareas[item.tarea_id]?.assignee_id || etapa.responsable_id || "", due_date: tareas[item.tarea_id]?.due_date || etapa.fecha_objetivo || "" })} />
+                    onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: tareas[item.tarea_id]?.assignee_id || "", due_date: tareas[item.tarea_id]?.due_date || "" })} />
                 ))}
 
                 {/* Lo hecho, contado y guardado: se abre si alguien lo busca. */}
