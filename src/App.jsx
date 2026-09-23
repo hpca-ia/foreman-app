@@ -321,7 +321,11 @@ export default function App() {
   // Un solo orden para las tres vistas, y se elige por qué: lo terminado
   // siempre al fondo, y dentro de eso lo que se haya pedido. Empatando, manda
   // lo que vence antes: una lista de tareas que no mira la fecha no sirve.
-  const nombreDe = (lista, id) => (lista.find(x => x.id === id)?.name || "").toLowerCase();
+  // Para comparar y para agrupar, el nombre pelado: sin tildes, sin mayúsculas
+  // y sin espacios de más. "Chronix", "chronix " y "CHRONIX" son el mismo
+  // proyecto, y separarlos partía la lista en dos grupos con el mismo título.
+  const pelado = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const nombreDe = (lista, id) => pelado(lista.find(x => x.id === id)?.name);
   const porFecha = (a, b) => (daysUntil(a.due_date) - daysUntil(b.due_date)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
   const comparar = {
     fecha: porFecha,
@@ -330,7 +334,7 @@ export default function App() {
     // un proyecto del pipeline. Antes miraba solo los de Ajustes: una tarea de
     // pipeline no tiene project_id, así que todas quedaban iguales y no se
     // ordenaba nada —justo lo que pasa con casi todas las tareas de la oficina—.
-    proyecto: (a, b) => (nombreProyecto(a).toLowerCase().localeCompare(nombreProyecto(b).toLowerCase())) || porFecha(a, b),
+    proyecto: (a, b) => (pelado(nombreProyecto(a)).localeCompare(pelado(nombreProyecto(b)))) || porFecha(a, b),
     responsable: (a, b) => (nombreDe(users, a.assignee_id).localeCompare(nombreDe(users, b.assignee_id))) || porFecha(a, b),
   };
   const ordenadas = visibles.slice().sort((a, b) => {
@@ -348,12 +352,12 @@ export default function App() {
     proyecto: t => {
       const nombre = nombreProyecto(t);
       const p = t.lead_id ? null : projects.find(x => x.id === t.project_id);
-      return { clave: `p${nombre.toLowerCase()}`, titulo: nombre || "Sin proyecto", color: p?.color };
+      return { clave: `p${pelado(nombre)}`, titulo: nombre.trim() || "Sin proyecto", color: p?.color };
     },
     urgencia: t => ({ clave: t.priority, titulo: (PRIORIDAD[t.priority] || PRIORIDAD.media).label, color: (PRIORIDAD[t.priority] || PRIORIDAD.media).color }),
     responsable: t => {
       const u = users.find(x => x.id === t.assignee_id);
-      return { clave: `u${t.assignee_id || 0}`, titulo: u?.name || "Sin asignar", color: u?.color };
+      return { clave: `u${pelado(u?.name) || t.assignee_id || 0}`, titulo: u?.name || "Sin asignar", color: u?.color };
     },
   };
   const agrupadas = (() => {
