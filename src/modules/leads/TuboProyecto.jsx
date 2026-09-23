@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Circle, CircleDot, SkipForward, RotateCcw, Loader2, Trash2 } from "lucide-react";
+import { Check, Plus, X, ListTodo, Circle, CircleDot, RotateCcw, Trash2, Loader2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -10,21 +10,16 @@ import {
   agregarItem, marcarItem, borrarItem, itemATarea, cambiarEstadoEtapa, avanceDe,
 } from "./tubo";
 
-// El tubo del proyecto: los hitos en fila y, debajo, qué le falta al que se
-// esté mirando.
+// El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
 //
-// Se mira más de lo que se lee: cada hito es una pieza que se llena a medida
-// que se cierran los puntos de su checklist, y de un vistazo se ve dónde está
-// el proyecto y cuánto le falta. Al tocar uno se abre su lista: lo que hay que
-// tener para cerrarlo. Un punto que necesita que alguien haga algo se vuelve
-// tarea, con responsable y fecha, y vive con el resto de las tareas.
-
-const ESTADOS = {
-  pendiente: { label: "Pendiente", icono: Circle },
-  en_curso: { label: "En curso", icono: CircleDot },
-  hecha: { label: "Cerrado", icono: Check },
-  omitida: { label: "Omitido", icono: SkipForward },
-};
+// Una columna por etapa, y en la columna sus pasos, uno debajo del otro. Así
+// se ve todo el proyecto de una: en qué va, qué le falta a cada etapa y dónde
+// está trabado. Un paso que necesita que alguien haga algo se vuelve tarea del
+// equipo, con responsable y fecha, y al completarse queda marcado.
+//
+// Arquitectura y Construcción traen sus etapas puestas y van en orden; un lead
+// las suma cuando pasan, porque ahí el plan masa puede ir antes que el
+// presupuesto.
 
 export default function TuboProyecto({ lead, catalogo = [], users = [], currentUser, onBitacora }) {
   const tunel = lead.tunel || "lead";
@@ -32,234 +27,195 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const [etapas, setEtapas] = useState([]);
   const [items, setItems] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
-  const [elegida, setElegida] = useState(null);
-  const [nuevo, setNuevo] = useState("");
-  const [ocupado, setOcupado] = useState(false);
-  const [aTarea, setATarea] = useState(null);   // ítem que se está volviendo tarea
+  const [nuevo, setNuevo] = useState({});        // etapa → texto del paso que se escribe
   const [agregando, setAgregando] = useState(false);
+  const [aTarea, setATarea] = useState(null);
+  const [ocupado, setOcupado] = useState(false);
 
   const cargar = useCallback(async () => {
     const r = await cargarTubo(lead.id);
     setSinTablas(r.sinTablas);
     setEtapas(r.etapas);
     setItems(r.items);
-    setElegida(v => v ?? r.etapas.find(e => e.estado === "en_curso")?.id ?? r.etapas.find(e => e.estado === "pendiente")?.id ?? r.etapas[0]?.id ?? null);
   }, [lead.id]);
 
   useEffect(() => {
-    (async () => {
-      await asegurarEtapas(lead, catalogo);
-      cargar();
-    })();
+    (async () => { await asegurarEtapas(lead, catalogo); cargar(); })();
     // eslint-disable-next-line
   }, [lead.id, catalogo.length]);
 
   if (sinTablas) {
-    return <div style={{ fontSize: 12, color: colors.warning, padding: "10px 0" }}>Falta correr la migración 040 en Supabase para el tubo del proyecto.</div>;
+    return <div style={{ fontSize: 12, color: colors.warning, padding: "10px 0" }}>Falta correr la migración 040 en Supabase.</div>;
   }
 
   const delTunel = etapasDelTunel(catalogo, tunel);
   const orden = new Map(delTunel.map((e, i) => [e.id, i]));
-  const enFila = [...etapas].sort((a, b) => (orden.get(a.etapa_id) ?? 99) - (orden.get(b.etapa_id) ?? 99) || a.orden - b.orden);
-  const actual = enFila.find(e => e.id === elegida) || enFila[0];
-  const susItems = items.filter(i => i.lead_etapa_id === actual?.id).sort((a, b) => a.orden - b.orden);
-  const itemsDe = etapaId => items.filter(i => i.lead_etapa_id === etapaId);
-
-  // En un lead las etapas no vienen dadas: se agregan cuando pasan, porque
-  // primero puede salir el plan masa y después el presupuesto.
-  async function agregarEtapa(etapaId) {
-    await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden: (etapas.length + 1) * 10, estado: "pendiente" });
-    setAgregando(false);
-    await cargar();
-  }
-  async function quitarEtapa(etapa) {
-    if (!window.confirm("¿Quitar esta etapa del proyecto? Se va con su checklist.")) return;
-    await supabase.from("lead_etapas").delete().eq("id", etapa.id);
-    setElegida(null);
-    await cargar();
-  }
-  // Quién la tiene a cargo y para cuándo: una etapa con responsable le aparece
-  // a esa persona entre sus tareas, que es como se entera.
-  async function guardarEtapa(etapa, campos) {
-    await supabase.from("lead_etapas").update(campos).eq("id", etapa.id);
-    await cargar();
-  }
+  // En Arquitectura y Construcción manda el orden del catálogo: son hitos, uno
+  // detrás de otro. En un lead manda el orden en que se fueron poniendo, que
+  // es el que tuvo ese proyecto.
+  const columnas = [...etapas].sort((a, b) => (info.enOrden
+    ? (orden.get(a.etapa_id) ?? 99) - (orden.get(b.etapa_id) ?? 99) || a.orden - b.orden
+    : a.orden - b.orden || a.id - b.id));
+  const itemsDe = id => items.filter(i => i.lead_etapa_id === id).sort((a, b) => a.orden - b.orden);
 
   async function hacer(fn) {
     setOcupado(true);
     try { await fn(); await cargar(); } finally { setOcupado(false); }
   }
-
-  const cerradas = enFila.filter(e => e.estado === "hecha").length;
+  const guardarEtapa = (etapa, campos) => hacer(async () => { await supabase.from("lead_etapas").update(campos).eq("id", etapa.id); });
+  const agregarEtapa = etapaId => hacer(async () => {
+    await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden: (etapas.length + 1) * 10, estado: "pendiente" });
+    setAgregando(false);
+  });
+  const quitarEtapa = etapa => {
+    if (!window.confirm("¿Quitar esta etapa del proyecto? Se va con sus pasos.")) return;
+    hacer(async () => { await supabase.from("lead_etapas").delete().eq("id", etapa.id); });
+  };
 
   return (
     <div>
-      {/* ── Los hitos, en fila ── */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>{info.label}</span>
-        <span style={{ fontSize: 11.5, color: colors.muted }}>
-          {info.enOrden ? "Los hitos van en orden: del uno se pasa al otro cuando está cerrado." : "Sin orden: las etapas pasan cuando pasan."}
-          {enFila.length ? ` · ${cerradas} de ${enFila.length} cerrados` : ""}
-        </span>
-      </div>
-
-      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6 }}>
-        {enFila.map((e, i) => {
-          const cat = etapaInfo(e.etapa_id, catalogo);
-          const suyos = itemsDe(e.id);
+      <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8, alignItems: "flex-start" }}>
+        {columnas.map(etapa => {
+          const cat = etapaInfo(etapa.etapa_id, catalogo);
+          const suyos = itemsDe(etapa.id);
+          const hecha = etapa.estado === "hecha";
+          const enCurso = etapa.estado === "en_curso";
           const avance = avanceDe(suyos);
-          const activa = e.id === actual?.id;
-          const hecha = e.estado === "hecha";
-          const Icono = (ESTADOS[e.estado] || ESTADOS.pendiente).icono;
-          const tono = hecha ? colors.success : e.estado === "en_curso" ? (cat.color || colors.brand) : colors.border;
+          const tono = hecha ? colors.success : enCurso ? (cat.color || colors.brand) : colors.border;
+
           return (
-            <button key={e.id} onClick={() => setElegida(e.id)}
-              style={{ flex: "1 0 140px", minWidth: 140, textAlign: "left", cursor: "pointer", fontFamily: colors.font,
-                background: activa ? colors.surface : colors.bg, border: `1px solid ${activa ? colors.ink : colors.border}`,
-                borderTop: `3px solid ${tono}`, borderRadius: colors.radiusSm, padding: "8px 10px", position: "relative" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-                <Icono size={12} color={hecha ? colors.success : e.estado === "en_curso" ? cat.color || colors.brand : colors.muted} />
-                <span style={{ fontSize: 10, color: colors.muted }}>{i + 1}</span>
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: hecha ? colors.muted : colors.ink, lineHeight: 1.25, textDecoration: hecha ? "line-through" : "none" }}>{cat.nombre}</div>
-              <div style={{ fontSize: 10, color: colors.muted, marginTop: 3, minHeight: 13 }}>
-                {avance == null ? "sin checklist" : `${suyos.filter(x => x.hecho).length}/${suyos.length}`}
-                {e.fecha_objetivo ? ` · ${new Date(e.fecha_objetivo + "T12:00:00").toLocaleDateString("es-EC", { day: "numeric", month: "short" })}` : ""}
-              </div>
-              {/* Cuánto lleva ese hito, en una barra: es lo que se mira primero. */}
-              <div style={{ height: 4, borderRadius: 3, background: colors.neutralSoft, marginTop: 5, overflow: "hidden" }}>
-                <div style={{ width: `${hecha ? 100 : avance || 0}%`, height: "100%", background: hecha ? colors.success : cat.color || colors.brand }} />
-              </div>
-              {e.responsable_nombre && (
-                <div style={{ position: "absolute", top: 6, right: 6 }} title={e.responsable_nombre}>
-                  <Avatar name={e.responsable_nombre} size={18} color={cat.color || colors.brand} />
+            <div key={etapa.id} style={{ width: 236, flexShrink: 0, background: colors.surface, border: `1px solid ${colors.border}`,
+              borderTop: `3px solid ${tono}`, borderRadius: colors.radiusMd, display: "flex", flexDirection: "column", opacity: hecha ? 0.75 : 1 }}>
+
+              {/* La cabeza de la etapa: cómo va, quién y para cuándo. */}
+              <div style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {hecha ? <Check size={13} color={colors.success} /> : enCurso ? <CircleDot size={13} color={cat.color || colors.brand} /> : <Circle size={13} color={colors.muted} />}
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: hecha ? colors.muted : colors.ink,
+                    textDecoration: hecha ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat.nombre}</span>
+                  {suyos.length > 0 && <span style={{ fontSize: 10.5, color: colors.muted }}>{suyos.filter(i => i.hecho).length}/{suyos.length}</span>}
+                  {!info.enOrden && (
+                    <button onClick={() => quitarEtapa(etapa)} title="Quitar esta etapa"
+                      style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 0 }}><Trash2 size={12} /></button>
+                  )}
                 </div>
-              )}
-            </button>
+
+                {avance != null && !hecha && (
+                  <div style={{ height: 3, borderRadius: 3, background: colors.neutralSoft, margin: "6px 0 0", overflow: "hidden" }}>
+                    <div style={{ width: `${avance}%`, height: "100%", background: cat.color || colors.brand }} />
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+                  <select value={etapa.responsable_id || ""} title="Quién la tiene a cargo"
+                    onChange={e => { const u = users.find(x => String(x.id) === e.target.value); guardarEtapa(etapa, { responsable_id: u?.id ?? null, responsable_nombre: u?.name ?? null }); }}
+                    style={{ ...chico, flex: 1, minWidth: 0 }}>
+                    <option value="">Sin responsable</option>
+                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                  <input type="date" value={etapa.fecha_objetivo || ""} title="Para cuándo"
+                    onChange={e => guardarEtapa(etapa, { fecha_objetivo: e.target.value || null })}
+                    style={{ ...chico, width: 112 }} />
+                </div>
+              </div>
+
+              {/* Los pasos de esta etapa, uno debajo del otro. */}
+              <div style={{ padding: "4px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: 320, overflowY: "auto" }}>
+                {suyos.map(item => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "5px 0" }}>
+                    <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado}
+                      title={item.hecho ? "Desmarcar" : "Marcar como hecho"}
+                      style={{ width: 16, height: 16, flexShrink: 0, marginTop: 1, borderRadius: 4, cursor: "pointer", padding: 0,
+                        border: `1.5px solid ${item.hecho ? colors.success : colors.border}`, background: item.hecho ? colors.success : "#fff",
+                        display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {item.hecho && <Check size={11} color="#fff" />}
+                    </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
+                      {item.tarea_id && <div style={{ fontSize: 9.5, color: colors.muted }}>es tarea del equipo</div>}
+                    </div>
+                    {!item.tarea_id && !item.hecho && (
+                      <button onClick={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })}
+                        title="Convertirlo en tarea del equipo"
+                        style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 1 }}><ListTodo size={13} /></button>
+                    )}
+                    <button onClick={() => hacer(() => borrarItem(item.id))} disabled={ocupado} title="Quitar"
+                      style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 1 }}><X size={12} /></button>
+                  </div>
+                ))}
+
+                {!suyos.length && (
+                  <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
+                    style={{ background: "none", border: "none", padding: "4px 0", textAlign: "left", fontSize: 11, color: colors.muted, cursor: "pointer", fontFamily: colors.font }}>
+                    Sin pasos · traer los de fábrica
+                  </button>
+                )}
+
+                <form onSubmit={e => {
+                  e.preventDefault();
+                  const t = (nuevo[etapa.id] || "").trim();
+                  if (t) hacer(async () => { await agregarItem(lead, etapa, t, suyos.length + 1); setNuevo(n => ({ ...n, [etapa.id]: "" })); });
+                }}>
+                  <input value={nuevo[etapa.id] || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: e.target.value }))}
+                    placeholder="+ paso" style={{ ...chico, width: "100%", marginTop: 4 }} />
+                </form>
+              </div>
+
+              <div style={{ padding: "8px 10px", borderTop: `1px solid ${colors.neutralSoft}` }}>
+                {hecha ? (
+                  <button onClick={() => hacer(() => cambiarEstadoEtapa(etapa, "en_curso", currentUser))} disabled={ocupado} style={boton(false)}>
+                    <RotateCcw size={12} /> Reabrir
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {!enCurso && <button onClick={() => hacer(() => cambiarEstadoEtapa(etapa, "en_curso", currentUser))} disabled={ocupado} style={boton(false)}>Arrancar</button>}
+                    <button onClick={() => hacer(async () => {
+                      const faltan = suyos.filter(i => !i.hecho).length;
+                      if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "paso" : "pasos"} sin marcar. ¿Cerrar la etapa igual?`)) return;
+                      await cambiarEstadoEtapa(etapa, "hecha", currentUser);
+                      onBitacora?.();
+                    })} disabled={ocupado} style={boton(true)}>
+                      {ocupado ? <Loader2 size={12} /> : <Check size={12} />} Cerrar
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           );
         })}
+
+        {/* En un lead las etapas se suman cuando pasan. */}
         {!info.enOrden && (
-          <button onClick={() => setAgregando(a => !a)}
-            style={{ flex: "0 0 124px", minWidth: 124, cursor: "pointer", fontFamily: colors.font, background: colors.bg,
-              border: `1px dashed ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px", color: colors.inkSoft, fontSize: 12,
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-            <Plus size={13} /> Agregar etapa
-          </button>
-        )}
-        {!enFila.length && info.enOrden && <div style={{ fontSize: 12, color: colors.muted, padding: "12px 0" }}>Todavía no hay etapas puestas.</div>}
-      </div>
-
-      {agregando && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", background: colors.bg, borderRadius: colors.radiusSm, padding: 10, marginBottom: 8 }}>
-          {delTunel.map(e => (
-            <button key={e.id} onClick={() => agregarEtapa(e.id)}
-              style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 16, padding: "4px 11px", fontSize: 12, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
-              {e.nombre}
+          <div style={{ width: 180, flexShrink: 0 }}>
+            <button onClick={() => setAgregando(a => !a)}
+              style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: colors.radiusMd,
+                padding: "12px 10px", color: colors.inkSoft, fontSize: 12.5, cursor: "pointer", fontFamily: colors.font,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Plus size={14} /> Etapa
             </button>
-          ))}
-          {!delTunel.length && <span style={{ fontSize: 12, color: colors.muted }}>Este tubo todavía no tiene etapas en Ajustes.</span>}
-        </div>
-      )}
-
-      {/* ── Lo que le falta al hito elegido ── */}
-      {actual && (
-        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginTop: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-            <span style={{ fontSize: 13.5, fontWeight: 700, color: colors.ink }}>{etapaInfo(actual.etapa_id, catalogo).nombre}</span>
-            <span style={{ fontSize: 11, color: colors.muted }}>{(ESTADOS[actual.estado] || ESTADOS.pendiente).label}</span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {actual.estado !== "hecha" ? (
-                <>
-                  {actual.estado !== "en_curso" && (
-                    <button onClick={() => hacer(() => cambiarEstadoEtapa(actual, "en_curso", currentUser))} disabled={ocupado}
-                      style={boton(false)}>Arrancar</button>
-                  )}
-                  <button onClick={() => hacer(async () => {
-                    const faltan = susItems.filter(i => !i.hecho).length;
-                    if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "punto" : "puntos"} sin marcar. ¿Cerrar el hito igual?`)) return;
-                    await cambiarEstadoEtapa(actual, "hecha", currentUser);
-                    onBitacora?.();
-                  })} disabled={ocupado} style={boton(true)}>
-                    {ocupado ? <Loader2 size={12} /> : <Check size={12} />} Cerrar hito
+            {agregando && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+                {delTunel.map(e => (
+                  <button key={e.id} onClick={() => agregarEtapa(e.id)}
+                    style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 8, padding: "5px 10px",
+                      fontSize: 12, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, textAlign: "left" }}>
+                    {e.nombre}
                   </button>
-                </>
-              ) : (
-                <button onClick={() => hacer(() => cambiarEstadoEtapa(actual, "en_curso", currentUser))} disabled={ocupado} style={boton(false)}>
-                  <RotateCcw size={12} /> Reabrir
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Quién y para cuándo: lo mínimo para que una etapa avance. */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-            <select value={actual.responsable_id || ""} title="Quién la tiene a cargo"
-              onChange={e => { const u = users.find(x => String(x.id) === e.target.value); guardarEtapa(actual, { responsable_id: u?.id ?? null, responsable_nombre: u?.name ?? null }); }}
-              style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12 }}>
-              <option value="">Sin responsable</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-            <input type="date" value={actual.fecha_objetivo || ""} title="Para cuándo"
-              onChange={e => guardarEtapa(actual, { fecha_objetivo: e.target.value || null })}
-              style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
-            {!info.enOrden && (
-              <button onClick={() => quitarEtapa(actual)} title="Quitar esta etapa del proyecto"
-                style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", marginLeft: "auto" }}><Trash2 size={13} /></button>
+                ))}
+                {!delTunel.length && <span style={{ fontSize: 11.5, color: colors.muted }}>Sin etapas en Ajustes.</span>}
+              </div>
             )}
           </div>
+        )}
 
-          {/* El checklist: lo que hay que tener para cerrarlo. */}
-          {susItems.map(item => {
-            const tarea = item.tarea_id;
-            return (
-              <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
-                <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado}
-                  title={item.hecho ? "Desmarcar" : "Marcar como hecho"}
-                  style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, cursor: "pointer",
-                    border: `1.5px solid ${item.hecho ? colors.success : colors.border}`, background: item.hecho ? colors.success : "#fff",
-                    display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
-                  {item.hecho && <Check size={12} color="#fff" />}
-                </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
-                  <div style={{ fontSize: 10, color: colors.muted }}>
-                    {item.hecho && item.hecho_por ? `${item.hecho_por}${item.hecho_at ? ` · ${new Date(item.hecho_at).toLocaleDateString("es-EC", { day: "numeric", month: "short" })}` : ""}` : ""}
-                    {tarea ? " · es una tarea" : ""}
-                  </div>
-                </div>
-                {!tarea && !item.hecho && (
-                  <button onClick={() => setATarea({ item, titulo: item.texto, assignee_id: "", due_date: "" })}
-                    title="Convertirlo en tarea de alguien"
-                    style={{ ...boton(false), padding: "3px 8px", fontSize: 11 }}><ListTodo size={11} /> Tarea</button>
-                )}
-                <button onClick={() => hacer(() => borrarItem(item.id))} disabled={ocupado} title="Quitar del checklist"
-                  style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><X size={13} /></button>
-              </div>
-            );
-          })}
+        {!columnas.length && info.enOrden && (
+          <div style={{ fontSize: 12, color: colors.muted, padding: "16px 0" }}>Este proyecto todavía no tiene etapas.</div>
+        )}
+      </div>
 
-          {!susItems.length && (
-            <div style={{ fontSize: 11.5, color: colors.muted, padding: "6px 0" }}>
-              Sin checklist todavía. Escribe abajo lo que hay que tener para cerrar este hito
-              <button onClick={() => hacer(() => sembrarChecklist(lead, actual))} disabled={ocupado}
-                style={{ background: "none", border: "none", padding: "0 4px", color: colors.ink, textDecoration: "underline", cursor: "pointer", fontSize: 11.5, fontFamily: colors.font }}>
-                o trae el de fábrica
-              </button>.
-            </div>
-          )}
-
-          <form onSubmit={e => { e.preventDefault(); if (nuevo.trim()) hacer(async () => { await agregarItem(lead, actual, nuevo, susItems.length + 1); setNuevo(""); }); }}
-            style={{ display: "flex", gap: 6, marginTop: 8 }}>
-            <input value={nuevo} onChange={e => setNuevo(e.target.value)} placeholder="Agregar un punto a este hito"
-              style={{ ...inputStyle, flex: 1, fontSize: 12.5 }} />
-            <button type="submit" disabled={!nuevo.trim() || ocupado} style={boton(true)}><Plus size={12} /> Agregar</button>
-          </form>
-        </div>
-      )}
-
-      {/* Volver un punto en tarea: quién y para cuándo. */}
+      {/* Volver un paso en tarea del equipo: quién y para cuándo. */}
       {aTarea && (
-        <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginTop: 8 }}>
+        <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginTop: 4 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, marginBottom: 8 }}>Convertir en tarea</div>
           <div style={{ display: "grid", gap: 8 }}>
             <input value={aTarea.titulo} onChange={e => setATarea(a => ({ ...a, titulo: e.target.value }))} style={inputStyle} />
@@ -268,7 +224,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 <option value="">¿Quién la hace?</option>
                 {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
-              <input type="date" value={aTarea.due_date} onChange={e => setATarea(a => ({ ...a, due_date: e.target.value }))} style={inputStyle} />
+              <input type="date" value={aTarea.due_date || ""} onChange={e => setATarea(a => ({ ...a, due_date: e.target.value }))} style={inputStyle} />
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => hacer(async () => {
@@ -277,7 +233,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               })} disabled={ocupado || !aTarea.titulo.trim()} style={boton(true)}>Crear tarea</button>
               <button onClick={() => setATarea(null)} style={boton(false)}>Cancelar</button>
             </div>
-            <div style={{ fontSize: 10.5, color: colors.muted }}>Va a la lista de tareas con el proyecto puesto. Al completarla, el punto queda marcado.</div>
           </div>
         </div>
       )}
@@ -285,6 +240,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   );
 }
 
+const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 const boton = fuerte => ({
   display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
   border: `1px solid ${fuerte ? colors.ink : colors.border}`, background: fuerte ? colors.ink : "#fff",

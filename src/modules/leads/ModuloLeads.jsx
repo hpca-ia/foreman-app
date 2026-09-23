@@ -342,73 +342,47 @@ function Aviso({ n, txt, Icono, color, bg, borde }) {
 // y cuándo. La barra son los puntos de revisión; si volvió a una etapa
 // anterior lo dice, porque un proyecto que regresa no está caminando.
 function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = true, onAbrir }) {
-  const temp = tempInfo(lead.temperatura);
+  // Una línea por proyecto, y solo lo que hace falta para decidir si hay que
+  // meterse ahí: cómo se llama, en qué etapa va, quién la tiene y para cuándo.
+  //
+  // Antes esta fila llevaba además el contacto, la temperatura, una barra de
+  // puntos, "etapa 2 de 5", el próximo paso, el monto y "0/1 pasos". Ocho
+  // datos por proyecto: con cinco proyectos ya no se leía nada. Lo demás sigue
+  // adentro del proyecto, que es donde se necesita.
   const etapa = etapaInfo(plan?.actual?.etapa_id || lead.etapa, catalogo);
-  // Los puntos de revisión son los de ESTE proyecto, en su orden. Sin plan
-  // todavía, se muestran los de la ruta estándar.
-  const conPlan = plan?.lista?.length ? plan.lista : null;
-  const puntos = conPlan
-    ? conPlan.map(e => ({ id: e.id, nombre: etapaInfo(e.etapa_id, catalogo).nombre }))
-    : catalogo.filter(e => !e.cierra);
-  const llegada = conPlan
-    ? (plan.actual ? conPlan.findIndex(e => e.id === plan.actual.id)
-       : conPlan.map(e => e.estado).lastIndexOf("hecha"))
-    : puntos.findIndex(e => e.id === etapa.id);
   const d = fecha ? daysUntil(fecha) : null;
   const vencido = d != null && d < 0;
-  const paso = ruta?.siguiente;
   const responsable = plan?.actual?.responsable_nombre || lead.responsable_nombre;
   const cuandoTxt = d == null ? "sin fecha" : vencido ? `atrasado ${Math.abs(d)} d` : d === 0 ? "hoy" : d === 1 ? "mañana" : `en ${d} d`;
 
   return (
     <div onClick={onAbrir} className="pipeline-fila"
-      style={{ borderLeft: `3px solid ${vencido ? colors.danger : temp?.color || "transparent"}` }}>
+      style={{ borderLeft: `3px solid ${vencido ? colors.danger : etapa.color || "transparent"}` }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {lead.nombre}
-          {/* La (L) dice que todavía se está persiguiendo: es el mismo
-              proyecto, pero aún no es trabajo firmado. */}
+          {/* La (L) dice que todavía se está persiguiendo. */}
           {(lead.tunel || "lead") === "lead" && (
             <span title="Lead: todavía se está persiguiendo"
               style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: colors.muted, border: `1px solid ${colors.border}`, borderRadius: 4, padding: "0 4px" }}>L</span>
           )}
         </div>
-        <div style={{ fontSize: 11, color: colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {[lead.contacto, temp?.label].filter(Boolean).join(" · ") || "Sin contacto"}
-        </div>
       </div>
 
-      <div style={{ minWidth: 0 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: etapa.color || colors.inkSoft }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{etapa.nombre}</span>
-          {volvioAtras && <CornerDownLeft size={11} color={colors.warning} />}
-        </span>
-        <div style={{ display: "flex", gap: 2, margin: "3px 0" }}>
-          {puntos.map((p, i) => (
-            <span key={p.id} title={p.nombre}
-              style={{ flex: 1, height: 3, borderRadius: 2, background: i <= llegada ? (etapa.color || colors.brand) : colors.neutralSoft }} />
-          ))}
-        </div>
-        <div style={{ fontSize: 10, color: volvioAtras ? colors.warning : colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {volvioAtras ? "volvió atrás · " : ""}
-          {conPlan ? `etapa ${llegada + 1} de ${conPlan.length}` : `punto ${llegada + 1} de ${puntos.length}`}
-          {responsable ? ` · ${responsable}` : ""}
-        </div>
+      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: etapa.color || colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{etapa.nombre}</span>
+        {volvioAtras && <CornerDownLeft size={11} color={colors.warning} title="Volvió atrás" />}
       </div>
 
-      <div style={{ minWidth: 0, fontSize: 11, color: vencido ? colors.danger : colors.inkSoft }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <Clock size={10} style={{ flexShrink: 0 }} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {paso ? paso.title : plan?.actual ? `En curso: ${etapa.nombre}` : "Sin próximo paso"}
-          </span>
-        </div>
-        <div style={{ fontSize: 10, color: vencido ? colors.danger : colors.muted, fontWeight: vencido ? 700 : 400 }}>{cuandoTxt}</div>
+      <div style={{ minWidth: 0, fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {responsable || "sin responsable"}
       </div>
 
-      <div style={{ textAlign: "right" }}>
-        {verMonto && <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>${fmt(lead.valor_estimado)}</div>}
-        {ruta?.total > 0 && <div style={{ fontSize: 10, color: colors.muted }}>{ruta.hechos}/{ruta.total} pasos</div>}
+      <div style={{ textAlign: "right", fontSize: 12, color: vencido ? colors.danger : colors.muted, fontWeight: vencido ? 700 : 400, whiteSpace: "nowrap" }}>
+        {cuandoTxt}
+        {verMonto && Number(lead.valor_estimado) > 0 && (
+          <div style={{ fontSize: 11, color: colors.muted, fontWeight: 400 }}>${fmt(lead.valor_estimado)}</div>
+        )}
       </div>
     </div>
   );

@@ -260,7 +260,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   // no cuánto vale el negocio.
   const verDatos = currentUser?.role === "owner" || !editando || lead.created_by === currentUser?.id;
   const SECCIONES = editando
-    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["dia", "Tareas"], ["bitacora", "Bitácora"], ["gente", "Gente"]]
+    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["gente", "Gente"]]
     : [["datos", "Datos"]];
 
   return (
@@ -463,7 +463,14 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         </>
       )}
 
-      {editando && seccionVisible === "bitacora" && (
+      {/* La bitácora es el pie del proyecto —qué pasó, en orden—, no otra
+          pantalla: se lee después de ver las etapas. */}
+      {editando && seccionVisible === "plan" && (
+        <div style={{ borderTop: `1px solid ${colors.neutralSoft}`, marginTop: 18, paddingTop: 12, fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 }}>
+          BITÁCORA
+        </div>
+      )}
+      {editando && seccionVisible === "plan" && (
         <>
           <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
             Qué pasó, en orden. Se llena sola con el plan y los pasos; lo que escribes tú se puede corregir.
