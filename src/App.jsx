@@ -169,10 +169,35 @@ export default function App() {
     return true;
   }
 
-  async function cambiarEstado(id, estado) {
+  async function cambiarEstado(id, estado, cierre = null) {
     const tarea = tareas.find(t => t.id === id);
-    setTareas(prev => prev.map(t => t.id === id ? { ...t, status: estado } : t));
-    const { error } = await supabase.from("tasks").update({ status: estado }).eq("id", id);
+    // Lo que se deja al cerrarla: la prueba de lo que se hizo, o la decisión
+    // de quien aprueba. Sin la migración 038 se guarda solo el estado.
+    const campos = { status: estado };
+    if (cierre) {
+      if (cierre.enlace) campos.prueba_enlace = cierre.enlace;
+      if (cierre.decision === "aprobar" || cierre.decision === "devolver") {
+        campos.aprobacion_estado = cierre.decision === "aprobar" ? "aprobada" : "devuelta";
+        campos.aprobacion_por = usuario.id;
+        campos.aprobacion_nombre = usuario.name;
+        campos.aprobacion_at = new Date().toISOString();
+        campos.aprobacion_nota = cierre.nota || null;
+      }
+    }
+    setTareas(prev => prev.map(t => t.id === id ? { ...t, ...campos } : t));
+    let { error } = await supabase.from("tasks").update(campos).eq("id", id);
+    if (error && /column|schema cache/i.test(error.message)) {
+      alert("Falta correr la migración 038 en Supabase: por ahora se guarda el estado, pero no la prueba ni quién aprobó.");
+      ({ error } = await supabase.from("tasks").update({ status: estado }).eq("id", id));
+    }
+    // La nota de cierre queda como comentario: es la conversación de la tarea,
+    // y así le llega a quien la creó y a quien la estaba esperando.
+    if (cierre?.nota) {
+      await supabase.from("tarea_comentarios").insert({
+        task_id: id, autor_id: usuario.id, autor_nombre: usuario.name,
+        texto: `${cierre.decision === "aprobar" ? "Aprobada" : cierre.decision === "devolver" ? "Devuelta" : "Completada"}: ${cierre.nota}`,
+      });
+    }
     if (error) { console.error("Error updating status:", error); fetchTareas(); return; }
 
     // Al completarla, las que la estaban esperando se destraban solas.
@@ -195,13 +220,26 @@ export default function App() {
   async function guardarTarea(formEntero, id) {
     // Los acompañantes no son columnas de la tarea: van en su propia tabla.
     const { _acompanantes: conmigo = [], ...form } = formEntero;
+    // Si falta la migración 038, la tarea se guarda igual: sin la marca de
+    // aprobación, y se avisa.
+    const sinNuevas = ({ es_aprobacion, enlace, ...resto }) => resto;
+    const guardar = async campos => {
+      const r = id ? await supabase.from("tasks").update(campos).eq("id", id)
+                   : await supabase.from("tasks").insert({ ...campos, created_by: usuario.id }).select().single();
+      if (r.error && /column|schema cache/i.test(r.error.message)) {
+        alert("Falta correr en Supabase las migraciones 037 y 038: la tarea se guarda, pero sin el enlace ni el pedido de aprobación.");
+        return id ? await supabase.from("tasks").update(sinNuevas(campos)).eq("id", id)
+                  : await supabase.from("tasks").insert({ ...sinNuevas(campos), created_by: usuario.id }).select().single();
+      }
+      return r;
+    };
     if (id) {
-      const { error } = await supabase.from("tasks").update(form).eq("id", id);
+      const { error } = await guardar(form);
       if (error) { alert(mensajeErrorTarea(error)); return; }
       await guardarResponsables(id, conmigo, form.assignee_id);
       cargarEquipoDeTareas();
     } else {
-      const { data: creada, error } = await supabase.from("tasks").insert({ ...form, created_by: usuario.id }).select().single();
+      const { data: creada, error } = await guardar({ ...form, ...(form.es_aprobacion ? { aprobacion_estado: "pendiente" } : {}) });
       if (error) { alert(mensajeErrorTarea(error)); return; }
       if (creada && conmigo.length) { await guardarResponsables(creada.id, conmigo, form.assignee_id); cargarEquipoDeTareas(); }
       if (form.assignee_id) {
@@ -225,7 +263,10 @@ export default function App() {
   const puede = crearPuede(usuario, permisos);
   // Se calcula acá y no antes: `puede` todavía no existe más arriba.
   const verPipeline = puede("leads.ver") || tienePipeline;
-  const nombreProyecto = t => t.lead_id ? (leadsPorId[t.lead_id] || "Pipeline") : nombreProyecto(t);
+  // El nombre del proyecto de una tarea: el del pipeline si viene de ahí, el de
+  // Ajustes si no. (Se llamaba a sí misma: al buscar por texto una tarea con
+  // proyecto normal, el navegador se quedaba sin pila y la pantalla se caía.)
+  const nombreProyecto = t => (t.lead_id ? (leadsPorId[t.lead_id] || "Pipeline") : projects.find(p => p.id === t.project_id)?.name || "");
   const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.

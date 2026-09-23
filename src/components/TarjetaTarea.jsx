@@ -1,4 +1,6 @@
-import { Pencil, Trash2, MessageSquare, Clock, Link as Enlace } from "lucide-react";
+import { useState } from "react";
+import { Pencil, Trash2, MessageSquare, Clock, Link as Enlace, Stamp, Check, Undo2 } from "lucide-react";
+import CompletarTarea from "./CompletarTarea";
 import { PRIORIDAD, ESTADO, estadosElegibles } from "../theme/constants";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
@@ -27,10 +29,19 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
   const puedeCambiar = admin || esMiTarea;
   const esListo = task.status === "listo";
 
+  // Completar pide la prueba: la foto, el archivo o el enlace de cómo quedó.
+  // Los demás estados se cambian de una.
+  const [cerrando, setCerrando] = useState(null);   // "completar" | "aprobar" | "devolver"
   function handleEstado(nuevoEstado) {
     if (!puedeCambiar) return;
+    if (nuevoEstado === "listo") { setCerrando("completar"); return; }
     onCambiarEstado(task.id, nuevoEstado);
   }
+
+  // Un pedido de aprobación no se "completa": se aprueba o se devuelve, y
+  // queda dicho quién y cuándo.
+  const esAprobacion = !!task.es_aprobacion;
+  const decidida = esAprobacion && ["aprobada", "devuelta"].includes(task.aprobacion_estado);
 
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 6, borderLeft: `3px solid ${proy?.color || colors.brand}`, opacity: esListo ? 0.6 : 1, fontFamily: colors.font, transition: "opacity 0.2s", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
@@ -39,6 +50,12 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
           <span style={{ background: pC.bg, color: pC.color, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{pC.label}</span>
           <span style={{ background: colors.neutralSoft, color: colors.inkSoft, fontSize: 11, padding: "2px 8px", borderRadius: 20 }}>{task.type}</span>
           <span style={{ color: eC.color, fontSize: 11 }}>{eC.label}</span>
+          {esAprobacion && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: task.aprobacion_estado === "aprobada" ? colors.successSoft : task.aprobacion_estado === "devuelta" ? colors.dangerSoft : colors.neutralSoft,
+              color: task.aprobacion_estado === "aprobada" ? colors.success : task.aprobacion_estado === "devuelta" ? colors.danger : colors.inkSoft, fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>
+              <Stamp size={11} /> {task.aprobacion_estado === "aprobada" ? "Aprobada" : task.aprobacion_estado === "devuelta" ? "Devuelta" : "Pide aprobación"}
+            </span>
+          )}
         </div>
         <FechaBadge due={task.due_date} status={task.status} />
       </div>
@@ -79,9 +96,34 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
           <Enlace size={11} /> {task.enlace.replace(/^https?:\/\//, "").slice(0, 48)}
         </a>
       )}
+      {decidida && (
+        <div style={{ fontSize: 11, color: colors.inkSoft, background: colors.bg, borderRadius: colors.radiusSm, padding: "5px 8px", marginBottom: 6, lineHeight: 1.4 }}>
+          {task.aprobacion_estado === "aprobada" ? "Aprobada" : "Devuelta"} por {task.aprobacion_nombre || "alguien"}
+          {task.aprobacion_at && ` el ${new Date(task.aprobacion_at).toLocaleDateString("es-EC", { day: "numeric", month: "short" })}`}
+          {task.aprobacion_nota && <div style={{ color: colors.ink, marginTop: 2 }}>“{task.aprobacion_nota}”</div>}
+        </div>
+      )}
+      {task.prueba_enlace && (
+        <a href={task.prueba_enlace} target="_blank" rel="noreferrer noopener"
+          style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: colors.success, textDecoration: "none", marginBottom: 6, overflowWrap: "anywhere" }}>
+          <Check size={11} /> Prueba: {task.prueba_enlace.replace(/^https?:\/\//, "").slice(0, 40)}
+        </a>
+      )}
       <InlineFiles taskId={task.id} />
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", paddingTop: 6, borderTop: "1px solid #F3F4F6", marginTop: 4 }}>
-        {puedeCambiar && (
+        {puedeCambiar && esAprobacion && !esListo && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button onClick={() => setCerrando("aprobar")}
+              style={{ background: colors.success, border: "none", borderRadius: colors.radiusSm, padding: "6px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 5 }}>
+              <Check size={13} /> Aprobar
+            </button>
+            <button onClick={() => setCerrando("devolver")}
+              style={{ background: "#fff", border: `1px solid ${colors.dangerBorder || colors.border}`, borderRadius: colors.radiusSm, padding: "6px 14px", color: colors.danger, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 5 }}>
+              <Undo2 size={13} /> Devolver
+            </button>
+          </div>
+        )}
+        {puedeCambiar && !(esAprobacion && !esListo) && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             {estadosElegibles(task.status).map(([k, v]) => (
               <button key={k} onClick={() => handleEstado(k)}
@@ -95,6 +137,10 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
         {admin && <WhatsAppDraftModal task={task} users={users} projects={projects} />}
         {admin && <button onClick={() => onEliminar(task.id)} style={{ background: colors.dangerSoft, border: "1px solid #F3C6C6", borderRadius: colors.radiusSm, padding: "5px 8px", color: colors.danger, cursor: "pointer", display: "flex", alignItems: "center" }}><Trash2 size={13} /></button>}
       </div>
+      {cerrando && (
+        <CompletarTarea tarea={task} modo={cerrando} onCerrar={() => setCerrando(null)}
+          onConfirmar={datos => onCambiarEstado(task.id, cerrando === "devolver" ? "en-progreso" : "listo", { ...datos, decision: cerrando })} />
+      )}
     </div>
   );
 }

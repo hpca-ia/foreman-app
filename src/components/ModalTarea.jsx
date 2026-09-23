@@ -17,7 +17,8 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
     status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada, enlace: editTask.enlace || "",
-  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "" });
+    es_aprobacion: !!editTask.es_aprobacion,
+  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "", es_aprobacion: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   // Los que acompañan al responsable principal: el plano lo hacen dos.
   const [conmigo, setConmigo] = useState(acompanantes);
@@ -128,6 +129,14 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Los recordatorios y la carga se cuentan al responsable principal; los demás la ven como suya y la pueden mover.</div>
         </div>
         <div><label style={lS}>Fecha límite *</label><input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} style={inputStyle} /></div>
+        {/* Pedir una aprobación es pedir una tarea: la misma lista, la misma
+            fecha, pero se cierra aprobando o devolviendo, no con un check. */}
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer", background: form.es_aprobacion ? colors.brandSoft : colors.bg, borderRadius: colors.radiusSm, padding: "8px 10px", lineHeight: 1.4 }}>
+          <input type="checkbox" checked={!!form.es_aprobacion} onChange={e => inp("es_aprobacion", e.target.checked)} style={{ marginTop: 2 }} />
+          <span>
+            <strong style={{ color: colors.ink }}>Pide una aprobación</strong> — quien la reciba la aprueba o la devuelve con un comentario, en vez de marcarla completada. Queda anotado quién decidió y cuándo.
+          </span>
+        </label>
         {soyAdmin && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
             <input type="checkbox" checked={!!form.privada} onChange={e => inp("privada", e.target.checked)} />
