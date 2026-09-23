@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Circle, CircleDot, SkipForward, RotateCcw, Loader2 } from "lucide-react";
+import { Check, Plus, X, ListTodo, Circle, CircleDot, SkipForward, RotateCcw, Loader2, Trash2 } from "lucide-react";
+import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import Avatar from "../../components/ui/Avatar";
@@ -35,6 +36,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const [nuevo, setNuevo] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [aTarea, setATarea] = useState(null);   // ítem que se está volviendo tarea
+  const [agregando, setAgregando] = useState(false);
 
   const cargar = useCallback(async () => {
     const r = await cargarTubo(lead.id);
@@ -62,6 +64,26 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const actual = enFila.find(e => e.id === elegida) || enFila[0];
   const susItems = items.filter(i => i.lead_etapa_id === actual?.id).sort((a, b) => a.orden - b.orden);
   const itemsDe = etapaId => items.filter(i => i.lead_etapa_id === etapaId);
+
+  // En un lead las etapas no vienen dadas: se agregan cuando pasan, porque
+  // primero puede salir el plan masa y después el presupuesto.
+  async function agregarEtapa(etapaId) {
+    await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden: (etapas.length + 1) * 10, estado: "pendiente" });
+    setAgregando(false);
+    await cargar();
+  }
+  async function quitarEtapa(etapa) {
+    if (!window.confirm("¿Quitar esta etapa del proyecto? Se va con su checklist.")) return;
+    await supabase.from("lead_etapas").delete().eq("id", etapa.id);
+    setElegida(null);
+    await cargar();
+  }
+  // Quién la tiene a cargo y para cuándo: una etapa con responsable le aparece
+  // a esa persona entre sus tareas, que es como se entera.
+  async function guardarEtapa(etapa, campos) {
+    await supabase.from("lead_etapas").update(campos).eq("id", etapa.id);
+    await cargar();
+  }
 
   async function hacer(fn) {
     setOcupado(true);
@@ -116,8 +138,28 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
             </button>
           );
         })}
-        {!enFila.length && <div style={{ fontSize: 12, color: colors.muted, padding: "12px 0" }}>Todavía no hay etapas puestas.</div>}
+        {!info.enOrden && (
+          <button onClick={() => setAgregando(a => !a)}
+            style={{ flex: "0 0 124px", minWidth: 124, cursor: "pointer", fontFamily: colors.font, background: colors.bg,
+              border: `1px dashed ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px", color: colors.inkSoft, fontSize: 12,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            <Plus size={13} /> Agregar etapa
+          </button>
+        )}
+        {!enFila.length && info.enOrden && <div style={{ fontSize: 12, color: colors.muted, padding: "12px 0" }}>Todavía no hay etapas puestas.</div>}
       </div>
+
+      {agregando && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", background: colors.bg, borderRadius: colors.radiusSm, padding: 10, marginBottom: 8 }}>
+          {delTunel.map(e => (
+            <button key={e.id} onClick={() => agregarEtapa(e.id)}
+              style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 16, padding: "4px 11px", fontSize: 12, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+              {e.nombre}
+            </button>
+          ))}
+          {!delTunel.length && <span style={{ fontSize: 12, color: colors.muted }}>Este tubo todavía no tiene etapas en Ajustes.</span>}
+        </div>
+      )}
 
       {/* ── Lo que le falta al hito elegido ── */}
       {actual && (
@@ -147,6 +189,23 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Quién y para cuándo: lo mínimo para que una etapa avance. */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+            <select value={actual.responsable_id || ""} title="Quién la tiene a cargo"
+              onChange={e => { const u = users.find(x => String(x.id) === e.target.value); guardarEtapa(actual, { responsable_id: u?.id ?? null, responsable_nombre: u?.name ?? null }); }}
+              style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12 }}>
+              <option value="">Sin responsable</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <input type="date" value={actual.fecha_objetivo || ""} title="Para cuándo"
+              onChange={e => guardarEtapa(actual, { fecha_objetivo: e.target.value || null })}
+              style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
+            {!info.enOrden && (
+              <button onClick={() => quitarEtapa(actual)} title="Quitar esta etapa del proyecto"
+                style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", marginLeft: "auto" }}><Trash2 size={13} /></button>
+            )}
           </div>
 
           {/* El checklist: lo que hay que tener para cerrarlo. */}

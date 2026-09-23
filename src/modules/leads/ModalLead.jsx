@@ -260,7 +260,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   // no cuánto vale el negocio.
   const verDatos = currentUser?.role === "owner" || !editando || lead.created_by === currentUser?.id;
   const SECCIONES = editando
-    ? [...(verDatos ? [["datos", "Datos"]] : []), ["plan", "Plan"], ["dia", "Tareas"], ["bitacora", "Bitácora"], ["gente", "Gente"]]
+    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["dia", "Tareas"], ["bitacora", "Bitácora"], ["gente", "Gente"]]
     : [["datos", "Datos"]];
 
   return (
@@ -394,15 +394,18 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {/* El tubo: los hitos del proyecto y qué le falta a cada uno. En los
           tubos con orden —Arquitectura, Construcción— se ve el camino entero.
           Un lead va sin orden, así que ahí manda la lista de abajo. */}
-      {editando && seccionVisible === "plan" && (form.tunel || "lead") !== "lead" && (
+      {/* El tubo, igual para los tres tipos: los hitos en fila, y abajo lo que
+          le falta al que se esté mirando. En un lead las etapas se agregan
+          cuando pasan; en Arquitectura y Construcción vienen puestas, en orden. */}
+      {editando && seccionVisible === "plan" && (
         <div style={{ marginBottom: 14 }}>
           <TuboProyecto lead={{ ...lead, tunel: form.tunel }} catalogo={catalogo} users={users} currentUser={currentUser} onBitacora={recargarBitacora} />
         </div>
       )}
 
-      {editando && (seccionVisible === "plan" || seccionVisible === "gente") && (form.tunel || "lead") === "lead" && (
+      {editando && seccionVisible === "gente" && (
         <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
-          parte={seccionVisible === "plan" ? "etapas" : "gente"}
+          parte="gente"
           puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
           onBitacora={recargarBitacora}
           onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
