@@ -90,12 +90,20 @@ export async function borrarItem(id) {
  * con su responsable y su fecha. Al completarse la tarea, el ítem se marca
  * solo (lo hace el módulo de tareas al cerrar una que tiene ítem).
  */
-export async function itemATarea(item, { lead, titulo, assignee_id, due_date, creadoPor }) {
-  const { data: tarea, error } = await supabase.from("tasks").insert({
+export async function itemATarea(item, { lead, titulo, assignee_id, due_date, creadoPor, responsable_externo = null }) {
+  const fila = {
     title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
     due_date: due_date || null, priority: "media", status: "en-progreso", type: "Otro",
-    created_by: creadoPor ?? null, notes: `Del checklist de ${lead.nombre}`,
-  }).select().single();
+    created_by: creadoPor ?? null, notes: `Actividad de ${lead.nombre}`,
+    ...(responsable_externo ? { responsable_externo } : {}),
+  };
+  let { data: tarea, error } = await supabase.from("tasks").insert(fila).select().single();
+  // Sin la migración 041 la tarea entra igual, con el nombre en las notas.
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { responsable_externo: fuera, ...resto } = fila;
+    ({ data: tarea, error } = await supabase.from("tasks")
+      .insert({ ...resto, notes: `${resto.notes}${fuera ? ` · Responsable: ${fuera}` : ""}` }).select().single());
+  }
   if (error) return { error: error.message };
   const { error: e2 } = await supabase.from("lead_etapa_items").update({ tarea_id: tarea.id }).eq("id", item.id);
   return e2 ? { tarea, error: e2.message } : { tarea };

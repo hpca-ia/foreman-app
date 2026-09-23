@@ -31,12 +31,19 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const [agregando, setAgregando] = useState(false);
   const [aTarea, setATarea] = useState(null);
   const [ocupado, setOcupado] = useState(false);
+  // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
+  // proveedor. Una actividad puede ser de ellos aunque no entren a FOREMAN.
+  const [invitados, setInvitados] = useState([]);
 
   const cargar = useCallback(async () => {
-    const r = await cargarTubo(lead.id);
+    const [r, { data: inv }] = await Promise.all([
+      cargarTubo(lead.id),
+      supabase.from("pipeline_invitados").select("id,nombre,rol").eq("lead_id", lead.id).order("nombre"),
+    ]);
     setSinTablas(r.sinTablas);
     setEtapas(r.etapas);
     setItems(r.items);
+    setInvitados(inv || []);
   }, [lead.id]);
 
   useEffect(() => {
@@ -74,6 +81,13 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
   return (
     <div>
+      {/* Dos cosas distintas y hay que verlas distintas: arriba las ETAPAS
+          —los hitos del proyecto— y dentro de cada una sus ACTIVIDADES. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 }}>ETAPAS DEL PROYECTO</span>
+        <span style={{ fontSize: 11, color: colors.muted }}>· dentro de cada una, sus actividades</span>
+      </div>
+
       <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8, alignItems: "flex-start" }}>
         {columnas.map(etapa => {
           const cat = etapaInfo(etapa.etapa_id, catalogo);
@@ -119,8 +133,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 </div>
               </div>
 
-              {/* Los pasos de esta etapa, uno debajo del otro. */}
-              <div style={{ padding: "4px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: 320, overflowY: "auto" }}>
+              {/* Las actividades de esta etapa, una debajo de la otra. */}
+              <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: 320, overflowY: "auto" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>ACTIVIDADES</div>
                 {suyos.map(item => (
                   <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "5px 0" }}>
                     <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name))} disabled={ocupado}
@@ -132,7 +147,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
-                      {item.tarea_id && <div style={{ fontSize: 9.5, color: colors.muted }}>es tarea del equipo</div>}
+                      {item.tarea_id && <div style={{ fontSize: 9.5, color: colors.muted }}>es una tarea</div>}
                     </div>
                     {!item.tarea_id && !item.hecho && (
                       <button onClick={() => setATarea({ item, titulo: item.texto, assignee_id: etapa.responsable_id || "", due_date: etapa.fecha_objetivo || "" })}
@@ -147,7 +162,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {!suyos.length && (
                   <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
                     style={{ background: "none", border: "none", padding: "4px 0", textAlign: "left", fontSize: 11, color: colors.muted, cursor: "pointer", fontFamily: colors.font }}>
-                    Sin pasos · traer los de fábrica
+                    Sin actividades · traer las de fábrica
                   </button>
                 )}
 
@@ -157,7 +172,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   if (t) hacer(async () => { await agregarItem(lead, etapa, t, suyos.length + 1); setNuevo(n => ({ ...n, [etapa.id]: "" })); });
                 }}>
                   <input value={nuevo[etapa.id] || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: e.target.value }))}
-                    placeholder="+ paso" style={{ ...chico, width: "100%", marginTop: 4 }} />
+                    placeholder="+ actividad" style={{ ...chico, width: "100%", marginTop: 4 }} />
                 </form>
               </div>
 
@@ -171,7 +186,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     {!enCurso && <button onClick={() => hacer(() => cambiarEstadoEtapa(etapa, "en_curso", currentUser))} disabled={ocupado} style={boton(false)}>Arrancar</button>}
                     <button onClick={() => hacer(async () => {
                       const faltan = suyos.filter(i => !i.hecho).length;
-                      if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "paso" : "pasos"} sin marcar. ¿Cerrar la etapa igual?`)) return;
+                      if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "actividad" : "actividades"} sin marcar. ¿Cerrar la etapa igual?`)) return;
                       await cambiarEstadoEtapa(etapa, "hecha", currentUser);
                       onBitacora?.();
                     })} disabled={ocupado} style={boton(true)}>
@@ -220,15 +235,29 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
           <div style={{ display: "grid", gap: 8 }}>
             <input value={aTarea.titulo} onChange={e => setATarea(a => ({ ...a, titulo: e.target.value }))} style={inputStyle} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {/* Del equipo o de afuera: el ingeniero, el proveedor, el cliente.
+                  No todos los que tienen algo que hacer entran a FOREMAN. */}
               <select value={aTarea.assignee_id} onChange={e => setATarea(a => ({ ...a, assignee_id: e.target.value }))} style={inputStyle}>
                 <option value="">¿Quién la hace?</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                <optgroup label="Del equipo">
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </optgroup>
+                {invitados.length > 0 && (
+                  <optgroup label="De afuera">
+                    {invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}{i.rol ? ` · ${i.rol}` : ""}</option>)}
+                  </optgroup>
+                )}
               </select>
               <input type="date" value={aTarea.due_date || ""} onChange={e => setATarea(a => ({ ...a, due_date: e.target.value }))} style={inputStyle} />
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => hacer(async () => {
-                await itemATarea(aTarea.item, { lead, titulo: aTarea.titulo, assignee_id: aTarea.assignee_id ? Number(aTarea.assignee_id) : null, due_date: aTarea.due_date || null, creadoPor: currentUser?.id });
+                const externo = String(aTarea.assignee_id).startsWith("x:") ? String(aTarea.assignee_id).slice(2) : null;
+                await itemATarea(aTarea.item, {
+                  lead, titulo: aTarea.titulo, due_date: aTarea.due_date || null, creadoPor: currentUser?.id,
+                  assignee_id: externo || !aTarea.assignee_id ? null : Number(aTarea.assignee_id),
+                  responsable_externo: externo,
+                });
                 setATarea(null);
               })} disabled={ocupado || !aTarea.titulo.trim()} style={boton(true)}>Crear tarea</button>
               <button onClick={() => setATarea(null)} style={boton(false)}>Cancelar</button>

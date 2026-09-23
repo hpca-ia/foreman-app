@@ -347,53 +347,13 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               <input value={form.motivo_perdida || ""} onChange={e => inp("motivo_perdida", e.target.value)} placeholder="Precio, plazo, se fue con otro..." style={mini} />
             </div>
           )}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={lbl}>ETAPA ACTUAL</label>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {catalogo.map(et => (
-                <button key={et.id} onClick={() => inp("etapa", et.id)}
-                  style={{ padding: "5px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
-                    border: `1px solid ${form.etapa === et.id ? et.color : colors.border}`,
-                    background: form.etapa === et.id ? et.color : "transparent",
-                    color: form.etapa === et.id ? "#fff" : colors.inkSoft }}>
-                  {et.nombre}
-                </button>
-              ))}
-            </div>
-            {editando && <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>Normalmente se mueve sola, al marcar una etapa En curso en el Plan.</div>}
-
-            {/* En qué tubo va: mientras se persigue es un lead, y al ganarlo
-                recorre los hitos de Arquitectura o de Construcción. Es el mismo
-                proyecto, en otro momento. */}
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 5 }}>TUBO</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {Object.entries(TUNELES).map(([id, t]) => (
-                  <button key={id} type="button" onClick={() => setForm(p => ({ ...p, tunel: id, es_lead: id === "lead" }))}
-                    style={{ border: `1px solid ${(form.tunel || "lead") === id ? colors.ink : colors.border}`, borderRadius: 16, padding: "4px 12px",
-                      background: (form.tunel || "lead") === id ? colors.ink : "#fff", color: (form.tunel || "lead") === id ? "#fff" : colors.inkSoft,
-                      fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>
-                {(form.tunel || "lead") === "lead"
-                  ? "Se está persiguiendo: sus etapas pasan sin orden y aparece con una (L)."
-                  : "Recorre los hitos en orden, uno detrás de otro."}
-              </div>
-            </div>
+          <div style={{ gridColumn: "1 / -1", fontSize: 11.5, color: colors.muted }}>
+            La etapa en la que va el proyecto sale de sus etapas, en "El proyecto": la que esté en curso manda.
+            Acá solo van los datos del proyecto.
           </div>
         </div>
       )}
 
-      {editando && seccionVisible === "plan" && lead.obra_id && (
-        <ObraDelProyecto obraId={lead.obra_id} onIrAObra={onIrAObra} />
-      )}
-
-      {/* El tubo: los hitos del proyecto y qué le falta a cada uno. En los
-          tubos con orden —Arquitectura, Construcción— se ve el camino entero.
-          Un lead va sin orden, así que ahí manda la lista de abajo. */}
       {/* El tubo, igual para los tres tipos: los hitos en fila, y abajo lo que
           le falta al que se esté mirando. En un lead las etapas se agregan
           cuando pasan; en Arquitectura y Construcción vienen puestas, en orden. */}

@@ -74,7 +74,9 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
         <span style={{ background: `${proy?.color}18`, color: proy?.color, fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>{proy?.name}</span>
         {asig ? <div style={{ display: "flex", alignItems: "center", gap: 4 }}><Avatar name={asig.name} size={18} color={asig.color || proy?.color} /><span style={{ color: colors.inkSoft, fontSize: 12 }}>{asig.name}</span></div>
-          : <span style={{ color: colors.danger, fontSize: 11 }}>Sin asignar</span>}
+          : task.responsable_externo
+            ? <span style={{ color: colors.inkSoft, fontSize: 12 }}>{task.responsable_externo} <span style={{ color: colors.muted, fontSize: 10 }}>· de afuera</span></span>
+            : <span style={{ color: colors.danger, fontSize: 11 }}>Sin asignar</span>}
         {/* Los que van con él: la tarea es de varios. */}
         {conmigo.map(u => (
           <span key={u.id} title={`${u.name} también la trabaja`} style={{ display: "inline-flex" }}>

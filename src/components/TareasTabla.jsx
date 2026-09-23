@@ -66,6 +66,8 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
                 <Avatar name={asig.name} size={16} color={asig.color || colors.brand} />
                 <span style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asig.name}</span>
               </div>
+            ) : t.responsable_externo ? (
+              <span style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.responsable_externo} · de afuera</span>
             ) : <span style={{ fontSize: 12, color: colors.danger }}>Sin asignar</span>}
             <span style={{ fontSize: 11, fontWeight: 600, color: pC.color, background: pC.bg, padding: "2px 8px", borderRadius: 20, width: "fit-content" }}>{pC.label}</span>
             <span style={{ fontSize: 12, color: eC.color }}>{eC.label}</span>
