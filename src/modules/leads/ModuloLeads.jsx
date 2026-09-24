@@ -20,7 +20,6 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 // Volver atrás es información, no una columna: un proyecto que regresó a plan
 // masa no está avanzando, y la pantalla lo dice con todas sus letras.
 
-const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { maximumFractionDigits: 0 });
 const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 
 export default function ModuloLeads({ currentUser, users = [], puede = () => true, onIrAObra }) {
@@ -118,13 +117,17 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // proyecto en distintos momentos, pero mezclarlos en una sola lista era
   // justamente lo que no dejaba ver en qué anda la oficina.
   const delTunel = l => (l.tunel || "lead");
-  const cuantos = t => leads.filter(l => delTunel(l) === t && !l.resultado && !etapaInfo(l.etapa, catalogo).cierra).length;
   const enTubo = l => tubo === "todos" || delTunel(l) === tubo;
 
-  // Un proyecto sigue abierto mientras no se haya ganado ni perdido: ganarlo
-  // no lo saca de la lista, lo manda a ejecución.
-  const abiertos = leads.filter(l => enTubo(l) && !l.resultado && !etapaInfo(l.etapa, catalogo).cierra);
-  const cerrados = leads.filter(l => enTubo(l) && (l.resultado || etapaInfo(l.etapa, catalogo).cierra));
+  // Aprobar un proyecto no lo saca del pipeline: recién ahí empieza el trabajo.
+  // Un proyecto ganado sigue en la lista con todo lo que le falta —contrato,
+  // obra, entrega—, y se va solo cuando se perdió o cuando cerró su última
+  // etapa. Antes ganarlo lo mandaba a "cerrados" y desaparecía teniendo
+  // actividades pendientes.
+  const seFue = l => l.resultado === "perdido" || etapaInfo(l.etapa, catalogo).cierra;
+  const cuantos = t => leads.filter(l => delTunel(l) === t && !seFue(l)).length;
+  const abiertos = leads.filter(l => enTubo(l) && !seFue(l));
+  const cerrados = leads.filter(l => enTubo(l) && seFue(l));
 
   // Lo que manda en la lista: cuándo vence el próximo paso. Las etapas ya no
   // llevan fecha —un hito no se entrega un día, lo entregan sus actividades—,
@@ -143,10 +146,9 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // la ruta estándar; si no tiene plan, se compara contra la ruta estándar.
   // Cuánto vale el negocio lo ve el Director y quien lo abrió. Al resto le
   // toca su etapa, no la plata.
-  // Cuánto vale el negocio lo ve el Director, quien abrió el proyecto y quien
-  // tenga el permiso de montos: así se decide en Ajustes y no por código.
-  const verMonto = l => currentUser?.role === "owner" || puede("montos.ver") || l.created_by === currentUser?.id;
-  const verTotales = currentUser?.role === "owner" || puede("montos.ver");
+  // El pipeline no habla de plata: es dónde va cada proyecto y qué le falta.
+  // Lo que cuesta se trabaja en Presupuestos y se controla en Control de Obra,
+  // que es donde el número es de verdad y no una estimación de pasillo.
   const puedeEditar = puede("leads.editar");
 
   const retrocedio = l => {
@@ -184,9 +186,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
     { titulo: "Sin fecha", color: colors.muted, leads: abiertos.filter(l => !cuando(l)) },
   ].map(g => ({ ...g, leads: g.leads.slice().sort(orden) }));
 
-  const enJuego = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0), 0);
-  const ponderado = abiertos.reduce((s, l) => s + (Number(l.valor_estimado) || 0) * ((l.probabilidad ?? 50) / 100), 0);
-
   return (
     <div style={{ fontFamily: colors.font }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
@@ -200,7 +199,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           proyectos andando. Cada uno con su cuenta, para saber dónde mirar. */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
         {[["todos", "Todos"], ...Object.entries(TUNELES).map(([id, t]) => [id, t.label])].map(([id, label]) => {
-          const n = id === "todos" ? leads.filter(l => !l.resultado && !etapaInfo(l.etapa, catalogo).cierra).length : cuantos(id);
+          const n = id === "todos" ? leads.filter(l => !seFue(l)).length : cuantos(id);
           const activo = tubo === id;
           return (
             <button key={id} onClick={() => setTubo(id)}
@@ -266,10 +265,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
       <div style={{ display: "flex", gap: 22, marginBottom: 14, flexWrap: "wrap", fontSize: 12, color: colors.inkSoft }}>
         <span><strong style={{ color: colors.ink, fontSize: 15 }}>{abiertos.length}</strong> en curso</span>
-        {verTotales && <>
-          <span>En juego <strong style={{ color: colors.ink, fontSize: 15 }}>${fmt(enJuego)}</strong></span>
-          <span>Ponderado <strong style={{ color: colors.brand, fontSize: 15 }}>${fmt(ponderado)}</strong></span>
-        </>}
       </div>
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div>
@@ -289,7 +284,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                 <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
                   {g.leads.map(l => (
                     <FilaLead key={l.id} lead={l} ruta={rutas[l.id]} plan={planes[l.id]} catalogo={catalogo}
-                      verMonto={verMonto(l)} fecha={cuando(l)} volvioAtras={retrocedio(l)} onAbrir={() => setAbierto(l)} />
+                      fecha={cuando(l)} volvioAtras={retrocedio(l)} onAbrir={() => setAbierto(l)} />
                   ))}
                 </div>
               </div>
@@ -311,7 +306,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                         <span style={{ color: l.resultado === "ganado" ? colors.success : colors.muted, fontSize: 11, fontWeight: 600 }}>
                           {l.resultado === "ganado" ? "Ganado" : l.resultado === "perdido" ? "Perdido" : etapaInfo(l.etapa, catalogo).nombre}
                         </span>
-                        <span style={{ color: colors.inkSoft }}>${fmt(l.valor_estimado)}</span>
                       </div>
                     ))}
                   </div>
@@ -344,7 +338,7 @@ function Aviso({ n, txt, Icono, color, bg, borde }) {
 // Una fila por proyecto: hasta dónde llegó en la ruta estándar, qué toca ahora
 // y cuándo. La barra son los puntos de revisión; si volvió a una etapa
 // anterior lo dice, porque un proyecto que regresa no está caminando.
-function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = true, onAbrir }) {
+function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, onAbrir }) {
   // Una línea por proyecto, y solo lo que hace falta para decidir si hay que
   // meterse ahí: cómo se llama, en qué etapa va, quién la tiene y para cuándo.
   //
@@ -364,10 +358,15 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = t
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {lead.nombre}
-          {/* La (L) dice que todavía se está persiguiendo. */}
-          {(lead.tunel || "lead") === "lead" && (
+          {/* La (L) dice que todavía se está persiguiendo; cuando lo aprueban
+              deja de ser un lead y se ve que ya es trabajo. */}
+          {(lead.tunel || "lead") === "lead" && !lead.resultado && (
             <span title="Lead: todavía se está persiguiendo"
               style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: colors.muted, border: `1px solid ${colors.border}`, borderRadius: 4, padding: "0 4px" }}>L</span>
+          )}
+          {lead.resultado === "ganado" && (
+            <span title="Aprobado: sigue en el pipeline hasta terminar sus etapas"
+              style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: colors.success, border: `1px solid ${colors.success}`, borderRadius: 4, padding: "0 4px" }}>APROBADO</span>
           )}
         </div>
       </div>
@@ -385,14 +384,6 @@ function FilaLead({ lead, ruta, plan, catalogo, fecha, volvioAtras, verMonto = t
         {cuandoTxt}
       </div>
 
-      {/* Cuánto vale, en su propia columna. Metido debajo de la fecha y en
-          gris chiquito no se leía, y cuando está en cero conviene que se note:
-          es un dato que falta, no un proyecto que no vale nada. */}
-      {verMonto && (
-        <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 600, color: Number(lead.valor_estimado) > 0 ? colors.ink : colors.border, whiteSpace: "nowrap" }}>
-          {Number(lead.valor_estimado) > 0 ? `$${fmt(lead.valor_estimado)}` : "—"}
-        </div>
-      )}
     </div>
   );
 }

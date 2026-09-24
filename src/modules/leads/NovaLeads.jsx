@@ -41,7 +41,7 @@ ${catalogo}
 Interpretas lo que dicta el director y devuelves SOLO JSON, sin markdown.
 
 Si habla de una oportunidad nueva —"hay la oportunidad de construir la casa Fowler"—:
-{"accion":"crear","nombre":"Casa Fowler","contacto":null,"valor_estimado":null,"pasos":[]}
+{"accion":"crear","nombre":"Casa Fowler","contacto":null,"pasos":[]}
 
 Si habla de algo que hay que hacer sobre un lead que ya existe —"hay que enviar
 el presupuesto de Fowler el viernes", "solicitar los planos"—:
@@ -72,7 +72,7 @@ Si no entiendes a qué lead se refiere: {"accion":"nada","motivo":"..."}`,
       if (p.accion === "crear") {
         const { data: lead, error: e } = await supabase.from("leads").insert({
           nombre: p.nombre, contacto: p.contacto || null,
-          valor_estimado: Number(p.valor_estimado) || null, etapa: "nuevo",
+          etapa: "nuevo",
           responsable_id: currentUser?.id, responsable_nombre: currentUser?.name,
           created_by: currentUser?.id,
         }).select().single();

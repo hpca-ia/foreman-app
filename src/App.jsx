@@ -452,7 +452,10 @@ export default function App() {
                 </select>}
               </div>
               <div className="tareas-filtros" style={{ marginBottom: 10 }}>
-                {[["todas", "Todas"], ["urgente", "Urgentes"], ["atrasadas", "Atrasadas"], ["pausadas", "Pausadas"], ["listo", "Completadas"]].map(([f, l]) => (
+                {/* Urgentes y Atrasadas ya están arriba, en los avisos, y con su
+                    número: tenerlas otra vez acá era pedir lo mismo de dos
+                    maneras y no saber cuál mandaba. */}
+                {[["todas", "Todas"], ["pausadas", "Pausadas"], ["listo", "Completadas"]].map(([f, l]) => (
                   <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
                 ))}
               </div>

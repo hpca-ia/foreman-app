@@ -123,7 +123,7 @@ input, select, textarea { outline: none; font-family: var(--font); }
    le gana a la clase y así el layout del teléfono nunca se aplicaba. */
 .pipeline-fila {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) minmax(130px, 1.1fr) minmax(130px, 1.2fr) 92px 96px;
+  grid-template-columns: minmax(170px, 1.4fr) minmax(150px, 1.1fr) minmax(150px, 1.2fr) 92px;
   gap: 10px; align-items: center; padding: 10px 12px;
   border-bottom: 1px solid var(--neutral-soft); cursor: pointer;
 }
@@ -140,8 +140,6 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .pipeline-fila > *:nth-child(4) { grid-row: 1; grid-column: 2; text-align: right; }
   .pipeline-fila > *:nth-child(2),
   .pipeline-fila > *:nth-child(3) { grid-column: 1 / -1; }
-  /* En el teléfono el monto va en su propia línea, alineado a la derecha. */
-  .pipeline-fila > *:nth-child(5) { grid-column: 1 / -1; text-align: right; }
 
   /* El tacho se queda arriba a la derecha, no en una línea para él solo. */
   .etapa-fila { grid-template-columns: 16px 1fr 24px; row-gap: 6px; padding: 9px 0; border-bottom: 1px solid var(--neutral-soft); }

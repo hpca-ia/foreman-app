@@ -359,7 +359,6 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           </div>
-          <div><label style={lbl}>VALOR ESTIMADO</label><input type="number" value={form.valor_estimado || ""} onChange={e => inp("valor_estimado", e.target.value)} placeholder="0" style={mini} /></div>
           <div><label style={lbl}>SE DECIDE EL</label><input type="date" value={form.fecha_cierre || ""} onChange={e => inp("fecha_cierre", e.target.value)} style={mini} /></div>
           <div>
             <label style={lbl}>TEMPERATURA</label>
