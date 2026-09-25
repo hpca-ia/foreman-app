@@ -1,5 +1,8 @@
 import { daysUntil } from "../lib/dates";
+import { useState } from "react";
+import { Check } from "lucide-react";
 import { PRIORIDAD, ESTADO, CLASES, claseDe } from "../theme/constants";
+import CompletarTarea from "./CompletarTarea";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 import MarcaPrivada from "./ui/MarcaPrivada";
@@ -20,7 +23,11 @@ function fechaColor(t) {
   return colors.muted;
 }
 
-export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, etiqueta = "TAREA", clase = null, onEditar }) {
+export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, etiqueta = "TAREA", clase = null, onEditar, onCambiarEstado }) {
+  // Marcar desde la lista, sin abrir nada: se toca el cuadro, se cuenta qué se
+  // hizo y listo. Lo que salió de una gestión del pipeline queda marcado allá
+  // también, y la bitácora del proyecto lo anota.
+  const [cerrando, setCerrando] = useState(null);
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
@@ -54,10 +61,20 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
         return (
           <div key={t.id} className="tabla-row" onClick={() => onEditar(t)}
             style={{ ...row, borderLeft: `3px solid ${CLASES[clase || claseDe(t)].color}` }}>
-            {/* El cuadrito es del proyecto; el filo de la izquierda, de lo que
-                la cosa es: gestión, tarea o reunión, el mismo color que en el
-                proyecto. */}
-            <div style={{ width: 8, height: 8, borderRadius: 2, background: proy?.color || colors.brand }} />
+            {/* El cuadro para marcarla. El filo de la izquierda dice qué es
+                —gestión, tarea o reunión—, con el mismo color del proyecto. */}
+            {onCambiarEstado ? (
+              <button onClick={e => { e.stopPropagation(); if (t.status === "listo") onCambiarEstado(t.id, "en-progreso"); else setCerrando(t); }}
+                title={t.status === "listo" ? "Marcar como pendiente" : "Marcar como hecha"}
+                style={{ width: 17, height: 17, borderRadius: 4, padding: 0, cursor: "pointer", flexShrink: 0,
+                  border: `1.5px solid ${t.status === "listo" ? colors.success : colors.border}`,
+                  background: t.status === "listo" ? colors.success : "#fff",
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {t.status === "listo" && <Check size={12} color="#fff" />}
+              </button>
+            ) : (
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: proy?.color || colors.brand }} />
+            )}
             <div style={{ minWidth: 0, opacity: t.status === "listo" ? 0.55 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                 {t.privada && <MarcaPrivada />}
@@ -107,6 +124,11 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
       })}
       </div>
       ))}
+
+      {cerrando && (
+        <CompletarTarea tarea={cerrando} modo="completar" onCerrar={() => setCerrando(null)}
+          onConfirmar={datos => { onCambiarEstado(cerrando.id, "listo", { ...datos, decision: "completar" }); setCerrando(null); }} />
+      )}
     </div>
   );
 }

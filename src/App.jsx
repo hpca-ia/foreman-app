@@ -518,6 +518,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                                 {b.sueltas > 0 && <span style={{ color: colors.danger }}> · {b.sueltas} SIN RESPONSABLE</span>}
                               </div>
                               <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta} clase={b.clase}
+                                onCambiarEstado={cambiarEstado}
                                 onEditar={t => { setEditTask(t); setShowModal(true); }} />
                             </div>
                           ))}
