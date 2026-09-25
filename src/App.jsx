@@ -156,6 +156,20 @@ export default function App() {
     setCargando(false);
   }
 
+  /** Le avisa por correo a quien quedó a cargo. Devuelve el motivo si no pudo. */
+  async function avisarPorCorreo(tareaId) {
+    try {
+      const r = await fetch("/api/aviso-tarea", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tareaId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      return d.ok ? null : (d.error || "el servidor no contestó");
+    } catch (e) {
+      return e.message;
+    }
+  }
+
   async function sendEmail(to, subject, html) {
     if (!to) return;
     try {
@@ -256,22 +270,24 @@ export default function App() {
       return r;
     };
     if (id) {
+      const antes = tareas.find(t => t.id === id);
       const { error } = await guardar(form);
       if (error) { alert(mensajeErrorTarea(error)); return; }
       await guardarResponsables(id, conmigo, form.assignee_id);
       cargarEquipoDeTareas();
+      // Si cambió de manos, el nuevo se entera: enterarse por casualidad de que
+      // algo era tuyo es la forma más cara de perder una semana.
+      if (form.assignee_id && form.assignee_id !== antes?.assignee_id) await avisarPorCorreo(id);
     } else {
       const { data: creada, error } = await guardar({ ...form, ...(form.es_aprobacion ? { aprobacion_estado: "pendiente" } : {}) });
       if (error) { alert(mensajeErrorTarea(error)); return; }
       if (creada && conmigo.length) { await guardarResponsables(creada.id, conmigo, form.assignee_id); cargarEquipoDeTareas(); }
-      if (form.assignee_id) {
-        const asignado = users.find(u => u.id === form.assignee_id);
-        const proyecto = projects.find(p => p.id === form.project_id);
-        if (asignado?.email) {
-          const prioridad = form.priority === "urgente" ? "URGENTE" : form.priority === "alta" ? "Alta" : form.priority === "media" ? "Media" : "Baja";
-          const html = `<div style="font-family:Inter,sans-serif;max-width:600px;margin:0 auto;padding:20px"><div style="background:${colors.brand};border-radius:12px;padding:20px;margin-bottom:20px"><h1 style="color:#fff;margin:0;font-size:22px">FOREMAN</h1><p style="color:rgba(255,255,255,0.8);margin:4px 0 0;font-size:13px">Nueva tarea asignada</p></div><h2 style="color:${colors.ink};font-size:18px">Hola ${asignado.name}</h2><p style="color:${colors.inkSoft}">${usuario.name} te asignó una nueva tarea:</p><div style="background:${colors.bg};border-left:4px solid ${colors.brand};border-radius:8px;padding:16px;margin:16px 0"><h3 style="color:${colors.ink};margin:0 0 8px;font-size:16px">${form.title}</h3><p style="color:${colors.inkSoft};margin:4px 0;font-size:13px">Proyecto: <strong>${proyecto?.name}</strong></p><p style="color:${colors.inkSoft};margin:4px 0;font-size:13px">Fecha límite: <strong>${form.due_date}</strong></p><p style="color:${colors.inkSoft};margin:4px 0;font-size:13px">Prioridad: <strong>${prioridad}</strong></p>${form.notes ? `<p style="color:${colors.inkSoft};margin:8px 0 0;font-size:13px">${form.notes}</p>` : ""}</div><a href="https://foreman-app-ebon.vercel.app" style="display:inline-block;background:${colors.brand};color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Ver en FOREMAN →</a><p style="color:${colors.muted};font-size:11px;margin-top:24px">FOREMAN by HCA Studio</p></div>`;
-          await sendEmail(asignado.email, `Nueva tarea: ${form.title}`, html);
-        }
+      // El aviso lo manda el servidor, que es el único que ve los correos y
+      // sabe de qué proyecto es. Si no se pudo mandar, se dice: antes el error
+      // se tragaba y la persona nunca se enteraba de que tenía algo.
+      if (creada?.id && form.assignee_id) {
+        const fallo = await avisarPorCorreo(creada.id);
+        if (fallo) alert(`La tarea se guardó, pero no se pudo avisar por correo: ${fallo}`);
       }
     }
     setEditTask(null);

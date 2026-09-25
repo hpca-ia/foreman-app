@@ -3,6 +3,7 @@ import { Check, Plus, X, ListTodo, RotateCcw, Trash2, Loader2, Hourglass, Chevro
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
+import ComentariosTarea from "../../components/ComentariosTarea";
 import Avatar from "../../components/ui/Avatar";
 import { etapaInfo } from "./constantes";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
@@ -54,6 +55,18 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una actividad puede ser de ellos aunque no entren a FOREMAN.
   const [invitados, setInvitados] = useState([]);
+
+  // Le avisa por correo a quien quedó a cargo, igual que en el tablero: lo que
+  // nacía en el pipeline no avisaba a nadie.
+  const avisarPorCorreo = async tareaId => {
+    if (!tareaId) return;
+    try {
+      await fetch("/api/aviso-tarea", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tareaId }),
+      });
+    } catch { /* el correo no puede trabar el trabajo */ }
+  };
 
   const cargar = useCallback(async () => {
     const [r, { data: inv }] = await Promise.all([
@@ -152,7 +165,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       // Todo lo que se suma entra también a las tareas del proyecto, tenga
       // dueño o no: sin responsable igual es algo pendiente de ese proyecto.
       const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
-      await itemATarea(r.item, {
+      const hecha = await itemATarea(r.item, {
         lead, titulo: texto, due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
         tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : "Otro", urgente: !!n.urgente,
         creadoPor: currentUser?.id, quien: currentUser,
@@ -160,6 +173,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
         nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
         responsable_externo: externo,
       });
+      if (hecha?.tarea?.assignee_id) await avisarPorCorreo(hecha.tarea.id);
       // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
       // seguidas, y volver a abrir el cuadro cada vez era un clic de más.
       setNuevo(x => ({ ...x, [etapa.id]: { abierto: true, tipo, texto: "", assignee_id: "", due_date: "", hora: "", urgente: false } }));
@@ -514,7 +528,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               <button onClick={() => hacer(async () => {
                 const externo = String(aTarea.assignee_id).startsWith("x:") ? String(aTarea.assignee_id).slice(2) : null;
                 const antes = tareas[aTarea.item.tarea_id];
-                await asegurarTarea(aTarea.item, {
+                const guardada = await asegurarTarea(aTarea.item, {
                   lead, titulo: aTarea.titulo, due_date: aTarea.due_date || null, hora: (aTarea.due_date && aTarea.hora) || null,
                   tipo: aTarea.tipo === "reunion" ? "Reunión" : aTarea.tipo === "tarea" ? "Otro" : "Gestión",
                   creadoPor: currentUser?.id, quien: currentUser,
@@ -522,6 +536,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   nombreResponsable: users.find(u => String(u.id) === String(aTarea.assignee_id))?.name,
                   responsable_externo: externo,
                 });
+                if (guardada?.tarea?.assignee_id && guardada.tarea.assignee_id !== antes?.assignee_id) {
+                  await avisarPorCorreo(guardada.tarea.id);
+                }
                 // Lo que cambió queda escrito: quién la movió y de qué a qué.
                 const nombre = id => users.find(u => u.id === Number(id))?.name || null;
                 const cambios = [];
@@ -717,6 +734,11 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
               <> Es una gestión del proyecto, todavía sin responsable.</>
             ) : null}
           </div>
+
+          {/* Lo que se habla de esto: la conversación vive con la cosa, no en
+              un WhatsApp aparte. Es la misma de la tarea en el tablero, así que
+              lo que se comenta acá se lee allá y al revés. */}
+          {tarea?.id && <ComentariosTarea taskId={tarea.id} currentUser={currentUser} />}
 
           {/* Lo que solo sabe quien la trabajó. */}
           <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2} readOnly={!editable}
