@@ -266,15 +266,10 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
 
-  const etapaActual = etapaInfo(form.etapa, catalogo);
   // El rótulo de la esquina dice qué es el proyecto: Arquitectura, Construcción
   // o Lead. Antes decía la etapa guardada en `leads.etapa`, que nace en "lead"
   // para todos, y un proyecto de Construcción aparecía marcado como Lead.
   const tuboActual = TUNELES[form.tunel || "lead"] || TUNELES.lead;
-  // La etapa solo se muestra cuando es una del tubo de este proyecto: la del
-  // tubo en orden se ve en "El proyecto", hito por hito, y repetirla mal
-  // confunde más que no ponerla.
-  const etapaDelTubo = catalogo.some(e => e.id === form.etapa && (e.tunel || "lead") === (form.tunel || "lead"));
   const temp = TEMPERATURAS.find(t => t.id === form.temperatura);
   // Los datos del proyecto —valor, contacto, origen, resultado— son del
   // Director y de quien lo abrió. Quien trabaja una etapa ve el plan y lo suyo,
@@ -296,11 +291,9 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: tuboActual.color }}>
               {tuboActual.label}
             </span>
-            {etapaDelTubo && (
-              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: etapaActual.color || colors.muted }}>
-                {etapaActual.nombre}
-              </span>
-            )}
+            {/* Solo el tubo. La etapa en la que va el proyecto se ve abajo,
+                hito por hito y con lo que le falta a cada uno; repetirla acá
+                como una etiqueta suelta no decía de qué estaba hablando. */}
           </>
         )}
       </div>

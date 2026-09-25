@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Circle, CircleDot, RotateCcw, Trash2, Loader2, Hourglass, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, Plus, X, ListTodo, RotateCcw, Trash2, Loader2, Hourglass, ChevronLeft, ChevronRight } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -8,7 +8,7 @@ import { etapaInfo } from "./constantes";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
   agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, asegurarTarea, anotarCorreccion,
-  anotar, cambiarEstadoEtapa, moverEtapa, avanceDe,
+  anotar, cambiarEstadoEtapa, moverEtapa,
 } from "./tubo";
 
 // El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
@@ -176,13 +176,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     <div>
       {/* Dos cosas distintas y hay que verlas distintas: arriba las ETAPAS
           —los hitos del proyecto— y dentro de cada una sus ACTIVIDADES. */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 }}>ETAPAS DEL PROYECTO</span>
-        <span style={{ fontSize: 11, color: colors.muted }}>
-          · dentro de cada una, sus actividades: se marcan, quedan esperando (⧗) si dependen de un tercero,
-          o se vuelven tarea de alguien si hay que hacerlas
-        </span>
-      </div>
+      {/* Sin el párrafo de instrucciones: lo que se puede hacer ya lo dicen
+          los botones por su nombre —Actividad, Tarea, Reunión— y explicarlo
+          arriba era pedirle al lector que estudie antes de mirar. */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 8 }}>ETAPAS DEL PROYECTO</div>
 
       <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8, alignItems: "flex-start" }}>
         {columnas.map((etapa, i) => {
@@ -193,12 +190,12 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
           const porHacer = suyos.filter(i => !i.hecho).sort((a, b) => (a.espera ? 1 : 0) - (b.espera ? 1 : 0));
           const hechas = suyos.filter(i => i.hecho);
           const hecha = etapa.estado === "hecha";
-          const enCurso = etapa.estado === "en_curso";
-          const avance = avanceDe(suyos);
-          const tono = hecha ? colors.success : enCurso ? (cat.color || colors.brand) : colors.border;
+          // La franja de arriba de la columna: lo único que queda del estado
+          // aparte del tachado y el contador.
+          const tono = hecha ? colors.success : etapa.estado === "en_curso" ? (cat.color || colors.brand) : colors.border;
 
           return (
-            <div key={etapa.id} style={{ width: 236, flexShrink: 0, background: colors.surface, border: `1px solid ${colors.border}`,
+            <div key={etapa.id} className="tubo-columna" style={{ width: 236, flexShrink: 0, background: colors.surface, border: `1px solid ${colors.border}`,
               borderTop: `3px solid ${tono}`, borderRadius: colors.radiusMd, display: "flex", flexDirection: "column", opacity: hecha ? 0.75 : 1 }}>
 
               {/* La cabeza de la etapa: el hito y cómo va. Sin responsable ni
@@ -206,9 +203,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   hace y para cuándo son de cada actividad de abajo. */}
               <div style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {hecha ? <Check size={13} color={colors.success} /> : enCurso ? <CircleDot size={13} color={cat.color || colors.brand} /> : <Circle size={13} color={colors.muted} />}
                   {/* El nombre entero del hito: cortado con puntos suspensivos,
-                      "Permisos y ap…" no dice nada. */}
+                      "Permisos y ap…" no dice nada. En qué va lo dicen el
+                      tachado y el "1/3"; antes lo decían también un ícono y una
+                      barra de avance, cuatro señales para un solo dato. */}
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: hecha ? colors.muted : colors.ink,
                     textDecoration: hecha ? "line-through" : "none", lineHeight: 1.25, overflowWrap: "anywhere" }}>{cat.nombre}</span>
                   {suyos.length > 0 && (
@@ -226,7 +224,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {/* Mover el hito: el orden de Ajustes es el de fábrica, el de
                     este proyecto lo pone quien lo lleva. */}
                 {editable && columnas.length > 1 && (
-                <div style={{ display: "flex", gap: 2, marginTop: 4 }}>
+                <div className="tubo-flechas" style={{ display: "flex", gap: 2, marginTop: 4 }}>
                   <button onClick={() => hacer(() => moverEtapa(columnas, etapa, false))} disabled={ocupado || i === 0} title="Mover a la izquierda"
                     style={flecha(i === 0)}><ChevronLeft size={12} /></button>
                   <button onClick={() => hacer(() => moverEtapa(columnas, etapa, true))} disabled={ocupado || i === columnas.length - 1} title="Mover a la derecha"
@@ -234,11 +232,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 </div>
                 )}
 
-                {avance != null && !hecha && (
-                  <div style={{ height: 3, borderRadius: 3, background: colors.neutralSoft, margin: "6px 0 0", overflow: "hidden" }}>
-                    <div style={{ width: `${avance}%`, height: "100%", background: cat.color || colors.brand }} />
-                  </div>
-                )}
 
               </div>
 
