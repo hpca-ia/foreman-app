@@ -89,7 +89,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     onCambio();
   }
 
-  function descargar() {
+  async function descargar() {
     const alcanceTxt = alcance === "todo" ? "Todo el proyecto" : alcance === "sin" ? "Sin planilla" : nombrePlanilla(Number(alcance));
     const filtros = [
       proveedor && `Proveedor: ${proveedor}`,
@@ -114,7 +114,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     });
     filas.push([]);
     filas.push(["", "", "", "", "", "", "", "", "TOTALES", resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", resumen.sinAsignar]);
-    exportarExcel(`${obra.nombre} - Facturas - ${alcanceTxt}`, [
+    await exportarExcel(`${obra.nombre} - Facturas - ${alcanceTxt}`, [
       { nombre: "Facturas", filas, anchos: [5, 11, 16, 14, 30, 18, 14, 40, 30, 11, 11, 11, 11, 12, 16, 36, 12] },
     ]);
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { ListTodo } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
@@ -16,20 +16,29 @@ import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
 import TareasListaMovil from "./components/TareasListaMovil";
 import AvisoTareas from "./components/AvisoTareas";
-import ModuloLeads from "./modules/leads/ModuloLeads";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
-import PanelAjustes from "./components/PanelAjustes";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 
-import ModuloPresupuestos from "./modules/ModuloPresupuestos";
-import ModuloControlObra from "./modules/controlObra/ModuloControlObra";
-import ModuloCajaChica from "./modules/ModuloCajaChica";
+// Cada módulo se baja cuando se entra a él. Antes viajaban todos en el primer
+// paquete —con el motor de Excel y el de PDF adentro—, así que quien abre
+// FOREMAN en el teléfono para ver sus tareas del día esperaba por cosas que usa
+// una vez por semana.
+const ModuloLeads = lazy(() => import("./modules/leads/ModuloLeads"));
+const ModuloPresupuestos = lazy(() => import("./modules/ModuloPresupuestos"));
+const ModuloControlObra = lazy(() => import("./modules/controlObra/ModuloControlObra"));
+const ModuloCajaChica = lazy(() => import("./modules/ModuloCajaChica"));
+const PanelAjustes = lazy(() => import("./components/PanelAjustes"));
+
+// Mientras llega el módulo: un renglón discreto, no una pantalla en blanco.
+const Cargando = () => (
+  <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>Cargando…</div>
+);
 
 export default function App() {
   // Arranca con la copia guardada en el navegador y se refresca desde la base:
@@ -531,19 +540,20 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
             </>
           )}
 
-          {puede("presupuestos.ver") && vista === "presupuestos" && (
-            <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} />
-          )}
-          {puede("controlObra.ver") && vista === "controlObra" && (
-            <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
-          )}
-          {verPipeline && vista === "leads" && (
-            <ModuloLeads currentUser={usuario} users={users} puede={puede} onIrAObra={() => setVista("controlObra")} />
-          )}
-
-          {puede("cajaChica.ver") && vista === "cajaChica" && (
-            <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} />
-          )}
+          <Suspense fallback={<Cargando />}>
+            {puede("presupuestos.ver") && vista === "presupuestos" && (
+              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} />
+            )}
+            {puede("controlObra.ver") && vista === "controlObra" && (
+              <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
+            )}
+            {verPipeline && vista === "leads" && (
+              <ModuloLeads currentUser={usuario} users={users} puede={puede} onIrAObra={() => setVista("controlObra")} />
+            )}
+            {puede("cajaChica.ver") && vista === "cajaChica" && (
+              <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} />
+            )}
+          </Suspense>
 
         </div>
       </div>
@@ -585,7 +595,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
         </div>
       )}
       {showModal && <ModalTarea editTask={editTask} pipeline={proyectosPipeline} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
-      {showAjustes && <PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} />}
+      {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
     </div>
   );
 }

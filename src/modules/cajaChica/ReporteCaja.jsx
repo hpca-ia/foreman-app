@@ -34,7 +34,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
   const periodo = `${desde || "inicio"} a ${hasta || "hoy"}`;
   const conAdjunto = gastosF.filter(g => g.archivo_url).length;
 
-  function generarExcel() {
+  async function generarExcel() {
     setGenerando("excel");
     try {
       const filasGastos = [
@@ -75,7 +75,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         ["Saldo disponible", Number(caja.saldo_disponible) || 0],
       ];
 
-      exportarExcel(`Caja Chica - ${caja.proyecto_nombre} - ${desde}`, [
+      await exportarExcel(`Caja Chica - ${caja.proyecto_nombre} - ${desde}`, [
         { nombre: "Gastos", filas: filasGastos, anchos: [11, 28, 14, 18, 42, 24, 12, 12, 12, 16, 9] },
         { nombre: "Anticipos", filas: filasAnticipos, anchos: [11, 40, 20, 12] },
         { nombre: "Resumen", filas: filasResumen, anchos: [36, 16] },

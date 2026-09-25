@@ -1,9 +1,20 @@
 // Exportación de reportes: Excel para los datos, PDF para el documento
 // que se presenta o se envía (con las facturas adjuntas).
 
-import * as XLSX from "xlsx";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+// Excel y PDF se piden cuando alguien exporta, no al abrir FOREMAN. Traerlos
+// siempre significaba que quien entra en el teléfono a ver sus tareas del día
+// bajaba igual el motor de Excel y el de PDF: la mayor parte del peso, para
+// algo que usa una persona una vez por semana.
+let XLSX, jsPDF, autoTable;
+const cargarExcel = async () => { XLSX = XLSX || await import("xlsx"); return XLSX; };
+const cargarPDF = async () => {
+  if (!jsPDF) {
+    const [pdf, tabla] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    jsPDF = pdf.jsPDF;
+    autoTable = tabla.default;
+  }
+  return { jsPDF, autoTable };
+};
 
 const MARCA = [15, 61, 62];       // --brand
 const TINTA = [17, 24, 39];       // --ink
@@ -17,7 +28,8 @@ const limpiarNombre = s => (s || "reporte").replace(/[^\w\sáéíóúñÁÉÍÓ�
  * Excel con una o varias hojas.
  * @param hojas [{ nombre, filas: [[]], anchos?: [] }]
  */
-export function exportarExcel(nombreArchivo, hojas) {
+export async function exportarExcel(nombreArchivo, hojas) {
+  await cargarExcel();
   const wb = XLSX.utils.book_new();
   for (const hoja of hojas) {
     const ws = XLSX.utils.aoa_to_sheet(hoja.filas);
@@ -40,6 +52,7 @@ export function exportarExcel(nombreArchivo, hojas) {
  */
 export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso, tono }) {
   const FUERTE = tono?.fuerte || MARCA, SUAVE = tono?.suave || [231, 241, 239];
+  await cargarPDF();
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
   let y = 42;

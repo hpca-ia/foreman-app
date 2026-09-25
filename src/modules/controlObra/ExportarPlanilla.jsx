@@ -128,10 +128,10 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
     return filas;
   }
 
-  function generarExcel() {
+  async function generarExcel() {
     setGenerando("excel");
     try {
-      exportarExcel(`${obra.nombre} - ${nombrePlanilla}`, [
+      await exportarExcel(`${obra.nombre} - ${nombrePlanilla}`, [
         { nombre: "Control de Presupuesto", filas: filasControl(), anchos: [8, 52, 8, 11, 12, 14, 14, 14, 14, 14, 10] },
         conPlanillas && planillas.length > 0 && { nombre: "Planillas", filas: filasPlanillas(), anchos: [5, 26, 11, 11, 10, 10, 14, 16, 14] },
         conFacturas && { nombre: "Compendio Facturas", filas: filasFacturas(), anchos: [5, 11, 16, 14, 30, 18, 16, 40, 30, 11, 11, 11, 11, 12, 14, 30, 11] },

@@ -225,9 +225,9 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
     } finally { setImprimiendo(""); }
   }
 
-  function imprimirExcel() {
+  async function imprimirExcel() {
     const pendientesNova = Object.values(obsPorId).flat();
-    exportarExcel(nombreArchivo, [
+    await exportarExcel(nombreArchivo, [
       { nombre: "Rubros", anchos: [7, 50, 30, 7, 10, 11, 8, 11, 12, 7, 45], filas: [
         [`REVISIÓN — ${presupuesto.nombre || ""}`], ["Documento de revisión interna, no es el presupuesto para el cliente"], [comoSeVe], [],
         ["N°", "DESCRIPCIÓN", "CAPÍTULO", "UND", "CANTIDAD", "P. BASE", "UTIL %", "P. FINAL", "TOTAL", "% TOTAL", "ALERTAS"],
