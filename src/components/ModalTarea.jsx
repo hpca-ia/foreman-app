@@ -15,10 +15,10 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
-    type: editTask.type, due_date: editTask.due_date, priority: editTask.priority,
+    type: editTask.type, due_date: editTask.due_date, hora: editTask.hora || "", priority: editTask.priority,
     status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada, enlace: editTask.enlace || "",
     es_aprobacion: !!editTask.es_aprobacion,
-  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "", es_aprobacion: false });
+  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", hora: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "", es_aprobacion: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   // Los que acompañan al responsable principal: el plano lo hacen dos.
   const [conmigo, setConmigo] = useState(acompanantes);
@@ -134,9 +134,19 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
         </div>
         <div>
           <label style={lS}>Fecha límite *</label>
-          <input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} disabled={!puedeMoverFecha}
-            title={puedeMoverFecha ? "" : "La fecha la mueve el Director o quien tenga ese permiso"}
-            style={{ ...inputStyle, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }} />
+          {/* La hora, solo cuando hay día y para lo que se agenda: una reunión
+              es "el 9 a las tres", y así entra al calendario a esa hora en vez
+              de quedar como evento de todo el día. */}
+          <div style={{ display: "flex", gap: 6 }}>
+            <input type="date" value={form.due_date} onChange={e => inp("due_date", e.target.value)} disabled={!puedeMoverFecha}
+              title={puedeMoverFecha ? "" : "La fecha la mueve el Director o quien tenga ese permiso"}
+              style={{ ...inputStyle, flex: 1, minWidth: 0, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }} />
+            {form.due_date && (
+              <input type="time" value={form.hora || ""} onChange={e => inp("hora", e.target.value)} disabled={!puedeMoverFecha}
+                title="Hora, si es una reunión" placeholder="--:--"
+                style={{ ...inputStyle, width: 104, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }} />
+            )}
+          </div>
           {!puedeMoverFecha && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>La mueve el Director o quien tenga ese permiso.</div>}
         </div>
         {/* Pedir una aprobación es pedir una tarea: la misma lista, la misma

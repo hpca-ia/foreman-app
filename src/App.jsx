@@ -55,6 +55,9 @@ export default function App() {
   const [dependencias, setDependencias] = useState({ espera: new Map(), destraba: new Map() });
   const [orden, setOrden] = useState("fecha");
   const [filtro, setFiltro] = useState("todas");
+  // Tres cosas distintas que hoy viven en la misma lista: lo que hay que hacer,
+  // lo que hay que ir a una hora, y lo que sale de las etapas de un proyecto.
+  const [seccion, setSeccion] = useState("tareas");
   const [filtroP, setFiltroP] = useState("all");
   const [showModal, setShowModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
@@ -240,12 +243,12 @@ export default function App() {
     const { _acompanantes: conmigo = [], ...form } = formEntero;
     // Si falta la migración 038, la tarea se guarda igual: sin la marca de
     // aprobación, y se avisa.
-    const sinNuevas = ({ es_aprobacion, enlace, ...resto }) => resto;
+    const sinNuevas = ({ es_aprobacion, enlace, hora, ...resto }) => resto;
     const guardar = async campos => {
       const r = id ? await supabase.from("tasks").update(campos).eq("id", id)
                    : await supabase.from("tasks").insert({ ...campos, created_by: usuario.id }).select().single();
       if (r.error && /column|schema cache/i.test(r.error.message)) {
-        alert("Falta correr en Supabase las migraciones 037 y 038: la tarea se guarda, pero sin el enlace ni el pedido de aprobación.");
+        alert("Faltan migraciones en Supabase (037, 038, 045): la tarea se guarda, pero sin el enlace, el pedido de aprobación ni la hora.");
         return id ? await supabase.from("tasks").update(sinNuevas(campos)).eq("id", id)
                   : await supabase.from("tasks").insert({ ...sinNuevas(campos), created_by: usuario.id }).select().single();
       }
@@ -298,6 +301,12 @@ export default function App() {
   // Una actividad de proyecto que nadie tomó no es tarea de nadie: no entra a
   // "Mis tareas" por haberla escrito yo —eso llenaría la lista de cosas que no
   // me tocan—, pero tampoco se pierde: vive en "Pendientes de proyectos".
+  // Una reunión es lo que tiene hora —o está tipificada así—: no se "termina",
+  // se asiste. Una actividad es la que sale de una etapa del pipeline. Lo demás
+  // es una tarea.
+  const esReunion = t => !!t.hora || t.type === "Reunión";
+  const esActividad = t => !esReunion(t) && !!t.lead_id;
+  const deLaSeccion = t => (seccion === "reuniones" ? esReunion(t) : seccion === "actividades" ? esActividad(t) : !esReunion(t) && !t.lead_id);
   const sinDueño = t => t.lead_id && !t.assignee_id && !t.responsable_externo && t.status !== "listo";
   const pendientesSinDueño = tareas.filter(sinDueño);
   const misAlertasTareas = veTodo
@@ -341,6 +350,11 @@ export default function App() {
   if (filtro === "hoy") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) === 0);
   if (filtro === "urgentes") visibles = visibles.filter(t => t.status !== "listo" && t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
   if (filtroP !== "all") visibles = visibles.filter(t => t.project_id === Number(filtroP));
+  const porSeccion = visibles;                       // para contar cada pestaña
+  visibles = visibles.filter(deLaSeccion);
+  const vacio = seccion === "reuniones" ? 'Sin reuniones. Se agendan poniéndole hora a una tarea o a una actividad del proyecto.'
+    : seccion === "actividades" ? "Sin actividades tuyas. Salen de las etapas de un proyecto, en Pipeline."
+    : 'Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.';
 
   // Un solo orden para las tres vistas, y se elige por qué: lo terminado
   // siempre al fondo, y dentro de eso lo que se haya pedido. Empatando, manda
@@ -451,6 +465,26 @@ export default function App() {
                   {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>}
               </div>
+              {/* Tres listas, no una sola mezclada: lo que hay que hacer, lo
+                  que hay que ir a una hora y lo que sale de las etapas de un
+                  proyecto. Son tuyas las tres; el resto del equipo va resumido
+                  al final de la pantalla. */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                {[["tareas", "Tareas"], ["reuniones", "Reuniones"], ["actividades", "Actividades"]].map(([id, label]) => {
+                  const cuantas = porSeccion.filter(t => t.status !== "listo"
+                    && (id === "reuniones" ? esReunion(t) : id === "actividades" ? esActividad(t) : !esReunion(t) && !t.lead_id)).length;
+                  const activa = seccion === id;
+                  return (
+                    <button key={id} onClick={() => setSeccion(id)}
+                      style={{ border: `1px solid ${activa ? colors.ink : colors.border}`, background: activa ? colors.ink : "#fff",
+                        color: activa ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
+                        cursor: "pointer", fontFamily: colors.font, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {label} <span style={{ opacity: 0.7, fontWeight: 400 }}>{cuantas}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               <div className="tareas-filtros" style={{ marginBottom: 10 }}>
                 {/* Urgentes y Atrasadas ya están arriba, en los avisos, y con su
                     número: tenerlas otra vez acá era pedir lo mismo de dos
@@ -463,7 +497,7 @@ export default function App() {
               {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
                 <>
                   <div className="tasks-view-desktop">
-                    {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
+                    {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>{vacio}</div>
                       : vistaTareas === "calendario"
                         ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "tablero"
@@ -482,7 +516,7 @@ export default function App() {
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 
                   <div className="tasks-view-mobile">
-                    {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.</div>
+                    {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />{vacio}</div>
                       : vistaTareas === "calendario"
                         ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "lista"

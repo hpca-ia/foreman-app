@@ -19,6 +19,9 @@ export const TUNELES = {
 };
 
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
+// Para la bitácora: "9 oct" se lee, "2026-10-09" hay que traducirlo. Al mediodía
+// para que la fecha no se corra un día al leerla desde Ecuador.
+const enCriollo = f => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
 /** El catálogo de etapas de un tubo, en orden. */
 export const etapasDelTunel = (catalogo = [], tunel) =>
@@ -80,16 +83,45 @@ export async function sembrarChecklist(lead, etapa) {
   return data || [];
 }
 
-export async function agregarItem(lead, etapa, texto, orden) {
+export async function agregarItem(lead, etapa, texto, orden, quien) {
   const { data, error } = await supabase.from("lead_etapa_items")
     .insert({ lead_id: lead.id, lead_etapa_id: etapa.id, texto: texto.trim(), orden })
     .select().single();
-  return error ? { error: falta(error) ? "Falta correr la migración 040." : error.message } : { item: data };
+  if (error) return { error: falta(error) ? "Falta correr la migración 040." : error.message };
+  await anotar(lead.id, { detalle: `Sumó "${texto.trim()}"`, quien });
+  return { item: data };
 }
 
-export async function marcarItem(item, hecho, quien) {
+/**
+ * El estado de un hito sale de sus actividades: arranca cuando se marca la
+ * primera y cierra cuando se marca la última. Antes había que acordarse de
+ * apretar "Arrancar" y "Cerrar", y el tubo mostraba en pendiente etapas donde
+ * ya se estaba trabajando.
+ *
+ * Un hito cerrado a mano se queda cerrado —se cerró sabiendo que algo quedaba
+ * afuera— hasta que alguien lo reabra.
+ */
+export async function alDiaLosHitos(etapas = [], items = [], quien, nombreDe = () => null) {
+  let cambio = false;
+  for (const e of etapas) {
+    if (e.estado === "hecha" || e.estado === "omitida") continue;
+    const suyos = items.filter(i => i.lead_etapa_id === e.id);
+    if (!suyos.length) continue;
+    const hechas = suyos.filter(i => i.hecho).length;
+    const debe = hechas === suyos.length ? "hecha" : hechas > 0 ? "en_curso" : "pendiente";
+    if (debe === e.estado) continue;
+    // El cierre sí es noticia del proyecto; arrancar no: sería una fila de
+    // bitácora por cada tilde.
+    await cambiarEstadoEtapa(e, debe, quien, debe === "hecha", nombreDe(e));
+    cambio = true;
+  }
+  return cambio;
+}
+
+export async function marcarItem(item, hecho, quien, autor) {
   const campos = { hecho, hecho_at: hecho ? new Date().toISOString() : null, hecho_por: hecho ? quien || null : null };
   const { error } = await supabase.from("lead_etapa_items").update(campos).eq("id", item.id);
+  if (!error) await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor });
   // Su tarea va con ella: marcar la actividad y que la tarea siga abierta en el
   // tablero de alguien es la forma de que nadie vuelva a confiar en el tablero.
   if (!error && item.tarea_id) {
@@ -113,11 +145,12 @@ export async function asegurarTarea(item, datos) {
     title: datos.titulo || item.texto,
     assignee_id: datos.assignee_id || null,
     due_date: datos.due_date || null,
+    hora: datos.hora || null,
     ...(datos.responsable_externo !== undefined ? { responsable_externo: datos.responsable_externo } : {}),
   };
   let { data, error } = await supabase.from("tasks").update(campos).eq("id", item.tarea_id).select().single();
   if (error && /column|schema cache/i.test(error.message)) {
-    const { responsable_externo, ...resto } = campos;
+    const { responsable_externo, hora, ...resto } = campos;
     ({ data, error } = await supabase.from("tasks").update(resto).eq("id", item.tarea_id).select().single());
   }
   return error ? { error: error.message } : { tarea: data };
@@ -134,13 +167,18 @@ export async function guardarNota(item, nota) {
   return error ? (falta(error) ? "falta_migracion" : error.message) : null;
 }
 
-export async function marcarEspera(item, espera) {
+export async function marcarEspera(item, espera, quien) {
   const { error } = await supabase.from("lead_etapa_items").update({ espera }).eq("id", item.id);
+  if (!error) {
+    await anotar(item.lead_id, { detalle: `"${item.texto}" ${espera ? "queda esperando a un tercero" : "ya no espera"}`, quien });
+  }
   return error ? (falta(error) ? "falta_migracion" : error.message) : null;
 }
 
-export async function borrarItem(id) {
+export async function borrarItem(item, quien) {
+  const id = typeof item === "object" ? item.id : item;
   const { error } = await supabase.from("lead_etapa_items").delete().eq("id", id);
+  if (!error && typeof item === "object") await anotar(item.lead_id, { detalle: `Quitó "${item.texto}"`, quien });
   return error ? error.message : null;
 }
 
@@ -156,39 +194,57 @@ export async function borrarItem(id) {
  * tarea, la actividad se marca sola, y al marcar la actividad, la tarea se
  * cierra.
  */
-export async function itemATarea(item, { lead, titulo, assignee_id, due_date, creadoPor, responsable_externo = null }) {
+export async function itemATarea(item, { lead, titulo, assignee_id, due_date, hora, creadoPor, quien, nombreResponsable, responsable_externo = null }) {
   const fila = {
     title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
     due_date: due_date || null, priority: "media", status: "en-progreso", type: "Otro",
     created_by: creadoPor ?? null, notes: `Actividad de ${lead.nombre}`,
+    ...(hora ? { hora } : {}),
     ...(responsable_externo ? { responsable_externo } : {}),
   };
   let { data: tarea, error } = await supabase.from("tasks").insert(fila).select().single();
-  // Sin la migración 041 la tarea entra igual, con el nombre en las notas.
+  // Sin las migraciones 041 y 045 la tarea entra igual: el responsable de
+  // afuera y la hora quedan escritos en las notas, que es donde se pueden leer.
   if (error && /column|schema cache/i.test(error.message)) {
-    const { responsable_externo: fuera, ...resto } = fila;
+    const { responsable_externo: fuera, hora: aLaHora, ...resto } = fila;
     ({ data: tarea, error } = await supabase.from("tasks")
-      .insert({ ...resto, notes: `${resto.notes}${fuera ? ` · Responsable: ${fuera}` : ""}` }).select().single());
+      .insert({ ...resto, notes: `${resto.notes}${fuera ? ` · Responsable: ${fuera}` : ""}${aLaHora ? ` · ${aLaHora}` : ""}` }).select().single());
   }
   if (error) return { error: error.message };
   const { error: e2 } = await supabase.from("lead_etapa_items").update({ tarea_id: tarea.id }).eq("id", item.id);
+  // Encargarle algo a alguien es de las cosas que hay que poder rastrear.
+  if (assignee_id || responsable_externo) {
+    await anotar(lead.id, {
+      detalle: `Le encargó "${tarea.title}" a ${responsable_externo || nombreResponsable || "alguien del equipo"}`
+        + (due_date ? `, para el ${enCriollo(due_date)}${hora ? ` a las ${hora}` : ""}` : ""),
+      quien: quien || { id: creadoPor ?? null },
+    });
+  }
   return e2 ? { tarea, error: e2.message } : { tarea };
 }
 
 /**
- * Lo que se corrigió, a la bitácora.
+ * La bitácora: qué pasó en este proyecto, en orden.
  *
- * Equivocarse escribiendo es normal y arreglarlo tiene que ser fácil; lo que
- * no puede pasar es que la tarea cambie de dueño o de fecha y nadie sepa quién
- * la movió. Por eso el arreglo se anota con nombre y hora.
+ * Se escribe sola con el trabajo —una actividad que se agrega, una que se
+ * hace, una que se le encarga a alguien, un hito que cierra, un arreglo— para
+ * que a fin de mes se pueda contar la obra sin acordarse de nada. Si falta la
+ * columna `automatico` (migración 024) la fila entra igual: perder el
+ * movimiento por una columna sería perder justo lo que se quería guardar.
  */
-export async function anotarCorreccion(lead, detalle, quien) {
-  const { error } = await supabase.from("lead_movimientos").insert({
-    lead_id: lead.id, tipo: "actividad", automatico: true, detalle,
-    autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null,
-  });
+export async function anotar(leadId, { tipo = "actividad", detalle, quien, automatico = true }) {
+  if (!leadId || !detalle) return null;
+  const fila = { lead_id: leadId, tipo, automatico, detalle, autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null };
+  let { error } = await supabase.from("lead_movimientos").insert(fila);
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { automatico: auto, ...resto } = fila;
+    ({ error } = await supabase.from("lead_movimientos").insert(resto));
+  }
   return error ? error.message : null;
 }
+
+/** Lo que se corrigió, a la bitácora: quién la movió y de qué a qué. */
+export const anotarCorreccion = (lead, detalle, quien) => anotar(lead.id, { detalle, quien });
 
 /**
  * Mover un hito a la izquierda o a la derecha dentro de este proyecto.
@@ -197,28 +253,48 @@ export async function anotarCorreccion(lead, detalle, quien) {
  * hacer las ingenierías antes que el anteproyecto, o volver a una etapa
  * anterior. El orden es de cada proyecto, y por eso se guarda acá y no en el
  * catálogo, que es de toda la oficina.
+ *
+ * Se renumera la fila entera —10, 20, 30…— en vez de cambiarle el número a dos.
+ * Intercambiar servía solo si los números eran distintos, y no lo eran: los
+ * proyectos de antes tenían todas sus etapas en cero o repetidas, así que la
+ * flecha no movía nada y parecía rota.
  */
-export async function moverEtapa(etapa, vecina) {
-  if (!vecina) return null;
-  const [{ error: e1 }, { error: e2 }] = await Promise.all([
-    supabase.from("lead_etapas").update({ orden: vecina.orden }).eq("id", etapa.id),
-    supabase.from("lead_etapas").update({ orden: etapa.orden }).eq("id", vecina.id),
-  ]);
-  return e1?.message || e2?.message || null;
+export async function moverEtapa(columnas, etapa, haciaLaDerecha) {
+  const i = columnas.findIndex(e => e.id === etapa.id);
+  const j = i + (haciaLaDerecha ? 1 : -1);
+  if (i < 0 || j < 0 || j >= columnas.length) return null;
+  const lista = [...columnas];
+  [lista[i], lista[j]] = [lista[j], lista[i]];
+
+  const cambios = lista
+    .map((e, k) => ({ id: e.id, antes: e.orden, orden: (k + 1) * 10 }))
+    .filter(x => x.antes !== x.orden);
+  const errores = await Promise.all(
+    cambios.map(x => supabase.from("lead_etapas").update({ orden: x.orden }).eq("id", x.id))
+  );
+  return errores.find(r => r.error)?.error?.message || null;
 }
 
-/** Cerrar un hito, o volver a abrirlo. */
-export async function cambiarEstadoEtapa(etapa, estado, quien) {
+/**
+ * Cerrar un hito, o volver a abrirlo.
+ *
+ * Casi siempre esto pasa solo: el hito arranca cuando se marca su primera
+ * actividad y se cierra cuando se marca la última. Esos cambios no se anotan
+ * en la bitácora —serían una fila por cada tilde—, salvo el cierre, que sí es
+ * una noticia del proyecto.
+ */
+export async function cambiarEstadoEtapa(etapa, estado, quien, anotarlo = true, nombre) {
   const campos = { estado, hecha_at: estado === "hecha" ? new Date().toISOString() : null };
   const { error } = await supabase.from("lead_etapas").update(campos).eq("id", etapa.id);
   if (error) return error.message;
+  if (!anotarlo) { await alDiaLaEtapaDelProyecto(etapa, estado); return null; }
   // En qué va el proyecto lo dice el tubo, y de ahí lo lee la lista del
   // pipeline. Sin este empate, un proyecto de Construcción seguía figurando en
   // la etapa con la que nació —"Lead"— aunque ya estuviera en obra gris.
   await alDiaLaEtapaDelProyecto(etapa, estado);
   await supabase.from("lead_movimientos").insert({
     lead_id: etapa.lead_id, tipo: "etapa", automatico: true,
-    detalle: `${estado === "hecha" ? "Cerró" : estado === "en_curso" ? "Arrancó" : estado === "omitida" ? "Omitió" : "Reabrió"} la etapa`,
+    detalle: `${estado === "hecha" ? "Cerró" : estado === "en_curso" ? "Arrancó" : estado === "omitida" ? "Omitió" : "Reabrió"} la etapa${nombre ? ` ${nombre}` : ""}`,
     autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null,
   }).select();
   return null;
@@ -233,8 +309,12 @@ async function alDiaLaEtapaDelProyecto(etapa, estado) {
   if (estado === "en_curso") etapaId = etapa.etapa_id;
   else if (estado === "hecha") {
     const { data } = await supabase.from("lead_etapas")
-      .select("etapa_id,estado,orden").eq("lead_id", etapa.lead_id).order("orden");
-    etapaId = (data || []).find(e => e.id !== etapa.id && e.estado !== "hecha" && e.estado !== "omitida")?.etapa_id || null;
+      .select("id,etapa_id,estado,orden").eq("lead_id", etapa.lead_id).order("orden");
+    const abiertas = (data || []).filter(e => e.id !== etapa.id && e.estado !== "hecha" && e.estado !== "omitida");
+    // La que sigue a la que se cerró; si esa era la última, la primera que
+    // quede abierta. Sin esto, cerrar obra gris devolvía el proyecto a una
+    // etapa anterior que nadie había cerrado, y parecía que retrocedió.
+    etapaId = (abiertas.find(e => e.orden > etapa.orden) || abiertas[0])?.etapa_id || null;
   }
   if (etapaId) await supabase.from("leads").update({ etapa: etapaId }).eq("id", etapa.lead_id);
 }
