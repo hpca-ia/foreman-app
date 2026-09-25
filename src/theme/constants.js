@@ -1,6 +1,6 @@
 import { colors } from "./colors";
 
-export const TIPOS = ["Llamada", "Reunión", "Contrato", "Compra", "Inspección", "Aprobación", "Visita a obra", "Otro"];
+export const TIPOS = ["Llamada", "Reunión", "Gestión", "Contrato", "Compra", "Inspección", "Aprobación", "Visita a obra", "Otro"];
 
 export const PRIORIDAD = {
   urgente: { label: "Urgente", color: colors.danger, bg: colors.dangerSoft },

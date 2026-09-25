@@ -35,6 +35,8 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const [cargando, setCargando] = useState(true);
   const [verCerrados, setVerCerrados] = useState(false);
   const [tubo, setTubo] = useState("todos");
+  // Tocar una etapa del resumen deja ver solo esa: "¿qué tengo en permisos?".
+  const [etapaAbierta, setEtapaAbierta] = useState(null);
   const [convirtiendo, setConvirtiendo] = useState(null);
   // Obras que entraron directo por Control de Obra y todavía no son proyecto.
   const [sueltas, setSueltas] = useState([]);
@@ -174,17 +176,25 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // medio camino, y es justo donde se pierde el hilo entre vender y construir.
   const porArrancar = leads.filter(l => l.resultado === "ganado" && !l.obra_id);
 
-  const entre = (l, desde, hasta) => {
-    const f = cuando(l);
-    const d = f ? daysUntil(f) : null;
-    return d != null && d >= desde && d <= hasta;
-  };
-  const grupos = [
-    { titulo: "Atrasados", color: colors.danger, leads: abiertos.filter(l => { const f = cuando(l); return f && daysUntil(f) < 0; }) },
-    { titulo: "Esta semana", color: colors.warning, leads: abiertos.filter(l => entre(l, 0, 7)) },
-    { titulo: "Más adelante", color: colors.inkSoft, leads: abiertos.filter(l => entre(l, 8, 99999)) },
-    { titulo: "Sin fecha", color: colors.muted, leads: abiertos.filter(l => !cuando(l)) },
-  ].map(g => ({ ...g, leads: g.leads.slice().sort(orden) }));
+  // El pipeline se lee por etapa: en qué va cada proyecto. Antes se partía por
+  // fecha —atrasados, esta semana, más adelante, sin fecha—, y como casi todo
+  // cae en "sin fecha" quedaban grupos de uno suelto que no decían nada. La
+  // urgencia ya está arriba, en los avisos; acá lo que importa es dónde está
+  // parado cada proyecto y cuántos hay en cada punto del camino.
+  const etapaDe = l => etapaInfo(planes[l.id]?.actual?.etapa_id || l.etapa, catalogo);
+  const ordenTunel = { arquitectura: 0, construccion: 1, lead: 2 };
+  const grupos = (() => {
+    const m = new Map();
+    abiertos.forEach(l => {
+      const e = etapaDe(l);
+      if (!m.has(e.id)) m.set(e.id, { id: e.id, titulo: e.nombre, color: e.color || colors.inkSoft, tunel: delTunel(l), orden: e.orden ?? 999, leads: [] });
+      m.get(e.id).leads.push(l);
+    });
+    return [...m.values()]
+      .map(g => ({ ...g, leads: g.leads.slice().sort(orden) }))
+      .sort((a, b) => (ordenTunel[a.tunel] - ordenTunel[b.tunel]) || a.orden - b.orden);
+  })();
+  const verGrupos = etapaAbierta ? grupos.filter(g => g.id === etapaAbierta) : grupos;
 
   return (
     <div style={{ fontFamily: colors.font }}>
@@ -202,7 +212,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           const n = id === "todos" ? leads.filter(l => !seFue(l)).length : cuantos(id);
           const activo = tubo === id;
           return (
-            <button key={id} onClick={() => setTubo(id)}
+            <button key={id} onClick={() => { setTubo(id); setEtapaAbierta(null); }}
               style={{ border: `1px solid ${activo ? colors.ink : colors.border}`, background: activo ? colors.ink : "#fff",
                 color: activo ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
                 cursor: "pointer", fontFamily: colors.font, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -211,6 +221,36 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           );
         })}
       </div>
+
+      {/* Dónde estamos: cuántos proyectos hay parados en cada etapa, en el
+          orden del camino. Es el resumen que faltaba —la lista de abajo dice
+          cuáles son, esto dice cuántos y dónde— y sirve de filtro: tocar una
+          etapa deja ver solo esa. */}
+      {grupos.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12, alignItems: "stretch" }}>
+          {grupos.map(g => {
+            const activa = etapaAbierta === g.id;
+            return (
+              <button key={g.id} onClick={() => setEtapaAbierta(activa ? null : g.id)}
+                title={`${g.leads.length} en ${g.titulo}`}
+                style={{ border: `1px solid ${activa ? g.color : colors.border}`, background: activa ? g.color : "#fff",
+                  borderTop: `3px solid ${g.color}`, borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontFamily: colors.font,
+                  textAlign: "left", minWidth: 92 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1, color: activa ? "#fff" : colors.ink }}>{g.leads.length}</div>
+                <div style={{ fontSize: 10.5, color: activa ? "#fff" : colors.inkSoft, marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 130 }}>
+                  {g.titulo}
+                </div>
+              </button>
+            );
+          })}
+          {etapaAbierta && (
+            <button onClick={() => setEtapaAbierta(null)}
+              style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, color: colors.inkSoft }}>
+              Ver todas
+            </button>
+          )}
+        </div>
+      )}
 
       {puede("leads.ver") && <NovaLeads leads={leads} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />}
 
@@ -276,9 +316,10 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           </div>
         ) : (
           <>
-            {grupos.filter(g => g.leads.length).map(g => (
-              <div key={g.titulo} style={{ marginBottom: 14 }}>
+            {verGrupos.map(g => (
+              <div key={g.id} style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: g.color, letterSpacing: 0.5, marginBottom: 6 }}>
+                  {tubo === "todos" && <span style={{ color: colors.muted }}>{(TUNELES[g.tunel] || TUNELES.lead).label.toUpperCase()} · </span>}
                   {g.titulo.toUpperCase()} · {g.leads.length}
                 </div>
                 <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>

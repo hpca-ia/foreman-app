@@ -21,7 +21,6 @@ import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
-import PendientesDeProyectos from "./components/PendientesDeProyectos";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import PanelAjustes from "./components/PanelAjustes";
@@ -303,31 +302,34 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Una gestión de proyecto que nadie tomó no es tarea de nadie: no entra a
   // "Mis tareas" por haberla escrito yo —eso llenaría la lista de cosas que no
   // me tocan—, pero tampoco se pierde: vive en su propio cuadro, abajo.
-  // Una reunión es lo que tiene hora —o está tipificada así—: no se "termina",
-  // se asiste. Una actividad es la que sale de una etapa del pipeline. Lo demás
-  // es una tarea.
+  // Qué es cada cosa lo dice su tipo, no de dónde vino: una tarea del pipeline
+  // asignada a Camila es una tarea, no una gestión, y aparecía abajo entre las
+  // gestiones solo por tener proyecto. Las de antes de esta distinción se
+  // reparten por lo único que las separaba entonces: si tenían dueño o no.
   const esReunion = t => !!t.hora || t.type === "Reunión";
-  const esGestion = t => !esReunion(t) && !!t.lead_id;
-  // Una gestión de proyecto sin dueño vive en su propio cuadro. Una reunión no: aunque nadie la "tenga", es una cita del
-  // estudio y tiene que verse en la lista y en el calendario, que es donde uno
-  // mira para saber si el martes está libre.
-  const sinDueño = t => t.lead_id && !t.assignee_id && !t.responsable_externo && t.status !== "listo" && !esReunion(t);
-  const pendientesSinDueño = tareas.filter(sinDueño);
+  // Las creadas antes de que el tubo distinguiera: se reconocen por su nota
+  // automática, y se reparten por lo único que las separaba entonces —tener
+  // dueño o no—, que es justo lo que las volvía gestión o tarea.
+  const viejaDelTubo = t => /^(Gestión|Actividad) de /.test(t.notes || "");
+  const esGestion = t => !esReunion(t) && (t.type === "Gestión"
+    || (viejaDelTubo(t) && !t.assignee_id && !t.responsable_externo));
+  // Lo que no tiene dueño no se guarda en un cajón aparte: va en su lista, con
+  // todo lo demás y marcado en rojo. En un cuadro al fondo titulado "Sin
+  // responsable" nadie entendía de dónde salía ni qué había que hacer con eso.
   const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
-    : tareas.filter(t => (t.assignee_id === usuario.id || (!sinDueño(t) && t.created_by === usuario.id)) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
+    : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
   const alertCount = misAlertasTareas.length;
   // Quien no es admin ve lo suyo en "Mis tareas". Al elegir uno de sus
   // proyectos ve también lo de sus compañeros ahí —para coordinarse—, salvo lo
   // marcado como privado. Lo privado solo lo ven los admins y el asignado.
   // Mía es también la que me sumaron como acompañante: si la puedo mover, la
   // tengo que ver.
-  const esMia = t => t.assignee_id === usuario.id || (!sinDueño(t) && t.created_by === usuario.id) || (acompanantes.get(t.id) || []).includes(usuario.id);
+  const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
   const misProyectos = new Set(proyectosElegibles.map(p => p.id));
-  let visibles = (veTodo
+  let visibles = veTodo
     ? tareas.filter(t => !t.privada || admin || esMia(t))
-    : tareas.filter(t => esMia(t) || (filtroP !== "all" && !t.privada && misProyectos.has(t.project_id) && t.project_id === Number(filtroP)))
-  ).filter(t => !sinDueño(t));
+    : tareas.filter(t => esMia(t) || (filtroP !== "all" && !t.privada && misProyectos.has(t.project_id) && t.project_id === Number(filtroP)));
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -369,11 +371,12 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
   // Las tres cosas de uno, en el orden en que aprietan: una reunión tiene hora
   // y no espera, una tarea tiene dueño, una actividad es del proyecto.
+  const sinNadie = t => !t.assignee_id && !t.responsable_externo && t.status !== "listo";
   const bloques = [
     { titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
-    { titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => !esReunion(t) && !t.lead_id) },
+    { titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => !esReunion(t) && !esGestion(t)) },
     { titulo: "Gestiones de proyectos", etiqueta: "GESTIÓN", tareas: ordenadas.filter(esGestion) },
-  ].filter(b => b.tareas.length);
+  ].filter(b => b.tareas.length).map(b => ({ ...b, sueltas: b.tareas.filter(sinNadie).length }));
   const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
 
   const filtS = a => ({ padding: "6px 14px", borderRadius: 20, border: a ? "none" : `1px solid ${colors.border}`, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: a ? colors.ink : "#fff", color: a ? "#fff" : colors.inkSoft, flexShrink: 0 });
@@ -453,6 +456,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                             <div key={b.titulo} style={{ marginBottom: 16 }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
                                 {b.titulo.toUpperCase()} · {b.tareas.length}
+                                {b.sueltas > 0 && <span style={{ color: colors.danger }}> · {b.sueltas} SIN RESPONSABLE</span>}
                               </div>
                               <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta}
                                 onEditar={t => { setEditTask(t); setShowModal(true); }} />
@@ -464,10 +468,6 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   <TareasDeLosDemas
                     tasks={tareas.filter(t => t.assignee_id !== usuario.id && (!t.privada || admin || t.created_by === usuario.id))}
                     users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
-                    onEditar={t => { setEditTask(t); setShowModal(true); }} />
-
-                  {/* Y las gestiones que ningún proyecto repartió todavía. */}
-                  <PendientesDeProyectos tasks={pendientesSinDueño} projects={projects} leads={leadsPorId}
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 
                   <div className="tasks-view-mobile">

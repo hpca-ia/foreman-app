@@ -73,7 +73,13 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
               </div>
             ) : t.responsable_externo ? (
               <span style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.responsable_externo} · de afuera</span>
-            ) : <span style={{ fontSize: 12, color: colors.danger }}>Sin asignar</span>}
+            ) : (
+              /* Sin dueño no es un detalle gris: es lo que hay que resolver
+                 antes de que la fecha se venga encima. */
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: "#fff", background: colors.danger, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
+                SIN RESPONSABLE
+              </span>
+            )}
             <span style={{ fontSize: 11, fontWeight: 600, color: pC.color, background: pC.bg, padding: "2px 8px", borderRadius: 20, width: "fit-content" }}>{pC.label}</span>
             <span style={{ fontSize: 12, color: eC.color }}>{eC.label}</span>
             <span style={{ fontSize: 11, fontWeight: 600, color: fechaColor(t) }}>{fechaLabel(t)}</span>

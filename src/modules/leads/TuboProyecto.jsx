@@ -137,7 +137,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   async function sumar(etapa, cuantas) {
     const n = nuevo[etapa.id] || {};
     const texto = (n.texto || "").trim();
-    const tipo = n.tipo || "actividad";
+    const tipo = n.tipo || "gestion";
     const falta = !texto ? `Escribe ${tipo === "reunion" ? "de qué es la reunión" : "qué hay que hacer"}.`
       : tipo === "tarea" && !n.assignee_id ? "Una tarea es de alguien: elige quién la hace."
       : tipo === "reunion" && !n.due_date ? "Una reunión tiene día: ponle la fecha."
@@ -153,7 +153,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
       await itemATarea(r.item, {
         lead, titulo: texto, due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
-        tipo: tipo === "reunion" ? "Reunión" : "Otro", urgente: !!n.urgente,
+        tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : "Otro", urgente: !!n.urgente,
         creadoPor: currentUser?.id, quien: currentUser,
         assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
         nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
@@ -282,7 +282,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     un documento no es lo mismo que el trabajo que alguien
                     tiene que sentarse a hacer. */}
                 {editable && !nuevo[etapa.id]?.abierto && (
-                  <button onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { abierto: true, tipo: "actividad", texto: "" } }))}
+                  <button onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { abierto: true, tipo: "gestion", texto: "" } }))}
                     style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", marginTop: 6,
                       fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 4 }}>
                     <Plus size={11} /> Agregar
@@ -292,7 +292,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {editable && nuevo[etapa.id]?.abierto && (<>
                 <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {TIPOS_NUEVO.map(([id, label]) => {
-                    const activo = (nuevo[etapa.id]?.tipo || "actividad") === id;
+                    const activo = (nuevo[etapa.id]?.tipo || "gestion") === id;
                     return (
                       <button key={id} onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], tipo: id } }))}
                         style={{ ...mini(false), padding: "3px 8px", borderColor: activo ? colors.ink : colors.border,
@@ -306,7 +306,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 <input value={nuevo[etapa.id]?.texto || ""} autoFocus
                   onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], texto: e.target.value } }))}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(etapa, suyos.length); } }}
-                  placeholder={PISTA[nuevo[etapa.id]?.tipo || "actividad"]}
+                  placeholder={PISTA[nuevo[etapa.id]?.tipo || "gestion"]}
                   style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 5 }} />
 
                 {/* Los tres campos están siempre: una actividad también puede
@@ -314,7 +314,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     guardar, y eso lo dice la línea de abajo. */}
                 <select value={nuevo[etapa.id]?.assignee_id || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], assignee_id: e.target.value } }))}
                   style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 4 }}>
-                  <option value="">¿Quién la hace?{(nuevo[etapa.id]?.tipo || "actividad") === "tarea" ? "" : " (opcional)"}</option>
+                  <option value="">¿Quién la hace?{(nuevo[etapa.id]?.tipo || "gestion") === "tarea" ? "" : " (opcional)"}</option>
                   <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
                   {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
                 </select>
@@ -342,7 +342,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   Urgente
                 </label>
 
-                <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>{PIDE[nuevo[etapa.id]?.tipo || "actividad"]}</div>
+                <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>{PIDE[nuevo[etapa.id]?.tipo || "gestion"]}</div>
 
                 <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
                   {/* El botón no se apaga por falta de datos: apagado no explica
@@ -572,14 +572,14 @@ const linea = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, col
 const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 
 // Las tres cosas que puede haber debajo de un hito, y qué pide cada una.
-const TIPOS_NUEVO = [["actividad", "Gestión"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
+const TIPOS_NUEVO = [["gestion", "Gestión"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
 const PISTA = {
-  actividad: "¿Qué hay que gestionar?",
+  gestion: "¿Qué hay que gestionar?",
   tarea: "¿Qué hay que hacer?",
   reunion: "¿De qué es la reunión?",
 };
 const PIDE = {
-  actividad: "Se marca cuando pasa. Responsable y fecha, si hay.",
+  gestion: "Se marca cuando pasa. Responsable y fecha, si hay.",
   tarea: "Pide responsable. La fecha, si la hay.",
   reunion: "Pide día. A una hora o todo el día.",
 };
