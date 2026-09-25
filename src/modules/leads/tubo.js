@@ -202,10 +202,10 @@ export async function borrarItem(item, quien) {
  * tarea, la actividad se marca sola, y al marcar la actividad, la tarea se
  * cierra.
  */
-export async function itemATarea(item, { lead, titulo, assignee_id, due_date, hora, tipo, creadoPor, quien, nombreResponsable, responsable_externo = null }) {
+export async function itemATarea(item, { lead, titulo, assignee_id, due_date, hora, tipo, urgente, creadoPor, quien, nombreResponsable, responsable_externo = null }) {
   const fila = {
     title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
-    due_date: due_date || null, priority: "media", status: "en-progreso", type: tipo || "Otro",
+    due_date: due_date || null, priority: urgente ? "urgente" : "media", status: "en-progreso", type: tipo || "Otro",
     created_by: creadoPor ?? null, notes: `Gestión de ${lead.nombre}`,
     ...(hora ? { hora } : {}),
     ...(responsable_externo ? { responsable_externo } : {}),

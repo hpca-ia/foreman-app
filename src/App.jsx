@@ -370,9 +370,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Las tres cosas de uno, en el orden en que aprietan: una reunión tiene hora
   // y no espera, una tarea tiene dueño, una actividad es del proyecto.
   const bloques = [
-    { titulo: "Reuniones", tareas: ordenadas.filter(esReunion) },
-    { titulo: "Tareas", tareas: ordenadas.filter(t => !esReunion(t) && !t.lead_id) },
-    { titulo: "Gestiones de proyectos", tareas: ordenadas.filter(esGestion) },
+    { titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
+    { titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => !esReunion(t) && !t.lead_id) },
+    { titulo: "Gestiones de proyectos", etiqueta: "GESTIÓN", tareas: ordenadas.filter(esGestion) },
   ].filter(b => b.tareas.length);
   const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
 
@@ -454,7 +454,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                               <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
                                 {b.titulo.toUpperCase()} · {b.tareas.length}
                               </div>
-                              <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId}
+                              <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta}
                                 onEditar={t => { setEditTask(t); setShowModal(true); }} />
                             </div>
                           ))}

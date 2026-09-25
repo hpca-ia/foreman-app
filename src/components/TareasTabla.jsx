@@ -19,7 +19,7 @@ function fechaColor(t) {
   return colors.muted;
 }
 
-export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, onEditar }) {
+export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, etiqueta = "TAREA", onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
@@ -29,7 +29,7 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
       <div style={{ ...row, minHeight: 34, padding: "0 16px", background: colors.bg, cursor: "default" }}>
         <span />
-        {["TAREA", "PROYECTO", "RESPONSABLE", "PRIORIDAD", "ESTADO", "VENCE"].map(h => (
+        {[etiqueta, "PROYECTO", "RESPONSABLE", "PRIORIDAD", "ESTADO", "VENCE"].map(h => (
           <span key={h} style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>{h}</span>
         ))}
       </div>
@@ -58,7 +58,12 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
                 {t.privada && <MarcaPrivada />}
                 <span style={{ fontSize: 13, fontWeight: 500, color: colors.ink, textDecoration: t.status === "listo" ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
               </div>
-              {t.notes && <div title={t.notes} style={{ fontSize: 11, color: colors.muted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>}
+              {/* La nota automática —"Gestión de Villa Fontana"— repite la
+                  columna PROYECTO que está al lado. Se muestra solo lo que
+                  alguien escribió de verdad. */}
+              {t.notes && !/^(Gestión|Actividad) de /.test(t.notes) && (
+                <div title={t.notes} style={{ fontSize: 11, color: colors.muted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>
+              )}
             </div>
             <span style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{proy?.name}</span>
             {asig ? (

@@ -79,7 +79,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     if (ids.length) {
       // Con la 045 puesta viene la hora; sin ella, la misma consulta sin hora.
       let { data: ts, error } = await supabase.from("tasks")
-        .select("id,title,status,due_date,hora,assignee_id,responsable_externo").in("id", ids);
+        .select("id,title,status,due_date,hora,priority,type,assignee_id,responsable_externo").in("id", ids);
       if (error) {
         ({ data: ts } = await supabase.from("tasks")
           .select("id,title,status,due_date,assignee_id").in("id", ids));
@@ -141,7 +141,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     const falta = !texto ? `Escribe ${tipo === "reunion" ? "de qué es la reunión" : "qué hay que hacer"}.`
       : tipo === "tarea" && !n.assignee_id ? "Una tarea es de alguien: elige quién la hace."
       : tipo === "reunion" && !n.due_date ? "Una reunión tiene día: ponle la fecha."
-      : tipo === "reunion" && !n.hora ? "Una reunión tiene hora: ponle la hora."
       : null;
     if (falta) { setErrores(e => ({ ...e, [etapa.id]: falta })); return; }
     setErrores(e => ({ ...e, [etapa.id]: "" }));
@@ -154,7 +153,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
       await itemATarea(r.item, {
         lead, titulo: texto, due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
-        tipo: tipo === "reunion" ? "Reunión" : "Otro",
+        tipo: tipo === "reunion" ? "Reunión" : "Otro", urgente: !!n.urgente,
         creadoPor: currentUser?.id, quien: currentUser,
         assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
         nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
@@ -162,7 +161,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       });
       // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
       // seguidas, y volver a abrir el cuadro cada vez era un clic de más.
-      setNuevo(x => ({ ...x, [etapa.id]: { abierto: true, tipo, texto: "", assignee_id: "", due_date: "", hora: "" } }));
+      setNuevo(x => ({ ...x, [etapa.id]: { abierto: true, tipo, texto: "", assignee_id: "", due_date: "", hora: "", urgente: false } }));
     });
   }
 
@@ -324,10 +323,24 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   <input type="date" value={nuevo[etapa.id]?.due_date || ""} title="Para cuándo"
                     onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], due_date: e.target.value } }))}
                     style={{ ...chico, flex: 1, minWidth: 0 }} />
-                  <input type="time" value={nuevo[etapa.id]?.hora || ""} title="A qué hora"
+                  {/* La hora de una lista y no del relojito del navegador: en el
+                      teléfono ese control es una ruleta, y en el escritorio hay
+                      que pelear con am/pm. Acá se elige "Todo el día" o una
+                      hora de trabajo, que es lo que se usa. */}
+                  <select value={nuevo[etapa.id]?.hora || ""} title="A qué hora"
                     onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], hora: e.target.value } }))}
-                    style={{ ...chico, width: 84 }} />
+                    style={{ ...chico, width: 104 }}>
+                    <option value="">Todo el día</option>
+                    {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
                 </div>
+
+                {/* Lo urgente se marca cuando se escribe, que es cuando se sabe. */}
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: colors.inkSoft, marginTop: 5, cursor: "pointer" }}>
+                  <input type="checkbox" checked={!!nuevo[etapa.id]?.urgente}
+                    onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], urgente: e.target.checked } }))} />
+                  Urgente
+                </label>
 
                 <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>{PIDE[nuevo[etapa.id]?.tipo || "actividad"]}</div>
 
@@ -445,9 +458,12 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   disabled={fechaBloqueada} title={fechaBloqueada ? "La fecha la mueve el Director o quien tenga ese permiso" : ""}
                   style={{ ...inputStyle, flex: 1, minWidth: 0, ...(fechaBloqueada ? { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" } : {}) }} />
                 {aTarea.due_date && (
-                  <input type="time" value={aTarea.hora || ""} onChange={e => setATarea(a => ({ ...a, hora: e.target.value }))}
-                    disabled={fechaBloqueada} title="Hora, si es una reunión"
-                    style={{ ...inputStyle, width: 96, ...(fechaBloqueada ? { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" } : {}) }} />
+                  <select value={aTarea.hora || ""} onChange={e => setATarea(a => ({ ...a, hora: e.target.value }))}
+                    disabled={fechaBloqueada} title="A qué hora"
+                    style={{ ...inputStyle, width: 116, ...(fechaBloqueada ? { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" } : {}) }}>
+                    <option value="">Todo el día</option>
+                    {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
                 )}
               </div>
             </div>
@@ -565,8 +581,15 @@ const PISTA = {
 const PIDE = {
   actividad: "Se marca cuando pasa. Responsable y fecha, si hay.",
   tarea: "Pide responsable. La fecha, si la hay.",
-  reunion: "Pide día y hora.",
+  reunion: "Pide día. A una hora o todo el día.",
 };
+
+// De media en media, de siete a siete: las horas en que la oficina trabaja.
+// Una lista corta se elige de un toque; el reloj del navegador no.
+const HORAS = Array.from({ length: 25 }, (_, i) => {
+  const minutos = 7 * 60 + i * 30;
+  return `${String(Math.floor(minutos / 60)).padStart(2, "0")}:${minutos % 60 === 0 ? "00" : "30"}`;
+});
 
 // Las flechas que mueven el hito: discretas, y apagadas en las puntas.
 const flecha = apagada => ({
@@ -609,7 +632,13 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
           {item.hecho && <Check size={11} color="#fff" />}
         </button>
         <div onClick={onAbrir} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-          <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>{item.texto}</div>
+          <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>
+            {/* Lo urgente se ve sin abrir nada. */}
+            {!item.hecho && tarea?.priority === "urgente" && (
+              <span style={{ color: colors.danger, fontWeight: 700, fontSize: 9.5, marginRight: 4, letterSpacing: 0.3 }}>URGENTE</span>
+            )}
+            {item.texto}
+          </div>
           {!abierta && (
             <div style={{ fontSize: 9.5, color: item.espera && !item.hecho ? colors.warning : colors.muted }}>
               {item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
