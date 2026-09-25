@@ -307,7 +307,11 @@ export default function App() {
   const esReunion = t => !!t.hora || t.type === "Reunión";
   const esActividad = t => !esReunion(t) && !!t.lead_id;
   const deLaSeccion = t => (seccion === "reuniones" ? esReunion(t) : seccion === "actividades" ? esActividad(t) : !esReunion(t) && !t.lead_id);
-  const sinDueño = t => t.lead_id && !t.assignee_id && !t.responsable_externo && t.status !== "listo";
+  // Una actividad de proyecto sin dueño es un pendiente del proyecto y vive en
+  // su propio cuadro. Una reunión no: aunque nadie la "tenga", es una cita del
+  // estudio y tiene que verse en la lista y en el calendario, que es donde uno
+  // mira para saber si el martes está libre.
+  const sinDueño = t => t.lead_id && !t.assignee_id && !t.responsable_externo && t.status !== "listo" && !esReunion(t);
   const pendientesSinDueño = tareas.filter(sinDueño);
   const misAlertasTareas = veTodo
     ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
