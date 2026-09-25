@@ -97,6 +97,7 @@ export default function App() {
   // Los proyectos del pipeline no están en Ajustes, pero sus etapas son tareas
   // de alguien: sin su nombre, esas tareas aparecían sin proyecto.
   const [leadsPorId, setLeadsPorId] = useState({});
+  const [accesosLead, setAccesosLead] = useState({});
   const [proyectosPipeline, setProyectosPipeline] = useState([]);
   const [comentarios, setComentarios] = useState({});   // task_id -> cuántos
   const tienePipeline = Object.keys(leadsPorId).length > 0;
@@ -106,12 +107,19 @@ export default function App() {
     // y los que se están haciendo. Las tareas se cuelgan de ahí igual que de
     // los proyectos de Ajustes, para que no haya dos listas con el mismo
     // nombre y haya que adivinar cuál elegir.
-    supabase.from("leads").select("id,nombre,tunel,es_lead,resultado")
+    supabase.from("leads").select("*")
       .then(({ data, error }) => {
         const filas = error ? [] : data || [];
         setLeadsPorId(Object.fromEntries(filas.map(l => [l.id, l.nombre])));
         setProyectosPipeline(filas.filter(l => l.resultado !== "perdido"));
       });
+    // Quién entra a cada proyecto del pipeline: es lo que antes decían los
+    // miembros del proyecto de Ajustes.
+    supabase.from("lead_accesos").select("lead_id,usuario_id").then(({ data }) => {
+      const m = {};
+      (data || []).forEach(a => { (m[a.lead_id] = m[a.lead_id] || []).push(a.usuario_id); });
+      setAccesosLead(m);
+    });
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
       const c = {};
       (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; });
@@ -313,6 +321,16 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
   const proyectosElegibles = veTodo ? projects : projects.filter(p => (p.miembros || []).includes(usuario.id));
+  // Una sola lista de proyectos: los del pipeline —que son los de verdad— y,
+  // mientras convivan, los de Ajustes que todavía no se empataron. El filtro
+  // miraba solo los de Ajustes, así que una tarea del pipeline no aparecía por
+  // más que se eligiera su proyecto.
+  const proyectosTodos = [
+    ...proyectosPipeline.map(l => ({ clave: `l${l.id}`, id: l.id, esLead: true, name: l.nombre, color: l.color, gente: accesosLead[l.id] || [], creador: l.created_by })),
+    ...projects.filter(p => !p.lead_id).map(p => ({ clave: `p${p.id}`, id: p.id, esLead: false, name: p.name, color: p.color, gente: p.miembros || [] })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+  const mios = proyectosTodos.filter(p => veTodo || p.gente.includes(usuario.id) || p.creador === usuario.id);
+  const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
   // Sin él, a sí mismo y a sus compañeros: quienes comparten con él al menos un
   // proyecto. Así se coordinan en obra sin poder cargarle tareas a un admin o a
@@ -348,10 +366,11 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Mía es también la que me sumaron como acompañante: si la puedo mover, la
   // tengo que ver.
   const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
-  const misProyectos = new Set(proyectosElegibles.map(p => p.id));
+  const puedoVerEseProyecto = proyectoElegido && mios.some(p => p.clave === proyectoElegido.clave);
   let visibles = veTodo
     ? tareas.filter(t => !t.privada || admin || esMia(t))
-    : tareas.filter(t => esMia(t) || (filtroP !== "all" && !t.privada && misProyectos.has(t.project_id) && t.project_id === Number(filtroP)));
+    : tareas.filter(t => esMia(t) || (puedoVerEseProyecto && !t.privada
+        && (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id)));
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -367,7 +386,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // El aviso de arriba es sobre lo que te toca a ti: a María no se le prende
   // la alarma por una tarea vencida de Héctor.
   const baseAviso = veTodo ? visibles : visibles.filter(esMia);
-  const paraAvisar = filtroP === "all" ? baseAviso : baseAviso.filter(t => t.project_id === Number(filtroP));
+  const paraAvisar = !proyectoElegido ? baseAviso
+    : baseAviso.filter(t => (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id));
 
   if (filtro === "atrasadas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
   if (filtro === "pausadas") visibles = visibles.filter(t => t.status === "bloqueado");
@@ -377,7 +397,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   if (filtro === "vencidas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
   if (filtro === "hoy") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) === 0);
   if (filtro === "urgentes") visibles = visibles.filter(t => t.status !== "listo" && t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
-  if (filtroP !== "all") visibles = visibles.filter(t => t.project_id === Number(filtroP));
+  if (proyectoElegido) visibles = visibles.filter(t => (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id));
   // Lo terminado no se mezcla con lo que falta: se ve cuando se lo pide.
   if (!verListas) visibles = visibles.filter(t => t.status !== "listo");
 
@@ -449,9 +469,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                     <button key={v} onClick={() => setVistaTareas(v)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: vistaTareas === v ? colors.surface : "transparent", color: vistaTareas === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
                 </div>
-                {proyectosElegibles.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
+                {mios.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
                   <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
-                  {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {mios.map(p => <option key={p.clave} value={p.clave}>{p.name}</option>)}
                 </select>}
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: colors.inkSoft, cursor: "pointer", flexShrink: 0 }}>
                   <input type="checkbox" checked={verListas} onChange={e => setVerListas(e.target.checked)} /> Ver completadas
