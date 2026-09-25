@@ -206,7 +206,7 @@ export async function itemATarea(item, { lead, titulo, assignee_id, due_date, ho
   const fila = {
     title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
     due_date: due_date || null, priority: "media", status: "en-progreso", type: tipo || "Otro",
-    created_by: creadoPor ?? null, notes: `Actividad de ${lead.nombre}`,
+    created_by: creadoPor ?? null, notes: `Gestión de ${lead.nombre}`,
     ...(hora ? { hora } : {}),
     ...(responsable_externo ? { responsable_externo } : {}),
   };

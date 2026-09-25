@@ -3,9 +3,9 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { colors } from "../theme/colors";
 import { daysUntil } from "../lib/dates";
 
-// Pendientes de los proyectos: lo que hay que hacer y todavía no tiene dueño.
+// Sin responsable: las gestiones de los proyectos que nadie tomó todavía.
 //
-// Cada actividad de un tubo entra a tareas aunque nadie la haya tomado. Sin
+// Cada gestión de un tubo entra a tareas aunque nadie la haya tomado. Sin
 // esto, el tablero mostraría al proyecto limpio mientras en su etapa quedan
 // seis cosas sin hacer: el pendiente existe desde que se escribe, no desde que
 // se le pone nombre.
@@ -66,9 +66,9 @@ export default function PendientesDeProyectos({ tasks = [], projects = [], leads
       <button onClick={alternar}
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", fontFamily: colors.font, textAlign: "left" }}>
         {abierto ? <ChevronDown size={14} color={colors.muted} /> : <ChevronRight size={14} color={colors.muted} />}
-        <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Pendientes de proyectos</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Sin responsable</span>
         <span style={{ fontSize: 11.5, color: colors.muted }}>
-          {total} sin responsable en {grupos.length} {grupos.length === 1 ? "proyecto" : "proyectos"}
+          {total} {total === 1 ? "gestión" : "gestiones"} en {grupos.length} {grupos.length === 1 ? "proyecto" : "proyectos"}
         </span>
       </button>
 

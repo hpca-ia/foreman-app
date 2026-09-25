@@ -180,7 +180,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       {/* Dos cosas distintas y hay que verlas distintas: arriba las ETAPAS
           —los hitos del proyecto— y dentro de cada una sus ACTIVIDADES. */}
       {/* Sin el párrafo de instrucciones: lo que se puede hacer ya lo dicen
-          los botones por su nombre —Actividad, Tarea, Reunión— y explicarlo
+          los botones por su nombre —Gestión, Tarea, Reunión— y explicarlo
           arriba era pedirle al lector que estudie antes de mirar. */}
       <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 8 }}>ETAPAS DEL PROYECTO</div>
 
@@ -203,7 +203,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
               {/* La cabeza de la etapa: el hito y cómo va. Sin responsable ni
                   fecha: un hito no lo hace nadie ni se entrega un día. Quien
-                  hace y para cuándo son de cada actividad de abajo. */}
+                  hace y para cuándo son de cada gestión de abajo. */}
               <div style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {/* El nombre entero del hito: cortado con puntos suspensivos,
@@ -241,7 +241,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               {/* Las actividades de esta etapa, una debajo de la otra: primero lo
                   que falta, al fondo lo hecho. Una etapa puede tener muchas. */}
               <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: "60vh", overflowY: "auto" }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>ACTIVIDADES</div>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>GESTIONES</div>
                 {porHacer.map(item => (
                   <Actividad key={item.id} item={item} etapa={etapa} nombreEtapa={cat.nombre} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
@@ -263,22 +263,25 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {/* Las que esa etapa trae predeterminadas desde Ajustes, si tiene. */}
                 {editable && !suyos.length && predeterminadas[etapa.etapa_id] > 0 && (
                   <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
-                    title={`Trae las ${predeterminadas[etapa.etapa_id]} actividades que esta etapa tiene puestas en Ajustes`}
+                    title={`Trae las ${predeterminadas[etapa.etapa_id]} gestiones que esta etapa tiene puestas en Ajustes`}
                     style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", textAlign: "left",
                       fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, marginBottom: 2 }}>
                     Traer manualmente ({predeterminadas[etapa.etapa_id]})
                   </button>
                 )}
                 {!suyos.length && !predeterminadas[etapa.etapa_id] && (
-                  <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin actividades.</div>
+                  <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin gestiones.</div>
                 )}
 
                 {/* Agregar está guardado detrás de un botón: con el formulario
                     siempre abierto, cada columna mostraba cuatro casillas y la
                     pantalla parecía un tablero de controles en vez de la lista
-                    de lo que falta. Se elige primero qué es —una actividad que
-                    se marca, una tarea de alguien, o una reunión con día y
-                    hora— y recién ahí se pide lo que ese tipo necesita. */}
+                    de lo que falta. Se elige primero qué es —una gestión que se
+                    marca cuando pasa, una tarea de alguien, o una reunión con
+                    día y hora— y recién ahí se pide lo que ese tipo necesita.
+                    "Gestión" y no "actividad": pedir una cotización o esperar
+                    un documento no es lo mismo que el trabajo que alguien
+                    tiene que sentarse a hacer. */}
                 {editable && !nuevo[etapa.id]?.abierto && (
                   <button onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { abierto: true, tipo: "actividad", texto: "" } }))}
                     style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", marginTop: 6,
@@ -355,7 +358,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 ) : (
                   <button onClick={() => hacer(async () => {
                     const faltan = suyos.filter(i => !i.hecho).length;
-                    if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "actividad" : "actividades"} sin marcar. ¿Cerrar la etapa igual?`)) return;
+                    if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "gestión" : "gestiones"} sin marcar. ¿Cerrar la etapa igual?`)) return;
                     await cambiarEstadoEtapa(etapa, "hecha", currentUser, true, cat.nombre);
                     onBitacora?.();
                   })} disabled={ocupado} style={boton(false)}>
@@ -553,14 +556,14 @@ const linea = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, col
 const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 
 // Las tres cosas que puede haber debajo de un hito, y qué pide cada una.
-const TIPOS_NUEVO = [["actividad", "Actividad"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
+const TIPOS_NUEVO = [["actividad", "Gestión"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
 const PISTA = {
-  actividad: "¿Qué actividad?",
+  actividad: "¿Qué hay que gestionar?",
   tarea: "¿Qué hay que hacer?",
   reunion: "¿De qué es la reunión?",
 };
 const PIDE = {
-  actividad: "Se marca cuando se hace. Responsable y fecha, si querés.",
+  actividad: "Se marca cuando pasa. Responsable y fecha, si hay.",
   tarea: "Pide responsable. La fecha, si la hay.",
   reunion: "Pide día y hora.",
 };
@@ -634,7 +637,7 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
                 {tarea.status === "listo" ? " · completada" : tarea.status === "bloqueado" ? " · pausada" : " · en proceso"}.
               </>
             ) : tarea ? (
-              <> Está en las tareas del proyecto, todavía sin responsable.</>
+              <> Es una gestión del proyecto, todavía sin responsable.</>
             ) : null}
           </div>
 
@@ -664,7 +667,7 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
             <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser, nombreEtapa))} disabled={ocupado} style={mini(false)}>
               <Check size={11} /> {item.hecho ? "Desmarcar" : "Marcar hecha"}
             </button>
-            <button onClick={() => { if (window.confirm("¿Quitar esta actividad?")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
+            <button onClick={() => { if (window.confirm("¿Quitar esta gestión?")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
               style={{ ...mini(false), color: colors.danger, marginLeft: "auto" }}><X size={11} /> Quitar</button>
           </div>
           )}

@@ -27,8 +27,8 @@ export const GRUPOS_PERMISOS = [
     titulo: "Qué puede hacer",
     permisos: [
       { id: "tareas.asignar", label: "Asignar tareas a otros" },
-      { id: "tareas.fechas", label: "Mover fechas de tareas", nota: "Cambiar la fecha de una tarea o actividad ya creada. Sin esto la pone al crearla, pero después no la corre solo" },
-      { id: "leads.editar", label: "Editar el pipeline", nota: "Crear proyectos, mover etapas y cargar actividades. Sin esto los ve pero no los toca" },
+      { id: "tareas.fechas", label: "Mover fechas de tareas", nota: "Cambiar la fecha de una tarea, gestión o reunión ya creada. Sin esto la pone al crearla, pero después no la corre solo" },
+      { id: "leads.editar", label: "Editar el pipeline", nota: "Crear proyectos, mover etapas y cargar gestiones. Sin esto los ve pero no los toca" },
       { id: "presupuestos.crear", label: "Crear y editar presupuestos" },
       { id: "obras.crear", label: "Activar una obra para controlarla" },
       { id: "facturas.registrar", label: "Registrar facturas y gastos" },

@@ -300,16 +300,15 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // gente de otras obras.
   const compañeros = new Set(projects.filter(p => (p.miembros || []).includes(usuario.id)).flatMap(p => p.miembros || []));
   const asignables = puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id || compañeros.has(u.id));
-  // Una actividad de proyecto que nadie tomó no es tarea de nadie: no entra a
+  // Una gestión de proyecto que nadie tomó no es tarea de nadie: no entra a
   // "Mis tareas" por haberla escrito yo —eso llenaría la lista de cosas que no
-  // me tocan—, pero tampoco se pierde: vive en "Pendientes de proyectos".
+  // me tocan—, pero tampoco se pierde: vive en su propio cuadro, abajo.
   // Una reunión es lo que tiene hora —o está tipificada así—: no se "termina",
   // se asiste. Una actividad es la que sale de una etapa del pipeline. Lo demás
   // es una tarea.
   const esReunion = t => !!t.hora || t.type === "Reunión";
-  const esActividad = t => !esReunion(t) && !!t.lead_id;
-  // Una actividad de proyecto sin dueño es un pendiente del proyecto y vive en
-  // su propio cuadro. Una reunión no: aunque nadie la "tenga", es una cita del
+  const esGestion = t => !esReunion(t) && !!t.lead_id;
+  // Una gestión de proyecto sin dueño vive en su propio cuadro. Una reunión no: aunque nadie la "tenga", es una cita del
   // estudio y tiene que verse en la lista y en el calendario, que es donde uno
   // mira para saber si el martes está libre.
   const sinDueño = t => t.lead_id && !t.assignee_id && !t.responsable_externo && t.status !== "listo" && !esReunion(t);
@@ -360,10 +359,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
   // Manda la fecha, y lo terminado al fondo: una lista de pendientes que no
   // mira la fecha no sirve, y elegir entre cuatro órdenes era una decisión más
-  // para algo que casi siempre se quiere igual. Para filtrar por proyecto, el
-  // nombre pelado —sin tildes ni mayúsculas—: "Chronix" y "CHRONIX" son el
-  // mismo.
-  const pelado = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  // para algo que casi siempre se quiere igual.
   const porFecha = (a, b) => (daysUntil(a.due_date) - daysUntil(b.due_date)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
   const ordenadas = visibles.slice().sort((a, b) => {
     if (a.status === "listo" && b.status !== "listo") return 1;
@@ -376,7 +372,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const bloques = [
     { titulo: "Reuniones", tareas: ordenadas.filter(esReunion) },
     { titulo: "Tareas", tareas: ordenadas.filter(t => !esReunion(t) && !t.lead_id) },
-    { titulo: "Actividades de proyectos", tareas: ordenadas.filter(esActividad) },
+    { titulo: "Gestiones de proyectos", tareas: ordenadas.filter(esGestion) },
   ].filter(b => b.tareas.length);
   const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
 
@@ -444,8 +440,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                 <>
                   {/* Lo tuyo, todo a la vista y separado por lo que es: las
                       reuniones primero —tienen hora y no se posponen solas—,
-                      después las tareas y al final las actividades de los
-                      proyectos. Antes eran tres pestañas: para saber qué tenías
+                      después las tareas y al final las gestiones de los
+                      proyectos —pedir una cotización, esperar un documento—. Antes eran tres pestañas: para saber qué tenías
                       hoy había que abrir las tres. */}
                   <div className="tasks-view-desktop">
                     {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>{VACIO}</div>
@@ -470,7 +466,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                     users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 
-                  {/* Y lo que ningún proyecto tiene repartido todavía. */}
+                  {/* Y las gestiones que ningún proyecto repartió todavía. */}
                   <PendientesDeProyectos tasks={pendientesSinDueño} projects={projects} leads={leadsPorId}
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 
