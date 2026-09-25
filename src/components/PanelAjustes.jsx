@@ -16,17 +16,16 @@ import { inputStyle } from "./ui/Input";
 import UserForm from "./UserForm";
 import PanelPermisos from "./PanelPermisos";
 import ProjectForm from "./ProjectForm";
+import ProyectosDelPipeline from "./ProyectosDelPipeline";
 
 export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
   const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
   const [editP, setEditP] = useState(null);
   const [newU, setNewU] = useState(false);
-  const [newP, setNewP] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoRef = useRef(null);
   const emptyUser = { id: Date.now(), name: "", role: "residente", pin: "", avatar: "", color: "#0F3D3E" };
-  const emptyProject = { id: Date.now(), name: "", color: "#0F3D3E", tipo: "otro", miembros: [] };
   const [errEquipo, setErrEquipo] = useState("");
   const [okEquipo, setOkEquipo] = useState("");
 
@@ -219,7 +218,20 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
           {/* Un proyecto, una sola vez: acá se dice cuál de esta lista es cuál
               del pipeline, y dejan de ser dos cosas con el mismo nombre. */}
           <EmparejarProyectos onCambio={onEquipoCambio} />
-          {projects.map(p => editP?.id === p.id ? (
+
+          {/* La lista de verdad: la del pipeline. Acá el proyecto solo recibe
+              lo que hace falta para trabajar en equipo —color y gente—; nace y
+              se trabaja en el pipeline, con su tubo y sus etapas. */}
+          <ProyectosDelPipeline users={users} onCambio={onEquipoCambio} />
+
+          {/* Lo que todavía no se empató se sigue viendo y editando como antes:
+              nada desaparece por el camino. */}
+          {projects.filter(p => !p.lead_id).length > 0 && (
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.4, margin: "14px 0 7px" }}>
+              LISTA VIEJA DE AJUSTES · {projects.filter(p => !p.lead_id).length}
+            </div>
+          )}
+          {projects.filter(p => !p.lead_id).map(p => editP?.id === p.id ? (
             <ProjectForm key={p.id} p={editP} users={users} onSave={saveProject} onCancel={() => setEditP(null)} />
           ) : (
             <div key={p.id} style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10, borderLeft: `3px solid ${p.color}` }}>
@@ -234,9 +246,12 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
               <button onClick={() => deleteProject(p.id)} style={deleteBtn}><X size={13} /></button>
             </div>
           ))}
-          {newP ? <ProjectForm p={emptyProject} users={users} onSave={saveProject} onCancel={() => setNewP(false)} /> : (
-            <button onClick={() => setNewP(true)} style={{ width: "100%", background: "var(--bg)", border: "1.5px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 10, color: "var(--ink-soft)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>+ Agregar proyecto</button>
-          )}
+          {/* Los proyectos nuevos nacen en el pipeline: ahí eligen su tubo y
+              arrancan con sus etapas. Crear uno acá volvía a partir la lista en
+              dos, que es el problema que estamos cerrando. */}
+          <div style={{ fontSize: 11.5, color: "var(--muted)", background: "var(--bg)", border: "1px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 11, textAlign: "center" }}>
+            Los proyectos nuevos se crean en <strong style={{ color: "var(--ink-soft)" }}>Pipeline → Nuevo proyecto</strong>, con su tubo y sus etapas.
+          </div>
         </div>
       )}
     </Modal>
