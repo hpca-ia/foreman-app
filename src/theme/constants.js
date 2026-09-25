@@ -18,6 +18,13 @@ export const claseDe = t => (t?.type === "Reunión" ? "reunion"
   : /^(Gestión|Actividad) de /.test(t?.notes || "") ? "gestion"
   : "tarea");
 
+// De media en media, de siete a siete: las horas en que la oficina trabaja. Una
+// lista corta se elige de un toque; el reloj del navegador, no.
+export const HORAS = Array.from({ length: 25 }, (_, i) => {
+  const m = 7 * 60 + i * 30;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${m % 60 === 0 ? "00" : "30"}`;
+});
+
 export const PRIORIDAD = {
   urgente: { label: "Urgente", color: colors.danger, bg: colors.dangerSoft },
   alta: { label: "Alta", color: colors.warning, bg: colors.warningSoft },

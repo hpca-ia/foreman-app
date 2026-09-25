@@ -5,7 +5,7 @@ import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import Avatar from "../../components/ui/Avatar";
 import { etapaInfo } from "./constantes";
-import { CLASES, claseDe } from "../../theme/constants";
+import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
   agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, asegurarTarea, anotarCorreccion,
@@ -80,10 +80,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     if (ids.length) {
       // Con la 045 puesta viene la hora; sin ella, la misma consulta sin hora.
       let { data: ts, error } = await supabase.from("tasks")
-        .select("id,title,status,due_date,hora,priority,type,assignee_id,responsable_externo").in("id", ids);
+        .select("id,title,status,due_date,hora,priority,type,notes,assignee_id,responsable_externo").in("id", ids);
       if (error) {
         ({ data: ts } = await supabase.from("tasks")
-          .select("id,title,status,due_date,assignee_id").in("id", ids));
+          .select("id,title,status,due_date,priority,type,notes,assignee_id").in("id", ids));
       }
       setTareas(Object.fromEntries((ts || []).map(t => [t.id, t])));
     } else setTareas({});
@@ -629,12 +629,6 @@ const PIDE = {
   reunion: "Pide día. A una hora o todo el día.",
 };
 
-// De media en media, de siete a siete: las horas en que la oficina trabaja.
-// Una lista corta se elige de un toque; el reloj del navegador no.
-const HORAS = Array.from({ length: 25 }, (_, i) => {
-  const minutos = 7 * 60 + i * 30;
-  return `${String(Math.floor(minutos / 60)).padStart(2, "0")}:${minutos % 60 === 0 ? "00" : "30"}`;
-});
 
 // Las flechas que mueven el hito: discretas, y apagadas en las puntas.
 const flecha = apagada => ({

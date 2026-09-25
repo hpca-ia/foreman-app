@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { guardarProyecto } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
-import { TIPOS, PRIORIDAD, ESTADO_NUEVO } from "../theme/constants";
+import { PRIORIDAD, ESTADO_NUEVO, CLASES, claseDe, HORAS } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
@@ -34,6 +34,16 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   // lleva el proyecto. Sin el permiso, el campo queda a la vista pero cerrado:
   // esconderlo haría creer que la tarea no tiene fecha.
   const puedeMoverFecha = !editTask || puede("tareas.fechas");
+  // Qué es esta cosa —gestión, tarea o reunión—: se guarda en el tipo, y la
+  // nota automática se mantiene en línea para que las dos pantallas coincidan.
+  const claseDelForm = claseDe(form);
+  const cambiarClase = id => setForm(p => ({
+    ...p,
+    type: id === "reunion" ? "Reunión" : id === "gestion" ? "Gestión" : p.type === "Reunión" || p.type === "Gestión" ? "Otro" : p.type || "Otro",
+    notes: /^(Gestión|Actividad|Tarea|Reunión) de /.test(p.notes || "")
+      ? `${CLASES[id].label} de ${p.notes.replace(/^(Gestión|Actividad|Tarea|Reunión) de /, "")}`
+      : p.notes,
+  }));
   const asignablesPara = projectId => {
     if (puedeAsignarATodos) return users;
     const p = projects.find(x => x.id === projectId);
@@ -99,7 +109,25 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
             {opciones.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             {puedeCrearProyecto && <option value="__nuevo__">+ Nuevo proyecto…</option>}
           </select></div>
-          <div><label style={lS}>Tipo</label><select value={form.type} onChange={e => inp("type", e.target.value)} style={inputStyle}>{TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
+          {/* Qué es se elige acá igual que en el proyecto, y con los mismos
+              colores: la misma cosa no puede llamarse gestión en una pantalla y
+              tarea en la otra. Cambiarlo acá la mueve de bloque en el tablero. */}
+          <div>
+            <label style={lS}>Qué es</label>
+            <div style={{ display: "flex", gap: 5 }}>
+              {Object.entries(CLASES).map(([id, c]) => {
+                const activa = claseDelForm === id;
+                return (
+                  <button key={id} type="button" onClick={() => cambiarClase(id)}
+                    style={{ flex: 1, border: `1px solid ${activa ? c.color : colors.border}`, background: activa ? c.color : "#fff",
+                      color: activa ? "#fff" : colors.inkSoft, borderRadius: 8, padding: "8px 6px", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", fontFamily: colors.font }}>
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div><label style={lS}>Asignar a</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
           <div><label style={lS}>Prioridad</label><select value={form.priority} onChange={e => inp("priority", e.target.value)} style={inputStyle} disabled={!admin}>{Object.entries(PRIORIDAD).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
         </div>
@@ -142,9 +170,14 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
               title={puedeMoverFecha ? "" : "La fecha la mueve el Director o quien tenga ese permiso"}
               style={{ ...inputStyle, flex: 1, minWidth: 0, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }} />
             {form.due_date && (
-              <input type="time" value={form.hora || ""} onChange={e => inp("hora", e.target.value)} disabled={!puedeMoverFecha}
-                title="Hora, si es una reunión" placeholder="--:--"
-                style={{ ...inputStyle, width: 104, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }} />
+              /* La misma lista que en el proyecto: "Todo el día" o una hora de
+                 trabajo. El relojito del navegador es una ruleta en el teléfono. */
+              <select value={form.hora || ""} onChange={e => inp("hora", e.target.value)} disabled={!puedeMoverFecha}
+                title="A qué hora"
+                style={{ ...inputStyle, width: 124, ...(puedeMoverFecha ? {} : { background: colors.bg, color: colors.inkSoft, cursor: "not-allowed" }) }}>
+                <option value="">Todo el día</option>
+                {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
             )}
           </div>
           {!puedeMoverFecha && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>La mueve el Director o quien tenga ese permiso.</div>}
