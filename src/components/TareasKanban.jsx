@@ -21,6 +21,7 @@ const MOVIBLES = [["en-progreso", "En proceso"], ["bloqueado", "Pausada"], ["lis
 const MAX_VISIBLE = 8;
 
 function fechaLabel(t) {
+  if (!t.due_date) return "sin fecha";
   const d = daysUntil(t.due_date);
   if (d < 0) return `Vencida ${Math.abs(d)}d`;
   if (d === 0) return "Hoy";
@@ -40,7 +41,7 @@ export default function TareasKanban({ tasks, users, projects, leads = {}, curre
       {COLUMNAS.map(col => {
         const enColumna = tasks
           .filter(col.de)
-          .sort((a, b) => daysUntil(a.due_date) - daysUntil(b.due_date));
+          .sort((a, b) => (daysUntil(a.due_date) || 0) - (daysUntil(b.due_date) || 0) || 0);
         return (
           <div key={col.id} style={{ width: 270, flexShrink: 0, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 4px", marginBottom: 8 }}>

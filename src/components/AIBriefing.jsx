@@ -19,7 +19,7 @@ export default function AIBriefing({ tasks, currentUser, users, projects }) {
         proyecto: gP(t.project_id)?.name || "?",
         responsable: t.assignee_id ? gU(t.assignee_id)?.name : "Sin asignar",
         estado: t.status,
-        fecha: t.status === "listo" ? "completada" : d < 0 ? `vencida ${Math.abs(d)}d` : d === 0 ? "HOY" : `en ${d}d`,
+        fecha: t.status === "listo" ? "completada" : !t.due_date ? "sin fecha" : d < 0 ? `vencida ${Math.abs(d)}d` : d === 0 ? "HOY" : `en ${d}d`,
         prioridad: t.priority,
         vencida: t.status !== "listo" && d < 0,
         urgente: t.status !== "listo" && (t.priority === "urgente" || d <= 1),

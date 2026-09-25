@@ -362,7 +362,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Manda la fecha, y lo terminado al fondo: una lista de pendientes que no
   // mira la fecha no sirve, y elegir entre cuatro órdenes era una decisión más
   // para algo que casi siempre se quiere igual.
-  const porFecha = (a, b) => (daysUntil(a.due_date) - daysUntil(b.due_date)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
+  // Sin fecha va al fondo: Infinity menos Infinity da NaN y el orden se rompía.
+  const cuantoFalta = t => (t.due_date ? daysUntil(t.due_date) : Number.MAX_SAFE_INTEGER);
+  const porFecha = (a, b) => (cuantoFalta(a) - cuantoFalta(b)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
   const ordenadas = visibles.slice().sort((a, b) => {
     if (a.status === "listo" && b.status !== "listo") return 1;
     if (b.status === "listo" && a.status !== "listo") return -1;

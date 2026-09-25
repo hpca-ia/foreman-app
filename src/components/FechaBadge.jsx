@@ -4,6 +4,7 @@ import Badge from "./ui/Badge";
 
 export default function FechaBadge({ due, status }) {
   if (status === "listo") return null;
+  if (!due) return <Badge color={colors.muted} bg={colors.neutralSoft}>sin fecha</Badge>;
   const d = daysUntil(due);
   if (d < 0) return <Badge color={colors.danger} bg={colors.dangerSoft}>Vencida {Math.abs(d)}d</Badge>;
   if (d === 0) return <Badge color={colors.warning} bg={colors.warningSoft}>Hoy</Badge>;

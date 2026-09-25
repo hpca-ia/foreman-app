@@ -182,6 +182,11 @@ export async function marcarEspera(item, espera, quien) {
 
 export async function borrarItem(item, quien) {
   const id = typeof item === "object" ? item.id : item;
+  // La tarea se va con ella. Quedaba viva en el tablero, sin etapa ni proyecto
+  // que la explique: "esto no está en ningún lugar del pipeline".
+  if (typeof item === "object" && item.tarea_id) {
+    await supabase.from("tasks").delete().eq("id", item.tarea_id);
+  }
   const { error } = await supabase.from("lead_etapa_items").delete().eq("id", id);
   if (!error && typeof item === "object") {
     await anotar(item.lead_id, { detalle: `Quitó "${item.texto}"`, quien });

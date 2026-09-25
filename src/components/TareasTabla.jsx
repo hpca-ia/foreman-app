@@ -6,6 +6,7 @@ import MarcaPrivada from "./ui/MarcaPrivada";
 
 function fechaLabel(t) {
   if (t.status === "listo") return "—";
+  if (!t.due_date) return "sin fecha";
   const d = daysUntil(t.due_date);
   if (d < 0) return `Vencida ${Math.abs(d)}d`;
   if (d === 0) return "Hoy";

@@ -170,8 +170,15 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const fechaBloqueada = !!tareas[aTarea?.item?.tarea_id]?.due_date && !puede("tareas.fechas");
 
   const quitarEtapa = etapa => {
-    if (!window.confirm("¿Quitar esta etapa del proyecto? Se va con sus pasos.")) return;
-    hacer(async () => { await supabase.from("lead_etapas").delete().eq("id", etapa.id); });
+    const suyos = itemsDe(etapa.id);
+    if (!window.confirm(`¿Quitar esta etapa del proyecto?${suyos.length ? ` Se van con ella sus ${suyos.length} ${suyos.length === 1 ? "gestión" : "gestiones"}.` : ""}`)) return;
+    hacer(async () => {
+      // Y sus tareas: la etapa se borra en cascada con sus gestiones, pero las
+      // tareas que salieron de ellas quedaban vivas en el tablero, huérfanas.
+      const tareasSuyas = suyos.map(i => i.tarea_id).filter(Boolean);
+      if (tareasSuyas.length) await supabase.from("tasks").delete().in("id", tareasSuyas);
+      await supabase.from("lead_etapas").delete().eq("id", etapa.id);
+    });
   };
 
   return (
