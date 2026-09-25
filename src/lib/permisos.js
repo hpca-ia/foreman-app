@@ -10,6 +10,7 @@ export const GRUPOS_PERMISOS = [
       { id: "presupuestos.ver", label: "Presupuestos" },
       { id: "controlObra.ver", label: "Control de Obra" },
       { id: "cajaChica.ver", label: "Caja Chica" },
+      { id: "compras.ver", label: "Compras", nota: "Pedir lo que hace falta en obra y seguir en qué va" },
       { id: "leads.ver", label: "Todo el pipeline", nota: "Ver todos los proyectos y leads. Sin esto igual se ven los que le compartan o donde tenga una etapa a su cargo" },
       { id: "ajustes.ver", label: "Ajustes", nota: "Usuarios, proyectos y datos de la empresa" },
     ],
@@ -31,6 +32,7 @@ export const GRUPOS_PERMISOS = [
       { id: "leads.editar", label: "Editar el pipeline", nota: "Crear proyectos, mover etapas y cargar gestiones. Sin esto los ve pero no los toca" },
       { id: "presupuestos.crear", label: "Crear y editar presupuestos" },
       { id: "obras.crear", label: "Activar una obra para controlarla" },
+      { id: "compras.gestionar", label: "Comprar y facturar", nota: "Concretar la compra, subir la factura y asignarla a su rubro. Quien pide no compra" },
       { id: "facturas.registrar", label: "Registrar facturas y gastos" },
       { id: "planillas.cerrar", label: "Cerrar una planilla" },
       { id: "gastos.anular", label: "Anular facturas y gastos", nota: "Anular no borra: queda el registro de quién y por qué" },
@@ -49,6 +51,7 @@ export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitect
 // no existan en la base.
 export const POR_DEFECTO = {
   assistant: {
+    "compras.ver": true, "compras.gestionar": true,
     "tareas.ver": true, "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.todas": true, "obras.crear": true,
@@ -58,6 +61,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   gerente: {
+    "compras.ver": true, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
@@ -70,6 +74,7 @@ export const POR_DEFECTO = {
   // presupuesto. Del pipeline ve solo los proyectos que le tocan, no todo lo
   // comercial. Todo esto se puede cambiar en Ajustes.
   arquitecto: {
+    "compras.ver": true, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
@@ -80,6 +85,7 @@ export const POR_DEFECTO = {
   },
   // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros ni ve montos.
   arquitecto_jr: {
+    "compras.ver": false, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
@@ -89,6 +95,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   residente: {
+    "compras.ver": true, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": false, "obras.todas": false, "obras.crear": false,
