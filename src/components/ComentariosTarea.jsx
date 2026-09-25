@@ -48,7 +48,7 @@ export default function ComentariosTarea({ taskId, currentUser }) {
     setTexto("");
     await cargar();
     // El aviso va aparte: si el correo falla, el comentario ya quedó guardado.
-    fetch("/api/aviso-comentario", {
+    fetch("/api/aviso?de=comentario", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ taskId, texto: t, autorId: currentUser?.id }),
     }).catch(() => {});

@@ -61,7 +61,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const avisarPorCorreo = async tareaId => {
     if (!tareaId) return;
     try {
-      await fetch("/api/aviso-tarea", {
+      await fetch("/api/aviso?de=tarea", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tareaId }),
       });
@@ -602,7 +602,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               <button disabled={ocupado || !avisar.a.size} onClick={async () => {
                 setOcupado(true);
                 try {
-                  const r = await fetch("/api/aviso-reunion", {
+                  const r = await fetch("/api/aviso?de=reunion", {
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                       tareaId: avisar.tarea.id,

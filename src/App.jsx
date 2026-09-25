@@ -167,7 +167,7 @@ export default function App() {
   /** Le avisa por correo a quien quedó a cargo. Devuelve el motivo si no pudo. */
   async function avisarPorCorreo(tareaId) {
     try {
-      const r = await fetch("/api/aviso-tarea", {
+      const r = await fetch("/api/aviso?de=tarea", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tareaId }),
       });

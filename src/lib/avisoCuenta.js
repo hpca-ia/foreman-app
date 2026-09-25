@@ -6,7 +6,7 @@
 
 async function pedir(cuerpo) {
   try {
-    const r = await fetch("/api/aviso-cuenta", {
+    const r = await fetch("/api/aviso?de=cuenta", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo),
     });
     const d = await r.json().catch(() => ({}));
