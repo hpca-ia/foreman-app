@@ -7,7 +7,7 @@ import { esAdmin } from "./lib/roles";
 import { cargarPermisos, crearPuede } from "./lib/permisos";
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
-import { PRIORIDAD } from "./theme/constants";
+import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
 import { salir, mensajeError } from "./lib/sesion";
@@ -306,13 +306,15 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // asignada a Camila es una tarea, no una gestión, y aparecía abajo entre las
   // gestiones solo por tener proyecto. Las de antes de esta distinción se
   // reparten por lo único que las separaba entonces: si tenían dueño o no.
-  const esReunion = t => !!t.hora || t.type === "Reunión";
-  // Las creadas antes de que el tubo distinguiera: se reconocen por su nota
-  // automática, y se reparten por lo único que las separaba entonces —tener
-  // dueño o no—, que es justo lo que las volvía gestión o tarea.
-  const viejaDelTubo = t => /^(Gestión|Actividad) de /.test(t.notes || "");
-  const esGestion = t => !esReunion(t) && (t.type === "Gestión"
-    || (viejaDelTubo(t) && !t.assignee_id && !t.responsable_externo));
+  // Una reunión es una reunión porque se creó como tal, no porque tenga hora:
+  // ponerle hora a una gestión —"llamar al municipio a las 9"— la mandaba a
+  // Reuniones y desaparecía de donde el que la escribió la fue a buscar.
+  const esReunion = t => claseDe(t) === "reunion";
+  // Del tubo salen las tres, y cada una lo dice: en su tipo y en su nota. Las
+  // de antes de la distinción decían "Actividad de …" y se toman como
+  // gestiones, que es donde viven —dentro de una etapa—; si alguna era una
+  // tarea, se corrige en un clic desde el proyecto.
+  const esGestion = t => claseDe(t) === "gestion";
   // Lo que no tiene dueño no se guarda en un cajón aparte: va en su lista, con
   // todo lo demás y marcado en rojo. En un cuadro al fondo titulado "Sin
   // responsable" nadie entendía de dónde salía ni qué había que hacer con eso.
@@ -375,9 +377,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // y no espera, una tarea tiene dueño, una actividad es del proyecto.
   const sinNadie = t => !t.assignee_id && !t.responsable_externo && t.status !== "listo";
   const bloques = [
-    { titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
-    { titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => !esReunion(t) && !esGestion(t)) },
-    { titulo: "Gestiones de proyectos", etiqueta: "GESTIÓN", tareas: ordenadas.filter(esGestion) },
+    { clase: "reunion", titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
+    { clase: "tarea", titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => claseDe(t) === "tarea") },
+    { clase: "gestion", titulo: "Gestiones de proyectos", etiqueta: "GESTIÓN", tareas: ordenadas.filter(esGestion) },
   ].filter(b => b.tareas.length).map(b => ({ ...b, sueltas: b.tareas.filter(sinNadie).length }));
   const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
 
@@ -456,11 +458,12 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                         ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                         : bloques.map(b => (
                             <div key={b.titulo} style={{ marginBottom: 16 }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: CLASES[b.clase].color, letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: 2, background: CLASES[b.clase].color }} />
                                 {b.titulo.toUpperCase()} · {b.tareas.length}
                                 {b.sueltas > 0 && <span style={{ color: colors.danger }}> · {b.sueltas} SIN RESPONSABLE</span>}
                               </div>
-                              <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta}
+                              <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta} clase={b.clase}
                                 onEditar={t => { setEditTask(t); setShowModal(true); }} />
                             </div>
                           ))}

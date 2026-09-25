@@ -113,7 +113,11 @@ export async function alDiaElHito(leadEtapaId, quien, nombre) {
   ]);
   if (!etapa || etapa.estado === "omitida" || !suyos?.length) return null;
   const hechas = suyos.filter(i => i.hecho).length;
-  const debe = hechas === suyos.length ? "hecha" : hechas > 0 ? "en_curso" : "pendiente";
+  // Nunca hacia atrás: un hito que alguien marcó "Estamos aquí" se quedaba en
+  // pendiente al sumarle la primera gestión, porque todavía no había ninguna
+  // hecha. Esto solo adelanta: arranca al marcarse la primera y cierra con la
+  // última; volver atrás lo decide una persona.
+  const debe = hechas === suyos.length ? "hecha" : hechas > 0 ? "en_curso" : etapa.estado;
   if (debe === etapa.estado) return null;
   // El cierre sí es noticia del proyecto; arrancar no: sería una fila de
   // bitácora por cada tilde.
@@ -151,6 +155,9 @@ export async function asegurarTarea(item, datos) {
     assignee_id: datos.assignee_id || null,
     due_date: datos.due_date || null,
     hora: datos.hora || null,
+    // Corregir qué es —gestión, tarea o reunión— cambia dónde se la ve, así que
+    // se guarda igual que al crearla: en el tipo y en la nota.
+    ...(datos.tipo ? { type: datos.tipo, notes: `${datos.tipo === "Reunión" ? "Reunión" : datos.tipo === "Gestión" ? "Gestión" : "Tarea"} de ${datos.lead?.nombre || ""}`.trim() } : {}),
     ...(datos.responsable_externo !== undefined ? { responsable_externo: datos.responsable_externo } : {}),
   };
   let { data, error } = await supabase.from("tasks").update(campos).eq("id", item.tarea_id).select().single();
@@ -211,7 +218,10 @@ export async function itemATarea(item, { lead, titulo, assignee_id, due_date, ho
   const fila = {
     title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
     due_date: due_date || null, priority: urgente ? "urgente" : "media", status: "en-progreso", type: tipo || "Otro",
-    created_by: creadoPor ?? null, notes: `Gestión de ${lead.nombre}`,
+    created_by: creadoPor ?? null,
+    // La nota dice qué es: sin esto, una tarea y una gestión del tubo se
+    // guardaban idénticas y el tablero tenía que adivinar de qué lado ponerlas.
+    notes: `${tipo === "Reunión" ? "Reunión" : tipo === "Gestión" ? "Gestión" : "Tarea"} de ${lead.nombre}`,
     ...(hora ? { hora } : {}),
     ...(responsable_externo ? { responsable_externo } : {}),
   };

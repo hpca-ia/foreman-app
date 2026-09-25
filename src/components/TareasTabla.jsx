@@ -1,5 +1,5 @@
 import { daysUntil } from "../lib/dates";
-import { PRIORIDAD, ESTADO } from "../theme/constants";
+import { PRIORIDAD, ESTADO, CLASES, claseDe } from "../theme/constants";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 import MarcaPrivada from "./ui/MarcaPrivada";
@@ -20,7 +20,7 @@ function fechaColor(t) {
   return colors.muted;
 }
 
-export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, etiqueta = "TAREA", onEditar }) {
+export default function TareasTabla({ tasks, users, projects, leads = {}, grupos = null, etiqueta = "TAREA", clase = null, onEditar }) {
   const gU = id => users.find(u => u.id === id);
   const gP = id => projects.find(p => p.id === id);
 
@@ -52,7 +52,11 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
         const pC = PRIORIDAD[t.priority] || PRIORIDAD.media;
         const eC = ESTADO[t.status] || ESTADO.pendiente;
         return (
-          <div key={t.id} className="tabla-row" style={row} onClick={() => onEditar(t)}>
+          <div key={t.id} className="tabla-row" onClick={() => onEditar(t)}
+            style={{ ...row, borderLeft: `3px solid ${CLASES[clase || claseDe(t)].color}` }}>
+            {/* El cuadrito es del proyecto; el filo de la izquierda, de lo que
+                la cosa es: gestión, tarea o reunión, el mismo color que en el
+                proyecto. */}
             <div style={{ width: 8, height: 8, borderRadius: 2, background: proy?.color || colors.brand }} />
             <div style={{ minWidth: 0, opacity: t.status === "listo" ? 0.55 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
@@ -74,6 +78,13 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
               </div>
             ) : t.responsable_externo ? (
               <span style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.responsable_externo} · de afuera</span>
+            ) : t.responsable_externo ? (
+              /* El ingeniero, el proveedor, el cliente: tienen la cosa a cargo
+                 aunque no entren a FOREMAN, y marcarlos "sin responsable" era
+                 mandar a buscar a alguien que ya estaba. */
+              <span style={{ fontSize: 12, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                {t.responsable_externo} <span style={{ color: colors.muted }}>· de afuera</span>
+              </span>
             ) : (
               /* Sin dueño no es un detalle gris: es lo que hay que resolver
                  antes de que la fecha se venga encima. */

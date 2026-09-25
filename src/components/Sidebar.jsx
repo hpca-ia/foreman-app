@@ -32,7 +32,8 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
         </div>
       </div>
 
-      {navItem("tareas", "Tareas", ListTodo)}
+      {/* Dejó de ser solo tareas: tiene reuniones y gestiones de proyectos. */}
+      {navItem("tareas", "Tablero", ListTodo)}
       {puede("presupuestos.ver") && navItem("presupuestos", "Presupuestos", Wallet)}
       {puede("controlObra.ver") && navItem("controlObra", "Control Obra", HardHat)}
       {puede("cajaChica.ver") && navItem("cajaChica", "Caja Chica", PiggyBank)}

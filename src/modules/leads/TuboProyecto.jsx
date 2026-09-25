@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import Avatar from "../../components/ui/Avatar";
 import { etapaInfo } from "./constantes";
+import { CLASES, claseDe } from "../../theme/constants";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
   agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, asegurarTarea, anotarCorreccion,
@@ -253,7 +254,8 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable}
                     onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
-                    onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: tareas[item.tarea_id]?.assignee_id || "", due_date: tareas[item.tarea_id]?.due_date || "", hora: tareas[item.tarea_id]?.hora || "" })} />
+                    onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
+                      assignee_id: t?.responsable_externo ? `x:${t.responsable_externo}` : t?.assignee_id || "", due_date: t?.due_date || "", hora: t?.hora || "" }); }} />
                 ))}
 
                 {/* Lo hecho se queda a la vista, abajo y tachado: la columna
@@ -302,8 +304,8 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     const activo = (nuevo[etapa.id]?.tipo || "gestion") === id;
                     return (
                       <button key={id} onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], tipo: id } }))}
-                        style={{ ...mini(false), padding: "3px 8px", borderColor: activo ? colors.ink : colors.border,
-                          background: activo ? colors.ink : "#fff", color: activo ? "#fff" : colors.inkSoft }}>
+                        style={{ ...mini(false), padding: "3px 8px", borderColor: activo ? CLASES[id].color : colors.border,
+                          background: activo ? CLASES[id].color : "#fff", color: activo ? "#fff" : colors.inkSoft }}>
                         {label}
                       </button>
                     );
@@ -378,19 +380,24 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 ) : (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {/* Decir en qué hito va el proyecto sin tener que marcar
-                        una gestión: un proyecto que ya venía andando entra al
-                        tubo en el punto donde está, no al principio. Lo
-                        anterior queda cerrado, porque si está en Contrato ya
-                        pasó lo de antes. */}
-                    {etapa.estado !== "en_curso" && (
+                        una gestión: uno que ya venía andando entra al tubo en el
+                        punto donde está, no al principio. Lo anterior queda
+                        cerrado, porque si está en Contrato ya pasó lo de antes. */}
+                    {etapa.estado === "en_curso" ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                        color: cat.color || colors.brand, border: `1px solid ${cat.color || colors.brand}`, borderRadius: 14, padding: "3px 9px" }}>
+                        <CircleDot size={11} /> ETAPA ACTUAL
+                      </span>
+                    ) : (
                       <button onClick={() => hacer(async () => {
                         for (const previa of columnas.filter(e => e.orden < etapa.orden && e.estado !== "hecha" && e.estado !== "omitida")) {
                           await cambiarEstadoEtapa(previa, "hecha", currentUser, false, etapaInfo(previa.etapa_id, catalogo).nombre);
                         }
                         await cambiarEstadoEtapa(etapa, "en_curso", currentUser, true, cat.nombre);
                         onBitacora?.();
-                      })} disabled={ocupado} style={boton(true)}>
-                        {ocupado ? <Loader2 size={12} /> : <CircleDot size={12} />} Estamos aquí
+                      })} disabled={ocupado} style={boton(true)}
+                        title="Pone el proyecto en este hito y da por cerrados los anteriores">
+                        {ocupado ? <Loader2 size={12} /> : <CircleDot size={12} />} Marcar etapa actual
                       </button>
                     )}
                     <button onClick={() => hacer(async () => {
@@ -458,8 +465,23 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
           {/* El mismo cuadro sirve para arreglar lo que se escribió mal: el
               texto, el responsable y la fecha se corrigen acá, y el arreglo
               queda en la bitácora del proyecto. */}
-          <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8 }}>También se corrige acá lo que esté mal escrito. El cambio queda en la bitácora.</div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8 }}>También se corrige acá lo que esté mal escrito, y qué es. El cambio queda en la bitácora.</div>
           <div style={{ display: "grid", gap: 8 }}>
+            {/* Qué es se corrige acá: lo que se cargó mal —o lo que se cargó
+                antes de que existiera la distinción— cambia de lista con un
+                clic, en vez de haber que borrarlo y volver a escribirlo. */}
+            <div style={{ display: "flex", gap: 4 }}>
+              {TIPOS_NUEVO.map(([id, label]) => {
+                const activo = (aTarea.tipo || "gestion") === id;
+                return (
+                  <button key={id} onClick={() => setATarea(a => ({ ...a, tipo: id }))}
+                    style={{ ...mini(false), padding: "3px 9px", borderColor: activo ? CLASES[id].color : colors.border,
+                      background: activo ? CLASES[id].color : "#fff", color: activo ? "#fff" : colors.inkSoft }}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
             <input value={aTarea.titulo} onChange={e => setATarea(a => ({ ...a, titulo: e.target.value }))} style={inputStyle} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {/* Del equipo o de afuera: el ingeniero, el proveedor, el cliente.
@@ -498,6 +520,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 const antes = tareas[aTarea.item.tarea_id];
                 await asegurarTarea(aTarea.item, {
                   lead, titulo: aTarea.titulo, due_date: aTarea.due_date || null, hora: (aTarea.due_date && aTarea.hora) || null,
+                  tipo: aTarea.tipo === "reunion" ? "Reunión" : aTarea.tipo === "tarea" ? "Otro" : "Gestión",
                   creadoPor: currentUser?.id, quien: currentUser,
                   assignee_id: externo || !aTarea.assignee_id ? null : Number(aTarea.assignee_id),
                   nombreResponsable: users.find(u => String(u.id) === String(aTarea.assignee_id))?.name,
@@ -598,6 +621,7 @@ const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 
 // Las tres cosas que puede haber debajo de un hito, y qué pide cada una.
 const TIPOS_NUEVO = [["gestion", "Gestión"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
+
 const PISTA = {
   gestion: "¿Qué hay que gestionar?",
   tarea: "¿Qué hay que hacer?",
@@ -656,6 +680,9 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
             display: "flex", alignItems: "center", justifyContent: "center" }}>
           {item.hecho && <Check size={11} color="#fff" />}
         </button>
+        {/* Su color, el mismo del tablero: se ve de un vistazo si la columna
+            está llena de gestiones o de reuniones. */}
+        <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: CLASES[claseDe(tarea)].color, opacity: item.hecho ? 0.4 : 1, flexShrink: 0 }} />
         <div onClick={onAbrir} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
           <div style={{ fontSize: 12, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>
             {/* Lo urgente se ve sin abrir nada. */}
