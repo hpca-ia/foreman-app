@@ -30,6 +30,7 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   });
   const [ruta, setRuta] = useState([]);
   const [movs, setMovs] = useState([]);
+  const [presupuestos, setPresupuestos] = useState([]);
   const [nota, setNota] = useState("");
   const [nuevoPaso, setNuevoPaso] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -68,6 +69,14 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
       autor_id: currentUser?.id, autor_nombre: currentUser?.name, ...extra,
     });
   }
+
+  // Los presupuestos que cuelgan de este proyecto. Sin la migración 046 no hay
+  // columna que consultar y simplemente no se muestran.
+  useEffect(() => {
+    if (!lead?.id) return;
+    supabase.from("presupuestos").select("id,nombre,enviado_at,decidido").eq("lead_id", lead.id)
+      .then(({ data, error }) => setPresupuestos(error ? [] : data || []));
+  }, [lead?.id]);
 
   async function recargarBitacora() {
     const { data } = await supabase.from("lead_movimientos").select("*").eq("lead_id", lead.id)
@@ -400,6 +409,26 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {editando && seccionVisible === "plan" && (
         <div style={{ marginBottom: 14 }}>
           <TuboProyecto lead={{ ...lead, tunel: form.tunel }} catalogo={catalogo} users={users} currentUser={currentUser} puede={puede} editable={editable} onBitacora={recargarBitacora} />
+
+          {/* Los presupuestos de este proyecto: que existen y en qué estado
+              están. Sin montos, que el pipeline no habla de plata —eso se
+              trabaja en Presupuestos, que es donde el número es de verdad. */}
+          {presupuestos.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
+                PRESUPUESTOS · {presupuestos.length}
+              </div>
+              {presupuestos.map(p => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12.5 }}>
+                  <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nombre}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+                    color: p.decidido === "aprobado" ? colors.success : p.decidido === "no_aprobado" ? colors.danger : p.enviado_at ? colors.warning : colors.muted }}>
+                    {p.decidido === "aprobado" ? "Aprobado" : p.decidido === "no_aprobado" ? "No aprobado" : p.enviado_at ? "Enviado" : "Borrador"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

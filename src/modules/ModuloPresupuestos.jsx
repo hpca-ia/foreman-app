@@ -82,12 +82,14 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
   const [showAddCap, setShowAddCap] = useState(false);
   const [showAdminBD, setShowAdminBD] = useState(false);
-  const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", honorarios_pct:0, iva_pct:12, notas:"" });
+  const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", lead_id:"", honorarios_pct:0, iva_pct:12, notas:"" });
+  // Los proyectos, para que el presupuesto cuelgue de uno y se vea desde ahí.
+  const [proyectos, setProyectos] = useState([]);
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
 
-  useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchProveedores(); fetchCapitulosDB(); }, []);
+  useEffect(() => { fetchPresupuestos(); fetchClientes(); fetchProveedores(); fetchCapitulosDB(); fetchProyectos(); }, []);
 
   // Mientras el presupuesto está abierto se anota que alguien lo trabaja, y se
   // mira quién más lo tiene abierto. Es un aviso, no un candado: la marca se
@@ -122,6 +124,10 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   async function fetchPresupuestos() {
     const { data } = await supabase.from("presupuestos").select("*").order("created_at",{ascending:false});
     setPresupuestos(data||[]);
+  }
+  async function fetchProyectos() {
+    const { data } = await supabase.from("leads").select("id,nombre,resultado").order("nombre");
+    setProyectos((data || []).filter(l => l.resultado !== "perdido"));
   }
   async function fetchClientes() {
     const { data } = await supabase.from("clientes").select("*").order("nombre");
@@ -313,13 +319,20 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
       const { data: nc } = await supabase.from("clientes").insert({ nombre:form.cliente_nombre }).select().single();
       if (nc) { cliente_id = nc.id; setClientes(prev=>[...prev,nc]); }
     }
-    const { data, error } = await supabase.from("presupuestos").insert({
+    const fila = {
       nombre:form.nombre, cliente_id:cliente_id||null,
       cliente_nombre:form.cliente_nombre,
       honorarios_pct:Number(form.honorarios_pct),
       iva_pct:Number(form.iva_pct),
-      notas:form.notas, created_by:currentUser.id
-    }).select().single();
+      notas:form.notas, created_by:currentUser.id,
+      ...(form.lead_id ? { lead_id: Number(form.lead_id) } : {}),
+    };
+    let { data, error } = await supabase.from("presupuestos").insert(fila).select().single();
+    // Sin la migración 046 el presupuesto se crea igual, sin su proyecto.
+    if (error && /column|schema cache/i.test(error.message)) {
+      const { lead_id, ...resto } = fila;
+      ({ data, error } = await supabase.from("presupuestos").insert(resto).select().single());
+    }
     if (!error && data) {
       setPresupuestoActivo(data); setItems([]); setCapitulosActivos([]);
       setSubVista("detalle"); fetchPresupuestos();
@@ -901,6 +914,19 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           <div style={{display:"grid",gap:14}}>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Nombre *</label>
               <input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej: Remodelación BdP Condado" style={iS}/></div>
+            {/* De qué proyecto es. Antes el presupuesto colgaba solo de un
+                cliente, así que no había manera de verlo desde su proyecto ni
+                de saber cuántos presupuestos tenía una obra. */}
+            <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Proyecto</label>
+              <select value={form.lead_id} onChange={e=>{
+                const l = proyectos.find(x=>String(x.id)===e.target.value);
+                setForm(p=>({...p, lead_id:e.target.value, nombre: p.nombre || l?.nombre || ""}));
+              }} style={iS}>
+                <option value="">Sin proyecto todavía</option>
+                {proyectos.map(l=><option key={l.id} value={l.id}>{l.nombre}</option>)}
+              </select>
+              <div style={{fontSize:10.5,color:"var(--muted)",marginTop:3}}>Se abre desde el proyecto y su total se ve ahí.</div>
+            </div>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Cliente *</label>
               <select value={form.cliente_id} onChange={e=>{const cl=clientes.find(c=>c.id===Number(e.target.value));setForm(p=>({...p,cliente_id:e.target.value,cliente_nombre:cl?.nombre||""}));}} style={iS}>
                 <option value="">Selecciona cliente...</option>
