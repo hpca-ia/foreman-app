@@ -89,6 +89,7 @@ export async function agregarItem(lead, etapa, texto, orden, quien) {
     .select().single();
   if (error) return { error: falta(error) ? "Falta correr la migración 040." : error.message };
   await anotar(lead.id, { detalle: `Sumó "${texto.trim()}"`, quien });
+  await alDiaElHito(etapa.id, quien);
   return { item: data };
 }
 
@@ -98,30 +99,34 @@ export async function agregarItem(lead, etapa, texto, orden, quien) {
  * apretar "Arrancar" y "Cerrar", y el tubo mostraba en pendiente etapas donde
  * ya se estaba trabajando.
  *
- * Un hito cerrado a mano se queda cerrado —se cerró sabiendo que algo quedaba
- * afuera— hasta que alguien lo reabra.
+ * Esto corre al tocar una actividad, nunca al abrir el proyecto: si corriera
+ * al abrirlo, una etapa reabierta a mano —con todo marcado— se volvía a cerrar
+ * sola al primer refresco y el botón "Reabrir" parecía roto. Reabrir es una
+ * decisión de una persona y manda hasta que alguien vuelva a mover una
+ * actividad de esa etapa.
  */
-export async function alDiaLosHitos(etapas = [], items = [], quien, nombreDe = () => null) {
-  let cambio = false;
-  for (const e of etapas) {
-    if (e.estado === "hecha" || e.estado === "omitida") continue;
-    const suyos = items.filter(i => i.lead_etapa_id === e.id);
-    if (!suyos.length) continue;
-    const hechas = suyos.filter(i => i.hecho).length;
-    const debe = hechas === suyos.length ? "hecha" : hechas > 0 ? "en_curso" : "pendiente";
-    if (debe === e.estado) continue;
-    // El cierre sí es noticia del proyecto; arrancar no: sería una fila de
-    // bitácora por cada tilde.
-    await cambiarEstadoEtapa(e, debe, quien, debe === "hecha", nombreDe(e));
-    cambio = true;
-  }
-  return cambio;
+export async function alDiaElHito(leadEtapaId, quien, nombre) {
+  if (!leadEtapaId) return null;
+  const [{ data: etapa }, { data: suyos }] = await Promise.all([
+    supabase.from("lead_etapas").select("*").eq("id", leadEtapaId).single(),
+    supabase.from("lead_etapa_items").select("id,hecho").eq("lead_etapa_id", leadEtapaId),
+  ]);
+  if (!etapa || etapa.estado === "omitida" || !suyos?.length) return null;
+  const hechas = suyos.filter(i => i.hecho).length;
+  const debe = hechas === suyos.length ? "hecha" : hechas > 0 ? "en_curso" : "pendiente";
+  if (debe === etapa.estado) return null;
+  // El cierre sí es noticia del proyecto; arrancar no: sería una fila de
+  // bitácora por cada tilde.
+  return cambiarEstadoEtapa(etapa, debe, quien, debe === "hecha", nombre);
 }
 
-export async function marcarItem(item, hecho, quien, autor) {
+export async function marcarItem(item, hecho, quien, autor, nombreEtapa) {
   const campos = { hecho, hecho_at: hecho ? new Date().toISOString() : null, hecho_por: hecho ? quien || null : null };
   const { error } = await supabase.from("lead_etapa_items").update(campos).eq("id", item.id);
-  if (!error) await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor });
+  if (!error) {
+    await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor });
+    await alDiaElHito(item.lead_etapa_id, autor, nombreEtapa);
+  }
   // Su tarea va con ella: marcar la actividad y que la tarea siga abierta en el
   // tablero de alguien es la forma de que nadie vuelva a confiar en el tablero.
   if (!error && item.tarea_id) {
@@ -178,7 +183,10 @@ export async function marcarEspera(item, espera, quien) {
 export async function borrarItem(item, quien) {
   const id = typeof item === "object" ? item.id : item;
   const { error } = await supabase.from("lead_etapa_items").delete().eq("id", id);
-  if (!error && typeof item === "object") await anotar(item.lead_id, { detalle: `Quitó "${item.texto}"`, quien });
+  if (!error && typeof item === "object") {
+    await anotar(item.lead_id, { detalle: `Quitó "${item.texto}"`, quien });
+    await alDiaElHito(item.lead_etapa_id, quien);
+  }
   return error ? error.message : null;
 }
 
@@ -194,10 +202,10 @@ export async function borrarItem(item, quien) {
  * tarea, la actividad se marca sola, y al marcar la actividad, la tarea se
  * cierra.
  */
-export async function itemATarea(item, { lead, titulo, assignee_id, due_date, hora, creadoPor, quien, nombreResponsable, responsable_externo = null }) {
+export async function itemATarea(item, { lead, titulo, assignee_id, due_date, hora, tipo, creadoPor, quien, nombreResponsable, responsable_externo = null }) {
   const fila = {
     title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
-    due_date: due_date || null, priority: "media", status: "en-progreso", type: "Otro",
+    due_date: due_date || null, priority: "media", status: "en-progreso", type: tipo || "Otro",
     created_by: creadoPor ?? null, notes: `Actividad de ${lead.nombre}`,
     ...(hora ? { hora } : {}),
     ...(responsable_externo ? { responsable_externo } : {}),

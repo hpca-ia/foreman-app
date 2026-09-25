@@ -8,7 +8,7 @@ import { etapaInfo } from "./constantes";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
   agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, asegurarTarea, anotarCorreccion,
-  anotar, alDiaLosHitos, cambiarEstadoEtapa, moverEtapa, avanceDe,
+  anotar, cambiarEstadoEtapa, moverEtapa, avanceDe,
 } from "./tubo";
 
 // El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
@@ -44,9 +44,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   // Cuántas actividades predeterminadas tiene cada etapa en Ajustes: si no
   // tiene ninguna, no se ofrece traerlas y no hay botón que no haga nada.
   const [predeterminadas, setPredeterminadas] = useState({});
-  // Al agregar: o es una actividad que se marca y ya, o es una tarea con
-  // responsable y fecha. Se decide en el momento, no después.
-  const [conTarea, setConTarea] = useState({});   // etapa → { on, assignee_id, due_date }
+  // Lo que se está escribiendo en cada etapa: qué tipo, el texto y los tres
+  // datos. Vive por etapa para poder tener una a medio escribir en una columna
+  // mientras se mira otra.
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una actividad puede ser de ellos aunque no entren a FOREMAN.
   const [invitados, setInvitados] = useState([]);
@@ -70,14 +70,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       const cuenta = {};
       (plantillas || []).forEach(p => { cuenta[p.etapa_id] = (cuenta[p.etapa_id] || 0) + 1; });
       setPredeterminadas(cuenta);
-    }
-
-    // El estado de cada hito sale de sus actividades. Si algo cambió, se
-    // guarda y se vuelve a leer una vez: a la segunda ya coinciden y para.
-    if (await alDiaLosHitos(r.etapas || [], r.items || [], currentUser, e => etapaInfo(e.etapa_id, catalogo).nombre)) {
-      const r2 = await cargarTubo(lead.id);
-      setEtapas(r2.etapas);
-      setItems(r2.items);
     }
 
     const ids = (r.items || []).map(i => i.tarea_id).filter(Boolean);
@@ -134,36 +126,40 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     await supabase.from("lead_etapas").insert({ lead_id: lead.id, etapa_id: etapaId, orden: (etapas.length + 1) * 10, estado: "pendiente" });
     setAgregando(false);
   });
-  // Sumar una actividad a una etapa, diciendo si algo salió mal en vez de
-  // quedarse callado.
+  // Sumar algo a una etapa, diciendo qué falta en vez de quedarse callado.
+  //
+  // Los tres tipos guardan lo mismo —una actividad con su fila en tareas—, lo
+  // que cambia es qué se exige: una tarea es de alguien, una reunión tiene día
+  // y hora, y una actividad se marca y ya. Lo demás es opcional en los tres.
   async function sumar(etapa, cuantas) {
-    const texto = (nuevo[etapa.id] || "").trim();
-    if (!texto) return;
-    const t = conTarea[etapa.id];
-    // Una tarea es de alguien: sin responsable no es una tarea, es una
-    // actividad, y guardarla igual dejaba trabajo encargado a nadie. Si todavía
-    // no se sabe quién la hace, se agrega como actividad y se asigna después.
-    if (t?.on && !t.assignee_id) {
-      setErrores(e => ({ ...e, [etapa.id]: "Elige quién la hace, o agrégala como actividad." }));
-      return;
-    }
+    const n = nuevo[etapa.id] || {};
+    const texto = (n.texto || "").trim();
+    const tipo = n.tipo || "actividad";
+    const falta = !texto ? `Escribe ${tipo === "reunion" ? "de qué es la reunión" : "qué hay que hacer"}.`
+      : tipo === "tarea" && !n.assignee_id ? "Una tarea es de alguien: elige quién la hace."
+      : tipo === "reunion" && !n.due_date ? "Una reunión tiene día: ponle la fecha."
+      : tipo === "reunion" && !n.hora ? "Una reunión tiene hora: ponle la hora."
+      : null;
+    if (falta) { setErrores(e => ({ ...e, [etapa.id]: falta })); return; }
     setErrores(e => ({ ...e, [etapa.id]: "" }));
+
     await hacer(async () => {
       const r = await agregarItem(lead, etapa, texto, cuantas + 1, currentUser);
       if (r?.error) { setErrores(e => ({ ...e, [etapa.id]: r.error })); return; }
-      // Toda actividad entra también a las tareas del proyecto, tenga dueño o
-      // no: una actividad sin responsable igual es algo pendiente, y el tablero
-      // tiene que decirlo.
-      const externo = t?.on && String(t.assignee_id || "").startsWith("x:") ? String(t.assignee_id).slice(2) : null;
+      // Todo lo que se suma entra también a las tareas del proyecto, tenga
+      // dueño o no: sin responsable igual es algo pendiente de ese proyecto.
+      const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
       await itemATarea(r.item, {
-        lead, titulo: texto, due_date: (t?.on && t.due_date) || null, hora: (t?.on && t.due_date && t.hora) || null,
+        lead, titulo: texto, due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
+        tipo: tipo === "reunion" ? "Reunión" : "Otro",
         creadoPor: currentUser?.id, quien: currentUser,
-        assignee_id: t?.on && t.assignee_id && !externo ? Number(t.assignee_id) : null,
-        nombreResponsable: users.find(u => String(u.id) === String(t?.assignee_id))?.name,
+        assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
+        nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
         responsable_externo: externo,
       });
-      setNuevo(n => ({ ...n, [etapa.id]: "" }));
-      setConTarea(c => ({ ...c, [etapa.id]: { on: t?.on, assignee_id: "", due_date: "", hora: "" } }));
+      // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
+      // seguidas, y volver a abrir el cuadro cada vez era un clic de más.
+      setNuevo(x => ({ ...x, [etapa.id]: { abierto: true, tipo, texto: "", assignee_id: "", due_date: "", hora: "" } }));
     });
   }
 
@@ -251,7 +247,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: "60vh", overflowY: "auto" }}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>ACTIVIDADES</div>
                 {porHacer.map(item => (
-                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]} users={users}
+                  <Actividad key={item.id} item={item} etapa={etapa} nombreEtapa={cat.nombre} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable}
                     onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: tareas[item.tarea_id]?.assignee_id || "", due_date: tareas[item.tarea_id]?.due_date || "", hora: tareas[item.tarea_id]?.hora || "" })} />
@@ -262,7 +258,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     que ya se hizo—, no solo lo pendiente. Esconderlo obligaba a
                     abrir un desplegable para saber si algo se había hecho. */}
                 {hechas.map(item => (
-                  <Actividad key={item.id} item={item} etapa={etapa} tarea={tareas[item.tarea_id]} users={users}
+                  <Actividad key={item.id} item={item} etapa={etapa} nombreEtapa={cat.nombre} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} onTarea={() => {}} />
                 ))}
@@ -280,58 +276,72 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin actividades.</div>
                 )}
 
-                {/* Primero se elige qué se está agregando y después se escribe:
-                    al revés, tocar "Tarea de alguien" sacaba el foco del campo y
-                    lo escrito se guardaba como actividad antes de tiempo. Por eso
-                    tampoco se guarda al salir de la casilla: se guarda con el
-                    botón o con Enter, y lo escrito se queda hasta entonces. */}
-                {editable && (<>
-                <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {[[false, "Actividad"], [true, "Tarea de alguien"]].map(([on, label]) => (
-                    <button key={label} onClick={() => setConTarea(c => ({ ...c, [etapa.id]: { ...(c[etapa.id] || {}), on } }))}
-                      style={{ ...mini(false), borderColor: !!conTarea[etapa.id]?.on === on ? colors.ink : colors.border,
-                        background: !!conTarea[etapa.id]?.on === on ? colors.ink : "#fff",
-                        color: !!conTarea[etapa.id]?.on === on ? "#fff" : colors.inkSoft }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
-                  <input value={nuevo[etapa.id] || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: e.target.value }))}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(etapa, suyos.length); } }}
-                    placeholder={conTarea[etapa.id]?.on ? "¿Qué hay que hacer?" : "¿Qué actividad?"}
-                    style={{ ...chico, flex: 1, minWidth: 0 }} />
-                  {/* El botón no se apaga por falta de responsable: apagado no
-                      explica nada. Se toca, y dice qué falta. */}
-                  <button onClick={() => sumar(etapa, suyos.length)} disabled={ocupado || !(nuevo[etapa.id] || "").trim()}
-                    style={{ ...mini(false), padding: "4px 9px", opacity: (nuevo[etapa.id] || "").trim() ? 1 : 0.5 }}>
+                {/* Agregar está guardado detrás de un botón: con el formulario
+                    siempre abierto, cada columna mostraba cuatro casillas y la
+                    pantalla parecía un tablero de controles en vez de la lista
+                    de lo que falta. Se elige primero qué es —una actividad que
+                    se marca, una tarea de alguien, o una reunión con día y
+                    hora— y recién ahí se pide lo que ese tipo necesita. */}
+                {editable && !nuevo[etapa.id]?.abierto && (
+                  <button onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { abierto: true, tipo: "actividad", texto: "" } }))}
+                    style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", marginTop: 6,
+                      fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 4 }}>
                     <Plus size={11} /> Agregar
                   </button>
+                )}
+
+                {editable && nuevo[etapa.id]?.abierto && (<>
+                <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {TIPOS_NUEVO.map(([id, label]) => {
+                    const activo = (nuevo[etapa.id]?.tipo || "actividad") === id;
+                    return (
+                      <button key={id} onClick={() => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], tipo: id } }))}
+                        style={{ ...mini(false), padding: "3px 8px", borderColor: activo ? colors.ink : colors.border,
+                          background: activo ? colors.ink : "#fff", color: activo ? "#fff" : colors.inkSoft }}>
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {conTarea[etapa.id]?.on && (
-                  <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
-                    <select value={conTarea[etapa.id]?.assignee_id || ""} onChange={e => setConTarea(c => ({ ...c, [etapa.id]: { ...c[etapa.id], assignee_id: e.target.value } }))}
-                      style={{ ...chico, flex: 1, minWidth: 0 }}>
-                      <option value="">¿Quién la hace?</option>
-                      <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
-                      {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
-                    </select>
-                    <input type="date" value={conTarea[etapa.id]?.due_date || ""} onChange={e => setConTarea(c => ({ ...c, [etapa.id]: { ...c[etapa.id], due_date: e.target.value } }))}
-                      style={{ ...chico, width: 116 }} />
-                    {/* La hora solo aparece cuando ya hay día: una reunión es
-                        "el 9 a las tres", no una hora suelta. */}
-                    {conTarea[etapa.id]?.due_date && (
-                      <input type="time" value={conTarea[etapa.id]?.hora || ""} title="Hora, si es una reunión"
-                        onChange={e => setConTarea(c => ({ ...c, [etapa.id]: { ...c[etapa.id], hora: e.target.value } }))}
-                        style={{ ...chico, width: 86 }} />
-                    )}
-                  </div>
-                )}
-                {conTarea[etapa.id]?.on && !conTarea[etapa.id]?.assignee_id && !errores[etapa.id] && (
-                  <div style={{ fontSize: 10, color: colors.muted, marginTop: 3 }}>Una tarea es de alguien: elige quién la hace.</div>
-                )}
+                <input value={nuevo[etapa.id]?.texto || ""} autoFocus
+                  onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], texto: e.target.value } }))}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(etapa, suyos.length); } }}
+                  placeholder={PISTA[nuevo[etapa.id]?.tipo || "actividad"]}
+                  style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 5 }} />
+
+                {/* Los tres campos están siempre: una actividad también puede
+                    tener dueño o fecha. Lo que cambia es qué se exige para
+                    guardar, y eso lo dice la línea de abajo. */}
+                <select value={nuevo[etapa.id]?.assignee_id || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], assignee_id: e.target.value } }))}
+                  style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 4 }}>
+                  <option value="">¿Quién la hace?{(nuevo[etapa.id]?.tipo || "actividad") === "tarea" ? "" : " (opcional)"}</option>
+                  <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
+                  {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
+                </select>
+
+                <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                  <input type="date" value={nuevo[etapa.id]?.due_date || ""} title="Para cuándo"
+                    onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], due_date: e.target.value } }))}
+                    style={{ ...chico, flex: 1, minWidth: 0 }} />
+                  <input type="time" value={nuevo[etapa.id]?.hora || ""} title="A qué hora"
+                    onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], hora: e.target.value } }))}
+                    style={{ ...chico, width: 84 }} />
+                </div>
+
+                <div style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>{PIDE[nuevo[etapa.id]?.tipo || "actividad"]}</div>
+
+                <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+                  {/* El botón no se apaga por falta de datos: apagado no explica
+                      nada. Se toca, y dice qué falta. */}
+                  <button onClick={() => sumar(etapa, suyos.length)} disabled={ocupado}
+                    style={{ ...mini(false), padding: "4px 9px", background: colors.ink, color: "#fff", borderColor: colors.ink }}>
+                    <Plus size={11} /> Agregar
+                  </button>
+                  <button onClick={() => { setNuevo(n => ({ ...n, [etapa.id]: { abierto: false } })); setErrores(e => ({ ...e, [etapa.id]: "" })); }}
+                    style={{ ...mini(false), padding: "4px 9px" }}>Cancelar</button>
+                </div>
+
                 {errores[etapa.id] && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 4 }}>{errores[etapa.id]}</div>}
                 </>)}
               </div>
@@ -339,7 +349,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               {/* El hito arranca y cierra solo, con sus actividades. Acá queda
                   únicamente lo que una máquina no puede decidir: darlo por
                   cerrado aunque falten cosas, o reabrirlo. */}
-              {editable && (hecha || suyos.some(i => !i.hecho) || !suyos.length) && (
+              {editable && (
               <div style={{ padding: "8px 10px", borderTop: `1px solid ${colors.neutralSoft}` }}>
                 {hecha ? (
                   <button onClick={() => hacer(async () => { await cambiarEstadoEtapa(etapa, "en_curso", currentUser, true, cat.nombre); onBitacora?.(); })} disabled={ocupado} style={boton(false)}>
@@ -352,7 +362,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     await cambiarEstadoEtapa(etapa, "hecha", currentUser, true, cat.nombre);
                     onBitacora?.();
                   })} disabled={ocupado} style={boton(false)}>
-                    {ocupado ? <Loader2 size={12} /> : <Check size={12} />} {suyos.length ? "Cerrar igual" : "Cerrar"}
+                    {ocupado ? <Loader2 size={12} /> : <Check size={12} />} {suyos.some(i => !i.hecho) ? "Cerrar igual" : "Cerrar"}
                   </button>
                 )}
               </div>
@@ -481,6 +491,19 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
 const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 
+// Las tres cosas que puede haber debajo de un hito, y qué pide cada una.
+const TIPOS_NUEVO = [["actividad", "Actividad"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
+const PISTA = {
+  actividad: "¿Qué actividad?",
+  tarea: "¿Qué hay que hacer?",
+  reunion: "¿De qué es la reunión?",
+};
+const PIDE = {
+  actividad: "Se marca cuando se hace. Responsable y fecha, si querés.",
+  tarea: "Pide responsable. La fecha, si la hay.",
+  reunion: "Pide día y hora.",
+};
+
 // Las flechas que mueven el hito: discretas, y apagadas en las puntas.
 const flecha = apagada => ({
   border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 6, padding: "1px 5px",
@@ -499,7 +522,7 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, en qué va la tarea que salió de
 // ella, y deja escribir lo que solo sabe quien la trabajó. Los botones dicen
 // su nombre: un ⧗ y un ✓ sueltos no le enseñan a nadie cómo se usa esto.
-function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, onTarea }) {
+function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, onTarea }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // De quién es la tarea que salió de esta actividad.
@@ -512,7 +535,7 @@ function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, 
   return (
     <div style={{ borderRadius: 6, background: abierta ? colors.bg : "transparent", padding: abierta ? "4px 6px" : 0, margin: abierta ? "2px -6px" : 0 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "5px 0" }}>
-        <button onClick={() => editable && hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser))} disabled={ocupado || !editable}
+        <button onClick={() => editable && hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser, nombreEtapa))} disabled={ocupado || !editable}
           title={!editable ? "Solo mirar" : item.hecho ? "Desmarcar" : "Marcar como hecha"}
           style={{ width: 16, height: 16, flexShrink: 0, marginTop: 1, borderRadius: 4, cursor: "pointer", padding: 0,
             border: `1.5px solid ${item.hecho ? colors.success : colors.border}`, background: item.hecho ? colors.success : "#fff",
@@ -570,7 +593,7 @@ function Actividad({ item, etapa, tarea, users = [], abierta, onAbrir, ocupado, 
                 <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar responsable" : "Asignar a alguien"}
               </button>
             )}
-            <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser))} disabled={ocupado} style={mini(false)}>
+            <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser, nombreEtapa))} disabled={ocupado} style={mini(false)}>
               <Check size={11} /> {item.hecho ? "Desmarcar" : "Marcar hecha"}
             </button>
             <button onClick={() => { if (window.confirm("¿Quitar esta actividad?")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
