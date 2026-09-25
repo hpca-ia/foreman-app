@@ -26,8 +26,12 @@ export const claseDe = t => (t?.type === "Reunión" ? "reunion"
  */
 export function armarResumen(d) {
   const hoy = d.hoy || hoyISO();
-  const ayer = sumarDias(hoy, -1);
   const manana = sumarDias(hoy, 1);
+  // "Lo que cerraste" mira hasta el último día hábil: el lunes eso es el
+  // sábado, porque el domingo no se trabaja y el resumen no sale. Si mirara
+  // solo ayer, el trabajo del sábado no lo vería nadie.
+  const esLunes = new Date(`${hoy}T12:00:00`).getDay() === 1;
+  const desde = sumarDias(hoy, esLunes ? -2 : -1);
   const nombreProyecto = id => d.leads.find(l => l.id === id)?.nombre || "";
 
   // Dónde entra cada persona: sus proyectos del pipeline y los de la lista
@@ -41,7 +45,10 @@ export function armarResumen(d) {
   const conProyecto = t => ({ ...t, proyecto: nombreProyecto(t.lead_id), clase: claseDe(t) });
 
   const abiertas = d.tareas.filter(ABIERTA);
-  const cerradasAyer = d.tareas.filter(t => t.status === "listo" && String(t.updated_at || "").slice(0, 10) === ayer);
+  const cerradasAyer = d.tareas.filter(t => {
+    const cuando = String(t.updated_at || "").slice(0, 10);
+    return t.status === "listo" && cuando >= desde && cuando < hoy;
+  });
 
   return d.usuarios
     .filter(u => u.email && u.activo !== false)
