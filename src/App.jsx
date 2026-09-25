@@ -116,7 +116,7 @@ export default function App() {
     // y los que se están haciendo. Las tareas se cuelgan de ahí igual que de
     // los proyectos de Ajustes, para que no haya dos listas con el mismo
     // nombre y haya que adivinar cuál elegir.
-    supabase.from("leads").select("*")
+    supabase.from("leads").select("id,nombre,tunel,es_lead,resultado,color,created_by,responsable_id,obra_id")
       .then(({ data, error }) => {
         const filas = error ? [] : data || [];
         setLeadsPorId(Object.fromEntries(filas.map(l => [l.id, l.nombre])));
@@ -144,11 +144,16 @@ export default function App() {
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, p => setTareas(prev => prev.map(t => t.id === p.new.id ? p.new : t)))
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, p => setTareas(prev => prev.filter(t => t.id !== p.old.id)))
       .subscribe();
-    // Polling silencioso cada 15s - sin mostrar loading
+    // Una red por si el tiempo real se cae, no la fuente principal: cada
+    // quince segundos se traía la tabla entera de tareas para siempre, con la
+    // pestaña en segundo plano incluida. Ahora es cada minuto y solo cuando
+    // alguien está mirando; los cambios siguen llegando al instante por el
+    // canal de arriba.
     const poll = setInterval(async () => {
+      if (document.hidden) return;
       const { data } = await supabase.from("tasks").select("*").order("created_at", { ascending: false });
       if (data) setTareas(data);
-    }, 15000);
+    }, 60000);
     return () => { supabase.removeChannel(tCh); clearInterval(poll); };
   }, [usuario]);
 
