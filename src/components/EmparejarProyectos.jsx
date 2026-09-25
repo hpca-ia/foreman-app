@@ -42,11 +42,17 @@ export default function EmparejarProyectos({ onCambio }) {
 
   const cargar = useCallback(async () => {
     const [{ data: ps, error: e1 }, { data: ls }] = await Promise.all([
-      supabase.from("proyectos").select("id,name,nombre,color,lead_id,activo").eq("activo", true),
+      // Con * y no con una lista de columnas: la tabla guarda "nombre" y la app
+      // lo lee como "name", y pedir la columna equivocada fallaba igual que si
+      // faltara la migración. Si falta `lead_id`, las filas simplemente no lo
+      // traen, y eso es lo que se mira.
+      supabase.from("proyectos").select("*").eq("activo", true),
       supabase.from("leads").select("id,nombre,tunel,resultado").order("nombre"),
     ]);
-    if (e1 && /column|schema cache/i.test(e1.message)) { setSinColumna(true); return; }
-    setProyectos(ps || []);
+    if (e1) { setSinColumna(/column|schema cache|relation/i.test(e1.message)); return; }
+    const filas = ps || [];
+    setSinColumna(filas.length > 0 && !("lead_id" in filas[0]));
+    setProyectos(filas);
     setLeads(ls || []);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
