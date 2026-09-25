@@ -160,11 +160,15 @@ export async function asegurarTarea(item, datos) {
     ...(datos.tipo ? { type: datos.tipo, notes: `${datos.tipo === "Reunión" ? "Reunión" : datos.tipo === "Gestión" ? "Gestión" : "Tarea"} de ${datos.lead?.nombre || ""}`.trim() } : {}),
     ...(datos.responsable_externo !== undefined ? { responsable_externo: datos.responsable_externo } : {}),
   };
-  let { data, error } = await supabase.from("tasks").update(campos).eq("id", item.tarea_id).select().single();
+  let { data, error } = await supabase.from("tasks").update(campos).eq("id", item.tarea_id).select().maybeSingle();
   if (error && /column|schema cache/i.test(error.message)) {
     const { responsable_externo, hora, ...resto } = campos;
-    ({ data, error } = await supabase.from("tasks").update(resto).eq("id", item.tarea_id).select().single());
+    ({ data, error } = await supabase.from("tasks").update(resto).eq("id", item.tarea_id).select().maybeSingle());
   }
+  // Si la tarea ya no existe —alguien la borró desde el tablero y el vínculo
+  // quedó apuntando al vacío—, se crea de nuevo en vez de guardar en la nada:
+  // así el cambio aparece, que es lo único que esperaba quien lo hizo.
+  if (!error && !data) return itemATarea({ ...item, tarea_id: null }, datos);
   return error ? { error: error.message } : { tarea: data };
 }
 

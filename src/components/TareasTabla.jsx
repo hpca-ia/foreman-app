@@ -59,14 +59,21 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
                 proyecto. */}
             <div style={{ width: 8, height: 8, borderRadius: 2, background: proy?.color || colors.brand }} />
             <div style={{ minWidth: 0, opacity: t.status === "listo" ? 0.55 : 1 }}>
-              <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                 {t.privada && <MarcaPrivada />}
+                {/* Qué es, con su nombre y su color: un filo de tres píxeles no
+                    se ve, y el color solo no dice qué significa. */}
+                {(() => { const c = CLASES[claseDe(t)]; return (
+                  <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3, color: c.color, background: c.soft, borderRadius: 4, padding: "2px 5px", whiteSpace: "nowrap", flexShrink: 0 }}>
+                    {c.label.toUpperCase()}
+                  </span>
+                ); })()}
                 <span style={{ fontSize: 13, fontWeight: 500, color: colors.ink, textDecoration: t.status === "listo" ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
               </div>
               {/* La nota automática —"Gestión de Villa Fontana"— repite la
                   columna PROYECTO que está al lado. Se muestra solo lo que
                   alguien escribió de verdad. */}
-              {t.notes && !/^(Gestión|Actividad) de /.test(t.notes) && (
+              {t.notes && !/^(Gestión|Actividad|Tarea|Reunión) de /.test(t.notes) && (
                 <div title={t.notes} style={{ fontSize: 11, color: colors.muted, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>
               )}
             </div>

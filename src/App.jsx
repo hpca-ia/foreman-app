@@ -175,6 +175,10 @@ export default function App() {
     if (!window.confirm("¿Borrar esta tarea? No se puede deshacer.")) return false;
     const { error } = await supabase.from("tasks").delete().eq("id", id);
     if (error) { alert("No se pudo borrar: " + error.message); return false; }
+    // Si salió de una gestión del pipeline, se corta el vínculo: si no, esa
+    // gestión queda apuntando a una tarea que ya no existe y editarla no
+    // guardaba en ningún lado.
+    await supabase.from("lead_etapa_items").update({ tarea_id: null }).eq("tarea_id", id);
     setTareas(prev => prev.filter(t => t.id !== id));
     return true;
   }

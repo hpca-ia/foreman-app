@@ -202,7 +202,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
           const hecha = etapa.estado === "hecha";
           // La franja de arriba de la columna: lo único que queda del estado
           // aparte del tachado y el contador.
-          const tono = hecha ? colors.success : etapa.estado === "en_curso" ? (cat.color || colors.brand) : colors.border;
+          // Dónde está parado el proyecto: el primer hito que no se cerró.
+          const esLaActual = columnas.find(e => e.estado !== "hecha" && e.estado !== "omitida")?.id === etapa.id;
+          const tono = hecha ? colors.success : esLaActual ? (cat.color || colors.brand) : colors.border;
 
           return (
             <div key={etapa.id} className="tubo-columna" style={{ width: 236, flexShrink: 0, background: colors.surface, border: `1px solid ${colors.border}`,
@@ -383,22 +385,16 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                         una gestión: uno que ya venía andando entra al tubo en el
                         punto donde está, no al principio. Lo anterior queda
                         cerrado, porque si está en Contrato ya pasó lo de antes. */}
-                    {etapa.estado === "en_curso" ? (
+                    {/* La etapa actual no se declara: es la primera que sigue
+                        abierta. Para mover el proyecto a Contrato se cierran las
+                        de antes, que es lo que de verdad pasó. Un botón para
+                        "decir dónde estamos" era una tercera manera de decir lo
+                        mismo, y encima había que entenderla. */}
+                    {esLaActual && (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
                         color: cat.color || colors.brand, border: `1px solid ${cat.color || colors.brand}`, borderRadius: 14, padding: "3px 9px" }}>
                         <CircleDot size={11} /> ETAPA ACTUAL
                       </span>
-                    ) : (
-                      <button onClick={() => hacer(async () => {
-                        for (const previa of columnas.filter(e => e.orden < etapa.orden && e.estado !== "hecha" && e.estado !== "omitida")) {
-                          await cambiarEstadoEtapa(previa, "hecha", currentUser, false, etapaInfo(previa.etapa_id, catalogo).nombre);
-                        }
-                        await cambiarEstadoEtapa(etapa, "en_curso", currentUser, true, cat.nombre);
-                        onBitacora?.();
-                      })} disabled={ocupado} style={boton(true)}
-                        title="Pone el proyecto en este hito y da por cerrados los anteriores">
-                        {ocupado ? <Loader2 size={12} /> : <CircleDot size={12} />} Marcar etapa actual
-                      </button>
                     )}
                     <button onClick={() => hacer(async () => {
                       const faltan = suyos.filter(i => !i.hecho).length;
@@ -693,11 +689,17 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
           </div>
           {!abierta && (
             <div style={{ fontSize: 9.5, color: item.espera && !item.hecho ? colors.warning : colors.muted }}>
-              {item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
-                : item.espera ? "esperando respuesta"
-                : tomada(tarea) ? `tarea de ${deQuien(tarea)}${tarea.due_date ? ` · ${cuando(tarea.due_date)}${tarea.hora ? ` ${tarea.hora}` : ""}` : ""}`
-                : tarea?.due_date ? `para ${cuando(tarea.due_date)}${tarea.hora ? ` ${tarea.hora}` : ""}`
-                : ""}
+              {/* Qué es, dicho y pintado: el mismo color y la misma palabra que
+                  en el tablero. */}
+              <span style={{ color: CLASES[claseDe(tarea)].color, fontWeight: 700 }}>{CLASES[claseDe(tarea)].label.toLowerCase()}</span>
+              {(() => {
+                const resto = item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
+                  : item.espera ? "esperando respuesta"
+                  : tomada(tarea) ? `${deQuien(tarea)}${tarea.due_date ? ` · ${cuando(tarea.due_date)}${tarea.hora ? ` ${tarea.hora}` : ""}` : ""}`
+                  : tarea?.due_date ? `para ${cuando(tarea.due_date)}${tarea.hora ? ` ${tarea.hora}` : ""}`
+                  : "";
+                return resto ? ` · ${resto}` : "";
+              })()}
             </div>
           )}
         </div>
