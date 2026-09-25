@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, RotateCcw, Trash2, Loader2, Hourglass, ChevronLeft, ChevronRight, Mail } from "lucide-react";
+import { Check, Plus, X, ListTodo, RotateCcw, Trash2, Loader2, Hourglass, ChevronLeft, ChevronRight, Mail, CircleDot } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -369,14 +369,32 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     <RotateCcw size={12} /> Reabrir
                   </button>
                 ) : (
-                  <button onClick={() => hacer(async () => {
-                    const faltan = suyos.filter(i => !i.hecho).length;
-                    if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "gestión" : "gestiones"} sin marcar. ¿Cerrar la etapa igual?`)) return;
-                    await cambiarEstadoEtapa(etapa, "hecha", currentUser, true, cat.nombre);
-                    onBitacora?.();
-                  })} disabled={ocupado} style={boton(false)}>
-                    {ocupado ? <Loader2 size={12} /> : <Check size={12} />} {suyos.some(i => !i.hecho) ? "Cerrar igual" : "Cerrar"}
-                  </button>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {/* Decir en qué hito va el proyecto sin tener que marcar
+                        una gestión: un proyecto que ya venía andando entra al
+                        tubo en el punto donde está, no al principio. Lo
+                        anterior queda cerrado, porque si está en Contrato ya
+                        pasó lo de antes. */}
+                    {etapa.estado !== "en_curso" && (
+                      <button onClick={() => hacer(async () => {
+                        for (const previa of columnas.filter(e => e.orden < etapa.orden && e.estado !== "hecha" && e.estado !== "omitida")) {
+                          await cambiarEstadoEtapa(previa, "hecha", currentUser, false, etapaInfo(previa.etapa_id, catalogo).nombre);
+                        }
+                        await cambiarEstadoEtapa(etapa, "en_curso", currentUser, true, cat.nombre);
+                        onBitacora?.();
+                      })} disabled={ocupado} style={boton(true)}>
+                        {ocupado ? <Loader2 size={12} /> : <CircleDot size={12} />} Estamos aquí
+                      </button>
+                    )}
+                    <button onClick={() => hacer(async () => {
+                      const faltan = suyos.filter(i => !i.hecho).length;
+                      if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "gestión" : "gestiones"} sin marcar. ¿Cerrar la etapa igual?`)) return;
+                      await cambiarEstadoEtapa(etapa, "hecha", currentUser, true, cat.nombre);
+                      onBitacora?.();
+                    })} disabled={ocupado} style={boton(false)}>
+                      {ocupado ? <Loader2 size={12} /> : <Check size={12} />} {suyos.some(i => !i.hecho) ? "Cerrar igual" : "Cerrar"}
+                    </button>
+                  </div>
                 )}
               </div>
               )}

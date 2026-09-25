@@ -73,6 +73,14 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       if (e.estado === "hecha" || e.estado === "omitida") p.hechas++;
       if (e.estado === "en_curso" && !p.actual) { p.actual = e; p.indice = p.lista.length; }
     });
+    // Si ningún hito está en curso, el proyecto va en el primero que le queda
+    // abierto. Sin esto, un proyecto de Construcción seguía mostrando la etapa
+    // con la que nació en el modelo viejo —"Presupuesto", "Ejecución"— aunque
+    // su tubo ya estuviera armado, y dos proyectos parecidos aparecían en
+    // etapas que no existen en su tubo.
+    Object.values(porPlan).forEach(p => {
+      if (!p.actual) p.actual = p.lista.find(e => e.estado !== "hecha" && e.estado !== "omitida") || null;
+    });
 
     // Hasta dónde llegó cada uno en la ruta estándar: si hoy está más atrás, retrocedió.
     const lejos = {};
