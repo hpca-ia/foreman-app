@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, RotateCcw, Trash2, Loader2, Hourglass, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, Plus, X, ListTodo, RotateCcw, Trash2, Loader2, Hourglass, ChevronLeft, ChevronRight, Mail } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -35,6 +35,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const [nuevo, setNuevo] = useState({});        // etapa → texto del paso que se escribe
   const [agregando, setAgregando] = useState(false);
   const [aTarea, setATarea] = useState(null);
+  // A quién avisarle de una reunión: al del equipo que la tiene y a los de
+  // afuera que vengan. Se elige cada vez, porque no siempre va el cliente.
+  const [avisar, setAvisar] = useState(null);   // { item, tarea, a: Set }
   const [ocupado, setOcupado] = useState(false);
   // La actividad abierta: al tocarla cuenta qué se hizo, quién y cuándo, y
   // ofrece lo que se puede hacer con ella, con botones que dicen su nombre.
@@ -243,6 +246,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   <Actividad key={item.id} item={item} etapa={etapa} nombreEtapa={cat.nombre} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
                     ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable}
+                    onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
                     onTarea={() => setATarea({ item, titulo: item.texto, assignee_id: tareas[item.tarea_id]?.assignee_id || "", due_date: tareas[item.tarea_id]?.due_date || "", hora: tareas[item.tarea_id]?.hora || "" })} />
                 ))}
 
@@ -478,9 +482,73 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
           </div>
         </div>
       )}
+
+      {/* Avisar de una reunión: al del equipo que la tiene y a los de afuera
+          que vengan. Va con el .ics adjunto, así al cliente le queda en su
+          propio calendario sin entrar a FOREMAN. */}
+      {avisar && (
+        <div onClick={() => setAvisar(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: colors.radiusMd, padding: 16, width: 340, maxWidth: "100%", boxShadow: "0 12px 40px rgba(15,23,42,0.2)" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>¿A quién le aviso?</div>
+            <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8 }}>
+              {avisar.item.texto}{avisar.tarea?.due_date ? ` · ${cuando(avisar.tarea.due_date)}${avisar.tarea.hora ? ` ${avisar.tarea.hora}` : ""}` : ""}
+            </div>
+
+            <div style={{ display: "grid", gap: 4 }}>
+              {avisar.tarea?.assignee_id && (
+                <label style={linea}>
+                  <input type="checkbox" checked={avisar.a.has("responsable")}
+                    onChange={() => setAvisar(v => { const a = new Set(v.a); a.has("responsable") ? a.delete("responsable") : a.add("responsable"); return { ...v, a }; })} />
+                  {users.find(u => u.id === avisar.tarea.assignee_id)?.name || "Responsable"} <span style={{ color: colors.muted }}>· del equipo</span>
+                </label>
+              )}
+              {invitados.map(i => (
+                <label key={i.id} style={{ ...linea, opacity: i.email ? 1 : 0.5 }} title={i.email || "No tiene correo cargado"}>
+                  <input type="checkbox" disabled={!i.email} checked={avisar.a.has(i.id)}
+                    onChange={() => setAvisar(v => { const a = new Set(v.a); a.has(i.id) ? a.delete(i.id) : a.add(i.id); return { ...v, a }; })} />
+                  {i.nombre} <span style={{ color: colors.muted }}>· {i.email ? i.rol || "de afuera" : "sin correo"}</span>
+                </label>
+              ))}
+              {!invitados.length && !avisar.tarea?.assignee_id && (
+                <div style={{ fontSize: 11, color: colors.muted }}>Esta reunión no tiene responsable ni gente de afuera cargada en el proyecto.</div>
+              )}
+            </div>
+
+            {avisar.dijo && <div style={{ fontSize: 11, color: avisar.mal ? colors.danger : colors.success, marginTop: 8 }}>{avisar.dijo}</div>}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button disabled={ocupado || !avisar.a.size} onClick={async () => {
+                setOcupado(true);
+                try {
+                  const r = await fetch("/api/aviso-reunion", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      tareaId: avisar.tarea.id,
+                      alResponsable: avisar.a.has("responsable"),
+                      invitados: [...avisar.a].filter(x => x !== "responsable"),
+                    }),
+                  });
+                  const d = await r.json();
+                  if (d.ok) { setAvisar(v => ({ ...v, dijo: `Avisado a ${d.enviadoA.join(", ")}.`, mal: false })); onBitacora?.(); }
+                  else setAvisar(v => ({ ...v, dijo: d.error || "No se pudo avisar.", mal: true }));
+                } catch (e) {
+                  setAvisar(v => ({ ...v, dijo: "No se pudo avisar: " + e.message, mal: true }));
+                } finally { setOcupado(false); }
+              }} style={{ ...boton(true), opacity: avisar.a.size ? 1 : 0.5 }}>
+                {ocupado ? "Enviando…" : "Avisar"}
+              </button>
+              <button onClick={() => setAvisar(null)} style={boton(false)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const linea = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.ink, cursor: "pointer" };
 
 const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 
@@ -515,7 +583,7 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, en qué va la tarea que salió de
 // ella, y deja escribir lo que solo sabe quien la trabajó. Los botones dicen
 // su nombre: un ⧗ y un ✓ sueltos no le enseñan a nadie cómo se usa esto.
-function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, onTarea }) {
+function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, onTarea, onAvisar }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // De quién es la tarea que salió de esta actividad.
@@ -524,6 +592,8 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
   // pendientes. Solo las que alguien tomó se anuncian como "tarea de fulano":
   // las demás son actividades, y decir "tarea de sin responsable" sería ruido.
   const tomada = t => !!(t?.assignee_id || t?.responsable_externo);
+  // Una reunión es la que tiene hora o quedó marcada como tal.
+  const esReunion = t => !!(t?.hora || t?.type === "Reunión");
 
   return (
     <div style={{ borderRadius: 6, background: abierta ? colors.bg : "transparent", padding: abierta ? "4px 6px" : 0, margin: abierta ? "2px -6px" : 0 }}>
@@ -585,6 +655,11 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
               <button onClick={onTarea} style={mini(false)}>
                 <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar responsable" : "Asignar a alguien"}
               </button>
+            )}
+            {/* Una reunión hay que avisarla: el del equipo la ve en FOREMAN,
+                pero el cliente y el ingeniero no entran acá. */}
+            {!item.hecho && esReunion(tarea) && (
+              <button onClick={() => onAvisar(tarea)} style={mini(false)}><Mail size={11} /> Avisar</button>
             )}
             <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser, nombreEtapa))} disabled={ocupado} style={mini(false)}>
               <Check size={11} /> {item.hecho ? "Desmarcar" : "Marcar hecha"}

@@ -53,11 +53,9 @@ export default function App() {
   // armar la función cada vez que cambia la lista.
   const tareasRef = useRef([]);
   const [dependencias, setDependencias] = useState({ espera: new Map(), destraba: new Map() });
-  const [orden, setOrden] = useState("fecha");
   const [filtro, setFiltro] = useState("todas");
-  // Tres cosas distintas que hoy viven en la misma lista: lo que hay que hacer,
-  // lo que hay que ir a una hora, y lo que sale de las etapas de un proyecto.
-  const [seccion, setSeccion] = useState("tareas");
+  // Lo completado se guarda, no se tira: se ve cuando alguien lo pide.
+  const [verListas, setVerListas] = useState(false);
   const [filtroP, setFiltroP] = useState("all");
   const [showModal, setShowModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
@@ -288,7 +286,11 @@ export default function App() {
   // Ajustes si no. (Se llamaba a sí misma: al buscar por texto una tarea con
   // proyecto normal, el navegador se quedaba sin pila y la pantalla se caía.)
   const nombreProyecto = t => (t.lead_id ? (leadsPorId[t.lead_id] || "Pipeline") : projects.find(p => p.id === t.project_id)?.name || "");
-  const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
+  // Lo que dice el botón que quita un filtro encendido desde los avisos.
+const ETIQUETA_FILTRO = { vencidas: "Vencidas", hoy: "Para hoy", urgentes: "Urgentes", urgente: "Urgentes", atrasadas: "Atrasadas", pausadas: "Pausadas", listo: "Completadas" };
+const VACIO = 'Nada pendiente. Toca "+ Nueva tarea" o dile a NOVA.';
+
+const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
   const proyectosElegibles = veTodo ? projects : projects.filter(p => (p.miembros || []).includes(usuario.id));
@@ -306,7 +308,6 @@ export default function App() {
   // es una tarea.
   const esReunion = t => !!t.hora || t.type === "Reunión";
   const esActividad = t => !esReunion(t) && !!t.lead_id;
-  const deLaSeccion = t => (seccion === "reuniones" ? esReunion(t) : seccion === "actividades" ? esActividad(t) : !esReunion(t) && !t.lead_id);
   // Una actividad de proyecto sin dueño es un pendiente del proyecto y vive en
   // su propio cuadro. Una reunión no: aunque nadie la "tenga", es una cita del
   // estudio y tiene que verse en la lista y en el calendario, que es donde uno
@@ -354,66 +355,30 @@ export default function App() {
   if (filtro === "hoy") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) === 0);
   if (filtro === "urgentes") visibles = visibles.filter(t => t.status !== "listo" && t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
   if (filtroP !== "all") visibles = visibles.filter(t => t.project_id === Number(filtroP));
-  const porSeccion = visibles;                       // para contar cada pestaña
-  visibles = visibles.filter(deLaSeccion);
-  const vacio = seccion === "reuniones" ? 'Sin reuniones. Se agendan poniéndole hora a una tarea o a una actividad del proyecto.'
-    : seccion === "actividades" ? "Sin actividades tuyas. Salen de las etapas de un proyecto, en Pipeline."
-    : 'Sin tareas. Toca "+ Nueva tarea" o dile a NOVA.';
+  // Lo terminado no se mezcla con lo que falta: se ve cuando se lo pide.
+  if (!verListas) visibles = visibles.filter(t => t.status !== "listo");
 
-  // Un solo orden para las tres vistas, y se elige por qué: lo terminado
-  // siempre al fondo, y dentro de eso lo que se haya pedido. Empatando, manda
-  // lo que vence antes: una lista de tareas que no mira la fecha no sirve.
-  // Para comparar y para agrupar, el nombre pelado: sin tildes, sin mayúsculas
-  // y sin espacios de más. "Chronix", "chronix " y "CHRONIX" son el mismo
-  // proyecto, y separarlos partía la lista en dos grupos con el mismo título.
+  // Manda la fecha, y lo terminado al fondo: una lista de pendientes que no
+  // mira la fecha no sirve, y elegir entre cuatro órdenes era una decisión más
+  // para algo que casi siempre se quiere igual. Para filtrar por proyecto, el
+  // nombre pelado —sin tildes ni mayúsculas—: "Chronix" y "CHRONIX" son el
+  // mismo.
   const pelado = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-  const nombreDe = (lista, id) => pelado(lista.find(x => x.id === id)?.name);
   const porFecha = (a, b) => (daysUntil(a.due_date) - daysUntil(b.due_date)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
-  const comparar = {
-    fecha: porFecha,
-    urgencia: (a, b) => (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]) || porFecha(a, b),
-    // Por el nombre que se ve en la fila, venga de un proyecto de Ajustes o de
-    // un proyecto del pipeline. Antes miraba solo los de Ajustes: una tarea de
-    // pipeline no tiene project_id, así que todas quedaban iguales y no se
-    // ordenaba nada —justo lo que pasa con casi todas las tareas de la oficina—.
-    proyecto: (a, b) => (pelado(nombreProyecto(a)).localeCompare(pelado(nombreProyecto(b)))) || porFecha(a, b),
-    responsable: (a, b) => (nombreDe(users, a.assignee_id).localeCompare(nombreDe(users, b.assignee_id))) || porFecha(a, b),
-  };
   const ordenadas = visibles.slice().sort((a, b) => {
     if (a.status === "listo" && b.status !== "listo") return 1;
     if (b.status === "listo" && a.status !== "listo") return -1;
-    return (comparar[orden] || porFecha)(a, b);
+    return porFecha(a, b);
   });
 
-  // Ordenar sin que se note no sirve de nada: cuando se ordena por proyecto,
-  // por urgencia o por responsable, la lista se parte en grupos con su título.
-  // Por fecha no se agrupa: la fecha ya se lee en cada fila.
-  const grupoDe = {
-    // El grupo es el nombre, no el número: dos tareas del mismo proyecto del
-    // pipeline caían en grupos distintos y se veía el título repetido.
-    proyecto: t => {
-      const nombre = nombreProyecto(t);
-      const p = t.lead_id ? null : projects.find(x => x.id === t.project_id);
-      return { clave: `p${pelado(nombre)}`, titulo: nombre.trim() || "Sin proyecto", color: p?.color };
-    },
-    urgencia: t => ({ clave: t.priority, titulo: (PRIORIDAD[t.priority] || PRIORIDAD.media).label, color: (PRIORIDAD[t.priority] || PRIORIDAD.media).color }),
-    responsable: t => {
-      const u = users.find(x => x.id === t.assignee_id);
-      return { clave: `u${pelado(u?.name) || t.assignee_id || 0}`, titulo: u?.name || "Sin asignar", color: u?.color };
-    },
-  };
-  const agrupadas = (() => {
-    const de = grupoDe[orden];
-    if (!de) return null;
-    const grupos = [];
-    ordenadas.forEach(t => {
-      const g = de(t);
-      const ultimo = grupos[grupos.length - 1];
-      if (ultimo && ultimo.clave === g.clave) ultimo.tareas.push(t);
-      else grupos.push({ ...g, tareas: [t] });
-    });
-    return grupos;
-  })();
+  // Las tres cosas de uno, en el orden en que aprietan: una reunión tiene hora
+  // y no espera, una tarea tiene dueño, una actividad es del proyecto.
+  const bloques = [
+    { titulo: "Reuniones", tareas: ordenadas.filter(esReunion) },
+    { titulo: "Tareas", tareas: ordenadas.filter(t => !esReunion(t) && !t.lead_id) },
+    { titulo: "Actividades de proyectos", tareas: ordenadas.filter(esActividad) },
+  ].filter(b => b.tareas.length);
+  const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
 
   const filtS = a => ({ padding: "6px 14px", borderRadius: 20, border: a ? "none" : `1px solid ${colors.border}`, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: a ? colors.ink : "#fff", color: a ? "#fff" : colors.inkSoft, flexShrink: 0 });
 
@@ -450,63 +415,53 @@ export default function App() {
                   primero cómo quiero verlas, después cuáles quiero ver. Antes
                   los filtros, el orden, el proyecto y las vistas estaban todos
                   mezclados en la misma fila y no se sabía qué hacía qué. */}
+              {/* Una sola barra: cómo se ve y de qué proyecto. El orden ya no se
+                  elige —manda la fecha, que es lo que importa de una lista de
+                  pendientes— y los estados tampoco se filtran: lo terminado se
+                  muestra con un interruptor y lo urgente ya está en los avisos
+                  de arriba. Antes eran tres filas de controles sobre la lista. */}
               <div className="tareas-barra">
                 <div className="tareas-vistas">
                   {[["lista", "Lista"], ["tablero", "Tablero"], ["calendario", "Calendario"]].map(([v, l]) => (
                     <button key={v} onClick={() => setVistaTareas(v)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: vistaTareas === v ? colors.surface : "transparent", color: vistaTareas === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
                 </div>
-                {/* Agrupar solo tiene sentido en la lista: el tablero ya está
-                    partido por estado y el calendario por día. */}
-                {vistaTareas === "lista" && (
-                  <select value={orden} onChange={e => setOrden(e.target.value)} title="Cómo se agrupa la lista"
-                    style={{ background: "#fff", border: `1px solid ${orden !== "fecha" ? colors.brand : colors.border}`, borderRadius: 20, color: orden !== "fecha" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
-                    {[["fecha", "Ordenar por fecha"], ["urgencia", "Agrupar por urgencia"], ["proyecto", "Agrupar por proyecto"], ["responsable", "Agrupar por responsable"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                )}
                 {proyectosElegibles.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
                   <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
                   {proyectosElegibles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>}
-              </div>
-              {/* Tres listas, no una sola mezclada: lo que hay que hacer, lo
-                  que hay que ir a una hora y lo que sale de las etapas de un
-                  proyecto. Son tuyas las tres; el resto del equipo va resumido
-                  al final de la pantalla. */}
-              <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-                {[["tareas", "Tareas"], ["reuniones", "Reuniones"], ["actividades", "Actividades"]].map(([id, label]) => {
-                  const cuantas = porSeccion.filter(t => t.status !== "listo"
-                    && (id === "reuniones" ? esReunion(t) : id === "actividades" ? esActividad(t) : !esReunion(t) && !t.lead_id)).length;
-                  const activa = seccion === id;
-                  return (
-                    <button key={id} onClick={() => setSeccion(id)}
-                      style={{ border: `1px solid ${activa ? colors.ink : colors.border}`, background: activa ? colors.ink : "#fff",
-                        color: activa ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
-                        cursor: "pointer", fontFamily: colors.font, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      {label} <span style={{ opacity: 0.7, fontWeight: 400 }}>{cuantas}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="tareas-filtros" style={{ marginBottom: 10 }}>
-                {/* Urgentes y Atrasadas ya están arriba, en los avisos, y con su
-                    número: tenerlas otra vez acá era pedir lo mismo de dos
-                    maneras y no saber cuál mandaba. */}
-                {[["todas", "Todas"], ["pausadas", "Pausadas"], ["listo", "Completadas"]].map(([f, l]) => (
-                  <button key={f} onClick={() => setFiltro(f)} style={filtS(filtro === f)}>{l}</button>
-                ))}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: colors.inkSoft, cursor: "pointer", flexShrink: 0 }}>
+                  <input type="checkbox" checked={verListas} onChange={e => setVerListas(e.target.checked)} /> Ver completadas
+                </label>
+                {filtro !== "todas" && (
+                  <button onClick={() => setFiltro("todas")} style={{ ...filtS(true), padding: "5px 12px" }}>
+                    {ETIQUETA_FILTRO[filtro] || filtro} ✕
+                  </button>
+                )}
               </div>
 
               {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
                 <>
+                  {/* Lo tuyo, todo a la vista y separado por lo que es: las
+                      reuniones primero —tienen hora y no se posponen solas—,
+                      después las tareas y al final las actividades de los
+                      proyectos. Antes eran tres pestañas: para saber qué tenías
+                      hoy había que abrir las tres. */}
                   <div className="tasks-view-desktop">
-                    {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>{vacio}</div>
+                    {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>{VACIO}</div>
                       : vistaTareas === "calendario"
                         ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "tablero"
                         ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
-                        : <TareasTabla tasks={ordenadas} grupos={agrupadas} users={users} projects={projects} leads={leadsPorId} onEditar={t => { setEditTask(t); setShowModal(true); }} />}
+                        : bloques.map(b => (
+                            <div key={b.titulo} style={{ marginBottom: 16 }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
+                                {b.titulo.toUpperCase()} · {b.tareas.length}
+                              </div>
+                              <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId}
+                                onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                            </div>
+                          ))}
                   </div>
                   {/* Lo primero son las tareas de uno; en qué anda el resto va
                       abajo, en su propio cuadro, sin lo marcado como privado. */}
@@ -520,11 +475,11 @@ export default function App() {
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 
                   <div className="tasks-view-mobile">
-                    {visibles.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />{vacio}</div>
+                    {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />{VACIO}</div>
                       : vistaTareas === "calendario"
                         ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                       : vistaTareas === "lista"
-                        ? <TareasListaMovil tasks={ordenadas} grupos={agrupadas} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasListaMovil tasks={ordenadas} grupos={bloquesMovil} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
                         : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0}
                             acompanantes={acompanantes.get(t.id) || []}
                             espera={(dependencias.espera.get(t.id) || []).map(id => tareas.find(x => x.id === id)).filter(x => x && x.status !== "listo")}
