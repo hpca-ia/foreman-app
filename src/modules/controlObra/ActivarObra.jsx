@@ -38,13 +38,22 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
     // importados desde Excel), no se vuelve a aplicar.
     const ivaPct = yaIncluyeIva ? 0 : (Number(sel.iva_pct) || 0);
 
-    const { data: obra, error: e1 } = await supabase.from("obras").insert({
+    // La obra hereda el proyecto del presupuesto: así el control, el
+    // presupuesto y el pipeline hablan del mismo proyecto y no de tres nombres
+    // parecidos escritos a mano.
+    const fila = {
       nombre: nombre.trim(),
       cliente_id: sel.cliente_id || null,
       cliente_nombre: sel.cliente_nombre || null,
       presupuesto_id: sel.id,
       created_by: currentUser.id,
-    }).select().single();
+      ...(sel.lead_id ? { lead_id: sel.lead_id } : {}),
+    };
+    let { data: obra, error: e1 } = await supabase.from("obras").insert(fila).select().single();
+    if (e1 && /column|schema cache/i.test(e1.message)) {
+      const { lead_id, ...resto } = fila;
+      ({ data: obra, error: e1 } = await supabase.from("obras").insert(resto).select().single());
+    }
 
     if (e1 || !obra) { setError("No se pudo crear la obra: " + (e1?.message || "")); setGuardando(false); return; }
 

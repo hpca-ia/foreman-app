@@ -40,7 +40,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
 
   useEffect(() => { fetchCajas(); fetchObras(); }, []);
   async function fetchObras() {
-    const { data } = await supabase.from("obras").select("id,nombre").eq("estado","activa").order("created_at",{ascending:false});
+    // Con su proyecto: la caja cuelga del mismo, y así el gasto sabe de dónde
+    // viene sin depender del nombre escrito a mano.
+    let { data, error } = await supabase.from("obras").select("id,nombre,lead_id").eq("estado","activa").order("created_at",{ascending:false});
+    if (error) ({ data } = await supabase.from("obras").select("id,nombre").eq("estado","activa").order("created_at",{ascending:false}));
     setObras(data||[]);
   }
   async function fetchCajas() {
@@ -86,10 +89,18 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
 
   async function crearCaja() {
     const resUser = users.find(u=>u.id===Number(nuevaCajaForm.responsable_id));
-    const { data, error } = await supabase.from("cajas_chicas").insert({
+    const obra = obras.find(o => o.id === Number(nuevaCajaForm.obra_id));
+    const fila = {
       proyecto_nombre:nuevaCajaForm.proyecto_nombre, obra_id:Number(nuevaCajaForm.obra_id)||null, responsable_id:Number(nuevaCajaForm.responsable_id),
-      responsable_nombre:resUser?.name||"", limite_alerta:Number(nuevaCajaForm.limite_alerta)||50, created_by:currentUser.id
-    }).select().single();
+      responsable_nombre:resUser?.name||"", limite_alerta:Number(nuevaCajaForm.limite_alerta)||50, created_by:currentUser.id,
+      ...(obra?.lead_id ? { lead_id: obra.lead_id } : {}),
+    };
+    let { data, error } = await supabase.from("cajas_chicas").insert(fila).select().single();
+    // Sin la migración 046 la caja se crea igual, atada solo a su obra.
+    if (error && /column|schema cache/i.test(error.message)) {
+      const { lead_id, ...resto } = fila;
+      ({ data, error } = await supabase.from("cajas_chicas").insert(resto).select().single());
+    }
     if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); }
   }
 

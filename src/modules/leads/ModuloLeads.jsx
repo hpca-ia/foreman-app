@@ -107,10 +107,16 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // cierra el hilo entre lo comercial y lo que se construye.
   async function convertirEnObra(lead) {
     setConvirtiendo(lead.id);
-    const { data: obra, error } = await supabase.from("obras").insert({
+    const fila = {
       nombre: lead.nombre, cliente_nombre: lead.contacto || lead.nombre,
-      notas: `Viene del lead ${lead.nombre}`, created_by: currentUser?.id,
-    }).select().single();
+      notas: `Viene del lead ${lead.nombre}`, created_by: currentUser?.id, lead_id: lead.id,
+    };
+    let { data: obra, error } = await supabase.from("obras").insert(fila).select().single();
+    // Sin la migración 046 la obra se crea igual, sin el vínculo de vuelta.
+    if (error && /column|schema cache/i.test(error.message)) {
+      const { lead_id, ...resto } = fila;
+      ({ data: obra, error } = await supabase.from("obras").insert(resto).select().single());
+    }
     if (!error && obra) {
       await supabase.from("leads").update({ obra_id: obra.id, etapa: "ejecucion" }).eq("id", lead.id);
       await supabase.from("lead_movimientos").insert({
