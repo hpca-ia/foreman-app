@@ -5,6 +5,7 @@ import EtapasCatalogo from "./EtapasCatalogo";
 import { BUCKET_PUBLICO } from "../lib/archivos";
 import { saveToStorage } from "../lib/storage";
 import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
+import EmparejarProyectos from "./EmparejarProyectos";
 import { esAdmin } from "../lib/roles";
 import { avisarPinNuevo, avisarPermisos } from "../lib/avisoCuenta";
 import { rolInfo } from "../lib/roles";
@@ -215,6 +216,9 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
       {tab === "proyectos" && (
         <div>
           {avisoEquipo}
+          {/* Un proyecto, una sola vez: acá se dice cuál de esta lista es cuál
+              del pipeline, y dejan de ser dos cosas con el mismo nombre. */}
+          <EmparejarProyectos onCambio={onEquipoCambio} />
           {projects.map(p => editP?.id === p.id ? (
             <ProjectForm key={p.id} p={editP} users={users} onSave={saveProject} onCancel={() => setEditP(null)} />
           ) : (
