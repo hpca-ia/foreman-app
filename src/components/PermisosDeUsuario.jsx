@@ -46,9 +46,10 @@ export default function PermisosDeUsuario({ usuario, permisos, valores = {}, onC
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${colors.neutralSoft}` }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, marginBottom: 2 }}>Permisos de {usuario.name}</div>
       <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8, lineHeight: 1.5 }}>
-        Esto es para excepciones de esta persona: a qué módulos entra. Lo normal es dejarlo todo en
-        <strong> “Como su rol”</strong>. Para decidir qué proyecto y qué presupuesto puede tocar —y si lo ve o lo
-        edita— usá <strong>Ajustes → Proyectos</strong>, que va de a un proyecto.
+        Acá se decide <strong>a qué pantallas entra</strong> esta persona, y nada más: es la puerta del edificio.
+        Prenderle “Presupuestos” no le abre los presupuestos de la oficina, le abre la pantalla —adentro salen los
+        de sus proyectos. A qué proyectos entra, y si los toca o solo los mira, se decide en
+        <strong> Ajustes → Proyectos</strong>. Lo normal es dejar todo esto en <strong>“Como su rol”</strong>.
       </div>
 
       {GRUPOS_PERMISOS.map(g => (

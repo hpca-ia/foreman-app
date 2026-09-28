@@ -9,10 +9,15 @@ import ImportarObra from "./ImportarObra";
 import VistaObra from "./VistaObra";
 import BorrarObra from "./BorrarObra";
 
-export default function ModuloControlObra({ currentUser, puede, nivelObra = () => null }) {
+export default function ModuloControlObra({ currentUser, puede, nivelObra = () => null, entraATodo = false }) {
   // Lo que se puede hacer en una obra sale del proyecto al que pertenece: quien
   // la tiene en "solo ver" la lee y no la toca; quien no la tiene, no la ve.
-  const nivelDe = obra => (obra?.lead_id ? nivelObra(obra.lead_id) : null);
+  //
+  // El permiso "ver control de obra" abre la pantalla; cuáles obras salen acá
+  // lo decide el proyecto de cada una. Una obra suelta —sin proyecto— la ven
+  // quienes entran a todos los proyectos.
+  const nivelDe = obra => (obra?.lead_id ? nivelObra(obra.lead_id) : entraATodo ? "editar" : null);
+  const alcanza = obra => entraATodo || !!nivelDe(obra);
   const puedeEnObra = (obra, permiso) => nivelDe(obra) === "ver" ? false : puede?.(permiso) !== false;
   const [vista, setVista] = useState("lista"); // lista | activar | obra
   const [obras, setObras] = useState([]);
@@ -26,9 +31,9 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
   async function fetchObras() {
     setCargando(true);
     const { data: obrasData } = await supabase.from("obras").select("*").order("created_at", { ascending: false });
-    // Una obra marcada "sin acceso" para esta persona no se lista: verla en la
-    // lista y que no abra es peor que no verla.
-    const lista = (obrasData || []).filter(o => nivelDe(o) !== "no");
+    // Una obra a la que esta persona no entra no se lista: verla y que no abra
+    // es peor que no verla.
+    const lista = (obrasData || []).filter(alcanza);
     setObras(lista);
 
     if (lista.length) {

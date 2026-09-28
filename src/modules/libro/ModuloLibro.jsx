@@ -15,20 +15,23 @@ import { diasDe, hoyEnObra } from "./libro";
 const diaLargo = f => new Date(`${f}T12:00:00`).toLocaleDateString("es-EC", { weekday: "long", day: "numeric", month: "long" });
 
 export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => null }) {
-  const [proyectos, setProyectos] = useState([]);
+  // El permiso "ver libro de obra" abre la pantalla; qué obras salen acá lo
+  // decide el proyecto de cada una.
+  const [todos, setTodos] = useState([]);
   const [lead, setLead] = useState(null);
   const [dias, setDias] = useState([]);
   const [fecha, setFecha] = useState(null);
   const [sinTablas, setSinTablas] = useState(false);
   const [cargando, setCargando] = useState(true);
+  // Los accesos llegan después que la lista: por eso se filtra al pintar y no
+  // al cargar, que si no la primera vuelta deja la pantalla vacía.
+  const proyectos = todos.filter(l => !!nivelProyecto(l.id));
 
   useEffect(() => {
     supabase.from("leads").select("id,nombre,tunel,resultado,obra_id").order("nombre").then(({ data }) => {
       // El libro es de las obras: los leads que todavía se persiguen no tienen
       // días que registrar.
-      // Las obras que esta persona tiene marcadas "sin acceso" no se listan.
-      setProyectos((data || []).filter(l => l.resultado !== "perdido"
-        && (l.tunel || "lead") !== "lead" && nivelProyecto(l.id) !== "no"));
+      setTodos((data || []).filter(l => l.resultado !== "perdido" && (l.tunel || "lead") !== "lead"));
       setCargando(false);
     });
   }, []);
@@ -61,7 +64,7 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
           <ChevronLeft size={14} /> {lead.nombre}
         </button>
         <DiaDeObra lead={lead} fecha={fecha} currentUser={currentUser}
-          puedeEscribir={!["ver", "no"].includes(nivelProyecto(lead.id))}
+          puedeEscribir={nivelProyecto(lead.id) === "editar"}
           onCambio={() => cargarDias(lead.id)} />
       </div>
     );

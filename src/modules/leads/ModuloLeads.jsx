@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, AlertTriangle, Clock, ArrowRight, CornerDownLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
-import { esAdmin } from "../../lib/roles";
 import { daysUntil } from "../../lib/dates";
 import Button from "../../components/ui/Button";
 import { CATALOGO_BASE, etapaInfo, tempInfo, DIAS_SIN_MOVER } from "./constantes";
@@ -148,8 +147,9 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   //   · El nivel en Ajustes → Proyectos decide QUÉ HACE en cada uno.
   // Sin la primera, ve los que le asignaron. Con ella los ve todos, pero
   // "Sin acceso" en uno gana igual: es una puerta cerrada, no una preferencia.
-  const verTodos = esAdmin(currentUser?.role) || puede("leads.ver");
-  const alcanzo = l => nivelProyecto(l.id) !== "no" && (verTodos || !!nivelProyecto(l.id));
+  // Una sola pregunta: ¿entra a este proyecto? Quien entra a todos los ve
+  // todos; el resto, los que le asignaron en Ajustes → Proyectos.
+  const alcanzo = l => !!nivelProyecto(l.id);
   const abiertos = leads.filter(l => enTubo(l) && !seFue(l) && alcanzo(l));
   const cerrados = leads.filter(l => enTubo(l) && seFue(l) && alcanzo(l));
 

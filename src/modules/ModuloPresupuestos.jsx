@@ -30,7 +30,7 @@ import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios"
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
 const centavos = v => Math.round((Number(v) || 0) * 100) / 100;
 
-export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto = () => null }) {
+export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
   const [borrarPre, setBorrarPre] = useState(null);
@@ -97,9 +97,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   // presupuesto no cuelga de ningún proyecto, manda el permiso general.
   const nivelDelActivo = presupuestoActivo?.lead_id ? nivelProyecto(presupuestoActivo.lead_id) : null;
   const puedeEditar = esAdmin(currentUser.role)
-    || (nivelDelActivo ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
-  // "Sin acceso" en ese proyecto: no se abre, y se dice por qué.
-  const sinAcceso = nivelDelActivo === "no";
+    || (presupuestoActivo?.lead_id ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
+  const sinAcceso = !!presupuestoActivo?.lead_id && !nivelDelActivo;
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
@@ -858,7 +857,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       {subVista==="lista"&&(()=>{
         const q=busquedaLista.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
         const coincide=p=>!q||`${p.nombre} ${p.cliente_nombre||""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").includes(q);
-        const activos=presupuestos.filter(p=>!p.archivado_at), pasados=presupuestos.filter(p=>p.archivado_at);
+        // El permiso "ver presupuestos" abre la pantalla; cuáles salen acá lo
+        // decide el proyecto de cada uno. Un presupuesto suelto —sin proyecto—
+        // es de la casa: lo ven quienes entran a todos los proyectos.
+        const alcanza = p => entraATodo || esAdmin(currentUser.role) || (p.lead_id ? !!nivelProyecto(p.lead_id) : false);
+        const alcance = presupuestos.filter(alcanza);
+        const activos=alcance.filter(p=>!p.archivado_at), pasados=alcance.filter(p=>p.archivado_at);
         const lista=(pestanaLista==="activos"?activos:pasados).filter(coincide);
         return (
         <div>

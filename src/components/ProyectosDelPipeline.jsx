@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
 import { TUNELES } from "../modules/leads/tubo";
+import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/acceso";
 
 // Los proyectos, de verdad: los del pipeline.
 //
@@ -16,14 +17,15 @@ import { TUNELES } from "../modules/leads/tubo";
 // ve el proyecto en el pipeline: así "estar en el proyecto" significa una sola
 // cosa y no dos parecidas.
 
-const AREAS = [["presupuesto", "Presupuesto"], ["obra", "Control de obra"], ["libro", "Libro de obra"]];
+// Las áreas y los niveles salen de lib/acceso.js, que es donde vive la regla:
+// esta pantalla la muestra, no la define.
 
 export default function ProyectosDelPipeline({ users = [], onCambio }) {
   const [leads, setLeads] = useState([]);
   const [accesos, setAccesos] = useState({});    // lead_id -> { usuario_id: nivel }
   const [abierto, setAbierto] = useState(null);
   const [sinColor, setSinColor] = useState(false);
-  const [sinNivelPresupuesto, setSinNivelPresupuesto] = useState(false);
+  const [sinAreas, setSinAreas] = useState(false);
   const [guardando, setGuardando] = useState(null);
 
   const cargar = useCallback(async () => {
@@ -33,14 +35,20 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
     ]);
     const filas = (ls || []).filter(l => l.resultado !== "perdido");
     setSinColor(filas.length > 0 && !("color" in filas[0]));
+    // Si falta la migración 055 no hay columnas por área: mejor avisarlo al
+    // entrar que dejar que los botones no hagan nada.
+    if (as?.length) setSinAreas(!("nivel_obra" in as[0]));
     setLeads(filas);
     const mapa = {};
     (as || []).forEach(a => {
+      const nivel = a.nivel || "editar";
       (mapa[a.lead_id] = mapa[a.lead_id] || {})[a.usuario_id] = {
-        nivel: a.nivel || "editar",
-        presupuesto: a.nivel_presupuesto || null,
-        obra: a.nivel_obra || null,
-        libro: a.nivel_libro || null,
+        nivel,
+        // Una fila vieja solo tiene el nivel del proyecto: vale para todo hasta
+        // que alguien toque un botón de área.
+        presupuesto: a.nivel_presupuesto || nivel,
+        obra: a.nivel_obra || nivel,
+        libro: a.nivel_libro || nivel,
       };
     });
     setAccesos(mapa);
@@ -57,51 +65,40 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
   }
 
   /**
-   * Poner a alguien en un proyecto con su nivel, o sacarlo.
+   * El nivel de una persona en un área de un proyecto.
    *
-   * `nivel` null lo saca. Tocar el nivel que ya tiene también lo saca: el mismo
-   * botón pone y quita, que es como funciona todo lo demás en FOREMAN.
-   */
-  async function ponerNivel(lead, usuarioId, nivel) {
-    const actual = (accesos[lead.id] || {})[usuarioId];
-    const quitar = nivel === null || actual?.nivel === nivel;
-    setGuardando(`${lead.id}:${usuarioId}`);
-    setAccesos(a => {
-      const suyos = { ...(a[lead.id] || {}) };
-      if (quitar) delete suyos[usuarioId]; else suyos[usuarioId] = { ...(suyos[usuarioId] || {}), nivel, presupuesto: nivel === "ver" ? null : suyos[usuarioId]?.presupuesto || null };
-      return { ...a, [lead.id]: suyos };
-    });
-    if (quitar) {
-      await supabase.from("lead_accesos").delete().eq("lead_id", lead.id).eq("usuario_id", usuarioId);
-    } else {
-      // Sin la migración 051 no hay columna `nivel`: entra igual, como antes.
-      let { error } = await supabase.from("lead_accesos")
-        .upsert({ lead_id: lead.id, usuario_id: usuarioId, nivel }, { onConflict: "lead_id,usuario_id" });
-      if (error) await supabase.from("lead_accesos").upsert({ lead_id: lead.id, usuario_id: usuarioId }, { onConflict: "lead_id,usuario_id" });
-    }
-    setGuardando(null);
-    onCambio?.();
-  }
-
-  /**
-   * El presupuesto, aparte del resto del proyecto.
-   *
-   * Un residente trabaja la obra —facturas, planillas, caja chica— y el
-   * presupuesto lo mira y nada más. Con un solo nivel había que elegir entre
-   * darle todo o dejarlo afuera de todo.
+   * Todo es explícito: nada se hereda ni se deduce. Si todavía no estaba en el
+   * proyecto entra con esto y el resto en "No entra" —darle el presupuesto a
+   * alguien no puede significar darle la obra de yapa—, y si las cuatro quedan
+   * en "No entra" sale del proyecto, porque una fila que no permite nada es una
+   * fila que confunde.
    */
   async function ponerNivelArea(lead, usuarioId, area, valor) {
+    const despues = filaDeAcceso((accesos[lead.id] || {})[usuarioId], area, valor);
+    const vacio = sinNingunAcceso(despues);
+
     setGuardando(`${lead.id}:${usuarioId}`);
     setAccesos(a => {
       const suyos = { ...(a[lead.id] || {}) };
-      suyos[usuarioId] = { ...(suyos[usuarioId] || { nivel: "editar" }), [area]: valor };
+      if (vacio) delete suyos[usuarioId]; else suyos[usuarioId] = despues;
       return { ...a, [lead.id]: suyos };
     });
-    const columna = { presupuesto: "nivel_presupuesto", obra: "nivel_obra", libro: "nivel_libro" }[area];
-    const { error } = await supabase.from("lead_accesos")
-      .update({ [columna]: valor }).eq("lead_id", lead.id).eq("usuario_id", usuarioId);
+
+    if (vacio) {
+      await supabase.from("lead_accesos").delete().eq("lead_id", lead.id).eq("usuario_id", usuarioId);
+    } else {
+      const fila = { lead_id: lead.id, usuario_id: usuarioId };
+      AREAS_PROYECTO.forEach(a => { fila[a.columna] = despues[a.campo] || "no"; });
+      const { error } = await supabase.from("lead_accesos").upsert(fila, { onConflict: "lead_id,usuario_id" });
+      // Sin la migración 055 no existen las columnas de área: entra igual con
+      // el nivel del proyecto y la pantalla lo avisa.
+      if (error && /column|schema cache/i.test(error.message)) {
+        setSinAreas(true);
+        await supabase.from("lead_accesos")
+          .upsert({ lead_id: lead.id, usuario_id: usuarioId, nivel: fila.nivel }, { onConflict: "lead_id,usuario_id" });
+      }
+    }
     setGuardando(null);
-    if (error && /column|schema cache/i.test(error.message)) setSinNivelPresupuesto(true);
     onCambio?.();
   }
 
@@ -114,9 +111,10 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
       </div>
       {/* La regla, dicha acá para que no haya que deducirla de dos pantallas. */}
       <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8, lineHeight: 1.5 }}>
-        El Director, los admins y quien tenga <strong>“Ver todos los proyectos”</strong> —los gerentes— ven todos.
-        El resto ve solo los que le asignes acá. Y lo que cada uno puede <strong>hacer</strong> en un proyecto sale
-        de su nivel en esta lista, no de aquel permiso.
+        Acá se decide <strong>a qué proyectos entra cada uno y para qué</strong>. En Permisos se decide si ve el
+        botón del módulo; prender “ver presupuestos” allá no le abre todos los presupuestos, le abre la pantalla:
+        adentro salen los de los proyectos que le des acá. El Director, los admins y quien tenga
+        <strong> “Entra a todos los proyectos”</strong> entran a todos sin que haya que asignarles nada.
       </div>
       {sinColor && (
         <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 8 }}>
@@ -152,66 +150,54 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
 
             {editando && (
               <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${colors.neutralSoft}` }}>
-                <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 6 }}>¿Quién entra a este proyecto, y con qué nivel?</div>
+                <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 2 }}>¿Quién entra a este proyecto, y a qué?</div>
+                {sinAreas && (
+                  <div style={{ fontSize: 10.5, color: colors.warning, marginBottom: 4 }}>
+                    Falta correr la migración 055 para separar presupuesto, obra y libro. Por ahora manda “Proyecto y tareas”.
+                  </div>
+                )}
                 <div style={{ display: "grid", gap: 5 }}>
                   {candidatos.map(u => {
                     const acceso = suyos[u.id];
-                    const nivel = acceso?.nivel;
+                    const dentro = !!acceso;
                     return (
-                      <div key={u.id} style={{ display: "grid", gap: 3 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: nivel ? colors.ink : colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div key={u.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 7, marginTop: 3 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: dentro ? colors.ink : colors.muted, marginBottom: 3 }}>
                           {u.name}
-                        </span>
-                        {[["ver", "Ver"], ["editar", "Editar"]].map(([id, label]) => {
-                          const activo = nivel === id;
-                          const color = id === "editar" ? colors.brand : colors.inkSoft;
+                          {!dentro && <span style={{ fontWeight: 400 }}> · no entra a este proyecto</span>}
+                        </div>
+                        {AREAS_PROYECTO.map(({ campo, label: etiqueta }) => {
+                          const valor = (acceso?.[campo]) || "no";
+                          const apagada = sinAreas && campo !== "nivel";
                           return (
-                            <button key={id} onClick={() => ponerNivel(l, u.id, id)} disabled={guardando === `${l.id}:${u.id}`}
-                              title={id === "ver" ? "Entra y lee: el proyecto y su presupuesto, sin tocar nada" : "Entra y trabaja: puede cambiar lo del proyecto y su presupuesto"}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${activo ? color : colors.border}`,
-                                background: activo ? color : "#fff", color: activo ? "#fff" : colors.inkSoft, borderRadius: 14,
-                                padding: "3px 11px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
-                              {activo && <Check size={10} />} {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Y dentro del proyecto, área por área: el residente
-                          trabaja el control de obra y el libro, y el presupuesto
-                          lo mira; la arquitecta al revés. */}
-                      {nivel && !sinNivelPresupuesto && (
-                        <div style={{ display: "grid", gap: 3, paddingLeft: 2, paddingBottom: 4 }}>
-                          {AREAS.map(([area, etiqueta]) => (
-                            <div key={area} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div key={campo} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1.5px 0", opacity: apagada ? 0.45 : 1 }}>
                               <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: colors.muted }}>{etiqueta}</span>
-                              {[[null, nivel === "editar" ? "Igual: editar" : "Igual: ver"], ["ver", "Solo ver"], ["no", "Sin acceso"]].map(([v, label]) => {
-                                const activo = (acceso?.[area] ?? null) === v;
-                                const color = v === "no" ? colors.danger : v === "ver" ? colors.inkSoft : colors.brand;
+                              {NIVELES.map(({ id: v, label, pista }) => {
+                                const activo = valor === v;
+                                const color = v === "no" ? colors.muted : v === "ver" ? colors.inkSoft : colors.brand;
                                 return (
-                                  <button key={String(v)} onClick={() => ponerNivelArea(l, u.id, area, v)}
-                                    disabled={guardando === `${l.id}:${u.id}`}
-                                    style={{ border: `1px solid ${activo ? color : colors.border}`, background: activo ? color : "#fff",
-                                      color: activo ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 8px", fontSize: 10.5,
-                                      fontWeight: 600, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
-                                    {label}
+                                  <button key={v} title={pista} onClick={() => ponerNivelArea(l, u.id, campo, v)}
+                                    disabled={apagada || guardando === `${l.id}:${u.id}`}
+                                    style={{ display: "inline-flex", alignItems: "center", gap: 3,
+                                      border: `1px solid ${activo ? color : colors.border}`, background: activo ? color : "#fff",
+                                      color: activo ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 9px", fontSize: 10.5,
+                                      fontWeight: 600, cursor: apagada ? "not-allowed" : "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                                    {activo && <Check size={9} />} {label}
                                   </button>
                                 );
                               })}
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          );
+                        })}
                       </div>
                     );
                   })}
                   {!candidatos.length && <span style={{ fontSize: 11.5, color: colors.muted }}>Todavía no hay gente en el equipo.</span>}
                 </div>
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8, lineHeight: 1.5 }}>
-                  <strong>Ver</strong>: entra al proyecto y lee su presupuesto, sin poder cambiar nada.
-                  <strong> Editar</strong>: trabaja el proyecto y su presupuesto.
-                  Tocar el mismo botón otra vez lo saca del proyecto. Los admins entran a todo.
+                  <strong>No entra</strong>: no la ve ni aparece en su lista. <strong>Ver</strong>: la lee y no la toca.
+                  <strong> Editar</strong>: la trabaja. Las cuatro en “No entra” lo sacan del proyecto.
+                  Un residente típico: proyecto <em>Editar</em>, presupuesto <em>Ver</em>, obra y libro <em>Editar</em>.
                 </div>
               </div>
             )}

@@ -2,27 +2,34 @@ import { supabase } from "./supabase";
 
 // Catálogo de permisos. Es lo que el Director ve como lista de interruptores
 // en Ajustes, así que los textos son los que él lee: nada de jerga.
+//
+// Estos interruptores son la PUERTA DEL EDIFICIO: deciden si alguien ve el
+// botón de un módulo. A qué proyectos entra adentro de ese módulo —y si toca o
+// solo mira— se decide en Ajustes → Proyectos, proyecto por proyecto. Prender
+// "Presupuestos" acá no abre todos los presupuestos de la oficina: abre la
+// pantalla, y adentro salen los de sus proyectos. La única excepción está
+// abajo, "Entra a todos los proyectos".
 export const GRUPOS_PERMISOS = [
   {
     titulo: "A qué módulos entra",
     permisos: [
-      { id: "tareas.ver", label: "Tareas" },
-      { id: "presupuestos.ver", label: "Presupuestos" },
-      { id: "controlObra.ver", label: "Control de Obra" },
+      { id: "presupuestos.ver", label: "Presupuestos", nota: "Solo los de sus proyectos, con el nivel que le hayas dado en cada uno" },
+      { id: "controlObra.ver", label: "Control de Obra", nota: "Solo las obras de sus proyectos" },
       { id: "cajaChica.ver", label: "Caja Chica" },
       { id: "compras.ver", label: "Compras", nota: "Pedir lo que hace falta en obra y seguir en qué va" },
-      { id: "libro.ver", label: "Libro de Obra", nota: "El registro diario de la obra: quién estuvo, qué se hizo, qué llegó" },
-      { id: "leads.ver", label: "Ver todos los proyectos", nota: "CUÁNTOS ve. Sin esto, solo los que le asignes en Ajustes → Proyectos. Lo que puede HACER en cada uno sale de su nivel ahí, no de acá" },
+      { id: "libro.ver", label: "Libro de Obra", nota: "El registro diario de la obra: quién estuvo, qué se hizo, qué llegó. Solo el de sus proyectos" },
+      { id: "leads.ver", label: "Entra a todos los proyectos", nota: "Para gerentes: entra a todos con nivel de editar y no hay que asignarle ninguno. Apagado, entra solo a los que le des en Ajustes → Proyectos. Es lo único que cambia CUÁNTOS ve" },
       { id: "ajustes.ver", label: "Ajustes", nota: "Usuarios, proyectos y datos de la empresa" },
     ],
   },
   {
     titulo: "Cuánto ve",
+    // Acá había cuatro interruptores y tres no hacían nada: "todas las obras",
+    // "todas las cajas chicas" y "los montos del presupuesto" se prendían y la
+    // app seguía igual. Un permiso que miente es peor que no tenerlo, y además
+    // los dos primeros ya los contesta Ajustes → Proyectos.
     permisos: [
-      { id: "tareas.todas", label: "Las tareas de todos", nota: "Si no, solo las suyas" },
-      { id: "obras.todas", label: "Todas las obras", nota: "Si no, solo las que tenga asignadas" },
-      { id: "cajaChica.todas", label: "Todas las cajas chicas", nota: "Si no, solo la suya" },
-      { id: "montos.ver", label: "Los montos del presupuesto", nota: "Sin esto puede asignar un gasto a un rubro, pero no ve cuánto tiene ese rubro" },
+      { id: "tareas.todas", label: "Las tareas de todos", nota: "Si no, solo las suyas. También le abre todos los proyectos" },
     ],
   },
   {
@@ -36,7 +43,6 @@ export const GRUPOS_PERMISOS = [
       { id: "compras.gestionar", label: "Comprar y facturar", nota: "Concretar la compra, subir la factura y asignarla a su rubro. Quien pide no compra" },
       { id: "facturas.registrar", label: "Registrar facturas y gastos" },
       { id: "planillas.cerrar", label: "Cerrar una planilla" },
-      { id: "gastos.anular", label: "Anular facturas y gastos", nota: "Anular no borra: queda el registro de quién y por qué" },
       { id: "borrar.definitivo", label: "Borrar definitivamente", nota: "Solo cosas nunca usadas, como un presupuesto que quedó en borrador" },
     ],
   },
@@ -54,23 +60,23 @@ export const POR_DEFECTO = {
   assistant: {
     "libro.ver": true,
     "compras.ver": true, "compras.gestionar": true,
-    "tareas.ver": true, "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
+    "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
-    "controlObra.ver": true, "obras.todas": true, "obras.crear": true,
+    "controlObra.ver": true, "obras.crear": true,
     "facturas.registrar": true, "planillas.cerrar": true,
-    "cajaChica.ver": true, "cajaChica.todas": true, "leads.ver": true, "leads.editar": false,
-    "montos.ver": true, "gastos.anular": true, "ajustes.ver": true,
+    "cajaChica.ver": true, "leads.ver": true, "leads.editar": false,
+    "ajustes.ver": true,
     "borrar.definitivo": false,
   },
   gerente: {
     "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
+    "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
-    "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
+    "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": true, "planillas.cerrar": true,
-    "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": true, "leads.editar": false,
-    "montos.ver": true, "gastos.anular": true, "ajustes.ver": false,
+    "cajaChica.ver": true, "leads.ver": true, "leads.editar": false,
+    "ajustes.ver": false,
     "borrar.definitivo": false,
   },
   // Arquitectura trabaja el proyecto antes de la obra: diseño, propuesta y
@@ -79,35 +85,38 @@ export const POR_DEFECTO = {
   arquitecto: {
     "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
+    "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
-    "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
+    "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false, "leads.editar": true,
-    "montos.ver": true, "gastos.anular": false, "ajustes.ver": false,
+    "cajaChica.ver": false, "leads.ver": false, "leads.editar": true,
+    "ajustes.ver": false,
     "borrar.definitivo": false,
   },
-  // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros ni ve montos.
+  // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros.
   arquitecto_jr: {
     "libro.ver": false,
     "compras.ver": false, "compras.gestionar": false,
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
-    "controlObra.ver": true, "obras.todas": false, "obras.crear": false,
+    "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": false, "cajaChica.todas": false, "leads.ver": false, "leads.editar": false,
-    "montos.ver": false, "gastos.anular": false, "ajustes.ver": false,
+    "cajaChica.ver": false, "leads.ver": false, "leads.editar": false,
+    "ajustes.ver": false,
     "borrar.definitivo": false,
   },
+  // El residente vive en la obra: escribe el libro, registra las facturas y
+  // pide materiales. El presupuesto de su obra lo consulta y no lo mueve —eso
+  // se le da proyecto por proyecto, en Ajustes → Proyectos.
   residente: {
     "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
-    "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
-    "presupuestos.ver": false, "presupuestos.crear": false,
-    "controlObra.ver": false, "obras.todas": false, "obras.crear": false,
-    "facturas.registrar": false, "planillas.cerrar": false,
-    "cajaChica.ver": true, "cajaChica.todas": false, "leads.ver": false, "leads.editar": false,
-    "montos.ver": false, "gastos.anular": false, "ajustes.ver": false,
+    "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "presupuestos.ver": true, "presupuestos.crear": false,
+    "controlObra.ver": true, "obras.crear": false,
+    "facturas.registrar": true, "planillas.cerrar": false,
+    "cajaChica.ver": true, "leads.ver": false, "leads.editar": false,
+    "ajustes.ver": false,
     "borrar.definitivo": false,
   },
 };

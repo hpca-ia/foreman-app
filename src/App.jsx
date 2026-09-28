@@ -8,6 +8,7 @@ import { cargarPermisos, cargarPermisosUsuario, crearPuede } from "./lib/permiso
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
+import { nivelDeAcceso } from "./lib/acceso";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
@@ -353,34 +354,38 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // miraba solo los de Ajustes, así que una tarea del pipeline no aparecía por
   // más que se eligiera su proyecto.
   const proyectosTodos = unirProyectos(proyectosPipeline, projects, accesosLead);
-  // Con qué nivel entra esta persona a un proyecto: "editar", "ver", o nada.
-  // Los admins entran a todo. Es lo que decide si un presupuesto se toca o solo
-  // se lee, sin depender de una llave que abre todos los presupuestos a la vez.
-  const nivelProyecto = leadId => {
-    if (!leadId) return null;
-    if (veTodo) return "editar";
-    return accesosLead[leadId]?.[usuario.id]?.nivel || null;
-  };
-  // Cada área puede ir aparte: el residente trabaja el control de obra y el
-  // libro, y el presupuesto lo mira. Sin nada puesto, es el nivel del proyecto.
-  // "no" es sin acceso, y ahí ni siquiera se lista.
-  const nivelArea = (leadId, area) => {
-    if (!leadId) return null;
-    if (veTodo) return "editar";
-    const suyo = accesosLead[leadId]?.[usuario.id];
-    if (!suyo) return null;
-    if (area === "proyecto") return suyo.nivel;
-    const propio = suyo[area];
-    return propio === "no" ? "no" : (propio || suyo.nivel);
-  };
-  const nivelPresupuesto = leadId => nivelArea(leadId, "presupuesto");
-  const nivelLibro = leadId => nivelArea(leadId, "libro");
-  // La misma regla que el pipeline: "Ver todos los proyectos" decide cuántos
-  // ve; el nivel de cada proyecto, qué puede hacer ahí.
-  const mios = proyectosTodos.filter(p => {
-    if (p.esLead && nivelArea(p.id, "proyecto") === "no") return false;
-    return veTodo || puede("leads.ver") || p.gente.includes(usuario.id) || p.creador === usuario.id;
-  });
+  // Los que creó esta persona: entra sin que nadie se lo asigne.
+  const leadsMios = new Set(proyectosPipeline.filter(l => l.created_by === usuario.id).map(l => l.id));
+  // ────────────────────────────────────────────────────────────────────────
+  // Los permisos, en dos preguntas y nada más.
+  //
+  //   1. ¿Entra al módulo?  Lo dice el permiso del rol o de la persona
+  //      (Ajustes → Permisos). Es la puerta del edificio: sin eso no ve
+  //      siquiera el botón.
+  //
+  //   2. ¿A qué proyectos, y para qué?  Lo dice Ajustes → Proyectos, donde
+  //      cada persona tiene su nivel en el proyecto y en cada área.
+  //
+  // Prender "ver presupuestos" no abre todos los presupuestos: abre la
+  // pantalla, y adentro salen los de los proyectos que le asignaste. Quien
+  // entra a todos los proyectos —Director, admins, gerentes— los trabaja
+  // todos, y ahí sí el permiso del módulo es lo único que lo limita.
+  //
+  // `nivelEn` devuelve "editar", "ver" o null. Null es no entra, y punto: no
+  // hay un tercer valor que haya que recordar.
+  // ────────────────────────────────────────────────────────────────────────
+  // La regla entera vive en lib/acceso.js; acá solo se le pasa el caso.
+  const entraATodo = veTodo || puede("leads.ver");
+  const nivelEn = (leadId, area = "proyecto") => (leadId
+    ? nivelDeAcceso({ acceso: accesosLead[leadId]?.[usuario.id], area, entraATodo, esMio: leadsMios.has(leadId) })
+    : entraATodo ? "editar" : null);
+  const nivelProyecto = leadId => nivelEn(leadId, "proyecto");
+  const nivelPresupuesto = leadId => nivelEn(leadId, "presupuesto");
+  const nivelLibro = leadId => nivelEn(leadId, "libro");
+  const nivelObra = leadId => nivelEn(leadId, "obra");
+  const mios = proyectosTodos.filter(p => (p.esLead
+    ? !!nivelProyecto(p.id)
+    : entraATodo || p.gente.includes(usuario.id) || p.creador === usuario.id));
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
   // Sin él, a sí mismo y a sus compañeros: quienes comparten con él al menos un
@@ -585,10 +590,10 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
           <Suspense fallback={<Cargando />}>
             {puede("presupuestos.ver") && vista === "presupuestos" && (
-              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} />
+              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} entraATodo={entraATodo} />
             )}
             {puede("controlObra.ver") && vista === "controlObra" && (
-              <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={leadId => nivelArea(leadId, "obra")} />
+              <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {verPipeline && vista === "leads" && (
               <ModuloLeads currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIrAObra={() => setVista("controlObra")} />
