@@ -21,6 +21,7 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
   const [accesos, setAccesos] = useState({});    // lead_id -> { usuario_id: nivel }
   const [abierto, setAbierto] = useState(null);
   const [sinColor, setSinColor] = useState(false);
+  const [sinNivelPresupuesto, setSinNivelPresupuesto] = useState(false);
   const [guardando, setGuardando] = useState(null);
 
   const cargar = useCallback(async () => {
@@ -32,7 +33,9 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
     setSinColor(filas.length > 0 && !("color" in filas[0]));
     setLeads(filas);
     const mapa = {};
-    (as || []).forEach(a => { (mapa[a.lead_id] = mapa[a.lead_id] || {})[a.usuario_id] = a.nivel || "editar"; });
+    (as || []).forEach(a => {
+      (mapa[a.lead_id] = mapa[a.lead_id] || {})[a.usuario_id] = { nivel: a.nivel || "editar", presupuesto: a.nivel_presupuesto || null };
+    });
     setAccesos(mapa);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
@@ -54,11 +57,11 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
    */
   async function ponerNivel(lead, usuarioId, nivel) {
     const actual = (accesos[lead.id] || {})[usuarioId];
-    const quitar = nivel === null || actual === nivel;
+    const quitar = nivel === null || actual?.nivel === nivel;
     setGuardando(`${lead.id}:${usuarioId}`);
     setAccesos(a => {
       const suyos = { ...(a[lead.id] || {}) };
-      if (quitar) delete suyos[usuarioId]; else suyos[usuarioId] = nivel;
+      if (quitar) delete suyos[usuarioId]; else suyos[usuarioId] = { ...(suyos[usuarioId] || {}), nivel, presupuesto: nivel === "ver" ? null : suyos[usuarioId]?.presupuesto || null };
       return { ...a, [lead.id]: suyos };
     });
     if (quitar) {
@@ -70,6 +73,27 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
       if (error) await supabase.from("lead_accesos").upsert({ lead_id: lead.id, usuario_id: usuarioId }, { onConflict: "lead_id,usuario_id" });
     }
     setGuardando(null);
+    onCambio?.();
+  }
+
+  /**
+   * El presupuesto, aparte del resto del proyecto.
+   *
+   * Un residente trabaja la obra —facturas, planillas, caja chica— y el
+   * presupuesto lo mira y nada más. Con un solo nivel había que elegir entre
+   * darle todo o dejarlo afuera de todo.
+   */
+  async function ponerNivelPresupuesto(lead, usuarioId, valor) {
+    setGuardando(`${lead.id}:${usuarioId}`);
+    setAccesos(a => {
+      const suyos = { ...(a[lead.id] || {}) };
+      suyos[usuarioId] = { ...(suyos[usuarioId] || { nivel: "editar" }), presupuesto: valor };
+      return { ...a, [lead.id]: suyos };
+    });
+    const { error } = await supabase.from("lead_accesos")
+      .update({ nivel_presupuesto: valor }).eq("lead_id", lead.id).eq("usuario_id", usuarioId);
+    setGuardando(null);
+    if (error && /column|schema cache/i.test(error.message)) setSinNivelPresupuesto(true);
     onCambio?.();
   }
 
@@ -117,9 +141,11 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                 <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 6 }}>¿Quién entra a este proyecto, y con qué nivel?</div>
                 <div style={{ display: "grid", gap: 5 }}>
                   {candidatos.map(u => {
-                    const nivel = suyos[u.id];
+                    const acceso = suyos[u.id];
+                    const nivel = acceso?.nivel;
                     return (
-                      <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div key={u.id} style={{ display: "grid", gap: 3 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: nivel ? colors.ink : colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {u.name}
                         </span>
@@ -136,6 +162,18 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                             </button>
                           );
                         })}
+                      </div>
+
+                      {/* Con el proyecto en Editar, el presupuesto puede ir
+                          aparte: trabaja la obra y el presupuesto solo lo mira. */}
+                      {nivel === "editar" && !sinNivelPresupuesto && (
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: colors.inkSoft, cursor: "pointer", paddingLeft: 2 }}>
+                          <input type="checkbox" checked={acceso?.presupuesto === "ver"}
+                            onChange={e => ponerNivelPresupuesto(l, u.id, e.target.checked ? "ver" : null)}
+                            disabled={guardando === `${l.id}:${u.id}`} />
+                          El presupuesto, solo lectura
+                        </label>
+                      )}
                       </div>
                     );
                   })}

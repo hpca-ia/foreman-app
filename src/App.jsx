@@ -131,7 +131,9 @@ export default function App() {
     // Quién entra a cada proyecto y con qué nivel: ver o editar.
     supabase.from("lead_accesos").select("*").then(({ data }) => {
       const m = {};
-      (data || []).forEach(a => { (m[a.lead_id] = m[a.lead_id] || {})[a.usuario_id] = a.nivel || "editar"; });
+      (data || []).forEach(a => {
+        (m[a.lead_id] = m[a.lead_id] || {})[a.usuario_id] = { nivel: a.nivel || "editar", presupuesto: a.nivel_presupuesto || null };
+      });
       setAccesosLead(m);
     });
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
@@ -351,7 +353,15 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const nivelProyecto = leadId => {
     if (!leadId) return null;
     if (veTodo) return "editar";
-    return accesosLead[leadId]?.[usuario.id] || null;
+    return accesosLead[leadId]?.[usuario.id]?.nivel || null;
+  };
+  // El presupuesto puede ir aparte: se trabaja la obra y el presupuesto solo se
+  // mira. Sin nada puesto, es el mismo nivel que el proyecto.
+  const nivelPresupuesto = leadId => {
+    if (!leadId) return null;
+    if (veTodo) return "editar";
+    const suyo = accesosLead[leadId]?.[usuario.id];
+    return suyo ? (suyo.presupuesto || suyo.nivel) : null;
   };
   const mios = proyectosTodos.filter(p => veTodo || p.gente.includes(usuario.id) || p.creador === usuario.id);
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
@@ -558,7 +568,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
           <Suspense fallback={<Cargando />}>
             {puede("presupuestos.ver") && vista === "presupuestos" && (
-              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelProyecto} />
+              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} />
             )}
             {puede("controlObra.ver") && vista === "controlObra" && (
               <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />

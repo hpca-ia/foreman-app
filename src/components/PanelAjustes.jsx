@@ -22,6 +22,8 @@ import PermisosDeUsuario from "./PermisosDeUsuario";
 export default function PanelAjustes({ usuario, permisos, setPermisos, permisosUsuario = {}, setPermisosUsuario = () => {}, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
   // Qué persona tiene abiertos sus permisos: uno a la vez, que son muchos.
   const [permisosDe, setPermisosDe] = useState(null);
+  const [probandoResumen, setProbandoResumen] = useState(false);
+  const [resumenDijo, setResumenDijo] = useState("");
   const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
   const [editP, setEditP] = useState(null);
@@ -152,6 +154,29 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
 
       {tab === "empresa" && (
         <div style={{ display: "grid", gap: 14 }}>
+          {/* El resumen de la mañana sale solo; si algo está mal uno se entera
+              al día siguiente. Con esto se lo pide cuando quiere. */}
+          <div style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: 14, border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)", marginBottom: 4 }}>Resumen de la mañana</div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>
+              Sale de lunes a sábado a las 7:00: a cada quien lo suyo, y a los admins la foto del equipo.
+              Probalo ahora y te llega a vos solo, con los datos de hoy.
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <Button variant="outline" size="sm" disabled={probandoResumen} onClick={async () => {
+                setProbandoResumen(true); setResumenDijo("");
+                try {
+                  const r = await fetch("/api/aviso?de=resumen", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+                  const d = await r.json();
+                  setResumenDijo(d.ok
+                    ? (d.enviados?.length ? `Te lo mandé a ${d.enviados[0]} · ${d.tareas} tareas leídas` : "No se pudo mandar: revisá tu correo en Usuarios")
+                    : d.error || "No se pudo armar el resumen");
+                } catch (e) { setResumenDijo("No se pudo: " + e.message); }
+                setProbandoResumen(false);
+              }}>{probandoResumen ? "Mandando…" : "Mandármelo ahora"}</Button>
+              {resumenDijo && <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{resumenDijo}</span>}
+            </div>
+          </div>
           <div style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: 14, border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)", marginBottom: 10 }}>Logo de la empresa</div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>

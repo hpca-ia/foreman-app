@@ -17,7 +17,8 @@ export function unirProyectos(leads = [], ajustes = [], accesos = {}) {
     .filter(l => l.resultado !== "perdido")
     .map(l => ({
       clave: `l${l.id}`, id: l.id, esLead: true, name: l.nombre, nombre: l.nombre,
-      color: l.color || null, gente: Object.keys(accesos[l.id] || {}).map(Number),
+      color: l.color || null,
+      gente: Object.keys(accesos[l.id] || {}).map(Number),
       niveles: accesos[l.id] || {},
       creador: l.created_by, obra_id: l.obra_id || null,
     }));

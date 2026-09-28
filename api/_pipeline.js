@@ -8,7 +8,33 @@ export const hoy = () => new Date().toISOString().split("T")[0];
 export const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
 export async function json(r) {
-  try { const d = await r.json(); return Array.isArray(d) ? d : d ? [d] : []; } catch { return []; }
+  try {
+    const d = await r.json();
+    if (Array.isArray(d)) return d;
+    // Un error de PostgREST viene como objeto ({ message, code }). Envolverlo
+    // en una lista lo convertía en una fila fantasma: así salió un resumen con
+    // "SIN RESPONSABLE · 1" y una tarea sin título, que era el error disfrazado.
+    if (d && (d.message || d.code || d.error)) return [];
+    return d ? [d] : [];
+  } catch { return []; }
+}
+
+/**
+ * Trae una tabla probando columnas de menos si alguna no existe.
+ *
+ * La base se migra a mano, así que una columna puede no estar todavía. Antes
+ * eso hacía fallar la consulta entera y el correo salía vacío sin decir por
+ * qué; ahora se cae al juego de columnas que sí existe y el trabajo sigue.
+ */
+export async function traer(tabla, intentos) {
+  for (const columnas of intentos) {
+    const r = await rest(`${tabla}?select=${columnas}`);
+    if (r.ok) return { filas: await json(r), columnas };
+    // 400: alguna columna no existe. Cualquier otro error no se arregla
+    // pidiendo menos, así que no se insiste.
+    if (r.status !== 400) break;
+  }
+  return { filas: [], columnas: null };
 }
 
 export async function datosDelProyecto(leadId) {

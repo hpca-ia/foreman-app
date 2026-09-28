@@ -6,7 +6,7 @@
 // versión vieja—. Los cuatro avisos entran por acá y se reparten adentro; cada
 // uno sigue viviendo en su archivo, con su nombre y sus reglas.
 //
-// POST /api/aviso?de=tarea | reunion | comentario | cuenta
+// POST /api/aviso?de=tarea | reunion | comentario | cuenta | resumen
 //
 // Va en la dirección y no en el cuerpo porque el aviso de cuenta ya usa "tipo"
 // para lo suyo (pin o permisos) y dos cosas no pueden llamarse igual.
@@ -15,8 +15,9 @@ import tarea from "./_aviso-tarea.js";
 import reunion from "./_aviso-reunion.js";
 import comentario from "./_aviso-comentario.js";
 import cuenta from "./_aviso-cuenta.js";
+import resumen from "./_aviso-resumen.js";
 
-const AVISOS = { tarea, reunion, comentario, cuenta };
+const AVISOS = { tarea, reunion, comentario, cuenta, resumen };
 
 export default async function handler(req, res) {
   const de = String(req.query?.de || "");
