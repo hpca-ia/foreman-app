@@ -7,7 +7,7 @@ import { fmt, resumenPlanilla } from "./calculos";
 import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
 
-export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, onCambio, mostrarTitulo = true }) {
+export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, puede, onCambio, mostrarTitulo = true }) {
   const [modal, setModal] = useState(null); // null | {factura?}
 
   const delPeriodo = facturas.filter(f => planillaActual ? f.planilla_id === planillaActual.id : !f.planilla_id);
@@ -32,9 +32,9 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
             {planillaActual ? <>Facturas de <strong>{planillaActual.nombre || `Planilla N°${planillaActual.numero}`}</strong></> : "Facturas sin planilla"}
           </div>
         )}
-        <Button variant="primary" size="sm" style={{ marginLeft: "auto" }} onClick={() => setModal({})} disabled={!planillaActual || planillaActual.estado === "cerrada"}>
+        {puede?.("facturas.registrar") !== false && <Button variant="primary" size="sm" style={{ marginLeft: "auto" }} onClick={() => setModal({})} disabled={!planillaActual || planillaActual.estado === "cerrada"}>
           <Plus size={13} /> Nueva factura
-        </Button>
+        </Button>}
       </div>
 
       {planillaActual?.estado === "cerrada" && (

@@ -77,7 +77,7 @@ export default function ModuloControlObra({ currentUser, puede }) {
   }
 
   if (vista === "obra" && obraActiva) {
-    return <VistaObra obra={obraActiva} currentUser={currentUser} onVolver={() => { setVista("lista"); fetchObras(); }} />;
+    return <VistaObra obra={obraActiva} currentUser={currentUser} puede={puede} onVolver={() => { setVista("lista"); fetchObras(); }} />;
   }
 
   return (
@@ -85,12 +85,17 @@ export default function ModuloControlObra({ currentUser, puede }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, flexShrink: 0 }}>Control de Obra</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {/* Activar una obra o subirla desde un Excel es crear la línea base
+              del control: lo hace quien tiene ese permiso, no cualquiera que
+              entre a mirar cómo va su obra. */}
+          {puede?.("obras.crear") !== false && <>
           <Button variant="outline" size="md" onClick={() => setVista("activar")}>
             <Plus size={14} /> Desde un presupuesto
           </Button>
           <Button variant="primary" size="md" onClick={() => setVista("importar")}>
             <Upload size={14} /> Subir presupuesto
           </Button>
+          </>}
         </div>
       </div>
 

@@ -12,7 +12,7 @@ import { fmt } from "./calculos";
 // hacía la fila era cerrar la planilla, y abrirla te sacaba a otra pestaña:
 // uno perdía de vista en qué planilla estaba parado.
 
-export default function PanelPlanillas({ obra, planillas, facturas, asignaciones, planillaSel, abierta, onAbrir, onVolver, onCambio, children }) {
+export default function PanelPlanillas({ obra, planillas, facturas, asignaciones, planillaSel, abierta, onAbrir, onVolver, onCambio, puede, children }) {
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState("");
   const [editando, setEditando] = useState(null);     // id de la planilla que se está renombrando
@@ -130,7 +130,7 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
             <div style={{ marginLeft: "auto" }}>
               {cerrada
                 ? <Button variant="outline" size="sm" onClick={() => reabrir(p)}><Unlock size={12} /> Reabrir</Button>
-                : <Button variant="outline" size="sm" onClick={() => cerrarPlanilla(p)}><Lock size={12} /> Cerrar planilla</Button>}
+                : puede?.("planillas.cerrar") !== false ? <Button variant="outline" size="sm" onClick={() => cerrarPlanilla(p)}><Lock size={12} /> Cerrar planilla</Button> : null}
             </div>
           </div>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 11, color: colors.muted }}>

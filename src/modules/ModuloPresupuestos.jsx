@@ -85,6 +85,12 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", lead_id:"", honorarios_pct:0, iva_pct:12, notas:"" });
   // Los proyectos, para que el presupuesto cuelgue de uno y se vea desde ahí.
   const [proyectos, setProyectos] = useState([]);
+  // Ver y editar son dos cosas distintas y el módulo las trataba como una:
+  // quien entraba, tocaba. Con "Crear y editar presupuestos" apagado se ve
+  // todo —los rubros, los precios, el total— y se puede exportar, pero no se
+  // cambia nada. Es lo que hace falta para que un residente o una arquitecta
+  // consulten el presupuesto de su obra sin poder moverlo.
+  const puedeEditar = puede ? puede("presupuestos.crear") : true;
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
@@ -744,19 +750,19 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             <button onClick={()=>setSubVista("baseDatos")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>
             <button onClick={()=>setSubVista("alimentarBD")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Alimentar BD</button>
             <button onClick={()=>setShowAdminBD(true)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Admin BD</button>
-            <button onClick={()=>setSubVista("importar")} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Desde Excel</button>
-            <button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>
+            {puedeEditar&&<button onClick={()=>setSubVista("importar")} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Desde Excel</button>}
+            {puedeEditar&&<button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>}
           </>}
           {subVista==="detalle"&&<>
-            <button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
+            {puedeEditar&&<button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
-              style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>
-            {!bloqueado&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
-            <button onClick={()=>setPasarABase(true)} disabled={items.length===0}
+              style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>}
+            {!bloqueado&&puedeEditar&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
+            {puedeEditar&&<button onClick={()=>setPasarABase(true)} disabled={items.length===0}
               title={presupuestoActivo?.en_base_at?`Pasado a la base el ${new Date(presupuestoActivo.en_base_at).toLocaleDateString("es-EC")}`:"Cuando lo des por bueno: sus precios entran a la base de rubros"}
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
               {presupuestoActivo?.en_base_at?"✓ En la base":"Pasar a la base"}
-            </button>
+            </button>}
 
             <button onClick={()=>setExportar(true)} disabled={items.length===0} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>Exportar</button>
           </>}
@@ -985,9 +991,18 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
             </div>
           )}
 
-          {/* Un histórico se mira, no se toca: el fieldset deshabilita cada
-              casilla y cada botón de adentro de una vez. */}
-          <fieldset disabled={bloqueado} style={{border:0,padding:0,margin:0,minWidth:0}}>
+          {/* Quien no puede editar igual entra y lee: el presupuesto de su obra
+              le hace falta. Lo que no puede es moverlo. */}
+          {!puedeEditar&&(
+            <div style={{fontSize:12,color:"var(--ink-soft)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",marginBottom:12}}>
+              Estás viendo este presupuesto, no editándolo. Podés leerlo entero y exportarlo; para cambiarlo hace falta el permiso <strong>Crear y editar presupuestos</strong>.
+            </div>
+          )}
+
+          {/* Un histórico se mira, no se toca —y quien solo mira, tampoco—: el
+              fieldset deshabilita cada casilla y cada botón de adentro de una
+              vez, sin tener que acordarse de uno por uno. */}
+          <fieldset disabled={bloqueado||!puedeEditar} style={{border:0,padding:0,margin:0,minWidth:0}}>
           {modoDetalle==="armar"&&<>
           <ArchivosPresupuesto presupuestoId={presupuestoActivo.id} currentUser={currentUser}
             soloLectura={bloqueado} version={archivosVersion}/>

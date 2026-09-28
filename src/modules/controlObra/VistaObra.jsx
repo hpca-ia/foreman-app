@@ -13,7 +13,7 @@ import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import ExportarPlanilla from "./ExportarPlanilla";
 
-export default function VistaObra({ obra, currentUser, onVolver }) {
+export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   const [tab, setTab] = useState("control");
   const [rubros, setRubros] = useState([]);
   const [planillas, setPlanillas] = useState([]);
@@ -124,7 +124,7 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
               {/* Lo que el Excel tenía en dos hojas y uno cruzaba a mano: arriba
                   en qué va cada rubro, abajo las facturas que lo movieron. */}
               <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
-                <PanelFacturas
+                <PanelFacturas puede={puede}
                   obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
                   facturas={facturas} asignaciones={asignaciones}
                   currentUser={currentUser} onCambio={cargar}
@@ -133,12 +133,12 @@ export default function VistaObra({ obra, currentUser, onVolver }) {
             </>
           )}
           {tab === "planillas" && (
-            <PanelPlanillas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones}
+            <PanelPlanillas puede={puede} obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones}
               planillaSel={planillaSel} onCambio={cargar}
               abierta={planillas.find(p => p.id === abierta) || null}
               onAbrir={p => { setPlanillaSel(p.id); setAbierta(p.id); }}
               onVolver={() => setAbierta(null)}>
-              <PanelFacturas
+              <PanelFacturas puede={puede}
                 obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
                 planillaActual={planillas.find(p => p.id === abierta) || null}
                 facturas={facturas} asignaciones={asignaciones}
