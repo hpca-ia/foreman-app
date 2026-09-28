@@ -26,7 +26,9 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
     supabase.from("leads").select("id,nombre,tunel,resultado,obra_id").order("nombre").then(({ data }) => {
       // El libro es de las obras: los leads que todavía se persiguen no tienen
       // días que registrar.
-      setProyectos((data || []).filter(l => l.resultado !== "perdido" && (l.tunel || "lead") !== "lead"));
+      // Las obras que esta persona tiene marcadas "sin acceso" no se listan.
+      setProyectos((data || []).filter(l => l.resultado !== "perdido"
+        && (l.tunel || "lead") !== "lead" && nivelProyecto(l.id) !== "no"));
       setCargando(false);
     });
   }, []);
@@ -59,7 +61,7 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
           <ChevronLeft size={14} /> {lead.nombre}
         </button>
         <DiaDeObra lead={lead} fecha={fecha} currentUser={currentUser}
-          puedeEscribir={nivelProyecto(lead.id) !== "ver"}
+          puedeEscribir={!["ver", "no"].includes(nivelProyecto(lead.id))}
           onCambio={() => cargarDias(lead.id)} />
       </div>
     );

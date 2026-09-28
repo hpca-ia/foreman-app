@@ -133,7 +133,12 @@ export default function App() {
     supabase.from("lead_accesos").select("*").then(({ data }) => {
       const m = {};
       (data || []).forEach(a => {
-        (m[a.lead_id] = m[a.lead_id] || {})[a.usuario_id] = { nivel: a.nivel || "editar", presupuesto: a.nivel_presupuesto || null };
+        (m[a.lead_id] = m[a.lead_id] || {})[a.usuario_id] = {
+          nivel: a.nivel || "editar",
+          presupuesto: a.nivel_presupuesto || null,
+          obra: a.nivel_obra || null,
+          libro: a.nivel_libro || null,
+        };
       });
       setAccesosLead(m);
     });
@@ -356,14 +361,19 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     if (veTodo) return "editar";
     return accesosLead[leadId]?.[usuario.id]?.nivel || null;
   };
-  // El presupuesto puede ir aparte: se trabaja la obra y el presupuesto solo se
-  // mira. Sin nada puesto, es el mismo nivel que el proyecto.
-  const nivelPresupuesto = leadId => {
+  // Cada área puede ir aparte: el residente trabaja el control de obra y el
+  // libro, y el presupuesto lo mira. Sin nada puesto, es el nivel del proyecto.
+  // "no" es sin acceso, y ahí ni siquiera se lista.
+  const nivelArea = (leadId, area) => {
     if (!leadId) return null;
     if (veTodo) return "editar";
     const suyo = accesosLead[leadId]?.[usuario.id];
-    return suyo ? (suyo.presupuesto || suyo.nivel) : null;
+    if (!suyo) return null;
+    const propio = suyo[area];
+    return propio === "no" ? "no" : (propio || suyo.nivel);
   };
+  const nivelPresupuesto = leadId => nivelArea(leadId, "presupuesto");
+  const nivelLibro = leadId => nivelArea(leadId, "libro");
   const mios = proyectosTodos.filter(p => veTodo || p.gente.includes(usuario.id) || p.creador === usuario.id);
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
@@ -572,7 +582,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} />
             )}
             {puede("controlObra.ver") && vista === "controlObra" && (
-              <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />
+              <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={leadId => nivelArea(leadId, "obra")} />
             )}
             {verPipeline && vista === "leads" && (
               <ModuloLeads currentUser={usuario} users={users} puede={puede} onIrAObra={() => setVista("controlObra")} />
@@ -584,7 +594,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloCompras currentUser={usuario} puede={puede} users={users} />
             )}
             {puede("libro.ver") && vista === "libro" && (
-              <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto} />
+              <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelLibro} />
             )}
           </Suspense>
 

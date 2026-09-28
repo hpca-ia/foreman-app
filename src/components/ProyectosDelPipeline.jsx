@@ -16,6 +16,8 @@ import { TUNELES } from "../modules/leads/tubo";
 // ve el proyecto en el pipeline: así "estar en el proyecto" significa una sola
 // cosa y no dos parecidas.
 
+const AREAS = [["presupuesto", "Presupuesto"], ["obra", "Control de obra"], ["libro", "Libro de obra"]];
+
 export default function ProyectosDelPipeline({ users = [], onCambio }) {
   const [leads, setLeads] = useState([]);
   const [accesos, setAccesos] = useState({});    // lead_id -> { usuario_id: nivel }
@@ -34,7 +36,12 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
     setLeads(filas);
     const mapa = {};
     (as || []).forEach(a => {
-      (mapa[a.lead_id] = mapa[a.lead_id] || {})[a.usuario_id] = { nivel: a.nivel || "editar", presupuesto: a.nivel_presupuesto || null };
+      (mapa[a.lead_id] = mapa[a.lead_id] || {})[a.usuario_id] = {
+        nivel: a.nivel || "editar",
+        presupuesto: a.nivel_presupuesto || null,
+        obra: a.nivel_obra || null,
+        libro: a.nivel_libro || null,
+      };
     });
     setAccesos(mapa);
   }, []);
@@ -83,15 +90,16 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
    * presupuesto lo mira y nada más. Con un solo nivel había que elegir entre
    * darle todo o dejarlo afuera de todo.
    */
-  async function ponerNivelPresupuesto(lead, usuarioId, valor) {
+  async function ponerNivelArea(lead, usuarioId, area, valor) {
     setGuardando(`${lead.id}:${usuarioId}`);
     setAccesos(a => {
       const suyos = { ...(a[lead.id] || {}) };
-      suyos[usuarioId] = { ...(suyos[usuarioId] || { nivel: "editar" }), presupuesto: valor };
+      suyos[usuarioId] = { ...(suyos[usuarioId] || { nivel: "editar" }), [area]: valor };
       return { ...a, [lead.id]: suyos };
     });
+    const columna = { presupuesto: "nivel_presupuesto", obra: "nivel_obra", libro: "nivel_libro" }[area];
     const { error } = await supabase.from("lead_accesos")
-      .update({ nivel_presupuesto: valor }).eq("lead_id", lead.id).eq("usuario_id", usuarioId);
+      .update({ [columna]: valor }).eq("lead_id", lead.id).eq("usuario_id", usuarioId);
     setGuardando(null);
     if (error && /column|schema cache/i.test(error.message)) setSinNivelPresupuesto(true);
     onCambio?.();
@@ -164,15 +172,30 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                         })}
                       </div>
 
-                      {/* Con el proyecto en Editar, el presupuesto puede ir
-                          aparte: trabaja la obra y el presupuesto solo lo mira. */}
-                      {nivel === "editar" && !sinNivelPresupuesto && (
-                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: colors.inkSoft, cursor: "pointer", paddingLeft: 2 }}>
-                          <input type="checkbox" checked={acceso?.presupuesto === "ver"}
-                            onChange={e => ponerNivelPresupuesto(l, u.id, e.target.checked ? "ver" : null)}
-                            disabled={guardando === `${l.id}:${u.id}`} />
-                          El presupuesto, solo lectura
-                        </label>
+                      {/* Y dentro del proyecto, área por área: el residente
+                          trabaja el control de obra y el libro, y el presupuesto
+                          lo mira; la arquitecta al revés. */}
+                      {nivel && !sinNivelPresupuesto && (
+                        <div style={{ display: "grid", gap: 3, paddingLeft: 2, paddingBottom: 4 }}>
+                          {AREAS.map(([area, etiqueta]) => (
+                            <div key={area} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: colors.muted }}>{etiqueta}</span>
+                              {[[null, nivel === "editar" ? "Igual: editar" : "Igual: ver"], ["ver", "Solo ver"], ["no", "Sin acceso"]].map(([v, label]) => {
+                                const activo = (acceso?.[area] ?? null) === v;
+                                const color = v === "no" ? colors.danger : v === "ver" ? colors.inkSoft : colors.brand;
+                                return (
+                                  <button key={String(v)} onClick={() => ponerNivelArea(l, u.id, area, v)}
+                                    disabled={guardando === `${l.id}:${u.id}`}
+                                    style={{ border: `1px solid ${activo ? color : colors.border}`, background: activo ? color : "#fff",
+                                      color: activo ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 8px", fontSize: 10.5,
+                                      fontWeight: 600, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
                       )}
                       </div>
                     );

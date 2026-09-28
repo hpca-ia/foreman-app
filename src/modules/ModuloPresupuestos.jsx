@@ -98,6 +98,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const nivelDelActivo = presupuestoActivo?.lead_id ? nivelProyecto(presupuestoActivo.lead_id) : null;
   const puedeEditar = esAdmin(currentUser.role)
     || (nivelDelActivo ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
+  // "Sin acceso" en ese proyecto: no se abre, y se dice por qué.
+  const sinAcceso = nivelDelActivo === "no";
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
@@ -1008,7 +1010,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
 
           {/* Quien no puede editar igual entra y lee: el presupuesto de su obra
               le hace falta. Lo que no puede es moverlo. */}
-          {!puedeEditar&&(
+          {sinAcceso&&(
+            <div style={{fontSize:12.5,color:"var(--danger)",background:"var(--danger-soft)",border:"1px solid var(--danger-border)",borderRadius:8,padding:"10px 12px",marginBottom:12}}>
+              Este presupuesto es de un proyecto al que no tenés acceso. Pedíselo al Director.
+            </div>
+          )}
+          {!sinAcceso&&!puedeEditar&&(
             <div style={{fontSize:12,color:"var(--ink-soft)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",marginBottom:12}}>
               Estás viendo este presupuesto, no editándolo. Podés leerlo entero y exportarlo; para cambiarlo hace falta el permiso <strong>Crear y editar presupuestos</strong>.
             </div>

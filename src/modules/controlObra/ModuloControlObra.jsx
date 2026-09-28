@@ -9,7 +9,11 @@ import ImportarObra from "./ImportarObra";
 import VistaObra from "./VistaObra";
 import BorrarObra from "./BorrarObra";
 
-export default function ModuloControlObra({ currentUser, puede }) {
+export default function ModuloControlObra({ currentUser, puede, nivelObra = () => null }) {
+  // Lo que se puede hacer en una obra sale del proyecto al que pertenece: quien
+  // la tiene en "solo ver" la lee y no la toca; quien no la tiene, no la ve.
+  const nivelDe = obra => (obra?.lead_id ? nivelObra(obra.lead_id) : null);
+  const puedeEnObra = (obra, permiso) => nivelDe(obra) === "ver" ? false : puede?.(permiso) !== false;
   const [vista, setVista] = useState("lista"); // lista | activar | obra
   const [obras, setObras] = useState([]);
   const [obraActiva, setObraActiva] = useState(null);
@@ -22,7 +26,9 @@ export default function ModuloControlObra({ currentUser, puede }) {
   async function fetchObras() {
     setCargando(true);
     const { data: obrasData } = await supabase.from("obras").select("*").order("created_at", { ascending: false });
-    const lista = obrasData || [];
+    // Una obra marcada "sin acceso" para esta persona no se lista: verla en la
+    // lista y que no abra es peor que no verla.
+    const lista = (obrasData || []).filter(o => nivelDe(o) !== "no");
     setObras(lista);
 
     if (lista.length) {
@@ -77,7 +83,9 @@ export default function ModuloControlObra({ currentUser, puede }) {
   }
 
   if (vista === "obra" && obraActiva) {
-    return <VistaObra obra={obraActiva} currentUser={currentUser} puede={puede} onVolver={() => { setVista("lista"); fetchObras(); }} />;
+    return <VistaObra obra={obraActiva} currentUser={currentUser}
+      puede={permiso => puedeEnObra(obraActiva, permiso)}
+      onVolver={() => { setVista("lista"); fetchObras(); }} />;
   }
 
   return (
