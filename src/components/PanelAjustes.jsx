@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Pencil, X, Building2, Upload } from "lucide-react";
+import { Pencil, X, Building2, Upload, KeyRound } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import EtapasCatalogo from "./EtapasCatalogo";
 import { BUCKET_PUBLICO } from "../lib/archivos";
@@ -17,8 +17,11 @@ import UserForm from "./UserForm";
 import PanelPermisos from "./PanelPermisos";
 import ProjectForm from "./ProjectForm";
 import ProyectosDelPipeline from "./ProyectosDelPipeline";
+import PermisosDeUsuario from "./PermisosDeUsuario";
 
-export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
+export default function PanelAjustes({ usuario, permisos, setPermisos, permisosUsuario = {}, setPermisosUsuario = () => {}, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
+  // Qué persona tiene abiertos sus permisos: uno a la vez, que son muchos.
+  const [permisosDe, setPermisosDe] = useState(null);
   const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
   const [editP, setEditP] = useState(null);
@@ -202,10 +205,29 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, equipoRem
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{!esAdmin(u.role) && ` · ${projects.filter(p => (p.miembros || []).includes(u.id)).length} proyecto${projects.filter(p => (p.miembros || []).includes(u.id)).length === 1 ? "" : "s"}`}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
               </div>
+              {/* Los permisos de esta persona, por encima de los de su rol. */}
+              {usuario?.role === "owner" && u.role !== "owner" && (
+                <button onClick={() => setPermisosDe(permisosDe === u.id ? null : u.id)} style={iconBtn} title="Permisos de esta persona">
+                  <KeyRound size={13} />
+                </button>
+              )}
               <button onClick={() => setEditU({ ...u, pin: "", proyectos: projects.filter(p => (p.miembros || []).includes(u.id)).map(p => p.id) })} style={iconBtn}><Pencil size={13} /></button>
               {u.role !== "owner" && <button onClick={() => deleteUser(u.id)} style={deleteBtn}><X size={13} /></button>}
             </div>
           ))}
+          {permisosDe && users.find(u => u.id === permisosDe) && (
+            <div style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 8, border: "1.5px solid var(--brand)" }}>
+              <PermisosDeUsuario
+                usuario={users.find(u => u.id === permisosDe)}
+                permisos={permisos}
+                valores={permisosUsuario[permisosDe] || {}}
+                onCambio={(uid, permiso, valor) => setPermisosUsuario(prev => {
+                  const suyos = { ...(prev[uid] || {}) };
+                  if (valor === null) delete suyos[permiso]; else suyos[permiso] = valor;
+                  return { ...prev, [uid]: suyos };
+                })} />
+            </div>
+          )}
           {newU ? <UserForm u={emptyUser} esNuevo projects={projects} onSave={saveUser} onCancel={() => setNewU(false)} /> : (
             <button onClick={() => setNewU(true)} style={{ width: "100%", background: "var(--bg)", border: "1.5px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 10, color: "var(--ink-soft)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>+ Agregar usuario</button>
           )}

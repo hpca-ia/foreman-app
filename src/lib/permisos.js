@@ -123,11 +123,44 @@ export async function guardarPermiso(rol, permiso, activo) {
   return supabase.from("permisos_rol").upsert({ rol, permiso, activo }, { onConflict: "rol,permiso" });
 }
 
-/** `puede("cajaChica.ver")` para el usuario en sesión. */
-export function crearPuede(usuario, mapa) {
+/**
+ * Las excepciones por persona: { usuario_id: { permiso: bool } }.
+ *
+ * El rol alcanza para el caso general, no para la oficina de verdad: a Camila
+ * hay que dejarla ver presupuestos sin volverla gerente. Lo que no esté acá lo
+ * decide su rol.
+ */
+export async function cargarPermisosUsuario() {
+  const { data, error } = await supabase.from("usuario_permisos").select("usuario_id,permiso,activo");
+  if (error) return {};
+  const mapa = {};
+  (data || []).forEach(({ usuario_id, permiso, activo }) => {
+    (mapa[usuario_id] = mapa[usuario_id] || {})[permiso] = !!activo;
+  });
+  return mapa;
+}
+
+/** Poner o quitar una excepción. `null` la borra: vuelve a mandar el rol. */
+export async function guardarPermisoUsuario(usuarioId, permiso, activo) {
+  if (activo === null) {
+    return supabase.from("usuario_permisos").delete().eq("usuario_id", usuarioId).eq("permiso", permiso);
+  }
+  return supabase.from("usuario_permisos").upsert({ usuario_id: usuarioId, permiso, activo }, { onConflict: "usuario_id,permiso" });
+}
+
+/**
+ * `puede("cajaChica.ver")` para el usuario en sesión.
+ *
+ * Manda lo que se le puso a esa persona; si no se le puso nada, manda su rol.
+ * El Director siempre puede: si sus permisos fueran editables, un error de
+ * edición lo dejaría fuera de su propia app.
+ */
+export function crearPuede(usuario, mapa, porUsuario = {}) {
   return permiso => {
     if (!usuario) return false;
-    if (usuario.role === "owner") return true;          // el Director siempre
+    if (usuario.role === "owner") return true;
+    const suyo = porUsuario?.[usuario.id]?.[permiso];
+    if (suyo !== undefined) return suyo;
     return !!mapa?.[usuario.role]?.[permiso];
   };
 }

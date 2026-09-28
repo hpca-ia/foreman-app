@@ -4,9 +4,10 @@ import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
 import { esAdmin } from "./lib/roles";
-import { cargarPermisos, crearPuede } from "./lib/permisos";
+import { cargarPermisos, cargarPermisosUsuario, crearPuede } from "./lib/permisos";
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
+import { unirProyectos } from "./lib/proyectos";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
@@ -70,11 +71,13 @@ export default function App() {
   const [editTask, setEditTask] = useState(null);
   const [showAjustes, setShowAjustes] = useState(false);
   const [permisos, setPermisos] = useState(null);
+  // Las excepciones de cada persona, que mandan sobre las de su rol.
+  const [permisosUsuario, setPermisosUsuario] = useState({});
   const [showAlerts, setShowAlerts] = useState(false);
   const [busqueda, setBusqueda] = useState("");
 
   useEffect(() => { setShowAlerts(false); setShowAjustes(false); setShowModal(false); }, [usuario]);
-  useEffect(() => { cargarPermisos().then(setPermisos); }, []);
+  useEffect(() => { cargarPermisos().then(setPermisos); cargarPermisosUsuario().then(setPermisosUsuario); }, []);
   useEffect(() => { recargarEquipo(); }, []);
 
   // Si la sesión se vence, la app lo dice y manda a entrar de nuevo. Antes se
@@ -321,7 +324,7 @@ export default function App() {
   if (!usuario) return <LoginScreen onLogin={u => { setUsuario(u); recargarEquipo(); }} users={users} />;
 
   const admin = esAdmin(usuario.role);
-  const puede = crearPuede(usuario, permisos);
+  const puede = crearPuede(usuario, permisos, permisosUsuario);
   // Se calcula acá y no antes: `puede` todavía no existe más arriba.
   const verPipeline = puede("leads.ver") || tienePipeline;
   // El nombre del proyecto de una tarea: el del pipeline si viene de ahí, el de
@@ -340,10 +343,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // mientras convivan, los de Ajustes que todavía no se empataron. El filtro
   // miraba solo los de Ajustes, así que una tarea del pipeline no aparecía por
   // más que se eligiera su proyecto.
-  const proyectosTodos = [
-    ...proyectosPipeline.map(l => ({ clave: `l${l.id}`, id: l.id, esLead: true, name: l.nombre, color: l.color, gente: accesosLead[l.id] || [], creador: l.created_by })),
-    ...projects.filter(p => !p.lead_id).map(p => ({ clave: `p${p.id}`, id: p.id, esLead: false, name: p.name, color: p.color, gente: p.miembros || [] })),
-  ].sort((a, b) => a.name.localeCompare(b.name));
+  const proyectosTodos = unirProyectos(proyectosPipeline, projects, accesosLead);
   const mios = proyectosTodos.filter(p => veTodo || p.gente.includes(usuario.id) || p.creador === usuario.id);
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
@@ -604,8 +604,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} pipeline={proyectosPipeline} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
-      {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
+      {showModal && <ModalTarea editTask={editTask} proyectos={proyectosTodos} mios={mios} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} permisosUsuario={permisosUsuario} setPermisosUsuario={setPermisosUsuario} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
     </div>
   );
 }

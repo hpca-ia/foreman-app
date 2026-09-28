@@ -2,6 +2,7 @@ import { useState } from "react";
 import { guardarProyecto } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
 import { PRIORIDAD, ESTADO_NUEVO, CLASES, claseDe, HORAS } from "../theme/constants";
+import { claveDeTarea, comoSeGuarda } from "../lib/proyectos";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
@@ -11,14 +12,14 @@ import InlineFiles from "./InlineFiles";
 import DependenciasTarea from "./DependenciasTarea";
 import Avatar from "./ui/Avatar";
 
-export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar, acompanantes = [], tareas = [], onCambio }) {
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectos = [], mios = [], proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar, acompanantes = [], tareas = [], onCambio }) {
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
-    title: editTask.title, project_id: editTask.project_id, assignee_id: editTask.assignee_id,
+    title: editTask.title, project_id: editTask.project_id, lead_id: editTask.lead_id, assignee_id: editTask.assignee_id,
     type: editTask.type, due_date: editTask.due_date, hora: editTask.hora || "", priority: editTask.priority,
     status: editTask.status, notes: editTask.notes || "", privada: !!editTask.privada, enlace: editTask.enlace || "",
     es_aprobacion: !!editTask.es_aprobacion,
-  } : { title: "", project_id: (proyectosElegibles || projects)[0]?.id ?? null, assignee_id: currentUser.id, type: "Llamada", due_date: "", hora: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "", es_aprobacion: false });
+  } : { title: "", ...comoSeGuarda((mios[0] || proyectos[0]) ?? null), assignee_id: currentUser.id, type: "Llamada", due_date: "", hora: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "", es_aprobacion: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   // Los que acompañan al responsable principal: el plano lo hacen dos.
   const [conmigo, setConmigo] = useState(acompanantes);
@@ -56,10 +57,10 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
 
   function elegirProyecto(valor) {
     if (valor === "__nuevo__") { setCreandoP(true); return; }
-    const id = valor ? Number(valor) : null;
-    const lista = asignablesPara(id);
+    const elegido = proyectos.find(p => p.clave === valor) || null;
+    const lista = asignablesPara(elegido && !elegido.esLead ? elegido.id : null);
     setForm(f => ({
-      ...f, project_id: id,
+      ...f, ...comoSeGuarda(elegido),
       // Si el asignado no es de ese proyecto, la tarea vuelve a quien la crea.
       assignee_id: f.assignee_id == null || lista.some(u => u.id === f.assignee_id) ? f.assignee_id
         : (lista.some(u => u.id === currentUser.id) ? currentUser.id : null),
@@ -73,11 +74,13 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   const [errP, setErrP] = useState("");
   const puedeCrearProyecto = esAdmin(currentUser.role);
 
-  // Solo los proyectos donde uno está, más el de la tarea si se está editando
-  // una que viene de otro proyecto: si no, el menú la mostraría en blanco.
-  const base = proyectosElegibles || projects;
-  const actual = projects.find(p => p.id === form.project_id);
-  const opciones = actual && !base.some(p => p.id === actual.id) ? [...base, actual] : base;
+  // Todos los proyectos, del pipeline y de Ajustes: antes el menú mostraba solo
+  // los de Ajustes y media oficina no aparecía. Los de uno primero, y si la
+  // tarea es de otro proyecto, ese también —si no, el menú saldría en blanco—.
+  const clave = claveDeTarea(form);
+  const base = mios.length ? mios : proyectos;
+  const actual = proyectos.find(p => p.clave === clave);
+  const opciones = actual && !base.some(p => p.clave === actual.clave) ? [...base, actual] : base;
 
   // Crear el proyecto sin salir de la tarea. Quedan como miembros quien lo
   // crea y a quien se le asigna, que es lo mínimo para que ambos lo vean.
@@ -104,9 +107,9 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
       <fieldset disabled={soloLectura} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: "grid", gap: 12 }}>
         <div><label style={lS}>Título *</label><input value={form.title} onChange={e => inp("title", e.target.value)} placeholder="¿Qué hay que hacer?" style={inputStyle} /></div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div><label style={lS}>Proyecto</label><select value={form.project_id ?? ""} onChange={e => elegirProyecto(e.target.value)} style={inputStyle}>
+          <div><label style={lS}>Proyecto</label><select value={clave} onChange={e => elegirProyecto(e.target.value)} style={inputStyle}>
             <option value="">Sin proyecto</option>
-            {opciones.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {opciones.map(p => <option key={p.clave} value={p.clave}>{p.name}</option>)}
             {puedeCrearProyecto && <option value="__nuevo__">+ Nuevo proyecto…</option>}
           </select></div>
           {/* Qué es se elige acá igual que en el proyecto, y con los mismos
