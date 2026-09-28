@@ -6,6 +6,7 @@ import { esAdmin } from "../lib/roles";
 import { POR_DEFECTO } from "../lib/permisos";
 import { fusionarLead, duplicadosProbables } from "../lib/fusionarLead";
 import QueVeEstaPersona from "./QueVeEstaPersona";
+import ProyectosRepetidos from "./ProyectosRepetidos";
 import { TUNELES, esProyecto } from "../modules/leads/tubo";
 import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/acceso";
 
@@ -202,6 +203,9 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
           Para elegir el color hace falta correr la migración 047. Lo demás funciona igual.
         </div>
       )}
+
+      <ProyectosRepetidos leads={leads} presupuestos={presupuestos} obras={obras} accesos={accesos}
+        onUnir={unir} uniendo={uniendo} />
 
       <QueVeEstaPersona users={users} leads={leads} accesos={accesos} presupuestos={presupuestos}
         obras={obras} permisos={permisos} permisosUsuario={permisosUsuario} />

@@ -100,6 +100,21 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const puedeEditar = esAdmin(currentUser.role)
     || (presupuestoActivo?.lead_id ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
   const sinAcceso = !!presupuestoActivo?.lead_id && !nivelDelActivo;
+  const [cambiandoProyecto, setCambiandoProyecto] = useState(false);
+  const proyectoDelActivo = proyectos.find(x => x.id === presupuestoActivo?.lead_id) || null;
+
+  /** Mover este presupuesto a otro proyecto (o dejarlo sin ninguno). */
+  async function asignarProyecto(leadId) {
+    if (!presupuestoActivo) return;
+    const valor = leadId ? Number(leadId) : null;
+    const { error } = await supabase.from("presupuestos").update({ lead_id: valor }).eq("id", presupuestoActivo.id);
+    if (error) return;
+    setPresupuestoActivo(p => ({ ...p, lead_id: valor }));
+    setPresupuestos(ps => ps.map(p => p.id === presupuestoActivo.id ? { ...p, lead_id: valor } : p));
+    setCambiandoProyecto(false);
+    fetchProyectos();
+  }
+
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
@@ -754,7 +769,30 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             {subVista==="lista"?"Presupuestos":subVista==="nuevo"?"Nuevo presupuesto":subVista==="importar"?"Nuevo presupuesto desde Excel":subVista==="baseDatos"?"Base de rubros":"Alimentar BD"}
           </div>
           )}
-          {subVista==="detalle"&&presupuestoActivo&&<div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</div>}
+          {/* De qué proyecto es. Un presupuesto con nombre propio —"Implementación
+              tal"— se lee como si fuera otro proyecto; decir de cuál es lo
+              cierra. Y si no cuelga de ninguno, se asigna acá mismo. */}
+          {subVista==="detalle"&&presupuestoActivo&&(
+            <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span style={{fontSize:10,fontWeight:700,color:"var(--muted)",letterSpacing:0.4}}>PROYECTO</span>
+              {proyectoDelActivo
+                ? <strong style={{color:"var(--ink)"}}>{proyectoDelActivo.nombre}</strong>
+                : <span style={{color:"var(--warning)"}}>sin proyecto — nadie lo ve salvo los admins</span>}
+              {puedeEditar && (
+                <button onClick={()=>setCambiandoProyecto(v=>!v)}
+                  style={{background:"none",border:"1px solid var(--border)",borderRadius:12,padding:"1px 8px",fontSize:10,color:"var(--ink-soft)",cursor:"pointer",fontFamily:"var(--font)"}}>
+                  {cambiandoProyecto?"cancelar":proyectoDelActivo?"cambiar":"asignar"}
+                </button>
+              )}
+              <span style={{color:"var(--muted)"}}>· {presupuestoActivo.cliente_nombre} · Total: ${fmt(presupuestoActivo.total)}</span>
+            </div>
+          )}
+          {subVista==="detalle"&&presupuestoActivo&&cambiandoProyecto&&(
+            <div style={{maxWidth:420,marginTop:6}}>
+              <ElegirProyecto value={presupuestoActivo.lead_id||""} creador={currentUser}
+                onElegir={({id})=>asignarProyecto(id)} />
+            </div>
+          )}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>setSubVista("lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
@@ -900,7 +938,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               onMouseEnter={e=>e.currentTarget.style.borderColor="var(--brand)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
               <div style={{minWidth:0}}>
                 <div style={{fontWeight:600,color:"var(--ink)",fontSize:14}}>{p.nombre}</div>
-                <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>{p.cliente_nombre} · {new Date(p.created_at).toLocaleDateString("es-EC")}{p.archivado_at&&<> · histórico desde el {new Date(p.archivado_at).toLocaleDateString("es-EC")}</>}</div>
+                <div style={{fontSize:12,color:"var(--ink-soft)",marginTop:2}}>
+                  {proyectos.find(x=>x.id===p.lead_id)?.nombre || <span style={{color:"var(--warning)"}}>sin proyecto</span>}
+                  {" · "}{p.cliente_nombre} · {new Date(p.created_at).toLocaleDateString("es-EC")}{p.archivado_at&&<> · histórico desde el {new Date(p.archivado_at).toLocaleDateString("es-EC")}</>}
+                </div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
                 <div style={{textAlign:"right"}}>

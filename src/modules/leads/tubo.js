@@ -33,7 +33,9 @@ export const TUNELES = {
  * llamar "proyecto" a los dos era la mitad de la confusión.
  */
 export const esProyecto = lead =>
-  lead?.resultado === "ganado" || ["arquitectura", "construccion"].includes(lead?.tunel);
+  lead?.resultado === "ganado"
+  || !!lead?.obra_id                      // tiene obra: ya es trabajo, diga lo que diga su túnel
+  || ["arquitectura", "construccion"].includes(lead?.tunel);
 
 /** Cómo se le dice a esto en pantalla. */
 export const queEs = lead => (esProyecto(lead) ? "proyecto" : "lead");

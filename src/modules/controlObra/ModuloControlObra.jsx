@@ -25,6 +25,8 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
   const [resumen, setResumen] = useState({});
   const [cargando, setCargando] = useState(true);
   const [borrar, setBorrar] = useState(null);
+  const [cuantasHay, setCuantasHay] = useState(0);
+  const [proyectos, setProyectos] = useState({});
 
   useEffect(() => { fetchObras(); }, []);
 
@@ -34,7 +36,15 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
     // Una obra a la que esta persona no entra no se lista: verla y que no abra
     // es peor que no verla.
     const lista = (obrasData || []).filter(alcanza);
+    setCuantasHay((obrasData || []).length);
     setObras(lista);
+    // Para poder decir de qué proyecto es cada obra: el nombre de la obra
+    // puede ser otro, y ahí es donde uno cree estar viendo dos proyectos.
+    const ids = [...new Set((obrasData || []).map(o => o.lead_id).filter(Boolean))];
+    if (ids.length) {
+      const { data: ls } = await supabase.from("leads").select("id,nombre").in("id", ids);
+      setProyectos(Object.fromEntries((ls || []).map(l => [l.id, l.nombre])));
+    }
 
     if (lista.length) {
       const ids = lista.map(o => o.id);
@@ -114,9 +124,15 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
 
       {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div>
         : obras.length === 0 ? (
-          <div style={{ textAlign: "center", color: colors.muted, padding: "50px 20px", fontSize: 13, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd }}>
-            Todavía no hay obras en curso.<br />
-            Activa un presupuesto para empezar a controlar su ejecución.
+          <div style={{ textAlign: "center", color: colors.muted, padding: "50px 20px", fontSize: 13, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, lineHeight: 1.6 }}>
+            {cuantasHay > 0 ? (<>
+              Hay {cuantasHay} {cuantasHay === 1 ? "obra" : "obras"}, pero {cuantasHay === 1 ? "no es" : "ninguna es"} de tus proyectos.<br />
+              <span style={{ fontSize: 12 }}>En Ajustes → Proyectos, “¿Qué ve esta persona?” dice exactamente por qué.</span>
+            </>) : (<>
+              Todavía no hay obras en curso.<br />
+              Un presupuesto aprobado no es una obra: hay que activarlo acá con
+              <strong> “Desde un presupuesto”</strong> para empezar a controlar su ejecución.
+            </>)}
           </div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
@@ -132,7 +148,12 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink }}>{o.nombre}</div>
-                      <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>{o.cliente_nombre || "Sin cliente"} · {r.rubros} rubros</div>
+                      <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
+                        {o.lead_id && proyectos[o.lead_id] && proyectos[o.lead_id] !== o.nombre
+                          ? <>Proyecto: <strong style={{ color: colors.inkSoft }}>{proyectos[o.lead_id]}</strong> · </>
+                          : !o.lead_id ? <span style={{ color: colors.warning }}>sin proyecto · </span> : null}
+                        {o.cliente_nombre || "Sin cliente"} · {r.rubros} rubros
+                      </div>
                     </div>
                     <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
                       <div style={{ textAlign: "right" }}>

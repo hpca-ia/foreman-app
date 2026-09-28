@@ -114,8 +114,11 @@ export function duplicadosProbables(leads = [], presupuestos = [], obras = []) {
       if (pares.some(p => (p.nuevo === leads[i].id && p.original === leads[j].id) || (p.nuevo === leads[j].id && p.original === leads[i].id))) continue;
       const a = limpio(leads[i].nombre), b = limpio(leads[j].nombre);
       if (!a.length || !b.length) continue;
+      // Dos palabras propias compartidas y que sean buena parte del nombre más
+      // corto. Antes se pedía casi calzar entero y se escapaban los pares
+      // donde uno de los dos arrastra media frase ("IMPLEMENTACIÓN … GUAYAQUIL").
       const comunes = a.filter(p => b.includes(p)).length;
-      if (comunes >= 2 && comunes >= Math.min(a.length, b.length) - 1) {
+      if (comunes >= 2 && comunes >= Math.min(a.length, b.length) * 0.5) {
         pares.push({ nuevo: leads[j].id, original: leads[i].id, porque: "se llaman casi igual" });
       }
     }
