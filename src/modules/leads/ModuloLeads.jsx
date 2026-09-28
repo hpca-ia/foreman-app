@@ -379,7 +379,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
         )}
 
       {(abierto || nuevo) && (
-        <ModalLead lead={abierto} currentUser={currentUser} users={users} catalogo={catalogo} puede={puede} editable={puedeEditar}
+        <ModalLead lead={abierto} currentUser={currentUser} users={users} todos={leads} catalogo={catalogo} puede={puede} editable={puedeEditar}
           onIrAObra={onIrAObra ? () => onIrAObra(abierto.obra_id) : null}
           onCerrar={() => { setAbierto(null); setNuevo(false); }}
           onGuardado={async () => { setAbierto(null); setNuevo(false); await cargar(); }} />

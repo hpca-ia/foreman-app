@@ -5,6 +5,7 @@ import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
 import { POR_DEFECTO } from "../lib/permisos";
 import { fusionarLead, duplicadosProbables } from "../lib/fusionarLead";
+import QueVeEstaPersona from "./QueVeEstaPersona";
 import { TUNELES, esProyecto } from "../modules/leads/tubo";
 import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/acceso";
 
@@ -42,6 +43,7 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
   const [presupuestos, setPresupuestos] = useState([]);
   const [obras, setObras] = useState([]);
   const [uniendo, setUniendo] = useState(null);
+  const [renombrando, setRenombrando] = useState(null);
 
   const cargar = useCallback(async () => {
     const [{ data: ls }, { data: as }, { data: ps }, { data: os }] = await Promise.all([
@@ -94,16 +96,23 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
 
   async function unir(de, a) {
     if (!window.confirm(
-      `¿Unir “${de.nombre}” con “${a.nombre}”?\n\n` +
+      `¿Unir estos dos?\n\n` +
+      `SE QUEDA: “${a.nombre}”\n` +
+      `SE BORRA: “${de.nombre}”\n\n` +
       `Todo lo de “${de.nombre}” —obra, presupuestos, caja chica, tareas, compras, libro, gente y bitácora— ` +
-      `pasa a “${a.nombre}”, y después “${de.nombre}” se borra.\n\n` +
-      `Sus etapas y su checklist no viajan: se queda el tubo de “${a.nombre}”.`
+      `pasa a “${a.nombre}”. Sus etapas y su checklist no viajan: se queda el tubo de “${a.nombre}”.\n\n` +
+      `El nombre que queda es “${a.nombre}”; en el paso siguiente podés cambiarlo.`
     )) return;
     setUniendo(de.id);
     const r = await fusionarLead(de, a);
     setUniendo(null);
     if (r.error) { window.alert(r.error); return; }
     if (r.avisos?.length) window.alert(`Se unieron, pero mirá esto:\n${r.avisos.join("\n")}`);
+    // El nombre es lo primero que se nota, y casi siempre el bueno es el del
+    // trabajo —el de la obra—, no el del lead con el que se lo persiguió.
+    if (de.nombre !== a.nombre && window.confirm(`¿Cómo se llama de ahora en adelante?\n\nAceptar: “${de.nombre}”\nCancelar: dejarlo como “${a.nombre}”`)) {
+      await supabase.from("leads").update({ nombre: de.nombre }).eq("id", a.id);
+    }
     await cargar();
     onCambio?.();
   }
@@ -117,6 +126,15 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
     setGuardando(null);
     if (error) return;
     setPresupuestos(ps => ps.map(p => (p.id === id ? { ...p, lead_id: lead.id } : p)));
+    onCambio?.();
+  }
+
+  async function renombrar(lead, nombre) {
+    const limpio = String(nombre || "").trim();
+    if (!limpio || limpio === lead.nombre) { setRenombrando(null); return; }
+    setLeads(x => x.map(l => (l.id === lead.id ? { ...l, nombre: limpio } : l)));
+    setRenombrando(null);
+    await supabase.from("leads").update({ nombre: limpio }).eq("id", lead.id);
     onCambio?.();
   }
 
@@ -185,6 +203,9 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
         </div>
       )}
 
+      <QueVeEstaPersona users={users} leads={leads} accesos={accesos} presupuestos={presupuestos}
+        obras={obras} permisos={permisos} permisosUsuario={permisosUsuario} />
+
       {[
         [proyectos, "PROYECTOS", "Contratados o en obra. Acá hay presupuesto que respetar, obra que controlar y libro que escribir."],
         [oportunidades, "LEADS", "Todavía se persiguen. No tienen obra ni libro: solo el proyecto y, si ya se cotizó, su presupuesto."],
@@ -214,10 +235,19 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
                 title="Color del proyecto"
                 style={{ width: 26, height: 26, border: `1px solid ${colors.border}`, borderRadius: 6, cursor: sinColor ? "not-allowed" : "pointer", padding: 2, background: "#fff", flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {l.nombre}
-                  {l.resultado === "ganado" && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: colors.success }}>APROBADO</span>}
-                </div>
+                {renombrando === l.id ? (
+                  <input autoFocus defaultValue={l.nombre}
+                    onBlur={e => renombrar(l, e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") renombrar(l, e.target.value); if (e.key === "Escape") setRenombrando(null); }}
+                    style={{ width: "100%", border: `1px solid ${colors.brand}`, borderRadius: 6, padding: "3px 6px",
+                      fontSize: 14, fontWeight: 600, color: colors.ink, fontFamily: colors.font }} />
+                ) : (
+                  <div onClick={() => setRenombrando(l.id)} title="Tocá para cambiarle el nombre"
+                    style={{ fontSize: 14, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}>
+                    {l.nombre}
+                    {l.resultado === "ganado" && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: colors.success }}>APROBADO</span>}
+                  </div>
+                )}
                 <div style={{ fontSize: 11, color: colors.muted }}>
                   {tubo.label} · {Object.keys(suyos).length ? `${Object.keys(suyos).length} ${Object.keys(suyos).length === 1 ? "persona" : "personas"}` : "sin gente — solo lo ven los admins"}
                   {propios.length ? ` · ${propios.length} ${propios.length === 1 ? "presupuesto" : "presupuestos"}` : ""}
@@ -315,6 +345,18 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
                       {sueltos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                     </select>
                   )}
+                </div>
+
+                {/* Unir a mano, sin esperar a que la app sospeche sola: el
+                    duplicado puede llamarse distinto y no parecerse a nada. */}
+                <div style={{ marginTop: 8 }}>
+                  <select value="" disabled={uniendo === l.id}
+                    onChange={e => { const otro = leads.find(x => String(x.id) === e.target.value); if (otro) unir(l, otro); }}
+                    style={{ width: "100%", border: `1px solid ${colors.border}`, borderRadius: 8, padding: "5px 7px",
+                      fontSize: 11.5, fontFamily: colors.font, color: colors.inkSoft, background: "#fff" }}>
+                    <option value="">Esto es lo mismo que… (unir y borrar este)</option>
+                    {leads.filter(x => x.id !== l.id).map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
+                  </select>
                 </div>
 
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8, lineHeight: 1.5 }}>

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
+import ElegirProyecto from "../components/ElegirProyecto";
 import { supabase } from "../lib/supabase";
 import { alimentarBase, resumenAlimentacion, preciosDeLaBase } from "../lib/baseRubros";
 import AdminBD from "./AdminBD";

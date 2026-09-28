@@ -21,7 +21,9 @@ const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
 const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
-export default function ModalLead({ lead, currentUser, users = [], catalogo = CATALOGO_BASE, puede = () => true, editable = true, onIrAObra, onCerrar, onGuardado }) {
+const sinTildes = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(p => p.length > 3);
+
+export default function ModalLead({ lead, currentUser, users = [], todos = [], catalogo = CATALOGO_BASE, puede = () => true, editable = true, onIrAObra, onCerrar, onGuardado }) {
   const editando = !!lead;
   const [form, setForm] = useState(lead ? { ...lead } : {
     nombre: "", contacto: "", telefono: "", email: "", origen: "Referido",
@@ -59,6 +61,15 @@ export default function ModalLead({ lead, currentUser, users = [], catalogo = CA
   }, [lead]);
 
   const inp = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  // Proyectos que ya existen y se llaman casi igual que el que se está
+  // escribiendo. Solo al crear: en uno que ya existe, el parecido es historia.
+  const palabras = sinTildes(form.nombre);
+  const parecidos = lead || palabras.length < 1 ? [] : todos.filter(x => {
+    if (x.id === lead?.id || x.resultado === "perdido") return false;
+    const suyas = sinTildes(x.nombre);
+    const comunes = palabras.filter(w => suyas.includes(w)).length;
+    return comunes >= Math.min(2, palabras.length) && comunes >= Math.min(palabras.length, suyas.length) - 1;
+  }).slice(0, 3);
 
   // automatico: lo anotó el sistema —cambió la etapa, se agregó un paso—. Eso
   // no se edita: si "pasó a Contrato el 12" se pudiera corregir, dejaría de ser
@@ -325,6 +336,17 @@ Si no se dice cuándo, pon la fecha de hoy.`,
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={lbl}>NOMBRE DEL PROYECTO</label>
             <input value={form.nombre} onChange={e => inp("nombre", e.target.value)} placeholder="Ej: Plaza Comercial Puembo" style={mini} autoFocus />
+            {/* Un proyecto que ya existe escrito otra vez es el origen de los
+                duplicados: mejor decirlo mientras se escribe que descubrirlo
+                cuando los permisos y los totales no cierran. */}
+            {parecidos.length > 0 && (
+              <div style={{ fontSize: 10.5, color: colors.warning, marginTop: 4, lineHeight: 1.5 }}>
+                Ya existe {parecidos.length === 1 ? "un proyecto que se llama" : "proyectos que se llaman"} casi igual:{" "}
+                <strong>{parecidos.map(p => p.nombre).join(" · ")}</strong>.
+                Si es el mismo trabajo, cerrá esto y abrilo desde ahí: dos proyectos iguales parten en dos su presupuesto,
+                su obra y sus permisos.
+              </div>
+            )}
           </div>
 
           {/* De qué es el proyecto: eso decide sus etapas. Arquitectura y
