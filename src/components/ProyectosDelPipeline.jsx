@@ -3,7 +3,9 @@ import { Pencil, Check } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
-import { TUNELES } from "../modules/leads/tubo";
+import { POR_DEFECTO } from "../lib/permisos";
+import { fusionarLead, duplicadosProbables } from "../lib/fusionarLead";
+import { TUNELES, esProyecto } from "../modules/leads/tubo";
 import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/acceso";
 
 // Los proyectos, de verdad: los del pipeline.
@@ -20,19 +22,39 @@ import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/a
 // Las áreas y los niveles salen de lib/acceso.js, que es donde vive la regla:
 // esta pantalla la muestra, no la define.
 
-export default function ProyectosDelPipeline({ users = [], onCambio }) {
+// Qué permiso de módulo hace falta para que un nivel de área se note. Sin
+// esto, dar "Presupuesto: Ver" y que la persona no vea nada parece un error de
+// la app, y es que su rol no le abre esa pantalla.
+const PUERTA = {
+  nivel: null,
+  presupuesto: ["presupuestos.ver", "Presupuestos"],
+  obra: ["controlObra.ver", "Control de Obra"],
+  libro: ["libro.ver", "Libro de Obra"],
+};
+
+export default function ProyectosDelPipeline({ users = [], permisos = {}, permisosUsuario = {}, onCambio }) {
   const [leads, setLeads] = useState([]);
   const [accesos, setAccesos] = useState({});    // lead_id -> { usuario_id: nivel }
   const [abierto, setAbierto] = useState(null);
   const [sinColor, setSinColor] = useState(false);
   const [sinAreas, setSinAreas] = useState(false);
   const [guardando, setGuardando] = useState(null);
+  const [presupuestos, setPresupuestos] = useState([]);
+  const [obras, setObras] = useState([]);
+  const [uniendo, setUniendo] = useState(null);
 
   const cargar = useCallback(async () => {
-    const [{ data: ls }, { data: as }] = await Promise.all([
+    const [{ data: ls }, { data: as }, { data: ps }, { data: os }] = await Promise.all([
       supabase.from("leads").select("*").order("nombre"),
       supabase.from("lead_accesos").select("*"),
+      // Los presupuestos, para poder decir cuál cuelga de cada proyecto. Dar
+      // "Presupuesto: Ver" no sirve de nada si el presupuesto no está enlazado
+      // al proyecto, y eso hay que verlo acá, no descubrirlo por un reclamo.
+      supabase.from("presupuestos").select("id,nombre,lead_id,archivado_at").order("created_at", { ascending: false }),
+      supabase.from("obras").select("id,nombre,lead_id,presupuesto_id"),
     ]);
+    setPresupuestos(ps || []);
+    setObras(os || []);
     const filas = (ls || []).filter(l => l.resultado !== "perdido");
     setSinColor(filas.length > 0 && !("color" in filas[0]));
     // Si falta la migración 055 no hay columnas por área: mejor avisarlo al
@@ -56,6 +78,47 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   const candidatos = users.filter(u => !esAdmin(u.role));
+
+  /** ¿Su rol —o su excepción— le abre esa pantalla? */
+  const tienePuerta = (u, campo) => {
+    const puerta = PUERTA[campo];
+    if (!puerta) return true;
+    const propio = permisosUsuario[u.id]?.[puerta[0]];
+    if (propio !== undefined && propio !== null) return !!propio;
+    return !!(permisos?.[u.role]?.[puerta[0]] ?? POR_DEFECTO[u.role]?.[puerta[0]]);
+  };
+  const sueltos = presupuestos.filter(p => !p.lead_id && !p.archivado_at);
+  // El mismo trabajo cargado dos veces: pasaba cuando se activaba una obra y
+  // el pipeline creaba un proyecto nuevo en vez de usar el lead del que venía.
+  const duplicados = duplicadosProbables(leads, presupuestos, obras);
+
+  async function unir(de, a) {
+    if (!window.confirm(
+      `¿Unir “${de.nombre}” con “${a.nombre}”?\n\n` +
+      `Todo lo de “${de.nombre}” —obra, presupuestos, caja chica, tareas, compras, libro, gente y bitácora— ` +
+      `pasa a “${a.nombre}”, y después “${de.nombre}” se borra.\n\n` +
+      `Sus etapas y su checklist no viajan: se queda el tubo de “${a.nombre}”.`
+    )) return;
+    setUniendo(de.id);
+    const r = await fusionarLead(de, a);
+    setUniendo(null);
+    if (r.error) { window.alert(r.error); return; }
+    if (r.avisos?.length) window.alert(`Se unieron, pero mirá esto:\n${r.avisos.join("\n")}`);
+    await cargar();
+    onCambio?.();
+  }
+
+  /** Enlazar un presupuesto suelto a este proyecto. */
+  async function enlazar(lead, presupuestoId) {
+    const id = Number(presupuestoId);
+    if (!id) return;
+    setGuardando(`p${lead.id}`);
+    const { error } = await supabase.from("presupuestos").update({ lead_id: lead.id }).eq("id", id);
+    setGuardando(null);
+    if (error) return;
+    setPresupuestos(ps => ps.map(p => (p.id === id ? { ...p, lead_id: lead.id } : p)));
+    onCambio?.();
+  }
 
   async function pintar(lead, color) {
     setLeads(x => x.map(l => (l.id === lead.id ? { ...l, color } : l)));
@@ -104,17 +167,17 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
 
   if (!leads.length) return null;
 
+  const proyectos = leads.filter(esProyecto);
+  const oportunidades = leads.filter(l => !esProyecto(l));
+
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
-        LOS PROYECTOS · {leads.length}
-      </div>
       {/* La regla, dicha acá para que no haya que deducirla de dos pantallas. */}
-      <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8, lineHeight: 1.5 }}>
-        Acá se decide <strong>a qué proyectos entra cada uno y para qué</strong>. En Permisos se decide si ve el
-        botón del módulo; prender “ver presupuestos” allá no le abre todos los presupuestos, le abre la pantalla:
-        adentro salen los de los proyectos que le des acá. El Director, los admins y quien tenga
-        <strong> “Entra a todos los proyectos”</strong> entran a todos sin que haya que asignarles nada.
+      <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5 }}>
+        Acá se decide <strong>a qué entra cada uno y para qué</strong>. En Permisos se decide si ve el botón del
+        módulo; prender “ver presupuestos” allá no le abre todos los presupuestos, le abre la pantalla: adentro
+        salen los de lo que le des acá. El Director, los admins y quien tenga
+        <strong> “Entra a todos los proyectos”</strong> entran a todo sin que haya que asignarles nada.
       </div>
       {sinColor && (
         <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 8 }}>
@@ -122,10 +185,27 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
         </div>
       )}
 
-      {leads.map(l => {
+      {[
+        [proyectos, "PROYECTOS", "Contratados o en obra. Acá hay presupuesto que respetar, obra que controlar y libro que escribir."],
+        [oportunidades, "LEADS", "Todavía se persiguen. No tienen obra ni libro: solo el proyecto y, si ya se cotizó, su presupuesto."],
+      ].map(([grupo, titulo, explicacion]) => (
+        <div key={titulo} style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
+            {titulo} · {grupo.length}
+          </div>
+          <div style={{ fontSize: 10, color: colors.muted, marginBottom: 6 }}>{explicacion}</div>
+          {!grupo.length && <div style={{ fontSize: 11, color: colors.muted, paddingBottom: 4 }}>Ninguno por ahora.</div>}
+          {grupo.map(l => {
         const tubo = TUNELES[l.tunel || "lead"] || TUNELES.lead;
         const suyos = accesos[l.id] || {};
+        const propios = presupuestos.filter(p => p.lead_id === l.id);
         const editando = abierto === l.id;
+        const par = duplicados.find(d => d.nuevo === l.id);
+        const otro = par && leads.find(x => x.id === par.original);
+        const duplicado = otro ? { ...otro, porque: par.porque } : null;
+        // Un lead no tiene obra ni libro todavía: preguntar por ellos es
+        // pedirle al Director que decida sobre algo que no existe.
+        const areas = esProyecto(l) ? AREAS_PROYECTO : AREAS_PROYECTO.filter(a => ["nivel", "presupuesto"].includes(a.campo));
         return (
           <div key={l.id} style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 8,
             borderLeft: `3px solid ${l.color || tubo.color}` }}>
@@ -140,8 +220,18 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                 </div>
                 <div style={{ fontSize: 11, color: colors.muted }}>
                   {tubo.label} · {Object.keys(suyos).length ? `${Object.keys(suyos).length} ${Object.keys(suyos).length === 1 ? "persona" : "personas"}` : "sin gente — solo lo ven los admins"}
+                  {propios.length ? ` · ${propios.length} ${propios.length === 1 ? "presupuesto" : "presupuestos"}` : ""}
                 </div>
               </div>
+              {duplicado && (
+                <button onClick={() => unir(l, duplicado)} disabled={uniendo === l.id}
+                  title={`Parece el mismo trabajo que “${duplicado.nombre}”: ${duplicado.porque}`}
+                  style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: 8,
+                    padding: "4px 8px", cursor: "pointer", color: colors.warning, fontSize: 10, fontWeight: 700,
+                    fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                  {uniendo === l.id ? "Uniendo…" : "ES EL MISMO — UNIR"}
+                </button>
+              )}
               <button onClick={() => setAbierto(editando ? null : l.id)} title="¿Quién participa?"
                 style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: colors.inkSoft, display: "flex" }}>
                 <Pencil size={13} />
@@ -150,7 +240,9 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
 
             {editando && (
               <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${colors.neutralSoft}` }}>
-                <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 2 }}>¿Quién entra a este proyecto, y a qué?</div>
+                <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 2 }}>
+                  ¿Quién entra a este {esProyecto(l) ? "proyecto" : "lead"}, y a qué?
+                </div>
                 {sinAreas && (
                   <div style={{ fontSize: 10.5, color: colors.warning, marginBottom: 4 }}>
                     Falta correr la migración 055 para separar presupuesto, obra y libro. Por ahora manda “Proyecto y tareas”.
@@ -164,14 +256,19 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                       <div key={u.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 7, marginTop: 3 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 600, color: dentro ? colors.ink : colors.muted, marginBottom: 3 }}>
                           {u.name}
-                          {!dentro && <span style={{ fontWeight: 400 }}> · no entra a este proyecto</span>}
+                          {!dentro && <span style={{ fontWeight: 400 }}> · no entra a {esProyecto(l) ? "este proyecto" : "este lead"}</span>}
                         </div>
-                        {AREAS_PROYECTO.map(({ campo, label: etiqueta }) => {
+                        {areas.map(({ campo, label: etiqueta }) => {
                           const valor = (acceso?.[campo]) || "no";
                           const apagada = sinAreas && campo !== "nivel";
+                          const sinPuerta = valor !== "no" && !tienePuerta(u, campo);
                           return (
                             <div key={campo} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1.5px 0", opacity: apagada ? 0.45 : 1 }}>
                               <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: colors.muted }}>{etiqueta}</span>
+                              {sinPuerta && (
+                                <span title={`Su rol no le abre ${PUERTA[campo][1]}`}
+                                  style={{ fontSize: 9.5, fontWeight: 700, color: colors.warning }}>NO VE LA PANTALLA</span>
+                              )}
                               {NIVELES.map(({ id: v, label, pista }) => {
                                 const activo = valor === v;
                                 const color = v === "no" ? colors.muted : v === "ver" ? colors.inkSoft : colors.brand;
@@ -194,16 +291,46 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                   })}
                   {!candidatos.length && <span style={{ fontSize: 11.5, color: colors.muted }}>Todavía no hay gente en el equipo.</span>}
                 </div>
+                {/* De nada sirve dar "Presupuesto: Ver" si el presupuesto no
+                    cuelga de este proyecto: la persona abre la pantalla y no ve
+                    nada, y nadie entiende por qué. Se dice, y se arregla acá. */}
+                <div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${colors.neutralSoft}` }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+                    PRESUPUESTOS ENLAZADOS
+                  </div>
+                  {propios.length ? propios.map(p => (
+                    <div key={p.id} style={{ fontSize: 11.5, color: colors.ink, padding: "1px 0" }}>· {p.nombre}</div>
+                  )) : (
+                    <div style={{ fontSize: 11, color: colors.warning, lineHeight: 1.5 }}>
+                      Ninguno. Mientras esté así, darle “Presupuesto: Ver” a alguien no le muestra nada:
+                      no hay qué mostrarle.
+                    </div>
+                  )}
+                  {sueltos.length > 0 && (
+                    <select value="" disabled={guardando === `p${l.id}`}
+                      onChange={e => enlazar(l, e.target.value)}
+                      style={{ marginTop: 5, width: "100%", border: `1px solid ${colors.border}`, borderRadius: 8,
+                        padding: "5px 7px", fontSize: 11.5, fontFamily: colors.font, color: colors.inkSoft, background: "#fff" }}>
+                      <option value="">Enlazar un presupuesto que no tiene proyecto…</option>
+                      {sueltos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </select>
+                  )}
+                </div>
+
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8, lineHeight: 1.5 }}>
                   <strong>No entra</strong>: no la ve ni aparece en su lista. <strong>Ver</strong>: la lee y no la toca.
-                  <strong> Editar</strong>: la trabaja. Las cuatro en “No entra” lo sacan del proyecto.
-                  Un residente típico: proyecto <em>Editar</em>, presupuesto <em>Ver</em>, obra y libro <em>Editar</em>.
+                  <strong> Editar</strong>: la trabaja. Todas en “No entra” lo sacan de acá.
+                  {esProyecto(l)
+                    ? " Un residente típico: proyecto Editar, presupuesto Ver, obra y libro Editar."
+                    : " Un lead todavía no tiene obra ni libro; esos aparecen cuando pase a Arquitectura o Construcción."}
                 </div>
               </div>
             )}
-          </div>
-        );
-      })}
+            </div>
+          );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

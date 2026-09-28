@@ -18,6 +18,26 @@ export const TUNELES = {
   lead: { label: "Lead", enOrden: false, color: "#8B92A5" },
 };
 
+/**
+ * Lead u obra: dos cosas distintas que viven en la misma tabla.
+ *
+ * Un **lead** es una oportunidad: se persigue, se cotiza y puede no pasar
+ * nada. No tiene obra, ni libro, ni facturas — nada que controlar todavía.
+ *
+ * Un **proyecto** es trabajo contratado: entró a Arquitectura o Construcción,
+ * o se ganó. Ahí sí hay presupuesto que respetar, obra que controlar y libro
+ * que escribir.
+ *
+ * Siguen en el mismo tubo a propósito —un proyecto aprobado no se va del
+ * pipeline, todavía le quedan gestiones—, pero no se les pide lo mismo, y
+ * llamar "proyecto" a los dos era la mitad de la confusión.
+ */
+export const esProyecto = lead =>
+  lead?.resultado === "ganado" || ["arquitectura", "construccion"].includes(lead?.tunel);
+
+/** Cómo se le dice a esto en pantalla. */
+export const queEs = lead => (esProyecto(lead) ? "proyecto" : "lead");
+
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 // Para la bitácora: "9 oct" se lee, "2026-10-09" hay que traducirlo. Al mediodía
 // para que la fecha no se corra un día al leerla desde Ecuador.

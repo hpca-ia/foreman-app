@@ -269,7 +269,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
           {/* La lista de verdad: la del pipeline. Acá el proyecto solo recibe
               lo que hace falta para trabajar en equipo —color y gente—; nace y
               se trabaja en el pipeline, con su tubo y sus etapas. */}
-          <ProyectosDelPipeline users={users} onCambio={onEquipoCambio} />
+          <ProyectosDelPipeline users={users} permisos={permisos} permisosUsuario={permisosUsuario} onCambio={onEquipoCambio} />
 
           {/* Lo que todavía no se empató se sigue viendo y editando como antes:
               nada desaparece por el camino. */}

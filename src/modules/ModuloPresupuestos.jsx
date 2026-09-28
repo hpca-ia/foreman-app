@@ -882,7 +882,16 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           </div>
           {pestanaLista==="pasados"&&<div style={{fontSize:11,color:"var(--muted)",marginBottom:10}}>Presupuestos que ya no se trabajan y quedan de referencia: se abren, se exportan y se copian, pero no se editan.</div>}
           {lista.length===0?<div style={{textAlign:"center",padding:"50px 0",color:"var(--muted)",fontSize:13}}>
-            {q?"Ningún presupuesto coincide con la búsqueda.":pestanaLista==="activos"?<><div style={{fontSize:40,marginBottom:12}}>💼</div>Sin presupuestos activos.</>:"Todavía no hay presupuestos pasados."}
+            {q?"Ningún presupuesto coincide con la búsqueda."
+              /* Una pantalla vacía sin explicación hace pensar que la app está
+                 rota. Si hay presupuestos y ninguno es de sus proyectos, se
+                 dice: casi siempre es un presupuesto sin proyecto enlazado. */
+              :presupuestos.length>0?<>
+                <div style={{fontSize:40,marginBottom:12}}>🔒</div>
+                Ningún presupuesto es de tus proyectos.<br/>
+                <span style={{fontSize:12}}>Si esperabas ver alguno, pedile al Director que lo enlace con tu proyecto en Ajustes → Proyectos.</span>
+              </>
+              :pestanaLista==="activos"?<><div style={{fontSize:40,marginBottom:12}}>💼</div>Sin presupuestos activos.</>:"Todavía no hay presupuestos pasados."}
           </div>
           :lista.map(p=>(
             <div key={p.id} onClick={()=>{setPresupuestoActivo(p);fetchItems(p.id);setSubVista("detalle");setModoDetalle("armar");}}
