@@ -16,7 +16,8 @@ import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
 import PasarABase from "./presupuestos/PasarABase";
 import ArchivosPresupuesto from "./presupuestos/ArchivosPresupuesto";
 import EstadoPresupuesto from "./presupuestos/EstadoPresupuesto";
-import { congelado, anotarPresencia, soltarPresencia, otrosEnElPresupuesto } from "./presupuestos/cicloPresupuesto";
+import { esAdmin } from "../lib/roles";
+import { congelado, anotarPresencia, soltarPresencia, quienTrabaja, tomarControl } from "./presupuestos/cicloPresupuesto";
 import { guardarOriginal } from "../lib/archivosPresupuesto";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
@@ -77,7 +78,8 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   const [archivosVersion, setArchivosVersion] = useState(0);
   // Quién más está en este presupuesto ahora, y si decidí trabajarlo igual.
   const [otros, setOtros] = useState([]);
-  const [tomado, setTomado] = useState(false);
+  // Quién tiene el control del presupuesto abierto: el primero que llegó.
+  const [manda, setManda] = useState(null);
   const [capDestino, setCapDestino] = useState("");
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
   const [showAddCap, setShowAddCap] = useState(false);
@@ -103,15 +105,16 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   useEffect(() => {
     const p = subVista === "detalle" ? presupuestoActivo : null;
     if (!p?.id) { setOtros([]); return; }
-    setTomado(false);
     let vivo = true;
     const latir = async () => {
       await anotarPresencia(p.id, currentUser);
-      const o = await otrosEnElPresupuesto(p.id, currentUser);
-      if (vivo) setOtros(o);
+      const { manda: quien, otros: o } = await quienTrabaja(p.id, currentUser);
+      if (vivo) { setManda(quien); setOtros(o); }
     };
     latir();
-    const reloj = setInterval(latir, 60000);
+    // Cada veinte segundos: si el que tenía el control se fue, el que queda
+    // tiene que enterarse rápido, no dentro de un minuto.
+    const reloj = setInterval(latir, 20000);
     return () => { vivo = false; clearInterval(reloj); soltarPresencia(p.id, currentUser); };
     // eslint-disable-next-line
   }, [presupuestoActivo?.id, subVista]);
@@ -716,13 +719,15 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // recalcular.
   const costoDirecto=items.reduce((s,i)=>s+(Number(i.total)||0),0);
 
-  // Por qué no se puede tocar: es histórico, ya salió al cliente, o lo está
-  // trabajando alguien más en este momento.
-  const bloqueado = !!presupuestoActivo && (congelado(presupuestoActivo) || (otros.length > 0 && !tomado));
+  // Manda el que llegó primero. Antes se bloqueaban los dos —cada uno veía al
+  // otro como "el otro"— y no podía trabajar nadie. El control se suelta al
+  // salir del presupuesto, o el Director lo toma.
+  const mando = !manda || manda.usuario_id === currentUser.id;
+  const bloqueado = !!presupuestoActivo && (congelado(presupuestoActivo) || !mando);
   const motivoBloqueo = presupuestoActivo?.archivado_at
     ? "Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."
-    : otros.length && !tomado
-      ? `${otros.map(o=>o.nombre).join(", ")} lo está trabajando ahora mismo. Si ya terminó, usa "Trabajarlo igual".`
+    : !mando
+      ? `${manda?.nombre || "Alguien"} lo está trabajando. Cuando salga, el control queda libre.`
       : "Este presupuesto ya salió al cliente. Para cambiarlo, crea la versión siguiente.";
   const iS={width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
 
@@ -969,8 +974,13 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
           </div>
 
           <EstadoPresupuesto presupuesto={presupuestoActivo} currentUser={currentUser} otros={otros}
+            manda={manda} mando={mando}
             soloLectura={!!presupuestoActivo.archivado_at}
-            onTomar={()=>setTomado(true)}
+            onTomar={esAdmin(currentUser.role) ? async ()=>{
+              await tomarControl(presupuestoActivo.id, currentUser);
+              const r = await quienTrabaja(presupuestoActivo.id, currentUser);
+              setManda(r.manda); setOtros(r.otros);
+            } : null}
             onNuevaVersion={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))}
             onCambiado={campos=>{setPresupuestoActivo(p=>({...p,...campos}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,...campos}:p));}}/>
 

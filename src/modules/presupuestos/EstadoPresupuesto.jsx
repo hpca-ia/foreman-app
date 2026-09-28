@@ -12,7 +12,7 @@ import { ESTADOS, estadoDe, congelado, fecha, cambiarEstado } from "./cicloPresu
 
 const COLOR = { muted: colors.muted, ink: colors.ink, success: colors.success, danger: colors.danger };
 
-export default function EstadoPresupuesto({ presupuesto, currentUser, otros = [], onCambiado, onNuevaVersion, onTomar, soloLectura }) {
+export default function EstadoPresupuesto({ presupuesto, currentUser, otros = [], manda = null, mando = true, onCambiado, onNuevaVersion, onTomar, soloLectura }) {
   const estado = estadoDe(presupuesto);
   const info = ESTADOS[estado];
   const [abierto, setAbierto] = useState(null);      // "enviar" | "decidir"
@@ -104,13 +104,19 @@ export default function EstadoPresupuesto({ presupuesto, currentUser, otros = []
       )}
 
       {/* Quién más lo está mirando ahora mismo. */}
-      {otros.length > 0 && (
+      {(otros.length > 0 || !mando) && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: 8, padding: "7px 10px" }}>
           <Users size={13} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 160 }}>
-            <strong>{otros.map(o => o.nombre).join(", ")}</strong> {otros.length === 1 ? "lo está trabajando" : "lo están trabajando"} ahora mismo. Para no pisarse, está de solo lectura.
+            {mando ? (
+              <>También lo tiene abierto <strong>{otros.map(o => o.nombre).join(", ")}</strong>, pero el control es tuyo: llegaste primero y lo soltás al salir.</>
+            ) : (
+              <><strong>{manda?.nombre || "Alguien"}</strong> lo está trabajando. Vos lo ves de solo lectura hasta que salga.</>
+            )}
           </span>
-          {onTomar && <button onClick={onTomar} style={{ ...chip, padding: "3px 10px", fontSize: 11 }}>Trabajarlo igual</button>}
+          {/* El Director puede quedarse con el control: el otro pasa a solo
+              lectura en su próximo latido, sin tener que avisarle por chat. */}
+          {!mando && onTomar && <button onClick={onTomar} style={{ ...chip, padding: "3px 10px", fontSize: 11 }}>Tomar el control</button>}
         </div>
       )}
 
