@@ -11,6 +11,7 @@ export const GRUPOS_PERMISOS = [
       { id: "controlObra.ver", label: "Control de Obra" },
       { id: "cajaChica.ver", label: "Caja Chica" },
       { id: "compras.ver", label: "Compras", nota: "Pedir lo que hace falta en obra y seguir en qué va" },
+      { id: "libro.ver", label: "Libro de Obra", nota: "El registro diario de la obra: quién estuvo, qué se hizo, qué llegó" },
       { id: "leads.ver", label: "Todo el pipeline", nota: "Ver todos los proyectos y leads. Sin esto igual se ven los que le compartan o donde tenga una etapa a su cargo" },
       { id: "ajustes.ver", label: "Ajustes", nota: "Usuarios, proyectos y datos de la empresa" },
     ],
@@ -51,6 +52,7 @@ export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitect
 // no existan en la base.
 export const POR_DEFECTO = {
   assistant: {
+    "libro.ver": true,
     "compras.ver": true, "compras.gestionar": true,
     "tareas.ver": true, "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
@@ -61,6 +63,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   gerente: {
+    "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
@@ -74,6 +77,7 @@ export const POR_DEFECTO = {
   // presupuesto. Del pipeline ve solo los proyectos que le tocan, no todo lo
   // comercial. Todo esto se puede cambiar en Ajustes.
   arquitecto: {
+    "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
@@ -85,6 +89,7 @@ export const POR_DEFECTO = {
   },
   // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros ni ve montos.
   arquitecto_jr: {
+    "libro.ver": false,
     "compras.ver": false, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
@@ -95,6 +100,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   residente: {
+    "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.ver": true, "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": false, "presupuestos.crear": false,

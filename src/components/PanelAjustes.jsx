@@ -166,7 +166,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
               <Button variant="outline" size="sm" disabled={probandoResumen} onClick={async () => {
                 setProbandoResumen(true); setResumenDijo("");
                 try {
-                  const r = await fetch("/api/aviso?de=resumen", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+                  const r = await fetch("/api/aviso?de=resumen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ usuarioId: usuario?.id }) });
                   const d = await r.json();
                   setResumenDijo(d.ok
                     ? (d.enviados?.length ? `Te lo mandé a ${d.enviados[0]} · ${d.tareas} tareas leídas` : "No se pudo mandar: revisá tu correo en Usuarios")

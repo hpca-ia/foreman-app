@@ -35,6 +35,7 @@ const ModuloPresupuestos = lazy(() => import("./modules/ModuloPresupuestos"));
 const ModuloControlObra = lazy(() => import("./modules/controlObra/ModuloControlObra"));
 const ModuloCajaChica = lazy(() => import("./modules/ModuloCajaChica"));
 const ModuloCompras = lazy(() => import("./modules/compras/ModuloCompras"));
+const ModuloLibro = lazy(() => import("./modules/libro/ModuloLibro"));
 const PanelAjustes = lazy(() => import("./components/PanelAjustes"));
 
 // Mientras llega el módulo: un renglón discreto, no una pantalla en blanco.
@@ -581,6 +582,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
             )}
             {puede("compras.ver") && vista === "compras" && (
               <ModuloCompras currentUser={usuario} puede={puede} users={users} />
+            )}
+            {puede("libro.ver") && vista === "libro" && (
+              <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto} />
             )}
           </Suspense>
 

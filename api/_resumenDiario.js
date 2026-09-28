@@ -92,7 +92,8 @@ export async function mandarResumen(soloPara = null) {
     // Probando, un sobre vacío también sirve: dice que el correo llega.
     if (!sobres.length) {
       const u = usuarios.find(x => x.id === Number(soloPara));
-      if (!u?.email) return { ok: false, error: "Esa persona no tiene correo cargado" };
+      if (!u) return { ok: false, error: `No encontré al usuario ${soloPara} en la tabla de usuarios` };
+      if (!u.email) return { ok: false, error: `${u.nombre} no tiene correo cargado: ponéselo en Ajustes → Usuarios` };
       sobres = [{ usuario: u, esAdmin: u.rol === "owner" || u.rol === "assistant",
         atrasadas: [], hoy: [], manana: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [] }];
     }

@@ -1,4 +1,4 @@
-import { ListTodo, Wallet, HardHat, PiggyBank, Target, ShoppingCart } from "lucide-react";
+import { ListTodo, Wallet, HardHat, PiggyBank, Target, ShoppingCart, BookOpen } from "lucide-react";
 import { rolInfo } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
@@ -38,6 +38,7 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
       {puede("controlObra.ver") && navItem("controlObra", "Control Obra", HardHat)}
       {puede("cajaChica.ver") && navItem("cajaChica", "Caja Chica", PiggyBank)}
       {puede("compras.ver") && navItem("compras", "Compras", ShoppingCart)}
+      {puede("libro.ver") && navItem("libro", "Libro de Obra", BookOpen)}
       {verPipeline && navItem("leads", "Pipeline", Target)}
 
       <div className="app-sidebar-spacer" style={{ flex: 1 }} />
