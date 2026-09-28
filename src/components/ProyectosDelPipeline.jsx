@@ -18,7 +18,7 @@ import { TUNELES } from "../modules/leads/tubo";
 
 export default function ProyectosDelPipeline({ users = [], onCambio }) {
   const [leads, setLeads] = useState([]);
-  const [accesos, setAccesos] = useState({});    // lead_id -> [usuario_id]
+  const [accesos, setAccesos] = useState({});    // lead_id -> { usuario_id: nivel }
   const [abierto, setAbierto] = useState(null);
   const [sinColor, setSinColor] = useState(false);
   const [guardando, setGuardando] = useState(null);
@@ -26,13 +26,13 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
   const cargar = useCallback(async () => {
     const [{ data: ls }, { data: as }] = await Promise.all([
       supabase.from("leads").select("*").order("nombre"),
-      supabase.from("lead_accesos").select("lead_id,usuario_id"),
+      supabase.from("lead_accesos").select("*"),
     ]);
     const filas = (ls || []).filter(l => l.resultado !== "perdido");
     setSinColor(filas.length > 0 && !("color" in filas[0]));
     setLeads(filas);
     const mapa = {};
-    (as || []).forEach(a => { (mapa[a.lead_id] = mapa[a.lead_id] || []).push(a.usuario_id); });
+    (as || []).forEach(a => { (mapa[a.lead_id] = mapa[a.lead_id] || {})[a.usuario_id] = a.nivel || "editar"; });
     setAccesos(mapa);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
@@ -46,15 +46,29 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
     onCambio?.();
   }
 
-  async function alternarGente(lead, usuarioId) {
-    const tiene = (accesos[lead.id] || []).includes(usuarioId);
+  /**
+   * Poner a alguien en un proyecto con su nivel, o sacarlo.
+   *
+   * `nivel` null lo saca. Tocar el nivel que ya tiene también lo saca: el mismo
+   * botón pone y quita, que es como funciona todo lo demás en FOREMAN.
+   */
+  async function ponerNivel(lead, usuarioId, nivel) {
+    const actual = (accesos[lead.id] || {})[usuarioId];
+    const quitar = nivel === null || actual === nivel;
     setGuardando(`${lead.id}:${usuarioId}`);
-    setAccesos(a => ({
-      ...a,
-      [lead.id]: tiene ? (a[lead.id] || []).filter(x => x !== usuarioId) : [...(a[lead.id] || []), usuarioId],
-    }));
-    if (tiene) await supabase.from("lead_accesos").delete().eq("lead_id", lead.id).eq("usuario_id", usuarioId);
-    else await supabase.from("lead_accesos").insert({ lead_id: lead.id, usuario_id: usuarioId });
+    setAccesos(a => {
+      const suyos = { ...(a[lead.id] || {}) };
+      if (quitar) delete suyos[usuarioId]; else suyos[usuarioId] = nivel;
+      return { ...a, [lead.id]: suyos };
+    });
+    if (quitar) {
+      await supabase.from("lead_accesos").delete().eq("lead_id", lead.id).eq("usuario_id", usuarioId);
+    } else {
+      // Sin la migración 051 no hay columna `nivel`: entra igual, como antes.
+      let { error } = await supabase.from("lead_accesos")
+        .upsert({ lead_id: lead.id, usuario_id: usuarioId, nivel }, { onConflict: "lead_id,usuario_id" });
+      if (error) await supabase.from("lead_accesos").upsert({ lead_id: lead.id, usuario_id: usuarioId }, { onConflict: "lead_id,usuario_id" });
+    }
     setGuardando(null);
     onCambio?.();
   }
@@ -74,7 +88,7 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
 
       {leads.map(l => {
         const tubo = TUNELES[l.tunel || "lead"] || TUNELES.lead;
-        const suyos = accesos[l.id] || [];
+        const suyos = accesos[l.id] || {};
         const editando = abierto === l.id;
         return (
           <div key={l.id} style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 8,
@@ -89,7 +103,7 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
                   {l.resultado === "ganado" && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: colors.success }}>APROBADO</span>}
                 </div>
                 <div style={{ fontSize: 11, color: colors.muted }}>
-                  {tubo.label} · {suyos.length ? `${suyos.length} ${suyos.length === 1 ? "persona" : "personas"}` : "sin gente — solo lo ven los admins"}
+                  {tubo.label} · {Object.keys(suyos).length ? `${Object.keys(suyos).length} ${Object.keys(suyos).length === 1 ? "persona" : "personas"}` : "sin gente — solo lo ven los admins"}
                 </div>
               </div>
               <button onClick={() => setAbierto(editando ? null : l.id)} title="¿Quién participa?"
@@ -100,23 +114,37 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
 
             {editando && (
               <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${colors.neutralSoft}` }}>
-                <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 6 }}>¿Quién participa?</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                <div style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, marginBottom: 6 }}>¿Quién entra a este proyecto, y con qué nivel?</div>
+                <div style={{ display: "grid", gap: 5 }}>
                   {candidatos.map(u => {
-                    const esta = suyos.includes(u.id);
+                    const nivel = suyos[u.id];
                     return (
-                      <button key={u.id} onClick={() => alternarGente(l, u.id)} disabled={guardando === `${l.id}:${u.id}`}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${esta ? colors.brand : colors.border}`,
-                          background: esta ? colors.brand : "#fff", color: esta ? "#fff" : colors.inkSoft, borderRadius: 14,
-                          padding: "4px 10px", fontSize: 12, cursor: "pointer", fontFamily: colors.font }}>
-                        {esta && <Check size={11} />} {u.name}
-                      </button>
+                      <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: nivel ? colors.ink : colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {u.name}
+                        </span>
+                        {[["ver", "Ver"], ["editar", "Editar"]].map(([id, label]) => {
+                          const activo = nivel === id;
+                          const color = id === "editar" ? colors.brand : colors.inkSoft;
+                          return (
+                            <button key={id} onClick={() => ponerNivel(l, u.id, id)} disabled={guardando === `${l.id}:${u.id}`}
+                              title={id === "ver" ? "Entra y lee: el proyecto y su presupuesto, sin tocar nada" : "Entra y trabaja: puede cambiar lo del proyecto y su presupuesto"}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${activo ? color : colors.border}`,
+                                background: activo ? color : "#fff", color: activo ? "#fff" : colors.inkSoft, borderRadius: 14,
+                                padding: "3px 11px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                              {activo && <Check size={10} />} {label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     );
                   })}
                   {!candidatos.length && <span style={{ fontSize: 11.5, color: colors.muted }}>Todavía no hay gente en el equipo.</span>}
                 </div>
-                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6 }}>
-                  Quien esté acá ve el proyecto en el pipeline y sus tareas en el tablero. Los admins ven todo.
+                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8, lineHeight: 1.5 }}>
+                  <strong>Ver</strong>: entra al proyecto y lee su presupuesto, sin poder cambiar nada.
+                  <strong> Editar</strong>: trabaja el proyecto y su presupuesto.
+                  Tocar el mismo botón otra vez lo saca del proyecto. Los admins entran a todo.
                 </div>
               </div>
             )}

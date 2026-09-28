@@ -128,9 +128,10 @@ export default function App() {
       });
     // Quién entra a cada proyecto del pipeline: es lo que antes decían los
     // miembros del proyecto de Ajustes.
-    supabase.from("lead_accesos").select("lead_id,usuario_id").then(({ data }) => {
+    // Quién entra a cada proyecto y con qué nivel: ver o editar.
+    supabase.from("lead_accesos").select("*").then(({ data }) => {
       const m = {};
-      (data || []).forEach(a => { (m[a.lead_id] = m[a.lead_id] || []).push(a.usuario_id); });
+      (data || []).forEach(a => { (m[a.lead_id] = m[a.lead_id] || {})[a.usuario_id] = a.nivel || "editar"; });
       setAccesosLead(m);
     });
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
@@ -344,6 +345,14 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // miraba solo los de Ajustes, así que una tarea del pipeline no aparecía por
   // más que se eligiera su proyecto.
   const proyectosTodos = unirProyectos(proyectosPipeline, projects, accesosLead);
+  // Con qué nivel entra esta persona a un proyecto: "editar", "ver", o nada.
+  // Los admins entran a todo. Es lo que decide si un presupuesto se toca o solo
+  // se lee, sin depender de una llave que abre todos los presupuestos a la vez.
+  const nivelProyecto = leadId => {
+    if (!leadId) return null;
+    if (veTodo) return "editar";
+    return accesosLead[leadId]?.[usuario.id] || null;
+  };
   const mios = proyectosTodos.filter(p => veTodo || p.gente.includes(usuario.id) || p.creador === usuario.id);
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
@@ -549,7 +558,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
           <Suspense fallback={<Cargando />}>
             {puede("presupuestos.ver") && vista === "presupuestos" && (
-              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} />
+              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelProyecto} />
             )}
             {puede("controlObra.ver") && vista === "controlObra" && (
               <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} />

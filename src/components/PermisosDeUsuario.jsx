@@ -15,7 +15,7 @@ import { GRUPOS_PERMISOS, POR_DEFECTO, guardarPermisoUsuario } from "../lib/perm
 // cambian con él.
 
 const ESTADOS = [
-  [null, "Hereda", "Lo que diga su rol"],
+  [null, "Como su rol", "Lo que le dé su rol, hoy y cuando cambie"],
   [true, "Sí", "Puede, aunque su rol no"],
   [false, "No", "No puede, aunque su rol sí"],
 ];
@@ -45,8 +45,10 @@ export default function PermisosDeUsuario({ usuario, permisos, valores = {}, onC
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${colors.neutralSoft}` }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, marginBottom: 2 }}>Permisos de {usuario.name}</div>
-      <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8 }}>
-        Lo que se marque acá manda sobre su rol. Lo que quede en “Hereda” sigue a {`"${usuario.role}"`} y cambia cuando cambie el rol.
+      <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8, lineHeight: 1.5 }}>
+        Esto es para excepciones de esta persona: a qué módulos entra. Lo normal es dejarlo todo en
+        <strong> “Como su rol”</strong>. Para decidir qué proyecto y qué presupuesto puede tocar —y si lo ve o lo
+        edita— usá <strong>Ajustes → Proyectos</strong>, que va de a un proyecto.
       </div>
 
       {GRUPOS_PERMISOS.map(g => (
@@ -71,7 +73,7 @@ export default function PermisosDeUsuario({ usuario, permisos, valores = {}, onC
                         style={{ border: `1px solid ${activo ? color : colors.border}`, background: activo ? color : "#fff",
                           color: activo ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "3px 9px", fontSize: 10.5,
                           fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
-                        {label}{v === null ? ` (${heredado ? "sí" : "no"})` : ""}
+                        {label}{v === null ? ` · ${heredado ? "sí" : "no"}` : ""}
                       </button>
                     );
                   })}

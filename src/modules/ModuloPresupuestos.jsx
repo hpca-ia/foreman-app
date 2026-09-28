@@ -30,7 +30,7 @@ import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios"
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
 const centavos = v => Math.round((Number(v) || 0) * 100) / 100;
 
-export default function ModuloPresupuestos({ currentUser, puede }) {
+export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto = () => null }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
   const [borrarPre, setBorrarPre] = useState(null);
@@ -92,7 +92,12 @@ export default function ModuloPresupuestos({ currentUser, puede }) {
   // todo —los rubros, los precios, el total— y se puede exportar, pero no se
   // cambia nada. Es lo que hace falta para que un residente o una arquitecta
   // consulten el presupuesto de su obra sin poder moverlo.
-  const puedeEditar = puede ? puede("presupuestos.crear") : true;
+  // Editar se decide por proyecto, no con una llave que abre todos: a Camila se
+  // le da ESTE presupuesto para trabajarlo y ese otro solo para mirarlo. Si el
+  // presupuesto no cuelga de ningún proyecto, manda el permiso general.
+  const nivelDelActivo = presupuestoActivo?.lead_id ? nivelProyecto(presupuestoActivo.lead_id) : null;
+  const puedeEditar = esAdmin(currentUser.role)
+    || (nivelDelActivo ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
   const [manualRubro, setManualRubro] = useState({ descripcion:"", unidad:"", cantidad:1, precio_unitario:0 });
   const cotizRef = useRef(null);
   const fileBDRef = useRef(null);
