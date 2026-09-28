@@ -369,12 +369,18 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     if (veTodo) return "editar";
     const suyo = accesosLead[leadId]?.[usuario.id];
     if (!suyo) return null;
+    if (area === "proyecto") return suyo.nivel;
     const propio = suyo[area];
     return propio === "no" ? "no" : (propio || suyo.nivel);
   };
   const nivelPresupuesto = leadId => nivelArea(leadId, "presupuesto");
   const nivelLibro = leadId => nivelArea(leadId, "libro");
-  const mios = proyectosTodos.filter(p => veTodo || p.gente.includes(usuario.id) || p.creador === usuario.id);
+  // La misma regla que el pipeline: "Ver todos los proyectos" decide cuántos
+  // ve; el nivel de cada proyecto, qué puede hacer ahí.
+  const mios = proyectosTodos.filter(p => {
+    if (p.esLead && nivelArea(p.id, "proyecto") === "no") return false;
+    return veTodo || puede("leads.ver") || p.gente.includes(usuario.id) || p.creador === usuario.id;
+  });
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
   // Sin él, a sí mismo y a sus compañeros: quienes comparten con él al menos un
@@ -585,7 +591,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={leadId => nivelArea(leadId, "obra")} />
             )}
             {verPipeline && vista === "leads" && (
-              <ModuloLeads currentUser={usuario} users={users} puede={puede} onIrAObra={() => setVista("controlObra")} />
+              <ModuloLeads currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIrAObra={() => setVista("controlObra")} />
             )}
             {puede("cajaChica.ver") && vista === "cajaChica" && (
               <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} />

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, AlertTriangle, Clock, ArrowRight, CornerDownLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
+import { esAdmin } from "../../lib/roles";
 import { daysUntil } from "../../lib/dates";
 import Button from "../../components/ui/Button";
 import { CATALOGO_BASE, etapaInfo, tempInfo, DIAS_SIN_MOVER } from "./constantes";
@@ -22,7 +23,7 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 
 const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 
-export default function ModuloLeads({ currentUser, users = [], puede = () => true, onIrAObra }) {
+export default function ModuloLeads({ currentUser, users = [], puede = () => true, nivelProyecto = () => null, onIrAObra }) {
   const [leads, setLeads] = useState([]);
   // El catálogo vive en la base porque cambia con el tiempo; si la migración
   // todavía no se corrió, se usa el de siempre.
@@ -142,8 +143,15 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // actividades pendientes.
   const seFue = l => l.resultado === "perdido" || etapaInfo(l.etapa, catalogo).cierra;
   const cuantos = t => leads.filter(l => delTunel(l) === t && !seFue(l)).length;
-  const abiertos = leads.filter(l => enTubo(l) && !seFue(l));
-  const cerrados = leads.filter(l => enTubo(l) && seFue(l));
+  // Dos llaves distintas y una sola regla, para que no se contradigan:
+  //   · "Ver todos los proyectos" decide CUÁNTOS ve.
+  //   · El nivel en Ajustes → Proyectos decide QUÉ HACE en cada uno.
+  // Sin la primera, ve los que le asignaron. Con ella los ve todos, pero
+  // "Sin acceso" en uno gana igual: es una puerta cerrada, no una preferencia.
+  const verTodos = esAdmin(currentUser?.role) || puede("leads.ver");
+  const alcanzo = l => nivelProyecto(l.id) !== "no" && (verTodos || !!nivelProyecto(l.id));
+  const abiertos = leads.filter(l => enTubo(l) && !seFue(l) && alcanzo(l));
+  const cerrados = leads.filter(l => enTubo(l) && seFue(l) && alcanzo(l));
 
   // Lo que manda en la lista: cuándo vence el próximo paso. Las etapas ya no
   // llevan fecha —un hito no se entrega un día, lo entregan sus actividades—,

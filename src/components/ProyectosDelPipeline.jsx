@@ -109,8 +109,14 @@ export default function ProyectosDelPipeline({ users = [], onCambio }) {
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 7 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
         LOS PROYECTOS · {leads.length}
+      </div>
+      {/* La regla, dicha acá para que no haya que deducirla de dos pantallas. */}
+      <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 8, lineHeight: 1.5 }}>
+        El Director, los admins y quien tenga <strong>“Ver todos los proyectos”</strong> —los gerentes— ven todos.
+        El resto ve solo los que le asignes acá. Y lo que cada uno puede <strong>hacer</strong> en un proyecto sale
+        de su nivel en esta lista, no de aquel permiso.
       </div>
       {sinColor && (
         <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 8 }}>
