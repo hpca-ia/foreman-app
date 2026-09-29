@@ -57,7 +57,7 @@ export default function App() {
   const [usuario, setUsuario] = useState(null);
   const [tareas, setTareas] = useState([]);
   const [cargando, setCargando] = useState(false);
-  const [vista, setVista] = useState("tareas");
+  const [vistaPedida, setVista] = useState("tareas");
   const [vistaTareas, setVistaTareas] = useState("lista");
   // Quién acompaña a cada tarea, y qué tarea espera a cuál.
   const [acompanantes, setAcompanantes] = useState(new Map());
@@ -348,7 +348,12 @@ const VACIO = 'Nada pendiente. Toca "+ Nueva tarea" o dile a NOVA.';
 const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Quien no entra al Tablero —un conductor, que solo rinde su caja— no puede
   // quedarse mirando una pantalla que no le toca: se lo lleva al primer módulo
-  // que sí tenga. Sin esto, abrir FOREMAN era abrir una pantalla vacía.
+  // que sí tenga.
+  //
+  // Se resuelve al pintar y no con un useEffect: acá arriba ya se volvió con
+  // la pantalla de ingreso, así que un hook puesto después de ese return se
+  // ejecuta en unos renders y en otros no, y React tumba la app entera. Eso
+  // fue exactamente lo que pasó: FOREMAN quedó en blanco al entrar.
   const primeraVista = () => {
     const puertas = [
       ["tareas", "tareas.ver"], ["leads", null], ["presupuestos", "presupuestos.ver"],
@@ -360,9 +365,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     }
     return "tareas";
   };
-  useEffect(() => {
-    if (vista === "tareas" && !puede("tareas.ver")) setVista(primeraVista());
-  }, [vista, permisos, permisosUsuario, usuario?.id, verPipeline]);
+  const vista = vistaPedida === "tareas" && !puede("tareas.ver") ? primeraVista() : vistaPedida;
 
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
