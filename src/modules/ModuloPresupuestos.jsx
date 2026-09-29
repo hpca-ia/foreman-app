@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import ElegirProyecto from "../components/ElegirProyecto";
+import { engancharAlProyecto } from "../lib/cadena";
 import { supabase } from "../lib/supabase";
 import { alimentarBase, resumenAlimentacion, preciosDeLaBase } from "../lib/baseRubros";
 import AdminBD from "./AdminBD";
@@ -109,11 +110,18 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const proyectoDelActivo = proyectos.find(x => x.id === presupuestoActivo?.lead_id) || null;
 
   /** Mover este presupuesto a otro proyecto (o dejarlo sin ninguno). */
+  /**
+   * Mover este presupuesto a otro proyecto —o corregir el que se eligió mal—.
+   *
+   * Se lleva la cadena entera: su obra y la caja chica de esa obra. Mover solo
+   * el presupuesto dejaba la obra colgando del proyecto equivocado, que es
+   * peor que el error original: ahí el control de obra deja de cuadrar con su
+   * presupuesto y nadie entiende por qué.
+   */
   async function asignarProyecto(leadId) {
     if (!presupuestoActivo) return;
     const valor = leadId ? Number(leadId) : null;
-    const { error } = await supabase.from("presupuestos").update({ lead_id: valor }).eq("id", presupuestoActivo.id);
-    if (error) return;
+    await engancharAlProyecto({ tipo: "presupuesto", id: presupuestoActivo.id }, valor);
     setPresupuestoActivo(p => ({ ...p, lead_id: valor }));
     setPresupuestos(ps => ps.map(p => p.id === presupuestoActivo.id ? { ...p, lead_id: valor } : p));
     setCambiandoProyecto(false);
@@ -796,6 +804,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             <div style={{maxWidth:420,marginTop:6}}>
               <ElegirProyecto value={presupuestoActivo.lead_id||""} creador={currentUser}
                 onElegir={({id})=>asignarProyecto(id)} />
+              <div style={{fontSize:10.5,color:"var(--muted)",marginTop:4,lineHeight:1.5}}>
+                Se mueve la cadena entera: este presupuesto, su obra en Control de Obra y la caja chica de esa obra.
+              </div>
             </div>
           )}
         </div>
