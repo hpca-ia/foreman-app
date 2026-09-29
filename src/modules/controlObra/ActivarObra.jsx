@@ -4,14 +4,17 @@ import { supabase } from "../../lib/supabase";
 import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
-import { inputStyle } from "../../components/ui/Input";
+import ElegirProyecto from "../../components/ElegirProyecto";
 import { fmt } from "./calculos";
 
 export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
   const [presupuestos, setPresupuestos] = useState([]);
   const [sel, setSel] = useState(null);
   const [items, setItems] = useState([]);
-  const [nombre, setNombre] = useState("");
+  // De qué proyecto es. No es opcional: una obra sin proyecto es una obra que
+  // nadie ve, que no cuadra con su presupuesto y que aparece como si fuera
+  // otro proyecto más. Es el eslabón que se venía perdiendo.
+  const [lead, setLead] = useState({ id: null, nombre: "" });
   const [yaIncluyeIva, setYaIncluyeIva] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -25,29 +28,30 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
 
   async function elegir(p) {
     setSel(p);
-    setNombre(p.nombre || p.cliente_nombre || "");
+    setLead({ id: p.lead_id || null, nombre: "" });
     const { data } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id", p.id).order("orden");
     setItems(data || []);
   }
 
   async function activar() {
-    if (!sel || !nombre.trim()) return;
+    if (!sel || !lead.id) return;
     if (!items.length) { setError("Ese presupuesto no tiene rubros cargados."); return; }
     setGuardando(true); setError("");
     // Si los totales del presupuesto ya traen IVA (caso de presupuestos
     // importados desde Excel), no se vuelve a aplicar.
     const ivaPct = yaIncluyeIva ? 0 : (Number(sel.iva_pct) || 0);
 
-    // La obra hereda el proyecto del presupuesto: así el control, el
-    // presupuesto y el pipeline hablan del mismo proyecto y no de tres nombres
-    // parecidos escritos a mano.
+    // La obra cuelga del proyecto, y el presupuesto también: los tres son el
+    // mismo trabajo. `nombre` se llena con el del proyecto por compatibilidad,
+    // pero ya no es la identidad de nada: las pantallas leen el del proyecto.
+    if (sel.lead_id !== lead.id) await supabase.from("presupuestos").update({ lead_id: lead.id }).eq("id", sel.id);
     const fila = {
-      nombre: nombre.trim(),
+      nombre: lead.nombre || sel.nombre,
       cliente_id: sel.cliente_id || null,
       cliente_nombre: sel.cliente_nombre || null,
       presupuesto_id: sel.id,
       created_by: currentUser.id,
-      ...(sel.lead_id ? { lead_id: sel.lead_id } : {}),
+      lead_id: lead.id,
     };
     let { data: obra, error: e1 } = await supabase.from("obras").insert(fila).select().single();
     if (e1 && /column|schema cache/i.test(e1.message)) {
@@ -128,8 +132,13 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 12 }}>Confirmar activación</div>
           <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
             <div>
-              <label style={{ fontSize: 11, color: colors.muted, display: "block", marginBottom: 4 }}>Nombre de la obra</label>
-              <input value={nombre} onChange={e => setNombre(e.target.value)} style={inputStyle} placeholder="Ej: Residencia Villa Fontana" />
+              <label style={{ fontSize: 11, color: colors.muted, display: "block", marginBottom: 4 }}>¿De qué proyecto es esta obra? *</label>
+              <ElegirProyecto value={lead.id || ""} creador={currentUser} permitirNinguno={false}
+                onElegir={({ id, nombre: n }) => setLead({ id, nombre: n })} />
+              <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
+                La obra no tiene nombre propio: se llama como su proyecto, y el presupuesto “{sel.nombre}” queda de
+                detalle. Así el pipeline, el presupuesto y el control hablan del mismo trabajo.
+              </div>
             </div>
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, cursor: "pointer" }}>
@@ -144,7 +153,7 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
             <span>Línea base (con IVA {ivaPctSel}%): <strong>${fmt(totalPresupuesto)}</strong></span>
           </div>
           {error && <div style={{ color: colors.danger, fontSize: 12, marginBottom: 10 }}>{error}</div>}
-          <Button variant="primary" size="lg" style={{ width: "100%" }} onClick={activar} disabled={guardando || !nombre.trim()}>
+          <Button variant="primary" size="lg" style={{ width: "100%" }} onClick={activar} disabled={guardando || !lead.id}>
             {guardando ? "Activando..." : "Activar obra"}
           </Button>
         </div>

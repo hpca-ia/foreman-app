@@ -27,6 +27,7 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
   const [borrar, setBorrar] = useState(null);
   const [cuantasHay, setCuantasHay] = useState(0);
   const [proyectos, setProyectos] = useState({});
+  const [presupuestos, setPresupuestos] = useState({});
 
   useEffect(() => { fetchObras(); }, []);
 
@@ -38,13 +39,17 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
     const lista = (obrasData || []).filter(alcanza);
     setCuantasHay((obrasData || []).length);
     setObras(lista);
-    // Para poder decir de qué proyecto es cada obra: el nombre de la obra
-    // puede ser otro, y ahí es donde uno cree estar viendo dos proyectos.
+    // El nombre de la obra no es suyo: es el del proyecto, y el presupuesto
+    // que la originó va de detalle. Así renombrar cualquiera de los dos se ve
+    // acá al instante, en vez de quedar congelado desde el día que se activó.
     const ids = [...new Set((obrasData || []).map(o => o.lead_id).filter(Boolean))];
-    if (ids.length) {
-      const { data: ls } = await supabase.from("leads").select("id,nombre").in("id", ids);
-      setProyectos(Object.fromEntries((ls || []).map(l => [l.id, l.nombre])));
-    }
+    const pres = [...new Set((obrasData || []).map(o => o.presupuesto_id).filter(Boolean))];
+    const [{ data: ls }, { data: ps }] = await Promise.all([
+      ids.length ? supabase.from("leads").select("id,nombre").in("id", ids) : Promise.resolve({ data: [] }),
+      pres.length ? supabase.from("presupuestos").select("id,nombre").in("id", pres) : Promise.resolve({ data: [] }),
+    ]);
+    setProyectos(Object.fromEntries((ls || []).map(l => [l.id, l.nombre])));
+    setPresupuestos(Object.fromEntries((ps || []).map(x => [x.id, x.nombre])));
 
     if (lista.length) {
       const ids = lista.map(o => o.id);
@@ -147,11 +152,13 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
                   onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink }}>{o.nombre}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink }}>
+                        {proyectos[o.lead_id] || o.nombre}
+                      </div>
                       <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
-                        {o.lead_id && proyectos[o.lead_id] && proyectos[o.lead_id] !== o.nombre
-                          ? <>Proyecto: <strong style={{ color: colors.inkSoft }}>{proyectos[o.lead_id]}</strong> · </>
-                          : !o.lead_id ? <span style={{ color: colors.warning }}>sin proyecto · </span> : null}
+                        {!o.lead_id && <span style={{ color: colors.warning }}>sin proyecto · </span>}
+                        {presupuestos[o.presupuesto_id] && presupuestos[o.presupuesto_id] !== (proyectos[o.lead_id] || o.nombre)
+                          && <>{presupuestos[o.presupuesto_id]} · </>}
                         {o.cliente_nombre || "Sin cliente"} · {r.rubros} rubros
                       </div>
                     </div>

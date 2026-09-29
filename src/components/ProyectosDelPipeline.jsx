@@ -7,6 +7,7 @@ import { POR_DEFECTO } from "../lib/permisos";
 import { fusionarLead, duplicadosProbables } from "../lib/fusionarLead";
 import QueVeEstaPersona from "./QueVeEstaPersona";
 import ProyectosRepetidos from "./ProyectosRepetidos";
+import { repararCadena, engancharAlProyecto } from "../lib/cadena";
 import { TUNELES, esProyecto } from "../modules/leads/tubo";
 import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/acceso";
 
@@ -45,6 +46,7 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
   const [obras, setObras] = useState([]);
   const [uniendo, setUniendo] = useState(null);
   const [renombrando, setRenombrando] = useState(null);
+  const [sinCadena, setSinCadena] = useState([]);
 
   const cargar = useCallback(async () => {
     const [{ data: ls }, { data: as }, { data: ps }, { data: os }] = await Promise.all([
@@ -58,6 +60,11 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
     ]);
     setPresupuestos(ps || []);
     setObras(os || []);
+    // Reengancha lo que se puede deducir —la obra toma el proyecto de su
+    // presupuesto y al revés— y devuelve lo que nadie puede adivinar.
+    const { sueltos: quedan, arreglados } = await repararCadena();
+    setSinCadena(quedan);
+    if (arreglados) onCambio?.();
     const filas = (ls || []).filter(l => l.resultado !== "perdido");
     setSinColor(filas.length > 0 && !("color" in filas[0]));
     // Si falta la migración 055 no hay columnas por área: mejor avisarlo al
@@ -201,6 +208,29 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
       {sinColor && (
         <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 8 }}>
           Para elegir el color hace falta correr la migración 047. Lo demás funciona igual.
+        </div>
+      )}
+
+      {sinCadena.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: colors.warning, letterSpacing: 0.4 }}>SIN PROYECTO · {sinCadena.length}</div>
+          <div style={{ fontSize: 10, color: colors.muted, marginBottom: 6, lineHeight: 1.5 }}>
+            Esto no cuelga de ningún proyecto, así que no le aparece a nadie salvo a los admins, y en Control de Obra
+            sale como si fuera otra cosa. Elegile su proyecto y la cadena queda entera: presupuesto, obra y pipeline.
+          </div>
+          {sinCadena.map(x => (
+            <div key={`${x.tipo}${x.id}`} style={{ display: "flex", gap: 6, alignItems: "center", background: colors.bg,
+              border: `1px solid ${colors.warningBorder}`, borderRadius: 8, padding: "6px 8px", marginBottom: 5, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>{x.tipo.toUpperCase()}</span>
+              <span style={{ flex: 1, minWidth: 120, fontSize: 12, color: colors.ink, overflowWrap: "anywhere" }}>{x.nombre}</span>
+              <select value="" onChange={async e => { if (!e.target.value) return; await engancharAlProyecto(x, e.target.value); await cargar(); onCambio?.(); }}
+                style={{ border: `1px solid ${colors.border}`, borderRadius: 8, padding: "4px 7px", fontSize: 11.5,
+                  fontFamily: colors.font, color: colors.inkSoft, background: "#fff", maxWidth: 220 }}>
+                <option value="">Es de…</option>
+                {leads.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+              </select>
+            </div>
+          ))}
         </div>
       )}
 

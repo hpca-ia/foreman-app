@@ -281,7 +281,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {hechas.map(item => (
                   <Actividad key={item.id} item={item} etapa={etapa} nombreEtapa={cat.nombre} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
-                    ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} onTarea={() => {}} />
+                    ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable}
+                    onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
+                      assignee_id: t?.responsable_externo ? `x:${t.responsable_externo}` : t?.assignee_id || "", due_date: t?.due_date || "", hora: t?.hora || "" }); }} />
                 ))}
 
                 {/* Las que esa etapa trae predeterminadas desde Ajustes, si tiene. */}
@@ -546,10 +548,15 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 const antesQuien = antes?.responsable_externo || nombre(antes?.assignee_id) || "nadie";
                 const ahoraQuien = externo || nombre(aTarea.assignee_id) || "nadie";
                 if (antesQuien !== ahoraQuien) cambios.push(`pasa de ${antesQuien} a ${ahoraQuien}`);
+                // De cuándo a cuándo, no solo cuándo: seis meses después, lo
+                // que hace falta saber es que la reunión se corrió y de qué día.
                 if ((antes?.due_date || "") !== (aTarea.due_date || "") || (antes?.hora || "") !== (aTarea.hora || "")) {
-                  cambios.push(aTarea.due_date
-                    ? `para el ${cuando(aTarea.due_date)}${aTarea.hora ? ` a las ${aTarea.hora}` : ""}`
-                    : "se queda sin fecha");
+                  const enPalabras = (f, h) => (f ? `${cuando(f)}${h ? ` a las ${h}` : ""}` : null);
+                  const deCuando = enPalabras(antes?.due_date, antes?.hora);
+                  const aCuando = enPalabras(aTarea.due_date, aTarea.hora);
+                  cambios.push(!aCuando ? `se queda sin fecha (era ${deCuando})`
+                    : deCuando ? `se mueve del ${deCuando} al ${aCuando}`
+                    : `queda para el ${aCuando}`);
                 }
                 if (cambios.length) {
                   await anotarCorreccion(lead, `Arregló "${aTarea.item.texto}": ${cambios.join(", ")}.`, currentUser);
@@ -753,11 +760,13 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
                 <Hourglass size={11} /> {item.espera ? "Ya no espera" : "Queda esperando"}
               </button>
             )}
-            {!item.hecho && (
-              <button onClick={onTarea} style={mini(false)}>
-                <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar responsable" : "Asignar a alguien"}
-              </button>
-            )}
+            {/* Antes decía "Cambiar responsable" y este mismo botón cambia el
+                título, el tipo, el día, la hora y quién la hace. Nadie iba a
+                entrar acá a correr una reunión. Y sirve también en las hechas:
+                un error se arregla, y el arreglo queda en la bitácora. */}
+            <button onClick={onTarea} style={mini(false)}>
+              <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar detalles" : "Asignar y poner fecha"}
+            </button>
             {/* Una reunión hay que avisarla: el del equipo la ve en FOREMAN,
                 pero el cliente y el ingeniero no entran acá. */}
             {!item.hecho && esReunion(tarea) && (

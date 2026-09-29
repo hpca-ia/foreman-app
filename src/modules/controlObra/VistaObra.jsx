@@ -14,6 +14,22 @@ import PresupuestoOriginal from "./PresupuestoOriginal";
 import ExportarPlanilla from "./ExportarPlanilla";
 
 export default function VistaObra({ obra, currentUser, puede, onVolver }) {
+  // La obra no tiene nombre propio: se llama como su proyecto, y el
+  // presupuesto del que salió va de detalle. Se leen ahora y no se copian, así
+  // renombrar cualquiera de los dos se ve acá sin tocar nada más.
+  const [cadena, setCadena] = useState({ proyecto: null, presupuesto: null });
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const [{ data: l }, { data: p }] = await Promise.all([
+        obra.lead_id ? supabase.from("leads").select("nombre").eq("id", obra.lead_id).maybeSingle() : Promise.resolve({ data: null }),
+        obra.presupuesto_id ? supabase.from("presupuestos").select("nombre").eq("id", obra.presupuesto_id).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      if (vivo) setCadena({ proyecto: l?.nombre || null, presupuesto: p?.nombre || null });
+    })();
+    return () => { vivo = false; };
+  }, [obra.lead_id, obra.presupuesto_id]);
+
   const [tab, setTab] = useState("control");
   const [rubros, setRubros] = useState([]);
   const [planillas, setPlanillas] = useState([]);
@@ -70,8 +86,12 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
         <Button variant="secondary" size="sm" onClick={onVolver}><ArrowLeft size={13} /> Obras</Button>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>{obra.nombre}</div>
-          <div style={{ fontSize: 11, color: colors.muted }}>{obra.cliente_nombre || "Sin cliente"} · {rubros.length} rubros</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>{cadena.proyecto || obra.nombre}</div>
+          <div style={{ fontSize: 11, color: colors.muted }}>
+            {!obra.lead_id && <span style={{ color: colors.warning }}>sin proyecto · </span>}
+            {cadena.presupuesto && cadena.presupuesto !== (cadena.proyecto || obra.nombre) && <>{cadena.presupuesto} · </>}
+            {obra.cliente_nombre || "Sin cliente"} · {rubros.length} rubros
+          </div>
         </div>
         {planillas.length > 0 && (
           <select value={planillaSel || ""} onChange={e => { const id = Number(e.target.value); setPlanillaSel(id); setAbierta(a => (a ? id : a)); }}
