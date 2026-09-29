@@ -68,7 +68,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       .then(({ data }) => setInvitados((data || []).filter(i => i.email)));
   }, [obra.lead_id]);
 
-  const capitulos = [...new Set(rubros.map(r => r.capitulo || "SIN CAPÍTULO"))];
+  // La base de la que se saca y sobre la que se agrega es el PRESUPUESTO
+  // CONTRATADO. Lo que entró por órdenes anteriores no se ofrece: una orden no
+  // se arma sobre otra orden, se arma sobre el contrato.
+  const rubrosBase = rubros.filter(r => r.origen !== "orden_cambio");
+  const capitulos = [...new Set(rubrosBase.map(r => r.capitulo || "SIN CAPÍTULO"))];
   // Contra qué se lee el número nuevo: la línea base y lo ya pactado después.
   const resumen = {
     base: rubros.filter(r => r.origen !== "orden_cambio").reduce((s, r) => s + (Number(r.total_base) || 0), 0),
@@ -360,17 +364,47 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       })}
                     </div>
                     <div style={{ display: "grid", gap: 6 }}>
+                      {/* La base es el PRESUPUESTO, rubro por rubro: una
+                          reducción saca un rubro que existe y un adicional casi
+                          siempre modifica uno. Elegirlo trae su descripción, su
+                          unidad y su precio, que es contra lo que se compara
+                          después; escribirlos de nuevo es como se descuadra. */}
+                      <select value={linea.obra_rubro_id || ""}
+                        onChange={e => {
+                          const r = rubrosBase.find(x => String(x.id) === e.target.value);
+                          setLinea(l => (r ? {
+                            ...l, obra_rubro_id: r.id, rubro_codigo: String(r.numero ?? r.codigo ?? ""),
+                            capitulo: r.capitulo || "", descripcion: r.descripcion || "",
+                            unidad: r.unidad || "", precio_unitario: r.precio_unitario ?? "",
+                          } : { ...l, obra_rubro_id: "", rubro_codigo: "" }));
+                        }}
+                        style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+                        <option value="">Rubro nuevo — no está en el presupuesto</option>
+                        {capitulos.map(cap => (
+                          <optgroup key={cap} label={cap}>
+                            {rubrosBase.filter(r => (r.capitulo || "SIN CAPÍTULO") === cap).map(r => (
+                              <option key={r.id} value={r.id}>
+                                {r.numero}. {r.descripcion}{r.unidad ? ` · ${r.unidad}` : ""} · ${fmt(r.precio_unitario)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
                       <input value={linea.descripcion} onChange={e => setLinea(l => ({ ...l, descripcion: e.target.value }))}
                         placeholder="Qué se agrega o se saca" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                         <input value={linea.especificacion} onChange={e => setLinea(l => ({ ...l, especificacion: e.target.value }))}
                           placeholder="Especificación" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
                         <input value={linea.rubro_codigo} onChange={e => setLinea(l => ({ ...l, rubro_codigo: e.target.value }))}
-                          placeholder="Rubro (ej: OC-03-01)" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                          placeholder="N° de rubro" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.8fr 1fr", gap: 6 }}>
+                        {/* De un rubro del presupuesto viene solo; de uno nuevo
+                            hay que decir a qué capítulo va, o el control no sabe
+                            dónde ponerlo. */}
                         <select value={linea.capitulo} onChange={e => setLinea(l => ({ ...l, capitulo: e.target.value }))}
-                          style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+                          disabled={!!linea.obra_rubro_id}
+                          style={{ ...inputStyle, padding: "7px 9px", fontSize: 12, opacity: linea.obra_rubro_id ? 0.6 : 1 }}>
                           <option value="">Capítulo…</option>
                           {capitulos.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
@@ -382,6 +416,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                           placeholder="P.U." style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
                       </div>
                     </div>
+                    {linea.obra_rubro_id && (() => {
+                      const r = rubrosBase.find(x => String(x.id) === String(linea.obra_rubro_id));
+                      if (!r) return null;
+                      const monto = (Number(linea.cantidad) || 0) * (Number(linea.precio_unitario) || 0);
+                      const sePasa = linea.tipo === "quita" && monto > (Number(r.total_base) || 0) + 0.005;
+                      return (
+                        <div style={{ fontSize: 10.5, color: sePasa ? colors.warning : colors.muted, marginTop: 5, lineHeight: 1.5 }}>
+                          Ese rubro tiene ${fmt(r.total_base)} en el presupuesto ({fmt(r.cantidad)} {r.unidad || ""}).
+                          {sePasa && " Estás sacando más de lo que había: revisá la cantidad."}
+                        </div>
+                      );
+                    })()}
+
                     <Button variant="outline" size="sm" style={{ marginTop: 7 }}
                       disabled={ocupado || !linea.descripcion.trim() || !Number(linea.precio_unitario)}
                       onClick={async () => {
