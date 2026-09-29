@@ -46,12 +46,16 @@ export async function cargarOrdenes(obraId) {
   if (error) return { ordenes: [], lineas: {}, sinTablas: falta(error) };
 
   const ids = (data || []).map(o => o.id);
-  let lineas = {};
+  const lineas = {}, fotos = {};
   if (ids.length) {
-    const { data: ls } = await supabase.from("orden_cambio_lineas").select("*").in("orden_id", ids).order("orden");
+    const [{ data: ls }, { data: fs }] = await Promise.all([
+      supabase.from("orden_cambio_lineas").select("*").in("orden_id", ids).order("orden"),
+      supabase.from("orden_cambio_fotos").select("*").in("orden_id", ids).order("orden"),
+    ]);
     (ls || []).forEach(l => { (lineas[l.orden_id] = lineas[l.orden_id] || []).push(l); });
+    (fs || []).forEach(f => { (fotos[f.orden_id] = fotos[f.orden_id] || []).push(f); });
   }
-  return { ordenes: data || [], lineas, sinTablas: false };
+  return { ordenes: data || [], lineas, fotos, sinTablas: false };
 }
 
 /** La siguiente, numerada sola: dos con el mismo número no se pueden citar. */
@@ -199,4 +203,39 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien) {
     await guardarOrden(orden.id, { estado: "enviada", enviada_at: new Date().toISOString() });
   }
   return { ok: true, enviadoA: datos.enviadoA || limpios };
+}
+
+// ── Los soportes gráficos del CAPÍTULO I ─────────────────────────────────
+//
+// La foto de lo que se encontró y el plano con la solución. Van al depósito
+// privado, como las del libro de obra, y viajan adjuntas en el correo: un
+// enlace que caduca deja el respaldo inservible justo cuando alguien lo
+// necesita, seis meses después, para justificar un adicional.
+
+export async function subirSoporte(orden, archivo, descripcion, quien, cuantasHay = 0) {
+  const limpio = archivo.name.replace(/[^\w.\-]/g, "_").slice(-60);
+  const ruta = `orden-${orden.id}/${Date.now()}-${limpio}`;
+  const { error } = await supabase.storage.from("task-files").upload(ruta, archivo, { upsert: false });
+  if (error) return { error: error.message };
+  const { data, error: e2 } = await supabase.from("orden_cambio_fotos").insert({
+    orden_id: orden.id, storage_path: ruta, descripcion: descripcion?.trim() || null,
+    orden: cuantasHay, autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
+  }).select().single();
+  return e2 ? { error: e2.message } : { foto: data };
+}
+
+export async function borrarSoporte(foto) {
+  await supabase.storage.from("task-files").remove([foto.storage_path]);
+  const { error } = await supabase.from("orden_cambio_fotos").delete().eq("id", foto.id);
+  return error ? error.message : null;
+}
+
+/** Enlaces temporales para mirarlos en pantalla, que el depósito es privado. */
+export async function enlacesDeSoportes(fotos = []) {
+  if (!fotos.length) return {};
+  const { data } = await supabase.storage.from("task-files")
+    .createSignedUrls(fotos.map(f => f.storage_path), 3600);
+  const mapa = {};
+  (data || []).forEach((x, i) => { if (x?.signedUrl) mapa[fotos[i].id] = x.signedUrl; });
+  return mapa;
 }

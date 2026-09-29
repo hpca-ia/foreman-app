@@ -23,9 +23,10 @@ export default async function handler(req, res) {
   const { data: orden } = await sb.from("ordenes_cambio").select("*").eq("id", orden_id).maybeSingle();
   if (!orden) return res.status(404).json({ error: "Esa orden de cambio no existe" });
 
-  const [{ data: lineas }, { data: obra }] = await Promise.all([
+  const [{ data: lineas }, { data: obra }, { data: soportes }] = await Promise.all([
     sb.from("orden_cambio_lineas").select("*").eq("orden_id", orden.id).order("orden"),
     sb.from("obras").select("id,nombre,cliente_nombre,lead_id").eq("id", orden.obra_id).maybeSingle(),
+    sb.from("orden_cambio_fotos").select("*").eq("orden_id", orden.id).order("orden"),
   ]);
 
   // El nombre que manda es el del proyecto, como en toda la app.
@@ -114,6 +115,7 @@ export default async function handler(req, res) {
       ${capitulo("I", "Argumentos para la solicitud.")}
       <div style="font-size:12.5px;color:#374151;line-height:1.6">${esc(orden.justificacion || "—")}</div>
       ${orden.soportes ? `<div style="font-size:11.5px;color:#6B7280;margin-top:6px"><strong>Soportes gráficos:</strong> ${esc(orden.soportes)}</div>` : ""}
+      ${soportes?.length ? `<div style="font-size:11.5px;color:#6B7280;margin-top:6px"><strong>Soportes gráficos:</strong> ${soportes.length} ${soportes.length === 1 ? "imagen adjunta" : "imágenes adjuntas"} a este correo${soportes.map(f => f.descripcion).filter(Boolean).length ? ` — ${esc(soportes.map(f => f.descripcion).filter(Boolean).join("; "))}` : ""}.</div>` : ""}
 
       ${capitulo("II", "Propuesta de imprevisto y cotización preliminar.")}
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
@@ -171,10 +173,28 @@ export default async function handler(req, res) {
     pie: "Orden de cambio emitida desde FOREMAN · HCA Studio. Para aprobarla o hacer observaciones, responde a quien te la envió.",
   });
 
+  // Los soportes van ADJUNTOS, no enlazados: un enlace que caduca deja el
+  // respaldo inservible justo cuando alguien lo busca, meses después, para
+  // justificar el adicional. Se mandan hasta seis y hasta 12 MB en total, que
+  // es lo que un correo aguanta sin rebotar.
+  const adjuntos = [];
+  let peso = 0;
+  for (const f of (soportes || []).slice(0, 6)) {
+    try {
+      const { data: archivo, error } = await sb.storage.from("task-files").download(f.storage_path);
+      if (error || !archivo) continue;
+      const buffer = Buffer.from(await archivo.arrayBuffer());
+      if (peso + buffer.length > 12 * 1024 * 1024) break;
+      peso += buffer.length;
+      adjuntos.push({ filename: f.storage_path.split("/").pop(), content: buffer.toString("base64") });
+    } catch { /* un soporte que no se pudo traer no frena el envío */ }
+  }
+
   const r = await enviarCorreo({
     to: correos,
     subject: `Orden de Cambio ${codigo} · ${proyecto}`,
     html,
+    adjuntos,
   });
   return r.ok ? res.status(200).json({ ok: true, enviadoA: r.enviadoA }) : res.status(500).json({ error: r.error });
 }

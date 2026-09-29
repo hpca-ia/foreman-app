@@ -7,7 +7,7 @@
 // algo que usa una persona una vez por semana.
 let XLSX, jsPDF, autoTable;
 const cargarExcel = async () => { XLSX = XLSX || await import("xlsx"); return XLSX; };
-const cargarPDF = async () => {
+export const cargarPDF = async () => {
   if (!jsPDF) {
     const [pdf, tabla] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
     jsPDF = pdf.jsPDF;

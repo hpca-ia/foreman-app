@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
-import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
+import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw, Camera, Download } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -8,7 +8,9 @@ import { fmt } from "./calculos";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
+  subirSoporte, borrarSoporte, enlacesDeSoportes,
 } from "./ordenesDeCambio";
+import { pdfDeOrden } from "./pdfOrdenCambio";
 
 // Las órdenes de cambio de una obra.
 //
@@ -31,6 +33,11 @@ const TIPOS = [
 export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], currentUser, puede, onCambio }) {
   const [ordenes, setOrdenes] = useState([]);
   const [lineas, setLineas] = useState({});
+  const [fotos, setFotos] = useState({});
+  const [enlaces, setEnlaces] = useState({});
+  const [subiendo, setSubiendo] = useState(false);
+  const [bajando, setBajando] = useState(null);
+  const camRef = useRef(null);
   const [sinTablas, setSinTablas] = useState(false);
   const [abierta, setAbierta] = useState(null);
   const [nueva, setNueva] = useState(null);       // { titulo, justificacion, solicitado_por }
@@ -47,6 +54,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     setSinTablas(r.sinTablas);
     setOrdenes(r.ordenes);
     setLineas(r.lineas);
+    setFotos(r.fotos || {});
+    const todas = Object.values(r.fotos || {}).flat();
+    if (todas.length) setEnlaces(await enlacesDeSoportes(todas));
   }, [obra.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -58,6 +68,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   }, [obra.lead_id]);
 
   const capitulos = [...new Set(rubros.map(r => r.capitulo || "SIN CAPÍTULO"))];
+  // Contra qué se lee el número nuevo: la línea base y lo ya pactado después.
+  const resumen = {
+    base: rubros.filter(r => r.origen !== "orden_cambio").reduce((s, r) => s + (Number(r.total_base) || 0), 0),
+    adicionales: rubros.filter(r => r.origen === "orden_cambio").reduce((s, r) => s + (Number(r.total_base) || 0), 0),
+  };
 
   async function hacer(fn) {
     setOcupado(true); setAviso("");
@@ -141,6 +156,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
         const suyas = lineas[o.id] || [];
         const sub = subtotales(suyas);
         const total = sub.total;
+        const suyasFotos = fotos[o.id] || [];
         const esta = abierta === o.id;
         const editable = puedeEditar && o.estado !== "aprobada";
         return (
@@ -174,6 +190,56 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   onBlur={e => editable && e.target.value !== (o.justificacion || "") && hacer(() => guardarOrden(o.id, { justificacion: e.target.value }))}
                   placeholder="Por qué se pide y qué pasa si no se hace"
                   style={{ ...inputStyle, fontSize: 12.5, padding: "7px 9px", resize: "vertical", marginBottom: 8, width: "100%", boxSizing: "border-box" }} />
+
+                {/* Los soportes: la foto de lo que se encontró y el plano con
+                    la solución. Quien aprueba deja de tener que creerle a la
+                    palabra escrita. Viajan adjuntos en el correo y en el PDF. */}
+                <div style={{ marginBottom: 9 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+                    SOPORTES GRÁFICOS{suyasFotos.length ? ` · ${suyasFotos.length}` : ""}
+                  </div>
+                  {suyasFotos.length > 0 && (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 6, marginBottom: 6 }}>
+                      {suyasFotos.map(f => (
+                        <div key={f.id} style={{ position: "relative" }}>
+                          {enlaces[f.id]
+                            ? <a href={enlaces[f.id]} target="_blank" rel="noreferrer">
+                                <img src={enlaces[f.id]} alt={f.descripcion || "Soporte"}
+                                  style={{ width: "100%", height: 76, objectFit: "cover", borderRadius: 6, border: `1px solid ${colors.border}`, display: "block" }} />
+                              </a>
+                            : <div style={{ width: "100%", height: 76, borderRadius: 6, background: colors.neutralSoft }} />}
+                          {editable && (
+                            <button onClick={() => { if (window.confirm("¿Quitar este soporte?")) hacer(() => borrarSoporte(f)); }}
+                              style={{ position: "absolute", top: 3, right: 3, background: "rgba(17,24,39,0.7)", border: "none", borderRadius: 5, color: "#fff", cursor: "pointer", display: "flex", padding: 2 }}>
+                              <X size={10} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {editable && (
+                    <>
+                      <button onClick={() => { setAbierta(o.id); camRef.current?.click(); }} disabled={subiendo}
+                        style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "9px",
+                          color: colors.inkSoft, fontSize: 12, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                        <Camera size={13} /> {subiendo ? "Subiendo…" : "Agregar foto o plano"}
+                      </button>
+                      <input ref={camRef} type="file" accept="image/*" style={{ display: "none" }}
+                        onChange={async ev => {
+                          const archivo = ev.target.files?.[0];
+                          ev.target.value = "";
+                          if (!archivo) return;
+                          setSubiendo(true);
+                          const descripcion = window.prompt("¿Qué se ve en esta imagen? (opcional)", "") || "";
+                          const r = await subirSoporte(o, archivo, descripcion, currentUser, suyasFotos.length);
+                          setSubiendo(false);
+                          if (r.error) { setAviso(r.error); return; }
+                          await cargar();
+                        }} />
+                    </>
+                  )}
+                </div>
 
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
                   CAPÍTULO II · ADICIONES Y REDUCCIONES
@@ -344,6 +410,22 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 )}
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {suyas.length > 0 && (
+                    <Button variant="outline" size="sm" disabled={bajando === o.id}
+                      onClick={async () => {
+                        setBajando(o.id); setAviso("");
+                        try {
+                          const doc = await pdfDeOrden({
+                            orden: o, lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
+                            codigo: codigoDe(o), subtotales: sub, resumenContrato: resumen,
+                          });
+                          doc.save(`${codigoDe(o)} - ${proyecto || obra.nombre}.pdf`);
+                        } catch (e) { setAviso("No se pudo armar el PDF: " + e.message); }
+                        setBajando(null);
+                      }}>
+                      <Download size={12} /> {bajando === o.id ? "Armando…" : "PDF"}
+                    </Button>
+                  )}
                   {puedeEditar && suyas.length > 0 && (
                     <Button variant="outline" size="sm" onClick={() => setMandando({ orden: o, correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email), cuerpo: "" })}>
                       <Mail size={12} /> Enviar por correo

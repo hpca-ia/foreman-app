@@ -113,6 +113,22 @@ create table if not exists public.orden_cambio_lineas (
 );
 create index if not exists orden_lineas on public.orden_cambio_lineas (orden_id, orden);
 
+-- Los soportes gráficos del CAPÍTULO I: la foto de lo que se encontró, el
+-- plano con el ducto existente en rojo y la nueva posición en verde. Sin eso,
+-- el que aprueba tiene que creerle a la palabra escrita; con eso ve el
+-- problema, y la orden se aprueba en un día en vez de en tres correos.
+create table if not exists public.orden_cambio_fotos (
+  id           bigserial primary key,
+  orden_id     bigint not null references public.ordenes_cambio(id) on delete cascade,
+  storage_path text not null,
+  descripcion  text,
+  orden        integer not null default 0,
+  autor_id     bigint,
+  autor_nombre text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists orden_fotos on public.orden_cambio_fotos (orden_id, orden);
+
 -- A quién se le manda el documento: la misma gente del proyecto que ya existe.
 alter table public.pipeline_invitados add column if not exists recibe_ordenes boolean not null default false;
 
@@ -130,7 +146,7 @@ create index if not exists orden_envios on public.orden_cambio_envios (orden_id)
 do $$
 declare t text;
 begin
-  foreach t in array array['ordenes_cambio','orden_cambio_lineas','orden_cambio_envios'] loop
+  foreach t in array array['ordenes_cambio','orden_cambio_lineas','orden_cambio_envios','orden_cambio_fotos'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "equipo foreman" on public.%I', t);
     execute format('create policy "equipo foreman" on public.%I for all to authenticated using (true) with check (true)', t);
