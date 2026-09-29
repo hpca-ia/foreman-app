@@ -9,6 +9,12 @@ export const ROLES = {
   arquitecto: { label: "Arquitecto", color: "#8A6BA1" },
   arquitecto_jr: { label: "Arquitecto Jr.", color: "#A98AC0" },
   residente: { label: "Residente", color: "#6B7F4F" },
+  // Entra a FOREMAN solo para rendir la plata que se le entrega: el conductor
+  // que compra materiales y trae las facturas, el mensajero, el bodeguero. No
+  // tiene nada que hacer en presupuestos ni en el pipeline, y ponerle un rol
+  // más grande "porque total no va a mirar" es cómo se termina con la
+  // información de la oficina abierta a quien no le toca.
+  conductor: { label: "Conductor", color: "#8A7A5C" },
 };
 
 // "Equipo" ya no existe: se muestra si algún usuario viejo lo tiene, pero no
@@ -20,4 +26,4 @@ export const rolInfo = role => ROLES[role] || LEGACY[role] || { label: "Equipo",
 export const esAdmin = role => role === "owner" || role === "assistant";
 export const esResidente = role => role === "residente";
 export const puedeControlObra = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr"].includes(role);
-export const puedeCajaChica = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr", "residente"].includes(role);
+export const puedeCajaChica = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr", "residente", "conductor"].includes(role);

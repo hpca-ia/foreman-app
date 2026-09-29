@@ -65,26 +65,65 @@ input, select, textarea { outline: none; font-family: var(--font); }
 /* Responsive: desktop gets table/kanban + icon rail; mobile gets stacked cards + bottom nav */
 .tasks-view-desktop { display: block; }
 .tasks-view-mobile { display: none; }
-.app-sidebar { width: 60px; flex-direction: column; border-right: 1px solid var(--border); border-top: none; padding: 16px 0; gap: 6px; position: relative; }
+/* El menú: icono y nombre, agrupado. Un riel de iconos sueltos obliga a
+   adivinar qué es cada cosa; con el nombre al lado no hace falta explicarlo. */
+.app-sidebar {
+  width: 204px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); border-top: none;
+  padding: 14px 10px 12px; gap: 2px; position: relative;
+}
+.app-sidebar-logo { display: flex; align-items: center; gap: 9px; padding: 0 6px 12px; }
+.app-nav-grupo { display: flex; flex-direction: column; gap: 2px; }
+.app-nav-grupo + .app-nav-grupo { margin-top: 12px; }
+.app-nav-titulo {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.6px;
+  color: var(--muted); padding: 0 10px 4px;
+}
+.app-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; font-size: 13px; width: 100%;
+  transition: background 0.12s ease;
+}
+.app-nav-item:hover { background: var(--neutral-soft); }
+.app-nav-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-nav-corto { display: none; }
+.app-sidebar-profile {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 6px 0; border-top: 1px solid var(--neutral-soft);
+}
 .app-shell-layout { flex-direction: row; }
 .app-content { padding: 26px 44px 32px; }
 /* La marca arranca donde arranca el contenido: el riel de 60 px más el aire
    de la página. Así todo lo que se lee cae sobre la misma línea. */
-.app-header-inner { padding: 0 44px 0 104px; }
+.app-header-inner { padding: 0 44px 0 248px; }
 
 @media (max-width: 768px) {
   .tasks-view-desktop { display: none; }
   .tasks-view-mobile { display: block; }
   .app-shell-layout { flex-direction: column; }
+  /* En el teléfono es la barra de abajo: el nombre va debajo del icono, que
+     ahí el ancho no alcanza para ponerlo al lado, y sigue haciendo falta. */
   .app-sidebar {
-    width: 100%; flex-direction: row; justify-content: space-around;
+    width: 100%; flex-direction: row; justify-content: space-around; align-items: stretch;
     border-right: none; border-top: 1px solid var(--border);
-    padding: 6px 4px; gap: 2px;
+    padding: 5px 2px 4px; gap: 0;
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
   }
   .app-sidebar .app-sidebar-profile,
   .app-sidebar .app-sidebar-logo,
+  .app-sidebar .app-nav-titulo,
   .app-sidebar .app-sidebar-spacer { display: none; }
+  /* Los grupos se disuelven: si siguen siendo cajas, el que tiene un solo
+     botón se lleva el mismo ancho que el que tiene cuatro y la barra queda
+     coja. Así los siete son hermanos y se reparten parejo. */
+  .app-nav-grupo { display: contents; }
+  .app-nav-item {
+    flex-direction: column; gap: 3px; padding: 5px 2px; flex: 1;
+    justify-content: center; text-align: center; font-size: 9px; font-weight: 600;
+  }
+  .app-nav-item:hover { background: transparent; }
+  .app-nav-item .app-nav-label { display: none; }
+  .app-nav-corto { display: block; font-size: 9.5px; line-height: 1.1; max-width: 100%; white-space: nowrap; }
   .app-content { padding: 16px 16px 84px; }
   .app-header-inner { padding: 0 16px; }
 }

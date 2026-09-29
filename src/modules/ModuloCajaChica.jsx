@@ -27,7 +27,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [archivoHash, setArchivoHash] = useState(null);
   const [pesoOriginal, setPesoOriginal] = useState("");
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
-  const [nuevaCajaForm, setNuevaCajaForm] = useState({ obra_id:"", proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50 });
+  const [nuevaCajaForm, setNuevaCajaForm] = useState({ obra_id:"", proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50, capitulo:"", obra_actividad_id:"" });
   const [obras, setObras] = useState([]);
   const [archivoGasto, setArchivoGasto] = useState(null);
   const [archivoPreview, setArchivoPreview] = useState(null);
@@ -41,6 +41,36 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const gerente = puedeControlObra(currentUser.role);
   const fmt = n => (Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
   const iS = {width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
+
+  // Los capítulos de la obra que se está eligiendo, para poder fijar el de la
+  // caja al abrirla.
+  // Un gasto se asigna a una AGRUPACIÓN, no a un capítulo: si la caja fijara
+  // un capítulo, el gasto seguiría sin saber a cuál de sus agrupaciones va y
+  // no se habría ahorrado nada. Se ofrecen las agrupaciones de la obra, y los
+  // capítulos solo cuando la obra todavía no tiene ninguna armada.
+  const [agrupacionesDeObra, setAgrupacionesDeObra] = useState([]);
+  const [capitulosDeObra, setCapitulosDeObra] = useState([]);
+  useEffect(() => {
+    const id = Number(nuevaCajaForm.obra_id);
+    if (!id) { setAgrupacionesDeObra([]); setCapitulosDeObra([]); return; }
+    let vivo = true;
+    Promise.all([
+      supabase.from("obra_actividades").select("id,codigo,nombre").eq("obra_id", id).order("orden"),
+      supabase.from("obra_rubros").select("capitulo").eq("obra_id", id),
+    ]).then(([{ data: acts }, { data: rs }]) => {
+      if (!vivo) return;
+      setAgrupacionesDeObra(acts || []);
+      setCapitulosDeObra([...new Set((rs || []).map(r => r.capitulo).filter(Boolean))]);
+    });
+    return () => { vivo = false; };
+  }, [nuevaCajaForm.obra_id]);
+
+  // Y al cargar un gasto, la caja ya trae puesto contra qué va. Se puede
+  // cambiar: es el punto de partida, no un candado.
+  useEffect(() => {
+    if (subVista !== "gasto" || rubrosGasto.length || !cajaActiva?.obra_actividad_id) return;
+    setRubrosGasto([{ obra_actividad_id: cajaActiva.obra_actividad_id, monto: Number(gastoForm.monto) || 0 }]);
+  }, [subVista, cajaActiva?.obra_actividad_id]);  // eslint-disable-line
 
   useEffect(() => { fetchCajas(); fetchObras(); }, []);
   async function fetchObras() {
@@ -105,11 +135,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       proyecto_nombre:nuevaCajaForm.proyecto_nombre, obra_id:Number(nuevaCajaForm.obra_id)||null, responsable_id:Number(nuevaCajaForm.responsable_id),
       responsable_nombre:resUser?.name||"", limite_alerta:Number(nuevaCajaForm.limite_alerta)||50, created_by:currentUser.id,
       ...(obra?.lead_id ? { lead_id: obra.lead_id } : {}),
+      ...(nuevaCajaForm.capitulo ? { capitulo: nuevaCajaForm.capitulo } : {}),
+      ...(nuevaCajaForm.obra_actividad_id ? { obra_actividad_id: Number(nuevaCajaForm.obra_actividad_id) } : {}),
     };
     let { data, error } = await supabase.from("cajas_chicas").insert(fila).select().single();
-    // Sin la migración 046 la caja se crea igual, atada solo a su obra.
+    // Sin las migraciones 046 y 058 la caja se crea igual, atada solo a su obra.
     if (error && /column|schema cache/i.test(error.message)) {
-      const { lead_id, ...resto } = fila;
+      const { lead_id, capitulo, obra_actividad_id, ...resto } = fila;
       ({ data, error } = await supabase.from("cajas_chicas").insert(resto).select().single());
     }
     if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); }
@@ -322,6 +354,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>setSubVista(subVista==="reporte"?"detalle":"lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&admin&&<button onClick={()=>setSubVista("nueva")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nueva caja</button>}
+          {subVista==="detalle"&&puede?.("borrar.definitivo")&&cajaActiva&&(
+            <button onClick={()=>setBorrarCaja(cajaActiva)} title="Borrar esta caja chica"
+              style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"7px 10px",color:"var(--danger)",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+              <Trash2 size={13}/> Borrar caja
+            </button>
+          )}
           {subVista==="detalle"&&<>
             {admin&&<button onClick={()=>setSubVista("anticipo")} style={{background:"#7C3AED",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Anticipo</button>}
             <button onClick={()=>setSubVista("gasto")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Gasto</button>
@@ -341,7 +379,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           revisar={()=>revisarCaja(borrarCaja)}
           borrar={()=>ejecutarBorradoCaja(borrarCaja)}
           onCancelar={()=>setBorrarCaja(null)}
-          onBorrado={()=>{setBorrarCaja(null);fetchCajas();}}
+          onBorrado={()=>{setBorrarCaja(null);setCajaActiva(null);setSubVista("lista");fetchCajas();}}
         />
       )}
 
@@ -387,7 +425,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid var(--border)"}}>
           <div style={{display:"grid",gap:14}}>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Obra</label>
-              <select value={nuevaCajaForm.obra_id} onChange={e=>{const o=obras.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,obra_id:e.target.value,proyecto_nombre:o?.nombre||p.proyecto_nombre}));}} style={iS}>
+              <select value={nuevaCajaForm.obra_id} onChange={e=>{const o=obras.find(x=>x.id===Number(e.target.value));setNuevaCajaForm(p=>({...p,obra_id:e.target.value,capitulo:"",proyecto_nombre:o?.nombre||p.proyecto_nombre}));}} style={iS}>
                 <option value="">Sin obra — gastos generales</option>
                 {obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}
               </select>
@@ -395,7 +433,38 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                 {nuevaCajaForm.obra_id
                   ? "Los gastos entran al control de esa obra y se asignan a sus rubros."
                   : "Para gastos que no son de una obra (movilización, oficina, etc.). No entran al control de obra."}
-              </div></div>
+              </div>
+            </div>
+
+            {/* Una caja se abre para algo: la del conductor que compra
+                albañilería, la del residente para acabados. Decirlo una vez acá
+                es que los treinta gastos del mes nazcan ya clasificados, en vez
+                de clasificarlos de a uno y descubrir a fin de mes que faltan. */}
+            {nuevaCajaForm.obra_id && (
+              <div>
+                <label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>¿Contra qué se gasta?</label>
+                {agrupacionesDeObra.length > 0 ? (
+                  <select value={nuevaCajaForm.obra_actividad_id||""}
+                    onChange={e=>{
+                      const a = agrupacionesDeObra.find(x=>String(x.id)===e.target.value);
+                      setNuevaCajaForm(p=>({...p, obra_actividad_id:e.target.value, capitulo:a?.nombre||""}));
+                    }} style={iS}>
+                    <option value="">Sin fijar — se elige en cada gasto</option>
+                    {agrupacionesDeObra.map(a=><option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
+                  </select>
+                ) : (
+                  <select value={nuevaCajaForm.capitulo||""} onChange={e=>setNuevaCajaForm(p=>({...p,capitulo:e.target.value}))} style={iS}>
+                    <option value="">Sin fijar — se elige en cada gasto</option>
+                    {capitulosDeObra.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+                <div style={{fontSize:10.5,color:"var(--muted)",marginTop:3,lineHeight:1.5}}>
+                  {agrupacionesDeObra.length > 0
+                    ? "Cada gasto de esta caja nace apuntado acá, y se puede cambiar gasto por gasto."
+                    : "Esta obra todavía no tiene agrupaciones armadas, así que esto queda de referencia: el gasto se asigna a mano."}
+                </div>
+              </div>
+            )}
 
             {!nuevaCajaForm.obra_id&&(
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Nombre de la caja *</label>

@@ -346,6 +346,24 @@ const ETIQUETA_FILTRO = { vencidas: "Vencidas", hoy: "Para hoy", urgentes: "Urge
 const VACIO = 'Nada pendiente. Toca "+ Nueva tarea" o dile a NOVA.';
 
 const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
+  // Quien no entra al Tablero —un conductor, que solo rinde su caja— no puede
+  // quedarse mirando una pantalla que no le toca: se lo lleva al primer módulo
+  // que sí tenga. Sin esto, abrir FOREMAN era abrir una pantalla vacía.
+  const primeraVista = () => {
+    const puertas = [
+      ["tareas", "tareas.ver"], ["leads", null], ["presupuestos", "presupuestos.ver"],
+      ["controlObra", "controlObra.ver"], ["libro", "libro.ver"],
+      ["compras", "compras.ver"], ["cajaChica", "cajaChica.ver"],
+    ];
+    for (const [v, permiso] of puertas) {
+      if (v === "leads" ? verPipeline : puede(permiso)) return v;
+    }
+    return "tareas";
+  };
+  useEffect(() => {
+    if (vista === "tareas" && !puede("tareas.ver")) setVista(primeraVista());
+  }, [vista, permisos, permisosUsuario, usuario?.id, verPipeline]);
+
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
   const proyectosElegibles = veTodo ? projects : projects.filter(p => (p.miembros || []).includes(usuario.id));
@@ -504,7 +522,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
         <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} verPipeline={verPipeline} />
 
         <div className="app-content" style={{ flex: 1, overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
-          {vista === "tareas" && (
+          {puede("tareas.ver") && vista === "tareas" && (
             <>
               {/* Lo primero de la pantalla y para todos los roles: antes las
                   herramientas de NOVA se comían el tope y una tarea vencida

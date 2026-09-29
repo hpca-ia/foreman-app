@@ -13,6 +13,7 @@ export const GRUPOS_PERMISOS = [
   {
     titulo: "A qué módulos entra",
     permisos: [
+      { id: "tareas.ver", label: "Tablero", nota: "Sus tareas, reuniones y gestiones. Apagado, la persona entra directo al primer módulo que sí tenga: es lo que hace falta para alguien que solo rinde caja chica" },
       { id: "presupuestos.ver", label: "Presupuestos", nota: "Solo los de sus proyectos, con el nivel que le hayas dado en cada uno" },
       { id: "controlObra.ver", label: "Control de Obra", nota: "Solo las obras de sus proyectos" },
       { id: "cajaChica.ver", label: "Caja Chica" },
@@ -52,13 +53,13 @@ export const TODOS_LOS_PERMISOS = GRUPOS_PERMISOS.flatMap(g => g.permisos);
 
 // El Director no aparece acá: siempre puede todo, por código. Si sus permisos
 // fueran editables, un error de edición lo dejaría fuera de su propia app.
-export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitecto_jr", "residente"];
+export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitecto_jr", "residente", "conductor"];
 
 // Se usa mientras la tabla carga, y para sembrar permisos nuevos que todavía
 // no existan en la base.
 export const POR_DEFECTO = {
   assistant: {
-    "libro.ver": true,
+    "tareas.ver": true, "libro.ver": true,
     "compras.ver": true, "compras.gestionar": true,
     "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
@@ -69,7 +70,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   gerente: {
-    "libro.ver": true,
+    "tareas.ver": true, "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
@@ -83,7 +84,7 @@ export const POR_DEFECTO = {
   // presupuesto. Del pipeline ve solo los proyectos que le tocan, no todo lo
   // comercial. Todo esto se puede cambiar en Ajustes.
   arquitecto: {
-    "libro.ver": true,
+    "tareas.ver": true, "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
@@ -95,7 +96,7 @@ export const POR_DEFECTO = {
   },
   // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros.
   arquitecto_jr: {
-    "libro.ver": false,
+    "tareas.ver": true, "libro.ver": false,
     "compras.ver": false, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
@@ -105,11 +106,25 @@ export const POR_DEFECTO = {
     "ajustes.ver": false,
     "borrar.definitivo": false,
   },
+  // El conductor entra a una sola pantalla: su caja chica. Rinde lo que
+  // gastó, sube la factura y nada más. Todo lo demás en falso a propósito —es
+  // más fácil prenderle algo después que descubrir que veía de más.
+  conductor: {
+    "tareas.ver": false, "libro.ver": false,
+    "compras.ver": false, "compras.gestionar": false,
+    "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "presupuestos.ver": false, "presupuestos.crear": false,
+    "controlObra.ver": false, "obras.crear": false,
+    "facturas.registrar": false, "planillas.cerrar": false,
+    "cajaChica.ver": true, "leads.ver": false, "leads.editar": false,
+    "ajustes.ver": false,
+    "borrar.definitivo": false,
+  },
   // El residente vive en la obra: escribe el libro, registra las facturas y
   // pide materiales. El presupuesto de su obra lo consulta y no lo mueve —eso
   // se le da proyecto por proyecto, en Ajustes → Proyectos.
   residente: {
-    "libro.ver": true,
+    "tareas.ver": true, "libro.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
