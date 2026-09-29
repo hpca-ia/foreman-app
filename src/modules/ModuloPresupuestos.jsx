@@ -100,6 +100,11 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const puedeEditar = esAdmin(currentUser.role)
     || (presupuestoActivo?.lead_id ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
   const sinAcceso = !!presupuestoActivo?.lead_id && !nivelDelActivo;
+  // La base de rubros es el activo de la oficina: los precios con los que se
+  // cotiza todo. Entra quien puede editar presupuestos —el que solo los lee no
+  // tiene nada que hacer ahí, y lo que toque ahí sale en todos los que vengan.
+  const puedeBD = esAdmin(currentUser.role) || (puede ? puede("presupuestos.crear") : true)
+    || presupuestos.some(p => p.lead_id && nivelProyecto(p.lead_id) === "editar");
   const [cambiandoProyecto, setCambiandoProyecto] = useState(false);
   const proyectoDelActivo = proyectos.find(x => x.id === presupuestoActivo?.lead_id) || null;
 
@@ -797,9 +802,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>setSubVista("lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&<>
-            <button onClick={()=>setSubVista("baseDatos")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>
-            <button onClick={()=>setSubVista("alimentarBD")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Alimentar BD</button>
-            <button onClick={()=>setShowAdminBD(true)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Admin BD</button>
+            {puedeBD&&<button onClick={()=>setSubVista("baseDatos")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Base de rubros</button>}
+            {puedeBD&&<button onClick={()=>setSubVista("alimentarBD")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Alimentar BD</button>}
+            {puedeBD&&<button onClick={()=>setShowAdminBD(true)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>Admin BD</button>}
             {puedeEditar&&<button onClick={()=>setSubVista("importar")} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Desde Excel</button>}
             {puedeEditar&&<button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>}
           </>}
@@ -819,7 +824,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         </div>
       </div>
 
-      {showAdminBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
+      {showAdminBD&&puedeBD&&<AdminBD onVolver={()=>setShowAdminBD(false)} currentUser={currentUser}/>}
       {pasarABase&&presupuestoActivo&&<PasarABase presupuesto={presupuestoActivo} items={items} onCerrar={()=>setPasarABase(false)}
         onHecho={t=>{setPresupuestoActivo(p=>({...p,en_base_at:t}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,en_base_at:t}:p));}}/>}
       {eligiendoPrecio&&<PreciosDeRubro item={items.find(i=>i.id===eligiendoPrecio.id)||eligiendoPrecio} base={baseRubros}
@@ -1370,10 +1375,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       )}
 
       {/* BASE DE RUBROS */}
-      {subVista==="baseDatos"&&<BaseRubros puede={puede}/>}
+      {subVista==="baseDatos"&&puedeBD&&<BaseRubros puede={puede}/>}
 
       {/* ALIMENTAR BD */}
-      {subVista==="alimentarBD"&&(
+      {subVista==="alimentarBD"&&puedeBD&&(
         <div>
           <div style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:12,padding:18,marginBottom:16}}>
             <div style={{fontSize:14,fontWeight:600,color:"var(--brand)",marginBottom:6}}>🤖 NOVA — Alimentar base de datos</div>
