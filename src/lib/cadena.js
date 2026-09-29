@@ -40,9 +40,10 @@ const noExiste = e => /relation|column|does not exist|schema cache/i.test(e?.mes
  * Es barato y se puede correr cada vez que se abre la app.
  */
 export async function repararCadena() {
-  const [{ data: obras, error: eo }, { data: presupuestos, error: ep }] = await Promise.all([
+  const [{ data: obras, error: eo }, { data: presupuestos, error: ep }, { data: cajas }] = await Promise.all([
     supabase.from("obras").select("id,nombre,lead_id,presupuesto_id"),
     supabase.from("presupuestos").select("id,nombre,lead_id,archivado_at"),
+    supabase.from("cajas_chicas").select("id,proyecto_nombre,lead_id,obra_id"),
   ]);
   if (eo || ep) return { arreglados: 0, sueltos: [], sinColumnas: noExiste(eo) || noExiste(ep) };
 
@@ -68,10 +69,21 @@ export async function repararCadena() {
     if (!error) { p.lead_id = lead; arreglados++; }
   }
 
+  // Y la caja chica, el de su obra: la plata de la obra es de la obra.
+  const obraPorId = new Map((obras || []).map(o => [o.id, o]));
+  for (const c of cajas || []) {
+    if (c.lead_id || !c.obra_id) continue;
+    const lead = obraPorId.get(c.obra_id)?.lead_id;
+    if (!lead) continue;
+    const { error } = await supabase.from("cajas_chicas").update({ lead_id: lead }).eq("id", c.id);
+    if (!error) { c.lead_id = lead; arreglados++; }
+  }
+
   // Lo que sigue sin proyecto: nadie puede deducirlo, hay que elegirlo.
   const sueltos = [
     ...(presupuestos || []).filter(p => !p.lead_id && !p.archivado_at).map(p => ({ tipo: "presupuesto", id: p.id, nombre: p.nombre })),
     ...(obras || []).filter(o => !o.lead_id).map(o => ({ tipo: "obra", id: o.id, nombre: o.nombre })),
+    ...(cajas || []).filter(c => !c.lead_id).map(c => ({ tipo: "caja chica", id: c.id, nombre: c.proyecto_nombre || `Caja #${c.id}` })),
   ];
   return { arreglados, sueltos, sinColumnas: false };
 }
@@ -81,11 +93,16 @@ export async function engancharAlProyecto(cosa, leadId) {
   const id = leadId ? Number(leadId) : null;
   if (cosa.tipo === "presupuesto") {
     await supabase.from("presupuestos").update({ lead_id: id }).eq("id", cosa.id);
-    // Su obra va con él: son el mismo trabajo.
+    // Su obra —y la caja de esa obra— van con él: son el mismo trabajo.
+    const { data: obras } = await supabase.from("obras").select("id").eq("presupuesto_id", cosa.id);
     await supabase.from("obras").update({ lead_id: id }).eq("presupuesto_id", cosa.id);
-  } else {
+    for (const o of obras || []) await supabase.from("cajas_chicas").update({ lead_id: id }).eq("obra_id", o.id);
+  } else if (cosa.tipo === "obra") {
     const { data: obra } = await supabase.from("obras").select("presupuesto_id").eq("id", cosa.id).maybeSingle();
     await supabase.from("obras").update({ lead_id: id }).eq("id", cosa.id);
+    await supabase.from("cajas_chicas").update({ lead_id: id }).eq("obra_id", cosa.id);
     if (obra?.presupuesto_id) await supabase.from("presupuestos").update({ lead_id: id }).eq("id", obra.presupuesto_id);
+  } else {
+    await supabase.from("cajas_chicas").update({ lead_id: id }).eq("id", cosa.id);
   }
 }

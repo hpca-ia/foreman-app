@@ -44,12 +44,13 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
   const [guardando, setGuardando] = useState(null);
   const [presupuestos, setPresupuestos] = useState([]);
   const [obras, setObras] = useState([]);
+  const [cajas, setCajas] = useState([]);
   const [uniendo, setUniendo] = useState(null);
   const [renombrando, setRenombrando] = useState(null);
   const [sinCadena, setSinCadena] = useState([]);
 
   const cargar = useCallback(async () => {
-    const [{ data: ls }, { data: as }, { data: ps }, { data: os }] = await Promise.all([
+    const [{ data: ls }, { data: as }, { data: ps }, { data: os }, { data: cs }] = await Promise.all([
       supabase.from("leads").select("*").order("nombre"),
       supabase.from("lead_accesos").select("*"),
       // Los presupuestos, para poder decir cuál cuelga de cada proyecto. Dar
@@ -57,9 +58,11 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
       // al proyecto, y eso hay que verlo acá, no descubrirlo por un reclamo.
       supabase.from("presupuestos").select("id,nombre,lead_id,archivado_at").order("created_at", { ascending: false }),
       supabase.from("obras").select("id,nombre,lead_id,presupuesto_id"),
+      supabase.from("cajas_chicas").select("id,proyecto_nombre,lead_id,responsable_id"),
     ]);
     setPresupuestos(ps || []);
     setObras(os || []);
+    setCajas(cs || []);
     // Reengancha lo que se puede deducir —la obra toma el proyecto de su
     // presupuesto y al revés— y devuelve lo que nadie puede adivinar.
     const { sueltos: quedan, arreglados } = await repararCadena();
@@ -238,7 +241,7 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
         onUnir={unir} uniendo={uniendo} />
 
       <QueVeEstaPersona users={users} leads={leads} accesos={accesos} presupuestos={presupuestos}
-        obras={obras} permisos={permisos} permisosUsuario={permisosUsuario} />
+        obras={obras} cajas={cajas} permisos={permisos} permisosUsuario={permisosUsuario} />
 
       {[
         [proyectos, "PROYECTOS", "Contratados o en obra. Acá hay presupuesto que respetar, obra que controlar y libro que escribir."],

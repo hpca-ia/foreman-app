@@ -8,7 +8,7 @@ import { cargarPermisos, cargarPermisosUsuario, crearPuede } from "./lib/permiso
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
-import { nivelDeAcceso } from "./lib/acceso";
+import { nivelDeAcceso, veLaTarea } from "./lib/acceso";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
@@ -422,11 +422,20 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Mía es también la que me sumaron como acompañante: si la puedo mover, la
   // tengo que ver.
   const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
-  const puedoVerEseProyecto = proyectoElegido && mios.some(p => p.clave === proyectoElegido.clave);
-  let visibles = veTodo
-    ? tareas.filter(t => !t.privada || admin || esMia(t))
-    : tareas.filter(t => esMia(t) || (puedoVerEseProyecto && !t.privada
-        && (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id)));
+  // El nivel de esta persona en el proyecto de una tarea. Las de los proyectos
+  // viejos de Ajustes se resuelven por sus miembros, mientras convivan.
+  const nivelDeTarea = t => {
+    if (t.lead_id) return nivelEn(t.lead_id, "proyecto");
+    if (!t.project_id) return null;
+    if (entraATodo) return "editar";
+    return (projects.find(p => p.id === t.project_id)?.miembros || []).includes(usuario.id) ? "editar" : null;
+  };
+  // Una sola regla, la misma de todo FOREMAN: es tuya, o entrás a su proyecto.
+  // Antes había que acordarse de filtrar por proyecto para ver lo del equipo.
+  let visibles = tareas.filter(t => veLaTarea({
+    tarea: t, usuarioId: usuario.id, admin, todas: veTodo, nivel: nivelDeTarea(t),
+    acompanante: (acompanantes.get(t.id) || []).includes(usuario.id),
+  }));
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -599,7 +608,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloLeads currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIrAObra={() => setVista("controlObra")} />
             )}
             {puede("cajaChica.ver") && vista === "cajaChica" && (
-              <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} />
+              <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {puede("compras.ver") && vista === "compras" && (
               <ModuloCompras currentUser={usuario} puede={puede} users={users} />

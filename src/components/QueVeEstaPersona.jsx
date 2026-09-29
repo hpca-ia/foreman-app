@@ -17,9 +17,13 @@ const PUERTA = {
   presupuesto: ["presupuestos.ver", "Presupuestos"],
   obra: ["controlObra.ver", "Control de Obra"],
   libro: ["libro.ver", "Libro de Obra"],
+  // La caja chica es plata de la obra: sigue al área "Control de obra" del
+  // proyecto, pero tiene su propia puerta de módulo.
+  caja: ["cajaChica.ver", "Caja Chica"],
 };
+const AREA_DEL = { presupuesto: "presupuesto", obra: "obra", libro: "libro", caja: "obra" };
 
-export default function QueVeEstaPersona({ users = [], leads = [], accesos = {}, presupuestos = [], obras = [], permisos = {}, permisosUsuario = {} }) {
+export default function QueVeEstaPersona({ users = [], leads = [], accesos = {}, presupuestos = [], obras = [], cajas = [], permisos = {}, permisosUsuario = {} }) {
   const [quien, setQuien] = useState("");
   const u = users.find(x => String(x.id) === quien);
 
@@ -40,7 +44,7 @@ export default function QueVeEstaPersona({ users = [], leads = [], accesos = {},
     if (!tienePermiso(permisoId)) return { ve: false, porque: `su rol no le abre ${pantalla}`, arreglo: `Prendele ${pantalla} en Ajustes → Permisos.` };
     if (entraATodo) return { ve: true, nivel: "editar", porque: "entra a todos los proyectos" };
     if (!leadId) return { ve: false, porque: "no está enlazado a ningún proyecto", arreglo: "Enlazalo a su proyecto acá abajo, en la ficha del proyecto." };
-    const nivel = nivelDeArea(accesos[leadId]?.[u.id], area);
+    const nivel = nivelDeArea(accesos[leadId]?.[u.id], AREA_DEL[area] || area);
     if (!nivel) {
       const enElProyecto = accesos[leadId]?.[u.id];
       return {
@@ -55,6 +59,12 @@ export default function QueVeEstaPersona({ users = [], leads = [], accesos = {},
   const filas = u ? [
     ...presupuestos.filter(p => !p.archivado_at).map(p => ({ tipo: "Presupuesto", nombre: p.nombre, ...veredicto(p.lead_id, "presupuesto") })),
     ...obras.map(o => ({ tipo: "Obra", nombre: o.nombre, ...veredicto(o.lead_id, "obra") })),
+    ...cajas.map(c => ({
+      tipo: "Caja chica", nombre: c.proyecto_nombre || `Caja #${c.id}`,
+      ...(c.responsable_id === u.id
+        ? { ve: true, nivel: "editar", porque: "es su caja: él rinde esa plata" }
+        : veredicto(c.lead_id, "caja")),
+    })),
     ...leads.filter(esProyecto).map(l => ({ tipo: "Libro", nombre: l.nombre, ...veredicto(l.id, "libro") })),
   ] : [];
   const ve = filas.filter(f => f.ve);

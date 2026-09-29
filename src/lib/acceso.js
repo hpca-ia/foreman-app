@@ -66,3 +66,25 @@ export function filaDeAcceso(acceso, area, valor) {
 /** Las cuatro en "no" no son una fila: son no estar en el proyecto. */
 export const sinNingunAcceso = acceso =>
   AREAS_PROYECTO.every(a => ((acceso || {})[a.campo] || "no") === "no");
+
+/**
+ * ¿Esta persona ve esta tarea?
+ *
+ * La misma regla que todo lo demás, dicha para una tarea: es tuya, o entrás a
+ * su proyecto. Nada de "solo las mías salvo que además elija el proyecto en un
+ * filtro", que era lo que hacía que una tarea del proyecto de uno no
+ * apareciera hasta acordarse de filtrar.
+ *
+ *   mia    · sos el responsable, la creaste, o te sumaron de acompañante
+ *   todas  · el permiso "Las tareas de todos"
+ *   nivel  · tu nivel en el proyecto de la tarea (null si no entrás, o si la
+ *            tarea no cuelga de ningún proyecto)
+ *
+ * Lo privado es privado: solo el dueño y los admins, y ahí el proyecto no
+ * abre nada.
+ */
+export function veLaTarea({ tarea, usuarioId, admin = false, todas = false, nivel = null, acompanante = false }) {
+  const mia = tarea?.assignee_id === usuarioId || tarea?.created_by === usuarioId || acompanante;
+  if (tarea?.privada) return admin || mia;
+  return mia || todas || !!nivel;
+}

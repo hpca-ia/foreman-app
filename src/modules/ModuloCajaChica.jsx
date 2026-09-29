@@ -11,7 +11,7 @@ import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 
-export default function ModuloCajaChica({ currentUser, puede, projects, users }) {
+export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
   const [borrarCaja, setBorrarCaja] = useState(null);
   const [cajas, setCajas] = useState([]);
@@ -34,6 +34,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
   const [rubrosGasto, setRubrosGasto] = useState([]);   // [{obra_actividad_id, monto}]
   const fileRef = useRef(null);
   const admin = esAdmin(currentUser.role);
+  // Se vuelven a filtrar al pintar: los accesos llegan después que las cajas,
+  // y si no la primera vuelta deja la pantalla vacía.
+  const cajasVisibles = cajas.filter(c => c.responsable_id === currentUser.id || admin || entraATodo
+    || (c.lead_id ? !!nivelObra(c.lead_id) : gerente));
   const gerente = puedeControlObra(currentUser.role);
   const fmt = n => (Number(n)||0).toLocaleString("es-EC",{minimumFractionDigits:2,maximumFractionDigits:2});
   const iS = {width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
@@ -46,10 +50,17 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
     if (error) ({ data } = await supabase.from("obras").select("id,nombre").eq("estado","activa").order("created_at",{ascending:false}));
     setObras(data||[]);
   }
+  // Qué cajas ve esta persona.
+  //
+  // Antes era una regla propia de esta pantalla —admin o gerente ven todas, el
+  // resto solo la suya— y por eso la caja de un proyecto no le aparecía a
+  // alguien que sí entraba al proyecto. Ahora es la misma regla que el resto
+  // de FOREMAN: la caja cuelga de un proyecto y se ve si entrás a su control
+  // de obra. La tuya, siempre: sos quien rinde cuentas de esa plata.
   async function fetchCajas() {
-    let q = supabase.from("cajas_chicas").select("*").order("created_at",{ascending:false});
-    if (!admin && !gerente) q = q.eq("responsable_id", currentUser.id);
-    const { data } = await q; setCajas(data||[]);
+    const { data } = await supabase.from("cajas_chicas").select("*").order("created_at",{ascending:false});
+    setCajas((data||[]).filter(c => c.responsable_id === currentUser.id || admin || entraATodo
+      || (c.lead_id ? !!nivelObra(c.lead_id) : gerente)));
   }
   async function fetchGastos(id) { const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setGastos(data||[]); }
   async function fetchAnticipos(id) { const { data } = await supabase.from("cajas_anticipos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setAnticipos(data||[]); }
@@ -336,8 +347,14 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users })
 
       {subVista==="lista"&&(
         <div>
-          {cajas.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)"}}><div style={{fontSize:40,marginBottom:12}}>💰</div>Sin cajas chicas.</div>
-          :cajas.map(c=>(
+          {cajasVisibles.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)",fontSize:13,lineHeight:1.6}}>
+            <div style={{fontSize:40,marginBottom:12}}>💰</div>
+            {cajas.length>0
+              ? <>Hay cajas chicas, pero ninguna es tuya ni de tus proyectos.<br/>
+                  <span style={{fontSize:12}}>En Ajustes → Proyectos, “¿Qué ve esta persona?” dice por qué.</span></>
+              : "Sin cajas chicas."}
+          </div>
+          :cajasVisibles.map(c=>(
             <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);setSubVista("detalle");}}
               style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer"}}
               onMouseEnter={e=>e.currentTarget.style.borderColor="var(--brand)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
