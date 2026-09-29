@@ -10,7 +10,7 @@ import {
   borrarOrden, agregarLinea, borrarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
 } from "./ordenesDeCambio";
-import { pdfDeOrden } from "./pdfOrdenCambio";
+import { pdfDeOrden, pdfConsolidado } from "./pdfOrdenCambio";
 
 // Las órdenes de cambio de una obra.
 //
@@ -37,6 +37,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [enlaces, setEnlaces] = useState({});
   const [subiendo, setSubiendo] = useState(false);
   const [bajando, setBajando] = useState(null);
+  const [consolidando, setConsolidando] = useState(false);
   const camRef = useRef(null);
   const [sinTablas, setSinTablas] = useState(false);
   const [abierta, setAbierta] = useState(null);
@@ -73,6 +74,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     base: rubros.filter(r => r.origen !== "orden_cambio").reduce((s, r) => s + (Number(r.total_base) || 0), 0),
     adicionales: rubros.filter(r => r.origen === "orden_cambio").reduce((s, r) => s + (Number(r.total_base) || 0), 0),
   };
+  // Lo que de verdad cuenta contra el contrato: aprobado y no anulado. Una
+  // orden enviada todavía se está discutiendo, y una anulada no pasó nunca.
+  const totalVigente = ordenes
+    .filter(o => !o.anulada && o.estado === "aprobada")
+    .reduce((t, o) => t + subtotales(lineas[o.id] || []).total, 0);
 
   async function hacer(fn) {
     setOcupado(true); setAviso("");
@@ -113,6 +119,45 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           </Button>
         )}
       </div>
+
+      {/* El consolidado, siempre a mano: es el documento que se entrega, y sus
+          números son los que se citan en cualquier conversación de obra. */}
+      {ordenes.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, background: colors.bg, borderRadius: colors.radiusMd,
+          padding: "9px 12px", margin: "8px 0", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", flex: 1, minWidth: 200 }}>
+            {[["Órdenes", ordenes.length],
+              ["Aprobadas", ordenes.filter(o => o.estado === "aprobada" && !o.anulada).length],
+              ["Ejecutadas", ordenes.filter(o => o.ejecucion === "ejecutado" && !o.anulada).length],
+              ["Anuladas", ordenes.filter(o => o.anulada).length]].map(([k, v]) => (
+              <div key={k}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{k.toUpperCase()}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink }}>{v}</div>
+              </div>
+            ))}
+            <div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>VIGENTE</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: totalVigente < 0 ? colors.danger : colors.brand }}>
+                {totalVigente < 0 ? "−" : "+"}${fmt(Math.abs(totalVigente))}
+              </div>
+            </div>
+          </div>
+          <Button variant="primary" size="sm" disabled={consolidando}
+            onClick={async () => {
+              setConsolidando(true); setAviso("");
+              try {
+                const doc = await pdfConsolidado({
+                  ordenes, lineasPorOrden: lineas, fotosPorOrden: fotos, enlaces,
+                  obra, proyecto, resumenContrato: resumen, subtotalesDe: subtotales, codigoDe,
+                });
+                doc.save(`Órdenes de cambio - ${proyecto || obra.nombre}.pdf`);
+              } catch (e) { setAviso("No se pudo armar el consolidado: " + e.message); }
+              setConsolidando(false);
+            }}>
+            <FileText size={13} /> {consolidando ? "Armando…" : "Consolidado en PDF"}
+          </Button>
+        </div>
+      )}
 
       {aviso && <div style={{ fontSize: 12, color: colors.danger, margin: "8px 0" }}>{aviso}</div>}
 
