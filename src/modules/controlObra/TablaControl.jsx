@@ -3,7 +3,7 @@ import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { fmt } from "./calculos";
 
-const COLS = "minmax(200px,3fr) 60px 70px repeat(5, minmax(90px,1fr)) 64px";
+const COLS = "minmax(200px,3fr) 60px 70px repeat(6, minmax(90px,1fr)) 64px";
 
 function pctColor(pct, saldo) {
   if (saldo < 0) return colors.danger;
@@ -11,7 +11,7 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
-function FilaRubro({ rubro: r, porRubro, sangria }) {
+function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
   const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: Number(r.total_base) || 0, pct: 0 };
   return (
     <div className="tabla-row"
@@ -27,13 +27,16 @@ function FilaRubro({ rubro: r, porRubro, sangria }) {
       <span style={{ textAlign: "right", color: colors.ink }} title={acc.estimado ? "Repartido desde una agrupación a prorrata del presupuesto — no es un monto de factura" : undefined}>
         {acc.estimado && <span style={{ color: colors.muted, marginRight: 2 }}>~</span>}${fmt(acc.acumulado)}
       </span>
+      <span style={{ textAlign: "right", color: comprometido ? colors.warning : colors.muted, fontSize: 11 }}>
+        {comprometido ? `$${fmt(comprometido)}` : ""}
+      </span>
       <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
       <span style={{ textAlign: "right", fontWeight: 600, color: pctColor(acc.pct, acc.saldo) }}>{(acc.pct * 100).toFixed(0)}%</span>
     </div>
   );
 }
 
-export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo" }) {
+export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null }) {
   // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
   // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
   const [cerrados, setCerrados] = useState(() => new Set());
@@ -64,12 +67,18 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             <span style={{ textAlign: "right" }}>ACUM. ANT.</span>
             <span style={{ textAlign: "right" }}>ESTE PERÍODO</span>
             <span style={{ textAlign: "right" }}>INVERTIDO</span>
+            {/* Lo pedido y todavía no facturado. Un capítulo al 80% con otro
+                20% comprometido ya está gastado, aunque el papel no llegue. */}
+            <span style={{ textAlign: "right" }} title="Solicitudes de compra vivas y sin factura: plata ya comprometida contra este capítulo">COMPROMETIDO</span>
             <span style={{ textAlign: "right" }}>SALDO</span>
             <span style={{ textAlign: "right" }}>AVANCE</span>
           </div>
 
           {grupos.map(g => {
             const abierto = !cerrados.has(g.clave || g.capitulo);
+            // Lo comprometido llega por capítulo; en modo agrupación no aplica.
+            const pedido = comprometido?.porCapitulo?.[g.capitulo] || 0;
+            const libre = g.saldo - pedido;
             return (
               <div key={g.clave || g.capitulo}>
                 {/* Capítulo o actividad */}
@@ -92,11 +101,16 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <span style={{ textAlign: "right" }}>${fmt(g.anterior)}</span>
                   <span style={{ textAlign: "right" }}>${fmt(g.periodo)}</span>
                   <span style={{ textAlign: "right" }}>${fmt(g.acumulado)}</span>
-                  <span style={{ textAlign: "right", color: g.saldo < 0 ? colors.danger : colors.brand }}>${fmt(g.saldo)}</span>
+                  <span style={{ textAlign: "right", color: pedido ? colors.warning : colors.muted }}>{pedido ? `$${fmt(pedido)}` : "—"}</span>
+                  <span style={{ textAlign: "right", color: libre < 0 ? colors.danger : colors.brand }}
+                    title={pedido ? `Quedan $${fmt(g.saldo)} sin contar lo comprometido; contándolo, $${fmt(libre)}` : undefined}>
+                    ${fmt(g.saldo)}
+                  </span>
                   <span style={{ textAlign: "right" }}>{(g.pct * 100).toFixed(0)}%</span>
                 </div>
 
-                {abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14} />)}
+                {abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14}
+                  comprometido={comprometido?.porRubro?.[r.id] || 0} />)}
               </div>
             );
           })}
@@ -109,6 +123,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             <span style={{ textAlign: "right" }}>${fmt(totales.anterior)}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.periodo)}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.acumulado)}</span>
+            <span style={{ textAlign: "right" }}>{comprometido?.total ? `$${fmt(comprometido.total)}` : "—"}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.saldo)}</span>
             <span style={{ textAlign: "right" }}>{(totales.pct * 100).toFixed(1)}%</span>
           </div>

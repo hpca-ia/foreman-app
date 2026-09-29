@@ -6,7 +6,7 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
-import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe } from "./compras";
+import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto } from "./compras";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -23,6 +23,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const editando = !!solicitud;
   const [form, setForm] = useState(solicitud ? { ...solicitud } : {
     lead_id: proyectos[0]?.id || "", descripcion: "", justificacion: "", necesita_para: "", urgente: false,
+    capitulo: "", obra_rubro_id: "", monto_estimado: "",
   });
   const [historial, setHistorial] = useState([]);
   const [comentario, setComentario] = useState("");
@@ -39,6 +40,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   useEffect(() => { if (solicitud?.id) historialDe(solicitud.id).then(setHistorial); }, [solicitud?.id]);
 
   const inp = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  // Los rubros de la obra de este proyecto: contra qué se está pidiendo.
+  const [obra, setObra] = useState(null);
+  const [rubros, setRubros] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    if (!form.lead_id) { setObra(null); setRubros([]); return; }
+    rubrosDelProyecto(form.lead_id).then(r => { if (vivo) { setObra(r.obra); setRubros(r.rubros); } });
+    return () => { vivo = false; };
+  }, [form.lead_id]);
+  const capitulos = [...new Set(rubros.map(r => r.capitulo || "SIN CAPÍTULO"))];
+  const delCapitulo = rubros.filter(r => (r.capitulo || "SIN CAPÍTULO") === form.capitulo);
 
   async function hacer(fn) {
     setOcupado(true); setError("");
@@ -152,6 +165,45 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             placeholder="En qué se va a usar y por qué ahora" style={{ ...mini, resize: "vertical" }}
             disabled={editando && !esMia} />
         </div>
+
+        {/* Contra qué parte del presupuesto. Una solicitud sin capítulo es un
+            pedido suelto: no se puede saber cuánto más quieren gastar de algo
+            que ya va por la mitad. Apuntar acá no gasta nada todavía —queda
+            como comprometido— y al comprarse, la factura hace el gasto. */}
+        {obra && capitulos.length > 0 && (
+          <div style={{ display: "grid", gap: 8, background: colors.bg, borderRadius: 8, padding: "9px 10px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
+              CONTRA QUÉ DEL PRESUPUESTO
+            </div>
+            <div>
+              <label style={lbl}>CAPÍTULO</label>
+              <select value={form.capitulo || ""} disabled={editando && !esMia}
+                onChange={ev => setForm(p => ({ ...p, capitulo: ev.target.value, obra_rubro_id: "" }))} style={mini}>
+                <option value="">Elegí el capítulo…</option>
+                {capitulos.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            {form.capitulo && delCapitulo.length > 0 && (
+              <div>
+                <label style={lbl}>RUBRO (SI SE SABE CUÁL)</label>
+                <select value={form.obra_rubro_id || ""} disabled={editando && !esMia}
+                  onChange={ev => inp("obra_rubro_id", ev.target.value)} style={mini}>
+                  <option value="">Todo el capítulo</option>
+                  {delCapitulo.map(r => <option key={r.id} value={r.id}>{r.numero}. {r.descripcion}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <label style={lbl}>CUÁNTO SE ESTIMA (US$)</label>
+              <input type="number" step="0.01" min="0" value={form.monto_estimado ?? ""} disabled={editando && !esMia}
+                onChange={ev => inp("monto_estimado", ev.target.value)} placeholder="Lo que se cree que va a costar" style={mini} />
+              <div style={{ fontSize: 10, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
+                Es una estimación, no un gasto: queda como <strong>comprometido</strong> contra ese capítulo hasta que
+                se compre. La plata se descuenta de verdad cuando entra la factura.
+              </div>
+            </div>
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
           <div>

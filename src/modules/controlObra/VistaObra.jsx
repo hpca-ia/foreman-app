@@ -12,12 +12,29 @@ import PanelDuplicados from "./PanelDuplicados";
 import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import ExportarPlanilla from "./ExportarPlanilla";
+import PanelOrdenesCambio from "./PanelOrdenesCambio";
+import { comprometidoPorGrupo } from "./calculos";
 
 export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   // La obra no tiene nombre propio: se llama como su proyecto, y el
   // presupuesto del que salió va de detalle. Se leen ahora y no se copian, así
   // renombrar cualquiera de los dos se ve acá sin tocar nada más.
   const [cadena, setCadena] = useState({ proyecto: null, presupuesto: null });
+  // Las solicitudes de compra vivas de esta obra: lo que piden gastar y
+  // todavía no es factura. Se muestra al lado del invertido, no sumado: una
+  // cosa es lo que salió y otra lo que está por salir.
+  const [solicitudes, setSolicitudes] = useState([]);
+  useEffect(() => {
+    if (!obra.lead_id && !obra.id) return;
+    supabase.from("compras_solicitudes").select("*").eq("obra_id", obra.id)
+      .then(({ data, error }) => {
+        if (!error && data?.length) { setSolicitudes(data); return; }
+        // Una solicitud puede haberse cargado antes de que la obra existiera:
+        // ahí cuelga solo del proyecto.
+        if (obra.lead_id) supabase.from("compras_solicitudes").select("*").eq("lead_id", obra.lead_id)
+          .then(({ data: d2 }) => setSolicitudes(d2 || []));
+      });
+  }, [obra.id, obra.lead_id]);
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -77,6 +94,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
   const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: planillaActual?.numero ?? null });
   const grupos = agrupar(rubros, porRubro, agruparPor, actividades);
+  const comprometido = comprometidoPorGrupo(solicitudes, rubros);
   const totales = totalesObra(grupos);
 
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
@@ -115,6 +133,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
+        <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
         <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
@@ -139,7 +158,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
                   </span>
                 )}
               </div>
-              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} />
+              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} comprometido={comprometido} />
 
               {/* Lo que el Excel tenía en dos hojas y uno cruzaba a mano: arriba
                   en qué va cada rubro, abajo las facturas que lo movieron. */}
@@ -169,6 +188,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
           {tab === "facturas" && (
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar} />
+          )}
+          {tab === "ordenes" && (
+            <PanelOrdenesCambio obra={obra} proyecto={cadena.proyecto} rubros={rubros}
+              currentUser={currentUser} puede={puede} onCambio={cargar} />
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}

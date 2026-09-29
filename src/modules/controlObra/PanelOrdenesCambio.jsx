@@ -1,0 +1,454 @@
+import { useState, useEffect, useCallback, Fragment } from "react";
+import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw } from "lucide-react";
+import { supabase } from "../../lib/supabase";
+import { colors } from "../../theme/colors";
+import Button from "../../components/ui/Button";
+import { inputStyle } from "../../components/ui/Input";
+import { fmt } from "./calculos";
+import {
+  ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
+  borrarOrden, agregarLinea, borrarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
+} from "./ordenesDeCambio";
+
+// Las órdenes de cambio de una obra.
+//
+// El documento se arma acá y se manda desde acá: quien lo hace no tiene que
+// pasar por Word ni acordarse de adjuntar nada. Mientras está en borrador se
+// le agregan y quitan líneas; al mandarlo queda "enviada" y ya se puede citar
+// por su número; al aprobarse, y recién ahí, sus líneas entran al control.
+
+const LINEA_VACIA = { descripcion: "", especificacion: "", rubro_codigo: "", unidad: "", cantidad: 1, precio_unitario: "", tipo: "aumenta", capitulo: "", obra_rubro_id: "" };
+// Los tipos que la oficina ya usa en sus órdenes. Se puede escribir otro.
+const TIPOS = [
+  "Requerimiento cliente",
+  "Requerimiento contratista (vicio oculto)",
+  "Cambio de especificación",
+  "Mejora de diseño — aprobada por cliente",
+  "Req. cliente — Rediseño",
+  "Req. contratista — necesario para continuar los trabajos",
+];
+
+export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], currentUser, puede, onCambio }) {
+  const [ordenes, setOrdenes] = useState([]);
+  const [lineas, setLineas] = useState({});
+  const [sinTablas, setSinTablas] = useState(false);
+  const [abierta, setAbierta] = useState(null);
+  const [nueva, setNueva] = useState(null);       // { titulo, justificacion, solicitado_por }
+  const [linea, setLinea] = useState(LINEA_VACIA);
+  const [mandando, setMandando] = useState(null); // { orden, correos, cuerpo }
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const [invitados, setInvitados] = useState([]);
+
+  const puedeEditar = puede?.("obras.crear") !== false;
+
+  const cargar = useCallback(async () => {
+    const r = await cargarOrdenes(obra.id);
+    setSinTablas(r.sinTablas);
+    setOrdenes(r.ordenes);
+    setLineas(r.lineas);
+  }, [obra.id]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  // A quién se le manda: la gente del proyecto que ya está cargada.
+  useEffect(() => {
+    if (!obra.lead_id) return;
+    supabase.from("pipeline_invitados").select("*").eq("lead_id", obra.lead_id)
+      .then(({ data }) => setInvitados((data || []).filter(i => i.email)));
+  }, [obra.lead_id]);
+
+  const capitulos = [...new Set(rubros.map(r => r.capitulo || "SIN CAPÍTULO"))];
+
+  async function hacer(fn) {
+    setOcupado(true); setAviso("");
+    const err = await fn();
+    setOcupado(false);
+    if (typeof err === "string" && err) { setAviso(err); return false; }
+    await cargar(); onCambio?.();
+    return true;
+  }
+
+  if (sinTablas) {
+    return (
+      <div style={{ fontSize: 12.5, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 14 }}>
+        Falta correr la migración 056 en Supabase para usar las órdenes de cambio.
+      </div>
+    );
+  }
+
+  const chip = estado => {
+    const e = ESTADOS_ORDEN[estado] || ESTADOS_ORDEN.borrador;
+    const c = { muted: colors.muted, warning: colors.warning, success: colors.success, danger: colors.danger }[e.color];
+    return <span title={e.pista} style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: c, borderRadius: 10, padding: "2px 7px", letterSpacing: 0.3 }}>{e.label.toUpperCase()}</span>;
+  };
+
+  return (
+    <div style={{ fontFamily: colors.font }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Órdenes de cambio</div>
+          <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5 }}>
+            Adicionales y disminuciones acordados después del contrato. No tocan el presupuesto aprobado: se
+            aprueban aparte y entran al control como adicionales.
+          </div>
+        </div>
+        {puedeEditar && (
+          <Button variant="primary" size="sm" onClick={() => setNueva({ titulo: "", justificacion: "", tipo: "", lugar: "Quito", fecha: new Date().toISOString().split("T")[0] })}>
+            <Plus size={13} /> Nueva orden
+          </Button>
+        )}
+      </div>
+
+      {aviso && <div style={{ fontSize: 12, color: colors.danger, margin: "8px 0" }}>{aviso}</div>}
+
+      {/* Una orden nueva: lo mínimo para poder empezar a listar qué cambia. */}
+      {nueva && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 14, margin: "10px 0" }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <input value={nueva.titulo} onChange={e => setNueva(n => ({ ...n, titulo: e.target.value }))}
+              placeholder="Qué cambia. Ej: Cambio de porcelanato en planta baja" style={inputStyle} autoFocus />
+            <textarea value={nueva.justificacion} onChange={e => setNueva(n => ({ ...n, justificacion: e.target.value }))}
+              rows={2} placeholder="Por qué se pide y qué pasa si no se hace" style={{ ...inputStyle, resize: "vertical" }} />
+            <input list="tipos-oc" value={nueva.tipo} onChange={e => setNueva(n => ({ ...n, tipo: e.target.value }))}
+              placeholder="Tipo: requerimiento cliente, vicio oculto, cambio de especificación…" style={inputStyle} />
+            <datalist id="tipos-oc">{TIPOS.map(t => <option key={t} value={t} />)}</datalist>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <input type="date" value={nueva.fecha} onChange={e => setNueva(n => ({ ...n, fecha: e.target.value }))} style={inputStyle} />
+              <input value={nueva.lugar} onChange={e => setNueva(n => ({ ...n, lugar: e.target.value }))} placeholder="Lugar" style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+            <Button variant="primary" size="sm" disabled={ocupado || !nueva.titulo.trim()}
+              onClick={async () => {
+                const r = await crearOrden(obra.id, nueva, currentUser);
+                if (r.error) { setAviso(r.error); return; }
+                setNueva(null); setAbierta(r.orden.id); await cargar(); onCambio?.();
+              }}>Crear</Button>
+            <Button variant="secondary" size="sm" onClick={() => setNueva(null)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {!ordenes.length && !nueva && (
+        <div style={{ textAlign: "center", color: colors.muted, padding: "40px 20px", fontSize: 13, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, lineHeight: 1.6 }}>
+          <FileText size={26} style={{ marginBottom: 8 }} />
+          <div>Todavía no hay órdenes de cambio en esta obra.</div>
+          <div style={{ fontSize: 12 }}>Cuando el cliente pida un adicional o se saque algo, se documenta acá.</div>
+        </div>
+      )}
+
+      {ordenes.map(o => {
+        const suyas = lineas[o.id] || [];
+        const sub = subtotales(suyas);
+        const total = sub.total;
+        const esta = abierta === o.id;
+        const editable = puedeEditar && o.estado !== "aprobada";
+        return (
+          <div key={o.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 8 }}>
+            <div onClick={() => setAbierta(esta ? null : o.id)} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: colors.muted }}>{codigoDe(o)}</span>
+              <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, fontWeight: 600, color: colors.ink }}>{o.titulo}</span>
+              {chip(o.estado)}
+              <span style={{ fontSize: 14, fontWeight: 700, color: total < 0 ? colors.danger : colors.brand }}>
+                {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
+              </span>
+            </div>
+
+            {esta && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${colors.neutralSoft}` }}>
+                {o.anulada && (
+                  <div style={{ background: "#FEF2F2", color: colors.danger, fontSize: 11.5, fontWeight: 700,
+                    textAlign: "center", padding: "6px 8px", borderRadius: 6, marginBottom: 8 }}>
+                    ORDEN DE CAMBIO ANULADA — NO EJECUTADA
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>
+                  {[o.tipo, o.lugar, o.fecha && new Date(`${o.fecha}T12:00:00`).toLocaleDateString("es-EC"),
+                    o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
+                </div>
+
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
+                  CAPÍTULO I · ARGUMENTOS
+                </div>
+                <textarea defaultValue={o.justificacion || ""} readOnly={!editable} rows={2}
+                  onBlur={e => editable && e.target.value !== (o.justificacion || "") && hacer(() => guardarOrden(o.id, { justificacion: e.target.value }))}
+                  placeholder="Por qué se pide y qué pasa si no se hace"
+                  style={{ ...inputStyle, fontSize: 12.5, padding: "7px 9px", resize: "vertical", marginBottom: 8, width: "100%", boxSizing: "border-box" }} />
+
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
+                  CAPÍTULO II · ADICIONES Y REDUCCIONES
+                </div>
+
+                {/* Lo que cambia, línea por línea. */}
+                {suyas.length > 0 && (
+                  <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 520 }}>
+                      <thead>
+                        <tr style={{ background: colors.bg }}>
+                          {["Item", "Rubro", "Descripción", "Unid", "Cant", "P. unit", "Total", ""].map((h, i) => (
+                            <th key={h + i} style={{ textAlign: i >= 4 && i <= 6 ? "right" : i === 3 ? "center" : "left",
+                              padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700 }}>{h.toUpperCase()}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[["aumenta", "ADICIONES", sub.adiciones], ["quita", "REDUCCIONES", sub.reducciones]].map(([tipo, titulo, monto]) => (
+                          <Fragment key={tipo}>
+                            <tr><td colSpan={8} style={{ background: colors.neutralSoft, padding: "3px 6px", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: colors.inkSoft }}>{titulo}</td></tr>
+                            {suyas.filter(l => (tipo === "quita" ? l.tipo === "quita" : l.tipo !== "quita")).map(l => (
+                              <tr key={l.id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
+                                <td style={{ padding: "5px 6px", color: colors.muted, fontSize: 11, whiteSpace: "nowrap" }}>{l.item || ""}</td>
+                                <td style={{ padding: "5px 6px", color: colors.muted, fontSize: 11, whiteSpace: "nowrap" }}>{l.rubro_codigo || ""}</td>
+                                <td style={{ padding: "5px 6px", color: colors.ink }}>
+                                  {l.descripcion}
+                                  {l.especificacion && <div style={{ fontSize: 10, color: colors.muted }}>{l.especificacion}</div>}
+                                  {l.capitulo && <div style={{ fontSize: 10, color: colors.muted }}>{l.capitulo}</div>}
+                                </td>
+                                <td style={{ padding: "5px 6px", textAlign: "center", color: colors.muted }}>{l.unidad || ""}</td>
+                                <td style={{ padding: "5px 6px", textAlign: "right" }}>{fmt(l.cantidad)}</td>
+                                <td style={{ padding: "5px 6px", textAlign: "right" }}>{fmt(l.precio_unitario)}</td>
+                                <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>${fmt((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0))}</td>
+                                <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                  {editable && (
+                                    <button onClick={() => hacer(() => borrarLinea(l.id))} disabled={ocupado} title="Quitar esta línea"
+                                      style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 0 }}>
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr>
+                              <td colSpan={6} style={{ padding: "4px 6px", textAlign: "right", fontSize: 11, fontWeight: 700, color: colors.inkSoft }}>SUBTOTAL {titulo}</td>
+                              <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: 700 }}>${fmt(monto)}</td>
+                              <td />
+                            </tr>
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Agregar una línea: lo que se saca va con "Quita", y el signo
+                    lo pone el sistema. Escribir montos en negativo a mano es de
+                    donde salen las órdenes que no cuadran. */}
+                {editable && (
+                  <div style={{ background: colors.bg, borderRadius: 8, padding: 9, marginBottom: 8 }}>
+                    <div style={{ display: "flex", gap: 5, marginBottom: 6 }}>
+                      {[["aumenta", "Agrega al contrato"], ["quita", "Saca del contrato"]].map(([v, label]) => {
+                        const activo = linea.tipo === v;
+                        const c = v === "quita" ? colors.danger : colors.brand;
+                        return (
+                          <button key={v} onClick={() => setLinea(l => ({ ...l, tipo: v }))}
+                            style={{ border: `1px solid ${activo ? c : colors.border}`, background: activo ? c : "#fff", color: activo ? "#fff" : colors.inkSoft,
+                              borderRadius: 12, padding: "3px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <input value={linea.descripcion} onChange={e => setLinea(l => ({ ...l, descripcion: e.target.value }))}
+                        placeholder="Qué se agrega o se saca" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <input value={linea.especificacion} onChange={e => setLinea(l => ({ ...l, especificacion: e.target.value }))}
+                          placeholder="Especificación" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                        <input value={linea.rubro_codigo} onChange={e => setLinea(l => ({ ...l, rubro_codigo: e.target.value }))}
+                          placeholder="Rubro (ej: OC-03-01)" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.8fr 1fr", gap: 6 }}>
+                        <select value={linea.capitulo} onChange={e => setLinea(l => ({ ...l, capitulo: e.target.value }))}
+                          style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+                          <option value="">Capítulo…</option>
+                          {capitulos.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <input value={linea.unidad} onChange={e => setLinea(l => ({ ...l, unidad: e.target.value }))}
+                          placeholder="u, m2" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                        <input type="number" step="0.01" value={linea.cantidad} onChange={e => setLinea(l => ({ ...l, cantidad: e.target.value }))}
+                          placeholder="Cant" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                        <input type="number" step="0.01" value={linea.precio_unitario} onChange={e => setLinea(l => ({ ...l, precio_unitario: e.target.value }))}
+                          placeholder="P.U." style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" style={{ marginTop: 7 }}
+                      disabled={ocupado || !linea.descripcion.trim() || !Number(linea.precio_unitario)}
+                      onClick={async () => {
+                        const r = await agregarLinea(o.id, { ...linea, orden: suyas.length }, suyas);
+                        if (r.error) { setAviso(r.error); return; }
+                        setLinea(LINEA_VACIA); await cargar(); onCambio?.();
+                      }}>
+                      <Plus size={12} /> Agregar línea
+                    </Button>
+                  </div>
+                )}
+
+                {/* El resultado, que es lo que se conversa con el cliente. */}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
+                  <span style={{ flex: 1, fontSize: 12, color: colors.inkSoft, fontWeight: 600 }}>
+                    {total < 0 ? "Menor valor del contrato" : "Mayor valor del contrato"}
+                  </span>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: total < 0 ? colors.danger : colors.brand }}>
+                    {total < 0 ? "−" : ""}${fmt(Math.abs(total))}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
+                  CAPÍTULO III · IMPACTO EN CRONOGRAMA
+                </div>
+                <textarea defaultValue={o.impacto_cronograma || ""} readOnly={!editable} rows={2}
+                  onBlur={e => editable && e.target.value !== (o.impacto_cronograma || "") && hacer(() => guardarOrden(o.id, { impacto_cronograma: e.target.value }))}
+                  placeholder="Ej: impacto estimado de 4 días por detención de trabajos"
+                  style={{ ...inputStyle, fontSize: 12.5, padding: "7px 9px", resize: "vertical", marginBottom: 8, width: "100%", boxSizing: "border-box" }} />
+
+                {/* CAPÍTULO IV · quién revisa. El contratista somos nosotros; la
+                    fiscalización y el contratante responden al correo, y lo que
+                    digan se escribe acá para que el papel quede completo. */}
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
+                  CAPÍTULO IV · REVISIÓN Y APROBACIÓN
+                </div>
+                <div style={{ display: "grid", gap: 4, marginBottom: 9 }}>
+                  {[["contratista", "Contratista"], ["fiscalizacion", "Fiscalización"], ["contratante", "Contratante"]].map(([k, label]) => (
+                    <div key={k} style={{ display: "grid", gridTemplateColumns: "92px 1fr 1fr", gap: 5, alignItems: "center" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{label.toUpperCase()}</span>
+                      <input defaultValue={o[`${k}_nombre`] || ""} readOnly={!editable} placeholder="Nombre"
+                        onBlur={e => editable && e.target.value !== (o[`${k}_nombre`] || "") && hacer(() => guardarOrden(o.id, { [`${k}_nombre`]: e.target.value || null }))}
+                        style={{ ...inputStyle, fontSize: 11.5, padding: "5px 7px" }} />
+                      <input defaultValue={o[`${k}_comentario`] || ""} readOnly={!editable} placeholder="Comentarios"
+                        onBlur={e => editable && e.target.value !== (o[`${k}_comentario`] || "") && hacer(() => guardarOrden(o.id, { [`${k}_comentario`]: e.target.value || null }))}
+                        style={{ ...inputStyle, fontSize: 11.5, padding: "5px 7px" }} />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Qué pasó con ella en obra, que no es lo mismo que en qué paso
+                    va el papel: una orden aprobada puede no ejecutarse nunca. */}
+                {puedeEditar && (
+                  <div style={{ display: "flex", gap: 5, alignItems: "center", marginBottom: 9, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>EN OBRA</span>
+                    {Object.entries(EJECUCION).map(([v, e]) => {
+                      const activo = (o.ejecucion || "por_definir") === v;
+                      const c = { success: colors.success, muted: colors.muted, warning: colors.warning }[e.color];
+                      return (
+                        <button key={v} onClick={() => hacer(() => guardarOrden(o.id, { ejecucion: v }))} disabled={ocupado}
+                          style={{ border: `1px solid ${activo ? c : colors.border}`, background: activo ? c : "#fff",
+                            color: activo ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 9px", fontSize: 10.5,
+                            fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>{e.label}</button>
+                      );
+                    })}
+                    <button onClick={() => hacer(() => guardarOrden(o.id, { anulada: !o.anulada }))} disabled={ocupado}
+                      style={{ border: `1px solid ${o.anulada ? colors.danger : colors.border}`, background: o.anulada ? colors.danger : "#fff",
+                        color: o.anulada ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 9px", fontSize: 10.5,
+                        fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>Anulada</button>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {puedeEditar && suyas.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => setMandando({ orden: o, correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email), cuerpo: "" })}>
+                      <Mail size={12} /> Enviar por correo
+                    </Button>
+                  )}
+                  {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && (
+                    <Button variant="primary" size="sm" disabled={ocupado}
+                      onClick={() => {
+                        const quien = window.prompt("¿Quién la aprobó? (nombre del contratante o fiscalizador)", o.contratante_nombre || "");
+                        if (quien === null) return;
+                        hacer(() => aprobarOrden(o, suyas, currentUser, { aprobada_por: quien }));
+                      }}>
+                      <Check size={12} /> Aprobada: llevar al control
+                    </Button>
+                  )}
+                  {puedeEditar && o.estado === "aprobada" && (
+                    <Button variant="secondary" size="sm" disabled={ocupado}
+                      onClick={() => { if (window.confirm("¿Deshacer la aprobación? Sus líneas salen del control de obra y la orden vuelve a revisión.")) hacer(() => desaprobarOrden(o)); }}>
+                      <RotateCcw size={12} /> Deshacer aprobación
+                    </Button>
+                  )}
+                  {puedeEditar && o.estado !== "aprobada" && o.estado !== "rechazada" && (
+                    <Button variant="secondary" size="sm" disabled={ocupado}
+                      onClick={() => hacer(() => guardarOrden(o.id, { estado: "rechazada" }))}>
+                      <X size={12} /> No se hace
+                    </Button>
+                  )}
+                  {puedeEditar && o.estado !== "aprobada" && (
+                    <button onClick={() => { if (window.confirm(`¿Borrar la ${codigoDe(o)}? Se van también sus líneas.`)) hacer(() => borrarOrden(o.id)); }}
+                      disabled={ocupado} style={{ marginLeft: "auto", background: "none", border: "none", color: colors.danger, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
+                      Borrar
+                    </button>
+                  )}
+                </div>
+
+                {o.estado === "aprobada" && (
+                  <div style={{ fontSize: 11, color: colors.success, marginTop: 7 }}>
+                    Aprobada{o.contratante_nombre ? ` por ${o.contratante_nombre}` : ""}{o.aprobada_at ? ` el ${new Date(o.aprobada_at).toLocaleDateString("es-EC")}` : ""}.
+                    Sus líneas ya están en el control como adicionales.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Mandarla: a la gente del proyecto que ya está cargada, o a quien se
+          escriba. El documento lo arma el servidor con lo que dice la base. */}
+      {mandando && (
+        <div onClick={() => setMandando(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: colors.radiusMd, padding: 18, width: "min(460px, 100%)", maxHeight: "85vh", overflowY: "auto" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink, marginBottom: 3 }}>
+              Enviar la {codigoDe(mandando.orden)}
+            </div>
+            <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5 }}>
+              Va el documento completo: las líneas, la diferencia y el nuevo valor del contrato.
+            </div>
+
+            {invitados.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>GENTE DEL PROYECTO</div>
+                {invitados.map(i => {
+                  const puesto = mandando.correos.includes(i.email);
+                  return (
+                    <label key={i.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 0", fontSize: 12.5, color: colors.ink, cursor: "pointer" }}>
+                      <input type="checkbox" checked={puesto}
+                        onChange={() => setMandando(m => ({ ...m, correos: puesto ? m.correos.filter(c => c !== i.email) : [...m.correos, i.email] }))} />
+                      {i.nombre}{i.rol ? ` · ${i.rol}` : ""} <span style={{ color: colors.muted, fontSize: 11 }}>{i.email}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>OTROS CORREOS</label>
+            <input placeholder="cliente@empresa.com, gerente@…"
+              onChange={e => setMandando(m => ({ ...m, sueltos: e.target.value }))}
+              style={{ ...inputStyle, marginTop: 4, marginBottom: 8 }} />
+
+            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>NOTA (OPCIONAL)</label>
+            <textarea rows={2} value={mandando.cuerpo} onChange={e => setMandando(m => ({ ...m, cuerpo: e.target.value }))}
+              placeholder="Lo que quieras decirles antes del cuadro" style={{ ...inputStyle, marginTop: 4, resize: "vertical" }} />
+
+            <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+              <Button variant="primary" size="sm" disabled={ocupado}
+                onClick={async () => {
+                  const sueltos = String(mandando.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
+                  const todos = [...new Set([...mandando.correos, ...sueltos])];
+                  if (!todos.length) { setAviso("Elegí a quién mandársela."); return; }
+                  setOcupado(true);
+                  const r = await enviarOrden(mandando.orden, todos, mandando.cuerpo, currentUser);
+                  setOcupado(false);
+                  if (r.error) { setAviso(r.error); return; }
+                  setMandando(null); setAviso(""); await cargar(); onCambio?.();
+                }}>
+                <Mail size={12} /> Enviar
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setMandando(null)}>Cancelar</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

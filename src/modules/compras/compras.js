@@ -47,23 +47,60 @@ export async function adjuntosDe(solicitudId) {
 }
 
 export async function crearSolicitud(datos, quien) {
-  const { data, error } = await supabase.from("compras_solicitudes").insert({
+  // Contra qué parte del presupuesto se pide, y cuánto se cree que va a ser.
+  // Eso es lo que convierte una lista de pedidos en un control: sin capítulo y
+  // sin monto no hay forma de saber cuánto más quieren gastar de un capítulo
+  // que ya va al 80%.
+  const fila = {
     lead_id: datos.lead_id, obra_id: datos.obra_id || null,
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
+    capitulo: datos.capitulo || null,
+    obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
+    monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
     estado: "borrador", solicitante_id: quien?.id ?? null, solicitante_nombre: quien?.name || null,
-  }).select().single();
+  };
+  let { data, error } = await supabase.from("compras_solicitudes").insert(fila).select().single();
+  // Sin la 056 no existen esas tres columnas: la solicitud se crea igual.
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { capitulo, obra_rubro_id, monto_estimado, ...resto } = fila;
+    ({ data, error } = await supabase.from("compras_solicitudes").insert(resto).select().single());
+  }
   if (error) return { error: falta(error) ? "Falta correr la migración 048." : error.message };
   await anotar(data.id, null, "borrador", quien, null);
   return { solicitud: data };
 }
 
 export async function guardarSolicitud(id, datos) {
-  const { error } = await supabase.from("compras_solicitudes").update({
+  const campos = {
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
-  }).eq("id", id);
+    capitulo: datos.capitulo || null,
+    obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
+    monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
+  };
+  let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", id);
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { capitulo, obra_rubro_id, monto_estimado, ...resto } = campos;
+    ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", id));
+  }
   return error ? error.message : null;
+}
+
+/**
+ * Los rubros de la obra de un proyecto, para poder apuntar la solicitud.
+ *
+ * Se piden por proyecto y no por obra porque quien pide está pensando en el
+ * proyecto; la obra la encuentra el código.
+ */
+export async function rubrosDelProyecto(leadId) {
+  if (!leadId) return { obra: null, rubros: [] };
+  const { data: obras } = await supabase.from("obras").select("id,nombre").eq("lead_id", leadId).limit(1);
+  const obra = obras?.[0];
+  if (!obra) return { obra: null, rubros: [] };
+  const { data } = await supabase.from("obra_rubros")
+    .select("id,numero,capitulo,descripcion,total_base").eq("obra_id", obra.id).order("orden");
+  return { obra, rubros: data || [] };
 }
 
 /** Cada paso queda escrito: sin esto el flujo es una conversación de WhatsApp. */

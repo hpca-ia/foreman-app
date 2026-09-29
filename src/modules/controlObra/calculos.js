@@ -115,6 +115,56 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
 const SIN_CAPITULO = "SIN CAPÍTULO";
 const SIN_ACTIVIDAD = "SIN AGRUPAR";
 
+/**
+ * Lo COMPROMETIDO: lo que pidieron gastar y todavía no es gasto.
+ *
+ * Una solicitud de compra aprobada —o esperando aprobación— ya es plata
+ * hablada contra un capítulo, aunque no haya factura. Verla recién cuando la
+ * factura entra es enterarse un mes tarde de que el capítulo se pasó.
+ *
+ * Se cuenta mientras la solicitud está viva y sin factura. Cuando se compra y
+ * la factura entra a Control de Obra, ese monto deja de estar comprometido
+ * porque ya está invertido: contarlo dos veces inflaría el capítulo.
+ */
+const VIVAS = ["pendiente_aprobacion", "requiere_info", "aprobada", "comprada"];
+
+export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
+  const capituloDeRubro = new Map(rubros.map(r => [r.id, r.capitulo || SIN_CAPITULO]));
+  const porCapitulo = {}, porRubro = {};
+  let total = 0;
+  solicitudes.forEach(s => {
+    if (!VIVAS.includes(s.estado) || s.factura_id) return;
+    const monto = n(s.monto ?? s.monto_estimado);
+    if (!monto) return;
+    const capitulo = s.obra_rubro_id ? capituloDeRubro.get(s.obra_rubro_id) : (s.capitulo || SIN_CAPITULO);
+    porCapitulo[capitulo || SIN_CAPITULO] = (porCapitulo[capitulo || SIN_CAPITULO] || 0) + monto;
+    if (s.obra_rubro_id) porRubro[s.obra_rubro_id] = (porRubro[s.obra_rubro_id] || 0) + monto;
+    total += monto;
+  });
+  return { porCapitulo, porRubro, total };
+}
+
+/**
+ * Lo que una orden de cambio le hace al contrato.
+ *
+ * Suma lo que agrega, resta lo que quita, y la diferencia es lo que hay que
+ * conversar con el cliente. No se guarda: se calcula de las líneas, porque un
+ * total tecleado se despega de ellas en la primera corrección.
+ */
+export function totalOrden(lineas = []) {
+  return lineas.reduce((t, l) => {
+    const monto = n(l.cantidad) * n(l.precio_unitario);
+    return t + (l.tipo === "quita" ? -monto : monto);
+  }, 0);
+}
+
+/** Lo aprobado en órdenes de cambio: el otro contrato, el de después. */
+export function totalAdicionales(ordenes = [], lineasPorOrden = {}) {
+  return ordenes
+    .filter(o => o.estado === "aprobada")
+    .reduce((t, o) => t + totalOrden(lineasPorOrden[o.id] || []), 0);
+}
+
 export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividades = []) {
   const porActividad = modo === "actividad";
   const dic = new Map(actividades.map(a => [a.id, a]));
