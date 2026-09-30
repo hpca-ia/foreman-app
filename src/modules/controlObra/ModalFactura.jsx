@@ -7,6 +7,7 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt, TIPOS_GASTO } from "./calculos";
+import { CLASES_DOC } from "./pagos";
 import { buscarDuplicados, hashArchivo } from "./duplicados";
 import { comprimirImagen } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
@@ -17,7 +18,7 @@ const n = v => Number(v) || 0;
 export default function ModalFactura({ obra, rubros, actividades = [], planilla, factura, asignacionesFactura = [], currentUser, onCerrar, onGuardado }) {
   const editando = !!factura;
   const [form, setForm] = useState(factura ? { ...factura } : {
-    fecha: hoy(), tipo_documento: "FACTURA", numero_factura: "", ruc: "", razon_social: "",
+    fecha: hoy(), tipo_documento: "FACTURA", clase: "factura", numero_factura: "", ruc: "", razon_social: "",
     detalle: "", justificacion: "", numero_cheque: "", tipo: "material",
     subtotal_0: 0, subtotal_5: 0, subtotal_15: 0, iva: 0, total: 0,
   });
@@ -176,6 +177,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       planilla_id: planilla?.id || null,
       fecha: form.fecha || hoy(),
       tipo_documento: form.tipo_documento || "FACTURA",
+      clase: form.clase || "factura",
       numero_factura: form.numero_factura || null,
       ruc: form.ruc || null,
       razon_social: form.razon_social || null,
@@ -193,13 +195,22 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       subido_por: currentUser.id, subido_por_nombre: currentUser.name,
     };
 
+    // Sin la migración 060 no existe `clase`: el documento entra igual, como
+    // factura, que es lo único que se podía cargar antes.
+    const sinClase = ({ clase, ...resto }) => resto;
     let facturaId = factura?.id;
     if (editando) {
-      const { error: e1 } = await supabase.from("obra_facturas").update(payload).eq("id", factura.id);
+      let { error: e1 } = await supabase.from("obra_facturas").update(payload).eq("id", factura.id);
+      if (e1 && /column|schema cache/i.test(e1.message)) {
+        ({ error: e1 } = await supabase.from("obra_facturas").update(sinClase(payload)).eq("id", factura.id));
+      }
       if (e1) { setError(e1.message); setGuardando(false); return; }
       await supabase.from("obra_asignaciones").delete().eq("factura_id", factura.id);
     } else {
-      const { data, error: e1 } = await supabase.from("obra_facturas").insert(payload).select().single();
+      let { data, error: e1 } = await supabase.from("obra_facturas").insert(payload).select().single();
+      if (e1 && /column|schema cache/i.test(e1.message)) {
+        ({ data, error: e1 } = await supabase.from("obra_facturas").insert(sinClase(payload)).select().single());
+      }
       if (e1 || !data) { setError(e1?.message || "No se pudo guardar"); setGuardando(false); return; }
       facturaId = data.id;
     }
@@ -274,11 +285,25 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         <div><label style={lbl}>TOTAL</label><input type="number" value={form.total ?? 0} onChange={e => set("total", e.target.value)} style={{ ...mini, fontWeight: 700 }} /></div>
       </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <label style={lbl}>TIPO DE GASTO</label>
-        <select value={form.tipo || "material"} onChange={e => set("tipo", e.target.value)} style={mini}>
-          {TIPOS_GASTO.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-        </select>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+        <div>
+          <label style={lbl}>TIPO DE GASTO</label>
+          <select value={form.tipo || "material"} onChange={e => set("tipo", e.target.value)} style={mini}>
+            {TIPOS_GASTO.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        </div>
+        {/* Qué es este papel. Una proforma no da crédito tributario y, sobre
+            todo, alguien la tiene que convertir en factura: sin distinguirlas
+            no se puede ni preguntar cuáles siguen pendientes. */}
+        <div>
+          <label style={lbl}>QUÉ ES ESTE DOCUMENTO</label>
+          <select value={form.clase || "factura"} onChange={e => set("clase", e.target.value)} style={mini}>
+            {Object.entries(CLASES_DOC).map(([id, c]) => <option key={id} value={id}>{c.label}</option>)}
+          </select>
+          <div style={{ fontSize: 10, color: colors.muted, marginTop: 3 }}>
+            {(CLASES_DOC[form.clase || "factura"]).pista}
+          </div>
+        </div>
       </div>
 
       {/* Reparto. Por actividad es el camino normal; el rubro es la excepción. */}

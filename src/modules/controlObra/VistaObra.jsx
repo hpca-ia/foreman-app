@@ -13,6 +13,7 @@ import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
+import PanelProveedores from "./PanelProveedores";
 import { comprometidoPorGrupo } from "./calculos";
 
 export default function VistaObra({ obra, currentUser, puede, onVolver }) {
@@ -133,6 +134,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
+        <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
@@ -188,6 +190,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
           {tab === "facturas" && (
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar} />
+          )}
+          {tab === "proveedores" && (
+            <PanelProveedores obra={obra} facturas={facturas} currentUser={currentUser} puede={puede} onCambio={cargar} />
           )}
           {tab === "ordenes" && (
             <PanelOrdenesCambio obra={obra} proyecto={cadena.proyecto} rubros={rubros}
