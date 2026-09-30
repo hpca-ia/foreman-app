@@ -29,6 +29,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
   const [nuevaCajaForm, setNuevaCajaForm] = useState({ obra_id:"", proyecto_nombre:"", responsable_id:"", responsable_nombre:"", limite_alerta:50, capitulo:"", obra_actividad_id:"" });
   const [obras, setObras] = useState([]);
+  // Qué gasto se está corrigiendo. Un gasto mal cargado —el monto con un cero
+  // de más, el proveedor equivocado— hoy había que borrarlo y volver a
+  // cargarlo con su foto: corregirlo es lo que cualquiera espera poder hacer.
+  const [gastoEditando, setGastoEditando] = useState(null);
   const [archivoGasto, setArchivoGasto] = useState(null);
   const [archivoPreview, setArchivoPreview] = useState(null);
   const [rubrosGasto, setRubrosGasto] = useState([]);   // [{obra_actividad_id, monto}]
@@ -279,6 +283,51 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     }
     const monto=Number(gastoForm.monto);
     const conRubros = rubrosGasto.filter(r=>r.obra_actividad_id);
+
+    // ── Corregir uno que ya estaba ───────────────────────────────────────
+    if (gastoEditando) {
+      const campos = {
+        descripcion:gastoForm.descripcion, proveedor:gastoForm.proveedor,
+        ruc:gastoForm.ruc||null, numero_factura:gastoForm.numero_factura||null, monto,
+        fecha:gastoForm.fecha, tipo:gastoForm.tipo, notas:gastoForm.notas,
+        ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
+      };
+      const {error:errEdit}=await supabase.from("cajas_gastos").update(campos).eq("id",gastoEditando.id);
+      if (errEdit) { setNovaError("No se pudo guardar la corrección: "+errEdit.message); setUploading(false); return false; }
+
+      // Su copia en el control de obra tiene que decir lo mismo: si no, la
+      // planilla sigue con el monto viejo y nadie entiende por qué no cuadra.
+      if (gastoEditando.obra_factura_id) {
+        await supabase.from("obra_facturas").update({
+          fecha:gastoForm.fecha, razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
+          numero_factura:gastoForm.numero_factura||null, detalle:gastoForm.descripcion,
+          justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
+          ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
+        }).eq("id",gastoEditando.obra_factura_id);
+        if (conRubros.length) {
+          await supabase.from("obra_asignaciones").delete().eq("factura_id",gastoEditando.obra_factura_id);
+          await supabase.from("obra_asignaciones").insert(conRubros
+            .map(r=>({factura_id:gastoEditando.obra_factura_id, obra_actividad_id:r.obra_actividad_id, monto:Number(r.monto)||0}))
+            .filter(f=>f.monto!==0));
+        }
+      }
+
+      // El saldo se vuelve a sumar de los gastos, no se ajusta por diferencia:
+      // un saldo que se arrastra sumando y restando termina desviándose.
+      const nuevos = gastos.map(g=>g.id===gastoEditando.id?{...g,...campos}:g);
+      const gastado = nuevos.reduce((t,g)=>t+(Number(g.monto)||0),0);
+      const disponible = (cajaActiva.saldo_total||0)-gastado;
+      await supabase.from("cajas_chicas").update({saldo_gastado:gastado,saldo_disponible:disponible}).eq("id",cajaActiva.id);
+      setCajaActiva(prev=>({...prev,saldo_gastado:gastado,saldo_disponible:disponible}));
+      setGastos(nuevos);
+      setGastoEditando(null);
+      setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
+      setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
+      setRubrosGasto([]); setArchivoGasto(null); setArchivoPreview(null); fetchCajas();
+      setUploading(false);
+      return true;
+    }
+
     const{data,error:errGasto}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
       proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
@@ -349,10 +398,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     <div style={{fontFamily:"var(--font)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:17,fontWeight:700,color:"var(--ink)"}}>
-          {subVista==="lista"?"Caja Chica":subVista==="nueva"?"Nueva caja":subVista==="gasto"?"Nuevo gasto":subVista==="anticipo"?"Anticipo":subVista==="reporte"?"Reporte":`${cajaActiva?.proyecto_nombre} — ${cajaActiva?.responsable_nombre}`}
+          {subVista==="lista"?"Caja Chica":subVista==="nueva"?"Nueva caja":subVista==="gasto"?(gastoEditando?"Corregir gasto":"Nuevo gasto"):subVista==="anticipo"?"Anticipo":subVista==="reporte"?"Reporte":`${cajaActiva?.proyecto_nombre} — ${cajaActiva?.responsable_nombre}`}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {subVista!=="lista"&&<button onClick={()=>setSubVista(subVista==="reporte"?"detalle":"lista")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
+          {subVista!=="lista"&&<button onClick={()=>{setGastoEditando(null);setSubVista(subVista==="reporte"?"detalle":"lista");}} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&admin&&<button onClick={()=>setSubVista("nueva")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nueva caja</button>}
           {subVista==="detalle"&&puede?.("borrar.definitivo")&&cajaActiva&&(
             <button onClick={()=>setBorrarCaja(cajaActiva)} title="Borrar esta caja chica"
@@ -505,7 +554,15 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
 
       {subVista==="gasto"&&(
         <div style={{background:"#fff",borderRadius:12,padding:20,border:"1px solid var(--border)"}}>
-          <div style={{fontSize:14,fontWeight:600,color:"var(--ink)",marginBottom:14}}>Nuevo gasto — {cajaActiva?.proyecto_nombre}</div>
+          <div style={{fontSize:14,fontWeight:600,color:"var(--ink)",marginBottom:4}}>
+            {gastoEditando?"Corregir gasto":"Nuevo gasto"} — {cajaActiva?.proyecto_nombre}
+          </div>
+          {gastoEditando&&(
+            <div style={{fontSize:11.5,color:"var(--ink-soft)",background:"var(--bg)",borderRadius:8,padding:"7px 10px",marginBottom:12,lineHeight:1.5}}>
+              Estás corrigiendo un gasto ya cargado. Si cambia el monto, se recalcula el saldo de la caja y se
+              actualiza su factura en Control de Obra. La foto solo se reemplaza si subís otra.
+            </div>
+          )}
           <div style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:10,padding:12,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:600,color:"var(--brand)",marginBottom:6}}>🤖 NOVA lee tu factura</div>
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -602,6 +659,20 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                   <div style={{fontWeight:700,color:"var(--danger)",fontSize:14}}>${fmt(g.monto)}</div>
                   <div style={{fontSize:10,color:g.estado==="aprobado"?"var(--success)":"var(--warning)",fontWeight:600,marginTop:2}}>{g.estado}</div>
                   {admin&&g.estado==="pendiente"&&<button onClick={()=>aprobarGasto(g.id)} style={{background:"var(--success)",border:"none",borderRadius:6,padding:"3px 8px",color:"#fff",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block"}}>✓ Aprobar</button>}
+                  {(admin||g.subido_por===currentUser.id)&&(
+                    <button onClick={()=>{
+                      setGastoEditando(g);
+                      setGastoForm({descripcion:g.descripcion||"",proveedor:g.proveedor||"",ruc:g.ruc||"",
+                        numero_factura:g.numero_factura||"",monto:g.monto||"",fecha:(g.fecha||"").slice(0,10),
+                        tipo:g.tipo||"factura",notas:g.notas||"",presupuesto_id:""});
+                      setRubrosGasto([]); setArchivoGasto(null); setArchivoPreview(null);
+                      setDupsGasto({exactos:[],posibles:[]}); setNovaError("");
+                      setSubVista("gasto");
+                    }}
+                      style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",color:"var(--ink-soft)",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block",fontFamily:"var(--font)"}}>
+                      Corregir
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

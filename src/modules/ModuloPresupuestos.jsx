@@ -1210,13 +1210,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           {/* Un histórico se mira, no se toca —y quien solo mira, tampoco—: el
               fieldset deshabilita cada casilla y cada botón de adentro de una
               vez, sin tener que acordarse de uno por uno. */}
-          <fieldset disabled={bloqueado||!puedeEditar} style={{border:0,padding:0,margin:0,minWidth:0}}>
-          {modoDetalle==="armar"&&<>
-          <ArchivosPresupuesto presupuestoId={presupuestoActivo.id} currentUser={currentUser}
-            soloLectura={bloqueado} version={archivosVersion}/>
-
-          {/* Buscar un rubro por nombre: arriba los de este presupuesto —la
-              tabla se filtra— y abajo los de la base, para agregarlos. */}
+          {/* El buscador va FUERA del fieldset: buscar es leer, no editar. Un
+              presupuesto de referencia se abre justamente para buscar algo en
+              él —"¿a cómo habíamos puesto el gypsum?"— y adentro del fieldset
+              ni se podía escribir en la casilla. Lo que sí se bloquea es
+              agregar rubros desde la base, que eso sí es editar. */}
+          {modoDetalle==="armar"&&(
           <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <Search size={15} color="var(--muted)"/>
@@ -1234,19 +1233,28 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               <div style={{marginTop:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
                   <span style={{fontSize:12,fontWeight:700,color:"var(--ink)"}}>En la base de rubros</span>
-                  <span style={{fontSize:11,color:"var(--muted)"}}>Agregar a</span>
-                  <select value={capDestino||capitulosActivos[0]?.nombre||""} onChange={e=>setCapDestino(e.target.value)}
-                    style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 8px",fontSize:12,color:"var(--ink)",fontFamily:"var(--font)",maxWidth:280}}>
-                    {capitulosActivos.map(c=><option key={c.nombre} value={c.nombre}>{c.orden}. {c.nombre}</option>)}
-                  </select>
+                  {!(bloqueado||!puedeEditar)&&<span style={{fontSize:11,color:"var(--muted)"}}>Agregar a</span>}
+                  {!(bloqueado||!puedeEditar)&&(
+                    <select value={capDestino||capitulosActivos[0]?.nombre||""} onChange={e=>setCapDestino(e.target.value)}
+                      style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 8px",fontSize:12,color:"var(--ink)",fontFamily:"var(--font)",maxWidth:280}}>
+                      {capitulosActivos.map(c=><option key={c.nombre} value={c.nombre}>{c.orden}. {c.nombre}</option>)}
+                    </select>
+                  )}
                 </div>
                 {capitulosActivos.length===0
                   ?<div style={{fontSize:12,color:"var(--muted)",padding:"8px 0"}}>Primero crea un capítulo para poder agregar rubros.</div>
                   :<ResultadosBase base={baseRubros} texto={buscaArmar} alto={300}
+                     soloLectura={bloqueado||!puedeEditar}
                      onAgregar={(r,precio)=>agregarItem(capDestino||capitulosActivos[0].nombre,{...r,precio_unitario:precio})}/>}
               </div>
             )}
           </div>
+          )}
+
+          <fieldset disabled={bloqueado||!puedeEditar} style={{border:0,padding:0,margin:0,minWidth:0}}>
+          {modoDetalle==="armar"&&<>
+          <ArchivosPresupuesto presupuestoId={presupuestoActivo.id} currentUser={currentUser}
+            soloLectura={bloqueado} version={archivosVersion}/>
 
           {capitulosActivos.length===0&&(
             <div style={{textAlign:"center",padding:"30px 0",color:"var(--muted)",fontSize:13}}>

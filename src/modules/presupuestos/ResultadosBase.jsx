@@ -25,7 +25,16 @@ export const cuando = f => {
   return `${["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][Number(m) - 1]} ${a}`;
 };
 
-export default function ResultadosBase({ base, texto, onAgregar, alto = 320, limite = 40, accion = "Agregar", titulo = "Agregar al presupuesto con este precio" }) {
+/**
+ * Los rubros de la base que calzan con lo que se busca.
+ *
+ * `soloLectura` deja mirar los precios sin poder agregarlos: en un presupuesto
+ * de referencia, consultar "¿a cómo lo hemos puesto?" es justamente para lo
+ * que se abre, y esconder los precios porque no se puede editar sería esconder
+ * lo único que se fue a buscar.
+ */
+export default function ResultadosBase({ base, texto, onAgregar, alto = 320, limite = 40, accion = "Agregar", titulo = "Agregar al presupuesto con este precio", soloLectura = false }) {
+  const agregar = soloLectura ? null : onAgregar;
   const [abierto, setAbierto] = useState(null);
   const encontrados = useMemo(() => buscarRubros(base?.todos || [], texto, { limite }), [base, texto, limite]);
 
@@ -66,7 +75,7 @@ export default function ResultadosBase({ base, texto, onAgregar, alto = 320, lim
                 {precios.length > 0 && (
                   <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
                     {precios.slice(0, abierta ? precios.length : 3).map((p, i) => (
-                      <button key={i} onClick={() => onAgregar(r, n(p.precio_unitario))} title={`${titulo}: $${fmt(p.precio_unitario)} de ${origenDe(p)}${p.fecha ? ` (${p.fecha})` : ""}`}
+                      <button key={i} disabled={soloLectura} onClick={() => agregar?.(r, n(p.precio_unitario))} title={`${titulo}: $${fmt(p.precio_unitario)} de ${origenDe(p)}${p.fecha ? ` (${p.fecha})` : ""}`}
                         style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 12, padding: "2px 8px", fontSize: 10.5, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         <strong style={{ color: colors.ink }}>${fmt(p.precio_unitario)}</strong> · {origenDe(p)}{cuando(p.fecha) && ` · ${cuando(p.fecha)}`}
                       </button>
@@ -80,7 +89,7 @@ export default function ResultadosBase({ base, texto, onAgregar, alto = 320, lim
                 )}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap" }}>${fmt(ultimo)}</div>
-              <button onClick={() => onAgregar(r, ultimo)} title={titulo}
+              <button disabled={soloLectura} onClick={() => agregar?.(r, ultimo)} title={titulo}
                 style={{ background: colors.ink, color: "#fff", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                 {accion === "Agregar" && <Plus size={12} />} {accion}
               </button>
@@ -95,7 +104,7 @@ export default function ResultadosBase({ base, texto, onAgregar, alto = 320, lim
                       {origenDe(p)}{p.origen_tipo && <span style={{ color: colors.muted }}> · {p.origen_tipo}</span>}{p.fecha && <span style={{ color: colors.muted }}> · {p.fecha}</span>}
                       {p.proyecto_ref && p.proyecto_ref !== origenDe(p) && <span style={{ color: colors.muted }}> · {p.proyecto_ref}</span>}
                     </span>
-                    <button onClick={() => onAgregar(r, Number(p.precio_unitario))}
+                    <button disabled={soloLectura} onClick={() => agregar?.(r, Number(p.precio_unitario))}
                       style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", color: colors.ink, fontFamily: colors.font, flexShrink: 0 }}>
                       {accion} con este
                     </button>
