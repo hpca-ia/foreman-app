@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
-import { Check, X, Send, ShoppingCart, PackageCheck, Clock } from "lucide-react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
-import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto } from "./compras";
+import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
+  adjuntosDe, subirAdjunto, borrarAdjunto, enlacesDeAdjuntos, elegirProforma } from "./compras";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -42,6 +43,23 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const inp = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   // Los rubros de la obra de este proyecto: contra qué se está pidiendo.
+  // Los papeles de la solicitud: proformas para comparar, anexos para explicar.
+  const [proformas, setProformas] = useState([]);
+  const [enlaces, setEnlaces] = useState({});
+  const [nuevaProforma, setNuevaProforma] = useState({ proveedor: "", monto: "" });
+  const [subiendo, setSubiendo] = useState(false);
+  const [avisoPapel, setAvisoPapel] = useState("");
+  const proformaRef = useRef(null);
+
+  const cargarPapeles = useCallback(async () => {
+    if (!solicitud?.id) return;
+    const todos = await adjuntosDe(solicitud.id);
+    const cotizaciones = todos.filter(a => a.tipo === "cotizacion");
+    setProformas(cotizaciones);
+    setEnlaces(await enlacesDeAdjuntos(cotizaciones));
+  }, [solicitud?.id]);
+  useEffect(() => { cargarPapeles(); }, [cargarPapeles]);
+
   const [obra, setObra] = useState(null);
   const [rubros, setRubros] = useState([]);
   useEffect(() => {
@@ -217,11 +235,77 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           </label>
         </div>
 
-        {/* Los respaldos: la cotización, el plano, la foto de lo que se rompió.
-            Sin esto, aprobar es adivinar. */}
+        {/* Las proformas: lo que hace que aprobar deje de ser adivinar.
+            Cuando de verdad se cotiza, se cotiza con tres proveedores, y quien
+            aprueba tiene que poder verlas al lado y elegir una. Esa elección
+            queda escrita: seis meses después contesta por qué se le compró a
+            ese y no al más barato. */}
         {editando && (
           <div>
-            <label style={lbl}>RESPALDOS</label>
+            <label style={lbl}>PROFORMAS{proformas.length ? ` · ${proformas.length}` : ""}</label>
+            {proformas.map(a => {
+              const elegida = solicitud.proforma_id === a.id;
+              return (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", marginBottom: 4,
+                  background: elegida ? colors.brandSoft : colors.bg, borderRadius: 8,
+                  border: `1px solid ${elegida ? colors.brand : "transparent"}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, overflowWrap: "anywhere" }}>
+                      {a.proveedor || a.nombre}
+                      {elegida && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: colors.brand }}>ELEGIDA</span>}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: colors.muted }}>
+                      {a.monto ? `$${Number(a.monto).toFixed(2)} · ` : ""}{a.nota || a.nombre}
+                    </div>
+                  </div>
+                  {enlaces[a.id] && (
+                    <a href={enlaces[a.id]} target="_blank" rel="noreferrer" title="Abrir la proforma"
+                      style={{ color: colors.inkSoft, display: "flex" }}><FileText size={14} /></a>
+                  )}
+                  {apruebo && !elegida && (
+                    <button onClick={async () => { await elegirProforma(solicitud, a, currentUser, comentario); await cargarPapeles(); onCambio?.(); }}
+                      style={{ border: `1px solid ${colors.brand}`, background: "#fff", color: colors.brand, borderRadius: 12,
+                        padding: "3px 10px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                      Comprar con esta
+                    </button>
+                  )}
+                  {esMia && (
+                    <button onClick={async () => { if (window.confirm("¿Quitar esta proforma?")) { await borrarAdjunto(a); await cargarPapeles(); } }}
+                      style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 0 }}>
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 6, marginTop: proformas.length ? 6 : 0 }}>
+              <input value={nuevaProforma.proveedor} onChange={ev => setNuevaProforma(p => ({ ...p, proveedor: ev.target.value }))}
+                placeholder="¿De qué proveedor?" style={mini} />
+              <input type="number" step="0.01" value={nuevaProforma.monto} onChange={ev => setNuevaProforma(p => ({ ...p, monto: ev.target.value }))}
+                placeholder="Monto" style={mini} />
+            </div>
+            <button onClick={() => proformaRef.current?.click()} disabled={subiendo || !nuevaProforma.proveedor.trim()}
+              style={{ width: "100%", marginTop: 5, background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8,
+                padding: "9px", color: colors.inkSoft, fontSize: 12, cursor: nuevaProforma.proveedor.trim() ? "pointer" : "not-allowed",
+                fontFamily: colors.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                opacity: nuevaProforma.proveedor.trim() ? 1 : 0.55 }}>
+              <Upload size={13} /> {subiendo ? "Subiendo…" : "Subir proforma de ese proveedor"}
+            </button>
+            <input ref={proformaRef} type="file" style={{ display: "none" }}
+              onChange={async ev => {
+                const archivo = ev.target.files?.[0]; ev.target.value = "";
+                if (!archivo) return;
+                setSubiendo(true);
+                const r = await subirAdjunto(solicitud, archivo, { tipo: "cotizacion", ...nuevaProforma, quien: currentUser });
+                setSubiendo(false);
+                if (r.error) { setAvisoPapel(r.error); return; }
+                setNuevaProforma({ proveedor: "", monto: "" });
+                await cargarPapeles();
+              }} />
+            {avisoPapel && <div style={{ fontSize: 11, color: colors.danger, marginTop: 4 }}>{avisoPapel}</div>}
+
+            <label style={{ ...lbl, marginTop: 12, display: "block" }}>ANEXOS · el plano, la foto, la especificación</label>
             <InlineFiles taskId={`compra-${solicitud.id}`} />
           </div>
         )}

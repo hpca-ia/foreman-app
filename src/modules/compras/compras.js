@@ -167,3 +167,100 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
   }
   return { ok: true };
 }
+
+// ── Los papeles de la solicitud ──────────────────────────────────────────
+//
+// Dos cosas distintas con el mismo mecanismo: los ANEXOS —la foto de lo que se
+// rompió, el plano, la especificación— y las PROFORMAS, que además traen de
+// quién son y cuánto cobran, porque son para comparar.
+
+export async function subirAdjunto(solicitud, archivo, { tipo = "respaldo", proveedor, monto, nota, quien }) {
+  const limpio = archivo.name.replace(/[^\w.\-]/g, "_").slice(-60);
+  const ruta = `compra-${solicitud.id}/${Date.now()}-${limpio}`;
+  const { error } = await supabase.storage.from("task-files").upload(ruta, archivo, { upsert: false });
+  if (error) return { error: error.message };
+
+  const fila = {
+    solicitud_id: solicitud.id, tipo, storage_path: ruta, nombre: archivo.name,
+    subido_por: quien?.id ?? null,
+    proveedor: proveedor?.trim() || null,
+    monto: monto ? Number(monto) : null,
+    nota: nota?.trim() || null,
+    // Se copia el rubro de la solicitud: así la colección de proformas se lee
+    // por rubro sin tener que entrar solicitud por solicitud.
+    obra_rubro_id: solicitud.obra_rubro_id || null,
+    capitulo: solicitud.capitulo || null,
+  };
+  let { data, error: e2 } = await supabase.from("compras_adjuntos").insert(fila).select().single();
+  // Sin la 059 no están las columnas nuevas: el archivo se guarda igual.
+  if (e2 && /column|schema cache/i.test(e2.message)) {
+    const { proveedor: p, monto: m, nota: nt, obra_rubro_id: r, capitulo: c, ...resto } = fila;
+    ({ data, error: e2 } = await supabase.from("compras_adjuntos").insert(resto).select().single());
+  }
+  return e2 ? { error: e2.message } : { adjunto: data };
+}
+
+export async function borrarAdjunto(adjunto) {
+  await supabase.storage.from("task-files").remove([adjunto.storage_path]);
+  const { error } = await supabase.from("compras_adjuntos").delete().eq("id", adjunto.id);
+  return error ? error.message : null;
+}
+
+/** Enlaces temporales para abrirlos: el depósito es privado. */
+export async function enlacesDeAdjuntos(adjuntos = []) {
+  if (!adjuntos.length) return {};
+  const { data } = await supabase.storage.from("task-files")
+    .createSignedUrls(adjuntos.map(a => a.storage_path), 3600);
+  const mapa = {};
+  (data || []).forEach((x, i) => { if (x?.signedUrl) mapa[adjuntos[i].id] = x.signedUrl; });
+  return mapa;
+}
+
+/**
+ * Elegir con qué proforma se compra.
+ *
+ * El monto y el proveedor de la solicitud pasan a ser los de esa proforma: a
+ * partir de acá, "cuánto cuesta esto" tiene una sola respuesta y un papel
+ * detrás. Queda escrito en el historial, que es lo que contesta seis meses
+ * después por qué se le compró a ese y no al más barato.
+ */
+export async function elegirProforma(solicitud, proforma, quien, comentario) {
+  const campos = { proforma_id: proforma.id, proveedor: proforma.proveedor || solicitud.proveedor || null };
+  if (proforma.monto) campos.monto = Number(proforma.monto);
+  let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { proforma_id, ...resto } = campos;
+    ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", solicitud.id));
+  }
+  if (error) return error.message;
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
+    `Proforma elegida: ${proforma.proveedor || proforma.nombre}${proforma.monto ? ` · $${Number(proforma.monto).toFixed(2)}` : ""}${comentario ? ` · ${comentario}` : ""}`);
+  return null;
+}
+
+/**
+ * Todas las proformas de un proyecto, agrupadas por rubro del presupuesto.
+ *
+ * Es el historial de precios que la oficina ya tiene y no puede consultar:
+ * "¿a cómo nos han cotizado el hormigón este año?" hoy se contesta buscando en
+ * WhatsApp.
+ */
+export async function proformasPorRubro(leadId) {
+  const { data: solicitudes } = await supabase.from("compras_solicitudes")
+    .select("id,descripcion,capitulo,obra_rubro_id,estado,proforma_id").eq("lead_id", leadId);
+  const ids = (solicitudes || []).map(s => s.id);
+  if (!ids.length) return { grupos: [], solicitudes: [] };
+
+  const { data: adjuntos } = await supabase.from("compras_adjuntos")
+    .select("*").in("solicitud_id", ids).eq("tipo", "cotizacion").order("created_at", { ascending: false });
+
+  const porSolicitud = new Map((solicitudes || []).map(s => [s.id, s]));
+  const grupos = new Map();
+  (adjuntos || []).forEach(a => {
+    const s = porSolicitud.get(a.solicitud_id);
+    const clave = a.capitulo || s?.capitulo || "SIN CAPÍTULO";
+    if (!grupos.has(clave)) grupos.set(clave, { capitulo: clave, proformas: [] });
+    grupos.get(clave).proformas.push({ ...a, solicitud: s, elegida: s?.proforma_id === a.id });
+  });
+  return { grupos: [...grupos.values()].sort((a, b) => a.capitulo.localeCompare(b.capitulo)), solicitudes: solicitudes || [] };
+}

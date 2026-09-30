@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, ShoppingCart, AlertTriangle } from "lucide-react";
+import { Plus, ShoppingCart, AlertTriangle, FileText } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { ESTADOS, ABIERTAS, cargarSolicitudes } from "./compras";
 import ModalSolicitud from "./ModalSolicitud";
+import Proformas from "./Proformas";
 
 // Compras: lo que hace falta en obra, pedido, aprobado y comprado.
 //
@@ -24,6 +25,10 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
   const [abierta, setAbierta] = useState(null);
   const [nueva, setNueva] = useState(false);
   const [filtro, setFiltro] = useState("mias");
+  // La colección de proformas es de un proyecto: preguntar "¿a cómo nos han
+  // cotizado el hormigón?" sin decir de qué obra no lleva a ninguna parte.
+  const [verProformas, setVerProformas] = useState(false);
+  const [proyectoProformas, setProyectoProformas] = useState("");
 
   const gestionaCompras = puede("compras.gestionar");
   const apruebo = puede("tareas.asignar") || currentUser?.role === "owner";
@@ -76,10 +81,29 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
     <div style={{ fontFamily: colors.font }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Compras</div>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Button variant={verProformas ? "primary" : "outline"} size="md" onClick={() => setVerProformas(v => !v)}>
+            <FileText size={14} /> Proformas
+          </Button>
           <Button variant="primary" size="md" onClick={() => setNueva(true)}><Plus size={14} /> Pedir algo</Button>
         </div>
       </div>
+
+      {/* Las proformas de un proyecto, por capítulo: el historial de precios
+          que la oficina ya tiene y hoy vive en WhatsApp. */}
+      {verProformas && (
+        <div style={{ marginBottom: 16 }}>
+          <select value={proyectoProformas} onChange={e => setProyectoProformas(e.target.value)}
+            style={{ width: "100%", maxWidth: 380, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "7px 9px",
+              fontSize: 12.5, fontFamily: colors.font, color: colors.ink, background: "#fff", marginBottom: 10 }}>
+            <option value="">Elegí el proyecto…</option>
+            {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+          <Proformas leadId={proyectoProformas ? Number(proyectoProformas) : null}
+            nombreProyecto={nombreProyecto(Number(proyectoProformas))}
+            currentUser={currentUser} puedeAlimentar={puede?.("presupuestos.crear") !== false} />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
         {[["mias", "Me toca a mí", pendientesMias], ["abiertas", "Abiertas", abiertas.length], ["todas", "Todas", solicitudes.length]].map(([id, label, n]) => {
