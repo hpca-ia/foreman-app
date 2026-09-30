@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Send, Check, X, Lock, Users, Loader2 } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { ESTADOS, estadoDe, congelado, fecha, cambiarEstado } from "./cicloPresupuesto";
+import { registrarEnvio } from "../leads/tubo";
 
 // La barra que dice en qué punto está el presupuesto y qué se puede hacer con
 // él: armarlo, mandarlo, anotar qué contestaron.
@@ -27,6 +28,22 @@ export default function EstadoPresupuesto({ presupuesto, currentUser, otros = []
     setTrabajando(false);
     if (r && r !== "sin_fechas") { setError(r); return; }
     if (r === "sin_fechas") setError("Se guardó el estado, pero falta correr la migración 034 para guardar las fechas.");
+
+    // Mandarlo también es un hecho del proyecto, no solo del presupuesto. Si
+    // cuelga de un proyecto del pipeline, queda ahí como Envío en la etapa
+    // Presupuesto, ya marcado. Sin esto, el pipeline no se enteraba y alguien
+    // terminaba preguntando por WhatsApp si ya se le había mandado al cliente.
+    if (nuevo === "enviado" && presupuesto.lead_id) {
+      await registrarEnvio(
+        { id: presupuesto.lead_id, nombre: presupuesto.nombre },
+        {
+          titulo: `Presupuesto enviado: ${presupuesto.nombre}`,
+          destinatario: datos?.enviado_a || presupuesto.cliente_nombre || "el cliente",
+          fecha: new Date().toISOString().split("T")[0],
+          quien: currentUser,
+        },
+      );
+    }
     setAbierto(null);
     onCambiado({ estado: nuevo, ...(nuevo === "enviado" ? { enviado_at: new Date().toISOString(), enviado_a: datos?.enviado_a || null } : {}),
       ...(nuevo === "aprobado" || nuevo === "no_aprobado" ? { decidido_at: new Date().toISOString(), decision_nota: datos?.nota || null } : {}),

@@ -247,7 +247,7 @@ export async function itemATarea(item, { lead, titulo, assignee_id, due_date, ho
     created_by: creadoPor ?? null,
     // La nota dice qué es: sin esto, una tarea y una gestión del tubo se
     // guardaban idénticas y el tablero tenía que adivinar de qué lado ponerlas.
-    notes: `${tipo === "Reunión" ? "Reunión" : tipo === "Gestión" ? "Gestión" : "Tarea"} de ${lead.nombre}`,
+    notes: `${tipo === "Reunión" ? "Reunión" : tipo === "Gestión" ? "Gestión" : tipo === "Envío" ? "Envío" : "Tarea"} de ${lead.nombre}`,
     ...(hora ? { hora } : {}),
     ...(responsable_externo ? { responsable_externo } : {}),
   };
@@ -372,4 +372,47 @@ async function alDiaLaEtapaDelProyecto(etapa, estado) {
 export function avanceDe(items = []) {
   if (!items.length) return null;
   return Math.round(items.filter(i => i.hecho).length / items.length * 100);
+}
+
+/**
+ * Dejar constancia en el pipeline de que se le mandó algo al cliente.
+ *
+ * Lo usa el presupuesto cuando se marca como enviado: hasta ahora eso quedaba
+ * solo en la ficha del presupuesto, y en el pipeline —que es donde se mira
+ * "¿en qué va este proyecto?"— no aparecía nada. El resultado era el clásico
+ * "¿ya le mandamos la propuesta?" preguntado por WhatsApp.
+ *
+ * Entra como Envío en la etapa que se diga —Presupuesto, por defecto—, ya
+ * marcado, porque ya pasó. Si esa etapa no existe en el tubo del proyecto se
+ * crea: que falte la etapa no es razón para perder el registro.
+ */
+export async function registrarEnvio(lead, { titulo, destinatario, fecha, quien, etapaId = "presupuesto", nombreEtapa = "Presupuesto" }) {
+  if (!lead?.id) return { error: "Sin proyecto" };
+
+  let { data: etapa } = await supabase.from("lead_etapas")
+    .select("*").eq("lead_id", lead.id).eq("etapa_id", etapaId).maybeSingle();
+
+  if (!etapa) {
+    const { data: ultimas } = await supabase.from("lead_etapas")
+      .select("orden").eq("lead_id", lead.id).order("orden", { ascending: false }).limit(1);
+    const { data: creada, error } = await supabase.from("lead_etapas").insert({
+      lead_id: lead.id, etapa_id: etapaId, orden: (ultimas?.[0]?.orden || 0) + 10, estado: "en_curso",
+    }).select().single();
+    if (error) return { error: falta(error) ? "Falta correr la migración 040." : error.message };
+    etapa = creada;
+  }
+
+  const { count } = await supabase.from("lead_etapa_items")
+    .select("id", { count: "exact", head: true }).eq("lead_etapa_id", etapa.id);
+
+  const r = await agregarItem(lead, etapa, titulo, (count || 0) + 1, quien);
+  if (r.error) return { error: r.error };
+
+  await itemATarea(r.item, {
+    lead, titulo, due_date: fecha || null, tipo: "Envío", creadoPor: quien?.id ?? null, quien,
+    responsable_externo: destinatario || null,
+  });
+  await marcarItem(r.item, true, quien?.name, quien, nombreEtapa);
+  await anotar(lead.id, { detalle: `Envío a ${destinatario || "el cliente"}: ${titulo}.`, quien, tipo: "nota" });
+  return { item: r.item };
 }

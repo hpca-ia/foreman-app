@@ -9,10 +9,15 @@ export const CLASES = {
   gestion: { label: "Gestión", plural: "Gestiones", color: "#B45309", soft: "#FDF3E7" },
   tarea:   { label: "Tarea",   plural: "Tareas",    color: "#0F3D3E", soft: "#E7F1EF" },
   reunion: { label: "Reunión", plural: "Reuniones", color: "#6D28D9", soft: "#F1ECFD" },
+  // Qué se mandó, a quién y cuándo. En un proyecto la mitad de las discusiones
+  // son "¿le mandamos la propuesta?" / "sí, el martes, a Marcelo": eso es un
+  // hecho con fecha, no una tarea pendiente ni una reunión.
+  envio:   { label: "Envío",   plural: "Envíos",     color: "#1D4ED8", soft: "#E8EEFC" },
 };
 
 /** Qué es una tarea guardada: su tipo manda, y las viejas se leen por su nota. */
 export const claseDe = t => (t?.type === "Reunión" ? "reunion"
+  : t?.type === "Envío" ? "envio"
   : t?.type === "Gestión" ? "gestion"
   : /^Tarea de /.test(t?.notes || "") ? "tarea"
   : /^(Gestión|Actividad) de /.test(t?.notes || "") ? "gestion"

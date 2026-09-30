@@ -152,9 +152,13 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     const n = nuevo[etapa.id] || {};
     const texto = (n.texto || "").trim();
     const tipo = n.tipo || "gestion";
-    const falta = !texto ? `Escribe ${tipo === "reunion" ? "de qué es la reunión" : "qué hay que hacer"}.`
+    const falta = !texto ? `Escribe ${tipo === "reunion" ? "de qué es la reunión" : tipo === "envio" ? "qué se envió" : "qué hay que hacer"}.`
       : tipo === "tarea" && !n.assignee_id ? "Una tarea es de alguien: elige quién la hace."
       : tipo === "reunion" && !n.due_date ? "Una reunión tiene día: ponle la fecha."
+      // Un envío es un hecho, no un pendiente: sin a quién y cuándo no sirve de
+      // nada, porque lo que se consulta seis meses después es justamente eso.
+      : tipo === "envio" && !(n.destinatario || "").trim() ? "Un envío es a alguien: escribí a quién se lo mandaste."
+      : tipo === "envio" && !n.due_date ? "Un envío tiene fecha: ¿cuándo se mandó?"
       : null;
     if (falta) { setErrores(e => ({ ...e, [etapa.id]: falta })); return; }
     setErrores(e => ({ ...e, [etapa.id]: "" }));
@@ -167,16 +171,26 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
       const hecha = await itemATarea(r.item, {
         lead, titulo: texto, due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
-        tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : "Otro", urgente: !!n.urgente,
+        tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : tipo === "envio" ? "Envío" : "Otro", urgente: !!n.urgente,
         creadoPor: currentUser?.id, quien: currentUser,
         assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
         nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
-        responsable_externo: externo,
+        // A quién se le mandó va en el responsable externo: es alguien de
+        // afuera, y así sale en la tarjeta y en la bitácora sin inventar otro
+        // campo que después haya que mantener.
+        responsable_externo: tipo === "envio" ? n.destinatario.trim() : externo,
       });
       if (hecha?.tarea?.assignee_id) await avisarPorCorreo(hecha.tarea.id);
+      // Un envío ya ocurrió: nace marcado y queda de registro. Dejarlo
+      // pendiente obligaría a marcarlo justo después de crearlo.
+      if (tipo === "envio" && r.item) {
+        await marcarItem(r.item, true, currentUser?.name, currentUser, etapaInfo(etapa.etapa_id, catalogo).nombre);
+        await anotar(lead, "nota", `Envío a ${n.destinatario.trim()}: ${texto}.`, currentUser);
+        onBitacora?.();
+      }
       // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
       // seguidas, y volver a abrir el cuadro cada vez era un clic de más.
-      setNuevo(x => ({ ...x, [etapa.id]: { abierto: true, tipo, texto: "", assignee_id: "", due_date: "", hora: "", urgente: false } }));
+      setNuevo(x => ({ ...x, [etapa.id]: { abierto: true, tipo, texto: "", assignee_id: "", due_date: "", hora: "", urgente: false, destinatario: "" } }));
     });
   }
 
@@ -339,15 +353,31 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                 {/* Los tres campos están siempre: una actividad también puede
                     tener dueño o fecha. Lo que cambia es qué se exige para
                     guardar, y eso lo dice la línea de abajo. */}
-                <select value={nuevo[etapa.id]?.assignee_id || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], assignee_id: e.target.value } }))}
-                  style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 4 }}>
-                  <option value="">¿Quién la hace?{(nuevo[etapa.id]?.tipo || "gestion") === "tarea" ? "" : " (opcional)"}</option>
-                  <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
-                  {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
-                </select>
+                {/* En un envío no se pregunta quién lo hace sino a quién se le
+                    mandó: es lo único que se consulta después. Se puede elegir
+                    de la gente del proyecto o escribir el nombre. */}
+                {(nuevo[etapa.id]?.tipo || "gestion") === "envio" ? (
+                  <>
+                    <input list={`invitados-${etapa.id}`} value={nuevo[etapa.id]?.destinatario || ""}
+                      onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], destinatario: e.target.value } }))}
+                      placeholder="¿A quién se lo mandaste?"
+                      style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 4 }} />
+                    <datalist id={`invitados-${etapa.id}`}>
+                      {invitados.map(i => <option key={`x${i.id}`} value={i.nombre} />)}
+                      {users.map(u => <option key={u.id} value={u.name} />)}
+                    </datalist>
+                  </>
+                ) : (
+                  <select value={nuevo[etapa.id]?.assignee_id || ""} onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], assignee_id: e.target.value } }))}
+                    style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 4 }}>
+                    <option value="">¿Quién la hace?{(nuevo[etapa.id]?.tipo || "gestion") === "tarea" ? "" : " (opcional)"}</option>
+                    <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
+                    {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
+                  </select>
+                )}
 
                 <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-                  <input type="date" value={nuevo[etapa.id]?.due_date || ""} title="Para cuándo"
+                  <input type="date" value={nuevo[etapa.id]?.due_date || ""} title={(nuevo[etapa.id]?.tipo || "gestion") === "envio" ? "¿Cuándo se mandó?" : "Para cuándo"}
                     onChange={e => setNuevo(n => ({ ...n, [etapa.id]: { ...n[etapa.id], due_date: e.target.value } }))}
                     style={{ ...chico, flex: 1, minWidth: 0 }} />
                   {/* La hora de una lista y no del relojito del navegador: en el
@@ -640,17 +670,19 @@ const linea = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, col
 const chico = { ...inputStyle, padding: "4px 7px", fontSize: 11.5 };
 
 // Las tres cosas que puede haber debajo de un hito, y qué pide cada una.
-const TIPOS_NUEVO = [["gestion", "Gestión"], ["tarea", "Tarea"], ["reunion", "Reunión"]];
+const TIPOS_NUEVO = [["gestion", "Gestión"], ["tarea", "Tarea"], ["reunion", "Reunión"], ["envio", "Envío"]];
 
 const PISTA = {
   gestion: "¿Qué hay que gestionar?",
   tarea: "¿Qué hay que hacer?",
   reunion: "¿De qué es la reunión?",
+  envio: "¿Qué se envió? Ej: propuesta económica rev.2",
 };
 const PIDE = {
   gestion: "Se marca cuando pasa. Responsable y fecha, si hay.",
   tarea: "Pide responsable. La fecha, si la hay.",
   reunion: "Pide día. A una hora o todo el día.",
+  envio: "Ya pasó: pide a quién y cuándo. Queda registrado, no pendiente.",
 };
 
 
