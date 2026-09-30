@@ -1582,7 +1582,27 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               )}
 
               {/* Rubros editables */}
-              <div style={{fontSize:11,fontWeight:600,color:"var(--ink-soft)",marginBottom:6}}>{bdRubros.length} rubros — edita o elimina antes de guardar:</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+                <div style={{fontSize:11,fontWeight:600,color:"var(--ink-soft)",flex:1,minWidth:180}}>
+                  {bdRubros.length} rubros — edita o elimina antes de guardar:
+                </div>
+                {/* El capítulo casi siempre está escrito una sola vez, arriba de
+                    su bloque: lo de abajo hereda. Un clic hace lo que en Excel
+                    se hace arrastrando, en vez de escribirlo cien veces. */}
+                {bdRubros.some(r=>!r.capitulo||r.capitulo==="SIN CAPÍTULO") && (
+                  <button onClick={()=>{
+                    let ultimo="";
+                    setBdRubros(prev=>prev.map(r=>{
+                      const suyo=(r.capitulo||"").trim();
+                      if (suyo && suyo!=="SIN CAPÍTULO") { ultimo=suyo; return r; }
+                      return ultimo ? {...r,capitulo:ultimo} : r;
+                    }));
+                  }}
+                    style={{border:"1px solid var(--border)",background:"#fff",borderRadius:14,padding:"3px 10px",fontSize:11,fontWeight:600,color:"var(--ink-soft)",cursor:"pointer",fontFamily:"var(--font)",whiteSpace:"nowrap"}}>
+                    ↓ Rellenar capítulos hacia abajo
+                  </button>
+                )}
+              </div>
               <div style={{maxHeight:300,overflowY:"auto",marginBottom:12,border:"1px solid var(--neutral-soft)",borderRadius:8}}>
                 {bdRubros.map((r,i)=>(
                   <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1.5fr 0.7fr 0.8fr auto",gap:6,padding:"6px 8px",borderBottom:"1px solid var(--bg)",alignItems:"center"}}>
