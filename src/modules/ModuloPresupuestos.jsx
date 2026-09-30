@@ -76,6 +76,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const [proveedores, setProveedores] = useState([]);
   const [modalRubro, setModalRubro] = useState(null);
   const [busquedaRubro, setBusquedaRubro] = useState("");
+  // Dónde busca el buscador de arriba. Arranca en el presupuesto: al abrir uno
+  // —sobre todo uno histórico— lo que se busca es lo que ese presupuesto tiene,
+  // no los 955 rubros de la oficina.
+  const [dondeBuscar, setDondeBuscar] = useState("presupuesto");
   // Buscar un rubro por nombre dentro del presupuesto y, a la vez, en la base
   // de rubros para agregarlo sin salir de la tabla.
   const [buscaArmar, setBuscaArmar] = useState("");
@@ -1219,17 +1223,27 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <Search size={15} color="var(--muted)"/>
-              <input value={buscaArmar} onChange={e=>{setBuscaArmar(e.target.value);cargarBase();}}
-                placeholder="Buscar un rubro por nombre, en este presupuesto y en la base"
-                style={{flex:"1 1 260px",minWidth:0,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"var(--font)",color:"var(--ink)",outline:"none"}}/>
+              <input value={buscaArmar} onChange={e=>{setBuscaArmar(e.target.value);if(dondeBuscar==="base")cargarBase();}}
+                placeholder={dondeBuscar==="base"?"Buscar un rubro en la base de la oficina":"Buscar un rubro dentro de este presupuesto"}
+                style={{flex:"1 1 240px",minWidth:0,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"var(--font)",color:"var(--ink)",outline:"none"}}/>
+              {/* Dónde buscar. Antes buscaba en los dos lados a la vez: abrir un
+                  presupuesto histórico para ver qué tenía terminaba mostrando
+                  955 rubros de la base debajo de los suyos. */}
+              <div style={{display:"inline-flex",gap:3,background:"var(--neutral-soft)",borderRadius:8,padding:3,flexShrink:0}}>
+                {[["presupuesto","En este presupuesto"],["base","En la base"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>{setDondeBuscar(k);if(k==="base")cargarBase();}}
+                    style={{padding:"5px 11px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"var(--font)",fontSize:11.5,fontWeight:600,
+                      background:dondeBuscar===k?"#fff":"transparent",color:dondeBuscar===k?"var(--ink)":"var(--ink-soft)",whiteSpace:"nowrap"}}>{l}</button>
+                ))}
+              </div>
               {buscaArmar&&(
                 <>
-                  <span style={{fontSize:12,color:"var(--ink-soft)"}}>{itemsFiltrados.length} {itemsFiltrados.length===1?"rubro":"rubros"} en el presupuesto</span>
+                  <span style={{fontSize:12,color:"var(--ink-soft)"}}>{itemsFiltrados.length} {itemsFiltrados.length===1?"rubro":"rubros"} acá</span>
                   <button onClick={()=>setBuscaArmar("")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",fontSize:12,color:"var(--ink-soft)",cursor:"pointer",fontFamily:"var(--font)"}}>Ver todo</button>
                 </>
               )}
             </div>
-            {buscaArmar&&(
+            {buscaArmar&&dondeBuscar==="base"&&(
               <div style={{marginTop:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
                   <span style={{fontSize:12,fontWeight:700,color:"var(--ink)"}}>En la base de rubros</span>
