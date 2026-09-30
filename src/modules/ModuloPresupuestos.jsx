@@ -745,30 +745,67 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
    *
    * Nace archivado y sin proyecto: es material de consulta, no un presupuesto
    * vivo que alguien tenga que seguir. Se duplica desde la lista de Pasados.
+   *
+   * Y se guarda en el formato de FOREMAN, no como una lista de filas sueltas:
+   * el orden de cada ítem lleva codificado su capítulo —`capOrden * 1000 +
+   * posición`, que es de donde la app reconstruye los capítulos al abrirlo— y
+   * los totales quedan calculados. Guardado de cualquier otra forma se abre
+   * con todos los rubros en un solo capítulo y sin monto, y entonces no sirve
+   * de punto de partida de nada.
    */
   async function guardarComoReferencia() {
     const nombre = (bdMeta.proveedor || "").trim() || `Referencia ${bdMeta.fecha || new Date().getFullYear()}`;
+
+    // Los capítulos en el orden en que vienen del Excel: ese orden es una
+    // decisión de quien lo armó y es parte de lo que se quiere conservar.
+    const capitulos = [];
+    bdRubros.forEach(r => {
+      const c = r.capitulo || "SIN CAPÍTULO";
+      if (!capitulos.includes(c)) capitulos.push(c);
+    });
+
+    const filas = [];
+    capitulos.forEach((cap, ci) => {
+      bdRubros.filter(r => (r.capitulo || "SIN CAPÍTULO") === cap).forEach((r, i) => {
+        const cantidad = Number(r.cantidad) || 0;
+        const precio = Number(r.precio_unitario) || 0;
+        filas.push({
+          capitulo: cap,
+          descripcion: r.descripcion,
+          unidad: unidadParaBase(r, bdPreguntas) || r.unidad || "",
+          cantidad, precio_unitario: precio,
+          total: Math.round(cantidad * precio * 100) / 100,
+          orden: (ci + 1) * 1000 + i + 1,
+        });
+      });
+    });
+
+    const costoDirecto = filas.reduce((t, f) => t + f.total, 0);
+    const t = totalesPresupuesto(costoDirecto, { honorarios_pct: 0, iva_pct: 0 });
+
     const { data: pre, error } = await supabase.from("presupuestos").insert({
       nombre: `${nombre} · referencia`,
       cliente_nombre: bdPreguntas.cliente || bdPreguntas.proveedor || null,
-      notas: `Cargado desde Excel el ${new Date().toLocaleDateString("es-EC")} para alimentar la base. Se guarda como punto de partida.`,
+      notas: `Cargado desde Excel el ${new Date().toLocaleDateString("es-EC")} para alimentar la base. Guardado como punto de partida.`,
       created_by: currentUser.id,
       archivado_at: new Date().toISOString(),
       estado: "borrador",
+      honorarios_pct: 0, iva_pct: 0,
+      subtotal: t.subtotal, honorarios_monto: t.honorarios_monto, iva_monto: t.iva, total: t.total,
     }).select().single();
     if (error || !pre) return error?.message || "No se pudo guardar la referencia";
 
-    const filas = bdRubros.map((r, i) => ({
-      presupuesto_id: pre.id,
-      capitulo: r.capitulo || "SIN CAPÍTULO",
-      descripcion: r.descripcion,
-      unidad: unidadParaBase(r, bdPreguntas) || r.unidad || "",
-      cantidad: Number(r.cantidad) || 0,
-      precio_unitario: Number(r.precio_unitario) || 0,
-      total: (Number(r.cantidad) || 0) * (Number(r.precio_unitario) || 0),
-      orden: i,
-    }));
-    if (filas.length) await supabase.from("presupuesto_items").insert(filas);
+    if (filas.length) {
+      await supabase.from("presupuesto_items")
+        .insert(filas.map(f => ({ ...f, presupuesto_id: pre.id })));
+    }
+
+    // Los capítulos nuevos entran al catálogo: si no, al duplicar la
+    // referencia aparecen como capítulos desconocidos.
+    const faltantes = capitulos.filter(c => c !== "SIN CAPÍTULO" && !capitulosDB.includes(c));
+    for (const [i, nombreCap] of faltantes.entries()) {
+      await supabase.from("capitulos").insert({ nombre: nombreCap, orden: capitulosDB.length + i + 1 });
+    }
     return null;
   }
 
@@ -1465,8 +1502,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                 <input type="checkbox" checked={guardarReferencia} onChange={e=>setGuardarReferencia(e.target.checked)} style={{marginTop:2}}/>
                 <span style={{fontSize:12,color:"var(--ink-soft)",lineHeight:1.5}}>
                   <strong style={{color:"var(--ink)"}}>Guardar también como presupuesto de referencia</strong><br/>
-                  Queda archivado en <strong>Pasados</strong> con sus {bdRubros.length} rubros y capítulos. Después se duplica
-                  y el próximo presupuesto parecido arranca de ahí en vez de una hoja vacía.
+                  Queda archivado en <strong>Pasados</strong> en formato FOREMAN —con sus {bdRubros.length} rubros,
+                  sus capítulos en orden y sus totales—, así que se abre, se exporta y se duplica como cualquier otro.
+                  El próximo presupuesto parecido arranca de ahí en vez de una hoja vacía.
                 </span>
               </label>
               <PreguntasNova rubros={bdRubros} respuestas={bdPreguntas} onCambiar={setBdPreguntas} sugerencia={bdSugerencia} clientes={clientes} proveedores={proveedores} cargos={bdResult.cargos||[]}/>
