@@ -16,6 +16,7 @@ import EtapasLead from "./EtapasLead";
 import TuboProyecto from "./TuboProyecto";
 import { TUNELES, asegurarEtapas } from "./tubo";
 import { useDictado } from "../../lib/dictado";
+import ArchivosDelProyecto from "./ArchivosDelProyecto";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
@@ -296,7 +297,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   // no cuánto vale el negocio.
   const verDatos = currentUser?.role === "owner" || !editando || lead.created_by === currentUser?.id;
   const SECCIONES = editando
-    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["gente", "Gente"]]
+    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["archivos", "Archivos"], ["gente", "Gente"]]
     : [["datos", "Datos"]];
 
   return (
@@ -452,6 +453,12 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             </div>
           )}
         </div>
+      )}
+
+      {/* El cajón del proyecto: planos, CAD, PDF del cliente, fotos del
+          terreno. Lo que hoy vive en el correo de quien lo recibió. */}
+      {editando && seccionVisible === "archivos" && (
+        <ArchivosDelProyecto lead={lead} currentUser={currentUser} editable={editable} />
       )}
 
       {editando && seccionVisible === "gente" && (
