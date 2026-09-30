@@ -119,15 +119,118 @@ export function precioQueCuadra(filasTodas, m) {
   return { columna: mejor.col, filas: mejor.calzan, de: filas.length, pct: medio == null ? null : Math.round(medio * 1000) / 10 };
 }
 
+/**
+ * Comprobar el mapa contra los números, y corregirlo si no cuadra.
+ *
+ * NOVA acierta casi siempre, pero "casi" en un presupuesto de 170 rubros son
+ * treinta filas mal leídas que alguien tiene que encontrar a mano. Y el modelo
+ * no puede garantizar nada: mira títulos de columna, que a veces mienten
+ * —"V. Unitario" en una columna que en realidad trae el precio con IVA—.
+ *
+ * Los números sí se pueden comprobar: en un presupuesto, cantidad × precio =
+ * total en casi todas las filas. Si el mapa que vino no cumple eso, se prueban
+ * las combinaciones de columnas numéricas y se elige la que SÍ lo cumple. Es
+ * aritmética, no opinión: o reproduce los totales del Excel o no.
+ *
+ * @returns el mapa corregido, y qué se cambió para poder decirlo en pantalla.
+ */
+export function mapaQueCuadra(filasTodas, m) {
+  const desde = (m.fila_encabezado ?? 0) + 1;
+  const filas = filasTodas.slice(desde, desde + 400).filter(f => Array.isArray(f) && f.length);
+  const columnas = Math.max(0, ...filas.map(f => f.length));
+  if (columnas < 3) return { mapa: m, cambios: [] };
+
+  // Cuántas filas cumplen cantidad × precio = total con esta combinación.
+  const calzan = (cc, cp, ct) => filas.filter(f => {
+    const cant = num(f[cc]), precio = num(f[cp]), total = num(f[ct]);
+    if (!(cant > 0 && precio > 0 && total > 0)) return false;
+    return Math.abs(cant * precio - total) <= Math.max(0.02, total * 0.005);
+  }).length;
+
+  // Con cuántas filas se puede medir: sin eso, "0 de 0" parecería un fracaso.
+  const conNumeros = (cc, cp, ct) => filas.filter(f =>
+    num(f[cc]) > 0 && num(f[cp]) > 0 && num(f[ct]) > 0).length;
+
+  const actual = m.col_cantidad != null && m.col_precio != null && m.col_total != null
+    ? { cc: m.col_cantidad, cp: m.col_precio, ct: m.col_total }
+    : null;
+  const base = actual ? calzan(actual.cc, actual.cp, actual.ct) : 0;
+  const posibles = actual ? conNumeros(actual.cc, actual.cp, actual.ct) : 0;
+
+  // Si ya cuadra en la mayoría, no se toca nada: el mapa está bien.
+  if (posibles >= 5 && base >= posibles * 0.8) return { mapa: m, cambios: [] };
+
+  let mejor = actual ? { ...actual, calzan: base, de: posibles } : null;
+  for (let cc = 0; cc < columnas; cc++) {
+    for (let cp = 0; cp < columnas; cp++) {
+      if (cp === cc) continue;
+      for (let ct = 0; ct < columnas; ct++) {
+        if (ct === cc || ct === cp) continue;
+        const de = conNumeros(cc, cp, ct);
+        if (de < 5) continue;
+        const n = calzan(cc, cp, ct);
+        if (n < de * 0.8) continue;
+        if (!mejor || n > mejor.calzan) mejor = { cc, cp, ct, calzan: n, de };
+      }
+    }
+  }
+  if (!mejor || !actual || (mejor.cc === actual.cc && mejor.cp === actual.cp && mejor.ct === actual.ct)) {
+    return { mapa: m, cambios: [] };
+  }
+
+  const cambios = [];
+  const nombre = { cc: "cantidad", cp: "precio unitario", ct: "total" };
+  const letra = i => String.fromCharCode(65 + (i % 26));
+  ["cc", "cp", "ct"].forEach(k => {
+    if (mejor[k] !== actual[k]) cambios.push(`${nombre[k]}: columna ${letra(actual[k])} → ${letra(mejor[k])}`);
+  });
+  return {
+    mapa: { ...m, col_cantidad: mejor.cc, col_precio: mejor.cp, col_total: mejor.ct },
+    cambios,
+    cuadran: mejor.calzan, de: mejor.de,
+  };
+}
+
 export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false } = {}) {
   // `respetarMapa` salta el saneo automático: lo usa quien corrige la lectura
   // a mano desde la pantalla. El saneo existe para cuando NOVA se equivoca,
   // pero si la persona está mirando su propio Excel y dice de qué columna sale
   // el capítulo, ella sabe más que la heurística.
-  const m = respetarMapa ? { ...mapaNova } : sanearMapa(filasTodas, mapaNova);
+  const saneado = respetarMapa ? { ...mapaNova } : sanearMapa(filasTodas, mapaNova);
+  // Antes de leer nada: que el mapa reproduzca los totales del propio Excel.
+  // Si no, se corrige solo. Es lo único que convierte "el modelo casi siempre
+  // acierta" en algo que se puede afirmar de esta importación en particular.
+  const revisado = mapaQueCuadra(filasTodas, saneado);
+  const m = revisado.mapa;
+  m.corregido = revisado.cambios?.length ? revisado : null;
   m.ivaEnFilas = precioQueCuadra(filasTodas, m);
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;
+
+  /**
+   * Hay planillas que REPITEN LA FILA DE ENCABEZADOS en cada capítulo, y
+   * escriben el nombre del capítulo en la misma fila:
+   *
+   *   PW | 1 | Trabajos preliminares | Unidad | Cantidad | V. Unitario | ...
+   *      | 1.01 | Replanteo general    | m²     | 848.21   | 0.70        | ...
+   *
+   * Sin reconocerlas, esa fila trae la palabra "Unidad" en la columna de
+   * unidad, se toma por una línea de detalle y se descarta —y con ella el
+   * capítulo—. Un presupuesto de 170 rubros salía entero SIN CAPÍTULO.
+   *
+   * Se reconoce comparando la fila contra el encabezado de verdad: si repite
+   * al menos dos de sus títulos en la misma posición, es un encabezado
+   * repetido y lo único que aporta es el nombre del capítulo.
+   */
+  const encabezado = filasTodas[m.fila_encabezado ?? 0] || [];
+  const columnasClave = [m.col_unidad, m.col_cantidad, m.col_precio, m.col_total].filter(c => c != null);
+  const tituloEncabezado = c => normal(val(encabezado, c));
+  const esEncabezadoRepetido = f =>
+    columnasClave.length >= 2 &&
+    columnasClave.filter(c => {
+      const t = tituloEncabezado(c);
+      return t && normal(val(f, c)) === t;
+    }).length >= 2;
 
   const leidas = filasTodas.slice(inicio).map((f, k) => {
     let desc = texto(val(f, m.col_descripcion));
@@ -145,6 +248,7 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
       precio: num(val(f, m.col_precio)),
       total: num(val(f, m.col_total)),
       capCol: m.col_capitulo != null ? texto(val(f, m.col_capitulo)) : "",
+      repiteEncabezado: esEncabezadoRepetido(f),
       linea: f.map(texto).filter(Boolean).join(" "),
     };
   });
@@ -213,8 +317,28 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     });
   };
 
+  // En esas planillas, el PRIMER capítulo va escrito en la propia fila de
+  // encabezados —"PW | 1 | Trabajos preliminares | Unidad | Cantidad | …"— y la
+  // lectura arranca en la fila siguiente, así que se perdía entero: sus rubros
+  // salían sin capítulo mientras los otros dieciocho sí lo tenían.
+  //
+  // Si esa celda dice "Descripción" o "Rubro" es un título de columna y no hay
+  // capítulo que abrir; si dice cualquier otra cosa, es el primer capítulo.
+  if (m.col_descripcion != null) {
+    const primero = texto(val(encabezado, m.col_descripcion));
+    if (primero && !GENERICO_DESC.test(primero)) {
+      abrir(primero.toUpperCase(), texto(val(encabezado, m.col_item)), null, null, m.fila_encabezado ?? 0);
+    }
+  }
+
   leidas.forEach((r, k) => {
     if (!r.desc && !r.total) return;
+    // Una fila que repite los encabezados no es un rubro ni un detalle: es el
+    // título del capítulo que empieza ahí.
+    if (r.repiteEncabezado) {
+      if (r.desc && !GENERICO_DESC.test(r.desc)) abrir(r.desc.toUpperCase(), r.codigo, null, null, r.fila);
+      return;
+    }
     if (r.capCol && cap?.nombre !== r.capCol.toUpperCase()) abrir(r.capCol.toUpperCase(), "", null, null, r.fila);
 
     if (esRubro(r)) return rubro(r, r.cant, r.precio, m.col_total != null ? r.total : r.cant * r.precio);
@@ -279,6 +403,7 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
   return {
     mapa: m, rubros, omitidas, cargos, capitulos: conRubros, subtotalesDeBloque, ivaEnFilas: m.ivaEnFilas || null,
     subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, advertencias,
+    corregido: m.corregido || null,
     preciosIncluyenIva: typeof mapaNova.precios_incluyen_iva === "boolean" ? mapaNova.precios_incluyen_iva : null,
   };
 }
@@ -547,6 +672,9 @@ export function aplicarDecisiones({ rubros, cargos, omitidas, advertencias = [] 
 const normal = v => String(v ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 export const CAMPOS_MAPA = ["col_item", "col_descripcion", "col_unidad", "col_cantidad", "col_precio", "col_total", "col_capitulo"];
+
+// Los títulos que significan "acá va la descripción", no un capítulo.
+const GENERICO_DESC = /^(descripci[oó]n|rubro|detalle|concepto|item|[ií]tem|actividad|partida|denominaci[oó]n)$/i;
 
 export function firmaEncabezado(fila = []) {
   const partes = fila.map((c, i) => [i, normal(c)]).filter(([, t]) => t && isNaN(Number(t)));

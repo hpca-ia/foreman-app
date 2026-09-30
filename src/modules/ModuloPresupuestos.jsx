@@ -673,7 +673,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         const lectura = await reconocerExcel(file);
         const r = interpretarPresupuesto(lectura.filas, lectura.mapa);
         if (r.rubros.length >= 3) {
-          setBdResult({ capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros, cargos: r.cargos });
+          setBdResult({ capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros, cargos: r.cargos, corregido: r.corregido });
           setBdRubros(r.rubros.map(x => ({ fila: x.fila, capitulo: x.capitulo, descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad, precio_unitario: x.precio_unitario })));
           setBdLectura({ filas: lectura.filas, mapa: r.mapa, archivo: file.name, origen: lectura.origen });
           setBdSugerencia({ emisor: lectura.datos.emisor || "", cliente: lectura.datos.cliente || "" });
@@ -1527,6 +1527,16 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
               {bdLectura?.origen?.tipo==="recordado"&&<div style={{fontSize:11,color:"var(--success)",marginBottom:10}}>Formato reconocido: se leyó igual que "{bdLectura.origen.archivo}".</div>}
+
+              {/* Cuando el mapa de columnas no reproducía los totales del
+                  Excel, se corrigió solo. Decirlo es parte de poder confiar:
+                  una corrección silenciosa es indistinguible de un error. */}
+              {bdResult.corregido && (
+                <div style={{fontSize:11,color:"var(--success)",background:"var(--brand-soft)",borderRadius:8,padding:"7px 10px",marginBottom:10,lineHeight:1.5}}>
+                  Las columnas no cuadraban y se corrigieron solas: {bdResult.corregido.cambios.join(" · ")}.
+                  Ahora cantidad × precio da el total en {bdResult.corregido.cuadran} de {bdResult.corregido.de} filas.
+                </div>
+              )}
 
               {/* Cuando la lectura no encontró los capítulos, todos los rubros
                   salen en "SIN CAPÍTULO". Pasa cuando el Excel los trae en una
