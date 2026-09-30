@@ -80,11 +80,19 @@ export const sinNingunAcceso = acceso =>
  *   nivel  · tu nivel en el proyecto de la tarea (null si no entrás, o si la
  *            tarea no cuelga de ningún proyecto)
  *
- * Lo privado es privado: solo el dueño y los admins, y ahí el proyecto no
- * abre nada.
+ * Lo privado es privado, y eso incluye a los admins.
+ *
+ * Antes decía "solo el dueño y los admins": con eso, marcar personal una tarea
+ * propia igual la dejaba a la vista del Director y de Admin, que son quienes
+ * uno justamente no quiere que la lean. Una casilla que promete privacidad y
+ * no la da es peor que no tenerla, porque alguien confía en ella.
+ *
+ * La ve quien la tiene asignada, quien la creó y quien fue sumado de
+ * acompañante —a ese lo sumó el dueño a propósito—. Nadie más, y ni el
+ * proyecto ni "las tareas de todos" la abren.
  */
 export function veLaTarea({ tarea, usuarioId, admin = false, todas = false, nivel = null, acompanante = false }) {
   const mia = tarea?.assignee_id === usuarioId || tarea?.created_by === usuarioId || acompanante;
-  if (tarea?.privada) return admin || mia;
+  if (tarea?.privada) return mia;
   return mia || todas || !!nivel;
 }

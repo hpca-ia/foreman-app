@@ -65,6 +65,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const [bdResult, setBdResult] = useState(null);
   const [bdRubros, setBdRubros] = useState([]); // editable rubros list
   const [bdMeta, setBdMeta] = useState({ proveedor:"", cliente:"", fecha:new Date().getFullYear().toString() });
+  // Quedarse con el armado del Excel, no solo con sus precios.
+  const [guardarReferencia, setGuardarReferencia] = useState(true);
   // Lo que NOVA pregunta antes de guardar (origen de los precios, unidades) y
   // lo leído del Excel, para recordar su formato.
   const [bdPreguntas, setBdPreguntas] = useState(RESPUESTAS_VACIAS);
@@ -733,6 +735,43 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     setUploadingBD(false); e.target.value="";
   }
 
+  /**
+   * Guardar el Excel también como presupuesto de referencia.
+   *
+   * Alimentar la base se queda con los precios y tira el resto: el armado —qué
+   * rubros, en qué capítulos, con qué cantidades— es medio día de trabajo de
+   * alguien y se perdía en cada carga. Guardado como referencia, el próximo
+   * presupuesto parecido arranca duplicándolo en vez de desde una hoja vacía.
+   *
+   * Nace archivado y sin proyecto: es material de consulta, no un presupuesto
+   * vivo que alguien tenga que seguir. Se duplica desde la lista de Pasados.
+   */
+  async function guardarComoReferencia() {
+    const nombre = (bdMeta.proveedor || "").trim() || `Referencia ${bdMeta.fecha || new Date().getFullYear()}`;
+    const { data: pre, error } = await supabase.from("presupuestos").insert({
+      nombre: `${nombre} · referencia`,
+      cliente_nombre: bdPreguntas.cliente || bdPreguntas.proveedor || null,
+      notas: `Cargado desde Excel el ${new Date().toLocaleDateString("es-EC")} para alimentar la base. Se guarda como punto de partida.`,
+      created_by: currentUser.id,
+      archivado_at: new Date().toISOString(),
+      estado: "borrador",
+    }).select().single();
+    if (error || !pre) return error?.message || "No se pudo guardar la referencia";
+
+    const filas = bdRubros.map((r, i) => ({
+      presupuesto_id: pre.id,
+      capitulo: r.capitulo || "SIN CAPÍTULO",
+      descripcion: r.descripcion,
+      unidad: unidadParaBase(r, bdPreguntas) || r.unidad || "",
+      cantidad: Number(r.cantidad) || 0,
+      precio_unitario: Number(r.precio_unitario) || 0,
+      total: (Number(r.cantidad) || 0) * (Number(r.precio_unitario) || 0),
+      orden: i,
+    }));
+    if (filas.length) await supabase.from("presupuesto_items").insert(filas);
+    return null;
+  }
+
   async function guardarEnBD() {
     if (!bdRubros.length || faltanRespuestas(bdPreguntas, bdRubros).length) return;
     setGuardandoBD(true);
@@ -742,9 +781,14 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     );
     // Se guardó bien: el formato del Excel queda aprendido.
     if (bdLectura && !res.error) await recordarFormato({ filas: bdLectura.filas, mapa: bdLectura.mapa, archivo: bdLectura.archivo, usuarioId: currentUser?.id });
-    fetchCapitulosDB(); fetchClientes(); fetchProveedores();
+    let comoReferencia = null;
+    if (guardarReferencia && !res.error) comoReferencia = await guardarComoReferencia();
+
+    fetchCapitulosDB(); fetchClientes(); fetchProveedores(); fetchPresupuestos();
     setGuardandoBD(false);
-    alert(res.error ? "⚠️ " + res.error : "✅ " + (resumenAlimentacion(res) || "No había nada nuevo que guardar."));
+    alert(res.error ? "⚠️ " + res.error
+      : "✅ " + (resumenAlimentacion(res) || "No había nada nuevo que guardar.")
+        + (guardarReferencia ? (comoReferencia ? `\n⚠️ No se pudo guardar la referencia: ${comoReferencia}` : "\n📄 También quedó guardado como presupuesto de referencia, en Pasados.") : ""));
     setBdResult(null); setBdLectura(null);
   }
 
@@ -1412,6 +1456,19 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
               {bdLectura?.origen?.tipo==="recordado"&&<div style={{fontSize:11,color:"var(--success)",marginBottom:10}}>Formato reconocido: se leyó igual que "{bdLectura.origen.archivo}".</div>}
+
+              {/* Alimentar la base se queda con los precios y tira el resto. El
+                  armado —qué rubros, en qué capítulos, con qué cantidades— es
+                  medio día de trabajo de alguien, y guardado sirve de punto de
+                  partida para el próximo presupuesto parecido. */}
+              <label style={{display:"flex",alignItems:"flex-start",gap:8,background:"var(--bg)",borderRadius:8,padding:"9px 11px",marginBottom:12,cursor:"pointer"}}>
+                <input type="checkbox" checked={guardarReferencia} onChange={e=>setGuardarReferencia(e.target.checked)} style={{marginTop:2}}/>
+                <span style={{fontSize:12,color:"var(--ink-soft)",lineHeight:1.5}}>
+                  <strong style={{color:"var(--ink)"}}>Guardar también como presupuesto de referencia</strong><br/>
+                  Queda archivado en <strong>Pasados</strong> con sus {bdRubros.length} rubros y capítulos. Después se duplica
+                  y el próximo presupuesto parecido arranca de ahí en vez de una hoja vacía.
+                </span>
+              </label>
               <PreguntasNova rubros={bdRubros} respuestas={bdPreguntas} onCambiar={setBdPreguntas} sugerencia={bdSugerencia} clientes={clientes} proveedores={proveedores} cargos={bdResult.cargos||[]}/>
 
               {/* Capítulos detectados */}

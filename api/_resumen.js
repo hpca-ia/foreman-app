@@ -46,6 +46,10 @@ export function armarResumen(d) {
   ]);
 
   const suyas = (u, lista) => lista.filter(t => t.assignee_id === u.id);
+  // Lo personal no sale en la foto del equipo ni en lo sin repartir: el correo
+  // del Director no puede ser la puerta de atrás de una casilla que promete
+  // privacidad.
+  const sinLoPersonal = lista => lista.filter(t => !t.privada);
   const conProyecto = t => ({ ...t, proyecto: nombreProyecto(t.lead_id), clase: claseDe(t) });
 
   const abiertas = d.tareas.filter(ABIERTA);
@@ -76,7 +80,7 @@ export function armarResumen(d) {
         ayer: suyas(u, cerradasAyer).map(conProyecto),
         // De sus proyectos, solo lo que aprieta y es de otro. Al admin no se lo
         // repetimos: abajo tiene la foto completa del equipo.
-        deSusProyectos: esAdmin ? [] : abiertas
+        deSusProyectos: esAdmin ? [] : sinLoPersonal(abiertas)
           .filter(t => t.assignee_id !== u.id && mios.has(t.lead_id) && t.due_date && t.due_date <= hoy)
           .map(conProyecto),
         equipo: [],
@@ -88,7 +92,7 @@ export function armarResumen(d) {
         sobre.equipo = d.usuarios
           .filter(o => o.activo !== false && o.id !== u.id)
           .map(o => {
-            const deEl = suyas(o, abiertas).map(conProyecto);
+            const deEl = suyas(o, sinLoPersonal(abiertas)).map(conProyecto);
             return {
               persona: o.nombre,
               atrasadas: deEl.filter(t => t.due_date && t.due_date < hoy),
@@ -98,7 +102,7 @@ export function armarResumen(d) {
             };
           })
           .filter(x => x.abiertas || x.ayer.length);
-        sobre.sinDueno = abiertas.filter(t => !t.assignee_id && !t.responsable_externo).map(conProyecto);
+        sobre.sinDueno = sinLoPersonal(abiertas).filter(t => !t.assignee_id && !t.responsable_externo).map(conProyecto);
       }
       return sobre;
     })

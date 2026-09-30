@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { Plus, AlertTriangle } from "lucide-react";
+import { Plus, AlertTriangle, Images } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt, resumenPlanilla } from "./calculos";
 import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
+import RespaldosPlanilla from "./RespaldosPlanilla";
 
 export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, puede, onCambio, mostrarTitulo = true }) {
   const [modal, setModal] = useState(null); // null | {factura?}
+  const [verRespaldos, setVerRespaldos] = useState(false);
 
   const delPeriodo = facturas.filter(f => planillaActual ? f.planilla_id === planillaActual.id : !f.planilla_id);
   const sinPlanilla = facturas.filter(f => !f.planilla_id);
@@ -32,10 +34,24 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
             {planillaActual ? <>Facturas de <strong>{planillaActual.nombre || `Planilla N°${planillaActual.numero}`}</strong></> : "Facturas sin planilla"}
           </div>
         )}
-        {puede?.("facturas.registrar") !== false && <Button variant="primary" size="sm" style={{ marginLeft: "auto" }} onClick={() => setModal({})} disabled={!planillaActual || planillaActual.estado === "cerrada"}>
+        {/* Ver los escaneos de a uno sirve para revisar una factura; para
+            revisar una planilla entera hay que verlos todos y, sobre todo,
+            saber cuáles faltan. */}
+        <Button variant={verRespaldos ? "primary" : "outline"} size="sm" style={{ marginLeft: "auto" }}
+          onClick={() => setVerRespaldos(v => !v)}>
+          <Images size={13} /> Respaldos
+        </Button>
+        {puede?.("facturas.registrar") !== false && <Button variant="primary" size="sm" onClick={() => setModal({})} disabled={!planillaActual || planillaActual.estado === "cerrada"}>
           <Plus size={13} /> Nueva factura
         </Button>}
       </div>
+
+      {verRespaldos && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 13, marginBottom: 12 }}>
+          <RespaldosPlanilla facturas={delPeriodo}
+            titulo={planillaActual ? `Respaldos de ${planillaActual.nombre || `Planilla N°${planillaActual.numero}`}` : "Respaldos"} />
+        </div>
+      )}
 
       {planillaActual?.estado === "cerrada" && (
         <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 10, fontSize: 12, color: colors.warning, marginBottom: 12 }}>

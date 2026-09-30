@@ -193,12 +193,12 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
             <strong style={{ color: colors.ink }}>Pide una aprobación</strong> — quien la reciba la aprueba o la devuelve con un comentario, en vez de marcarla completada. Queda anotado quién decidió y cuándo.
           </span>
         </label>
-        {soyAdmin && (
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
-            <input type="checkbox" checked={!!form.privada} onChange={e => inp("privada", e.target.checked)} />
-            Privada — solo la ven los admins y la persona asignada
-          </label>
-        )}
+        {/* Para todos, no solo para los admins: cualquiera tiene cosas suyas
+            que anotar y no hay razón para obligarlo a llevarlas en otro lado. */}
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!form.privada} onChange={e => inp("privada", e.target.checked)} />
+          Personal — no la ve nadie más, ni el Director
+        </label>
         <div><label style={lS}>Notas</label><textarea value={form.notes} onChange={e => inp("notes", e.target.value)} placeholder="Proveedor, contacto, contexto..." style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} /></div>
         {/* Lo que hace falta para hacerla: un enlace a Drive o Dropbox, o el
             del proveedor. Subirlo otra vez sería duplicarlo. */}
