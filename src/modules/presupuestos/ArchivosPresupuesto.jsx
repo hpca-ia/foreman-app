@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Paperclip, Download, Trash2, Upload, Loader2 } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { listarOriginales, guardarOriginal, borrarOriginal, abrirOriginal } from "../../lib/archivosPresupuesto";
+import { aFecha } from "../../lib/dates";
 
 // Los archivos originales del presupuesto: el Excel con que se armó, las
 // proformas de los proveedores, lo que mandó el cliente.
@@ -12,7 +13,7 @@ import { listarOriginales, guardarOriginal, borrarOriginal, abrirOriginal } from
 
 const TIPOS = { presupuesto: "Presupuesto original", cotizacion: "Cotización", otro: "Archivo" };
 const peso = b => (!b ? "" : b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
-const cuando = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" }) : "");
+const cuando = f => (aFecha(f)?.toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" }) || "");
 
 export default function ArchivosPresupuesto({ presupuestoId, currentUser, soloLectura, version }) {
   const [archivos, setArchivos] = useState([]);

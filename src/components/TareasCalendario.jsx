@@ -4,6 +4,7 @@ import { enlaceCalendario } from "../lib/calendarioSuscripcion";
 import { colors } from "../theme/colors";
 import { PRIORIDAD } from "../theme/constants";
 import MarcaPrivada from "./ui/MarcaPrivada";
+import { claveFecha } from "../lib/dates";
 
 // El mes, con las tareas en el día en que vencen.
 //
@@ -17,11 +18,8 @@ import MarcaPrivada from "./ui/MarcaPrivada";
 const DIAS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
-const clave = f => {
-  const d = new Date(f);
-  return isNaN(d) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-const hoyClave = () => clave(new Date());
+const clave = claveFecha;
+const hoyClave = () => claveFecha(new Date());
 
 /** Las seis semanas que se ven en un mes, empezando en lunes. */
 function semanasDe(ano, mes) {

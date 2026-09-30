@@ -59,6 +59,7 @@ export default function App() {
   const [cargando, setCargando] = useState(false);
   const [vistaPedida, setVista] = useState("tareas");
   const [vistaTareas, setVistaTareas] = useState("lista");
+  const [soloMias, setSoloMias] = useState(false);
   // Quién acompaña a cada tarea, y qué tarea espera a cuál.
   const [acompanantes, setAcompanantes] = useState(new Map());
   // Lo último de las tareas, para poder leer sus acompañantes sin volver a
@@ -453,10 +454,14 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   };
   // Una sola regla, la misma de todo FOREMAN: es tuya, o entrás a su proyecto.
   // Antes había que acordarse de filtrar por proyecto para ver lo del equipo.
-  let visibles = tareas.filter(t => veLaTarea({
+  // Todo lo que esta persona puede ver, sin filtros de pantalla encima. De acá
+  // sale el cuadro "en qué anda el resto", que no debe achicarse porque uno
+  // prendió un filtro para mirar lo suyo.
+  const visiblesTodas = tareas.filter(t => veLaTarea({
     tarea: t, usuarioId: usuario.id, admin, todas: veTodo, nivel: nivelDeTarea(t),
     acompanante: (acompanantes.get(t.id) || []).includes(usuario.id),
   }));
+  let visibles = visiblesTodas;
   if (busqueda.trim()) {
     const q = busqueda.toLowerCase();
     visibles = visibles.filter(t =>
@@ -475,6 +480,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const paraAvisar = !proyectoElegido ? baseAviso
     : baseAviso.filter(t => (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id));
 
+  if (soloMias) visibles = visibles.filter(esMia);
   if (filtro === "atrasadas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
   if (filtro === "pausadas") visibles = visibles.filter(t => t.status === "bloqueado");
   if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
@@ -559,6 +565,12 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
                   {mios.map(p => <option key={p.clave} value={p.clave}>{p.name}</option>)}
                 </select>}
+                {/* La lista ahora trae lo del equipo de sus proyectos, que es
+                    para lo que sirve: coordinarse. Pero a veces uno solo quiere
+                    saber qué le toca a él, y para eso está este interruptor. */}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: soloMias ? colors.brand : colors.inkSoft, cursor: "pointer", flexShrink: 0, fontWeight: soloMias ? 600 : 400 }}>
+                  <input type="checkbox" checked={soloMias} onChange={e => setSoloMias(e.target.checked)} /> Solo lo mío
+                </label>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: colors.inkSoft, cursor: "pointer", flexShrink: 0 }}>
                   <input type="checkbox" checked={verListas} onChange={e => setVerListas(e.target.checked)} /> Ver completadas
                 </label>
@@ -598,7 +610,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   {/* Lo primero son las tareas de uno; en qué anda el resto va
                       abajo, en su propio cuadro, sin lo marcado como privado. */}
                   <TareasDeLosDemas
-                    tasks={tareas.filter(t => t.assignee_id !== usuario.id && (!t.privada || admin || t.created_by === usuario.id))}
+                    tasks={visiblesTodas.filter(t => t.assignee_id !== usuario.id)}
                     users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
                     onEditar={t => { setEditTask(t); setShowModal(true); }} />
 

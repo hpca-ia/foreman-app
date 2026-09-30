@@ -22,11 +22,15 @@ export const claseDe = t => (t?.type === "Reunión" ? "reunion"
 /**
  * @param {object} d  { tareas, usuarios, leads, accesos, miembros, hoy }
  * @returns {Array} un sobre por persona: { usuario, atrasadas, hoy, manana,
- *                  sinFecha, ayer, deSusProyectos, esAdmin, equipo, sinDueno }
+ *                  estaSemana, masAdelante, sinFecha, ayer, deSusProyectos,
+ *                  esAdmin, equipo, sinDueno }
  */
 export function armarResumen(d) {
   const hoy = d.hoy || hoyISO();
   const manana = sumarDias(hoy, 1);
+  // Una semana por delante: más que eso deja de ser "lo que viene" y se vuelve
+  // una lista que nadie lee.
+  const finDeSemana = sumarDias(hoy, 7);
   // "Lo que cerraste" mira hasta el último día hábil: el lunes eso es el
   // sábado, porque el domingo no se trabaja y el resumen no sale. Si mirara
   // solo ayer, el trabajo del sábado no lo vería nadie.
@@ -63,6 +67,11 @@ export function armarResumen(d) {
         atrasadas: mias.filter(t => t.due_date && t.due_date < hoy),
         hoy: mias.filter(t => t.due_date === hoy),
         manana: mias.filter(t => t.due_date === manana),
+        // Lo que viene: el correo tiene que contestar "¿qué me espera?", no
+        // solo "¿qué se me pasó?". Sin esto, uno se enteraba de la entrega del
+        // jueves el jueves a las siete de la mañana.
+        estaSemana: mias.filter(t => t.due_date && t.due_date > manana && t.due_date <= finDeSemana),
+        masAdelante: mias.filter(t => t.due_date && t.due_date > finDeSemana),
         sinFecha: mias.filter(t => !t.due_date),
         ayer: suyas(u, cerradasAyer).map(conProyecto),
         // De sus proyectos, solo lo que aprieta y es de otro. Al admin no se lo
@@ -94,5 +103,6 @@ export function armarResumen(d) {
       return sobre;
     })
     .filter(s => s.atrasadas.length || s.hoy.length || s.manana.length || s.ayer.length
+      || s.estaSemana.length || s.masAdelante.length || s.sinFecha.length
       || s.deSusProyectos.length || (s.esAdmin && (s.equipo.length || s.sinDueno.length)));
 }

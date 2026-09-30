@@ -29,9 +29,18 @@ function cuerpoDelCorreo(s) {
     bloque("ATRASADO", "#B91C1C", s.atrasadas),
     bloque("HOY", "#B45309", s.hoy),
     bloque("MAÑANA", "#6B7280", s.manana),
+    // Lo que viene, para poder organizar el día sabiendo qué hay detrás.
+    bloque("ESTA SEMANA", "#6B7280", (s.estaSemana || []).slice(0, 12)),
+    (s.masAdelante || []).length
+      ? bloque("MÁS ADELANTE", "#9CA3AF", s.masAdelante.slice(0, 8))
+      : "",
+    (s.masAdelante || []).length > 8
+      ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${s.masAdelante.length - 8} más adelante.</div>` : "",
     s.deSusProyectos.length ? bloque("EN TUS PROYECTOS", "#6B7280", s.deSusProyectos) : "",
     s.ayer.length ? bloque("CERRASTE AYER", "#15803D", s.ayer) : "",
-    s.sinFecha.length ? `<div style="font-size:12px;color:#9CA3AF;margin-top:14px">Y ${s.sinFecha.length} ${s.sinFecha.length === 1 ? "cosa tuya sin fecha" : "cosas tuyas sin fecha"}.</div>` : "",
+    // Lo sin fecha ya no es una nota al pie: si no tiene día, no va a pasar
+    // solo, y el correo de la mañana es el momento de ponerle uno.
+    (s.sinFecha || []).length ? bloque(`SIN FECHA · ${s.sinFecha.length}`, "#9CA3AF", s.sinFecha.slice(0, 8)) : "",
 
     // La foto de la oficina, solo para quien la tiene que mirar.
     s.esAdmin && s.equipo.length ? `
@@ -47,6 +56,7 @@ function cuerpoDelCorreo(s) {
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
+      && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length
       ? `<p style="font-size:13px;color:#4B5563;margin:0">Hoy no tenés nada con fecha. Lo que esté sin fecha te espera en FOREMAN.</p>` : "",
 
     `<div style="margin-top:20px"><a href="${APP}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Abrir FOREMAN →</a></div>`,
@@ -95,7 +105,7 @@ export async function mandarResumen(soloPara = null) {
       if (!u) return { ok: false, error: `No encontré al usuario ${soloPara} en la tabla de usuarios` };
       if (!u.email) return { ok: false, error: `${u.nombre} no tiene correo cargado: ponéselo en Ajustes → Usuarios` };
       sobres = [{ usuario: u, esAdmin: u.rol === "owner" || u.rol === "assistant",
-        atrasadas: [], hoy: [], manana: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [] }];
+        atrasadas: [], hoy: [], manana: [], estaSemana: [], masAdelante: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [] }];
     }
   }
 

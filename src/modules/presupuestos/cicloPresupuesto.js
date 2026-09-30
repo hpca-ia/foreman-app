@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { aFecha } from "../../lib/dates";
 
 // La vida de un presupuesto: se arma, se manda, contestan.
 //
@@ -20,7 +21,7 @@ export const estadoDe = p => (ESTADOS[p?.estado] ? p.estado : "borrador");
 /** Un presupuesto que ya salió no se toca: los cambios van en otra versión. */
 export const congelado = p => estadoDe(p) !== "borrador" || !!p?.archivado_at;
 
-export const fecha = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
+export const fecha = f => (aFecha(f)?.toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) || "");
 
 /**
  * Cambia el estado y deja la fecha de lo que pasó.
