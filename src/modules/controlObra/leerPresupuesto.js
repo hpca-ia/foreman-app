@@ -119,8 +119,12 @@ export function precioQueCuadra(filasTodas, m) {
   return { columna: mejor.col, filas: mejor.calzan, de: filas.length, pct: medio == null ? null : Math.round(medio * 1000) / 10 };
 }
 
-export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false } = {}) {
-  const m = sanearMapa(filasTodas, mapaNova);
+export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false } = {}) {
+  // `respetarMapa` salta el saneo automático: lo usa quien corrige la lectura
+  // a mano desde la pantalla. El saneo existe para cuando NOVA se equivoca,
+  // pero si la persona está mirando su propio Excel y dice de qué columna sale
+  // el capítulo, ella sabe más que la heurística.
+  const m = respetarMapa ? { ...mapaNova } : sanearMapa(filasTodas, mapaNova);
   m.ivaEnFilas = precioQueCuadra(filasTodas, m);
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;

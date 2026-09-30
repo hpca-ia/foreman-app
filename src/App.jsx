@@ -37,6 +37,7 @@ const ModuloControlObra = lazy(() => import("./modules/controlObra/ModuloControl
 const ModuloCajaChica = lazy(() => import("./modules/ModuloCajaChica"));
 const ModuloCompras = lazy(() => import("./modules/compras/ModuloCompras"));
 const ModuloLibro = lazy(() => import("./modules/libro/ModuloLibro"));
+const ModuloObservaciones = lazy(() => import("./modules/observaciones/ModuloObservaciones"));
 const PanelAjustes = lazy(() => import("./components/PanelAjustes"));
 
 // Mientras llega el módulo: un renglón discreto, no una pantalla en blanco.
@@ -358,7 +359,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const primeraVista = () => {
     const puertas = [
       ["tareas", "tareas.ver"], ["leads", null], ["presupuestos", "presupuestos.ver"],
-      ["controlObra", "controlObra.ver"], ["libro", "libro.ver"],
+      ["controlObra", "controlObra.ver"], ["libro", "libro.ver"], ["observaciones", "observaciones.ver"],
       ["compras", "compras.ver"], ["cajaChica", "cajaChica.ver"],
     ];
     for (const [v, permiso] of puertas) {
@@ -648,6 +649,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
             )}
             {puede("libro.ver") && vista === "libro" && (
               <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelLibro} />
+            )}
+            {puede("observaciones.ver") && vista === "observaciones" && (
+              <ModuloObservaciones currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelObra} />
             )}
           </Suspense>
 

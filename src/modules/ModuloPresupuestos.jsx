@@ -809,6 +809,40 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     return null;
   }
 
+  /**
+   * Las columnas del Excel con un ejemplo de lo que traen.
+   *
+   * Sin el ejemplo, elegir "columna C" es adivinar. Se muestra el primer valor
+   * con texto que aparezca debajo del encabezado, que es lo que deja
+   * reconocerla de un vistazo.
+   */
+  function columnasDelExcel(lectura) {
+    const filas = lectura?.filas || [];
+    const desde = (lectura?.mapa?.fila_encabezado ?? 0) + 1;
+    const cuantas = Math.max(0, ...filas.slice(0, 40).map(f => (f || []).length));
+    const letra = i => String.fromCharCode(65 + (i % 26));
+    return Array.from({ length: cuantas }, (_, i) => {
+      const muestra = filas.slice(desde, desde + 60)
+        .map(f => String((f || [])[i] ?? "").trim())
+        .filter(Boolean).slice(0, 2).join(" · ");
+      return { i, letra: letra(i), ejemplo: muestra ? muestra.slice(0, 48) : "(vacía)" };
+    }).filter(c => c.ejemplo !== "(vacía)");
+  }
+
+  /** Volver a leer el mismo Excel diciendo de qué columna sale el capítulo. */
+  function releerConCapitulo(indice) {
+    if (!bdLectura?.filas) return;
+    const col = indice === "" ? null : Number(indice);
+    // Se fuerza a mano: el saneo automático es el que la descartó, y acá el
+    // que sabe es quien está mirando su propio Excel.
+    const mapa = { ...bdLectura.mapa, col_capitulo: col };
+    const r = interpretarPresupuesto(bdLectura.filas, mapa, { respetarMapa: true });
+    if (!r.rubros.length) return;
+    setBdResult(b => ({ ...(b || {}), capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros, cargos: r.cargos }));
+    setBdRubros(r.rubros.map(x => ({ fila: x.fila, capitulo: x.capitulo, descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad, precio_unitario: x.precio_unitario })));
+    setBdLectura(l => ({ ...l, mapa: { ...r.mapa, col_capitulo: col } }));
+  }
+
   async function guardarEnBD() {
     if (!bdRubros.length || faltanRespuestas(bdPreguntas, bdRubros).length) return;
     setGuardandoBD(true);
@@ -1493,6 +1527,30 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   <input value={bdMeta.fecha} onChange={e=>setBdMeta(p=>({...p,fecha:e.target.value}))} placeholder="2025" style={iS}/></div>
               </div>
               {bdLectura?.origen?.tipo==="recordado"&&<div style={{fontSize:11,color:"var(--success)",marginBottom:10}}>Formato reconocido: se leyó igual que "{bdLectura.origen.archivo}".</div>}
+
+              {/* Cuando la lectura no encontró los capítulos, todos los rubros
+                  salen en "SIN CAPÍTULO". Pasa cuando el Excel los trae en una
+                  columna que no se reconoció —o que se confundió con la de
+                  códigos—. En vez de obligar a corregir cien filas a mano, se
+                  elige la columna y se vuelve a leer. */}
+              {bdLectura && bdRubros.length > 0 && bdRubros.filter(r => !r.capitulo || r.capitulo === "SIN CAPÍTULO").length > bdRubros.length * 0.5 && (
+                <div style={{background:"var(--warning-soft)",border:"1px solid var(--warning-border)",borderRadius:8,padding:"10px 12px",marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--warning)",marginBottom:4}}>
+                    Los rubros salieron sin capítulo
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--ink-soft)",lineHeight:1.5,marginBottom:7}}>
+                    Si el Excel trae el capítulo en una columna, decí cuál y se vuelve a leer. Si los trae como títulos
+                    entre los rubros, dejalo en "ninguna" y corregilos abajo.
+                  </div>
+                  <select value={bdLectura.mapa?.col_capitulo ?? ""} onChange={e => releerConCapitulo(e.target.value)}
+                    style={{...iS, background:"#fff"}}>
+                    <option value="">El capítulo no está en una columna</option>
+                    {columnasDelExcel(bdLectura).map(c => (
+                      <option key={c.i} value={c.i}>Columna {c.letra} — {c.ejemplo}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Alimentar la base se queda con los precios y tira el resto. El
                   armado —qué rubros, en qué capítulos, con qué cantidades— es
