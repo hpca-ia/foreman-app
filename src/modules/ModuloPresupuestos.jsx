@@ -373,21 +373,44 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     });
     pidCargado.current = pid;
 
-    // La lista guardada manda: ahí están también los capítulos sin rubros, que
-    // de los rubros no se pueden deducir. Un presupuesto viejo no la tiene y
-    // entonces se usa lo deducido, como siempre.
+    // De dónde salen los capítulos: de la lista guardada con el presupuesto si
+    // la hay —ahí están también los que todavía no tienen rubros, que de los
+    // rubros no se pueden deducir— y si no, de los rubros, como siempre.
     const { data: pre } = await supabase.from("presupuestos").select("capitulos").eq("id", pid).maybeSingle();
     const guardados = Array.isArray(pre?.capitulos) ? pre.capitulos : null;
+
+    let lista;
     if (guardados?.length) {
-      // Un capítulo que aparece en los rubros y no en la lista —importado,
-      // o cargado antes de que esto existiera— se suma al final en vez de
-      // perderse.
+      // Un capítulo que aparece en los rubros y no en la lista —importado, o
+      // cargado antes de que esto existiera— se suma al final en vez de perderse.
       const faltan = caps.filter(c => !guardados.some(g => g.nombre === c.nombre));
       const tope = Math.max(0, ...guardados.map(g => Number(g.orden) || 0));
-      setCapitulosActivos([...guardados, ...faltan.map((c, k) => ({ ...c, orden: tope + k + 1 }))]
-        .sort((a, b) => a.orden - b.orden));
+      lista = [...guardados, ...faltan.map((c, k) => ({ ...c, orden: tope + k + 1 }))];
     } else {
-      setCapitulosActivos(caps.sort((a,b)=>a.orden-b.orden));
+      lista = caps;
+    }
+    lista = [...lista].sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+    // Y se endereza la numeración: 1, 2, 3… sin huecos. Agregar un capítulo le
+    // sumaba uno al orden de los de abajo sin que nadie ocupara el lugar que
+    // se liberaba arriba, así que con dos agregados la lista quedaba 1, 8, 9.
+    // Un hueco obliga a quien mira el presupuesto a preguntarse si falta un
+    // capítulo, y eso en un documento que se le manda al cliente no va.
+    const consecutivos = lista.every((c, i) => Number(c.orden) === i + 1);
+    const enderezada = consecutivos ? lista : lista.map((c, i) => ({ nombre: c.nombre, orden: i + 1 }));
+    setCapitulosActivos(enderezada);
+
+    if (!consecutivos) {
+      // Los rubros llevan su capítulo codificado en el orden: si se renumeran
+      // los capítulos y ellos no, quedan apuntando a otro.
+      const corregidos = numerar(enderezada, data || []);
+      const cambiados = corregidos.filter((x, k) => x.orden !== (data || [])[k]?.orden);
+      if (cambiados.length) {
+        setItems(corregidos);
+        await Promise.all(cambiados.map(x =>
+          supabase.from("presupuesto_items").update({ orden: x.orden }).eq("id", x.id)));
+      }
+      await guardarCapitulos(enderezada, pid);
     }
   }
 
@@ -508,7 +531,11 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   function agregarCapitulo(nombre) {
     const trimmed = nombre.trim();
     if (!trimmed || capitulosActivos.find(c=>c.nombre===trimmed)) return;
-    const reordenados = [{ nombre:trimmed, orden:1 }, ...capitulosActivos.map(c=>({...c, orden:c.orden+1}))];
+    // Se vuelve a numerar la lista entera desde 1. Sumarle uno al orden de
+    // cada uno dejaba huecos: con dos capítulos agregados quedaban numerados
+    // 1, 3, 4, 5 —cada agregado corría los de abajo pero nadie ocupaba el
+    // lugar que se liberaba arriba—.
+    const reordenados = [{ nombre:trimmed }, ...capitulosActivos].map((c,i)=>({ ...c, orden:i+1 }));
     setCapitulosActivos(reordenados);
     // Los rubros llevan su capítulo codificado en el orden: si el capítulo se
     // mueve y ellos no, quedan en otro lado.
