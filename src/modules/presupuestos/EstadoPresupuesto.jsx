@@ -120,20 +120,18 @@ export default function EstadoPresupuesto({ presupuesto, currentUser, otros = []
         </div>
       )}
 
-      {/* Quién más lo está mirando ahora mismo. */}
-      {(otros.length > 0 || !mando) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: 8, padding: "7px 10px" }}>
+      {/* Quién más lo está trabajando ahora mismo.
+          Ya no hay candado: cada rubro es su propia fila, así que dos personas
+          en capítulos distintos no se pisan. Lo que hace falta es saber quién
+          más está adentro para repartirse el trabajo —"vos hacé eléctrico que
+          yo voy por acabados"— y que lo que cargue el otro aparezca solo. */}
+      {otros.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, color: colors.brand, background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "7px 10px" }}>
           <Users size={13} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 160 }}>
-            {mando ? (
-              <>También lo tiene abierto <strong>{otros.map(o => o.nombre).join(", ")}</strong>, pero el control es tuyo: llegaste primero y lo soltás al salir.</>
-            ) : (
-              <><strong>{manda?.nombre || "Alguien"}</strong> lo está trabajando. Vos lo ves de solo lectura hasta que salga.</>
-            )}
+            Trabajando acá ahora: <strong>{otros.map(o => o.nombre).join(", ")}</strong>.
+            Lo que carguen aparece solo. Repártanse por capítulos: si dos tocan el mismo rubro, queda lo último que se guardó.
           </span>
-          {/* El Director puede quedarse con el control: el otro pasa a solo
-              lectura en su próximo latido, sin tener que avisarle por chat. */}
-          {!mando && onTomar && <button onClick={onTomar} style={{ ...chip, padding: "3px 10px", fontSize: 11 }}>Tomar el control</button>}
         </div>
       )}
 

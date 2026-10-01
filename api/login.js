@@ -105,6 +105,15 @@ export default async function handler(req, res) {
     const { session, error } = await sesionPara(cuenta.email);
     if (!session) return res.status(502).json({ error: "No se pudo abrir la sesión: " + error });
 
+    // Queda anotado cuándo entró. Si falta la columna —migración 063 sin
+    // correr— el ingreso no se cae por eso: es un dato de gestión, no parte
+    // de la autenticación.
+    try {
+      await rest(`usuarios?id=eq.${u.id}`, {
+        method: "PATCH", body: JSON.stringify({ ultima_conexion: new Date().toISOString() }),
+      });
+    } catch { /* sin la columna, se sigue igual */ }
+
     const { pin_hash, ...usuario } = u;
     return res.status(200).json({
       session: { access_token: session.access_token, refresh_token: session.refresh_token, expires_at: session.expires_at },

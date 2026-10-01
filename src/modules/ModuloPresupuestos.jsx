@@ -160,6 +160,22 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     // eslint-disable-next-line
   }, [presupuestoActivo?.id, subVista]);
 
+  // Trabajando de a dos, lo que cargó el otro tiene que aparecer solo. Se
+  // refresca cada diez segundos, pero NUNCA mientras alguien está escribiendo:
+  // recargar la lista con el cursor dentro de una casilla le borraría lo que
+  // está tecleando, que es peor que ver el cambio diez segundos más tarde.
+  useEffect(() => {
+    if (subVista !== "detalle" || !presupuestoActivo?.id || !otros.length) return;
+    const id = presupuestoActivo.id;
+    const reloj = setInterval(() => {
+      const foco = document.activeElement?.tagName;
+      if (foco === "INPUT" || foco === "TEXTAREA" || foco === "SELECT") return;
+      fetchItems(id);
+    }, 10000);
+    return () => clearInterval(reloj);
+    // eslint-disable-next-line
+  }, [presupuestoActivo?.id, subVista, otros.length]);
+
   // Si el total guardado quedó atrás de sus rubros —un cambio que no alcanzó a
   // recalcular—, se corrige al abrirlo. Solo con los rubros de este mismo
   // presupuesto: al cambiar de uno a otro, un instante se ven los del anterior,
@@ -873,16 +889,22 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   // recalcular.
   const costoDirecto=items.reduce((s,i)=>s+(Number(i.total)||0),0);
 
-  // Manda el que llegó primero. Antes se bloqueaban los dos —cada uno veía al
-  // otro como "el otro"— y no podía trabajar nadie. El control se suelta al
-  // salir del presupuesto, o el Director lo toma.
-  const mando = !manda || manda.usuario_id === currentUser.id;
-  const bloqueado = !!presupuestoActivo && (congelado(presupuestoActivo) || !mando);
+  // Dos o más personas pueden trabajar el mismo presupuesto a la vez.
+  //
+  // El candado de "manda el que llegó primero" era una precaución de más: cada
+  // rubro es su propia fila, así que dos personas en capítulos distintos nunca
+  // se pisan. Lo único que de verdad choca es que dos editen EL MISMO rubro, y
+  // para eso alcanza con que cada uno vea lo que hace el otro: la lista se
+  // refresca sola cada diez segundos.
+  //
+  // Lo que sigue bloqueando es lo que debe: un presupuesto archivado o uno que
+  // ya salió al cliente. Eso no es un candado entre personas, es el estado del
+  // documento.
+  const mando = true;
+  const bloqueado = !!presupuestoActivo && congelado(presupuestoActivo);
   const motivoBloqueo = presupuestoActivo?.archivado_at
     ? "Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."
-    : !mando
-      ? `${manda?.nombre || "Alguien"} lo está trabajando. Cuando salga, el control queda libre.`
-      : "Este presupuesto ya salió al cliente. Para cambiarlo, crea la versión siguiente.";
+    : "Este presupuesto ya salió al cliente. Para cambiarlo, crea la versión siguiente.";
   const iS={width:"100%",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,color:"var(--ink)",padding:"9px 12px",fontSize:13,fontFamily:"var(--font)",boxSizing:"border-box",outline:"none"};
 
   return (

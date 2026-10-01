@@ -19,6 +19,25 @@ import ProjectForm from "./ProjectForm";
 import ProyectosDelPipeline from "./ProyectosDelPipeline";
 import PermisosDeUsuario from "./PermisosDeUsuario";
 
+/** Hace cuánto entró a FOREMAN por última vez, en palabras. */
+function cuandoEntro(ts) {
+  if (!ts) return "nunca entró";
+  const dias = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000);
+  const hora = new Date(ts).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
+  if (dias <= 0) return `entró hoy a las ${hora}`;
+  if (dias === 1) return `entró ayer a las ${hora}`;
+  if (dias < 7) return `entró hace ${dias} días`;
+  if (dias < 30) return `entró hace ${Math.floor(dias / 7)} ${Math.floor(dias / 7) === 1 ? "semana" : "semanas"}`;
+  return `entró el ${new Date(ts).toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+// Tres semanas sin entrar casi siempre significa que algo no le funciona y no
+// lo dijo, así que se ve distinto.
+const colorConexion = ts => {
+  if (!ts) return "var(--warning)";
+  const dias = (Date.now() - new Date(ts).getTime()) / 86400000;
+  return dias > 21 ? "var(--warning)" : "var(--muted)";
+};
+
 export default function PanelAjustes({ usuario, permisos, setPermisos, permisosUsuario = {}, setPermisosUsuario = () => {}, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
   // Qué persona tiene abiertos sus permisos: uno a la vez, que son muchos.
   const [permisosDe, setPermisosDe] = useState(null);
@@ -229,6 +248,9 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{!esAdmin(u.role) && ` · ${projects.filter(p => (p.miembros || []).includes(u.id)).length} proyecto${projects.filter(p => (p.miembros || []).includes(u.id)).length === 1 ? "" : "s"}`}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
+                {/* Cuándo entró por última vez. La sesión dura siete días, así
+                    que "tiene sesión" no dice nada: esto sí dice si lo usa. */}
+                <div style={{ fontSize: 10.5, color: colorConexion(u.ultima_conexion) }}>{cuandoEntro(u.ultima_conexion)}</div>
               </div>
               {/* Los permisos de esta persona, por encima de los de su rol. */}
               {usuario?.role === "owner" && u.role !== "owner" && (
