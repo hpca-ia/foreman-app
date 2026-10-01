@@ -90,6 +90,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const [manda, setManda] = useState(null);
   const [capDestino, setCapDestino] = useState("");
   const [nuevoCapitulo, setNuevoCapitulo] = useState("");
+  // De qué presupuesto son los capítulos que hay en pantalla: al cambiar de
+  // uno a otro, los vacíos no se arrastran.
+  const pidCargado = useRef(null);
   const [showAddCap, setShowAddCap] = useState(false);
   const [showAdminBD, setShowAdminBD] = useState(false);
   const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", lead_id:"", honorarios_pct:0, iva_pct:12, notas:"" });
@@ -357,14 +360,48 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   async function fetchItems(pid) {
     const { data } = await supabase.from("presupuesto_items").select("*").eq("presupuesto_id",pid).order("orden");
     setItems(data||[]);
-    // Rebuild capitulos with order from items
+    // Los capítulos se reconstruyen desde los rubros, que es de donde sale su
+    // orden. Pero un capítulo recién creado todavía no tiene ninguno: si solo
+    // se mira los rubros, desaparece en el primer refresco —y encima deja los
+    // números corridos—. Los vacíos se conservan hasta que alguien les cargue
+    // algo o los borre.
     const caps = [];
     (data||[]).forEach(i => {
       if (i.capitulo && !caps.find(c=>c.nombre===i.capitulo)) {
         caps.push({ nombre: i.capitulo, orden: Math.floor(i.orden/1000)||caps.length+1 });
       }
     });
-    setCapitulosActivos(caps.sort((a,b)=>a.orden-b.orden));
+    pidCargado.current = pid;
+
+    // La lista guardada manda: ahí están también los capítulos sin rubros, que
+    // de los rubros no se pueden deducir. Un presupuesto viejo no la tiene y
+    // entonces se usa lo deducido, como siempre.
+    const { data: pre } = await supabase.from("presupuestos").select("capitulos").eq("id", pid).maybeSingle();
+    const guardados = Array.isArray(pre?.capitulos) ? pre.capitulos : null;
+    if (guardados?.length) {
+      // Un capítulo que aparece en los rubros y no en la lista —importado,
+      // o cargado antes de que esto existiera— se suma al final en vez de
+      // perderse.
+      const faltan = caps.filter(c => !guardados.some(g => g.nombre === c.nombre));
+      const tope = Math.max(0, ...guardados.map(g => Number(g.orden) || 0));
+      setCapitulosActivos([...guardados, ...faltan.map((c, k) => ({ ...c, orden: tope + k + 1 }))]
+        .sort((a, b) => a.orden - b.orden));
+    } else {
+      setCapitulosActivos(caps.sort((a,b)=>a.orden-b.orden));
+    }
+  }
+
+  /**
+   * Guardar la lista de capítulos del presupuesto.
+   *
+   * Es lo que hace que un capítulo exista aunque no tenga rubros todavía.
+   * Sin la migración 064 no pasa nada: se sigue trabajando como antes, con los
+   * capítulos deducidos de los rubros.
+   */
+  async function guardarCapitulos(lista, pid = presupuestoActivo?.id) {
+    if (!pid || !Array.isArray(lista)) return;
+    const limpia = lista.map((c, k) => ({ nombre: c.nombre, orden: c.orden ?? k + 1 }));
+    await supabase.from("presupuestos").update({ capitulos: limpia }).eq("id", pid);
   }
   async function saveCapituloToDB(nombre) {
     if (!capitulosDB.includes(nombre)) {
@@ -476,6 +513,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     // Los rubros llevan su capítulo codificado en el orden: si el capítulo se
     // mueve y ellos no, quedan en otro lado.
     guardarOrden(numerar(reordenados, items));
+    guardarCapitulos(reordenados);
     saveCapituloToDB(trimmed);
     setNuevoCapitulo(""); setShowAddCap(false);
   }
@@ -486,6 +524,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       .map((c,i)=>({...c, orden:i+1}));
     setCapitulosActivos(updated);
     guardarOrden(numerar(updated, items));
+    guardarCapitulos(updated);
   }
 
   function moverCapitulo(nombre, direccion) {
@@ -498,6 +537,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     const reordered = updated.map((c,i)=>({...c,orden:i+1}));
     setCapitulosActivos(reordered);
     guardarOrden(numerar(reordered, items));
+    guardarCapitulos(reordered);
   }
 
   async function agregarItem(capitulo, rubro) {
