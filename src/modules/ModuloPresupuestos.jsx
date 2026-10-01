@@ -434,6 +434,33 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   }
 
   /**
+   * Mandar un rubro a otro capítulo.
+   *
+   * Un presupuesto importado trae rubros en el capítulo equivocado —el lector
+   * los puso donde decía el Excel, y el Excel a veces está mal— y sin esto la
+   * única salida es borrarlo y volver a cargarlo a mano con su precio y su
+   * cantidad.
+   *
+   * Entra PRIMERO en el capítulo de destino, por lo mismo que lo nuevo entra
+   * arriba: queda a la vista, recién movido, y acomodarlo desde ahí es corto.
+   */
+  async function moverRubroACapitulo(item, capitulo) {
+    if (!capitulo || capitulo === item.capitulo) return;
+    const destino = capitulosActivos.find(c => c.nombre === capitulo);
+    if (!destino) return;
+
+    const { error } = await supabase.from("presupuesto_items")
+      .update({ capitulo }).eq("id", item.id);
+    if (error) return;
+
+    // Primero del destino; los que estaban ahí corren un lugar. El de origen
+    // se renumera solo al pasar por numerar(), que no deja huecos.
+    const movido = { ...item, capitulo, orden: destino.orden * 1000 - 1 };
+    const nuevos = items.map(i => (i.id === item.id ? movido : i));
+    await guardarOrden(numerar(capitulosActivos, nuevos));
+  }
+
+  /**
    * Un capítulo nuevo entra ARRIBA, no al final.
    *
    * Casi nunca se agrega un capítulo que va último: se agrega uno que iba en el
@@ -1453,6 +1480,19 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                               <input type="checkbox" checked={!!item.listo} onChange={e=>actualizarItemMulti(item.id,{listo:e.target.checked})}
                                 title={item.listo?"Rubro listo":"En proceso: todavía se está trabajando"}
                                 style={{margin:"0 0 0 3px",cursor:"pointer",accentColor:"var(--ink)"}}/>
+                              {/* Mandarlo a otro capítulo. Un presupuesto
+                                  importado trae rubros donde no van, y sin esto
+                                  hay que borrarlo y volver a cargarlo entero. */}
+                              {capitulosActivos.length>1&&(
+                                <select value="" title="Mover este rubro a otro capítulo"
+                                  onChange={e=>{const c=e.target.value; e.target.value=""; moverRubroACapitulo(item,c);}}
+                                  style={{border:"none",background:"none",color:"var(--border)",fontSize:11,cursor:"pointer",padding:0,width:16,appearance:"none",outline:"none"}}>
+                                  <option value="">⇅</option>
+                                  {capitulosActivos.filter(c=>c.nombre!==item.capitulo).map(c=>(
+                                    <option key={c.nombre} value={c.nombre}>Mover a {c.orden}. {c.nombre}</option>
+                                  ))}
+                                </select>
+                              )}
                             </div>
                           </td>
                           <td style={{padding:"3px 4px"}}>
