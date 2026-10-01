@@ -433,11 +433,22 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     await guardarOrden(numerar(capitulosActivos, items, { [item.capitulo]: ids }));
   }
 
+  /**
+   * Un capítulo nuevo entra ARRIBA, no al final.
+   *
+   * Casi nunca se agrega un capítulo que va último: se agrega uno que iba en el
+   * medio y alguien olvidó. Puesto al final, acomodarlo en un presupuesto de
+   * diecinueve capítulos son dieciocho clics en la flechita. Puesto arriba,
+   * está a la vista y bajarlo a su sitio son unos pocos.
+   */
   function agregarCapitulo(nombre) {
     const trimmed = nombre.trim();
     if (!trimmed || capitulosActivos.find(c=>c.nombre===trimmed)) return;
-    const nuevoOrden = Math.max(0, ...capitulosActivos.map(c=>c.orden)) + 1;
-    setCapitulosActivos(prev=>[...prev, { nombre:trimmed, orden:nuevoOrden }]);
+    const reordenados = [{ nombre:trimmed, orden:1 }, ...capitulosActivos.map(c=>({...c, orden:c.orden+1}))];
+    setCapitulosActivos(reordenados);
+    // Los rubros llevan su capítulo codificado en el orden: si el capítulo se
+    // mueve y ellos no, quedan en otro lado.
+    guardarOrden(numerar(reordenados, items));
     saveCapituloToDB(trimmed);
     setNuevoCapitulo(""); setShowAddCap(false);
   }
@@ -465,10 +476,14 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   async function agregarItem(capitulo, rubro) {
     if (!presupuestoActivo) return;
     const capOrden = capitulosActivos.find(c=>c.nombre===capitulo)?.orden || 1;
-    // Después del último: contar los rubros chocaba con uno existente si se
-    // había borrado alguno del medio.
-    const ultimaPos = Math.max(-1, ...items.filter(i=>i.capitulo===capitulo).map(i=>(Number(i.orden)||0) % 1000));
-    const orden = capOrden * 1000 + ultimaPos + 1;
+    // Entra PRIMERO en su capítulo: el rubro que se agrega casi nunca va
+    // último, va en algún lado del medio, y subirlo desde el final de un
+    // capítulo de treinta rubros son treinta clics. Arriba queda a la vista
+    // —recién agregado, con el precio por revisar— y bajarlo es más corto.
+    const delCap = items.filter(i=>i.capitulo===capitulo);
+    const orden = capOrden * 1000;
+    // Los que ya estaban corren un lugar para hacerle sitio.
+    const corridos = delCap.map(i=>({ ...i, orden: capOrden * 1000 + ((Number(i.orden)||0) % 1000) + 1 }));
     const { data } = await supabase.from("presupuesto_items").insert({
       presupuesto_id:presupuestoActivo.id,
       capitulo, rubro_id:rubro.id||null,
@@ -482,7 +497,15 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       total:centavos((Number(rubro.cantidad)||1)*centavos(rubro.precio_unitario||rubro.precio_referencia)),
       orden
     }).select().single();
-    if (data) { const ni=[...items,data]; setItems(ni); recalcTotales(ni); }
+    if (data) {
+      const ni = items.map(i => corridos.find(c=>c.id===i.id) || i).concat(data);
+      setItems(ni); recalcTotales(ni);
+      // El corrimiento se guarda; si no, al recargar vuelven a pisarse.
+      if (corridos.length) {
+        await Promise.all(corridos.map(c =>
+          supabase.from("presupuesto_items").update({ orden: c.orden }).eq("id", c.id)));
+      }
+    }
     setModalRubro(null); setBusquedaRubro(""); setRubrosDB([]);
     setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});
   }
