@@ -939,6 +939,18 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             {puedeEditar&&<button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>}
           </>}
           {subVista==="detalle"&&<>
+            {/* Archivar desde adentro: acá es donde uno termina de trabajarlo y
+                decide que ya está. En la lista había un iconito que nadie
+                encontraba, y quedaba todo mezclado entre los activos. */}
+            {puedeEditar&&presupuestoActivo&&(
+              <button onClick={()=>archivarPresupuesto(presupuestoActivo,!presupuestoActivo.archivado_at)}
+                title={presupuestoActivo.archivado_at
+                  ? "Volver a los que se trabajan: se puede volver a editar"
+                  : "Pasar a Pasados: queda de referencia y deja de editarse. Se puede revertir."}
+                style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5}}>
+                {presupuestoActivo.archivado_at?<><ArchiveRestore size={13}/> Reactivar</>:<><Archive size={13}/> Archivar</>}
+              </button>
+            )}
             {puedeEditar&&<button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>}
@@ -1179,7 +1191,21 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               setManda(r.manda); setOtros(r.otros);
             } : null}
             onNuevaVersion={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))}
-            onCambiado={campos=>{setPresupuestoActivo(p=>({...p,...campos}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,...campos}:p));}}/>
+            onCambiado={campos=>{
+              setPresupuestoActivo(p=>({...p,...campos}));
+              setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,...campos}:p));
+              // El momento natural de archivar es cuando el cliente contestó:
+              // a partir de ahí el presupuesto no se trabaja más, se consulta.
+              // Se ofrece, no se hace solo: un aprobado puede seguir activo
+              // mientras la obra arranca.
+              if ((campos.estado==="aprobado"||campos.estado==="no_aprobado") && !presupuestoActivo.archivado_at) {
+                setTimeout(()=>{
+                  if (window.confirm(`El cliente ya respondió. ¿Pasarlo a Pasados?\n\nQueda de referencia —se abre, se busca dentro y se duplica— y deja de editarse. Se puede revertir cuando quieras.`)) {
+                    archivarPresupuesto({...presupuestoActivo,...campos}, true);
+                  }
+                }, 300);
+              }
+            }}/>
 
           {presupuestoActivo.archivado_at&&(
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",background:"var(--neutral-soft)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--ink-soft)"}}>
@@ -1219,23 +1245,33 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               él —"¿a cómo habíamos puesto el gypsum?"— y adentro del fieldset
               ni se podía escribir en la casilla. Lo que sí se bloquea es
               agregar rubros desde la base, que eso sí es editar. */}
-          {modoDetalle==="armar"&&(
+          {modoDetalle==="armar"&&(() => {
+          // Un presupuesto archivado solo se busca a sí mismo: la base existe
+          // para agregar rubros, y acá no se agrega nada.
+          const soloEsteP = bloqueado||!puedeEditar;
+          const buscaEnLaBase = !soloEsteP && dondeBuscar==="base";
+          return (
           <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <Search size={15} color="var(--muted)"/>
-              <input value={buscaArmar} onChange={e=>{setBuscaArmar(e.target.value);if(dondeBuscar==="base")cargarBase();}}
-                placeholder={dondeBuscar==="base"?"Buscar un rubro en la base de la oficina":"Buscar un rubro dentro de este presupuesto"}
+              <input value={buscaArmar} onChange={e=>{setBuscaArmar(e.target.value);if(buscaEnLaBase)cargarBase();}}
+                placeholder={buscaEnLaBase?"Buscar un rubro en la base de la oficina":"Buscar un rubro dentro de este presupuesto"}
                 style={{flex:"1 1 240px",minWidth:0,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"var(--font)",color:"var(--ink)",outline:"none"}}/>
               {/* Dónde buscar. Antes buscaba en los dos lados a la vez: abrir un
                   presupuesto histórico para ver qué tenía terminaba mostrando
-                  955 rubros de la base debajo de los suyos. */}
-              <div style={{display:"inline-flex",gap:3,background:"var(--neutral-soft)",borderRadius:8,padding:3,flexShrink:0}}>
-                {[["presupuesto","En este presupuesto"],["base","En la base"]].map(([k,l])=>(
-                  <button key={k} onClick={()=>{setDondeBuscar(k);if(k==="base")cargarBase();}}
-                    style={{padding:"5px 11px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"var(--font)",fontSize:11.5,fontWeight:600,
-                      background:dondeBuscar===k?"#fff":"transparent",color:dondeBuscar===k?"var(--ink)":"var(--ink-soft)",whiteSpace:"nowrap"}}>{l}</button>
-                ))}
-              </div>
+                  955 rubros de la base debajo de los suyos.
+                  En uno archivado el interruptor ni aparece: la base sirve para
+                  agregar rubros, y ahí no se agrega nada. Ofrecerla sería
+                  ofrecer algo que no lleva a ninguna parte. */}
+              {!soloEsteP&&(
+                <div style={{display:"inline-flex",gap:3,background:"var(--neutral-soft)",borderRadius:8,padding:3,flexShrink:0}}>
+                  {[["presupuesto","En este presupuesto"],["base","En la base"]].map(([k,l])=>(
+                    <button key={k} onClick={()=>{setDondeBuscar(k);if(k==="base")cargarBase();}}
+                      style={{padding:"5px 11px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"var(--font)",fontSize:11.5,fontWeight:600,
+                        background:dondeBuscar===k?"#fff":"transparent",color:dondeBuscar===k?"var(--ink)":"var(--ink-soft)",whiteSpace:"nowrap"}}>{l}</button>
+                  ))}
+                </div>
+              )}
               {buscaArmar&&(
                 <>
                   <span style={{fontSize:12,color:"var(--ink-soft)"}}>{itemsFiltrados.length} {itemsFiltrados.length===1?"rubro":"rubros"} acá</span>
@@ -1243,7 +1279,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                 </>
               )}
             </div>
-            {buscaArmar&&dondeBuscar==="base"&&(
+            {buscaArmar&&buscaEnLaBase&&(
               <div style={{marginTop:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
                   <span style={{fontSize:12,fontWeight:700,color:"var(--ink)"}}>En la base de rubros</span>
@@ -1263,7 +1299,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               </div>
             )}
           </div>
-          )}
+          );
+          })()}
 
           <fieldset disabled={bloqueado||!puedeEditar} style={{border:0,padding:0,margin:0,minWidth:0}}>
           {modoDetalle==="armar"&&<>
