@@ -1300,6 +1300,15 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   <button onClick={()=>setBuscaArmar("")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",fontSize:12,color:"var(--ink-soft)",cursor:"pointer",fontFamily:"var(--font)"}}>Ver todo</button>
                 </>
               )}
+              {/* Agregar capítulo también desde arriba: el de abajo está
+                  después de todos los capítulos, y en uno de diecinueve hay que
+                  bajar media pantalla para encontrarlo. */}
+              {!soloEsteP&&(
+                <button onClick={()=>{setShowAddCap(true);fetchCapitulosDB();setTimeout(()=>document.getElementById("agregar-capitulo")?.scrollIntoView({behavior:"smooth",block:"center"}),60);}}
+                  style={{background:"var(--brand-soft)",border:"1px solid var(--border)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:600,color:"var(--brand)",cursor:"pointer",fontFamily:"var(--font)",whiteSpace:"nowrap"}}>
+                  + Capítulo
+                </button>
+              )}
             </div>
             {buscaArmar&&buscaEnLaBase&&(
               <div style={{marginTop:10}}>
@@ -1502,7 +1511,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           })}
 
           {/* Agregar capítulo */}
-          <div style={{marginBottom:16}}>
+          <div id="agregar-capitulo" style={{marginBottom:16}}>
             {!showAddCap?(
               <button onClick={()=>{setShowAddCap(true);fetchCapitulosDB();}} style={{width:"100%",background:"#fff",border:"1.5px dashed var(--border)",borderRadius:10,padding:"10px",color:"var(--muted)",fontSize:13,cursor:"pointer"}}>
                 + Agregar capítulo
