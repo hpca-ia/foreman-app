@@ -360,10 +360,13 @@ async function alDiaLaEtapaDelProyecto(etapa, estado) {
     const { data } = await supabase.from("lead_etapas")
       .select("id,etapa_id,estado,orden").eq("lead_id", etapa.lead_id).order("orden");
     const abiertas = (data || []).filter(e => e.id !== etapa.id && e.estado !== "hecha" && e.estado !== "omitida");
-    // La que sigue a la que se cerró; si esa era la última, la primera que
-    // quede abierta. Sin esto, cerrar obra gris devolvía el proyecto a una
+    // Si alguien dijo expresamente "estamos acá" en otra etapa, el proyecto se
+    // queda ahí: una decisión de una persona pesa más que el orden del tubo.
+    const declarada = [...abiertas].reverse().find(e => e.estado === "en_curso");
+    // Si no, la que sigue a la que se cerró; y si esa era la última, la primera
+    // que quede abierta. Sin esto, cerrar obra gris devolvía el proyecto a una
     // etapa anterior que nadie había cerrado, y parecía que retrocedió.
-    etapaId = (abiertas.find(e => e.orden > etapa.orden) || abiertas[0])?.etapa_id || null;
+    etapaId = (declarada || abiertas.find(e => e.orden > etapa.orden) || abiertas[0])?.etapa_id || null;
   }
   if (etapaId) await supabase.from("leads").update({ etapa: etapaId }).eq("id", etapa.lead_id);
 }

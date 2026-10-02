@@ -231,7 +231,16 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
           // La franja de arriba de la columna: lo único que queda del estado
           // aparte del tachado y el contador.
           // Dónde está parado el proyecto: el primer hito que no se cerró.
-          const esLaActual = columnas.find(e => e.estado !== "hecha" && e.estado !== "omitida")?.id === etapa.id;
+          // La etapa actual es la que alguien arrancó —la última puesta en
+          // curso— y, si nadie arrancó ninguna, la primera que sigue abierta.
+          //
+          // Antes era solo lo segundo, y por eso para decir que el proyecto
+          // estaba en Contrato había que cerrar todas las anteriores: la única
+          // forma de mover el indicador era vaciar lo que tenía delante. En
+          // arquitectura se vuelve atrás y se trabajan dos cosas a la vez, así
+          // que cerrar tiene que ser una decisión, no el precio de avanzar.
+          const enCurso = [...columnas].reverse().find(e => e.estado === "en_curso");
+          const esLaActual = (enCurso || columnas.find(e => e.estado !== "hecha" && e.estado !== "omitida"))?.id === etapa.id;
           const tono = hecha ? colors.success : esLaActual ? (cat.color || colors.brand) : colors.border;
 
           return (
@@ -427,20 +436,24 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                   </button>
                 ) : (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {/* Decir en qué hito va el proyecto sin tener que marcar
-                        una gestión: uno que ya venía andando entra al tubo en el
-                        punto donde está, no al principio. Lo anterior queda
-                        cerrado, porque si está en Contrato ya pasó lo de antes. */}
-                    {/* La etapa actual no se declara: es la primera que sigue
-                        abierta. Para mover el proyecto a Contrato se cierran las
-                        de antes, que es lo que de verdad pasó. Un botón para
-                        "decir dónde estamos" era una tercera manera de decir lo
-                        mismo, y encima había que entenderla. */}
+
                     {esLaActual && (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
                         color: cat.color || colors.brand, border: `1px solid ${cat.color || colors.brand}`, borderRadius: 14, padding: "3px 9px" }}>
                         <CircleDot size={11} /> ETAPA ACTUAL
                       </span>
+                    )}
+                    {/* Arrancar esta etapa sin tocar las de atrás. Mueve el
+                        indicador de "en qué va el proyecto" y nada más: lo que
+                        quede abierto detrás queda abierto, que es lo que pasa
+                        de verdad cuando se adelanta un trámite. */}
+                    {!esLaActual && etapa.estado !== "en_curso" && (
+                      <button onClick={() => hacer(async () => {
+                        await cambiarEstadoEtapa(etapa, "en_curso", currentUser, true, cat.nombre);
+                        onBitacora?.();
+                      })} disabled={ocupado} style={boton(false)} title="El proyecto pasa a estar en esta etapa. No cierra las anteriores.">
+                        <CircleDot size={12} /> Estamos acá
+                      </button>
                     )}
                     <button onClick={() => hacer(async () => {
                       const faltan = suyos.filter(i => !i.hecho).length;

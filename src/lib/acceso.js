@@ -48,13 +48,24 @@ export function nivelDeArea(acceso, area = "proyecto") {
 /**
  * El nivel de una persona en un proyecto, con todo lo que lo puede cambiar.
  *
- *   entraATodo · el Director, los admins y quien tenga "Entra a todos los
- *                proyectos": entra a todo con nivel de editar.
+ *   entraATodo · quien tenga "Entra a todos los proyectos" —los admins y los
+ *                gerentes—: entra a los que nadie le asignó, con nivel de
+ *                editar. Es un piso, no un techo.
  *   esMio      · el que creó el proyecto entra sin que nadie se lo asigne.
+ *
+ * Lo que se le puso EN ESE PROYECTO manda sobre "entra a todos". Antes era al
+ * revés y por eso ponerle a un Admin "Presupuesto: Ver" en un proyecto no
+ * hacía nada: entraATodo devolvía "editar" antes de mirar su fila. Un control
+ * que no controla es peor que no tenerlo.
+ *
+ * Y si tiene fila pero ahí dice "No entra", no entra: decirlo explícitamente
+ * tiene que poder más que cualquier permiso general.
  */
 export function nivelDeAcceso({ acceso, area = "proyecto", entraATodo = false, esMio = false }) {
-  if (entraATodo || esMio) return "editar";
-  return nivelDeArea(acceso, area);
+  const propio = nivelDeArea(acceso, area);
+  if (propio) return propio;
+  if (acceso) return null;
+  return entraATodo || esMio ? "editar" : null;
 }
 
 /** Lo que se guarda al mover un botón: la fila entera, sin nulls que adivinar. */

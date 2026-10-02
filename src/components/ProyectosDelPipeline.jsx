@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from "react";
 import { Pencil, Check } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
-import { esAdmin } from "../lib/roles";
 import { POR_DEFECTO } from "../lib/permisos";
 import { fusionarLead, duplicadosProbables } from "../lib/fusionarLead";
 import QueVeEstaPersona from "./QueVeEstaPersona";
@@ -90,7 +89,11 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const candidatos = users.filter(u => !esAdmin(u.role));
+  // Todos menos el Director. Los Admin estaban excluidos porque "entran a
+  // todo", pero entonces no había dónde decirles que en este proyecto el
+  // presupuesto solo lo miran. El Director queda afuera a propósito: siempre
+  // puede, y una fila suya mal puesta lo dejaría fuera de su propia app.
+  const candidatos = users.filter(u => u.role !== "owner");
 
   /** ¿Su rol —o su excepción— le abre esa pantalla? */
   const tienePuerta = (u, campo) => {
