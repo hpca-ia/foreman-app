@@ -46,6 +46,39 @@ export default function PanelPermisos({ permisos, setPermisos, usuarios = [] }) 
     setGuardando(null);
   }
 
+  /**
+   * Cerrar los presupuestos de un saque.
+   *
+   * Apagar "Crear y editar presupuestos" rol por rol son seis idas y vueltas,
+   * y mientras tanto quedan medio abiertos. Esto lo hace de una: después se
+   * prende a quien corresponda, de a uno, en los permisos de cada persona.
+   *
+   * El Director no está en la lista de roles editables: él siempre puede.
+   */
+  async function cerrarPresupuestos() {
+    const abiertos = ROLES_EDITABLES.filter(r => permisos?.[r]?.["presupuestos.crear"] !== false);
+    if (!abiertos.length) { setAviso("Ya estaban todos cerrados."); return; }
+    if (!window.confirm(
+      `¿Dejar los presupuestos solo para vos?\n\n` +
+      `Se apaga "Crear y editar presupuestos" en: ${abiertos.map(r => rolInfo(r).label).join(", ")}.\n\n` +
+      `Después se lo prendés a quien quieras, uno por uno, desde los permisos de esa persona en Ajustes → Usuarios. ` +
+      `Los siguen pudiendo LEER y exportar.`
+    )) return;
+
+    setGuardando("presupuestos.crear"); setError("");
+    setPermisos(prev => {
+      const copia = { ...prev };
+      abiertos.forEach(r => { copia[r] = { ...copia[r], "presupuestos.crear": false }; });
+      return copia;
+    });
+    for (const r of abiertos) {
+      const { error: e } = await guardarPermiso(r, "presupuestos.crear", false);
+      if (e) { setError("No se pudo guardar en " + rolInfo(r).label + ". " + e.message); setGuardando(null); return; }
+    }
+    setAviso(`Listo: los presupuestos quedan solo para el Director. Prendéselo a quien quieras desde sus permisos.`);
+    setGuardando(null);
+  }
+
   if (!permisos) return <div style={{ padding: "30px 0", textAlign: "center", color: colors.muted, fontSize: 13 }}>Cargando permisos...</div>;
 
   const info = rolInfo(rol);
@@ -54,6 +87,20 @@ export default function PanelPermisos({ permisos, setPermisos, usuarios = [] }) 
     <div>
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 10 }}>
         Elige un rol y prende o apaga lo que puede hacer. Los cambios entran cuando la persona vuelve a abrir la app.
+      </div>
+
+      {/* Lo que se pide seguido y rol por rol son seis idas y vueltas. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: colors.bg, borderRadius: colors.radiusMd, padding: "9px 11px", marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200, fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+          <strong style={{ color: colors.ink }}>Dejar los presupuestos solo para vos.</strong> Apaga “Crear y editar
+          presupuestos” en todos los roles —incluido Admin—. Después se lo prendés a quien quieras desde los permisos
+          de esa persona. Todos los siguen pudiendo leer y exportar.
+        </div>
+        <button onClick={cerrarPresupuestos} disabled={guardando === "presupuestos.crear"}
+          style={{ border: `1px solid ${colors.border}`, background: "#fff", color: colors.ink, borderRadius: 20,
+            padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+          {guardando === "presupuestos.crear" ? "Cerrando…" : "Cerrar presupuestos"}
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>

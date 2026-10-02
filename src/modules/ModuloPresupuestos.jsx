@@ -107,14 +107,32 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   // le da ESTE presupuesto para trabajarlo y ese otro solo para mirarlo. Si el
   // presupuesto no cuelga de ningún proyecto, manda el permiso general.
   const nivelDelActivo = presupuestoActivo?.lead_id ? nivelProyecto(presupuestoActivo.lead_id) : null;
-  const puedeEditar = esAdmin(currentUser.role)
-    || (presupuestoActivo?.lead_id ? nivelDelActivo === "editar" : (puede ? puede("presupuestos.crear") : true));
+  // Quién puede tocar un presupuesto.
+  //
+  // Antes esto arrancaba con esAdmin(), que salteaba todo lo demás: un Admin
+  // editaba cualquier presupuesto aunque en Permisos estuviera apagado y
+  // aunque en el proyecto se le hubiera puesto "Presupuesto: Ver". El permiso
+  // existía pero no servía para nada contra un Admin, que es justamente de
+  // quien a veces hay que poder limitarlo.
+  //
+  // Ahora son dos llaves, y hacen falta las dos:
+  //
+  //   1. "Crear y editar presupuestos" en Ajustes → Permisos. Apagado, esa
+  //      persona los lee y no los toca, sea Admin o residente.
+  //   2. En el proyecto, "Presupuesto: Editar". En "Ver" solo lee ese.
+  //
+  // El Director queda afuera a propósito: si se pudiera dejar sin permiso al
+  // dueño de la app, un error de edición lo encerraría fuera de su propio
+  // presupuesto y nadie podría devolvérselo.
+  const esDirector = currentUser.role === "owner";
+  const puedeEditarPresupuestos = esDirector || (puede ? puede("presupuestos.crear") : true);
+  const puedeEditar = puedeEditarPresupuestos
+    && (presupuestoActivo?.lead_id ? nivelDelActivo === "editar" : true);
   const sinAcceso = !!presupuestoActivo?.lead_id && !nivelDelActivo;
   // La base de rubros es el activo de la oficina: los precios con los que se
   // cotiza todo. Entra quien puede editar presupuestos —el que solo los lee no
   // tiene nada que hacer ahí, y lo que toque ahí sale en todos los que vengan.
-  const puedeBD = esAdmin(currentUser.role) || (puede ? puede("presupuestos.crear") : true)
-    || presupuestos.some(p => p.lead_id && nivelProyecto(p.lead_id) === "editar");
+  const puedeBD = puedeEditarPresupuestos;
   const [cambiandoProyecto, setCambiandoProyecto] = useState(false);
   const proyectoDelActivo = proyectos.find(x => x.id === presupuestoActivo?.lead_id) || null;
 
@@ -1372,7 +1390,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           )}
           {!sinAcceso&&!puedeEditar&&(
             <div style={{fontSize:12,color:"var(--ink-soft)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",marginBottom:12}}>
-              Estás viendo este presupuesto, no editándolo. Podés leerlo entero y exportarlo; para cambiarlo hace falta el permiso <strong>Crear y editar presupuestos</strong>.
+              Estás viendo este presupuesto, no editándolo. Podés leerlo entero, buscar dentro y exportarlo.
+              {!puedeEditarPresupuestos
+                ? <> Para cambiarlo hace falta el permiso <strong>Crear y editar presupuestos</strong>, que da el Director en Ajustes → Permisos.</>
+                : <> En este proyecto tenés el presupuesto en <strong>Ver</strong>; el Director lo cambia en Ajustes → Proyectos.</>}
             </div>
           )}
 

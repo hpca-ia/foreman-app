@@ -40,7 +40,7 @@ export const GRUPOS_PERMISOS = [
       { id: "tareas.asignar", label: "Asignar tareas a otros" },
       { id: "tareas.fechas", label: "Mover fechas de tareas", nota: "Cambiar la fecha de una tarea, gestión o reunión ya creada. Sin esto la pone al crearla, pero después no la corre solo" },
       { id: "leads.editar", label: "Editar el pipeline", nota: "Crear proyectos, mover etapas y cargar gestiones. Sin esto los ve pero no los toca" },
-      { id: "presupuestos.crear", label: "Crear y editar presupuestos" },
+      { id: "presupuestos.crear", label: "Crear y editar presupuestos", nota: "Apagado, esa persona los lee y no los toca, sea Admin o residente. También cierra la base de rubros, que es de donde salen los precios de todos" },
       { id: "obras.crear", label: "Activar una obra para controlarla" },
       { id: "compras.gestionar", label: "Comprar y facturar", nota: "Concretar la compra, subir la factura y asignarla a su rubro. Quien pide no compra" },
       { id: "facturas.registrar", label: "Registrar facturas y gastos" },
