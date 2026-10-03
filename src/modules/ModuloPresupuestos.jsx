@@ -618,7 +618,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           supabase.from("presupuesto_items").update({ orden: c.orden }).eq("id", c.id)));
       }
     }
-    setModalRubro(null); setBusquedaRubro(""); setRubrosDB([]);
+    setModalRubro(null); setBusquedaRubro("");
     setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});
   }
 

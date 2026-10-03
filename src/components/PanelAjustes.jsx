@@ -130,7 +130,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
     const existe = projects.some(x => x.id === p.id);
     const { error } = await guardarProyecto({ ...p, id: existe ? p.id : Date.now() }, usuario?.id);
     if (error) { setErrEquipo("No se pudo guardar el proyecto: " + error.message); return; }
-    setEditP(null); setNewP(false); onEquipoCambio();
+    setEditP(null); onEquipoCambio();
   }
   // Un proyecto con trabajo pendiente no se quita: sus tareas quedarían
   // huérfanas, sin nombre de proyecto y fuera de los filtros.

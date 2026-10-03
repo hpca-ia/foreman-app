@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
-  moverDeProyecto } from "./compras";
+  moverDeProyecto, SIN_PROYECTO, leadDe } from "./compras";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -74,10 +74,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // Guardar—, así los papeles se pueden adjuntar desde el primer momento.
   const [viva, setViva] = useState(solicitud || null);
   const editando = !!viva;
-  const [form, setForm] = useState(solicitud ? { ...solicitud } : {
-    lead_id: proyectos[0]?.id || "", descripcion: "", justificacion: "", necesita_para: "", urgente: false,
-    capitulo: "", obra_rubro_id: "", monto_estimado: "",
-  });
+  // Un pedido ya guardado sin proyecto es un gasto de oficina, no un pedido a
+  // medio llenar: el selector tiene que decirlo.
+  // Y al crear uno nuevo solo se preselecciona si hay un único proyecto: con
+  // diez, dejar el primero puesto es exactamente cómo un pedido termina
+  // cargado a la obra equivocada.
+  const [form, setForm] = useState(solicitud
+    ? { ...solicitud, lead_id: solicitud.lead_id ?? SIN_PROYECTO }
+    : {
+      lead_id: proyectos.length === 1 ? proyectos[0].id : "",
+      descripcion: "", justificacion: "", necesita_para: "", urgente: false,
+      capitulo: "", obra_rubro_id: "", monto_estimado: "", destino: "",
+    });
   const [historial, setHistorial] = useState([]);
   const [comentario, setComentario] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -135,8 +143,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [rubros, setRubros] = useState([]);
   useEffect(() => {
     let vivo = true;
-    if (!form.lead_id) { setObra(null); setRubros([]); return; }
-    rubrosDelProyecto(form.lead_id).then(r => { if (vivo) { setObra(r.obra); setRubros(r.rubros); } });
+    const lead = leadDe(form.lead_id);
+    if (!lead) { setObra(null); setRubros([]); return; }
+    rubrosDelProyecto(lead).then(r => { if (vivo) { setObra(r.obra); setRubros(r.rubros); } });
     return () => { vivo = false; };
   }, [form.lead_id]);
   const capitulos = [...new Set(rubros.map(r => r.capitulo || "SIN CAPÍTULO"))];
@@ -151,7 +160,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
    */
   async function asegurarSolicitud() {
     if (viva) return viva;
-    if (!form.lead_id) { setAvisoPapel("Elegí el proyecto antes de adjuntar."); return null; }
+    if (!form.lead_id) { setAvisoPapel("Elegí el proyecto —o gasto de oficina— antes de adjuntar."); return null; }
     if (!form.descripcion?.trim()) { setAvisoPapel("Escribí qué hace falta antes de adjuntar."); return null; }
     const r = await crearSolicitud(form, currentUser);
     if (r.error) { setAvisoPapel(r.error); return null; }
