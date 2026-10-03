@@ -89,6 +89,7 @@ export async function crearSolicitud(datos, quien) {
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
     capitulo: datos.capitulo || null,
+    obra_actividad_id: datos.obra_actividad_id ? Number(datos.obra_actividad_id) : null,
     obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
     monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
     estado: "borrador", solicitante_id: quien?.id ?? null, solicitante_nombre: quien?.name || null,
@@ -96,7 +97,7 @@ export async function crearSolicitud(datos, quien) {
   let { data, error } = await supabase.from("compras_solicitudes").insert(fila).select().single();
   // Sin la 056 no existen esas tres columnas: la solicitud se crea igual.
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_rubro_id, monto_estimado, destino, ...resto } = fila;
+    const { capitulo, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = fila;
     ({ data, error } = await supabase.from("compras_solicitudes").insert(resto).select().single());
   }
   if (error) return { error: falta(error) ? "Falta correr la migración 048." : error.message };
@@ -109,13 +110,14 @@ export async function guardarSolicitud(id, datos) {
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
     capitulo: datos.capitulo || null,
+    obra_actividad_id: datos.obra_actividad_id ? Number(datos.obra_actividad_id) : null,
     obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
     monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
     destino: datos.destino?.trim() || null,
   };
   let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", id);
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_rubro_id, monto_estimado, destino, ...resto } = campos;
+    const { capitulo, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = campos;
     ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", id));
   }
   return error ? error.message : null;
@@ -136,9 +138,14 @@ export async function rubrosDelProyecto(leadId) {
   // el presupuesto después de activar la obra, acá salían los viejos y no
   // había desde dónde arreglarlo. No toca un solo monto.
   await sincronizarCapitulos(obra);
-  const { data } = await supabase.from("obra_rubros")
-    .select("id,numero,capitulo,descripcion,total_base").eq("obra_id", obra.id).order("orden");
-  return { obra, rubros: data || [] };
+  // Las agrupaciones son contra qué se pide: "obra civil", "instalaciones".
+  // El capítulo —cómo se contrató— se deduce del rubro cuando hay uno.
+  const [{ data }, { data: acts }] = await Promise.all([
+    supabase.from("obra_rubros")
+      .select("id,numero,capitulo,descripcion,total_base,actividad_id").eq("obra_id", obra.id).order("orden"),
+    supabase.from("obra_actividades").select("id,nombre,codigo,orden").eq("obra_id", obra.id).order("orden"),
+  ]);
+  return { obra, rubros: data || [], actividades: acts || [] };
 }
 
 /** Cada paso queda escrito: sin esto el flujo es una conversación de WhatsApp. */
@@ -299,10 +306,10 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
  * proyecto. Se vuelven a elegir, que es un clic y es honesto.
  */
 export async function moverDeProyecto(solicitud, leadId, quien, nombreNuevo) {
-  const campos = { lead_id: leadDe(leadId), capitulo: null, obra_rubro_id: null, obra_id: null };
+  const campos = { lead_id: leadDe(leadId), capitulo: null, obra_actividad_id: null, obra_rubro_id: null, obra_id: null };
   let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_rubro_id, ...resto } = campos;
+    const { capitulo, obra_actividad_id, obra_rubro_id, ...resto } = campos;
     ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", solicitud.id));
   }
   if (error) return error.message;
@@ -310,7 +317,7 @@ export async function moverDeProyecto(solicitud, leadId, quien, nombreNuevo) {
   const donde = nombreNuevo || (campos.lead_id ? "otro proyecto" : "gasto de oficina");
   const detalle = `Pedido movido a ${donde}: ${solicitud.descripcion}`;
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
-    `Movido a ${donde} — hay que volver a elegir el capítulo`);
+    `Movido a ${donde} — hay que volver a elegir la agrupación`);
   // Las dos bitácoras se enteran: de dónde salió y a dónde entró. Un gasto de
   // oficina no tiene bitácora, así que esa punta simplemente no se escribe.
   const movimientos = [];

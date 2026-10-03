@@ -69,15 +69,18 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             <span style={{ textAlign: "right" }}>INVERTIDO</span>
             {/* Lo pedido y todavía no facturado. Un capítulo al 80% con otro
                 20% comprometido ya está gastado, aunque el papel no llegue. */}
-            <span style={{ textAlign: "right" }} title="Solicitudes de compra vivas y sin factura: plata ya comprometida contra este capítulo">COMPROMETIDO</span>
+            <span style={{ textAlign: "right" }} title="Solicitudes de compra vivas y sin factura: plata ya comprometida contra este grupo">COMPROMETIDO</span>
             <span style={{ textAlign: "right" }}>SALDO</span>
             <span style={{ textAlign: "right" }}>AVANCE</span>
           </div>
 
           {grupos.map(g => {
             const abierto = !cerrados.has(g.clave || g.capitulo);
-            // Lo comprometido llega por capítulo; en modo agrupación no aplica.
-            const pedido = comprometido?.porCapitulo?.[g.capitulo] || 0;
+            // La misma plata, leída por la vista que esté puesta: el pedido se
+            // hace contra una agrupación y el contrato está por capítulos.
+            const pedido = (modo === "actividad"
+              ? comprometido?.porActividad?.[g.clave]
+              : comprometido?.porCapitulo?.[g.capitulo]) || 0;
             const libre = g.saldo - pedido;
             return (
               <div key={g.clave || g.capitulo}>

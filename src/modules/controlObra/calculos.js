@@ -130,7 +130,8 @@ const VIVAS = ["pendiente_aprobacion", "requiere_info", "aprobada", "comprada"];
 
 export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   const capituloDeRubro = new Map(rubros.map(r => [r.id, r.capitulo || SIN_CAPITULO]));
-  const porCapitulo = {}, porRubro = {};
+  const actividadDeRubro = new Map(rubros.map(r => [r.id, r.actividad_id ?? null]));
+  const porCapitulo = {}, porActividad = {}, porRubro = {};
   let total = 0;
   solicitudes.forEach(s => {
     if (!VIVAS.includes(s.estado) || s.factura_id) return;
@@ -138,10 +139,16 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
     if (!monto) return;
     const capitulo = s.obra_rubro_id ? capituloDeRubro.get(s.obra_rubro_id) : (s.capitulo || SIN_CAPITULO);
     porCapitulo[capitulo || SIN_CAPITULO] = (porCapitulo[capitulo || SIN_CAPITULO] || 0) + monto;
+    // La misma plata leída por la otra vista. Se pide por agrupación; si el
+    // pedido apunta a un rubro, la agrupación es la de ese rubro. La clave es
+    // la misma que arma `agrupar`, para que la tabla la encuentre sin traducir.
+    const actId = s.obra_rubro_id ? actividadDeRubro.get(s.obra_rubro_id) : (s.obra_actividad_id ?? null);
+    const claveAct = actId ? `a${actId}` : SIN_ACTIVIDAD;
+    porActividad[claveAct] = (porActividad[claveAct] || 0) + monto;
     if (s.obra_rubro_id) porRubro[s.obra_rubro_id] = (porRubro[s.obra_rubro_id] || 0) + monto;
     total += monto;
   });
-  return { porCapitulo, porRubro, total };
+  return { porCapitulo, porActividad, porRubro, total };
 }
 
 /**

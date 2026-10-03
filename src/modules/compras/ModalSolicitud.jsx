@@ -84,7 +84,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     : {
       lead_id: proyectos.length === 1 ? proyectos[0].id : "",
       descripcion: "", justificacion: "", necesita_para: "", urgente: false,
-      capitulo: "", obra_rubro_id: "", monto_estimado: "", destino: "",
+      capitulo: "", obra_actividad_id: "", obra_rubro_id: "", monto_estimado: "", destino: "",
     });
   const [historial, setHistorial] = useState([]);
   const [comentario, setComentario] = useState("");
@@ -141,15 +141,20 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // Los rubros de la obra de este proyecto: contra qué se está pidiendo.
   const [obra, setObra] = useState(null);
   const [rubros, setRubros] = useState([]);
+  const [actividades, setActividades] = useState([]);
   useEffect(() => {
     let vivo = true;
     const lead = leadDe(form.lead_id);
-    if (!lead) { setObra(null); setRubros([]); return; }
-    rubrosDelProyecto(lead).then(r => { if (vivo) { setObra(r.obra); setRubros(r.rubros); } });
+    if (!lead) { setObra(null); setRubros([]); setActividades([]); return; }
+    rubrosDelProyecto(lead).then(r => {
+      if (!vivo) return;
+      setObra(r.obra); setRubros(r.rubros); setActividades(r.actividades || []);
+    });
     return () => { vivo = false; };
   }, [form.lead_id]);
-  const capitulos = [...new Set(rubros.map(r => r.capitulo || "SIN CAPÍTULO"))];
-  const delCapitulo = rubros.filter(r => (r.capitulo || "SIN CAPÍTULO") === form.capitulo);
+  // Contra qué se pide: la agrupación, que es cómo se ejecuta la obra. El
+  // capítulo —cómo se contrató— sale solo del rubro, cuando se elige uno.
+  const deLaAgrupacion = rubros.filter(r => String(r.actividad_id || "") === String(form.obra_actividad_id || ""));
 
   /**
    * La solicitud existe en la base, cueste lo que cueste.
@@ -339,40 +344,59 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             pedido suelto: no se puede saber cuánto más quieren gastar de algo
             que ya va por la mitad. Apuntar acá no gasta nada todavía —queda
             como comprometido— y al comprarse, la factura hace el gasto. */}
-        {obra && capitulos.length > 0 && (
+        {obra && (
           <div style={{ display: "grid", gap: 8, background: colors.bg, borderRadius: 8, padding: "9px 10px" }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
               CONTRA QUÉ DEL PRESUPUESTO
             </div>
             <div>
-              <label style={lbl}>CAPÍTULO</label>
-              <select value={form.capitulo || ""} disabled={!puedeEditar}
-                onChange={ev => setForm(p => ({ ...p, capitulo: ev.target.value, obra_rubro_id: "" }))} style={mini}>
-                <option value="">Elegí el capítulo…</option>
-                {capitulos.map(c => <option key={c} value={c}>{c}</option>)}
+              <label style={lbl}>AGRUPACIÓN</label>
+              {/* Se pide contra la agrupación y no contra el capítulo: el que
+                  pide piensa "esto es de instalaciones", no en cuál de los
+                  capítulos del contrato cae eso. Esa traducción la hacía a ojo
+                  y de ahí salían los pedidos cargados al capítulo equivocado.
+                  El capítulo lo pone el rubro, si se elige uno. */}
+              {!actividades.length && (
+                <div style={{ fontSize: 11, color: colors.warning, marginBottom: 4 }}>
+                  Esta obra todavía no tiene agrupaciones. Se arman en Control de Obra → Agrupaciones;
+                  mientras tanto el pedido sigue su camino sin apuntar a ninguna.
+                </div>
+              )}
+              <select value={form.obra_actividad_id || ""} disabled={!puedeEditar || !actividades.length}
+                onChange={ev => setForm(p => ({ ...p, obra_actividad_id: ev.target.value, obra_rubro_id: "", capitulo: "" }))} style={mini}>
+                <option value="">Elegí la agrupación…</option>
+                {actividades.map(a => <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
               </select>
             </div>
-            {form.capitulo && delCapitulo.length > 0 && (
+            {form.obra_actividad_id && deLaAgrupacion.length > 0 && (
               <div>
                 <label style={lbl}>RUBRO (SI SE SABE CUÁL)</label>
                 <select value={form.obra_rubro_id || ""} disabled={!puedeEditar}
-                  onChange={ev => inp("obra_rubro_id", ev.target.value)} style={mini}>
-                  <option value="">Todo el capítulo</option>
-                  {delCapitulo.map(r => <option key={r.id} value={r.id}>{r.numero}. {r.descripcion}</option>)}
+                  onChange={ev => setForm(p => ({ ...p, obra_rubro_id: ev.target.value,
+                    capitulo: deLaAgrupacion.find(r => String(r.id) === ev.target.value)?.capitulo || "" }))} style={mini}>
+                  <option value="">Toda la agrupación</option>
+                  {deLaAgrupacion.map(r => <option key={r.id} value={r.id}>{r.numero}. {r.descripcion}</option>)}
                 </select>
               </div>
             )}
-            <div>
-              <label style={lbl}>CUÁNTO SE ESTIMA (US$)</label>
-              <input type="number" step="0.01" min="0" value={form.monto_estimado ?? ""} disabled={!puedeEditar}
-                onChange={ev => inp("monto_estimado", ev.target.value)} placeholder="Lo que se cree que va a costar" style={mini} />
-              <div style={{ fontSize: 10, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
-                Es una estimación, no un gasto: queda como <strong>comprometido</strong> contra ese capítulo hasta que
-                se compre. La plata se descuenta de verdad cuando entra la factura.
-              </div>
-            </div>
           </div>
         )}
+
+        {/* Fuera del bloque de la obra a propósito: un gasto de oficina, o un
+            pedido de un proyecto que todavía no tiene obra activa, también se
+            estima y también se aprueba. Adentro, quien aprobaba se quedaba sin
+            saber de cuánta plata estaban hablando. */}
+        <div>
+          <label style={lbl}>CUÁNTO SE ESTIMA (US$)</label>
+          <input type="number" step="0.01" min="0" value={form.monto_estimado ?? ""} disabled={!puedeEditar}
+            onChange={ev => inp("monto_estimado", ev.target.value)} placeholder="Lo que se cree que va a costar" style={mini} />
+          {obra && (
+            <div style={{ fontSize: 10, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
+              Es una estimación, no un gasto: queda como <strong>comprometido</strong> contra esa agrupación hasta que
+              se compre. La plata se descuenta de verdad cuando entra la factura.
+            </div>
+          )}
+        </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
           <div>
