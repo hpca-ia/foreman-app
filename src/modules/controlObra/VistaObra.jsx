@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
+import { sincronizarCapitulos } from "./sincronizarCapitulos";
 import Button from "../../components/ui/Button";
 import { fmt, calcularControl, agrupar, totalesObra } from "./calculos";
 import TablaControl from "./TablaControl";
@@ -61,6 +62,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
 
   const cargar = useCallback(async () => {
     setCargando(true);
+    // Los capítulos de la obra son los del presupuesto, siempre: si allá se
+    // renombró o se reorganizó, acá se dice lo mismo. Mueve nombre y orden de
+    // capítulo y ningún monto — la línea base no se toca.
+    await sincronizarCapitulos(obra);
     const [{ data: r }, { data: p }, { data: f }, { data: act }] = await Promise.all([
       supabase.from("obra_rubros").select("*").eq("obra_id", obra.id).order("capitulo_orden").order("orden"),
       supabase.from("planillas").select("*").eq("obra_id", obra.id).order("numero"),

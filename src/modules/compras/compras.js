@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
 
 // El flujo de una compra, de punta a punta.
 //
@@ -24,6 +25,30 @@ export const ESTADOS = {
 export const ABIERTAS = ["pendiente_aprobacion", "requiere_info", "aprobada", "comprada"];
 
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
+
+/**
+ * ¿Esta persona ve esta compra?
+ *
+ * La misma regla que todo FOREMAN, dicha para una compra: es tuya, o entrás a
+ * su proyecto. Antes no había regla —la pantalla traía la tabla entera— y un
+ * residente de una obra veía, en "Abiertas" y en "Todas", lo que se estaba
+ * comprando en las otras: montos, proveedores y a quién se le aprobó qué.
+ *
+ *   mia          · la pediste, la aprobaste, la compraste o la recibiste
+ *   nivel        · tu nivel en el proyecto de la compra (null si no entrás)
+ *   todasLasObras· gestiona compras o aprueba: necesita la lista completa para
+ *                  hacer su trabajo, que es justamente mirar todas
+ *
+ * Una compra sin proyecto no la esconde de nadie que ya la tocó, pero tampoco
+ * se la muestra a quien no tiene nada que ver con ella.
+ */
+export function veLaCompra({ compra, usuarioId, nivel = null, todasLasObras = false }) {
+  const mia = compra?.solicitante_id === usuarioId
+    || compra?.aprobador_id === usuarioId
+    || compra?.comprado_por === usuarioId
+    || compra?.recibido_por === usuarioId;
+  return mia || todasLasObras || !!nivel;
+}
 
 /** @returns { solicitudes, sinTablas } */
 export async function cargarSolicitudes(leadId = null) {
@@ -95,9 +120,13 @@ export async function guardarSolicitud(id, datos) {
  */
 export async function rubrosDelProyecto(leadId) {
   if (!leadId) return { obra: null, rubros: [] };
-  const { data: obras } = await supabase.from("obras").select("id,nombre").eq("lead_id", leadId).limit(1);
+  const { data: obras } = await supabase.from("obras").select("id,nombre,presupuesto_id").eq("lead_id", leadId).limit(1);
   const obra = obras?.[0];
   if (!obra) return { obra: null, rubros: [] };
+  // Antes de ofrecer los capítulos, que sean los de hoy: si alguien reorganizó
+  // el presupuesto después de activar la obra, acá salían los viejos y no
+  // había desde dónde arreglarlo. No toca un solo monto.
+  await sincronizarCapitulos(obra);
   const { data } = await supabase.from("obra_rubros")
     .select("id,numero,capitulo,descripcion,total_base").eq("obra_id", obra.id).order("orden");
   return { obra, rubros: data || [] };
@@ -122,6 +151,9 @@ export async function anotar(solicitudId, antes, despues, quien, comentario) {
  */
 export async function moverA(solicitud, estado, { quien, comentario, paraQuien, titulo, extra = {} }) {
   const campos = { estado, ...extra };
+  // La fecha del PRIMER pedido de visto: reenviar una devuelta no reinicia la
+  // cuenta de cuánto tardó en aprobarse.
+  if (estado === "pendiente_aprobacion" && !solicitud.enviado_at) campos.enviado_at = new Date().toISOString();
   if (estado === "aprobada") { campos.aprobador_id = quien?.id ?? null; campos.aprobador_nombre = quien?.name || null; campos.aprobado_at = new Date().toISOString(); }
   if (estado === "comprada") { campos.comprado_por = quien?.id ?? null; campos.comprado_nombre = quien?.name || null; campos.comprado_at = new Date().toISOString(); }
   if (estado === "recibida") { campos.recibido_por = quien?.id ?? null; campos.recibido_nombre = quien?.name || null; campos.recibido_at = new Date().toISOString(); }
@@ -147,7 +179,12 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
   }
   campos.tarea_id = tarea?.id ?? null;
 
-  const { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
+  let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
+  // Sin la 065 no existe `enviado_at`: la solicitud avanza igual.
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { enviado_at, ...resto } = campos;
+    ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", solicitud.id));
+  }
   if (error) return { error: error.message };
   await anotar(solicitud.id, solicitud.estado, estado, quien, comentario);
 
@@ -235,6 +272,47 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
   if (error) return error.message;
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
     `Proforma elegida: ${proforma.proveedor || proforma.nombre}${proforma.monto ? ` · $${Number(proforma.monto).toFixed(2)}` : ""}${comentario ? ` · ${comentario}` : ""}`);
+  return null;
+}
+
+/**
+ * Se pagó.
+ *
+ * No mueve el estado y es a propósito: el estado contesta a quién le toca
+ * ahora —comprar, recibir—, y el pago no se mete en esa fila. Se paga por
+ * adelantado, contra entrega o a treinta días, y en los tres casos la compra
+ * sigue su camino. Es una fecha al costado, no un paso más.
+ *
+ * El monto es opcional: muchas veces se paga exactamente lo de la proforma y
+ * repetirlo es trabajo de más. En blanco, vale el de la compra.
+ */
+export async function registrarPago(solicitud, { monto, quien, comentario }) {
+  const campos = {
+    pagado_at: new Date().toISOString(),
+    pagado_por: quien?.id ?? null,
+    pagado_nombre: quien?.name || null,
+    pagado_monto: monto ? Number(monto) : (solicitud.monto ?? null),
+  };
+  const { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
+  if (error) return /column|schema cache/i.test(error.message) ? "Falta correr la migración 065." : error.message;
+
+  const cuanto = campos.pagado_monto ? ` · $${Number(campos.pagado_monto).toFixed(2)}` : "";
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, `Pagado${cuanto}${comentario ? ` · ${comentario}` : ""}`);
+  await supabase.from("lead_movimientos").insert({
+    lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
+    detalle: `Pagado${cuanto}: ${solicitud.descripcion}`,
+    autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
+  }).select();
+  return null;
+}
+
+/** Se pagó por error, o se deshizo el pago. */
+export async function deshacerPago(solicitud, quien) {
+  const { error } = await supabase.from("compras_solicitudes")
+    .update({ pagado_at: null, pagado_por: null, pagado_nombre: null, pagado_monto: null })
+    .eq("id", solicitud.id);
+  if (error) return error.message;
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, "Se deshizo el pago");
   return null;
 }
 

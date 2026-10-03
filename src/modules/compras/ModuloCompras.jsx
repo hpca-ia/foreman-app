@@ -3,7 +3,7 @@ import { Plus, ShoppingCart, AlertTriangle, FileText } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
-import { ESTADOS, ABIERTAS, cargarSolicitudes } from "./compras";
+import { ESTADOS, ABIERTAS, cargarSolicitudes, veLaCompra } from "./compras";
 import ModalSolicitud from "./ModalSolicitud";
 import Proformas from "./Proformas";
 
@@ -17,7 +17,7 @@ import Proformas from "./Proformas";
 // La pantalla arranca por lo que a uno le toca hacer, no por la lista completa:
 // esa es la pregunta con la que se entra acá.
 
-export default function ModuloCompras({ currentUser, puede, users = [] }) {
+export default function ModuloCompras({ currentUser, puede, users = [], nivelObra = () => null, entraATodo = false }) {
   const [solicitudes, setSolicitudes] = useState([]);
   const [proyectos, setProyectos] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -32,6 +32,9 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
 
   const gestionaCompras = puede("compras.gestionar");
   const apruebo = puede("tareas.asignar") || currentUser?.role === "owner";
+  // Quien compra y quien aprueba miran todas: es su trabajo. El resto ve lo
+  // suyo y lo de sus obras — la regla vive en compras.js.
+  const todasLasObras = gestionaCompras || apruebo || entraATodo;
 
   const cargar = useCallback(async () => {
     const [{ solicitudes: s, sinTablas: falta }, { data: ls }] = await Promise.all([
@@ -57,6 +60,9 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
   }
 
   const nombreProyecto = id => proyectos.find(p => p.id === id)?.nombre || "—";
+  // Pedir algo es pedirlo para una obra en la que uno está: la lista del
+  // selector es la misma que la de lo que ve, no el pipeline entero.
+  const misProyectos = todasLasObras ? proyectos : proyectos.filter(p => !!nivelObra(p.id));
 
   // A quién le toca cada estado: es lo que decide qué ve uno en "Me toca a mí".
   const meToca = s => {
@@ -68,10 +74,16 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
     return false;
   };
 
-  const abiertas = solicitudes.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
+  // Lo primero que se descarta es lo que esta persona no tiene por qué ver:
+  // los filtros de abajo son de lectura, no de permisos.
+  const visibles = solicitudes.filter(s => veLaCompra({
+    compra: s, usuarioId: currentUser.id, nivel: nivelObra(s.lead_id), todasLasObras,
+  }));
+
+  const abiertas = visibles.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
   const listas = filtro === "mias" ? abiertas.filter(meToca)
     : filtro === "abiertas" ? abiertas
-    : solicitudes;
+    : visibles;
 
   const pendientesMias = abiertas.filter(meToca).length;
 
@@ -106,7 +118,7 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
       )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {[["mias", "Me toca a mí", pendientesMias], ["abiertas", "Abiertas", abiertas.length], ["todas", "Todas", solicitudes.length]].map(([id, label, n]) => {
+        {[["mias", "Me toca a mí", pendientesMias], ["abiertas", "Abiertas", abiertas.length], ["todas", "Todas", visibles.length]].map(([id, label, n]) => {
           const activo = filtro === id;
           return (
             <button key={id} onClick={() => setFiltro(id)}
@@ -146,7 +158,10 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
                 </div>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: e.color }}>
                   {e.label}
-                  {e.quien && <span style={{ color: colors.muted, fontWeight: 400 }}> · {e.quien}</span>}
+                  {/* Pagado no es un paso del flujo sino una marca al costado:
+                      se paga antes, durante o después de recibir. */}
+                  {s.pagado_at && <span style={{ color: colors.success, marginLeft: 5 }}>· PAGADO</span>}
+                  {e.quien && !s.pagado_at && <span style={{ color: colors.muted, fontWeight: 400 }}> · {e.quien}</span>}
                 </div>
                 <div style={{ textAlign: "right", fontSize: 12, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                   {s.monto ? `$${Number(s.monto).toLocaleString("es-EC", { minimumFractionDigits: 2 })}` : ""}
@@ -159,7 +174,7 @@ export default function ModuloCompras({ currentUser, puede, users = [] }) {
       )}
 
       {(abierta || nueva) && (
-        <ModalSolicitud solicitud={abierta} proyectos={proyectos} users={users} currentUser={currentUser} puede={puede}
+        <ModalSolicitud solicitud={abierta} proyectos={misProyectos} users={users} currentUser={currentUser} puede={puede}
           onCerrar={() => { setAbierta(null); setNueva(false); }}
           onCambio={() => { cargar(); }} />
       )}
