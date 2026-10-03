@@ -276,6 +276,41 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
 }
 
 /**
+ * El pedido estaba en el proyecto equivocado.
+ *
+ * Pasa: se pide desde el teléfono, el selector venía con otro proyecto cargado
+ * y nadie lo mira hasta que la compra aparece en el control de la obra que no
+ * es. Corregirlo tiene que poder hacerse, y solo gerencia o compras pueden —si
+ * lo pudiera mover quien lo pidió, el pedido desaparecería de su propia vista
+ * y de la de su gerente sin que ninguno de los dos se entere.
+ *
+ * El capítulo y el rubro se borran al mover: eran de la obra anterior, y
+ * dejarlos apuntando ahí carga plata comprometida contra un rubro de otro
+ * proyecto. Se vuelven a elegir, que es un clic y es honesto.
+ */
+export async function moverDeProyecto(solicitud, leadId, quien, nombreNuevo) {
+  const campos = { lead_id: Number(leadId), capitulo: null, obra_rubro_id: null, obra_id: null };
+  let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { capitulo, obra_rubro_id, ...resto } = campos;
+    ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", solicitud.id));
+  }
+  if (error) return error.message;
+
+  const detalle = `Pedido movido a ${nombreNuevo || "otro proyecto"}: ${solicitud.descripcion}`;
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
+    `Movido a ${nombreNuevo || "otro proyecto"} — hay que volver a elegir el capítulo`);
+  // Las dos bitácoras se enteran: de dónde salió y a dónde entró.
+  await supabase.from("lead_movimientos").insert([
+    { lead_id: solicitud.lead_id, tipo: "compra", automatico: true, detalle,
+      autor_id: quien?.id ?? null, autor_nombre: quien?.name || null },
+    { lead_id: Number(leadId), tipo: "compra", automatico: true, detalle: `Pedido recibido de otro proyecto: ${solicitud.descripcion}`,
+      autor_id: quien?.id ?? null, autor_nombre: quien?.name || null },
+  ]).select();
+  return null;
+}
+
+/**
  * Se pagó.
  *
  * No mueve el estado y es a propósito: el estado contesta a quién le toca

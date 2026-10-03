@@ -6,7 +6,8 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
-  adjuntosDe, subirAdjunto, borrarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago } from "./compras";
+  adjuntosDe, subirAdjunto, borrarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
+  moverDeProyecto } from "./compras";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -95,8 +96,17 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // mientras no se haya comprado —después ya hay plata comprometida contra eso
   // y corregirlo a mano descuadra el control—, y gerencia y compras siempre,
   // que son quienes arreglan lo que llega mal escrito.
-  const cerrada = estado === "comprada" || estado === "recibida" || estado === "anulada";
-  const puedeEditar = (esMia && !cerrada) || apruebo || gestionaCompras;
+  // Quien lo pidió corrige lo suyo —la cantidad, el monto estimado, para
+  // cuándo— hasta que llega: equivocarse en "200 sacos" y no poder arreglarlo
+  // termina en un pedido anulado y otro escrito de nuevo. Después de recibido
+  // ya es historia y se congela. Gerencia y compras corrigen siempre, que son
+  // quienes arreglan lo que llega mal escrito.
+  const congelada = estado === "recibida" || estado === "anulada";
+  const puedeEditar = (esMia && !congelada) || apruebo || gestionaCompras;
+  // Mover el pedido de proyecto es otra cosa, y solo gerencia o compras: si lo
+  // pudiera mover quien lo pidió, el pedido se iría de su vista y de la de su
+  // gerente sin que ninguno de los dos se entere.
+  const puedeMover = !editando || apruebo || gestionaCompras;
 
   useEffect(() => { if (viva?.id) historialDe(viva.id).then(setHistorial); }, [viva?.id]);
 
@@ -149,6 +159,21 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     setAvisoPapel("");
     onCambio?.();
     return r.solicitud;
+  }
+
+  // Mover de proyecto se guarda en el acto —no espera un Guardar— porque lo
+  // que se corrige acá es un error que ya está molestando en el control de la
+  // obra equivocada.
+  async function cambiarProyecto(leadId) {
+    if (!leadId || leadId === form.lead_id) return;
+    setOcupado(true); setError("");
+    const err = await moverDeProyecto(viva, leadId, currentUser, proyectos.find(p => p.id === leadId)?.nombre);
+    setOcupado(false);
+    if (err) { setError(err); return; }
+    setForm(f => ({ ...f, lead_id: leadId, capitulo: "", obra_rubro_id: "" }));
+    setViva(v => ({ ...v, lead_id: leadId, capitulo: null, obra_rubro_id: null }));
+    historialDe(viva.id).then(setHistorial);
+    onCambio?.();
   }
 
   async function hacer(fn) {
@@ -255,10 +280,16 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       <div style={{ display: "grid", gap: 10 }}>
         <div>
           <label style={lbl}>PROYECTO</label>
-          <select value={form.lead_id || ""} onChange={ev => inp("lead_id", Number(ev.target.value))} disabled={editando} style={mini}>
+          <select value={form.lead_id || ""} disabled={!puedeMover} style={mini}
+            onChange={ev => (editando ? cambiarProyecto(Number(ev.target.value)) : inp("lead_id", Number(ev.target.value)))}>
             <option value="">Elegí el proyecto…</option>
             {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
+          {editando && puedeMover && (
+            <div style={{ fontSize: 10, color: colors.muted, marginTop: 3 }}>
+              Cambiarlo mueve el pedido de obra y borra el capítulo: hay que elegirlo de nuevo.
+            </div>
+          )}
         </div>
 
         <div>

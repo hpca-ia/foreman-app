@@ -17,7 +17,7 @@ import Proformas from "./Proformas";
 // La pantalla arranca por lo que a uno le toca hacer, no por la lista completa:
 // esa es la pregunta con la que se entra acá.
 
-export default function ModuloCompras({ currentUser, puede, users = [], nivelObra = () => null, entraATodo = false }) {
+export default function ModuloCompras({ currentUser, puede, users = [], nivelProyecto = () => null, entraATodo = false }) {
   const [solicitudes, setSolicitudes] = useState([]);
   const [proyectos, setProyectos] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -62,7 +62,7 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelObr
   const nombreProyecto = id => proyectos.find(p => p.id === id)?.nombre || "—";
   // Pedir algo es pedirlo para una obra en la que uno está: la lista del
   // selector es la misma que la de lo que ve, no el pipeline entero.
-  const misProyectos = todasLasObras ? proyectos : proyectos.filter(p => !!nivelObra(p.id));
+  const misProyectos = todasLasObras ? proyectos : proyectos.filter(p => !!nivelProyecto(p.id));
 
   // A quién le toca cada estado: es lo que decide qué ve uno en "Me toca a mí".
   const meToca = s => {
@@ -77,7 +77,7 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelObr
   // Lo primero que se descarta es lo que esta persona no tiene por qué ver:
   // los filtros de abajo son de lectura, no de permisos.
   const visibles = solicitudes.filter(s => veLaCompra({
-    compra: s, usuarioId: currentUser.id, nivel: nivelObra(s.lead_id), todasLasObras,
+    compra: s, usuarioId: currentUser.id, nivel: nivelProyecto(s.lead_id), todasLasObras,
   }));
 
   const abiertas = visibles.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
@@ -97,7 +97,12 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelObr
           <Button variant={verProformas ? "primary" : "outline"} size="md" onClick={() => setVerProformas(v => !v)}>
             <FileText size={14} /> Proformas
           </Button>
-          <Button variant="primary" size="md" onClick={() => setNueva(true)}><Plus size={14} /> Pedir algo</Button>
+          {/* Sin proyecto asignado no hay a qué cargarle la compra: el botón
+              lo dice en vez de abrir un formulario con el selector vacío. */}
+          <Button variant="primary" size="md" onClick={() => setNueva(true)} disabled={!misProyectos.length}
+            title={misProyectos.length ? "" : "Todavía no estás asignado a ningún proyecto"}>
+            <Plus size={14} /> Pedir algo
+          </Button>
         </div>
       </div>
 
@@ -109,7 +114,7 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelObr
             style={{ width: "100%", maxWidth: 380, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "7px 9px",
               fontSize: 12.5, fontFamily: colors.font, color: colors.ink, background: "#fff", marginBottom: 10 }}>
             <option value="">Elegí el proyecto…</option>
-            {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {misProyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
           <Proformas leadId={proyectoProformas ? Number(proyectoProformas) : null}
             nombreProyecto={nombreProyecto(Number(proyectoProformas))}

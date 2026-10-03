@@ -406,6 +406,11 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const nivelPresupuesto = leadId => nivelEn(leadId, "presupuesto");
   const nivelLibro = leadId => nivelEn(leadId, "libro");
   const nivelObra = leadId => nivelEn(leadId, "obra");
+  // Pedir materiales es estar en la obra, no ver el control de costos: alcanza
+  // con entrar al proyecto por cualquiera de las dos puertas. Atándolo solo a
+  // "Control de obra", un residente al que se le apagó esa área —para que no
+  // vea los márgenes— se quedaba sin poder pedir un saco de cemento.
+  const nivelCompras = leadId => nivelEn(leadId, "proyecto") || nivelEn(leadId, "obra");
   const mios = proyectosTodos.filter(p => (p.esLead
     ? !!nivelProyecto(p.id)
     : entraATodo || p.gente.includes(usuario.id) || p.creador === usuario.id));
@@ -645,7 +650,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {puede("compras.ver") && vista === "compras" && (
-              <ModuloCompras currentUser={usuario} puede={puede} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
+              <ModuloCompras currentUser={usuario} puede={puede} users={users} nivelProyecto={nivelCompras} entraATodo={entraATodo} />
             )}
             {puede("libro.ver") && vista === "libro" && (
               <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelLibro} />
