@@ -78,6 +78,41 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
     setGuardando(false);
   }
 
+  /**
+   * Subir o bajar una agrupación.
+   *
+   * El orden de las agrupaciones es el orden en que se lee el control de obra,
+   * y las que vienen de NOVA salen en el orden en que aparecieron en el Excel
+   * —que no es el orden en que se construye—. Sin poder moverlas, la única
+   * salida era disolverlas y volver a armarlas en el orden correcto.
+   *
+   * Se renumeran las dos que se intercambian y nada más: reescribir las veinte
+   * cada vez que alguien toca una flecha es pedirle a la base veinte escrituras
+   * por un movimiento.
+   */
+  async function moverAgrupacion(act, direccion) {
+    const enOrden = [...actividades].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+    const i = enOrden.findIndex(a => a.id === act.id);
+    const j = i + direccion;
+    if (i < 0 || j < 0 || j >= enOrden.length) return;
+
+    const otra = enOrden[j];
+    setGuardando(true); setError("");
+    // Si quedaron con el mismo orden —o sin ninguno—, intercambiar no movería
+    // nada: se les da el lugar que ocupan en la lista antes de cambiarlas.
+    const miOrden = act.orden ?? i + 1;
+    const suOrden = otra.orden ?? j + 1;
+    const a1 = miOrden === suOrden ? j + 1 : suOrden;
+    const a2 = miOrden === suOrden ? i + 1 : miOrden;
+    const [e1, e2] = await Promise.all([
+      supabase.from("obra_actividades").update({ orden: a1 }).eq("id", act.id),
+      supabase.from("obra_actividades").update({ orden: a2 }).eq("id", otra.id),
+    ]);
+    setGuardando(false);
+    if (e1.error || e2.error) { setError("No se pudo mover: " + (e1.error || e2.error).message); return; }
+    onCambio();
+  }
+
   async function moverANueva() {
     const nombre = nueva.trim();
     if (!nombre) return;
@@ -381,6 +416,12 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
           const abierta = abiertas.has(g.clave);
           const esSin = g.clave === SIN;
           const todos = g.rubros.length > 0 && g.rubros.every(r => seleccion.has(r.id));
+          // Las puntas no se mueven: una flecha que no hace nada es una flecha
+          // que se toca dos veces para descubrir que no hace nada.
+          const conActividad = grupos.filter(x => x.clave !== SIN);
+          const pos = conActividad.findIndex(x => x.clave === g.clave);
+          const primera = pos === 0;
+          const ultima = pos === conActividad.length - 1;
           return (
             <div key={g.clave}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: `1px solid ${colors.neutralSoft}`, background: esSin ? "transparent" : colors.brandSoft }}>
@@ -405,6 +446,16 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
                 </button>
                 {!esSin && (
                   <>
+                    {/* El orden de las agrupaciones es el orden en que se lee
+                        el control: las de NOVA salen como venían en el Excel. */}
+                    <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+                      <button onClick={() => moverAgrupacion(g.act, -1)} disabled={guardando || primera} title="Subir"
+                        style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 9,
+                          cursor: primera ? "default" : "pointer", color: primera ? colors.border : colors.muted }}>▲</button>
+                      <button onClick={() => moverAgrupacion(g.act, 1)} disabled={guardando || ultima} title="Bajar"
+                        style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 9,
+                          cursor: ultima ? "default" : "pointer", color: ultima ? colors.border : colors.muted }}>▼</button>
+                    </div>
                     <button onClick={() => setActsSel(prev => { const n = new Set(prev); n.has(g.act.id) ? n.delete(g.act.id) : n.add(g.act.id); return n; })}
                       title="Marcar para fusionar"
                       style={{ background: actsSel.has(g.act.id) ? colors.brand : "transparent", border: "none", borderRadius: 4, padding: 2, color: actsSel.has(g.act.id) ? "#fff" : colors.muted, cursor: "pointer", display: "flex" }}>

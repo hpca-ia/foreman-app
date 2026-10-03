@@ -154,7 +154,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
                         background: agruparPor === v ? colors.surface : "transparent", color: agruparPor === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
                 </div>
-                {agruparPor === "actividad" && !rubros.some(r => r.actividad) && (
+                {/* El rubro guarda `actividad_id`; `actividad` no existe en la
+                    fila, así que el aviso salía siempre —incluso con las
+                    agrupaciones armadas y a la vista debajo—. */}
+                {agruparPor === "actividad" && !rubros.some(r => r.actividad_id) && (
                   <span style={{ fontSize: 11, color: colors.warning }}>
                     Todavía no hay agrupaciones — créalas en la pestaña Agrupaciones.
                   </span>
