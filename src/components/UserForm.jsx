@@ -5,11 +5,11 @@ import { esAdmin, ROLES, rolInfo } from "../lib/roles";
 
 const etiqueta = { fontSize: 10, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.4, marginBottom: -2 };
 
-export default function UserForm({ u, esNuevo = false, projects = [], onSave, onCancel }) {
+export default function UserForm({ u, esNuevo = false, onSave, onCancel }) {
+  // `proyectos` se mantiene aunque ya no se edite acá: al guardar se conserva
+  // lo que la persona tuviera, en vez de vaciárselo por haber abierto la ficha.
   const [f, setF] = useState({ ...u, pin: u.pin || "", proyectos: u.proyectos || [] });
-  const alternarProyecto = id => setF(x => ({
-    ...x, proyectos: x.proyectos.includes(id) ? x.proyectos.filter(p => p !== id) : [...x.proyectos, id],
-  }));
+
   // Al crear, el PIN es obligatorio. Al editar, vacío deja el que tenía: en la
   // base solo hay una huella del PIN, así que no hay forma de mostrarlo.
   const pinOk = f.pin ? /^\d{4,8}$/.test(f.pin) : !esNuevo;
@@ -40,7 +40,7 @@ export default function UserForm({ u, esNuevo = false, projects = [], onSave, on
         </div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -4, lineHeight: 1.5 }}>
           {rolInfo(f.role).label}: lo que puede hacer se ajusta en la pestaña Permisos.
-          {esAdmin(f.role) ? " Los admins ven todo." : " Del pipeline solo verá los proyectos que le compartas o donde tenga una etapa a su cargo."}
+          {esAdmin(f.role) ? " Entra a todos los proyectos, salvo donde se le ponga otro nivel." : " Solo verá los proyectos que le asignes."}
         </div>
         <label style={etiqueta}>CONTACTO</label>
         <input value={f.email || ""} onChange={e => setF(p => ({ ...p, email: e.target.value }))} placeholder="Email (para notificaciones)" style={inputStyle} />
@@ -50,38 +50,18 @@ export default function UserForm({ u, esNuevo = false, projects = [], onSave, on
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -4, lineHeight: 1.5 }}>
           Con ese número reconoce NOVA a {f.name ? f.name.split(" ")[0] : "esta persona"} en WhatsApp. Sin número, no le contesta.
         </div>
-        {/* Para quien está en varias obras: sus proyectos se marcan acá de una
-            vez, en vez de entrar proyecto por proyecto. Los admins ven todos. */}
-        {esAdmin(f.role) ? (
-          <div style={{ fontSize: 11, color: "var(--muted)" }}>Los admins ven todos los proyectos; no hace falta asignarles ninguno.</div>
-        ) : (
-          <div>
-            <div style={{ fontSize: 11, color: "var(--ink-soft)", fontWeight: 500, marginBottom: 2 }}>
-              Proyectos de tareas donde participa <span style={{ color: "var(--muted)", fontWeight: 400 }}>· opcional{f.proyectos.length > 0 ? ` · ${f.proyectos.length}` : ""}</span>
-            </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5 }}>
-              Sirve para filtrar tareas por proyecto y para que pueda asignarle trabajo a sus compañeros de ese proyecto.
-              Los proyectos del pipeline no se marcan acá: se comparten desde cada proyecto.
-            </div>
-            {projects.length === 0 ? (
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>Todavía no hay proyectos.</div>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {projects.map(p => {
-                  const on = f.proyectos.includes(p.id);
-                  return (
-                    <button key={p.id} type="button" onClick={() => alternarProyecto(p.id)}
-                      style={{ padding: "5px 11px", borderRadius: 20, fontSize: 12, cursor: "pointer", fontFamily: "var(--font)",
-                        border: `1px solid ${on ? (p.color || "var(--brand)") : "var(--border)"}`,
-                        background: on ? (p.color || "var(--brand)") : "#fff", color: on ? "#fff" : "var(--ink-soft)" }}>
-                      {p.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Acá había una lista de proyectos para marcar. Ya no: los proyectos
+            son los del pipeline y a qué entra cada uno —y con qué nivel en el
+            presupuesto, la obra y el libro— se decide en Ajustes → Proyectos,
+            proyecto por proyecto. Dos lugares para decir lo mismo terminaban
+            diciendo cosas distintas, que es de donde salieron los líos de
+            permisos. Lo que ya estaba marcado se conserva al guardar; solo deja
+            de editarse desde acá. */}
+        <div style={{ fontSize: 11, color: "var(--muted)", background: "var(--bg)", borderRadius: 8, padding: "8px 10px", lineHeight: 1.5 }}>
+          A qué proyectos entra {f.name ? f.name.split(" ")[0] : "esta persona"} se decide en
+          <strong style={{ color: "var(--ink-soft)" }}> Ajustes → Proyectos</strong>, uno por uno, junto con qué puede
+          hacer en el presupuesto, el control de obra y el libro.
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button variant="primary" style={{ flex: 2 }} onClick={() => listo && onSave(f)} disabled={!listo}>Guardar</Button>
           <Button variant="secondary" style={{ flex: 1 }} onClick={onCancel}>Cancelar</Button>

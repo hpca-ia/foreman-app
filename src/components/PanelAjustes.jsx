@@ -19,9 +19,22 @@ import ProjectForm from "./ProjectForm";
 import ProyectosDelPipeline from "./ProyectosDelPipeline";
 import PermisosDeUsuario from "./PermisosDeUsuario";
 
-/** Hace cuánto entró a FOREMAN por última vez, en palabras. */
+/**
+ * Hace cuánto entró a FOREMAN por última vez, en palabras.
+ *
+ * `undefined` y `null` no son lo mismo: undefined es que la columna todavía no
+ * existe —falta la migración 063— y null es que existe y esa persona no entró
+ * nunca. Tratarlos igual ponía "nunca entró" en naranja sobre todo el equipo,
+ * incluido quien estaba mirando esa pantalla en ese momento. Un dato que no se
+ * tiene no se inventa: no se dice nada.
+ */
 function cuandoEntro(ts) {
-  if (!ts) return "nunca entró";
+  if (ts === undefined) return "";
+  // Sin fecha no es "nunca entró": la cuenta empieza el día que se corrió la
+  // migración, así que de todo el que no haya vuelto a entrar desde entonces
+  // tampoco hay dato. Decir "nunca entró" de alguien que entra todos los días
+  // es acusarlo de algo falso.
+  if (!ts) return "sin registro todavía";
   const dias = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000);
   const hora = new Date(ts).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
   if (dias <= 0) return `entró hoy a las ${hora}`;
@@ -33,7 +46,7 @@ function cuandoEntro(ts) {
 // Tres semanas sin entrar casi siempre significa que algo no le funciona y no
 // lo dijo, así que se ve distinto.
 const colorConexion = ts => {
-  if (!ts) return "var(--warning)";
+  if (!ts) return "var(--muted)";
   const dias = (Date.now() - new Date(ts).getTime()) / 86400000;
   return dias > 21 ? "var(--warning)" : "var(--muted)";
 };
@@ -241,16 +254,18 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
         <div>
           {avisoEquipo}
           {users.map(u => editU?.id === u.id ? (
-            <UserForm key={u.id} u={editU} projects={projects} onSave={saveUser} onCancel={() => setEditU(null)} />
+            <UserForm key={u.id} u={editU} onSave={saveUser} onCancel={() => setEditU(null)} />
           ) : (
             <div key={u.id} style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
               <Avatar name={u.name} size={36} color={u.color || "#0F3D3E"} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{!esAdmin(u.role) && ` · ${projects.filter(p => (p.miembros || []).includes(u.id)).length} proyecto${projects.filter(p => (p.miembros || []).includes(u.id)).length === 1 ? "" : "s"}`}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
                 {/* Cuándo entró por última vez. La sesión dura siete días, así
                     que "tiene sesión" no dice nada: esto sí dice si lo usa. */}
-                <div style={{ fontSize: 10.5, color: colorConexion(u.ultima_conexion) }}>{cuandoEntro(u.ultima_conexion)}</div>
+                {cuandoEntro(u.ultima_conexion) && (
+                  <div style={{ fontSize: 10.5, color: colorConexion(u.ultima_conexion) }}>{cuandoEntro(u.ultima_conexion)}</div>
+                )}
               </div>
               {/* Los permisos de esta persona, por encima de los de su rol. */}
               {usuario?.role === "owner" && u.role !== "owner" && (
@@ -275,7 +290,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
                 })} />
             </div>
           )}
-          {newU ? <UserForm u={emptyUser} esNuevo projects={projects} onSave={saveUser} onCancel={() => setNewU(false)} /> : (
+          {newU ? <UserForm u={emptyUser} esNuevo onSave={saveUser} onCancel={() => setNewU(false)} /> : (
             <button onClick={() => setNewU(true)} style={{ width: "100%", background: "var(--bg)", border: "1.5px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 10, color: "var(--ink-soft)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>+ Agregar usuario</button>
           )}
         </div>
