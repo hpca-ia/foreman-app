@@ -164,14 +164,16 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // Mover de proyecto se guarda en el acto —no espera un Guardar— porque lo
   // que se corrige acá es un error que ya está molestando en el control de la
   // obra equivocada.
-  async function cambiarProyecto(leadId) {
-    if (!leadId || leadId === form.lead_id) return;
+  async function cambiarProyecto(valor) {
+    if (!valor || valor === String(form.lead_id)) return;
+    const lead = leadDe(valor);
     setOcupado(true); setError("");
-    const err = await moverDeProyecto(viva, leadId, currentUser, proyectos.find(p => p.id === leadId)?.nombre);
+    const err = await moverDeProyecto(viva, valor, currentUser,
+      lead ? proyectos.find(p => p.id === lead)?.nombre : "gasto de oficina");
     setOcupado(false);
     if (err) { setError(err); return; }
-    setForm(f => ({ ...f, lead_id: leadId, capitulo: "", obra_rubro_id: "" }));
-    setViva(v => ({ ...v, lead_id: leadId, capitulo: null, obra_rubro_id: null }));
+    setForm(f => ({ ...f, lead_id: valor, capitulo: "", obra_rubro_id: "" }));
+    setViva(v => ({ ...v, lead_id: lead, capitulo: null, obra_rubro_id: null }));
     historialDe(viva.id).then(setHistorial);
     onCambio?.();
   }
@@ -195,6 +197,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const personaDeCompras = () => users.find(u => u.role === "assistant")?.id || gerenteDelProyecto();
 
   const guardarYMandar = () => hacer(async () => {
+    if (!form.lead_id) return { error: "Elegí el proyecto, o marcá que es un gasto de oficina." };
     if (!form.descripcion?.trim()) return { error: "Escribe qué hace falta." };
     let s = viva;
     if (!s) {
@@ -215,6 +218,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   });
 
   const soloGuardar = () => hacer(async () => {
+    if (!form.lead_id) return { error: "Elegí el proyecto, o marcá que es un gasto de oficina." };
     if (!form.descripcion?.trim()) return { error: "Escribe qué hace falta." };
     if (!viva) {
       const r = await crearSolicitud(form, currentUser);
@@ -280,10 +284,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       <div style={{ display: "grid", gap: 10 }}>
         <div>
           <label style={lbl}>PROYECTO</label>
-          <select value={form.lead_id || ""} disabled={!puedeMover} style={mini}
-            onChange={ev => (editando ? cambiarProyecto(Number(ev.target.value)) : inp("lead_id", Number(ev.target.value)))}>
+          <select value={form.lead_id ?? ""} disabled={!puedeMover} style={mini}
+            onChange={ev => (editando ? cambiarProyecto(ev.target.value) : inp("lead_id", ev.target.value))}>
             <option value="">Elegí el proyecto…</option>
             {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            {/* Lo que no es de ninguna obra: papel, el mantenimiento de la
+                camioneta, una herramienta del taller. Sigue el mismo camino
+                —lo aprueba quien aprueba— y no le ensucia un rubro a nadie. */}
+            <option value={SIN_PROYECTO}>— Sin proyecto · gasto de oficina</option>
           </select>
           {editando && puedeMover && (
             <div style={{ fontSize: 10, color: colors.muted, marginTop: 3 }}>
@@ -305,6 +313,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             placeholder="En qué se va a usar y por qué ahora" style={{ ...mini, resize: "vertical" }}
             disabled={!puedeEditar} />
         </div>
+
+        {/* Sin obra no hay rubro contra el cual apuntarlo, así que se dice en
+            palabras en qué se carga. Texto libre: las categorías de la oficina
+            las va a descubrir el uso. */}
+        {form.lead_id === SIN_PROYECTO && (
+          <div>
+            <label style={lbl}>A QUÉ SE CARGA</label>
+            <input value={form.destino || ""} onChange={ev => inp("destino", ev.target.value)}
+              placeholder="Ej: oficina · papelería, o camioneta · mantenimiento" style={mini}
+              disabled={!puedeEditar} />
+          </div>
+        )}
 
         {/* Contra qué parte del presupuesto. Una solicitud sin capítulo es un
             pedido suelto: no se puede saber cuánto más quieren gastar de algo

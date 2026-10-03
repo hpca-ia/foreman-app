@@ -24,6 +24,13 @@ export const ESTADOS = {
 
 export const ABIERTAS = ["pendiente_aprobacion", "requiere_info", "aprobada", "comprada"];
 
+// Un pedido puede no ser de ninguna obra: papel para la oficina, el
+// mantenimiento de la camioneta, una herramienta del taller. En la base eso es
+// `lead_id` nulo; en el selector hace falta un valor que no sea "" —que ya
+// significa "no elegiste nada"— para poder distinguir las dos cosas.
+export const SIN_PROYECTO = "oficina";
+export const leadDe = v => (v === SIN_PROYECTO || v === "" || v == null ? null : Number(v));
+
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 
 /**
@@ -77,7 +84,8 @@ export async function crearSolicitud(datos, quien) {
   // sin monto no hay forma de saber cuánto más quieren gastar de un capítulo
   // que ya va al 80%.
   const fila = {
-    lead_id: datos.lead_id, obra_id: datos.obra_id || null,
+    lead_id: leadDe(datos.lead_id), obra_id: datos.obra_id || null,
+    destino: datos.destino?.trim() || null,
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
     capitulo: datos.capitulo || null,
@@ -88,7 +96,7 @@ export async function crearSolicitud(datos, quien) {
   let { data, error } = await supabase.from("compras_solicitudes").insert(fila).select().single();
   // Sin la 056 no existen esas tres columnas: la solicitud se crea igual.
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_rubro_id, monto_estimado, ...resto } = fila;
+    const { capitulo, obra_rubro_id, monto_estimado, destino, ...resto } = fila;
     ({ data, error } = await supabase.from("compras_solicitudes").insert(resto).select().single());
   }
   if (error) return { error: falta(error) ? "Falta correr la migración 048." : error.message };
@@ -103,10 +111,11 @@ export async function guardarSolicitud(id, datos) {
     capitulo: datos.capitulo || null,
     obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
     monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
+    destino: datos.destino?.trim() || null,
   };
   let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", id);
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_rubro_id, monto_estimado, ...resto } = campos;
+    const { capitulo, obra_rubro_id, monto_estimado, destino, ...resto } = campos;
     ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", id));
   }
   return error ? error.message : null;
@@ -188,8 +197,9 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
   if (error) return { error: error.message };
   await anotar(solicitud.id, solicitud.estado, estado, quien, comentario);
 
-  // Y la bitácora del proyecto se entera, que es donde se lee la historia.
-  await supabase.from("lead_movimientos").insert({
+  // Y la bitácora del proyecto se entera, que es donde se lee la historia. Un
+  // gasto de oficina no cuelga de ninguna, y su historia es la de abajo.
+  if (solicitud.lead_id) await supabase.from("lead_movimientos").insert({
     lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
     detalle: `${ESTADOS[estado]?.label || estado}: ${solicitud.descripcion}${comentario ? ` — ${comentario}` : ""}`,
     autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
@@ -289,7 +299,7 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
  * proyecto. Se vuelven a elegir, que es un clic y es honesto.
  */
 export async function moverDeProyecto(solicitud, leadId, quien, nombreNuevo) {
-  const campos = { lead_id: Number(leadId), capitulo: null, obra_rubro_id: null, obra_id: null };
+  const campos = { lead_id: leadDe(leadId), capitulo: null, obra_rubro_id: null, obra_id: null };
   let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
   if (error && /column|schema cache/i.test(error.message)) {
     const { capitulo, obra_rubro_id, ...resto } = campos;
@@ -297,16 +307,19 @@ export async function moverDeProyecto(solicitud, leadId, quien, nombreNuevo) {
   }
   if (error) return error.message;
 
-  const detalle = `Pedido movido a ${nombreNuevo || "otro proyecto"}: ${solicitud.descripcion}`;
+  const donde = nombreNuevo || (campos.lead_id ? "otro proyecto" : "gasto de oficina");
+  const detalle = `Pedido movido a ${donde}: ${solicitud.descripcion}`;
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
-    `Movido a ${nombreNuevo || "otro proyecto"} — hay que volver a elegir el capítulo`);
-  // Las dos bitácoras se enteran: de dónde salió y a dónde entró.
-  await supabase.from("lead_movimientos").insert([
-    { lead_id: solicitud.lead_id, tipo: "compra", automatico: true, detalle,
-      autor_id: quien?.id ?? null, autor_nombre: quien?.name || null },
-    { lead_id: Number(leadId), tipo: "compra", automatico: true, detalle: `Pedido recibido de otro proyecto: ${solicitud.descripcion}`,
-      autor_id: quien?.id ?? null, autor_nombre: quien?.name || null },
-  ]).select();
+    `Movido a ${donde} — hay que volver a elegir el capítulo`);
+  // Las dos bitácoras se enteran: de dónde salió y a dónde entró. Un gasto de
+  // oficina no tiene bitácora, así que esa punta simplemente no se escribe.
+  const movimientos = [];
+  if (solicitud.lead_id) movimientos.push({ lead_id: solicitud.lead_id, tipo: "compra", automatico: true, detalle,
+    autor_id: quien?.id ?? null, autor_nombre: quien?.name || null });
+  if (campos.lead_id) movimientos.push({ lead_id: campos.lead_id, tipo: "compra", automatico: true,
+    detalle: `Pedido recibido de otro proyecto: ${solicitud.descripcion}`,
+    autor_id: quien?.id ?? null, autor_nombre: quien?.name || null });
+  if (movimientos.length) await supabase.from("lead_movimientos").insert(movimientos).select();
   return null;
 }
 
@@ -333,7 +346,7 @@ export async function registrarPago(solicitud, { monto, quien, comentario }) {
 
   const cuanto = campos.pagado_monto ? ` · $${Number(campos.pagado_monto).toFixed(2)}` : "";
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, `Pagado${cuanto}${comentario ? ` · ${comentario}` : ""}`);
-  await supabase.from("lead_movimientos").insert({
+  if (solicitud.lead_id) await supabase.from("lead_movimientos").insert({
     lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
     detalle: `Pagado${cuanto}: ${solicitud.descripcion}`,
     autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,

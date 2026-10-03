@@ -17,7 +17,7 @@ import Proformas from "./Proformas";
 // La pantalla arranca por lo que a uno le toca hacer, no por la lista completa:
 // esa es la pregunta con la que se entra acá.
 
-export default function ModuloCompras({ currentUser, puede, users = [], nivelProyecto = () => null, entraATodo = false }) {
+export default function ModuloCompras({ currentUser, puede, users = [], asignados = new Set() }) {
   const [solicitudes, setSolicitudes] = useState([]);
   const [proyectos, setProyectos] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -31,10 +31,15 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelPro
   const [proyectoProformas, setProyectoProformas] = useState("");
 
   const gestionaCompras = puede("compras.gestionar");
-  const apruebo = puede("tareas.asignar") || currentUser?.role === "owner";
-  // Quien compra y quien aprueba miran todas: es su trabajo. El resto ve lo
-  // suyo y lo de sus obras — la regla vive en compras.js.
-  const todasLasObras = gestionaCompras || apruebo || entraATodo;
+  const esDirector = currentUser?.role === "owner";
+  const apruebo = puede("tareas.asignar") || esDirector;
+  // Quien compra, quien aprueba y el Director miran todas: es su trabajo. El
+  // resto ve lo suyo y lo de sus obras — la regla vive en compras.js.
+  //
+  // Lo que NO entra acá es "entra a todos los proyectos": ese permiso abre el
+  // pipeline para mirarlo, y con él prendido un residente volvía a ver —y a
+  // poder pedir contra— las diez obras de la oficina.
+  const todasLasObras = gestionaCompras || apruebo;
 
   const cargar = useCallback(async () => {
     const [{ solicitudes: s, sinTablas: falta }, { data: ls }] = await Promise.all([
@@ -60,9 +65,17 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelPro
   }
 
   const nombreProyecto = id => proyectos.find(p => p.id === id)?.nombre || "—";
+  // Un pedido sin obra es un gasto de oficina, no un pedido roto: la lista lo
+  // dice con el destino que le pusieron.
+  const dondeVa = s => (s.lead_id ? nombreProyecto(s.lead_id) : (s.destino || "Oficina"));
   // Pedir algo es pedirlo para una obra en la que uno está: la lista del
   // selector es la misma que la de lo que ve, no el pipeline entero.
-  const misProyectos = todasLasObras ? proyectos : proyectos.filter(p => !!nivelProyecto(p.id));
+  // Pedir es otra cosa que mirar: el Director y compras arman un pedido para
+  // cualquier obra, y todos los demás —gerentes incluidos— solo para aquellas
+  // en las que alguien los puso.
+  const misProyectos = (esDirector || gestionaCompras)
+    ? proyectos
+    : proyectos.filter(p => asignados.has(p.id));
 
   // A quién le toca cada estado: es lo que decide qué ve uno en "Me toca a mí".
   const meToca = s => {
@@ -77,7 +90,7 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelPro
   // Lo primero que se descarta es lo que esta persona no tiene por qué ver:
   // los filtros de abajo son de lectura, no de permisos.
   const visibles = solicitudes.filter(s => veLaCompra({
-    compra: s, usuarioId: currentUser.id, nivel: nivelProyecto(s.lead_id), todasLasObras,
+    compra: s, usuarioId: currentUser.id, nivel: asignados.has(s.lead_id) ? "editar" : null, todasLasObras,
   }));
 
   const abiertas = visibles.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
@@ -97,12 +110,9 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelPro
           <Button variant={verProformas ? "primary" : "outline"} size="md" onClick={() => setVerProformas(v => !v)}>
             <FileText size={14} /> Proformas
           </Button>
-          {/* Sin proyecto asignado no hay a qué cargarle la compra: el botón
-              lo dice en vez de abrir un formulario con el selector vacío. */}
-          <Button variant="primary" size="md" onClick={() => setNueva(true)} disabled={!misProyectos.length}
-            title={misProyectos.length ? "" : "Todavía no estás asignado a ningún proyecto"}>
-            <Plus size={14} /> Pedir algo
-          </Button>
+          {/* Siempre se puede pedir: el que no tiene obra asignada igual pide
+              para la oficina. */}
+          <Button variant="primary" size="md" onClick={() => setNueva(true)}><Plus size={14} /> Pedir algo</Button>
         </div>
       </div>
 
@@ -159,7 +169,8 @@ export default function ModuloCompras({ currentUser, puede, users = [], nivelPro
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {nombreProyecto(s.lead_id)}
+                  {!s.lead_id && <span style={{ color: colors.muted, fontSize: 10.5 }}>SIN OBRA · </span>}
+                  {dondeVa(s)}
                 </div>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: e.color }}>
                   {e.label}

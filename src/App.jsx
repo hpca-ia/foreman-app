@@ -8,7 +8,7 @@ import { cargarPermisos, cargarPermisosUsuario, crearPuede } from "./lib/permiso
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
-import { nivelDeAcceso, veLaTarea } from "./lib/acceso";
+import { nivelDeAcceso, nivelDeArea, veLaTarea } from "./lib/acceso";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
@@ -406,11 +406,23 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const nivelPresupuesto = leadId => nivelEn(leadId, "presupuesto");
   const nivelLibro = leadId => nivelEn(leadId, "libro");
   const nivelObra = leadId => nivelEn(leadId, "obra");
-  // Pedir materiales es estar en la obra, no ver el control de costos: alcanza
-  // con entrar al proyecto por cualquiera de las dos puertas. Atándolo solo a
-  // "Control de obra", un residente al que se le apagó esa área —para que no
-  // vea los márgenes— se quedaba sin poder pedir un saco de cemento.
-  const nivelCompras = leadId => nivelEn(leadId, "proyecto") || nivelEn(leadId, "obra");
+  // Dónde está esta persona DE VERDAD: los proyectos que alguien le asignó en
+  // Ajustes → Proyectos. No los que puede mirar.
+  //
+  // Es otra pregunta que "¿entra?", y hay módulos que necesitan esta y no
+  // aquella. "Entra a todos los proyectos" y "las tareas de todos" son
+  // permisos de lectura —sirven para mirar el pipeline y coordinar—; tomados
+  // como asignación, cualquiera con uno de los dos prendido podía cargarle una
+  // compra a una obra en la que no pisa. Acá solo cuenta que alguien lo haya
+  // puesto en ese proyecto, por la puerta del proyecto o por la de la obra.
+  const leadsAsignados = new Set(
+    Object.entries(accesosLead)
+      .filter(([, deCadaUno]) => {
+        const mio = deCadaUno?.[usuario.id];
+        return !!(nivelDeArea(mio, "proyecto") || nivelDeArea(mio, "obra"));
+      })
+      .map(([leadId]) => Number(leadId))
+  );
   const mios = proyectosTodos.filter(p => (p.esLead
     ? !!nivelProyecto(p.id)
     : entraATodo || p.gente.includes(usuario.id) || p.creador === usuario.id));
@@ -650,7 +662,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {puede("compras.ver") && vista === "compras" && (
-              <ModuloCompras currentUser={usuario} puede={puede} users={users} nivelProyecto={nivelCompras} entraATodo={entraATodo} />
+              <ModuloCompras currentUser={usuario} puede={puede} users={users} asignados={leadsAsignados} />
             )}
             {puede("libro.ver") && vista === "libro" && (
               <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelLibro} />
