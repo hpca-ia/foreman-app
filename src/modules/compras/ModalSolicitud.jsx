@@ -6,8 +6,9 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
-  adjuntosDe, subirAdjunto, borrarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
-  moverDeProyecto, SIN_PROYECTO, leadDe } from "./compras";
+  adjuntosDe, subirAdjunto, borrarAdjunto, actualizarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
+  moverDeProyecto, facturarCompra, SIN_PROYECTO, leadDe } from "./compras";
+import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
 import { CLASES_PEDIDO, vaABodega } from "./bodega";
 
@@ -95,7 +96,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [comentario, setComentario] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
-  const [compra, setCompra] = useState({ proveedor: solicitud?.proveedor || "", monto: solicitud?.monto || "" });
+  // Lo que Johanna completa al concretar: el documento que llegó y cuánto se
+  // paga ahora. El documento es lo que descuenta el control; el pago es otra
+  // cosa y va a Proveedores.
+  const [compra, setCompra] = useState({
+    proveedor: solicitud?.proveedor || "", monto: solicitud?.monto || "",
+    clase: "factura", numero: "", ruc: "", fecha: new Date().toISOString().slice(0, 10),
+    pagaAhora: "", forma: "transferencia",
+  });
   const [pago, setPago] = useState({ monto: "" });
 
   const gestionaCompras = puede("compras.gestionar");
@@ -130,7 +138,6 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // Los papeles de la solicitud: proformas para comparar, anexos para explicar.
   const [proformas, setProformas] = useState([]);
   const [enlaces, setEnlaces] = useState({});
-  const [nuevaProforma, setNuevaProforma] = useState({ proveedor: "", monto: "" });
   const [subiendo, setSubiendo] = useState(false);
   const [avisoPapel, setAvisoPapel] = useState("");
   const [verAnexos, setVerAnexos] = useState(!!solicitud);
@@ -264,11 +271,27 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
 
   const marcarComprada = () => hacer(async () => {
     if (!compra.proveedor.trim()) return { error: "¿A quién se le compró?" };
-    return moverA(viva, "comprada", {
+    const total = Number(compra.monto) || 0;
+    if (!(total > 0)) return { error: "¿Por cuánto es el documento?" };
+
+    const r = await moverA(viva, "comprada", {
       quien: currentUser, comentario: comentario || null, paraQuien: viva.solicitante_id,
       titulo: `Recibir: ${viva.descripcion}`,
-      extra: { proveedor: compra.proveedor.trim(), monto: Number(compra.monto) || null },
+      extra: { proveedor: compra.proveedor.trim(), monto: total },
     });
+    if (r?.error) return r;
+
+    // Acá la plata deja de estar hablada: el documento entra al control y
+    // descuenta el rubro. Antes había que acordarse de ir a cargarlo a mano.
+    const con = { ...viva, proveedor: compra.proveedor.trim() };
+    const f = await facturarCompra(con, { ...compra, total }, currentUser);
+    if (f.error) return { error: "La compra quedó marcada, pero el documento no entró al control: " + f.error };
+
+    const paga = Number(compra.pagaAhora) || 0;
+    if (paga > 0) {
+      await registrarPagoDeFactura(f.factura, { monto: paga, fecha: compra.fecha, forma: compra.forma }, currentUser);
+    }
+    return {};
   });
 
   const marcarRecibida = () => hacer(() => moverA(viva, "recibida", {
@@ -456,12 +479,25 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 background: elegida ? colors.brandSoft : colors.bg, borderRadius: 8,
                 border: `1px solid ${elegida ? colors.brand : "transparent"}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, overflowWrap: "anywhere" }}>
-                    {a.proveedor || a.nombre}
-                    {elegida && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: colors.brand }}>ELEGIDA</span>}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: colors.muted }}>
-                    {a.monto ? `$${Number(a.monto).toFixed(2)} · ` : ""}{a.nota || a.nombre}
+                  {/* Se etiqueta acá, con la cotización ya subida y a la vista:
+                      es cuando uno sabe de quién es y cuánto cobra. */}
+                  {puedeEditar ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 92px", gap: 5 }}>
+                      <input defaultValue={a.proveedor || ""} placeholder="¿De qué proveedor?"
+                        onBlur={async ev => { await actualizarAdjunto(a.id, { proveedor: ev.target.value, monto: a.monto }); cargarPapeles(); }}
+                        style={{ ...mini, padding: "5px 7px", fontSize: 12 }} />
+                      <input defaultValue={a.monto ?? ""} type="number" step="0.01" placeholder="Monto"
+                        onBlur={async ev => { await actualizarAdjunto(a.id, { proveedor: a.proveedor, monto: ev.target.value }); cargarPapeles(); }}
+                        style={{ ...mini, padding: "5px 7px", fontSize: 12 }} />
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, overflowWrap: "anywhere" }}>
+                      {a.proveedor || a.nombre}{a.monto ? ` · $${Number(a.monto).toFixed(2)}` : ""}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2, overflowWrap: "anywhere" }}>
+                    {elegida && <span style={{ fontWeight: 700, color: colors.brand }}>ELEGIDA · </span>}
+                    {a.nombre}
                   </div>
                 </div>
                 {enlaces[a.id] && (
@@ -485,18 +521,17 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             );
           })}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 6, marginTop: proformas.length ? 6 : 0 }}>
-            <input value={nuevaProforma.proveedor} onChange={ev => setNuevaProforma(p => ({ ...p, proveedor: ev.target.value }))}
-              placeholder="¿De qué proveedor?" style={mini} />
-            <input type="number" step="0.01" value={nuevaProforma.monto} onChange={ev => setNuevaProforma(p => ({ ...p, monto: ev.target.value }))}
-              placeholder="Monto" style={mini} />
-          </div>
-          <button onClick={() => proformaRef.current?.click()} disabled={subiendo || !nuevaProforma.proveedor.trim()}
-            style={{ width: "100%", marginTop: 5, background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8,
-              padding: "9px", color: colors.inkSoft, fontSize: 12, cursor: nuevaProforma.proveedor.trim() ? "pointer" : "not-allowed",
-              fontFamily: colors.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              opacity: nuevaProforma.proveedor.trim() ? 1 : 0.55 }}>
-            <Upload size={13} /> {subiendo ? "Subiendo…" : "Subir proforma de ese proveedor"}
+          {/* Primero el archivo, el nombre después. Antes había que escribir el
+              proveedor ANTES de poder subir, y como al terminar los campos se
+              vaciaban el botón volvía a quedar gris: se leía como que no dejaba
+              subir una segunda cotización. Ahora se suben las tres seguidas y se
+              les pone nombre y precio en su fila. */}
+          <button onClick={() => proformaRef.current?.click()} disabled={subiendo}
+            style={{ width: "100%", marginTop: proformas.length ? 6 : 0, background: colors.bg,
+              border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "9px", color: colors.inkSoft,
+              fontSize: 12, cursor: "pointer", fontFamily: colors.font,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <Upload size={13} /> {subiendo ? "Subiendo…" : proformas.length ? "Subir otra cotización" : "Subir una cotización"}
           </button>
           <input ref={proformaRef} type="file" style={{ display: "none" }}
             onChange={async ev => {
@@ -505,10 +540,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               setSubiendo(true);
               const s = await asegurarSolicitud();
               if (!s) { setSubiendo(false); return; }
-              const r = await subirAdjunto(s, archivo, { tipo: "cotizacion", ...nuevaProforma, quien: currentUser });
+              // Sin proveedor escrito queda el nombre del archivo, que casi
+              // siempre lo dice, y se corrige en la fila.
+              const r = await subirAdjunto(s, archivo, { tipo: "cotizacion", quien: currentUser,
+                proveedor: archivo.name.replace(/\.[^.]+$/, "").slice(0, 60) });
               setSubiendo(false);
               if (r.error) { setAvisoPapel(r.error); return; }
-              setNuevaProforma({ proveedor: "", monto: "" });
               await cargarPapeles();
             }} />
           {avisoPapel && <div style={{ fontSize: 11, color: colors.danger, marginTop: 4 }}>{avisoPapel}</div>}
@@ -533,11 +570,39 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8 }}>
               <input value={compra.proveedor} onChange={ev => setCompra(c => ({ ...c, proveedor: ev.target.value }))}
                 placeholder="¿A quién se le compró?" style={mini} />
-              <input type="number" value={compra.monto} onChange={ev => setCompra(c => ({ ...c, monto: ev.target.value }))}
-                placeholder="Monto" style={mini} />
+              <input value={compra.ruc} onChange={ev => setCompra(c => ({ ...c, ruc: ev.target.value }))}
+                placeholder="RUC" style={mini} />
             </div>
-            <div style={{ fontSize: 10.5, color: colors.muted }}>
-              La factura se carga en Control de Obra y se asigna a su rubro: ahí es donde el gasto cuenta.
+            <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 130px 120px", gap: 8 }}>
+              <select value={compra.clase} onChange={ev => setCompra(c => ({ ...c, clase: ev.target.value }))} style={mini}>
+                {Object.entries(CLASES_DOC).map(([id, x]) => <option key={id} value={id}>{x.label}</option>)}
+              </select>
+              <input value={compra.numero} onChange={ev => setCompra(c => ({ ...c, numero: ev.target.value }))}
+                placeholder="N° del documento" style={mini} />
+              <input type="date" value={compra.fecha} onChange={ev => setCompra(c => ({ ...c, fecha: ev.target.value }))} style={mini} />
+              <input type="number" step="0.01" value={compra.monto} onChange={ev => setCompra(c => ({ ...c, monto: ev.target.value }))}
+                placeholder="Total" style={mini} />
+            </div>
+
+            {/* El total descuenta el rubro; lo que se paga ahora es otra cosa.
+                Una factura con 40% de anticipo ya se debe entera —el material
+                está en obra y el rubro se consumió—; lo que falta pagar es un
+                problema de caja y vive en Proveedores. */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: 8, alignItems: "end" }}>
+              <div>
+                <label style={lbl}>CUÁNTO SE PAGA AHORA</label>
+                <input type="number" step="0.01" value={compra.pagaAhora}
+                  onChange={ev => setCompra(c => ({ ...c, pagaAhora: ev.target.value }))}
+                  placeholder={compra.monto ? `Anticipo, o ${Number(compra.monto).toFixed(2)} si va completo` : "Anticipo o total"} style={mini} />
+              </div>
+              <select value={compra.forma} onChange={ev => setCompra(c => ({ ...c, forma: ev.target.value }))} style={mini}>
+                {FORMAS_PAGO.map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
+              Al guardar, el <strong>total</strong> entra al control de obra contra
+              {viva.obra_rubro_id ? " su rubro" : viva.obra_actividad_id ? " su agrupación" : " la obra (falta elegirle la agrupación)"} y
+              deja de contar como comprometido. Lo que quede sin pagar aparece en Proveedores.
             </div>
           </div>
         )}

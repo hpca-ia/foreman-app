@@ -256,6 +256,15 @@ export async function subirAdjunto(solicitud, archivo, { tipo = "respaldo", prov
   return e2 ? { error: e2.message } : { adjunto: data };
 }
 
+/** Ponerle nombre y precio a una proforma después de subirla. */
+export async function actualizarAdjunto(id, campos) {
+  const { error } = await supabase.from("compras_adjuntos").update({
+    proveedor: campos.proveedor?.trim() || null,
+    monto: campos.monto === "" || campos.monto == null ? null : Number(campos.monto),
+  }).eq("id", id);
+  return error ? error.message : null;
+}
+
 export async function borrarAdjunto(adjunto) {
   await supabase.storage.from("task-files").remove([adjunto.storage_path]);
   const { error } = await supabase.from("compras_adjuntos").delete().eq("id", adjunto.id);
@@ -330,6 +339,79 @@ export async function moverDeProyecto(solicitud, leadId, quien, nombreNuevo) {
     autor_id: quien?.id ?? null, autor_nombre: quien?.name || null });
   if (movimientos.length) await supabase.from("lead_movimientos").insert(movimientos).select();
   return null;
+}
+
+/**
+ * La compra entra al control de obra.
+ *
+ * Este es el momento en que la plata deja de estar hablada. Hasta acá la
+ * solicitud estaba COMPROMETIDA contra su agrupación: se dijo que se iban a
+ * gastar mil dólares. Con el documento cargado pasa a ser INVERTIDO y descuenta
+ * el rubro de verdad.
+ *
+ * Entra el total del documento, no lo que se pagó. Una factura con un anticipo
+ * del 40% ya se debe entera —el material ya está en obra y el rubro ya se
+ * consumió—; lo que falta pagar es un problema de caja, no de avance, y vive en
+ * Proveedores. Mezclar las dos cosas hace que una obra con buen crédito parezca
+ * ir mejor que una que paga al contado.
+ *
+ * Faltaba justo este paso: Johanna marcaba "ya la compré" y alguien tenía que
+ * acordarse de ir a cargar la factura a mano. Si no lo hacía, la compra quedaba
+ * comprometida para siempre y el control mentía en los dos sentidos.
+ */
+export async function facturarCompra(solicitud, datos, quien) {
+  const total = Number(datos.total) || 0;
+  if (!(total > 0)) return { error: "¿Por cuánto es el documento?" };
+  if (!solicitud.lead_id) return { error: "Un gasto de oficina no entra al control de una obra." };
+
+  const { data: obras } = await supabase.from("obras").select("id").eq("lead_id", solicitud.lead_id).limit(1);
+  const obra = obras?.[0];
+  if (!obra) return { error: "Este proyecto todavía no tiene una obra activa en Control de Obra." };
+
+  // A la planilla abierta; si no hay ninguna, queda sin corte y se asigna
+  // después. Una factura sin planilla ya salió de la caja igual.
+  const { data: planillas } = await supabase.from("planillas")
+    .select("id,numero,estado").eq("obra_id", obra.id).order("numero");
+  const abierta = (planillas || []).find(p => p.estado === "abierta") || (planillas || []).slice(-1)[0] || null;
+
+  const fila = {
+    obra_id: obra.id, planilla_id: abierta?.id || null,
+    fecha: datos.fecha || new Date().toISOString().slice(0, 10),
+    clase: datos.clase || "factura",
+    tipo_documento: (datos.clase || "factura").toUpperCase(),
+    numero_factura: datos.numero?.trim() || null,
+    razon_social: datos.proveedor?.trim() || solicitud.proveedor || null,
+    ruc: datos.ruc?.trim() || null,
+    detalle: solicitud.descripcion,
+    justificacion: solicitud.justificacion || null,
+    total,
+    origen: "manual",
+    subido_por: quien?.id ?? null, subido_por_nombre: quien?.name || null,
+  };
+  let { data: factura, error } = await supabase.from("obra_facturas").insert(fila).select().single();
+  if (error && /column|schema cache/i.test(error.message)) {
+    const { clase, ...resto } = fila;
+    ({ data: factura, error } = await supabase.from("obra_facturas").insert(resto).select().single());
+  }
+  if (error) return { error: "No se pudo cargar el documento: " + error.message };
+
+  // Contra qué del presupuesto. Lo eligió quien pidió, hace semanas: volver a
+  // preguntarlo acá es pedirle a Johanna que adivine de qué era la compra.
+  const destino = solicitud.obra_rubro_id
+    ? { obra_rubro_id: solicitud.obra_rubro_id }
+    : solicitud.obra_actividad_id ? { obra_actividad_id: solicitud.obra_actividad_id } : null;
+  if (destino) {
+    await supabase.from("obra_asignaciones").insert({ factura_id: factura.id, ...destino, monto: total });
+  }
+
+  // Enganchada al pedido: con esto deja de contarse como comprometido —si no,
+  // la misma plata pesaría dos veces sobre el mismo rubro.
+  await supabase.from("compras_solicitudes").update({ factura_id: factura.id, obra_id: obra.id }).eq("id", solicitud.id);
+
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
+    `${(datos.clase || "factura") === "proforma" ? "Proforma" : "Factura"}${fila.numero_factura ? ` ${fila.numero_factura}` : ""} por $${total.toFixed(2)} cargada al control de obra${destino ? "" : " — falta asignarle el rubro"}`);
+
+  return { factura, sinDestino: !destino, sinPlanilla: !abierta };
 }
 
 /**
