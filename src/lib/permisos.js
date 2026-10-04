@@ -16,6 +16,12 @@ export const GRUPOS_PERMISOS = [
       { id: "tareas.ver", label: "Tablero", nota: "Sus tareas, reuniones y gestiones. Apagado, la persona entra directo al primer módulo que sí tenga: es lo que hace falta para alguien que solo rinde caja chica" },
       { id: "presupuestos.ver", label: "Presupuestos", nota: "Solo los de sus proyectos, con el nivel que le hayas dado en cada uno" },
       { id: "controlObra.ver", label: "Control de Obra", nota: "Solo las obras de sus proyectos" },
+      // Colgados de Control de Obra y no en un grupo aparte: es donde uno los
+      // va a buscar. Entrar a la obra no es lo mismo que ver con qué plata se
+      // hace — un residente controla el avance de su obra sin tener por qué
+      // saber cuánto anticipó el cliente ni cuánto se le debe a cada proveedor.
+      { id: "fondos.ver", sangria: true, label: "…y la caja del proyecto", nota: "La pestaña con los anticipos del cliente, cuánto queda y en qué planilla la caja se quedó corta" },
+      { id: "proveedores.ver", sangria: true, label: "…y a quién le debemos", nota: "La pestaña con lo pagado y lo pendiente de cada proveedor" },
       { id: "cajaChica.ver", label: "Caja Chica" },
       { id: "compras.ver", label: "Compras", nota: "Pedir lo que hace falta en obra y seguir en qué va" },
       { id: "libro.ver", label: "Libro de Obra", nota: "El registro diario de la obra: quién estuvo, qué se hizo, qué llegó. Solo el de sus proyectos" },
@@ -32,12 +38,6 @@ export const GRUPOS_PERMISOS = [
     // los dos primeros ya los contesta Ajustes → Proyectos.
     permisos: [
       { id: "tareas.todas", label: "Las tareas de todos", nota: "Si no, solo las suyas. También le abre todos los proyectos" },
-      // Las dos pestañas de plata dentro de Control de Obra. Entrar a la obra
-      // no es lo mismo que ver con qué plata se hace: un residente controla el
-      // avance de su obra sin tener por qué saber cuánto anticipó el cliente
-      // ni cuánto se le debe a cada proveedor.
-      { id: "fondos.ver", label: "La caja del proyecto", nota: "Dentro de Control de Obra: cuánto anticipó el cliente, cuánto queda y en qué planilla se quedó corta. Apagado, esa pestaña no existe para esa persona" },
-      { id: "proveedores.ver", label: "A quién le debemos", nota: "Dentro de Control de Obra: lo pagado y lo pendiente por proveedor. Apagado, no ve la pestaña" },
     ],
   },
   {

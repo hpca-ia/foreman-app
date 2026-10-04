@@ -135,7 +135,11 @@ export default function PanelPermisos({ permisos, setPermisos, usuarios = [] }) 
             const ocupado = guardando === p.id;
             return (
               <label key={p.id}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer" }}>
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer",
+                  // Los que cuelgan de otro van corridos y con una guía: se lee
+                  // que son parte de ese módulo y no permisos sueltos.
+                  marginLeft: p.sangria ? 14 : 0, paddingLeft: p.sangria ? 10 : 0,
+                  borderLeft: p.sangria ? `2px solid ${colors.neutralSoft}` : "none" }}>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: "block", fontSize: 12, color: colors.ink }}>{p.label}</span>
                   {p.nota && <span style={{ display: "block", fontSize: 10, color: colors.muted, marginTop: 1, lineHeight: 1.4 }}>{p.nota}</span>}

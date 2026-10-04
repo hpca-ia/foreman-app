@@ -59,7 +59,9 @@ export default function PermisosDeUsuario({ usuario, permisos, valores = {}, onC
             const valor = valores[p.id];
             const heredado = delRol(p.id);
             return (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: `1px solid ${colors.neutralSoft}`,
+                marginLeft: p.sangria ? 14 : 0, paddingLeft: p.sangria ? 10 : 0,
+                borderLeft: p.sangria ? `2px solid ${colors.neutralSoft}` : "none" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: colors.ink }}>{p.label}</div>
                   {p.nota && <div style={{ fontSize: 10, color: colors.muted }}>{p.nota}</div>}
