@@ -118,6 +118,12 @@ export default function App() {
   const [accesosLead, setAccesosLead] = useState({});
   const [proyectosPipeline, setProyectosPipeline] = useState([]);
   const [comentarios, setComentarios] = useState({});   // task_id -> cuántos
+  // Qué compra abrir al tocar su aviso en el tablero. Va acá arriba y no junto
+  // a `abrirTarea`, que es donde se usa: abajo quedaría DESPUÉS del `return` de
+  // la pantalla de login, y un hook después de un return temprano se saltea
+  // cuando esa rama corre. React cuenta los hooks por orden y deja la app en
+  // blanco. Ya pasó una vez; por eso este comentario.
+  const [compraAbierta, setCompraAbierta] = useState(null);
   const tienePipeline = Object.keys(leadsPorId).length > 0;
   useEffect(() => {
     if (!usuario) return;
@@ -459,7 +465,6 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   //
   // `compra_id` lo pone la 069; sin ella se encuentra por la tarea, que la
   // solicitud guarda desde siempre en `tarea_id`.
-  const [compraAbierta, setCompraAbierta] = useState(null);
   const abrirTarea = t => {
     if (claseDe(t) === "compra") {
       setCompraAbierta({ compraId: t.compra_id || null, tareaId: t.id });
