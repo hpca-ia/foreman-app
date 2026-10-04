@@ -3,6 +3,7 @@ import { colors } from "../theme/colors";
 import { PRIORIDAD, ESTADO } from "../theme/constants";
 import FechaBadge from "./FechaBadge";
 import MarcaPrivada from "./ui/MarcaPrivada";
+import { estadoDeCompra } from "../lib/estadoDeCompra";
 
 // La vista de lista en el teléfono. Las tarjetas sirven para trabajar una
 // tarea —cambiar estado, subir un archivo—; esto sirve para ver veinte de un
@@ -45,7 +46,7 @@ export default function TareasListaMovil({ tasks, users, projects, leads = {}, c
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}>{t.privada && <MarcaPrivada />}{t.title}</div>
               <div style={{ fontSize: 11, color: colors.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {[proyecto, persona, ESTADO[t.status]?.label, comentarios[t.id] ? `${comentarios[t.id]} comentario${comentarios[t.id] === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}
+                {[proyecto, persona, (estadoDeCompra(t) || ESTADO[t.status])?.label, comentarios[t.id] ? `${comentarios[t.id]} comentario${comentarios[t.id] === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}
               </div>
               {t.notes && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.notes}</div>}
             </div>

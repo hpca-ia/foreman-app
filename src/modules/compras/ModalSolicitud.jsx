@@ -10,6 +10,7 @@ import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosD
   moverDeProyecto, facturarCompra, SIN_PROYECTO, leadDe } from "./compras";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
+import VisorAdjuntos from "./VisorAdjuntos";
 import { CLASES_PEDIDO, vaABodega } from "./bodega";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
@@ -471,6 +472,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             Se adjunta desde el primer momento, antes de mandarla a aprobar:
             el que pide suele tener la cotización en la mano justo entonces. */}
         <div>
+          {/* Los papeles primero y a la vista: quien abre este pedido viene a
+              comparar cotizaciones, no a buscarlas. */}
+          {editando && (
+            <div style={{ marginBottom: 12 }}>
+              <VisorAdjuntos solicitudId={viva.id} proformas={proformas} />
+            </div>
+          )}
+
           <label style={lbl}>PROFORMAS{proformas.length ? ` · ${proformas.length}` : ""}</label>
           {proformas.map(a => {
             const elegida = viva?.proforma_id === a.id;

@@ -9,6 +9,7 @@ import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
 import { nivelDeAcceso, nivelDeArea, veLaTarea } from "./lib/acceso";
+import { esperaMiVisto } from "./lib/estadoDeCompra";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
@@ -452,9 +453,13 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Lo que no tiene dueño no se guarda en un cajón aparte: va en su lista, con
   // todo lo demás y marcado en rojo. En un cuadro al fondo titulado "Sin
   // responsable" nadie entendía de dónde salía ni qué había que hacer con eso.
+  // Una compra esperando MI visto es una alerta aunque falten diez días para
+  // la fecha: lo que la vuelve urgente no es el calendario sino que hay alguien
+  // parado esperando. Son las únicas que entran por algo que no es la fecha.
+  const apremia = t => daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2 || esperaMiVisto(t, usuario.id);
   const misAlertasTareas = veTodo
-    ? tareas.filter(t => t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2))
-    : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && (daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2));
+    ? tareas.filter(t => t.status !== "listo" && apremia(t))
+    : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && apremia(t));
   const alertCount = misAlertasTareas.length;
   // Quien no es admin ve lo suyo en "Mis tareas". Al elegir uno de sus
   // proyectos ve también lo de sus compañeros ahí —para coordinarse—, salvo lo
@@ -530,6 +535,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     { clase: "reunion", titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
     { clase: "tarea", titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => claseDe(t) === "tarea") },
     { clase: "gestion", titulo: "Gestiones de proyectos", etiqueta: "GESTIÓN", tareas: ordenadas.filter(esGestion) },
+    // Las compras van últimas y juntas: no son trabajo de uno, son un paso que
+    // uno destraba. Antes caían entre las gestiones, donde se perdían.
+    { clase: "compra", titulo: "Compras", etiqueta: "COMPRA", tareas: ordenadas.filter(t => claseDe(t) === "compra") },
   ].filter(b => b.tareas.length).map(b => ({ ...b, sueltas: b.tareas.filter(sinNadie).length }));
   const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
 

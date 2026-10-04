@@ -13,11 +13,18 @@ export const CLASES = {
   // son "¿le mandamos la propuesta?" / "sí, el martes, a Marcelo": eso es un
   // hecho con fecha, no una tarea pendiente ni una reunión.
   envio:   { label: "Envío",   plural: "Envíos",     color: "#1D4ED8", soft: "#E8EEFC" },
+  // Los avisos del circuito de compras. Eran "Gestión" y caían entre el
+  // trámite del municipio y la llamada al cliente: lo que se hace con un
+  // "aprobar compra" no se parece en nada a lo que se hace con una gestión.
+  compra:  { label: "Compra",  plural: "Compras",    color: "#A16207", soft: "#FBF3E0" },
 };
 
 /** Qué es una tarea guardada: su tipo manda, y las viejas se leen por su nota. */
 export const claseDe = t => (t?.type === "Reunión" ? "reunion"
   : t?.type === "Envío" ? "envio"
+  // Las de antes de la 069 se reconocen por su nota, que es como las escribe
+  // el módulo desde el primer día: así se reordenan solas sin tocar la base.
+  : t?.type === "Compra" || t?.compra_id || /^Gestión de compras/.test(t?.notes || "") ? "compra"
   : t?.type === "Gestión" ? "gestion"
   : /^Tarea de /.test(t?.notes || "") ? "tarea"
   : /^(Gestión|Actividad) de /.test(t?.notes || "") ? "gestion"

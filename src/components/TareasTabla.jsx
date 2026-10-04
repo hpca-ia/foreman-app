@@ -6,6 +6,7 @@ import CompletarTarea from "./CompletarTarea";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
 import MarcaPrivada from "./ui/MarcaPrivada";
+import { estadoDeCompra } from "../lib/estadoDeCompra";
 
 function fechaLabel(t) {
   if (t.status === "listo") return "—";
@@ -57,7 +58,9 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
         const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline" } : gP(t.project_id);
         const asig = t.assignee_id ? gU(t.assignee_id) : null;
         const pC = PRIORIDAD[t.priority] || PRIORIDAD.media;
-        const eC = ESTADO[t.status] || ESTADO.pendiente;
+        // En un aviso de compra manda el paso de la compra: "esperando visto"
+        // dice qué hacer, "en proceso" no dice nada.
+        const eC = estadoDeCompra(t) || ESTADO[t.status] || ESTADO.pendiente;
         return (
           <div key={t.id} className="tabla-row" onClick={() => onEditar(t)}
             style={{ ...row, borderLeft: `3px solid ${CLASES[clase || claseDe(t)].color}` }}>

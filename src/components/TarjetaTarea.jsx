@@ -9,6 +9,7 @@ import Avatar from "./ui/Avatar";
 import FechaBadge from "./FechaBadge";
 import InlineFiles from "./InlineFiles";
 import WhatsAppDraftModal from "./WhatsAppDraftModal";
+import { estadoDeCompra } from "../lib/estadoDeCompra";
 
 export default function TarjetaTarea({ puede, task, currentUser, users, projects, leads = {}, comentarios = 0, acompanantes = [], espera = [], onCambiarEstado, onEditar, onEliminar }) {
   const gP = id => projects.find(p => p.id === id);
@@ -19,7 +20,7 @@ export default function TarjetaTarea({ puede, task, currentUser, users, projects
   const asig = task.assignee_id ? gU(task.assignee_id) : null;
   const crea = gU(task.created_by);
   const pC = PRIORIDAD[task.priority] || PRIORIDAD.media;
-  const eC = ESTADO[task.status] || ESTADO.pendiente;
+  const eC = estadoDeCompra(task) || ESTADO[task.status] || ESTADO.pendiente;
   // Cambiar estado, editar y borrar la tarea de otro es de admins, no de quien
   // tenga permiso de asignar: un gerente ve la tarea de su par, no la toca.
   const admin = esAdmin(currentUser.role);

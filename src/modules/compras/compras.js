@@ -184,15 +184,25 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
 
   let tarea = null;
   if (paraQuien) {
-    const { data } = await supabase.from("tasks").insert({
+    const fila = {
       title: titulo, lead_id: solicitud.lead_id, assignee_id: paraQuien,
       due_date: solicitud.necesita_para || null,
       priority: solicitud.urgente ? "urgente" : "media",
-      status: "en-progreso", type: "Gestión",
+      status: "en-progreso", type: "Compra",
+      // El paso va escrito en la tarea: el tablero muestra "esperando visto" en
+      // vez de "en proceso", que es cierto y no sirve para nada.
+      compra_id: solicitud.id, compra_estado: estado,
       notes: `Gestión de compras · ${solicitud.descripcion}`,
       created_by: quien?.id ?? null,
       ...(estado === "pendiente_aprobacion" ? { es_aprobacion: true, aprobacion_estado: "pendiente" } : {}),
-    }).select().single();
+    };
+    let { data } = await supabase.from("tasks").insert(fila).select().single();
+    // Sin la 069 no existen esas tres columnas: el aviso sale igual, con el
+    // aspecto de antes. Que falte una migración no puede frenar una compra.
+    if (!data) {
+      const { compra_id, compra_estado, type, ...resto } = fila;
+      ({ data } = await supabase.from("tasks").insert({ ...resto, type: "Gestión" }).select().single());
+    }
     tarea = data;
   }
   campos.tarea_id = tarea?.id ?? null;
