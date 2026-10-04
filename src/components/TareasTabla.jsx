@@ -1,6 +1,6 @@
 import { daysUntil } from "../lib/dates";
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, RefreshCw } from "lucide-react";
 import { PRIORIDAD, ESTADO, CLASES, claseDe } from "../theme/constants";
 import CompletarTarea from "./CompletarTarea";
 import { colors } from "../theme/colors";
@@ -66,7 +66,17 @@ export default function TareasTabla({ tasks, users, projects, leads = {}, grupos
             style={{ ...row, borderLeft: `3px solid ${CLASES[clase || claseDe(t)].color}` }}>
             {/* El cuadro para marcarla. El filo de la izquierda dice qué es
                 —gestión, tarea o reunión—, con el mismo color del proyecto. */}
-            {onCambiarEstado ? (
+            {/* Un aviso de compra no se marca a mano: se cierra solo cuando la
+                compra avanza —se aprueba, se compra, se recibe— y el circuito
+                cierra el paso anterior. Un tilde manual acá diría "hecho" sin
+                que nada haya pasado, y el pedido quedaría trabado con su aviso
+                apagado: nadie lo volvería a ver. */}
+            {claseDe(t) === "compra" ? (
+              <span title="Se cierra solo cuando la compra avanza"
+                style={{ width: 17, height: 17, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <RefreshCw size={11} color={t.status === "listo" ? colors.success : colors.muted} />
+              </span>
+            ) : onCambiarEstado ? (
               <button onClick={e => { e.stopPropagation(); if (t.status === "listo") onCambiarEstado(t.id, "en-progreso"); else setCerrando(t); }}
                 title={t.status === "listo" ? "Marcar como pendiente" : "Marcar como hecha"}
                 style={{ width: 17, height: 17, borderRadius: 4, padding: 0, cursor: "pointer", flexShrink: 0,

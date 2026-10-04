@@ -12,6 +12,7 @@ import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 import BuscadorDeGastos from "../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../lib/filtrarGastos";
+import CampoProveedor from "../components/CampoProveedor";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -589,7 +590,8 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
               <input value={gastoForm.descripcion} onChange={e=>setGastoForm(p=>({...p,descripcion:e.target.value}))} placeholder="¿Qué se compró?" style={iS}/></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Proveedor</label>
-                <input value={gastoForm.proveedor} onChange={e=>setGastoForm(p=>({...p,proveedor:e.target.value}))} placeholder="Proveedor" style={iS}/></div>
+                <CampoProveedor valor={gastoForm.proveedor} onChange={v=>setGastoForm(p=>({...p,proveedor:v}))}
+                  ruc={gastoForm.ruc} onRuc={v=>setGastoForm(p=>({...p,ruc:v}))} placeholder="Proveedor" estilo={iS}/></div>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Monto *</label>
                 <input type="number" value={gastoForm.monto} onChange={e=>setGastoForm(p=>({...p,monto:e.target.value}))} placeholder="$0.00" style={iS}/></div>
             </div>

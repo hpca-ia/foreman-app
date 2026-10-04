@@ -12,6 +12,8 @@ import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from
 import PanelBodega from "./PanelBodega";
 import VisorAdjuntos from "./VisorAdjuntos";
 import { CLASES_PEDIDO, vaABodega } from "./bodega";
+import CampoProveedor from "../../components/CampoProveedor";
+import { leerProforma, proveedorCanonico } from "./leerProforma";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -649,7 +651,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "9px", color: colors.inkSoft,
               fontSize: 12, cursor: "pointer", fontFamily: colors.font,
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            <Upload size={13} /> {subiendo ? "Subiendo…" : proformas.length ? "Subir otra cotización" : "Subir una cotización"}
+            <Upload size={13} /> {subiendo ? "NOVA la está leyendo…" : proformas.length ? "Subir otra cotización" : "Subir una cotización"}
           </button>)}
           <input ref={proformaRef} type="file" style={{ display: "none" }}
             onChange={async ev => {
@@ -658,12 +660,22 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               setSubiendo(true);
               const s = await asegurarSolicitud();
               if (!s) { setSubiendo(false); return; }
-              // Sin proveedor escrito queda el nombre del archivo, que casi
-              // siempre lo dice, y se corrige en la fila.
-              const r = await subirAdjunto(s, archivo, { tipo: "cotizacion", quien: currentUser,
-                proveedor: archivo.name.replace(/\.[^.]+$/, "").slice(0, 60) });
+              // NOVA lee el membrete: el proveedor, el RUC y el total salen
+              // del papel y no de lo que alguien teclee en la obra, que es de
+              // donde salen "Kiwy", "FERRETERIA KIWY" y "kywi" como tres
+              // proveedores distintos. Si no puede leerla, se sube igual con
+              // el nombre del archivo y se corrige en la fila.
+              const leido = await leerProforma(archivo).catch(() => ({}));
+              const canon = leido.proveedor ? await proveedorCanonico(leido) : {};
+              const r = await subirAdjunto(s, archivo, {
+                tipo: "cotizacion", quien: currentUser,
+                proveedor: canon.proveedor || archivo.name.replace(/\.[^.]+$/, "").slice(0, 60),
+                monto: leido.monto || null,
+                nota: leido.detalle || null,
+              });
               setSubiendo(false);
               if (r.error) { setAvisoPapel(r.error); return; }
+              if (leido.error) setAvisoPapel("Se subió, pero NOVA no pudo leerla: completá proveedor y monto.");
               await cargarPapeles();
             }} />
           {avisoPapel && <div style={{ fontSize: 11, color: colors.danger, marginTop: 4 }}>{avisoPapel}</div>}
@@ -686,8 +698,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, display: "grid", gap: 8 }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.ink }}>La compra</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8 }}>
-              <input value={compra.proveedor} onChange={ev => setCompra(c => ({ ...c, proveedor: ev.target.value }))}
-                placeholder="¿A quién se le compró?" style={mini} />
+              <CampoProveedor valor={compra.proveedor} onChange={v => setCompra(c => ({ ...c, proveedor: v }))}
+                ruc={compra.ruc} onRuc={v => setCompra(c => ({ ...c, ruc: v }))}
+                placeholder="¿A quién se le compró?" estilo={mini} />
               <input value={compra.ruc} onChange={ev => setCompra(c => ({ ...c, ruc: ev.target.value }))}
                 placeholder="RUC" style={mini} />
             </div>

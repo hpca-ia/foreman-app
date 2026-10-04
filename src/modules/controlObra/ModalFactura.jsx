@@ -11,6 +11,7 @@ import { CLASES_DOC } from "./pagos";
 import { buscarDuplicados, hashArchivo } from "./duplicados";
 import { comprimirImagen } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
+import CampoProveedor from "../../components/CampoProveedor";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -265,7 +266,9 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         <div><label style={lbl}>N° FACTURA</label><input value={form.numero_factura || ""} onChange={e => set("numero_factura", e.target.value)} onBlur={() => revisarDuplicados()} style={mini} /></div>
         <div><label style={lbl}>N° CHEQUE</label><input value={form.numero_cheque || ""} onChange={e => set("numero_cheque", e.target.value)} style={mini} /></div>
         <div><label style={lbl}>RUC</label><input value={form.ruc || ""} onChange={e => set("ruc", e.target.value)} style={mini} /></div>
-        <div style={{ gridColumn: "span 2" }}><label style={lbl}>PROVEEDOR</label><input value={form.razon_social || ""} onChange={e => set("razon_social", e.target.value)} onBlur={() => revisarDuplicados()} style={mini} /></div>
+        <div style={{ gridColumn: "span 2" }}><label style={lbl}>PROVEEDOR</label>
+          <CampoProveedor valor={form.razon_social || ""} onChange={v => set("razon_social", v)}
+            ruc={form.ruc} onRuc={v => set("ruc", v)} estilo={mini} /></div>
       </div>
 
       <div style={{ marginBottom: 10 }}>
