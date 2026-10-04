@@ -16,7 +16,9 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "nombres": "eslint --no-eslintrc -c .eslintrc.nombres.js --ext .js,.jsx src/"
+    "nombres": "eslint --no-eslintrc -c .eslintrc.nombres.js --ext .js,.jsx src/",
+    "hooks": "node scripts/hooks-despues-del-return.mjs",
+    "revisar": "npm run nombres && npm run hooks"
   },
   "browserslist": {
     "production": [
