@@ -9,9 +9,10 @@ import {
   ESTADOS_OBS, PRIORIDADES_OBS, ORIGENES_OBS, ABIERTAS_OBS,
   cargarObservaciones, crearObservacion, guardarObservacion, borrarObservacion,
   marcarResuelta, verificar, reabrir, subirFotoObs, borrarFotoObs, enlacesDeFotosObs, asignarResponsables,
-  notasDe, anotar, diasAbierta, resumenObservaciones, ordenarObservaciones,
+  notasDe, anotar, diasAbierta, resumenObservaciones, ordenarObservaciones, responsablesDe,
 } from "./observaciones";
 import FotosAlVuelo from "./FotosAlVuelo";
+import VisorFotos from "../../components/VisorFotos";
 
 // Observaciones de obra: lo que se ve en la recorrida y hay que arreglar.
 //
@@ -51,6 +52,11 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
   const [cargando, setCargando] = useState(true);
   const [abierta, setAbierta] = useState(null);
   const [nueva, setNueva] = useState(null);
+  // Qué foto se está mirando a pantalla completa. Guarda la tira entera para
+  // poder pasar del antes al después sin cerrar, que es la comparación por la
+  // que existe el módulo.
+  const [mirando, setMirando] = useState(null);
+  const [responsables, setResponsables] = useState({});
   const [verCerradas, setVerCerradas] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -58,7 +64,24 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
   const camRef = useRef(null);
   const momentoRef = useRef("problema");
 
+  // Dos permisos, no uno.
+  //
+  // ANOTAR lo que uno ve no cambia nada de nadie: es el registro de un hecho.
+  // Pedirle nivel de "editar" al residente para que pueda levantar una fisura
+  // —o sacarle la foto— es lo mismo que pedirle que no la anote, y después la
+  // obra se entera del problema cuando ya está revocado encima.
+  //
+  // CERRAR es otra cosa: dar por buena la de otro, verificarla, borrarla. Eso
+  // sigue necesitando nivel de editar, porque es lo que apaga la alarma.
+  //
+  // Y el responsable de una observación siempre puede trabajar la suya: subir
+  // la foto de cómo quedó y marcarla resuelta, sea cual sea su nivel. Si no,
+  // el que la arregla no puede decir que la arregló.
+  const entra = !lead || !!nivelProyecto(lead.id);
   const editable = !lead || nivelProyecto(lead.id) === "editar";
+  const puedeAnotar = entra;
+  const esMiObservacion = o => o?.responsable_id === currentUser.id
+    || (responsables[o?.id] || []).some(r => String(r.usuario_id) === String(currentUser.id));
 
   // Las obras a las que esta persona entra. Se cargan una vez: la lista de
   // proyectos no cambia mientras se camina una obra.
@@ -79,6 +102,7 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
     setObservaciones(r.observaciones);
     setFotos(r.fotos);
     setEnlaces(await enlacesDeFotosObs(Object.values(r.fotos).flat()));
+    setResponsables(await responsablesDe(r.observaciones.map(o => o.id)));
   }, [lead?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -157,7 +181,7 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>{lead.nombre}</div>
-        {editable && <Button variant="primary" size="sm" onClick={() => setNueva({ ...NUEVA })}><Plus size={13} /> Observación</Button>}
+        {puedeAnotar && <Button variant="primary" size="sm" onClick={() => setNueva({ ...NUEVA })}><Plus size={13} /> Observación</Button>}
       </div>
 
       {/* Los números que dicen cómo va la obra. El de la más vieja es el que
@@ -323,10 +347,17 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
                         {cuales.map(f => (
                           <div key={f.id} style={{ position: "relative" }}>
                             {enlaces[f.id]
-                              ? <a href={enlaces[f.id]} target="_blank" rel="noreferrer">
-                                  <img src={enlaces[f.id]} alt={f.descripcion || titulo}
-                                    style={{ width: "100%", height: 72, objectFit: "cover", borderRadius: 6, border: `1px solid ${colors.border}`, display: "block" }} />
-                                </a>
+                              ? <img src={enlaces[f.id]} alt={f.descripcion || titulo}
+                                  onClick={() => {
+                                    // Las dos tiras juntas y en orden: primero cómo
+                                    // estaba, después cómo quedó.
+                                    const tira = [
+                                      ...delProblema.map(x => ({ ...x, titulo: "Cómo estaba", url: enlaces[x.id] })),
+                                      ...deLaSolucion.map(x => ({ ...x, titulo: "Cómo quedó", url: enlaces[x.id] })),
+                                    ].filter(x => x.url);
+                                    setMirando({ fotos: tira, i: Math.max(0, tira.findIndex(x => x.id === f.id)) });
+                                  }}
+                                  style={{ width: "100%", height: 72, objectFit: "cover", borderRadius: 6, border: `1px solid ${colors.border}`, display: "block", cursor: "zoom-in" }} />
                               : <div style={{ width: "100%", height: 72, borderRadius: 6, background: colors.neutralSoft }} />}
                             {editable && (
                               <button onClick={() => { if (window.confirm("¿Quitar esta foto?")) hacer(() => borrarFotoObs(f)); }}
@@ -338,7 +369,7 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
                         ))}
                       </div>
                     )}
-                    {editable && (
+                    {(puedeAnotar || esMiObservacion(o)) && (
                       <button onClick={() => { momentoRef.current = momento; setAbierta(o.id); camRef.current?.click(); }}
                         style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px",
                           color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font,
@@ -362,7 +393,7 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
                     ))}
                   </div>
                 )}
-                {editable && (
+                {(puedeAnotar || esMiObservacion(o)) && (
                   <div style={{ display: "flex", gap: 5, marginBottom: 9 }}>
                     <input value={nota} onChange={ev => setNota(ev.target.value)}
                       onKeyDown={async ev => { if (ev.key === "Enter" && nota.trim()) { await anotar(o.id, nota, currentUser); setNota(""); setNotas(await notasDe(o.id)); } }}
@@ -371,12 +402,12 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
                 )}
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {editable && o.estado === "abierta" && (
+                  {(editable || esMiObservacion(o)) && o.estado === "abierta" && (
                     <Button variant="outline" size="sm" disabled={ocupado} onClick={() => hacer(() => guardarObservacion(o.id, { estado: "en_proceso" }))}>
                       La están arreglando
                     </Button>
                   )}
-                  {editable && ["abierta", "en_proceso"].includes(o.estado) && (
+                  {(editable || esMiObservacion(o)) && ["abierta", "en_proceso"].includes(o.estado) && (
                     <Button variant="primary" size="sm" disabled={ocupado}
                       onClick={() => {
                         if (!deLaSolucion.length && !window.confirm("No hay foto de cómo quedó. ¿Marcarla resuelta igual?")) return;
@@ -435,6 +466,13 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
           if (res.error) { setAviso(res.error); return; }
           await cargar();
         }} />
+
+      {/* La foto a pantalla completa, sin salir de FOREMAN. */}
+      {mirando && (
+        <VisorFotos fotos={mirando.fotos} indice={mirando.i}
+          onIndice={k => setMirando(v => ({ ...v, i: k }))}
+          onCerrar={() => setMirando(null)} />
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { ListTodo, ClipboardList } from "lucide-react";
+import { ListTodo, ClipboardList, ShoppingCart } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
@@ -129,6 +129,7 @@ export default function App() {
   // —una observación es un defecto, no un encargo— pero tienen que recordarse
   // en algún lado, o se enteran cuando alguien pregunta por WhatsApp.
   const [misObs, setMisObs] = useState([]);
+  const [misCompras, setMisCompras] = useState([]);
   const tienePipeline = Object.keys(leadsPorId).length > 0;
   useEffect(() => {
     if (!usuario) return;
@@ -158,6 +159,13 @@ export default function App() {
       setAccesosLead(m);
     });
     misObservaciones(usuario.id).then(setMisObs).catch(() => {});
+    // Lo que espera a esta persona en compras: lo que pidió y le devolvieron,
+    // y lo que le toca aprobar o comprar. El módulo ya sabe decirlo; acá solo
+    // hace falta el número para el menú y la línea del tablero.
+    supabase.from("compras_solicitudes")
+      .select("id,estado,solicitante_id,descripcion")
+      .in("estado", ["pendiente_aprobacion", "requiere_info", "aprobada"])
+      .then(({ data }) => setMisCompras(data || []));
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
       const c = {};
       (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; });
@@ -496,6 +504,13 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Mía es también la que me sumaron como acompañante: si la puedo mover, la
   // tengo que ver.
   const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
+  // A quién le toca cada paso de una compra. Es la misma regla del módulo,
+  // dicha acá para poder contar sin cargar la pantalla entera.
+  const comprasQueMeTocan = misCompras.filter(c => {
+    if (c.estado === "pendiente_aprobacion") return puede("compras.aprobar");
+    if (c.estado === "aprobada") return puede("compras.gestionar");
+    return c.solicitante_id === usuario.id;        // requiere_info: se la devolvieron
+  });
   // El nivel de esta persona en el proyecto de una tarea. Las de los proyectos
   // viejos de Ajustes se resuelven por sus miembros, mientras convivan.
   const nivelDeTarea = t => {
@@ -588,7 +603,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
       />
 
       <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1600, margin: "0 auto", width: "100%" }}>
-        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} verPipeline={verPipeline} />
+        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} verPipeline={verPipeline}
+          pendientes={{ observaciones: misObs.length, compras: comprasQueMeTocan.length }} />
 
         <div className="app-content" style={{ flex: 1, overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
           {puede("tareas.ver") && vista === "tareas" && (
@@ -603,6 +619,23 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   que alguien la tilde sin mirar la pared. Pero tienen que
                   recordarse, o el que las tiene encima se entera por WhatsApp.
                   Una línea, con lo urgente adelante, que lleva al módulo. */}
+              {/* Lo mismo para compras: lo que te devolvieron y lo que te
+                  toca destrabar. El correo ya avisó una vez; esto está cada
+                  vez que entrás, que es cuando se puede hacer algo. */}
+              {comprasQueMeTocan.length > 0 && puede("compras.ver") && (
+                <button onClick={() => setVista("compras")}
+                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 8,
+                    padding: "9px 14px", marginBottom: 12, background: colors.brandSoft,
+                    border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+                    fontSize: 13, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+                  <ShoppingCart size={15} color={colors.brand} />
+                  <span>
+                    <strong style={{ color: colors.ink }}>{comprasQueMeTocan.length}</strong>{" "}
+                    {comprasQueMeTocan.length === 1 ? "compra espera" : "compras esperan"} por vos
+                  </span>
+                </button>
+              )}
+
               {misObs.length > 0 && puede("observaciones.ver") && (
                 <button onClick={() => setVista("observaciones")}
                   style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 8,

@@ -16,10 +16,14 @@ import Avatar from "./ui/Avatar";
 // esa historia se aprende solo; uno ordenado por cuándo se programó cada
 // módulo, no.
 
-export default function Sidebar({ puede, usuario, empresa, vista, setVista, admin, verPipeline }) {
+export default function Sidebar({ puede, usuario, empresa, vista, setVista, admin, verPipeline, pendientes = {} }) {
   // En el teléfono la barra es de abajo y hay siete: ahí "Control de Obra" no
   // entra y empuja a los de al lado. El nombre corto es para esa barra, y solo
   // para esa: en la computadora se lee el completo.
+  // Cuántas cosas esperan a esta persona en cada módulo. Va en el menú y no en
+  // un correo: las observaciones de una obra son muchas y por goteo, y un
+  // correo por cada una se vuelve ruido que se archiva sin leer. El número al
+  // lado del nombre está cuando uno mira, y no cuando al sistema se le ocurre.
   const item = (v, label, Icon, corto = label) => (
     <button
       key={v}
@@ -37,6 +41,13 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
       <Icon size={17} strokeWidth={vista === v ? 2.2 : 1.8} style={{ flexShrink: 0 }} />
       <span className="app-nav-label">{label}</span>
       <span className="app-nav-corto">{corto}</span>
+      {pendientes[v] > 0 && (
+        <span style={{ marginLeft: "auto", background: colors.warning, color: "#fff", borderRadius: 10,
+          minWidth: 18, height: 18, padding: "0 5px", fontSize: 10.5, fontWeight: 700,
+          display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {pendientes[v] > 99 ? "99+" : pendientes[v]}
+        </span>
+      )}
     </button>
   );
 
