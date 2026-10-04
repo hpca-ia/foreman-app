@@ -17,7 +17,7 @@ import Proformas from "./Proformas";
 // La pantalla arranca por lo que a uno le toca hacer, no por la lista completa:
 // esa es la pregunta con la que se entra acá.
 
-export default function ModuloCompras({ currentUser, puede, users = [], asignados = new Set() }) {
+export default function ModuloCompras({ currentUser, puede, users = [], asignados = new Set(), abrir = null, onAbierta }) {
   const [solicitudes, setSolicitudes] = useState([]);
   const [proyectos, setProyectos] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -55,6 +55,17 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
     setCargando(false);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // Alguien tocó el aviso en su tablero: se abre ese pedido y no la lista.
+  // Por id de solicitud si la 069 ya corrió; si no, por la tarea, que la
+  // solicitud guarda desde siempre.
+  useEffect(() => {
+    if (!abrir || !solicitudes.length) return;
+    const s = solicitudes.find(x =>
+      (abrir.compraId && x.id === abrir.compraId) || (abrir.tareaId && x.tarea_id === abrir.tareaId));
+    if (s) setAbierta(s);
+    onAbierta?.();
+  }, [abrir, solicitudes, onAbierta]);
 
   if (sinTablas) {
     return (

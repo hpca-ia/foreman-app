@@ -450,6 +450,24 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // gestiones, que es donde viven —dentro de una etapa—; si alguna era una
   // tarea, se corrige en un clic desde el proyecto.
   const esGestion = t => claseDe(t) === "gestion";
+  // Un aviso de compra no se abre como tarea.
+  //
+  // Lo que uno quiere hacer al tocarlo es ver el pedido: las cotizaciones, el
+  // monto, contra qué va. El modal de tarea muestra el título y el responsable
+  // —nada de eso— y encima deja editar un recordatorio que el circuito maneja
+  // solo. Se va al pedido, que es el origen.
+  //
+  // `compra_id` lo pone la 069; sin ella se encuentra por la tarea, que la
+  // solicitud guarda desde siempre en `tarea_id`.
+  const [compraAbierta, setCompraAbierta] = useState(null);
+  const abrirTarea = t => {
+    if (claseDe(t) === "compra") {
+      setCompraAbierta({ compraId: t.compra_id || null, tareaId: t.id });
+      setVista("compras");
+      return;
+    }
+    setEditTask(t); setShowModal(true);
+  };
   // Lo que no tiene dueño no se guarda en un cajón aparte: va en su lista, con
   // todo lo demás y marcado en rojo. En un cuadro al fondo titulado "Sin
   // responsable" nadie entendía de dónde salía ni qué había que hacer con eso.
@@ -617,9 +635,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   <div className="tasks-view-desktop">
                     {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>{VACIO}</div>
                       : vistaTareas === "calendario"
-                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
                       : vistaTareas === "tablero"
-                        ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={abrirTarea} />
                         : bloques.map(b => (
                             <div key={b.titulo} style={{ marginBottom: 16 }}>
                               <div style={{ fontSize: 10, fontWeight: 700, color: CLASES[b.clase].color, letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
@@ -629,7 +647,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                               </div>
                               <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta} clase={b.clase}
                                 onCambiarEstado={cambiarEstado}
-                                onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                                onEditar={abrirTarea} />
                             </div>
                           ))}
                   </div>
@@ -638,18 +656,18 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   <TareasDeLosDemas
                     tasks={visiblesTodas.filter(t => t.assignee_id !== usuario.id)}
                     users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
-                    onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                    onEditar={abrirTarea} />
 
                   <div className="tasks-view-mobile">
                     {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />{VACIO}</div>
                       : vistaTareas === "calendario"
-                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
                       : vistaTareas === "lista"
-                        ? <TareasListaMovil tasks={ordenadas} grupos={bloquesMovil} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={t => { setEditTask(t); setShowModal(true); }} />
+                        ? <TareasListaMovil tasks={ordenadas} grupos={bloquesMovil} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={abrirTarea} />
                         : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0}
                             acompanantes={acompanantes.get(t.id) || []}
                             espera={(dependencias.espera.get(t.id) || []).map(id => tareas.find(x => x.id === id)).filter(x => x && x.status !== "listo")}
-                            onCambiarEstado={cambiarEstado} onEditar={t => { setEditTask(t); setShowModal(true); }} onEliminar={eliminarTarea} />)}
+                            onCambiarEstado={cambiarEstado} onEditar={abrirTarea} onEliminar={eliminarTarea} />)}
                   </div>
                 </>
               )}
@@ -670,7 +688,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {puede("compras.ver") && vista === "compras" && (
-              <ModuloCompras currentUser={usuario} puede={puede} users={users} asignados={leadsAsignados} />
+              <ModuloCompras currentUser={usuario} puede={puede} users={users} asignados={leadsAsignados}
+                abrir={compraAbierta} onAbierta={() => setCompraAbierta(null)} />
             )}
             {puede("libro.ver") && vista === "libro" && (
               <ModuloLibro currentUser={usuario} puede={puede} nivelProyecto={nivelLibro} />
