@@ -5,6 +5,8 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { ESTADOS, ABIERTAS, cargarSolicitudes, veLaCompra } from "./compras";
 import ModalSolicitud from "./ModalSolicitud";
+import BuscadorDeGastos from "../../components/BuscadorDeGastos";
+import { filtrarGastos, sumar } from "../../lib/filtrarGastos";
 import Proformas from "./Proformas";
 
 // Compras: lo que hace falta en obra, pedido, aprobado y comprado.
@@ -25,6 +27,10 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
   const [abierta, setAbierta] = useState(null);
   const [nueva, setNueva] = useState(false);
   const [filtro, setFiltro] = useState("mias");
+  // Por estado: "todos los aprobados", que es como uno busca de verdad. Y por
+  // proveedor y monto, para la otra pregunta: cuánto le compramos a quién.
+  const [estadoF, setEstadoF] = useState("");
+  const [busca, setBusca] = useState({ texto: "", min: "", max: "" });
   // La colección de proformas es de un proyecto: preguntar "¿a cómo nos han
   // cotizado el hormigón?" sin decir de qué obra no lleva a ninguna parte.
   const [verProformas, setVerProformas] = useState(false);
@@ -108,9 +114,14 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
   }));
 
   const abiertas = visibles.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
-  const listas = filtro === "mias" ? abiertas.filter(meToca)
+  const base = filtro === "mias" ? abiertas.filter(meToca)
     : filtro === "abiertas" ? abiertas
     : visibles;
+  // El estado y el buscador se aplican encima, no en vez de: "aprobadas de
+  // Disensa por más de 500" es una sola pregunta, no tres pantallas.
+  const porEstado = estadoF ? base.filter(s => s.estado === estadoF) : base;
+  const listas = filtrarGastos(porEstado, busca, ["proveedor", "descripcion", "solicitante_nombre", "destino"]);
+  const sumaListas = sumar(listas);
 
   const pendientesMias = abiertas.filter(meToca).length;
 
@@ -159,6 +170,31 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
           );
         })}
       </div>
+
+      {/* Los estados que de verdad hay, con cuántos: una ficha "Pagadas 0" es
+          una ficha que se toca una vez para descubrir que no hay nada. */}
+      {base.length > 0 && (
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+          {Object.entries(ESTADOS)
+            .map(([id, e]) => [id, e, base.filter(s => s.estado === id).length])
+            .filter(([, , n]) => n > 0)
+            .map(([id, e, n]) => {
+              const puesto = estadoF === id;
+              return (
+                <button key={id} onClick={() => setEstadoF(puesto ? "" : id)}
+                  style={{ border: `1px solid ${puesto ? e.color : colors.border}`,
+                    background: puesto ? e.color : "#fff", color: puesto ? "#fff" : e.color,
+                    borderRadius: 20, padding: "4px 11px", fontSize: 11.5, fontWeight: 600,
+                    cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                  {e.label} <span style={{ opacity: 0.75, fontWeight: 400 }}>{n}</span>
+                </button>
+              );
+            })}
+        </div>
+      )}
+
+      <BuscadorDeGastos filas={porEstado} filtro={busca} setFiltro={setBusca}
+        total={sumaListas} cuantos={listas.length} etiqueta="pedidos" />
 
       {cargando ? (
         <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando…</div>

@@ -10,6 +10,8 @@ import SelectorActividad from "./cajaChica/SelectorActividad";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
+import BuscadorDeGastos from "../components/BuscadorDeGastos";
+import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -17,6 +19,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [cajas, setCajas] = useState([]);
   const [cajaActiva, setCajaActiva] = useState(null);
   const [gastos, setGastos] = useState([]);
+  // Buscar por proveedor y por monto dentro de la caja: "¿cuánto gastó el
+  // chofer en esa gasolinera?" se contesta filtrando y sumando, y la suma es
+  // la mitad de la respuesta.
+  const [buscaGasto, setBuscaGasto] = useState({ texto: "", min: "", max: "" });
   const [anticipos, setAnticipos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [novaLeyendo, setNovaLeyendo] = useState(false);
@@ -394,6 +400,8 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const cajaValida = !!nuevaCajaForm.responsable_id && (!!nuevaCajaForm.obra_id || !!nuevaCajaForm.proyecto_nombre?.trim());
   const saldoColor=c=>c>(cajaActiva?.limite_alerta||50)*2?"var(--success)":c>(cajaActiva?.limite_alerta||50)?"var(--warning)":"var(--danger)";
 
+  const gastosFiltrados = filtrarGastos(gastos, buscaGasto, ["proveedor", "descripcion", "numero_factura", "notas"]);
+
   return(
     <div style={{fontFamily:"var(--font)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
@@ -646,8 +654,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
             ))}
           </div>}
           <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8}}>📋 Gastos ({gastos.length})</div>
+          {gastos.length>0 && (
+            <BuscadorDeGastos filas={gastos} filtro={buscaGasto} setFiltro={setBuscaGasto}
+              total={sumar(gastosFiltrados)} cuantos={gastosFiltrados.length} etiqueta="gastos" />
+          )}
           {gastos.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>Sin gastos aún.</div>
-          :gastos.map(g=>(
+          :gastosFiltrados.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>Ningún gasto con ese proveedor o ese monto.</div>
+          :gastosFiltrados.map(g=>(
             <div key={g.id} style={{background:"#fff",border:`1px solid ${g.estado==="aprobado"?"var(--success-border)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                 <div style={{flex:1}}>
