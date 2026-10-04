@@ -580,6 +580,11 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
         admin={puede("ajustes.ver")} onOpenAjustes={() => setShowAjustes(true)}
         usuario={usuario} onLogout={logout}
         onNuevaTarea={() => { setEditTask(null); setShowModal(true); }}
+        // El buscador del encabezado busca en el tablero; en los otros módulos
+        // cada pantalla tiene el suyo y dos buscadores arriba del otro hacen
+        // dudar de cuál usar. El botón grande solo donde crea lo de ahí.
+        buscaAca={vista === "tareas"}
+        accion={vista === "tareas" ? { label: "Nueva tarea", onClick: () => { setEditTask(null); setShowModal(true); } } : null}
       />
 
       <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1600, margin: "0 auto", width: "100%" }}>
