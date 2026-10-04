@@ -8,9 +8,10 @@ import { esProyecto } from "../leads/tubo";
 import {
   ESTADOS_OBS, PRIORIDADES_OBS, ORIGENES_OBS, ABIERTAS_OBS,
   cargarObservaciones, crearObservacion, guardarObservacion, borrarObservacion,
-  marcarResuelta, verificar, reabrir, subirFotoObs, borrarFotoObs, enlacesDeFotosObs,
+  marcarResuelta, verificar, reabrir, subirFotoObs, borrarFotoObs, enlacesDeFotosObs, asignarResponsables,
   notasDe, anotar, diasAbierta, resumenObservaciones, ordenarObservaciones,
 } from "./observaciones";
+import FotosAlVuelo from "./FotosAlVuelo";
 
 // Observaciones de obra: lo que se ve en la recorrida y hay que arreglar.
 //
@@ -24,10 +25,16 @@ import {
 // va a mirar la marca VERIFICADA. Juntarlos en un botón es cómo se cierran
 // cosas que siguen mal.
 
+// Lo que se llena parado frente al problema, con el teléfono en una mano. Lo
+// demás —cuándo se vio es hoy, el origen es la recorrida, si el cliente la ve
+// se decide después— tiene un valor por defecto que acierta casi siempre y se
+// cambia desde la observación ya creada. Cada campo de más en este formulario
+// es una observación que no se anota.
 const NUEVA = {
   titulo: "", detalle: "", ubicacion: "", prioridad: "media", origen: "recorrida",
   fecha_visto: new Date().toISOString().split("T")[0], fecha_limite: "",
-  responsable_id: "", responsable_externo: "", visible_cliente: false,
+  responsables: [], responsable_externo: "", visible_cliente: false,
+  fotos: [],
 };
 
 const COLOR = { danger: colors.danger, warning: colors.warning, success: colors.success, brand: colors.brand, muted: colors.muted, inkSoft: colors.inkSoft };
@@ -185,49 +192,75 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
       {/* Una observación nueva: lo mínimo para anotarla parada frente al
           problema. El resto se completa después, sentado. */}
       {nueva && (
-        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 13, marginBottom: 12, display: "grid", gap: 8 }}>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 13, marginBottom: 12, display: "grid", gap: 9 }}>
+          {/* La foto va primero y se saca acá, no después: parado frente a la
+              fisura uno tiene la cámara en la mano, y "después le saco una"
+              es como se llena el módulo de observaciones sin fotos. */}
+          <FotosAlVuelo fotos={nueva.fotos} onCambio={f => setNueva(n => ({ ...n, fotos: f }))} />
+
           <input autoFocus value={nueva.titulo} onChange={e => setNueva(n => ({ ...n, titulo: e.target.value }))}
             placeholder="¿Qué se observó? Ej: junta mal tomada en baño 2" style={inputStyle} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <input value={nueva.ubicacion} onChange={e => setNueva(n => ({ ...n, ubicacion: e.target.value }))}
-              placeholder="¿Dónde? Planta baja, eje 3…" style={inputStyle} />
-            <select value={nueva.prioridad} onChange={e => setNueva(n => ({ ...n, prioridad: e.target.value }))} style={inputStyle}>
-              {Object.entries(PRIORIDADES_OBS).map(([id, p]) => <option key={id} value={id}>{p.label}</option>)}
-            </select>
+          <input value={nueva.ubicacion} onChange={e => setNueva(n => ({ ...n, ubicacion: e.target.value }))}
+            placeholder="¿Dónde? Planta baja, eje 3…" style={inputStyle} />
+
+          <div style={{ display: "flex", gap: 5 }}>
+            {Object.entries(PRIORIDADES_OBS).map(([id, p]) => {
+              const puesta = nueva.prioridad === id;
+              return (
+                <button key={id} onClick={() => setNueva(n => ({ ...n, prioridad: id }))}
+                  style={{ flex: 1, border: `1px solid ${puesta ? (COLOR[p.color] || colors.brand) : colors.border}`,
+                    background: puesta ? (COLOR[p.color] || colors.brand) : "#fff",
+                    color: puesta ? "#fff" : colors.inkSoft, borderRadius: 8, padding: "7px 4px",
+                    fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <div>
-              <label style={{ fontSize: 10, color: colors.muted, display: "block", marginBottom: 2 }}>CUÁNDO SE VIO</label>
-              <input type="date" value={nueva.fecha_visto} onChange={e => setNueva(n => ({ ...n, fecha_visto: e.target.value }))} style={inputStyle} />
+
+          {/* Varios, porque en obra casi nunca es uno: la mira el residente y
+              la tapa el albañil. Al que no quedaba anotado había que avisarle
+              por WhatsApp y no veía nada en su pantalla. */}
+          <div>
+            <label style={{ fontSize: 10, color: colors.muted, display: "block", marginBottom: 3 }}>¿QUIÉN LA ARREGLA?</label>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {users.map(u => {
+                const puesto = nueva.responsables.some(r => String(r.id) === String(u.id));
+                return (
+                  <button key={u.id}
+                    onClick={() => setNueva(n => ({ ...n, responsables: puesto
+                      ? n.responsables.filter(r => String(r.id) !== String(u.id))
+                      : [...n.responsables, { id: u.id, name: u.name }] }))}
+                    style={{ border: `1px solid ${puesto ? colors.brand : colors.border}`,
+                      background: puesto ? colors.brand : "#fff", color: puesto ? "#fff" : colors.inkSoft,
+                      borderRadius: 20, padding: "4px 11px", fontSize: 11.5, fontWeight: 600,
+                      cursor: "pointer", fontFamily: colors.font }}>
+                    {u.name}
+                  </button>
+                );
+              })}
             </div>
-            <div>
-              <label style={{ fontSize: 10, color: colors.muted, display: "block", marginBottom: 2 }}>PARA CUÁNDO</label>
-              <input type="date" value={nueva.fecha_limite} onChange={e => setNueva(n => ({ ...n, fecha_limite: e.target.value }))} style={inputStyle} />
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <select value={nueva.responsable_id} onChange={e => setNueva(n => ({ ...n, responsable_id: e.target.value }))} style={inputStyle}>
-              <option value="">¿Quién la arregla? (opcional)</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
             <input value={nueva.responsable_externo} onChange={e => setNueva(n => ({ ...n, responsable_externo: e.target.value }))}
-              placeholder="O el contratista" style={inputStyle} />
+              placeholder="O un contratista de afuera" style={{ ...inputStyle, marginTop: 6 }} />
           </div>
-          <select value={nueva.origen} onChange={e => setNueva(n => ({ ...n, origen: e.target.value }))} style={inputStyle}>
-            {Object.entries(ORIGENES_OBS).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
-          </select>
-          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
-            <input type="checkbox" checked={nueva.visible_cliente} onChange={e => setNueva(n => ({ ...n, visible_cliente: e.target.checked }))} />
-            El cliente puede verla — la recorrida interna es interna salvo que se diga
-          </label>
+
           <div style={{ display: "flex", gap: 6 }}>
             <Button variant="primary" size="sm" disabled={ocupado || !nueva.titulo.trim()}
               onClick={async () => {
+                setOcupado(true);
                 const res = await crearObservacion(lead, { ...nueva, obra_id: lead.obra_id || null,
-                  responsable_nombre: users.find(u => String(u.id) === String(nueva.responsable_id))?.name || null }, currentUser);
-                if (res.error) { setAviso(res.error); return; }
+                  responsable_id: nueva.responsables[0]?.id || "",
+                  responsable_nombre: nueva.responsables[0]?.name || null }, currentUser);
+                if (res.error) { setOcupado(false); setAviso(res.error); return; }
+                // Las fotos y los responsables van con la observación recién
+                // creada: así nadie tiene que volver a entrar a completarla.
+                for (const f of nueva.fotos) {
+                  await subirFotoObs(res.observacion, f, { momento: "problema", quien: currentUser });
+                }
+                if (nueva.responsables.length) await asignarResponsables(res.observacion.id, nueva.responsables);
+                setOcupado(false);
                 setNueva(null); setAbierta(res.observacion.id); await cargar();
-              }}>Guardar</Button>
+              }}>{ocupado ? "Guardando…" : "Guardar"}</Button>
             <Button variant="secondary" size="sm" onClick={() => setNueva(null)}>Cancelar</Button>
           </div>
         </div>

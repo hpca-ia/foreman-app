@@ -74,6 +74,59 @@ export async function crearObservacion(lead, datos, quien) {
   return { observacion: data };
 }
 
+/**
+ * Quiénes la arreglan. Varios, porque en obra casi nunca es uno.
+ *
+ * Se guarda también el primero en `responsable_id`, que es lo que leen las
+ * pantallas y los correos de antes: mientras convivan, las dos cosas dicen lo
+ * mismo en vez de contradecirse.
+ */
+export async function asignarResponsables(observacionId, gente = []) {
+  await supabase.from("observacion_responsables").delete().eq("observacion_id", observacionId);
+  if (gente.length) {
+    const { error } = await supabase.from("observacion_responsables").insert(
+      gente.map(g => ({ observacion_id: observacionId, usuario_id: Number(g.id), nombre: g.name || null })));
+    if (error) return falta(error) ? "Falta correr la migración 071." : error.message;
+  }
+  await supabase.from("obra_observaciones").update({
+    responsable_id: gente[0] ? Number(gente[0].id) : null,
+    responsable_nombre: gente[0]?.name || null,
+  }).eq("id", observacionId);
+  return null;
+}
+
+/** Los responsables de varias observaciones de una, por id de observación. */
+export async function responsablesDe(ids = []) {
+  if (!ids.length) return {};
+  const { data, error } = await supabase.from("observacion_responsables")
+    .select("observacion_id,usuario_id,nombre").in("observacion_id", ids);
+  if (error) return {};
+  const mapa = {};
+  (data || []).forEach(r => { (mapa[r.observacion_id] = mapa[r.observacion_id] || []).push(r); });
+  return mapa;
+}
+
+/**
+ * Las observaciones abiertas que tiene encima esta persona.
+ *
+ * Es lo que se le recuerda en su pantalla. No se convierten en tareas a
+ * propósito: una observación de obra es un defecto, no un encargo. Mezclarlas
+ * con las tareas llena el tablero de cosas que se cierran mirando una pared, y
+ * el día que alguien tilda la tarea sin arreglar nada, la observación queda
+ * cerrada en el papel y abierta en la obra.
+ */
+export async function misObservaciones(usuarioId) {
+  if (!usuarioId) return [];
+  const { data, error } = await supabase.from("observacion_responsables")
+    .select("observacion_id").eq("usuario_id", usuarioId);
+  if (error || !data?.length) return [];
+  const { data: obs } = await supabase.from("obra_observaciones")
+    .select("id,titulo,estado,prioridad,lead_id,ubicacion,fecha_limite")
+    .in("id", data.map(r => r.observacion_id))
+    .in("estado", ["abierta", "en_proceso"]);
+  return obs || [];
+}
+
 export async function guardarObservacion(id, campos) {
   const { error } = await supabase.from("obra_observaciones")
     .update({ ...campos, updated_at: new Date().toISOString() }).eq("id", id);

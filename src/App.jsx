@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { ListTodo } from "lucide-react";
+import { ListTodo, ClipboardList } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
@@ -10,6 +10,7 @@ import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
 import { nivelDeAcceso, nivelDeArea, veLaTarea } from "./lib/acceso";
 import { esperaMiVisto } from "./lib/estadoDeCompra";
+import { misObservaciones } from "./modules/observaciones/observaciones";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
@@ -124,6 +125,10 @@ export default function App() {
   // cuando esa rama corre. React cuenta los hooks por orden y deja la app en
   // blanco. Ya pasó una vez; por eso este comentario.
   const [compraAbierta, setCompraAbierta] = useState(null);
+  // Las observaciones de obra que esta persona tiene encima. No son tareas
+  // —una observación es un defecto, no un encargo— pero tienen que recordarse
+  // en algún lado, o se enteran cuando alguien pregunta por WhatsApp.
+  const [misObs, setMisObs] = useState([]);
   const tienePipeline = Object.keys(leadsPorId).length > 0;
   useEffect(() => {
     if (!usuario) return;
@@ -152,6 +157,7 @@ export default function App() {
       });
       setAccesosLead(m);
     });
+    misObservaciones(usuario.id).then(setMisObs).catch(() => {});
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
       const c = {};
       (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; });
@@ -586,6 +592,30 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   herramientas de NOVA se comían el tope y una tarea vencida
                   aparecía cuarta, debajo del pliegue en el teléfono. */}
               <AvisoTareas tasks={paraAvisar} filtro={filtro} onFiltrar={setFiltro} />
+
+              {/* Las observaciones no son tareas y no entran al tablero: una
+                  observación es un defecto, no un encargo, y mezclarlas haría
+                  que alguien la tilde sin mirar la pared. Pero tienen que
+                  recordarse, o el que las tiene encima se entera por WhatsApp.
+                  Una línea, con lo urgente adelante, que lleva al módulo. */}
+              {misObs.length > 0 && puede("observaciones.ver") && (
+                <button onClick={() => setVista("observaciones")}
+                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 8,
+                    padding: "9px 14px", marginBottom: 12, background: colors.warningSoft,
+                    border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+                    fontSize: 13, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+                  <ClipboardList size={15} color={colors.warning} />
+                  <span>
+                    Tenés <strong style={{ color: colors.ink }}>{misObs.length}</strong>{" "}
+                    {misObs.length === 1 ? "observación de obra" : "observaciones de obra"} para arreglar
+                    {misObs.some(o => o.prioridad === "urgente") && (
+                      <strong style={{ color: colors.danger }}>
+                        {" "}· {misObs.filter(o => o.prioridad === "urgente").length} urgente{misObs.filter(o => o.prioridad === "urgente").length === 1 ? "" : "s"}
+                      </strong>
+                    )}
+                  </span>
+                </button>
+              )}
 
               {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
                   Solo cierra tareas que esa persona puede cambiar. */}
