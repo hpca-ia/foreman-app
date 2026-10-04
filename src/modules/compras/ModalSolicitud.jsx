@@ -126,7 +126,20 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // ya es historia y se congela. Gerencia y compras corrigen siempre, que son
   // quienes arreglan lo que llega mal escrito.
   const congelada = estado === "recibida" || estado === "anulada";
-  const puedeEditar = (esMia && !congelada) || apruebo || gestionaCompras;
+
+  // Dos permisos, no uno, porque son dos cosas distintas.
+  //
+  // QUÉ SE PIDIÓ —la descripción, para qué, para cuándo, si es urgente— es del
+  // que lo pidió y de nadie más. Si el gerente puede reescribirlo, aprueba algo
+  // que ya no es lo que le mandaron y el residente se entera cuando llega otra
+  // cosa. Si está mal escrito se devuelve con el motivo, que para eso está.
+  //
+  // CONTRA QUÉ VA —la agrupación, el rubro, cuánto se estima— es plata del
+  // control, y ahí el que aprueba manda: el residente apunta como puede y
+  // quien mira el presupuesto entero corrige sin devolver el pedido.
+  const puedeEditarPedido = esMia && !congelada;
+  const puedeEditarImputacion = (esMia && !congelada) || apruebo || gestionaCompras;
+  const puedeEditar = puedeEditarPedido || puedeEditarImputacion;
   // Mover el pedido de proyecto es otra cosa, y solo gerencia o compras: si lo
   // pudiera mover quien lo pidió, el pedido se iría de su vista y de la de su
   // gerente sin que ninguno de los dos se entere.
@@ -170,6 +183,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // Contra qué se pide: la agrupación, que es cómo se ejecuta la obra. El
   // capítulo —cómo se contrató— sale solo del rubro, cuando se elige uno.
   const deLaAgrupacion = rubros.filter(r => String(r.actividad_id || "") === String(form.obra_actividad_id || ""));
+  // Contra qué va este pedido, en palabras. El capítulo aparece solo en los
+  // pedidos viejos, de cuando se apuntaba así; se muestra igual para no dejar
+  // en blanco algo que sí estaba decidido.
+  const imputado = (() => {
+    const act = actividades.find(a => String(a.id) === String(form.obra_actividad_id || ""));
+    const rub = rubros.find(r => String(r.id) === String(form.obra_rubro_id || ""));
+    const partes = [];
+    if (act) partes.push(act.codigo ? `${act.codigo} · ${act.nombre}` : act.nombre);
+    if (rub) partes.push(`rubro ${rub.numero}, ${rub.descripcion}`);
+    if (!partes.length && form.capitulo) partes.push(`el capítulo ${form.capitulo}`);
+    return partes.join(" — ");
+  })();
 
   /**
    * La solicitud existe en la base, cueste lo que cueste.
@@ -349,14 +374,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <label style={lbl}>QUÉ HACE FALTA</label>
           <input value={form.descripcion || ""} onChange={ev => inp("descripcion", ev.target.value)}
             placeholder="Ej: 200 sacos de cemento, o contratar el vidriado" style={mini}
-            disabled={!puedeEditar} />
+            disabled={!puedeEditarPedido} />
         </div>
 
         <div>
           <label style={lbl}>PARA QUÉ</label>
           <textarea value={form.justificacion || ""} onChange={ev => inp("justificacion", ev.target.value)} rows={2}
             placeholder="En qué se va a usar y por qué ahora" style={{ ...mini, resize: "vertical" }}
-            disabled={!puedeEditar} />
+            disabled={!puedeEditarPedido} />
         </div>
 
         {/* Sin obra no hay rubro contra el cual apuntarlo, así que se dice en
@@ -367,7 +392,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             <label style={lbl}>A QUÉ SE CARGA</label>
             <input value={form.destino || ""} onChange={ev => inp("destino", ev.target.value)}
               placeholder="Ej: oficina · papelería, o camioneta · mantenimiento" style={mini}
-              disabled={!puedeEditar} />
+              disabled={!puedeEditarImputacion} />
           </div>
         )}
 
@@ -379,6 +404,17 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <div style={{ display: "grid", gap: 8, background: colors.bg, borderRadius: 8, padding: "9px 10px" }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
               CONTRA QUÉ DEL PRESUPUESTO
+            </div>
+            {/* Dicho en una línea, antes de los selectores. Quien aprueba
+                necesita leer contra qué va sin deducirlo de dos desplegables, y
+                un pedido sin asignar tiene que gritarlo: esa plata no descuenta
+                de ningún lado y el control queda corto sin que nadie lo note. */}
+            <div style={{ fontSize: 11.5, lineHeight: 1.5, color: imputado ? colors.ink : colors.warning,
+              background: imputado ? "transparent" : colors.warningSoft, borderRadius: 6,
+              padding: imputado ? 0 : "6px 8px" }}>
+              {imputado
+                ? <>Va contra <strong>{imputado}</strong>.</>
+                : <>Sin asignar todavía: así, esta compra no va a descontar de ningún capítulo. Elegile la agrupación.</>}
             </div>
             <div>
               <label style={lbl}>AGRUPACIÓN</label>
@@ -393,7 +429,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                   mientras tanto el pedido sigue su camino sin apuntar a ninguna.
                 </div>
               )}
-              <select value={form.obra_actividad_id || ""} disabled={!puedeEditar || !actividades.length}
+              <select value={form.obra_actividad_id || ""} disabled={!puedeEditarImputacion || !actividades.length}
                 onChange={ev => setForm(p => ({ ...p, obra_actividad_id: ev.target.value, obra_rubro_id: "", capitulo: "" }))} style={mini}>
                 <option value="">Elegí la agrupación…</option>
                 {actividades.map(a => <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
@@ -402,7 +438,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             {form.obra_actividad_id && deLaAgrupacion.length > 0 && (
               <div>
                 <label style={lbl}>RUBRO (SI SE SABE CUÁL)</label>
-                <select value={form.obra_rubro_id || ""} disabled={!puedeEditar}
+                <select value={form.obra_rubro_id || ""} disabled={!puedeEditarImputacion}
                   onChange={ev => setForm(p => ({ ...p, obra_rubro_id: ev.target.value,
                     capitulo: deLaAgrupacion.find(r => String(r.id) === ev.target.value)?.capitulo || "" }))} style={mini}>
                   <option value="">Toda la agrupación</option>
@@ -419,7 +455,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             saber de cuánta plata estaban hablando. */}
         <div>
           <label style={lbl}>CUÁNTO SE ESTIMA (US$)</label>
-          <input type="number" step="0.01" min="0" value={form.monto_estimado ?? ""} disabled={!puedeEditar}
+          <input type="number" step="0.01" min="0" value={form.monto_estimado ?? ""} disabled={!puedeEditarImputacion}
             onChange={ev => inp("monto_estimado", ev.target.value)} placeholder="Lo que se cree que va a costar" style={mini} />
           {obra && (
             <div style={{ fontSize: 10, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
@@ -438,11 +474,11 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             {CLASES_PEDIDO.map(c => {
               const puesta = (form.clase || "material") === c.id;
               return (
-                <button key={c.id} onClick={() => puedeEditar && inp("clase", c.id)} title={c.nota}
+                <button key={c.id} onClick={() => puedeEditarPedido && inp("clase", c.id)} title={c.nota}
                   style={{ flex: 1, border: `1px solid ${puesta ? colors.brand : colors.border}`, borderRadius: 8,
                     background: puesta ? colors.brandSoft : "#fff", color: puesta ? colors.brand : colors.inkSoft,
                     padding: "7px 10px", fontSize: 12, fontWeight: puesta ? 700 : 400, fontFamily: colors.font,
-                    cursor: puedeEditar ? "pointer" : "default", textAlign: "left" }}>
+                    cursor: puedeEditarPedido ? "pointer" : "default", textAlign: "left" }}>
                   {c.label}
                   <div style={{ fontSize: 9.5, fontWeight: 400, opacity: 0.8 }}>{c.nota}</div>
                 </button>
@@ -455,11 +491,11 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <div>
             <label style={lbl}>SE NECESITA PARA</label>
             <input type="date" value={form.necesita_para || ""} onChange={ev => inp("necesita_para", ev.target.value)}
-              style={mini} disabled={!puedeEditar} />
+              style={mini} disabled={!puedeEditarPedido} />
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.inkSoft, cursor: "pointer", paddingBottom: 9 }}>
             <input type="checkbox" checked={!!form.urgente} onChange={ev => inp("urgente", ev.target.checked)}
-              disabled={!puedeEditar} /> Urgente
+              disabled={!puedeEditarPedido} /> Urgente
           </label>
         </div>
 
