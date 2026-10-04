@@ -320,6 +320,31 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     });
   });
 
+  /**
+   * Compras devuelve el pedido, con la pregunta escrita.
+   *
+   * Johanna recibe la compra aprobada y a veces no se puede ejecutar: la
+   * proforma venció, el proveedor subió el precio, falta la medida exacta. Sin
+   * esto lo resolvía por WhatsApp y el pedido quedaba quieto en "aprobada"
+   * sin que nadie supiera por qué.
+   *
+   * Dos destinos porque son dos preguntas distintas. Si falta información de
+   * lo que se pidió, vuelve a quien lo pidió. Si cambió la plata —aprobaron
+   * 500 y ahora son 800—, vuelve a quien dio el visto: ese número ya no es el
+   * que aprobó, y hacerlo pasar por el residente no arregla eso.
+   */
+  const devolverCompras = destino => hacer(async () => {
+    if (!comentario.trim()) return { error: "Escribí qué hace falta saber." };
+    const aQuienPidio = destino === "pide";
+    return moverA(viva, aQuienPidio ? "requiere_info" : "pendiente_aprobacion", {
+      quien: currentUser, comentario: comentario.trim(),
+      paraQuien: aQuienPidio ? viva.solicitante_id : (viva.aprobador_id || gerenteDelProyecto()),
+      titulo: aQuienPidio
+        ? `Compras pregunta: ${viva.descripcion}`
+        : `Revisar el visto: ${viva.descripcion}`,
+    });
+  });
+
   const marcarComprada = () => hacer(async () => {
     if (!compra.proveedor.trim()) return { error: "¿A quién se le compró?" };
     const total = Number(compra.monto) || 0;
@@ -733,7 +758,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <div>
             <label style={lbl}>COMENTARIO</label>
             <textarea value={comentario} onChange={ev => setComentario(ev.target.value)} rows={2}
-              placeholder={estado === "pendiente_aprobacion" ? "Si la devolvés, decí qué falta" : "Opcional"}
+              placeholder={estado === "pendiente_aprobacion" ? "Si la devolvés, decí qué falta"
+                : estado === "aprobada" && gestionaCompras ? "Para devolverla, escribí acá la consulta"
+                : "Opcional"}
               style={{ ...mini, resize: "vertical" }} />
           </div>
         )}
@@ -770,7 +797,17 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         )}
 
         {editando && estado === "aprobada" && gestionaCompras && (
-          <Button variant="primary" onClick={marcarComprada} disabled={ocupado}><ShoppingCart size={13} /> Ya la compré</Button>
+          <>
+            <Button variant="primary" onClick={marcarComprada} disabled={ocupado}><ShoppingCart size={13} /> Ya la compré</Button>
+            {/* Compras también puede frenar: una proforma vencida o un precio
+                que cambió no se arreglan comprando igual. */}
+            <Button variant="outline" onClick={() => devolverCompras("pide")} disabled={ocupado}>
+              <X size={13} /> Preguntar a quien pidió
+            </Button>
+            <Button variant="outline" onClick={() => devolverCompras("visto")} disabled={ocupado}>
+              <X size={13} /> Cambió el precio: nuevo visto
+            </Button>
+          </>
         )}
 
         {editando && estado === "comprada" && esMia && (
