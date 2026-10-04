@@ -48,6 +48,12 @@ export const GRUPOS_PERMISOS = [
       { id: "leads.editar", label: "Editar el pipeline", nota: "Crear proyectos, mover etapas y cargar gestiones. Sin esto los ve pero no los toca" },
       { id: "presupuestos.crear", label: "Crear y editar presupuestos", nota: "Apagado, esa persona los lee y no los toca, sea Admin o residente. También cierra la base de rubros, que es de donde salen los precios de todos" },
       { id: "obras.crear", label: "Activar una obra para controlarla" },
+      // Aprobar una compra colgaba de "Asignar tareas a otros". Nunca debió:
+      // son dos cosas sin relación, y alcanzaba con que alguien pudiera
+      // repartir trabajo para que además se aprobara sus propios pedidos. El
+      // módulo entero se apoya en que quien pide no compra y quien compra no
+      // aprueba; un permiso prestado de otra cosa no sostiene eso.
+      { id: "compras.aprobar", label: "Dar el visto a una compra", nota: "Aprobar o devolver lo que piden de obra. Separado a propósito de comprar: quien pide no compra y quien compra no aprueba" },
       { id: "compras.gestionar", label: "Comprar y facturar", nota: "Concretar la compra, subir la factura y asignarla a su rubro. Quien pide no compra" },
       { id: "facturas.registrar", label: "Registrar facturas y gastos" },
       { id: "planillas.cerrar", label: "Cerrar una planilla" },
@@ -68,6 +74,7 @@ export const POR_DEFECTO = {
   assistant: {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": true,
+    "compras.aprobar": false,
     "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
     "fondos.ver": true, "proveedores.ver": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
@@ -80,6 +87,7 @@ export const POR_DEFECTO = {
   gerente: {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
+    "compras.aprobar": true,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "fondos.ver": true, "proveedores.ver": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
@@ -95,6 +103,7 @@ export const POR_DEFECTO = {
   arquitecto: {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
+    "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
     "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": true, "presupuestos.crear": true,
@@ -108,6 +117,7 @@ export const POR_DEFECTO = {
   arquitecto_jr: {
     "tareas.ver": true, "libro.ver": false, "observaciones.ver": true,
     "compras.ver": false, "compras.gestionar": false,
+    "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
@@ -123,6 +133,7 @@ export const POR_DEFECTO = {
   conductor: {
     "tareas.ver": false, "libro.ver": false, "observaciones.ver": false,
     "compras.ver": false, "compras.gestionar": false,
+    "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": false, "presupuestos.crear": false,
@@ -138,6 +149,7 @@ export const POR_DEFECTO = {
   residente: {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
+    "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
     "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": true, "presupuestos.crear": false,

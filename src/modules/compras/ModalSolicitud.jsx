@@ -99,7 +99,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [pago, setPago] = useState({ monto: "" });
 
   const gestionaCompras = puede("compras.gestionar");
-  const apruebo = puede("tareas.asignar") || currentUser?.role === "owner";
+  // Su propio permiso, no prestado de "asignar tareas": el módulo se apoya en
+  // que quien pide no compra y quien compra no aprueba.
+  const apruebo = puede("compras.aprobar");
   const esMia = !editando || viva.solicitante_id === currentUser.id;
   const estado = viva?.estado || "borrador";
   const e = ESTADOS[estado] || ESTADOS.borrador;
@@ -594,11 +596,19 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             obliga a hacerlo pasar otra vez por la aprobación. */}
         {puedeEditar && <Button variant="outline" onClick={soloGuardar} disabled={ocupado}>Guardar</Button>}
 
-        {editando && estado === "pendiente_aprobacion" && apruebo && (
+        {/* Nadie da el visto a su propio pedido, ni con el permiso puesto: eso
+            lo sube un escalón, al Director. Pedir y aprobar en el mismo clic
+            vacía de sentido al paso de la aprobación. */}
+        {editando && estado === "pendiente_aprobacion" && apruebo && (!esMia || currentUser?.role === "owner") && (
           <>
             <Button variant="primary" onClick={aprobar} disabled={ocupado}><Check size={13} /> Aprobar</Button>
             <Button variant="outline" onClick={devolver} disabled={ocupado}><X size={13} /> Devolver</Button>
           </>
+        )}
+        {editando && estado === "pendiente_aprobacion" && apruebo && esMia && currentUser?.role !== "owner" && (
+          <span style={{ fontSize: 11.5, color: colors.muted, alignSelf: "center" }}>
+            Lo pediste vos: el visto lo da el Director.
+          </span>
         )}
 
         {editando && estado === "aprobada" && gestionaCompras && (

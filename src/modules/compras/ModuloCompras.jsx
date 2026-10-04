@@ -32,7 +32,10 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
 
   const gestionaCompras = puede("compras.gestionar");
   const esDirector = currentUser?.role === "owner";
-  const apruebo = puede("tareas.asignar") || esDirector;
+  // Aprobar tiene su propio permiso. Antes colgaba de "Asignar tareas a
+  // otros", así que cualquiera que pudiera repartir trabajo se aprobaba
+  // también sus propios pedidos — justo lo que el módulo existe para impedir.
+  const apruebo = puede("compras.aprobar");
   // Quien compra, quien aprueba y el Director miran todas: es su trabajo. El
   // resto ve lo suyo y lo de sus obras — la regla vive en compras.js.
   //
