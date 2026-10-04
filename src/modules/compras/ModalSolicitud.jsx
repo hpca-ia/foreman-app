@@ -145,7 +145,17 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // entero —la descripción editable, subir cotizaciones, la fecha, bodega— le
   // hace buscar sus tres botones entre quince campos que no va a tocar, y la
   // decisión que vino a tomar queda escondida en el medio.
-  const modoVisto = editando && estado === "pendiente_aprobacion" && apruebo && !esMia;
+  // Si el pedido no es tuyo, no ves su formulario: ves lo que se pidió.
+  //
+  // Vale en cualquier paso, no solo mientras espera el visto. Un pedido
+  // devuelto, uno ya aprobado, uno comprado: en todos, lo que se pidió es de
+  // quien lo pidió. Al que mira le sirve leerlo de un vistazo, y quince campos
+  // grises son más difíciles de leer que cuatro líneas.
+  const soloMiro = editando && !esMia;
+  // La pantalla de decisión: además, los dos botones y nada más.
+  const modoVisto = soloMiro && estado === "pendiente_aprobacion" && apruebo;
+  // Los papeles los sube quien pide y quien compra. El que da el visto mira.
+  const puedeSubirPapeles = esMia || gestionaCompras;
   const puedeEditarImputacion = (esMia && !congelada) || apruebo || gestionaCompras;
   const puedeEditar = puedeEditarPedido || puedeEditarImputacion;
   // Mover el pedido de proyecto es otra cosa, y solo gerencia o compras: si lo
@@ -367,7 +377,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       {editando && <LineaDePasos s={viva} />}
 
       <div style={{ display: "grid", gap: 10 }}>
-        {modoVisto && (
+        {soloMiro && (
           <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: "11px 12px", display: "grid", gap: 7 }}>
             <div style={{ fontSize: 14.5, fontWeight: 700, color: colors.ink, lineHeight: 1.35 }}>
               {viva.urgente && <span style={{ color: colors.danger, fontSize: 10, fontWeight: 700, marginRight: 6 }}>URGENTE</span>}
@@ -385,7 +395,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           </div>
         )}
 
-        {!modoVisto && (
+        {!soloMiro && (
         <div>
           <label style={lbl}>PROYECTO</label>
           <select value={form.lead_id ?? ""} disabled={!puedeMover} style={mini}
@@ -405,14 +415,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         </div>
         )}
 
-        {!modoVisto && (<div>
+        {!soloMiro && (<div>
           <label style={lbl}>QUÉ HACE FALTA</label>
           <input value={form.descripcion || ""} onChange={ev => inp("descripcion", ev.target.value)}
             placeholder="Ej: 200 sacos de cemento, o contratar el vidriado" style={mini}
             disabled={!puedeEditarPedido} />
         </div>)}
 
-        {!modoVisto && (<div>
+        {!soloMiro && (<div>
           <label style={lbl}>PARA QUÉ</label>
           <textarea value={form.justificacion || ""} onChange={ev => inp("justificacion", ev.target.value)} rows={2}
             placeholder="En qué se va a usar y por qué ahora" style={{ ...mini, resize: "vertical" }}
@@ -500,7 +510,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           )}
         </div>
 
-        {!modoVisto && (<div>
+        {!soloMiro && (<div>
           <label style={lbl}>QUÉ CLASE DE PEDIDO ES</label>
           {/* Decide si el pedido pasa por bodega. Un servicio no entra a
               ninguna bodega, y pedirle a alguien que "reciba" el alquiler de
@@ -522,7 +532,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           </div>
         </div>)}
 
-        {!modoVisto && (<div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
+        {!soloMiro && (<div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
           <div>
             <label style={lbl}>SE NECESITA PARA</label>
             <input type="date" value={form.necesita_para || ""} onChange={ev => inp("necesita_para", ev.target.value)}
@@ -552,7 +562,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           )}
 
           <label style={lbl}>
-            {modoVisto ? "COTIZACIONES · ELEGÍ CON CUÁL SE COMPRA" : "PROFORMAS"}
+            {soloMiro ? "COTIZACIONES" : "PROFORMAS"}
             {proformas.length ? ` · ${proformas.length}` : ""}
           </label>
           {proformas.map(a => {
@@ -609,7 +619,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               vaciaban el botón volvía a quedar gris: se leía como que no dejaba
               subir una segunda cotización. Ahora se suben las tres seguidas y se
               les pone nombre y precio en su fila. */}
-          {!modoVisto && (<button onClick={() => proformaRef.current?.click()} disabled={subiendo}
+          {puedeSubirPapeles && (<button onClick={() => proformaRef.current?.click()} disabled={subiendo}
             style={{ width: "100%", marginTop: proformas.length ? 6 : 0, background: colors.bg,
               border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "9px", color: colors.inkSoft,
               fontSize: 12, cursor: "pointer", fontFamily: colors.font,
@@ -633,8 +643,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             }} />
           {avisoPapel && <div style={{ fontSize: 11, color: colors.danger, marginTop: 4 }}>{avisoPapel}</div>}
 
-          {!modoVisto && <label style={{ ...lbl, marginTop: 12, display: "block" }}>ANEXOS · el plano, la foto, la especificación</label>}
-          {modoVisto ? null : verAnexos && viva ? (
+          {puedeSubirPapeles && <label style={{ ...lbl, marginTop: 12, display: "block" }}>ANEXOS · el plano, la foto, la especificación</label>}
+          {!puedeSubirPapeles ? null : verAnexos && viva ? (
             <InlineFiles taskId={`compra-${viva.id}`} />
           ) : (
             <button onClick={async () => { const s = await asegurarSolicitud(); if (s) setVerAnexos(true); }}
