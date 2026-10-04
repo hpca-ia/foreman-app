@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { sincronizarCapitulos } from "./sincronizarCapitulos";
+import PanelFondos from "./PanelFondos";
 import Button from "../../components/ui/Button";
 import { fmt, calcularControl, agrupar, totalesObra } from "./calculos";
 import TablaControl from "./TablaControl";
@@ -140,6 +141,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>
+        <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
@@ -207,6 +209,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
               currentUser={currentUser} puede={puede} onCambio={cargar} />
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
+          {tab === "fondos" && (
+            <PanelFondos obra={obra} planillas={planillas} facturas={facturas} currentUser={currentUser} puede={puede} />
+          )}
+
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (

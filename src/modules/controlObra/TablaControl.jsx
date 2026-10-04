@@ -92,6 +92,15 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     {g.codigo && <span style={{ opacity: 0.6 }}>{g.codigo}</span>}
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.capitulo}</span>
                     <span style={{ fontWeight: 400, opacity: 0.7 }}>({g.rubros.length})</span>
+                    {/* Esto se gastó sin estar contratado: salarios, oficina,
+                        logística. Que se vea distinto es el punto. */}
+                    {g.sinPresupuesto && (
+                      <span title="Gasto sin presupuesto: no estaba contratado, por eso el saldo va en negativo"
+                        style={{ background: colors.warningSoft, color: colors.warning, borderRadius: 10,
+                          padding: "1px 7px", fontSize: 9, fontWeight: 600, flexShrink: 0 }}>
+                        sin presupuesto
+                      </span>
+                    )}
                     {g.cruzaCapitulos && (
                       <span title={`Esta agrupación toca ${g.capitulos.length} capítulos: ${g.capitulos.join(", ")}. El gasto que se le asigne se reparte entre ellos a prorrata.`}
                         style={{ display: "flex", alignItems: "center", gap: 3, background: colors.warningSoft, color: colors.warning, borderRadius: 10, padding: "1px 7px", fontSize: 9, fontWeight: 600, flexShrink: 0 }}>
@@ -109,7 +118,8 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     title={pedido ? `Quedan $${fmt(g.saldo)} sin contar lo comprometido; contándolo, $${fmt(libre)}` : undefined}>
                     ${fmt(g.saldo)}
                   </span>
-                  <span style={{ textAlign: "right" }}>{(g.pct * 100).toFixed(0)}%</span>
+                  {/* El avance es contra algo: sin presupuesto no hay contra qué. */}
+                  <span style={{ textAlign: "right" }}>{g.base > 0 ? `${(g.pct * 100).toFixed(0)}%` : "—"}</span>
                 </div>
 
                 {abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14}

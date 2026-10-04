@@ -66,8 +66,12 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     rubrosDe.get(r.actividad_id).push(r);
   });
 
-  // Plata asignada a una actividad que no tiene rubros: no hay dónde repartirla.
+  // Plata asignada a una agrupación sin rubros. Antes se perdía en un total
+  // suelto; ahora se guarda por agrupación, porque las agrupaciones extras
+  // —salarios, oficina, logística— no tienen rubros NUNCA y es justamente
+  // donde vive ese gasto.
   let sinRepartir = 0;
+  const porActividad = {};
 
   asignaciones.forEach(a => {
     const num = planillaDeFactura[a.factura_id];
@@ -83,7 +87,15 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
       return;
     }
     const destino = rubrosDe.get(a.obra_actividad_id) || [];
-    if (!destino.length) { sinRepartir += n(a.monto); return; }
+    if (!destino.length) {
+      const id = a.obra_actividad_id;
+      if (id != null) {
+        if (!porActividad[id]) porActividad[id] = { anterior: 0, periodo: 0 };
+        porActividad[id][campo] += n(a.monto);
+      }
+      sinRepartir += n(a.monto);
+      return;
+    }
     // Con un solo rubro no hay nada que repartir: el monto es exacto.
     const reparte = destino.length > 1;
     repartirProporcional(a.monto, destino).forEach((parte, i) => {
@@ -102,6 +114,7 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   });
 
   porRubro._sinRepartir = sinRepartir;
+  porRubro._porActividad = porActividad;
   return porRubro;
 }
 
@@ -113,6 +126,7 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
  * @param actividades filas de obra_actividades (solo para modo actividad)
  */
 const SIN_CAPITULO = "SIN CAPÍTULO";
+const FUERA_DE_PRESUPUESTO = "GASTOS SIN PRESUPUESTO";
 const SIN_ACTIVIDAD = "SIN AGRUPAR";
 
 /**
@@ -204,12 +218,54 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
       if (acc.estimado) g.estimado = true;
     });
 
+  // Una agrupación sin rubros no salía de ningún lado —los grupos se armaban
+  // leyendo rubros—, así que las extras eran invisibles justo cuando tenían
+  // gasto. Se agregan con presupuesto cero: el saldo arranca en negativo
+  // apenas entra el primer gasto, y eso no es un descuadre, es el dato.
+  const sueltos = porRubro._porActividad || {};
+  if (porActividad) {
+    actividades.forEach(a => {
+      const clave = `a${a.id}`;
+      if (mapa.has(clave)) return;
+      const acc = sueltos[a.id] || { anterior: 0, periodo: 0 };
+      mapa.set(clave, {
+        clave, capitulo: a.nombre, codigo: a.codigo || "", capitulo_orden: a.orden ?? 9999,
+        capitulos: new Set(), rubros: [],
+        base: 0, anterior: acc.anterior, periodo: acc.periodo,
+        acumulado: acc.anterior + acc.periodo, saldo: -(acc.anterior + acc.periodo),
+        pct: 0, estimado: false, extra: !!a.extra,
+      });
+    });
+  } else {
+    // En la vista por capítulos ese gasto tampoco tiene dónde caer —no es de
+    // ningún capítulo del contrato—, y si no se muestra, los totales de arriba
+    // cambian según qué vista esté puesta. Va en un bloque aparte, que además
+    // es la lectura honesta: esto se gastó sin estar contratado.
+    const fuera = Object.values(sueltos).reduce(
+      (t, x) => ({ anterior: t.anterior + x.anterior, periodo: t.periodo + x.periodo }),
+      { anterior: 0, periodo: 0 });
+    if (fuera.anterior || fuera.periodo) {
+      mapa.set(FUERA_DE_PRESUPUESTO, {
+        clave: FUERA_DE_PRESUPUESTO, capitulo: FUERA_DE_PRESUPUESTO, codigo: "", capitulo_orden: 9998,
+        capitulos: new Set(), rubros: [],
+        base: 0, anterior: fuera.anterior, periodo: fuera.periodo,
+        acumulado: fuera.anterior + fuera.periodo, saldo: -(fuera.anterior + fuera.periodo),
+        pct: 0, estimado: false, extra: true,
+      });
+    }
+  }
+
   const grupos = [...mapa.values()];
   grupos.forEach(g => {
     g.pct = g.base > 0 ? g.acumulado / g.base : 0;
     // Una actividad que cruza capítulos es la única que vuelve estimado el
     // número contractual del capítulo: se marca para poder partirla.
     g.cruzaCapitulos = porActividad && g.capitulos.size > 1;
+    // Sin presupuesto no hay porcentaje de avance: el avance es contra algo.
+    g.sinPresupuesto = g.base === 0 && g.acumulado !== 0;
+    if (porActividad && g.extra === undefined) {
+      g.extra = !!dic.get(Number(String(g.clave).slice(1)))?.extra;
+    }
     g.capitulos = [...g.capitulos];
   });
   const sinAsignar = porActividad ? SIN_ACTIVIDAD : SIN_CAPITULO;
