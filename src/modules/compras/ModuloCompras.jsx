@@ -114,9 +114,22 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
   }));
 
   const abiertas = visibles.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
-  const base = filtro === "mias" ? abiertas.filter(meToca)
-    : filtro === "abiertas" ? abiertas
-    : visibles;
+  // Las cuatro preguntas que uno se hace todos los días, y "todas" para el
+  // resto. Antes "aprobadas" y "pagadas" había que buscarlas en la lista.
+  //
+  // Pagada no sale de `estado` sino de `pagado_at`: pagar no es un paso del
+  // flujo —se paga antes, durante o después de recibir—, así que una compra
+  // pagada puede estar en cualquier estado y aun así es lo que uno busca
+  // cuando pregunta "¿qué ya pagamos?".
+  const CUADROS = [
+    { id: "mias",      label: "Me toca a mí", filtra: s => ABIERTAS.concat("borrador").includes(s.estado) && meToca(s) },
+    { id: "abiertas",  label: "Abiertas",     filtra: s => ABIERTAS.includes(s.estado) || s.estado === "borrador" },
+    { id: "aprobadas", label: "Aprobadas",    filtra: s => s.estado === "aprobada" },
+    { id: "pagadas",   label: "Pagadas",      filtra: s => !!s.pagado_at },
+    { id: "todas",     label: "Todas",        filtra: () => true },
+  ];
+  const cuadro = CUADROS.find(c => c.id === filtro) || CUADROS[0];
+  const base = visibles.filter(cuadro.filtra);
   // El estado y el buscador se aplican encima, no en vez de: "aprobadas de
   // Disensa por más de 500" es una sola pregunta, no tres pantallas.
   const porEstado = estadoF ? base.filter(s => s.estado === estadoF) : base;
@@ -124,6 +137,10 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
   const sumaListas = sumar(listas);
 
   const pendientesMias = abiertas.filter(meToca).length;
+  // Los estados que quedan por mirar dentro de lo elegido. Los que ya son un
+  // cuadro de arriba no se repiten acá: dos fichas que hacen lo mismo en la
+  // misma pantalla obligan a preguntarse en qué se diferencian.
+  const YA_ARRIBA = ["aprobada"];
 
   const fila = { display: "grid", gridTemplateColumns: "minmax(160px,2fr) minmax(110px,1fr) 130px 90px", gap: 10, alignItems: "center", padding: "10px 12px", borderTop: `1px solid ${colors.neutralSoft}`, cursor: "pointer" };
 
@@ -158,7 +175,9 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
       )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {[["mias", "Me toca a mí", pendientesMias], ["abiertas", "Abiertas", abiertas.length], ["todas", "Todas", visibles.length]].map(([id, label, n]) => {
+        {CUADROS.map(c => {
+          const id = c.id, label = c.label;
+          const n = id === "mias" ? pendientesMias : visibles.filter(c.filtra).length;
           const activo = filtro === id;
           return (
             <button key={id} onClick={() => setFiltro(id)}
@@ -176,6 +195,7 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
       {base.length > 0 && (
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
           {Object.entries(ESTADOS)
+            .filter(([id]) => !YA_ARRIBA.includes(id))
             .map(([id, e]) => [id, e, base.filter(s => s.estado === id).length])
             .filter(([, , n]) => n > 0)
             .map(([id, e, n]) => {
