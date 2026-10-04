@@ -32,6 +32,12 @@ export const GRUPOS_PERMISOS = [
     // los dos primeros ya los contesta Ajustes → Proyectos.
     permisos: [
       { id: "tareas.todas", label: "Las tareas de todos", nota: "Si no, solo las suyas. También le abre todos los proyectos" },
+      // Las dos pestañas de plata dentro de Control de Obra. Entrar a la obra
+      // no es lo mismo que ver con qué plata se hace: un residente controla el
+      // avance de su obra sin tener por qué saber cuánto anticipó el cliente
+      // ni cuánto se le debe a cada proveedor.
+      { id: "fondos.ver", label: "La caja del proyecto", nota: "Dentro de Control de Obra: cuánto anticipó el cliente, cuánto queda y en qué planilla se quedó corta. Apagado, esa pestaña no existe para esa persona" },
+      { id: "proveedores.ver", label: "A quién le debemos", nota: "Dentro de Control de Obra: lo pagado y lo pendiente por proveedor. Apagado, no ve la pestaña" },
     ],
   },
   {
@@ -63,6 +69,7 @@ export const POR_DEFECTO = {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": true,
     "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
+    "fondos.ver": true, "proveedores.ver": true,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.crear": true,
     "facturas.registrar": true, "planillas.cerrar": true,
@@ -74,6 +81,7 @@ export const POR_DEFECTO = {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
+    "fondos.ver": true, "proveedores.ver": true,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": true, "planillas.cerrar": true,
@@ -88,6 +96,7 @@ export const POR_DEFECTO = {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
+    "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
@@ -100,6 +109,7 @@ export const POR_DEFECTO = {
     "tareas.ver": true, "libro.ver": false, "observaciones.ver": true,
     "compras.ver": false, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
@@ -114,6 +124,7 @@ export const POR_DEFECTO = {
     "tareas.ver": false, "libro.ver": false, "observaciones.ver": false,
     "compras.ver": false, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": false, "obras.crear": false,
     "facturas.registrar": false, "planillas.cerrar": false,
@@ -128,6 +139,7 @@ export const POR_DEFECTO = {
     "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "fondos.ver": false, "proveedores.ver": false,
     "presupuestos.ver": true, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.crear": false,
     "facturas.registrar": true, "planillas.cerrar": false,

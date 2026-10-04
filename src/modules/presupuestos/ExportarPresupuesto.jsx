@@ -220,7 +220,8 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     try {
       const imagen = logo ? await logoParaPDF(logo.url) : null;
       if (logo && !imagen) setError("El logo no cargó: el PDF salió sin logo.");
-      pdfPresupuesto({ ...opciones, logo: imagen }).save(nombreArchivo("pdf"));
+      const doc = await pdfPresupuesto({ ...opciones, logo: imagen });
+      doc.save(nombreArchivo("pdf"));
       recordarEleccion();
     } catch (e) {
       setError("No se pudo armar el PDF: " + e.message);

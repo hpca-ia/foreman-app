@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { sincronizarCapitulos } from "./sincronizarCapitulos";
-import PanelFondos from "./PanelFondos";
 import Button from "../../components/ui/Button";
 import { fmt, calcularControl, agrupar, totalesObra } from "./calculos";
 import TablaControl from "./TablaControl";
@@ -15,8 +14,15 @@ import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
-import PanelProveedores from "./PanelProveedores";
 import { comprometidoPorGrupo } from "./calculos";
+
+// Las dos pantallas de plata bajan aparte. No es solo peso: quien no tiene el
+// permiso no descarga el código, así que no hay forma de llegar a esa pantalla
+// escribiendo una URL o tocando un estado desde la consola. Esconder un botón
+// es cortesía; no mandar el código es la cerradura.
+const PanelFondos = lazy(() => import("./PanelFondos"));
+const PanelProveedores = lazy(() => import("./PanelProveedores"));
+const Cargando = () => <div style={{ textAlign: "center", color: colors.muted, padding: "30px 0", fontSize: 12.5 }}>Cargando…</div>;
 
 export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   // La obra no tiene nombre propio: se llama como su proyecto, y el
@@ -104,6 +110,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   const comprometido = comprometidoPorGrupo(solicitudes, rubros);
   const totales = totalesObra(grupos);
 
+  // Las dos pantallas de plata. El Director siempre; los demás, si se lo
+  // prendieron. `puede` ya devuelve true para el Director por código.
+  const vePlata = puede ? puede("proveedores.ver") : true;
+  const veCaja = puede ? puede("fondos.ver") : true;
+
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
 
   return (
@@ -140,8 +151,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
-        <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>
-        <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>
+        {/* Entrar a la obra no es lo mismo que ver con qué plata se hace: un
+            residente controla el avance sin tener por qué saber cuánto
+            anticipó el cliente ni cuánto se le debe a cada proveedor. */}
+        {vePlata && <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>}
+        {veCaja && <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>}
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
@@ -201,16 +215,20 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar} />
           )}
-          {tab === "proveedores" && (
-            <PanelProveedores obra={obra} facturas={facturas} currentUser={currentUser} puede={puede} onCambio={cargar} />
+          {tab === "proveedores" && vePlata && (
+            <Suspense fallback={<Cargando />}>
+              <PanelProveedores obra={obra} facturas={facturas} currentUser={currentUser} puede={puede} onCambio={cargar} />
+            </Suspense>
           )}
           {tab === "ordenes" && (
             <PanelOrdenesCambio obra={obra} proyecto={cadena.proyecto} rubros={rubros}
               currentUser={currentUser} puede={puede} onCambio={cargar} />
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
-          {tab === "fondos" && (
-            <PanelFondos obra={obra} planillas={planillas} facturas={facturas} currentUser={currentUser} puede={puede} />
+          {tab === "fondos" && veCaja && (
+            <Suspense fallback={<Cargando />}>
+              <PanelFondos obra={obra} planillas={planillas} facturas={facturas} currentUser={currentUser} puede={puede} />
+            </Suspense>
           )}
 
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}

@@ -14,8 +14,19 @@
 // cantidad y el total del encabezado no alcanzó a recalcularse, el documento
 // igual cuadra consigo mismo.
 
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+// jsPDF y su tabla pesan ~124 KB comprimidos y solo hacen falta cuando
+// alguien exporta. Estaban importados arriba, así que los bajaba TODO el que
+// abría Presupuestos —incluido quien solo entra a mirar un precio—, y además
+// `PasarABase` los arrastraba por usar un helper de tres líneas de este mismo
+// archivo. Ahora se piden cuando se usan. Se guardan en estas dos variables
+// para que los tres `autoTable(doc, …)` de abajo sigan escritos igual.
+let jsPDF, autoTable;
+async function cargarPDF() {
+  if (jsPDF) return;
+  const [pdf, tabla] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+  jsPDF = pdf.jsPDF;
+  autoTable = tabla.default;
+}
 import { money } from "../../lib/exportar";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
 import { etiquetaUnidad } from "../../lib/unidades";
@@ -136,8 +147,9 @@ function tabla(caps, formato, notasRubro = true) {
  * @param firma  { nombre, cargo }: quién firma, escrito a mano
  * @param aceptacion  espacio para que firme el cliente
  */
-export function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
+export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
   titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true }) {
+  await cargarPDF();
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
