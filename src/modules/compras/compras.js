@@ -89,6 +89,7 @@ export async function crearSolicitud(datos, quien) {
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
     capitulo: datos.capitulo || null,
+    clase: datos.clase || "material",
     obra_actividad_id: datos.obra_actividad_id ? Number(datos.obra_actividad_id) : null,
     obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
     monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
@@ -97,7 +98,7 @@ export async function crearSolicitud(datos, quien) {
   let { data, error } = await supabase.from("compras_solicitudes").insert(fila).select().single();
   // Sin la 056 no existen esas tres columnas: la solicitud se crea igual.
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = fila;
+    const { capitulo, clase, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = fila;
     ({ data, error } = await supabase.from("compras_solicitudes").insert(resto).select().single());
   }
   if (error) return { error: falta(error) ? "Falta correr la migración 048." : error.message };
@@ -110,6 +111,7 @@ export async function guardarSolicitud(id, datos) {
     descripcion: datos.descripcion.trim(), justificacion: datos.justificacion?.trim() || null,
     necesita_para: datos.necesita_para || null, urgente: !!datos.urgente,
     capitulo: datos.capitulo || null,
+    clase: datos.clase || "material",
     obra_actividad_id: datos.obra_actividad_id ? Number(datos.obra_actividad_id) : null,
     obra_rubro_id: datos.obra_rubro_id ? Number(datos.obra_rubro_id) : null,
     monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
@@ -117,7 +119,7 @@ export async function guardarSolicitud(id, datos) {
   };
   let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", id);
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = campos;
+    const { capitulo, clase, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = campos;
     ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", id));
   }
   return error ? error.message : null;

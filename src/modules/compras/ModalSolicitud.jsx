@@ -8,6 +8,8 @@ import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
   moverDeProyecto, SIN_PROYECTO, leadDe } from "./compras";
+import PanelBodega from "./PanelBodega";
+import { CLASES_PEDIDO, vaABodega } from "./bodega";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -45,7 +47,9 @@ function LineaDePasos({ s }) {
     { id: "recibido", label: "Recibido",  cuando: s.recibido_at },
     // El ingreso a bodega todavía no tiene módulo: aparece el día que haya
     // algo que mostrar, en vez de prometer un paso que nadie puede dar.
-    ...(s.bodega_at ? [{ id: "bodega", label: "En bodega", cuando: s.bodega_at }] : []),
+    // Bodega solo para material: un servicio no entra a ninguna bodega, y
+    // mostrarle el paso a quien pidió una grúa es pedirle que lo complete.
+    ...((s.clase || "material") === "material" ? [{ id: "bodega", label: "En bodega", cuando: s.bodega_at }] : []),
   ];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 12 }}>
@@ -84,6 +88,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     : {
       lead_id: proyectos.length === 1 ? proyectos[0].id : "",
       descripcion: "", justificacion: "", necesita_para: "", urgente: false,
+      clase: "material",
       capitulo: "", obra_actividad_id: "", obra_rubro_id: "", monto_estimado: "", destino: "",
     });
   const [historial, setHistorial] = useState([]);
@@ -398,6 +403,28 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           )}
         </div>
 
+        <div>
+          <label style={lbl}>QUÉ CLASE DE PEDIDO ES</label>
+          {/* Decide si el pedido pasa por bodega. Un servicio no entra a
+              ninguna bodega, y pedirle a alguien que "reciba" el alquiler de
+              una grúa es enseñarle a apretar un botón sin mirar. */}
+          <div style={{ display: "flex", gap: 6 }}>
+            {CLASES_PEDIDO.map(c => {
+              const puesta = (form.clase || "material") === c.id;
+              return (
+                <button key={c.id} onClick={() => puedeEditar && inp("clase", c.id)} title={c.nota}
+                  style={{ flex: 1, border: `1px solid ${puesta ? colors.brand : colors.border}`, borderRadius: 8,
+                    background: puesta ? colors.brandSoft : "#fff", color: puesta ? colors.brand : colors.inkSoft,
+                    padding: "7px 10px", fontSize: 12, fontWeight: puesta ? 700 : 400, fontFamily: colors.font,
+                    cursor: puedeEditar ? "pointer" : "default", textAlign: "left" }}>
+                  {c.label}
+                  <div style={{ fontSize: 9.5, fontWeight: 400, opacity: 0.8 }}>{c.nota}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
           <div>
             <label style={lbl}>SE NECESITA PARA</label>
@@ -529,6 +556,16 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               <Button variant="outline" onClick={marcarPagada} disabled={ocupado}><Banknote size={13} /> Se pagó</Button>
             </div>
           )
+        )}
+
+        {/* Bodega: desde que se compró hasta que se recibe. Es el único
+            momento en que alguien tiene el material delante. */}
+        {editando && vaABodega(viva) && (estado === "comprada" || estado === "recibida") && (
+          <div>
+            <label style={lbl}>INGRESO A BODEGA</label>
+            <PanelBodega solicitud={viva} rubros={rubros} currentUser={currentUser}
+              onCambio={async () => { setViva(v => ({ ...v, bodega_at: new Date().toISOString() })); onCambio?.(); }} />
+          </div>
         )}
 
         {/* Un comentario acompaña cada paso; al devolver, es obligatorio. */}
