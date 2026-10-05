@@ -14,6 +14,7 @@ import {
 } from "./observaciones";
 import FotosAlVuelo from "./FotosAlVuelo";
 import VisorFotos from "../../components/VisorFotos";
+import PanelAvance from "./PanelAvance";
 
 // Observaciones de obra: lo que se ve en la recorrida y hay que arreglar.
 //
@@ -69,6 +70,10 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
   const [recorridas, setRecorridas] = useState([]);
   const [recorridaSel, setRecorridaSel] = useState(null);
   const [nuevaRec, setNuevaRec] = useState(null);
+  // Las dos caras de la misma obra: lo que está mal y hay que arreglar, y
+  // cómo va. Separadas porque son lo contrario una de la otra, y juntas
+  // porque se miran en la misma visita.
+  const [solapa, setSolapa] = useState("observaciones");
   const [verCerradas, setVerCerradas] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -325,6 +330,24 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
         </div>
       )}
 
+      <div style={{ display: "flex", gap: 4, marginBottom: 12, borderBottom: `1px solid ${colors.border}` }}>
+        {[["observaciones", "Observaciones"], ["avance", "Fotos de avance"]].map(([id, label]) => (
+          <button key={id} onClick={() => setSolapa(id)}
+            style={{ padding: "7px 14px", border: "none", background: "transparent",
+              borderBottom: solapa === id ? `2px solid ${colors.brand}` : "2px solid transparent",
+              color: solapa === id ? colors.brand : colors.inkSoft,
+              fontSize: 12.5, fontWeight: solapa === id ? 600 : 400, cursor: "pointer", fontFamily: colors.font }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {solapa === "avance" && (
+        <PanelAvance lead={lead} currentUser={currentUser} puedeSubir={puedeAnotar} />
+      )}
+
+      {solapa === "observaciones" && (<>
+
       {/* Las vueltas. En la obra nadie anota observaciones sueltas: se camina
           la obra un martes y de ahí salen once, que se discuten juntas y se
           mandan juntas. Elegir una recorrida acá es ponerse en ese día. */}
@@ -573,6 +596,8 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
           if (res.error) { setAviso(res.error); return; }
           await cargar();
         }} />
+
+      </>)}
 
       {/* La foto a pantalla completa, sin salir de FOREMAN. */}
       {mirando && (
