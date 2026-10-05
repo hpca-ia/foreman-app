@@ -8,9 +8,11 @@ import { fmt } from "./calculos";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
+  pedirVisto, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado } from "./pdfOrdenCambio";
+import ModalOrdenCambio from "./ModalOrdenCambio";
 
 // Las órdenes de cambio de una obra.
 //
@@ -49,6 +51,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [invitados, setInvitados] = useState([]);
 
   const puedeEditar = puede?.("obras.crear") !== false;
+  // El visto es del Director y de nadie más: es el que responde por el precio
+  // que sale de la oficina.
+  const esDirector = currentUser?.role === "owner";
 
   const cargar = useCallback(async () => {
     const r = await cargarOrdenes(obra.id);
@@ -118,8 +123,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           </div>
         </div>
         {puedeEditar && (
-          <Button variant="primary" size="sm" onClick={() => setNueva({ titulo: "", justificacion: "", tipo: "", lugar: "Quito", fecha: new Date().toISOString().split("T")[0] })}>
-            <Plus size={13} /> Nueva orden
+          <Button variant="primary" size="sm" onClick={() => setNueva(true)}>
+            <Plus size={13} /> Nueva orden de cambio
           </Button>
         )}
       </div>
@@ -166,7 +171,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       {aviso && <div style={{ fontSize: 12, color: colors.danger, margin: "8px 0" }}>{aviso}</div>}
 
       {/* Una orden nueva: lo mínimo para poder empezar a listar qué cambia. */}
-      {nueva && (
+      {nueva === true && (
+        <ModalOrdenCambio obra={obra} proyecto={proyecto} currentUser={currentUser}
+          onCerrar={() => setNueva(null)}
+          onCreada={async orden => { setNueva(null); await cargar(); setAbierta(orden.id); }} />
+      )}
+
+      {nueva && nueva !== true && (
         <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 14, margin: "10px 0" }}>
           <div style={{ display: "grid", gap: 8 }}>
             <input value={nueva.titulo} onChange={e => setNueva(n => ({ ...n, titulo: e.target.value }))}
@@ -235,6 +246,17 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   {[o.tipo, o.lugar, o.fecha && new Date(`${o.fecha}T12:00:00`).toLocaleDateString("es-EC"),
                     o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
                 </div>
+                {o.visto_at && (
+                  <div style={{ fontSize: 11.5, color: colors.success, marginBottom: 6 }}>
+                    Visto bueno de {o.visto_nombre || "la dirección"} · {new Date(o.visto_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
+                    {o.visto_comentario && <span style={{ color: colors.inkSoft }}> — {o.visto_comentario}</span>}
+                  </div>
+                )}
+                {!o.visto_at && o.visto_pedido_at && (
+                  <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 6 }}>
+                    Esperando el visto del Director desde el {new Date(o.visto_pedido_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
+                  </div>
+                )}
 
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
                   CAPÍTULO I · ARGUMENTOS
@@ -526,9 +548,36 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       <Download size={12} /> {bajando === o.id ? "Armando…" : "PDF"}
                     </Button>
                   )}
+                  {/* Tres caminos distintos y por eso tres botones. Algunos
+                      clientes quieren el papel por su canal; otras órdenes
+                      necesitan el visto antes de que el precio salga de la
+                      oficina —una vez que el cliente lo vio, bajarlo es una
+                      negociación y subirlo es imposible. */}
+                  {puedeEditar && suyas.length > 0 && !o.visto_at && !esDirector && (
+                    <Button variant="outline" size="sm" disabled={ocupado}
+                      onClick={() => hacer(() => pedirVisto(o.id))}>
+                      {o.visto_pedido_at ? "Visto pedido" : "Pedir el visto del Director"}
+                    </Button>
+                  )}
+                  {esDirector && suyas.length > 0 && !o.visto_at && (
+                    <Button variant="primary" size="sm" disabled={ocupado}
+                      onClick={() => {
+                        const c = window.prompt("¿Algo que aclarar antes de que salga? (opcional)", "");
+                        if (c === null) return;
+                        hacer(() => darVisto(o, currentUser, c));
+                      }}>
+                      <Check size={12} /> Dar el visto
+                    </Button>
+                  )}
                   {puedeEditar && suyas.length > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => setMandando({ orden: o, correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email), cuerpo: "" })}>
-                      <Mail size={12} /> Enviar por correo
+                    <Button variant={o.visto_at || esDirector ? "outline" : "secondary"} size="sm"
+                      title={o.visto_at || esDirector ? "" : "Todavía no tiene el visto del Director"}
+                      onClick={() => {
+                        if (!o.visto_at && !esDirector &&
+                          !window.confirm("Esta orden no tiene el visto del Director.\n\nUna vez que el cliente ve el precio, bajarlo es una negociación y subirlo es imposible. ¿Mandarla igual?")) return;
+                        setMandando({ orden: o, correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email), cuerpo: "" });
+                      }}>
+                      <Mail size={12} /> Enviar al cliente
                     </Button>
                   )}
                   {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && (

@@ -80,6 +80,38 @@ export async function crearOrden(obraId, datos, quien) {
   return { orden: data };
 }
 
+/**
+ * El visto del Director, antes de que la orden salga al cliente.
+ *
+ * Quien arma la orden suele ser el residente, y lo que viaja es un precio: una
+ * vez que el cliente lo vio, bajarlo es una negociación y subirlo es
+ * imposible. Ese control existe en la oficina pero vive en un WhatsApp —"¿la
+ * mando?" / "dale"— que seis meses después no encuentra nadie.
+ *
+ * No mueve el estado: `estado` cuenta dónde está la orden frente al CLIENTE, y
+ * meter ahí un paso interno mezcla dos conversaciones en una sola columna.
+ */
+export async function pedirVisto(ordenId) {
+  const { error } = await supabase.from("ordenes_cambio")
+    .update({ visto_pedido_at: new Date().toISOString() }).eq("id", ordenId);
+  return error ? (falta(error) ? "Falta correr la migración 078." : error.message) : null;
+}
+
+export async function darVisto(orden, quien, comentario) {
+  const { error } = await supabase.from("ordenes_cambio").update({
+    visto_at: new Date().toISOString(),
+    visto_por: quien?.id ?? null, visto_nombre: quien?.name || null,
+    visto_comentario: comentario?.trim() || null,
+  }).eq("id", orden.id);
+  return error ? (falta(error) ? "Falta correr la migración 078." : error.message) : null;
+}
+
+export async function quitarVisto(ordenId) {
+  const { error } = await supabase.from("ordenes_cambio")
+    .update({ visto_at: null, visto_por: null, visto_nombre: null, visto_comentario: null }).eq("id", ordenId);
+  return error ? error.message : null;
+}
+
 export async function guardarOrden(id, campos) {
   const { error } = await supabase.from("ordenes_cambio")
     .update({ ...campos, updated_at: new Date().toISOString() }).eq("id", id);
