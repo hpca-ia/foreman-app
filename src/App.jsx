@@ -361,7 +361,20 @@ export default function App() {
   const admin = esAdmin(usuario.role);
   const puede = crearPuede(usuario, permisos, permisosUsuario);
   // Se calcula acá y no antes: `puede` todavía no existe más arriba.
-  const verPipeline = puede("leads.ver") || tienePipeline;
+  //
+  // Decía `puede("leads.ver") || tienePipeline`, y `tienePipeline` es "existe
+  // al menos un proyecto en la oficina". O sea: el permiso no hacía nada y
+  // Pipeline se le mostraba a todo el mundo, siempre. Un arquitecto Jr. veía
+  // el embudo comercial entero —otros clientes, otras obras, en qué etapa está
+  // cada negociación— cuando lo único que le toca es su proyecto.
+  //
+  // Ahora entra quien tiene el permiso de verlos todos, o quien está asignado
+  // a alguno: ahí el módulo le sirve y adentro ve solo el suyo.
+  const asignadoAAlgunLead = Object.values(accesosLead).some(x => {
+    const mio = x?.[usuario.id];
+    return !!(nivelDeArea(mio, "proyecto") || nivelDeArea(mio, "obra"));
+  });
+  const verPipeline = puede("leads.ver") || asignadoAAlgunLead;
   // El nombre del proyecto de una tarea: el del pipeline si viene de ahí, el de
   // Ajustes si no. (Se llamaba a sí misma: al buscar por texto una tarea con
   // proyecto normal, el navegador se quedaba sin pila y la pantalla se caía.)

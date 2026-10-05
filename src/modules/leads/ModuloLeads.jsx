@@ -141,7 +141,15 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // etapa. Antes ganarlo lo mandaba a "cerrados" y desaparecía teniendo
   // actividades pendientes.
   const seFue = l => l.resultado === "perdido" || etapaInfo(l.etapa, catalogo).cierra;
-  const cuantos = t => leads.filter(l => delTunel(l) === t && !seFue(l)).length;
+  // A qué proyectos llega esta persona. Todo lo que se cuenta o se lista en
+  // esta pantalla pasa por acá.
+  const alcanzo = l => !!nivelProyecto(l.id);
+
+  // Las fichas de arriba contaban TODOS los proyectos de la oficina aunque
+  // las listas de abajo ya filtraran por acceso. El resultado era el peor de
+  // los dos mundos: alguien veía "8 en presupuesto" y una lista con uno solo,
+  // y de paso se enteraba de cuántos negocios hay en la casa.
+  const cuantos = t => leads.filter(l => delTunel(l) === t && !seFue(l) && alcanzo(l)).length;
   // Dos llaves distintas y una sola regla, para que no se contradigan:
   //   · "Ver todos los proyectos" decide CUÁNTOS ve.
   //   · El nivel en Ajustes → Proyectos decide QUÉ HACE en cada uno.
@@ -149,7 +157,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // "Sin acceso" en uno gana igual: es una puerta cerrada, no una preferencia.
   // Una sola pregunta: ¿entra a este proyecto? Quien entra a todos los ve
   // todos; el resto, los que le asignaron en Ajustes → Proyectos.
-  const alcanzo = l => !!nivelProyecto(l.id);
   const abiertos = leads.filter(l => enTubo(l) && !seFue(l) && alcanzo(l));
   const cerrados = leads.filter(l => enTubo(l) && seFue(l) && alcanzo(l));
 
@@ -231,7 +238,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           proyectos andando. Cada uno con su cuenta, para saber dónde mirar. */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
         {[["todos", "Todos"], ...Object.entries(TUNELES).map(([id, t]) => [id, t.label])].map(([id, label]) => {
-          const n = id === "todos" ? leads.filter(l => !seFue(l)).length : cuantos(id);
+          const n = id === "todos" ? leads.filter(l => !seFue(l) && alcanzo(l)).length : cuantos(id);
           const activo = tubo === id;
           return (
             <button key={id} onClick={() => { setTubo(id); setEtapaAbierta(null); }}
