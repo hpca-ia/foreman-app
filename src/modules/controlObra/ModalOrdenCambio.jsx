@@ -166,8 +166,8 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
             <div key={i} style={{ display: "grid", gridTemplateColumns: "88px 1fr 58px 70px 90px 26px", gap: 5, marginBottom: 5, alignItems: "center" }}>
               <select value={l.tipo} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, tipo: e.target.value } : x))}
                 style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }}>
-                <option value="aumenta">Agrega</option>
-                <option value="quita">Quita</option>
+                <option value="aumenta">Adición</option>
+                <option value="quita">Reducción</option>
               </select>
               {/* Lo que se quita se ELIGE del presupuesto, no se escribe: es
                   un rubro que ya está contratado, con su cantidad y su precio.
@@ -183,14 +183,14 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
                       cantidad: r?.cantidad ?? 1, precio_unitario: r?.precio_unitario ?? "",
                     } : x));
                   }}>
-                  <option value="">¿Qué rubro se saca?</option>
+                  <option value="">¿Qué rubro se reduce?</option>
                   {rubros.filter(r => !r.anulado_por_oc && (Number(r.total_base) || 0) > 0).map(r => (
                     <option key={r.id} value={r.id}>{r.numero}. {String(r.descripcion || "").slice(0, 70)}</option>
                   ))}
                 </select>
               ) : (
                 <input value={l.descripcion} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, descripcion: e.target.value } : x))}
-                  placeholder="Qué se hace" style={{ ...mini, padding: "6px 8px" }} />
+                  placeholder="Qué se adiciona" style={{ ...mini, padding: "6px 8px" }} />
               )}
               <input value={l.unidad} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, unidad: e.target.value } : x))}
                 placeholder="und" style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }} />
@@ -218,7 +218,7 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
                 cuadro mostraba "AGREGA $0 · QUITA $0 · NETO $465,40": tres
                 números de los cuales uno solo era cierto, que es peor que no
                 mostrar ninguno. */}
-            {[["Agrega", sub.adiciones, colors.brand], ["Quita", sub.reducciones, colors.danger], ["Neto", sub.total, sub.total < 0 ? colors.danger : colors.ink]].map(([k, v, c]) => (
+            {[["Adiciones", sub.adiciones, colors.brand], ["Reducciones", sub.reducciones, colors.danger], ["Mayor valor", sub.total, sub.total < 0 ? colors.danger : colors.ink]].map(([k, v, c]) => (
               <div key={k}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{k.toUpperCase()}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: c }}>

@@ -379,7 +379,12 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 {editable && (
                   <div style={{ background: colors.bg, borderRadius: 8, padding: 9, marginBottom: 8 }}>
                     <div style={{ display: "flex", gap: 5, marginBottom: 6 }}>
-                      {[["aumenta", "Agrega al contrato"], ["quita", "Saca del contrato"]].map(([v, label]) => {
+                      {/* Las mismas palabras que la tabla de arriba y que el
+                          PDF que firma el cliente. Decía "Agrega al contrato"
+                          debajo de una tabla que dice ADICIONES: son lo mismo,
+                          y dos nombres para una cosa en la misma pantalla
+                          hacen dudar de si son dos cosas. */}
+                      {[["aumenta", "Adición"], ["quita", "Reducción"]].map(([v, label]) => {
                         const activo = linea.tipo === v;
                         const c = v === "quita" ? colors.danger : colors.brand;
                         return (
@@ -416,7 +421,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                               } : { ...l, obra_rubro_id: "", rubro_codigo: "" }));
                             }}
                             style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
-                            <option value="">¿Qué rubro se saca del contrato?</option>
+                            <option value="">¿Qué rubro del presupuesto se reduce?</option>
                             {capitulos.map(cap => (
                               <optgroup key={cap} label={cap}>
                                 {rubrosBase.filter(r => (r.capitulo || "SIN CAPÍTULO") === cap).map(r => (
@@ -430,7 +435,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                           {linea.obra_rubro_id && (
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 120px", gap: 6, alignItems: "center" }}>
                               <span style={{ fontSize: 11, color: colors.muted }}>
-                                Se saca {linea.unidad ? `en ${linea.unidad}` : ""} a ${fmt(linea.precio_unitario)} cada uno
+                                Se reduce {linea.unidad ? `en ${linea.unidad}` : ""} a ${fmt(linea.precio_unitario)} cada uno
                               </span>
                               <input type="number" step="0.01" value={linea.cantidad}
                                 onChange={e => setLinea(l => ({ ...l, cantidad: e.target.value }))}
@@ -444,7 +449,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       ) : (
                         <>
                           <input value={linea.descripcion} onChange={e => setLinea(l => ({ ...l, descripcion: e.target.value }))}
-                            placeholder="Qué se agrega" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
+                            placeholder="Qué se adiciona al contrato" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
                           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.8fr 1fr", gap: 6 }}>
                             <select value={linea.capitulo} onChange={e => setLinea(l => ({ ...l, capitulo: e.target.value }))}
                               style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
