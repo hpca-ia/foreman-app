@@ -27,7 +27,7 @@ export default function PanelAvance({ lead, currentUser, puedeSubir = true }) {
   const [sinTabla, setSinTabla] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [nuevas, setNuevas] = useState([]);
-  const [datos, setDatos] = useState({ fecha: new Date().toISOString().split("T")[0], titulo: "" });
+  const [datos, setDatos] = useState({ fecha: new Date().toISOString().split("T")[0], titulo: "", descripcion: "" });
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState("");
   const [mirando, setMirando] = useState(null);
@@ -61,13 +61,16 @@ export default function PanelAvance({ lead, currentUser, puedeSubir = true }) {
       const { error: e2 } = await supabase.from("obra_avance_fotos").insert({
         lead_id: lead.id, obra_id: lead.obra_id || null,
         fecha: datos.fecha, titulo: datos.titulo?.trim() || null,
+        // Lo que el cliente va a leer debajo de la foto. Una foto de una losa
+        // sin una línea que diga qué se está mirando es una foto de cemento.
+        descripcion: datos.descripcion?.trim() || null,
         storage_path: ruta, visible_cliente: true,
         subido_por: currentUser?.id ?? null, subido_nombre: currentUser?.name || null,
       });
       if (e2) { setError(e2.message); break; }
     }
     setSubiendo(false);
-    setNuevas([]); setDatos(d => ({ ...d, titulo: "" }));
+    setNuevas([]); setDatos(d => ({ ...d, titulo: "", descripcion: "" }));
     await cargar();
   }
 
@@ -100,7 +103,7 @@ export default function PanelAvance({ lead, currentUser, puedeSubir = true }) {
   });
 
   const tira = fotos.filter(f => enlaces[f.id])
-    .map(f => ({ ...f, url: enlaces[f.id], titulo: f.titulo || dia(f.fecha) }));
+    .map(f => ({ ...f, url: enlaces[f.id], titulo: f.titulo || dia(f.fecha), descripcion: f.descripcion }));
 
   return (
     <div>
@@ -114,6 +117,9 @@ export default function PanelAvance({ lead, currentUser, puedeSubir = true }) {
                 <input value={datos.titulo} onChange={e => setDatos(d => ({ ...d, titulo: e.target.value }))}
                   placeholder="¿De qué son? Ej: losa del segundo piso" style={inputStyle} />
               </div>
+              <textarea value={datos.descripcion} onChange={e => setDatos(d => ({ ...d, descripcion: e.target.value }))} rows={2}
+                placeholder="Qué se está viendo, para el cliente. Ej: terminó el encofrado, la semana que viene se hormigona"
+                style={{ ...inputStyle, resize: "vertical" }} />
               <div style={{ display: "flex", gap: 6 }}>
                 <Button variant="primary" size="sm" onClick={subir} disabled={subiendo}>
                   {subiendo ? "Subiendo…" : `Guardar ${nuevas.length} ${nuevas.length === 1 ? "foto" : "fotos"}`}
@@ -160,9 +166,10 @@ export default function PanelAvance({ lead, currentUser, puedeSubir = true }) {
                     </button>
                   </div>
                 )}
-                {f.titulo && (
-                  <div style={{ fontSize: 10, color: colors.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {f.titulo}
+                {(f.titulo || f.descripcion) && (
+                  <div style={{ fontSize: 10, color: colors.muted, marginTop: 2, lineHeight: 1.4 }}>
+                    {f.titulo && <div style={{ color: colors.inkSoft, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.titulo}</div>}
+                    {f.descripcion && <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.descripcion}</div>}
                   </div>
                 )}
               </div>

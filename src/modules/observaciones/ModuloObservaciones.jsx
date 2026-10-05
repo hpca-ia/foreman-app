@@ -15,6 +15,7 @@ import {
 import FotosAlVuelo from "./FotosAlVuelo";
 import VisorFotos from "../../components/VisorFotos";
 import PanelAvance from "./PanelAvance";
+import PanelEntregas from "./PanelEntregas";
 
 // Observaciones de obra: lo que se ve en la recorrida y hay que arreglar.
 //
@@ -331,7 +332,7 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
       )}
 
       <div style={{ display: "flex", gap: 4, marginBottom: 12, borderBottom: `1px solid ${colors.border}` }}>
-        {[["observaciones", "Observaciones"], ["avance", "Fotos de avance"]].map(([id, label]) => (
+        {[["observaciones", "Observaciones"], ["avance", "Fotos de avance"], ["entregas", "Para aprobar"]].map(([id, label]) => (
           <button key={id} onClick={() => setSolapa(id)}
             style={{ padding: "7px 14px", border: "none", background: "transparent",
               borderBottom: solapa === id ? `2px solid ${colors.brand}` : "2px solid transparent",
@@ -344,6 +345,10 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
 
       {solapa === "avance" && (
         <PanelAvance lead={lead} currentUser={currentUser} puedeSubir={puedeAnotar} />
+      )}
+
+      {solapa === "entregas" && (
+        <PanelEntregas lead={lead} currentUser={currentUser} puedeEnviar={editable} />
       )}
 
       {solapa === "observaciones" && (<>
