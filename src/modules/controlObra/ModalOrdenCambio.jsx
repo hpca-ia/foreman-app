@@ -218,10 +218,11 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
                 cuadro mostraba "AGREGA $0 · QUITA $0 · NETO $465,40": tres
                 números de los cuales uno solo era cierto, que es peor que no
                 mostrar ninguno. */}
-            {[["Adiciones", sub.adiciones, colors.brand], ["Reducciones", sub.reducciones, colors.danger], [sub.total < 0 ? "El contrato baja" : "El contrato sube", sub.total, sub.total < 0 ? colors.danger : colors.ink]].map(([k, v, c]) => (
+            {[["Adiciones", sub.adiciones, colors.brand], ["Reducciones", sub.reducciones, colors.danger], ["Total", sub.total, sub.total < 0 ? colors.success : colors.danger]].map(([k, v, c]) => (
               <div key={k}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{k.toUpperCase()}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: c }}>
+                  {k === "Total" ? (Number(v) < 0 ? "−" : "+") : ""}
                   ${(Math.abs(Number(v) || 0)).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
