@@ -45,6 +45,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [abierta, setAbierta] = useState(null);
   const [nueva, setNueva] = useState(null);       // { titulo, justificacion, solicitado_por }
   const [linea, setLinea] = useState(LINEA_VACIA);
+  // Los dos campos que casi nunca se usan, plegados hasta que alguien los pida.
+  const [verDetalle, setVerDetalle] = useState(false);
   const [mandando, setMandando] = useState(null); // { orden, correos, cuerpo }
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -389,58 +391,94 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         );
                       })}
                     </div>
+                    {/* Cada modo pide lo suyo y nada más. Antes se mostraban
+                        los ocho campos siempre: con "Agrega" aparecía un
+                        desplegable para elegir un rubro del presupuesto, y con
+                        "Saca" aparecían capítulo, especificación y precio para
+                        escribir a mano. La mitad de la pantalla no aplicaba
+                        nunca, y eso obliga a decidir campo por campo cuál
+                        ignorar. */}
                     <div style={{ display: "grid", gap: 6 }}>
-                      {/* La base es el PRESUPUESTO, rubro por rubro: una
-                          reducción saca un rubro que existe y un adicional casi
-                          siempre modifica uno. Elegirlo trae su descripción, su
-                          unidad y su precio, que es contra lo que se compara
-                          después; escribirlos de nuevo es como se descuadra. */}
-                      <select value={linea.obra_rubro_id || ""}
-                        onChange={e => {
-                          const r = rubrosBase.find(x => String(x.id) === e.target.value);
-                          setLinea(l => (r ? {
-                            ...l, obra_rubro_id: r.id, rubro_codigo: String(r.numero ?? r.codigo ?? ""),
-                            capitulo: r.capitulo || "", descripcion: r.descripcion || "",
-                            unidad: r.unidad || "", precio_unitario: r.precio_unitario ?? "",
-                          } : { ...l, obra_rubro_id: "", rubro_codigo: "" }));
-                        }}
-                        style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
-                        <option value="">Rubro nuevo — no está en el presupuesto</option>
-                        {capitulos.map(cap => (
-                          <optgroup key={cap} label={cap}>
-                            {rubrosBase.filter(r => (r.capitulo || "SIN CAPÍTULO") === cap).map(r => (
-                              <option key={r.id} value={r.id}>
-                                {r.numero}. {r.descripcion}{r.unidad ? ` · ${r.unidad}` : ""} · ${fmt(r.precio_unitario)}
-                              </option>
+                      {linea.tipo === "quita" ? (
+                        <>
+                          {/* Sacar es sacar algo que está: se elige, no se
+                              escribe. Con la descripción tipeada a mano el
+                              monto no coincide con lo contratado y la resta no
+                              cuadra contra el presupuesto. */}
+                          <select value={linea.obra_rubro_id || ""}
+                            onChange={e => {
+                              const r = rubrosBase.find(x => String(x.id) === e.target.value);
+                              setLinea(l => (r ? {
+                                ...l, obra_rubro_id: r.id, rubro_codigo: String(r.numero ?? r.codigo ?? ""),
+                                capitulo: r.capitulo || "", descripcion: r.descripcion || "",
+                                unidad: r.unidad || "", precio_unitario: r.precio_unitario ?? "",
+                                cantidad: r.cantidad ?? 1,
+                              } : { ...l, obra_rubro_id: "", rubro_codigo: "" }));
+                            }}
+                            style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+                            <option value="">¿Qué rubro se saca del contrato?</option>
+                            {capitulos.map(cap => (
+                              <optgroup key={cap} label={cap}>
+                                {rubrosBase.filter(r => (r.capitulo || "SIN CAPÍTULO") === cap).map(r => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.numero}. {r.descripcion}{r.unidad ? ` · ${r.unidad}` : ""} · ${fmt(r.precio_unitario)}
+                                  </option>
+                                ))}
+                              </optgroup>
                             ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                      <input value={linea.descripcion} onChange={e => setLinea(l => ({ ...l, descripcion: e.target.value }))}
-                        placeholder="Qué se agrega o se saca" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                        <input value={linea.especificacion} onChange={e => setLinea(l => ({ ...l, especificacion: e.target.value }))}
-                          placeholder="Especificación" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
-                        <input value={linea.rubro_codigo} onChange={e => setLinea(l => ({ ...l, rubro_codigo: e.target.value }))}
-                          placeholder="N° de rubro" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.8fr 1fr", gap: 6 }}>
-                        {/* De un rubro del presupuesto viene solo; de uno nuevo
-                            hay que decir a qué capítulo va, o el control no sabe
-                            dónde ponerlo. */}
-                        <select value={linea.capitulo} onChange={e => setLinea(l => ({ ...l, capitulo: e.target.value }))}
-                          disabled={!!linea.obra_rubro_id}
-                          style={{ ...inputStyle, padding: "7px 9px", fontSize: 12, opacity: linea.obra_rubro_id ? 0.6 : 1 }}>
-                          <option value="">Capítulo…</option>
-                          {capitulos.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                        <input value={linea.unidad} onChange={e => setLinea(l => ({ ...l, unidad: e.target.value }))}
-                          placeholder="u, m2" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
-                        <input type="number" step="0.01" value={linea.cantidad} onChange={e => setLinea(l => ({ ...l, cantidad: e.target.value }))}
-                          placeholder="Cant" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
-                        <input type="number" step="0.01" value={linea.precio_unitario} onChange={e => setLinea(l => ({ ...l, precio_unitario: e.target.value }))}
-                          placeholder="P.U." style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
-                      </div>
+                          </select>
+                          {linea.obra_rubro_id && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 120px", gap: 6, alignItems: "center" }}>
+                              <span style={{ fontSize: 11, color: colors.muted }}>
+                                Se saca {linea.unidad ? `en ${linea.unidad}` : ""} a ${fmt(linea.precio_unitario)} cada uno
+                              </span>
+                              <input type="number" step="0.01" value={linea.cantidad}
+                                onChange={e => setLinea(l => ({ ...l, cantidad: e.target.value }))}
+                                placeholder="Cuánto" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                              <span style={{ fontSize: 13, fontWeight: 700, color: colors.danger, textAlign: "right" }}>
+                                −${fmt((Number(linea.cantidad) || 0) * (Number(linea.precio_unitario) || 0))}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <input value={linea.descripcion} onChange={e => setLinea(l => ({ ...l, descripcion: e.target.value }))}
+                            placeholder="Qué se agrega" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
+                          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.8fr 1fr", gap: 6 }}>
+                            <select value={linea.capitulo} onChange={e => setLinea(l => ({ ...l, capitulo: e.target.value }))}
+                              style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+                              <option value="">¿A qué capítulo va?</option>
+                              {capitulos.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <input value={linea.unidad} onChange={e => setLinea(l => ({ ...l, unidad: e.target.value }))}
+                              placeholder="u, m2" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                            <input type="number" step="0.01" value={linea.cantidad} onChange={e => setLinea(l => ({ ...l, cantidad: e.target.value }))}
+                              placeholder="Cant" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                            <input type="number" step="0.01" value={linea.precio_unitario} onChange={e => setLinea(l => ({ ...l, precio_unitario: e.target.value }))}
+                              placeholder="P.U." style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                          </div>
+                          {/* Lo que casi nunca hace falta, fuera del camino.
+                              La especificación la usa una obra de cada diez y
+                              el número de rubro lo pone el control: tenerlos
+                              siempre a la vista hacía que el formulario
+                              pareciera pedir ocho cosas para agregar una. */}
+                          {verDetalle ? (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                              <input value={linea.especificacion} onChange={e => setLinea(l => ({ ...l, especificacion: e.target.value }))}
+                                placeholder="Especificación técnica" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                              <input value={linea.rubro_codigo} onChange={e => setLinea(l => ({ ...l, rubro_codigo: e.target.value }))}
+                                placeholder="N° de rubro" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
+                            </div>
+                          ) : (
+                            <button onClick={() => setVerDetalle(true)}
+                              style={{ background: "none", border: "none", padding: 0, color: colors.muted, fontSize: 11,
+                                cursor: "pointer", fontFamily: colors.font, textAlign: "left" }}>
+                              + especificación y número de rubro
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
                     {linea.obra_rubro_id && (() => {
                       const r = rubrosBase.find(x => String(x.id) === String(linea.obra_rubro_id));
@@ -456,7 +494,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     })()}
 
                     <Button variant="outline" size="sm" style={{ marginTop: 7 }}
-                      disabled={ocupado || !linea.descripcion.trim() || !Number(linea.precio_unitario)}
+                      disabled={ocupado || !linea.descripcion.trim() || !Number(linea.precio_unitario)
+                        || (linea.tipo === "quita" && !linea.obra_rubro_id)}
                       onClick={async () => {
                         const r = await agregarLinea(o.id, { ...linea, orden: suyas.length }, suyas);
                         if (r.error) { setAviso(r.error); return; }
