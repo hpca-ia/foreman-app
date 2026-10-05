@@ -19,5 +19,17 @@ async function pedir(cuerpo) {
 /** Le manda su clave nueva. Solo sirve en el momento del cambio. */
 export const avisarPinNuevo = (usuarioId, pin) => pedir({ usuarioId, tipo: "pin", pin });
 
+/**
+ * Mandarle un correo de prueba, para saber si llega.
+ *
+ * El envío falla en silencio de maneras que no se distinguen desde adentro: el
+ * usuario no tiene correo cargado, la dirección está mal escrita, el servicio
+ * de envío rechaza el dominio, o llega y cae en spam. Las cuatro se ven igual
+ * —"no me llegó"— y sin una prueba hay que adivinar cuál es.
+ *
+ * Esto manda uno vacío y devuelve textualmente lo que contestó el servidor.
+ */
+export const probarCorreo = usuarioId => pedir({ usuarioId, tipo: "prueba" });
+
 /** Le cuenta qué cambió de lo que puede hacer. */
 export const avisarPermisos = (usuarioId, rol, cambios) => pedir({ usuarioId, tipo: "permisos", rol, cambios });

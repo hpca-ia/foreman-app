@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Pencil, X, Building2, Upload, KeyRound } from "lucide-react";
+import { Pencil, X, Building2, Upload, KeyRound, Send } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import EtapasCatalogo from "./EtapasCatalogo";
 import { BUCKET_PUBLICO } from "../lib/archivos";
@@ -7,7 +7,7 @@ import { saveToStorage } from "../lib/storage";
 import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
 import EmparejarProyectos from "./EmparejarProyectos";
 import { esAdmin } from "../lib/roles";
-import { avisarPinNuevo, avisarPermisos } from "../lib/avisoCuenta";
+import { avisarPinNuevo, avisarPermisos, probarCorreo } from "../lib/avisoCuenta";
 import { rolInfo } from "../lib/roles";
 import Modal from "./ui/Modal";
 import Avatar from "./ui/Avatar";
@@ -260,7 +260,13 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
               <Avatar name={u.name} size={36} color={u.color || "#0F3D3E"} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{u.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{rolInfo(u.role).label}{u.email ? ` · ${u.email}` : ""}{!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {rolInfo(u.role).label}{u.email ? ` · ${u.email}` : ""}
+                  {!u.pin_hash && !u.pin && <span style={{ color: "var(--warning)" }}> · sin PIN</span>}
+                  {/* La causa más común de "no me llegó el correo", y hasta hoy
+                      invisible: no hay dirección cargada. */}
+                  {!u.email && <span style={{ color: "var(--warning)" }}> · sin correo</span>}
+                </div>
                 {/* Cuándo entró por última vez. La sesión dura siete días, así
                     que "tiene sesión" no dice nada: esto sí dice si lo usa. */}
                 {cuandoEntro(u.ultima_conexion) && (
@@ -271,6 +277,22 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
               {usuario?.role === "owner" && u.role !== "owner" && (
                 <button onClick={() => setPermisosDe(permisosDe === u.id ? null : u.id)} style={iconBtn} title="Permisos de esta persona">
                   <KeyRound size={13} />
+                </button>
+              )}
+              {/* Probar el envío. "No me llegó" tiene cuatro causas que desde
+                  adentro se ven iguales —sin dirección, dirección mal escrita,
+                  el servicio rechazó el dominio, o llegó y cayó en spam— y sin
+                  una prueba hay que adivinar cuál. Esto dice textualmente lo
+                  que contestó el servidor. */}
+              {u.email && (
+                <button title="Mandarle un correo de prueba" style={iconBtn}
+                  onClick={async () => {
+                    setErrEquipo(""); setOkEquipo(`Mandando a ${u.email}…`);
+                    const r = await probarCorreo(u.id);
+                    if (r?.ok) { setOkEquipo(`Salió a ${r.enviadoA}. Si no aparece en unos minutos, mirá en spam: el correo viene de otro servidor con tu mismo dominio y Gmail lo filtra seguido.`); }
+                    else { setOkEquipo(""); setErrEquipo(`No salió: ${r?.error || "sin detalle"}`); }
+                  }}>
+                  <Send size={13} />
                 </button>
               )}
               <button onClick={() => setEditU({ ...u, pin: "", proyectos: projects.filter(p => (p.miembros || []).includes(u.id)).map(p => p.id) })} style={iconBtn}><Pencil size={13} /></button>

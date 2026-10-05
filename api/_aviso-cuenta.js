@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   if (!(await sesionValida(req))) return res.status(401).json({ error: "Tu sesión venció. Vuelve a entrar a FOREMAN." });
 
   const { usuarioId, tipo, pin, rol, cambios = [] } = req.body || {};
-  if (!usuarioId || !["pin", "permisos"].includes(tipo)) return res.status(400).json({ error: "Faltan datos" });
+  if (!usuarioId || !["pin", "permisos", "prueba"].includes(tipo)) return res.status(400).json({ error: "Faltan datos" });
 
   try {
     // Quien pide el aviso tiene que ser admin: si no, cualquiera mandaría
@@ -40,7 +40,13 @@ export default async function handler(req, res) {
     if (!usuario.email) return res.status(200).json({ ok: false, error: `${usuario.nombre} no tiene correo cargado en Ajustes.` });
 
     const linea = t => `<div style="font-size:13px;color:#374151;padding:3px 0">• ${esc(t)}</div>`;
-    const cuerpo = tipo === "pin"
+    const cuerpo = tipo === "prueba"
+      ? `<div style="font-size:14px;color:#111827">Si estás leyendo esto, los correos de FOREMAN te llegan bien.</div>
+         <div style="font-size:13px;color:#374151;margin-top:10px;line-height:1.5">
+           Lo mandó alguien desde Ajustes para comprobarlo. No hace falta que hagas nada.
+           Si lo encontraste en spam, marcalo como correo deseado: así los avisos de tareas y compras llegan donde tienen que llegar.
+         </div>`
+      : tipo === "pin"
       ? `<div style="font-size:14px;color:#111827">Tu clave de FOREMAN cambió.</div>
          <div style="margin:14px 0;padding:14px 16px;background:#F7F7F5;border:1px solid #E4E4E1;border-radius:8px;text-align:center">
            <div style="font-size:11px;color:#6B7280;letter-spacing:1px">TU NUEVA CLAVE</div>
@@ -57,9 +63,10 @@ export default async function handler(req, res) {
 
     const r = await enviarCorreo({
       to: usuario.email,
-      subject: tipo === "pin" ? "Tu nueva clave de FOREMAN" : "Cambiaron tus permisos en FOREMAN",
+      subject: tipo === "prueba" ? "Prueba de correo de FOREMAN"
+        : tipo === "pin" ? "Tu nueva clave de FOREMAN" : "Cambiaron tus permisos en FOREMAN",
       html: plantilla({
-        titulo: tipo === "pin" ? "Tu nueva clave" : "Tus permisos",
+        titulo: tipo === "prueba" ? "Prueba de correo" : tipo === "pin" ? "Tu nueva clave" : "Tus permisos",
         subtitulo: usuario.nombre,
         cuerpo,
       }),

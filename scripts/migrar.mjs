@@ -52,7 +52,26 @@ function cargarEnv() {
 const archivos = () => readdirSync(DIR).filter(n => n.endsWith(".sql")).sort();
 const version = n => n.split("_")[0];
 
-const url = cargarEnv();
+/**
+ * La clave, escapada para que entre en una URL.
+ *
+ * Supabase genera claves con símbolos, y una clave con `#`, `/` o `?` adentro
+ * de una URL parte la URL en otro lado del que uno cree: el cliente termina
+ * mandando media clave y el error que vuelve es "password authentication
+ * failed", que manda a buscar el problema donde no está.
+ *
+ * Se re-escapa siempre: si ya venía escapada, `decodeURIComponent` la deja
+ * igual y volver a escaparla da lo mismo.
+ */
+function arreglarClave(u) {
+  const m = String(u).match(/^(postgres(?:ql)?:\/\/)([^:/@]+):([^@]*)@(.+)$/);
+  if (!m) return u;
+  let clave = m[3];
+  try { clave = decodeURIComponent(clave); } catch { /* venía sin escapar */ }
+  return `${m[1]}${m[2]}:${encodeURIComponent(clave)}@${m[4]}`;
+}
+
+const url = arreglarClave(cargarEnv() || "") || cargarEnv();
 if (!url) {
   console.log("Falta la conexión a la base.\n");
   console.log("En Supabase → Project Settings → Database → Connection string → URI,");
@@ -67,7 +86,18 @@ const marcarHasta = (process.argv.find(a => a.startsWith("--marcar-hasta")) || "
   || (process.argv[process.argv.indexOf("--marcar-hasta") + 1] || "").match(/^\d+$/)?.[0];
 
 const cliente = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
-await cliente.connect();
+try {
+  await cliente.connect();
+} catch (e) {
+  // Un volcado de pg con treinta líneas de pila no le dice a nadie qué hacer.
+  console.log("No pude entrar a la base.\n");
+  if (/PEGA_ACA/.test(url)) console.log("El archivo .env.local todavía tiene el texto de ejemplo: falta pegar la clave.");
+  else if (/password authentication/i.test(e.message)) console.log("La contraseña no es la correcta.\nEn Supabase → Connect → Session pooler podés generar una nueva con \"Reset database password\".");
+  else if (/ENOTFOUND|EAI_AGAIN/i.test(e.message)) console.log("No se encontró el servidor. Revisá que la dirección sea la del Session pooler.");
+  else if (/ETIMEDOUT|ECONNREFUSED/i.test(e.message)) console.log("No contesta. Si elegiste \"Direct connection\", probá con \"Session pooler\": la directa necesita IPv6.");
+  else console.log(e.message);
+  process.exit(1);
+}
 
 await cliente.query(`
   create table if not exists public.foreman_migraciones (
