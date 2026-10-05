@@ -533,8 +533,16 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
 
                 {/* El resultado, que es lo que se conversa con el cliente. */}
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
+                  {/* El término de contrato primero en criollo y después como
+                      se llama. "Mayor valor del contrato" es lo correcto y es
+                      lo que va en el acta, pero quien lo lee en la pantalla se
+                      pregunta qué quiere decir — y el que se lo pregunta no
+                      vuelve a preguntar, se queda con la duda. */}
                   <span style={{ flex: 1, fontSize: 12, color: colors.inkSoft, fontWeight: 600 }}>
-                    {total < 0 ? "Menor valor del contrato" : "Mayor valor del contrato"}
+                    {total < 0 ? "El contrato baja" : "El contrato sube"}
+                    <span style={{ fontWeight: 400, color: colors.muted }}>
+                      {total < 0 ? " · menor valor del contrato" : " · mayor valor del contrato"}
+                    </span>
                   </span>
                   <span style={{ fontSize: 16, fontWeight: 700, color: total < 0 ? colors.danger : colors.brand }}>
                     {total < 0 ? "−" : ""}${fmt(Math.abs(total))}
