@@ -14,7 +14,7 @@
 // POST { usuarioId, tipo: "pin" | "permisos", pin?, rol?, cambios?: [texto] }
 
 import { sesionValida, usuarioDeToken, rest } from "./_supabase.js";
-import { enviarCorreo, plantilla, esc } from "./_correo.js";
+import { enviarCorreo, plantilla, esc, estadoDeCorreo } from "./_correo.js";
 import { json } from "./_pipeline.js";
 
 const ADMIN = ["owner", "admin", "director", "assistant"];
@@ -71,7 +71,24 @@ export default async function handler(req, res) {
         cuerpo,
       }),
     });
-    res.status(200).json(r.ok ? { ok: true, enviadoA: usuario.email } : { ok: false, error: r.error });
+    if (!r.ok) return res.status(200).json({ ok: false, error: r.error });
+
+    // En la prueba se vuelve a preguntar qué pasó: mandar devuelve 200 aunque
+    // la dirección esté suprimida y el correo se descarte. Decir "salió" ahí
+    // es exactamente lo que hizo que dos personas estuvieran semanas sin
+    // recibir nada y nadie supiera por qué.
+    if (tipo === "prueba") {
+      await new Promise(x => setTimeout(x, 1800));
+      const estado = await estadoDeCorreo(r.id);
+      if (estado && /suppress|bounce|complain|fail/i.test(String(estado))) {
+        return res.status(200).json({
+          ok: false,
+          error: `Resend lo descartó (${estado}). Esa dirección está en su lista de suprimidos —pasa cuando rebotó alguna vez o cuando alguien marcó un correo como spam—. Se saca en resend.com → Emails → Suppressions.`,
+        });
+      }
+      return res.status(200).json({ ok: true, enviadoA: usuario.email, estado: estado || "aceptado" });
+    }
+    res.status(200).json({ ok: true, enviadoA: usuario.email });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

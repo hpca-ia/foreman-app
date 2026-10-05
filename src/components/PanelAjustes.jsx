@@ -289,7 +289,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
                   onClick={async () => {
                     setErrEquipo(""); setOkEquipo(`Mandando a ${u.email}…`);
                     const r = await probarCorreo(u.id);
-                    if (r?.ok) { setOkEquipo(`Salió a ${r.enviadoA}. Si no aparece en unos minutos, mirá en spam: el correo viene de otro servidor con tu mismo dominio y Gmail lo filtra seguido.`); }
+                    if (r?.ok) { setOkEquipo(`Salió a ${r.enviadoA}${r.estado && r.estado !== "aceptado" ? ` · ${r.estado}` : ""}. Si no aparece en unos minutos, que mire en spam y lo marque "No es spam".`); }
                     else { setOkEquipo(""); setErrEquipo(`No salió: ${r?.error || "sin detalle"}`); }
                   }}>
                   <Send size={13} />

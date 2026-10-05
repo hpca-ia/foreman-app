@@ -16,6 +16,33 @@ export async function enviarCorreo({ to, subject, html, adjuntos }) {
   return r.ok ? { ok: true, enviadoA: destinatarios, id: datos.id } : { ok: false, error: datos.message || "Resend rechazó el envío" };
 }
 
+/**
+ * Qué pasó de verdad con un correo ya mandado.
+ *
+ * Mandar devuelve un identificador y un 200 aunque el correo NO vaya a salir:
+ * si la dirección está en la lista de suprimidos —porque rebotó alguna vez o
+ * porque alguien marcó un aviso como spam—, Resend acepta el pedido y después
+ * lo descarta. Visto desde acá, un envío que nunca ocurre se ve idéntico a uno
+ * entregado.
+ *
+ * Eso convirtió un diagnóstico en una mentira: el botón de prueba decía "salió"
+ * mientras los correos de dos personas se descartaban en silencio hacía
+ * semanas. Por eso se vuelve a preguntar.
+ */
+export async function estadoDeCorreo(id) {
+  if (!id || !process.env.RESEND_API_KEY) return null;
+  try {
+    const r = await fetch(`https://api.resend.com/emails/${id}`, {
+      headers: { Authorization: "Bearer " + process.env.RESEND_API_KEY },
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d?.last_event || d?.status || null;
+  } catch {
+    return null;
+  }
+}
+
 const escapar = t => String(t ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
 
 /** El mismo marco para todos los correos: título, cuerpo y una nota al pie. */
