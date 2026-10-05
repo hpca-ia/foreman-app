@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link2, Copy, Check, Power } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -30,6 +30,28 @@ function nuevaLlave() {
 export default function EnlaceDelCliente({ lead, onCambio }) {
   const [token, setToken] = useState(lead?.portal_token || null);
   const [activo, setActivo] = useState(!!lead?.portal_activo);
+  const [leido, setLeido] = useState(false);
+
+  // Se relee del proyecto al abrir el panel, y no se confía en lo que vino con
+  // la lista.
+  //
+  // La lista de proyectos se carga una sola vez al entrar al módulo. Si en esa
+  // sesión alguien creó el enlace, la lista sigue diciendo que no hay, y
+  // "Crear el enlace" generaría una llave nueva encima de la que el cliente ya
+  // tiene guardada: el enlace que le mandamos ayer deja de abrir y nadie se
+  // entera hasta que llama. Una lectura de una fila evita eso.
+  useEffect(() => {
+    let vivo = true;
+    if (!lead?.id) return;
+    supabase.from("leads").select("portal_token,portal_activo").eq("id", lead.id).maybeSingle()
+      .then(({ data, error }) => {
+        if (!vivo || error) { if (vivo) setLeido(true); return; }
+        setToken(data?.portal_token || null);
+        setActivo(!!data?.portal_activo);
+        setLeido(true);
+      });
+    return () => { vivo = false; };
+  }, [lead?.id]);
   const [copiado, setCopiado] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState("");
@@ -49,6 +71,9 @@ export default function EnlaceDelCliente({ lead, onCambio }) {
   }
 
   async function prender() {
+    // Nunca pisar una llave que ya existe: la que se mandó tiene que seguir
+    // abriendo. Cambiarla es una decisión aparte, con su confirmación.
+    if (!leido) return;
     const llave = token || nuevaLlave();
     if (await guardar({ portal_token: llave, portal_activo: true })) { setToken(llave); setActivo(true); }
   }
@@ -68,6 +93,15 @@ export default function EnlaceDelCliente({ lead, onCambio }) {
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2200);
     });
+  }
+
+  // Hasta no saber si ya hay una llave, no se ofrece crear ninguna.
+  if (!leido) {
+    return (
+      <div style={{ fontSize: 12, color: colors.muted, padding: "10px 0", marginBottom: 12 }}>
+        Viendo si este proyecto ya tiene enlace…
+      </div>
+    );
   }
 
   if (!activo) {
