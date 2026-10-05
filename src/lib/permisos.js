@@ -21,6 +21,7 @@ export const GRUPOS_PERMISOS = [
       // otro — el cliente y el residente miran el cronograma; la
       // administración, el control.
       { id: "cronograma.ver", label: "Cronograma", nota: "Qué se hace, cuándo, y qué no puede esperar. Con la ruta crítica marcada" },
+      { id: "manoObra.ver", label: "Mano de obra", nota: "La asistencia del día y el rol de pagos. El residente anota, la administración paga" },
       // Colgados de Control de Obra y no en un grupo aparte: es donde uno los
       // va a buscar. Entrar a la obra no es lo mismo que ver con qué plata se
       // hace — un residente controla el avance de su obra sin tener por qué
@@ -85,6 +86,7 @@ export const POR_DEFECTO = {
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.crear": true,
     "cronograma.ver": true,
+    "manoObra.ver": true,
     "facturas.registrar": true, "planillas.cerrar": true,
     "cajaChica.ver": true, "leads.ver": true, "leads.editar": false,
     "ajustes.ver": true,
@@ -99,6 +101,7 @@ export const POR_DEFECTO = {
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.crear": false,
     "cronograma.ver": true,
+    "manoObra.ver": true,
     "facturas.registrar": true, "planillas.cerrar": true,
     "cajaChica.ver": true, "leads.ver": true, "leads.editar": false,
     "ajustes.ver": false,
@@ -116,6 +119,7 @@ export const POR_DEFECTO = {
     "presupuestos.ver": true, "presupuestos.crear": true,
     "controlObra.ver": true, "obras.crear": false,
     "cronograma.ver": true,
+    "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": false, "leads.ver": false, "leads.editar": true,
     "ajustes.ver": false,
@@ -131,6 +135,7 @@ export const POR_DEFECTO = {
     "presupuestos.ver": true, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.crear": false,
     "cronograma.ver": true,
+    "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": false, "leads.ver": false, "leads.editar": false,
     "ajustes.ver": false,
@@ -148,6 +153,7 @@ export const POR_DEFECTO = {
     "presupuestos.ver": false, "presupuestos.crear": false,
     "controlObra.ver": false, "obras.crear": false,
     "cronograma.ver": false,
+    "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": true, "leads.ver": false, "leads.editar": false,
     "ajustes.ver": false,
@@ -165,6 +171,7 @@ export const POR_DEFECTO = {
     "presupuestos.ver": true, "presupuestos.crear": false,
     "controlObra.ver": true, "obras.crear": false,
     "cronograma.ver": true,
+    "manoObra.ver": true,
     "facturas.registrar": true, "planillas.cerrar": false,
     "cajaChica.ver": true, "leads.ver": false, "leads.editar": false,
     "ajustes.ver": false,

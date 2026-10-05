@@ -63,6 +63,7 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
       puede("controlObra.ver") && item("controlObra", "Control de Obra", HardHat, "Obra"),
       puede("libro.ver") && item("libro", "Libro de Obra", BookOpen, "Libro"),
       puede("cronograma.ver") && item("cronograma", "Cronograma", GanttChartSquare, "Crono."),
+      puede("manoObra.ver") && item("manoObra", "Mano de obra", HardHat, "Personal"),
       puede("observaciones.ver") && item("observaciones", "Observaciones", ClipboardList, "Observ."),
       puede("compras.ver") && item("compras", "Compras", ShoppingCart),
       puede("cajaChica.ver") && item("cajaChica", "Caja Chica", PiggyBank, "Caja"),

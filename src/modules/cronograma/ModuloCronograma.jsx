@@ -4,7 +4,6 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { esProyecto } from "../leads/tubo";
 import { calendario, calcular, aFecha, claveFecha } from "./cpm";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
@@ -39,9 +38,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [uniendo, setUniendo] = useState(null);
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio").order("nombre")
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead").order("nombre")
       .then(({ data }) => {
-        setProyectos((data || []).filter(l => l.resultado !== "perdido" && esProyecto(l)));
+        // Todo lo que no se perdió, en curso o no.
+        //
+        // Un cronograma no es solo de una obra en marcha: el presupuesto se
+        // entrega CON un cronograma, y ese se arma antes de que el proyecto
+        // sea proyecto. Filtrar por "ganado" dejaba vacía la pantalla
+        // justamente cuando más se la necesita — cuando hay que mostrarle al
+        // cliente en cuánto tiempo se le hace la obra.
+        setProyectos((data || []).filter(l => l.resultado !== "perdido"));
         setCargando(false);
       });
   }, []);
@@ -74,15 +80,26 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         </div>
         {!mios.length ? <Centro>No tenés proyectos asignados.</Centro> : (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-            {mios.map(p => (
-              <button key={p.id} onClick={() => setLead(p)}
-                style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
-                  padding: "11px 13px", background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`,
-                  cursor: "pointer", fontFamily: colors.font, fontSize: 13.5, color: colors.ink }}>
-                <GanttChartSquare size={15} color={colors.muted} />
-                {p.nombre}
-              </button>
-            ))}
+            {mios.map(p => {
+              const enCurso = p.resultado === "ganado" || !!p.obra_id;
+              return (
+                <button key={p.id} onClick={() => setLead(p)}
+                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
+                    padding: "11px 13px", background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`,
+                    cursor: "pointer", fontFamily: colors.font, fontSize: 13.5, color: colors.ink }}>
+                  <GanttChartSquare size={15} color={enCurso ? colors.brand : colors.muted} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.nombre}
+                  </span>
+                  {/* Un cronograma para cotizar no es lo mismo que uno de una
+                      obra en marcha, y conviene no confundirlos de un vistazo. */}
+                  {!enCurso && (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, background: colors.neutralSoft,
+                      borderRadius: 10, padding: "1px 7px", flexShrink: 0 }}>PARA COTIZAR</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
