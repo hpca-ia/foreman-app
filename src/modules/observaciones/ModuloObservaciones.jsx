@@ -16,6 +16,7 @@ import FotosAlVuelo from "./FotosAlVuelo";
 import VisorFotos from "../../components/VisorFotos";
 import PanelAvance from "./PanelAvance";
 import PanelEntregas from "./PanelEntregas";
+import EnlaceDelCliente from "./EnlaceDelCliente";
 
 // Observaciones de obra: lo que se ve en la recorrida y hay que arreglar.
 //
@@ -105,10 +106,18 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
   // proyectos no cambia mientras se camina una obra.
   const [todos, setTodos] = useState([]);
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id").order("nombre").then(({ data }) => {
+    // El token del portal viene con el proyecto: sin él, el panel del enlace
+    // no sabría si ya existe uno y ofrecería crear otro encima del que el
+    // cliente ya tiene guardado.
+    (async () => {
+      const campos = "id,nombre,tunel,resultado,obra_id";
+      let { data, error } = await supabase.from("leads").select(`${campos},portal_token,portal_activo`).order("nombre");
+      // Sin la 073 no existen esas dos columnas. Un módulo entero en blanco
+      // por una migración que falta es peor que no tener el enlace todavía.
+      if (error) ({ data } = await supabase.from("leads").select(campos).order("nombre"));
       setTodos((data || []).filter(l => l.resultado !== "perdido" && esProyecto(l)));
       setCargando(false);
-    });
+    })();
   }, []);
   // Se filtra al pintar: los accesos llegan después que la lista.
   useEffect(() => { setProyectos(todos.filter(l => !!nivelProyecto(l.id))); }, [todos, nivelProyecto]);
@@ -348,7 +357,11 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
       )}
 
       {solapa === "entregas" && (
-        <PanelEntregas lead={lead} currentUser={currentUser} puedeEnviar={editable} />
+        <>
+          {/* Dónde está el acceso del cliente: acá, junto a lo que va a ver. */}
+          {editable && <EnlaceDelCliente lead={lead} onCambio={() => {}} />}
+          <PanelEntregas lead={lead} currentUser={currentUser} puedeEnviar={editable} />
+        </>
       )}
 
       {solapa === "observaciones" && (<>
