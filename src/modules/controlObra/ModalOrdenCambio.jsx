@@ -26,11 +26,13 @@ const VACIA = {
   titulo: "", tipo: "", lugar: "Quito", fecha: new Date().toISOString().split("T")[0],
   emitido_por: "", justificacion: "", soportes: "", impacto_cronograma: "", dias_impacto: "",
 };
-const LINEA = () => ({ tipo: "agrega", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "" });
+// "aumenta" y no "agrega": es el valor que guarda la base y el que suma
+// `subtotales`. Con el otro, la vista previa de totales mostraba cero.
+const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "", obra_rubro_id: "" });
 
 const TIPOS = ["Requerimiento del cliente", "Vicio oculto", "Cambio de especificación", "Error de proyecto", "Condición del terreno"];
 
-export default function ModalOrdenCambio({ obra, proyecto, currentUser, onCerrar, onCreada }) {
+export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentUser, onCerrar, onCreada }) {
   const [f, setF] = useState(VACIA);
   const [lineas, setLineas] = useState([LINEA()]);
   const [fotos, setFotos] = useState([]);
@@ -66,6 +68,7 @@ export default function ModalOrdenCambio({ obra, proyecto, currentUser, onCerrar
     for (const l of conMonto) {
       const linea = {
         tipo: l.tipo,
+        obra_rubro_id: l.obra_rubro_id ? Number(l.obra_rubro_id) : null,
         item: siguienteItem(puestas, l.tipo),
         descripcion: l.descripcion.trim(),
         unidad: l.unidad || "u",
@@ -163,11 +166,32 @@ export default function ModalOrdenCambio({ obra, proyecto, currentUser, onCerrar
             <div key={i} style={{ display: "grid", gridTemplateColumns: "88px 1fr 58px 70px 90px 26px", gap: 5, marginBottom: 5, alignItems: "center" }}>
               <select value={l.tipo} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, tipo: e.target.value } : x))}
                 style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }}>
-                <option value="agrega">Agrega</option>
+                <option value="aumenta">Agrega</option>
                 <option value="quita">Quita</option>
               </select>
-              <input value={l.descripcion} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, descripcion: e.target.value } : x))}
-                placeholder="Qué se hace" style={{ ...mini, padding: "6px 8px" }} />
+              {/* Lo que se quita se ELIGE del presupuesto, no se escribe: es
+                  un rubro que ya está contratado, con su cantidad y su precio.
+                  Tipeado a mano se pone otro número y la resta no cuadra con
+                  lo que de verdad sale del contrato. */}
+              {l.tipo === "quita" ? (
+                <select value={l.obra_rubro_id || ""} style={{ ...mini, padding: "6px 8px" }}
+                  onChange={e => {
+                    const r = rubros.find(x => String(x.id) === e.target.value);
+                    setLineas(v => v.map((x, k) => k === i ? {
+                      ...x, obra_rubro_id: e.target.value,
+                      descripcion: r?.descripcion || "", unidad: r?.unidad || "u",
+                      cantidad: r?.cantidad ?? 1, precio_unitario: r?.precio_unitario ?? "",
+                    } : x));
+                  }}>
+                  <option value="">¿Qué rubro se saca?</option>
+                  {rubros.filter(r => !r.anulado_por_oc && (Number(r.total_base) || 0) > 0).map(r => (
+                    <option key={r.id} value={r.id}>{r.numero}. {String(r.descripcion || "").slice(0, 70)}</option>
+                  ))}
+                </select>
+              ) : (
+                <input value={l.descripcion} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, descripcion: e.target.value } : x))}
+                  placeholder="Qué se hace" style={{ ...mini, padding: "6px 8px" }} />
+              )}
               <input value={l.unidad} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, unidad: e.target.value } : x))}
                 placeholder="und" style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }} />
               <input type="number" step="0.01" value={l.cantidad} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, cantidad: e.target.value } : x))}

@@ -190,6 +190,9 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
   const porActividad = modo === "actividad";
   const dic = new Map(actividades.map(a => [a.id, a]));
 
+  // Un rubro que una orden de cambio sacó del contrato no suma: sigue en la
+  // lista —tachado, con el número de la orden— porque es historia del
+  // presupuesto, pero su plata ya no es parte de lo que hay que hacer.
   const mapa = new Map();
   rubros.slice()
     .sort((a, b) => ((a.capitulo_orden ?? 9999) - (b.capitulo_orden ?? 9999)) || (a.orden - b.orden) || (a.numero - b.numero))
@@ -210,6 +213,7 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
       const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base) };
       g.rubros.push(r);
       g.capitulos.add(r.capitulo || SIN_CAPITULO);
+      if (r.anulado_por_oc) return;      // tachado: se muestra y no cuenta
       g.base += n(r.total_base);
       g.anterior += acc.anterior;
       g.periodo += acc.periodo;

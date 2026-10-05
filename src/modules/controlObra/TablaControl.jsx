@@ -12,11 +12,17 @@ function pctColor(pct, saldo) {
 }
 
 function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
+  // Sacado del contrato por una orden de cambio: se lee tachado y en gris. Que
+  // siga a la vista es el punto — alguien tiene que poder ver que ese trabajo
+  // estaba y ya no está, sin ir a buscar la orden.
+  const fuera = !!r.anulado_por_oc;
   const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: Number(r.total_base) || 0, pct: 0 };
   return (
     <div className="tabla-row"
-      style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: `7px 14px 7px ${sangria}px`, borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center" }}>
-      <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
+      style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: `7px 14px 7px ${sangria}px`, borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center",
+        opacity: fuera ? 0.5 : 1, textDecoration: fuera ? "line-through" : "none" }}>
+      <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        title={fuera ? `${r.descripcion} — sacado del contrato por una orden de cambio` : r.descripcion}>
         <span style={{ color: colors.muted, marginRight: 6 }}>{r.numero}</span>{r.descripcion}
       </span>
       <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{r.unidad}</span>

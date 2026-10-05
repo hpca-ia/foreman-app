@@ -130,6 +130,7 @@ export async function guardarOrden(id, campos) {
  */
 export async function borrarOrden(id) {
   await supabase.from("obra_rubros").delete().eq("orden_cambio_id", id);
+  await supabase.from("obra_rubros").update({ anulado_por_oc: null }).eq("anulado_por_oc", id);
   const { data: fotos } = await supabase.from("orden_cambio_fotos").select("storage_path").eq("orden_id", id);
   const rutas = (fotos || []).map(f => f.storage_path).filter(Boolean);
   if (rutas.length) await supabase.storage.from("task-files").remove(rutas);
@@ -158,6 +159,7 @@ export async function agregarLinea(ordenId, linea, yaPuestas = []) {
     cantidad: Number(linea.cantidad) || 0,
     precio_unitario: Number(linea.precio_unitario) || 0,
     orden: Number(linea.orden) || 0,
+    obra_rubro_id: linea.obra_rubro_id || null,
   }).select().single();
   return error ? { error: error.message } : { linea: data };
 }
@@ -182,10 +184,29 @@ export async function borrarLinea(id) {
  * Lo que la orden agrega entra como rubro de la obra con `origen` en
  * 'orden_cambio', para que se vea aparte de la línea base y se pueda decir en
  * cualquier momento "esto es contrato y esto se pactó después". Lo que quita
- * entra igual, en negativo: sacar un rubro de la base borraría la historia.
+ * Lo que QUITA, cuando apunta a un rubro del presupuesto, no entra como una
+ * línea negativa al final: marca ese rubro como anulado. El neto es el mismo,
+ * pero la lectura cambia por completo —antes el rubro seguía ahí con su monto
+ * entero, como si se fuera a hacer, y alguien lo planificaba y lo compraba. La
+ * plata estaba corregida; la obra no se enteraba.
+ *
+ * Se marca y no se borra: un presupuesto es un documento con historia, y el
+ * día que alguien pregunte por qué no se hizo la mampostería del eje 4, la
+ * respuesta tiene que estar a la vista con el número de la orden.
+ *
+ * Una quita escrita a mano —sin rubro al que apuntar— sigue entrando en
+ * negativo: no hay nada que tachar.
  */
 export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observaciones } = {}) {
-  const filas = (lineas || []).map((l, i) => {
+  const anulan = (lineas || []).filter(l => l.tipo === "quita" && l.obra_rubro_id);
+  if (anulan.length) {
+    const { error } = await supabase.from("obra_rubros")
+      .update({ anulado_por_oc: orden.id })
+      .in("id", anulan.map(l => Number(l.obra_rubro_id)));
+    if (error && !/column|schema cache/i.test(error.message)) return error.message;
+  }
+
+  const filas = (lineas || []).filter(l => !(l.tipo === "quita" && l.obra_rubro_id)).map((l, i) => {
     const signo = l.tipo === "quita" ? -1 : 1;
     return {
       obra_id: orden.obra_id,
@@ -226,6 +247,9 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
 /** Deshacer: se van sus rubros y vuelve a estar en revisión. */
 export async function desaprobarOrden(orden) {
   await supabase.from("obra_rubros").delete().eq("orden_cambio_id", orden.id);
+  // Los rubros que la orden había tachado vuelven al presupuesto: deshacer la
+  // aprobación tiene que dejar las cosas como estaban, también de este lado.
+  await supabase.from("obra_rubros").update({ anulado_por_oc: null }).eq("anulado_por_oc", orden.id);
   return guardarOrden(orden.id, { estado: "enviada", aprobada_at: null, contratante_fecha: null });
 }
 
