@@ -370,11 +370,16 @@ export default function App() {
   //
   // Ahora entra quien tiene el permiso de verlos todos, o quien está asignado
   // a alguno: ahí el módulo le sirve y adentro ve solo el suyo.
-  const asignadoAAlgunLead = Object.values(accesosLead).some(x => {
-    const mio = x?.[usuario.id];
-    return !!(nivelDeArea(mio, "proyecto") || nivelDeArea(mio, "obra"));
-  });
-  const verPipeline = puede("leads.ver") || asignadoAAlgunLead;
+  // Un permiso propio, y nada más. El Pipeline es el embudo comercial de la
+  // oficina —qué se persigue, con quién, en qué etapa— y eso es de dirección,
+  // gerencia y los arquitectos que llevan propuestas. Un residente o un Jr. no
+  // tienen nada que hacer ahí: su proyecto lo ven en Tareas, en Control de
+  // Obra y en el Libro.
+  //
+  // Hasta hoy lo abría "Entra a todos los proyectos", que es otra cosa: ese
+  // decide a CUÁNTOS proyectos entra, no qué módulos ve. Un interruptor que
+  // hace dos trabajos no deja pedir uno sin el otro.
+  const verPipeline = puede("pipeline.ver");
   // El nombre del proyecto de una tarea: el del pipeline si viene de ahí, el de
   // Ajustes si no. (Se llamaba a sí misma: al buscar por texto una tarea con
   // proyecto normal, el navegador se quedaba sin pila y la pantalla se caía.)

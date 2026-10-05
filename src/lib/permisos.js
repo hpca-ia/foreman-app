@@ -32,7 +32,11 @@ export const GRUPOS_PERMISOS = [
       { id: "compras.ver", label: "Compras", nota: "Pedir lo que hace falta en obra y seguir en qué va" },
       { id: "libro.ver", label: "Libro de Obra", nota: "El registro diario de la obra: quién estuvo, qué se hizo, qué llegó. Solo el de sus proyectos" },
       { id: "observaciones.ver", label: "Observaciones de obra", nota: "Lo que se ve en la recorrida y hay que arreglar. Se anota con una foto y se cierra con otra" },
-      { id: "leads.ver", label: "Entra a todos los proyectos", nota: "Para gerentes: entra a todos con nivel de editar y no hay que asignarle ninguno. Apagado, entra solo a los que le des en Ajustes → Proyectos. Es lo único que cambia CUÁNTOS ve" },
+      // Dos cosas que hasta hoy hacía un solo interruptor, y por eso no se
+      // podía pedir una sin la otra: ver el embudo comercial, y entrar a todos
+      // los proyectos. Un arquitecto puede necesitar lo primero sin lo
+      // segundo, y un residente no necesita ninguna de las dos.
+      { id: "pipeline.ver", label: "Pipeline", nota: "El embudo comercial: qué se está persiguiendo y en qué etapa va cada cosa. Es de dirección, gerencia y los arquitectos que llevan propuestas" },
       { id: "ajustes.ver", label: "Ajustes", nota: "Usuarios, proyectos y datos de la empresa" },
     ],
   },
@@ -44,6 +48,7 @@ export const GRUPOS_PERMISOS = [
     // los dos primeros ya los contesta Ajustes → Proyectos.
     permisos: [
       { id: "tareas.todas", label: "Las tareas de todos", nota: "Si no, solo las suyas. También le abre todos los proyectos" },
+      { id: "leads.ver", label: "Entra a todos los proyectos", nota: "Para gerentes: entra a todos con nivel de editar y no hay que asignarle ninguno. Apagado, entra solo a los que le des en Ajustes → Proyectos. Es lo único que cambia CUÁNTOS ve" },
     ],
   },
   {
@@ -89,6 +94,7 @@ export const POR_DEFECTO = {
     "manoObra.ver": true,
     "facturas.registrar": true, "planillas.cerrar": true,
     "cajaChica.ver": true, "leads.ver": true, "leads.editar": false,
+    "pipeline.ver": true,
     "ajustes.ver": true,
     "borrar.definitivo": false,
   },
@@ -104,6 +110,7 @@ export const POR_DEFECTO = {
     "manoObra.ver": true,
     "facturas.registrar": true, "planillas.cerrar": true,
     "cajaChica.ver": true, "leads.ver": true, "leads.editar": false,
+    "pipeline.ver": true,
     "ajustes.ver": false,
     "borrar.definitivo": false,
   },
@@ -122,6 +129,7 @@ export const POR_DEFECTO = {
     "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": false, "leads.ver": false, "leads.editar": true,
+    "pipeline.ver": true,
     "ajustes.ver": false,
     "borrar.definitivo": false,
   },
@@ -138,6 +146,7 @@ export const POR_DEFECTO = {
     "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": false, "leads.ver": false, "leads.editar": false,
+    "pipeline.ver": false,
     "ajustes.ver": false,
     "borrar.definitivo": false,
   },
@@ -156,6 +165,7 @@ export const POR_DEFECTO = {
     "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": true, "leads.ver": false, "leads.editar": false,
+    "pipeline.ver": false,
     "ajustes.ver": false,
     "borrar.definitivo": false,
   },
@@ -174,6 +184,7 @@ export const POR_DEFECTO = {
     "manoObra.ver": true,
     "facturas.registrar": true, "planillas.cerrar": false,
     "cajaChica.ver": true, "leads.ver": false, "leads.editar": false,
+    "pipeline.ver": false,
     "ajustes.ver": false,
     "borrar.definitivo": false,
   },
