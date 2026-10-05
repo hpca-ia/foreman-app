@@ -1,0 +1,318 @@
+import { useEffect, useState, useCallback } from "react";
+import { Plus, Trash2, ChevronLeft, GanttChartSquare, AlertTriangle, Link2 } from "lucide-react";
+import { supabase } from "../../lib/supabase";
+import { colors } from "../../theme/colors";
+import Button from "../../components/ui/Button";
+import { inputStyle } from "../../components/ui/Input";
+import { esProyecto } from "../leads/tubo";
+import { calendario, calcular, aFecha, claveFecha } from "./cpm";
+
+// El cronograma de la obra. Módulo propio, y a propósito.
+//
+// Control de Obra habla de plata —rubro, planilla, factura— y lo abren la
+// administración y la dirección. Esto habla de tiempo —actividad, duración,
+// holgura— y lo abren el residente y el cliente. Son dos idiomas, y juntarlos
+// en una pantalla obliga a traducir entre ellos para hacer cualquiera de las
+// dos cosas. Lo que pasa cuando se mezclan es que la gente deja de usar la
+// mitad que no entiende.
+//
+// Están atados por un puente explícito y en un solo sentido: una actividad
+// puede colgar de una agrupación del presupuesto, y de ahí sale su plata.
+//
+// LA RUTA CRÍTICA SE MARCA, NO SE EXPLICA. Las barras rojas son las que no
+// tienen colchón: un día de atraso ahí es un día de atraso en la entrega. Lo
+// demás puede correrse sin que pase nada, y saber cuál es cuál es la mitad de
+// para qué sirve un cronograma.
+
+const hoy = () => new Date().toISOString().split("T")[0];
+const dia = f => (f ? aFecha(f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "—");
+
+export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) {
+  const [proyectos, setProyectos] = useState([]);
+  const [lead, setLead] = useState(null);
+  const [actividades, setActividades] = useState([]);
+  const [dependencias, setDependencias] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [sinTablas, setSinTablas] = useState(false);
+  const [nueva, setNueva] = useState(null);
+  const [error, setError] = useState("");
+  const [uniendo, setUniendo] = useState(null);
+
+  useEffect(() => {
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio").order("nombre")
+      .then(({ data }) => {
+        setProyectos((data || []).filter(l => l.resultado !== "perdido" && esProyecto(l)));
+        setCargando(false);
+      });
+  }, []);
+
+  const cargar = useCallback(async () => {
+    if (!lead?.id) return;
+    const { data: act, error: e } = await supabase.from("cronograma_actividades")
+      .select("*").eq("lead_id", lead.id).order("orden");
+    if (e) { setSinTablas(/relation|does not exist|schema cache/i.test(e.message)); return; }
+    setActividades(act || []);
+    if (act?.length) {
+      const { data: dep } = await supabase.from("cronograma_dependencias")
+        .select("*").in("actividad_id", act.map(a => a.id));
+      setDependencias(dep || []);
+    } else setDependencias([]);
+  }, [lead?.id]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const editable = !lead || nivelProyecto?.(lead.id) === "editar";
+
+  if (cargando) return <Centro>Cargando…</Centro>;
+
+  if (!lead) {
+    const mios = proyectos.filter(p => !nivelProyecto || !!nivelProyecto(p.id));
+    return (
+      <div style={{ fontFamily: colors.font }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>Cronograma</div>
+        <div style={{ fontSize: 12.5, color: colors.muted, marginBottom: 14 }}>
+          Qué se hace, cuándo, y qué no puede esperar.
+        </div>
+        {!mios.length ? <Centro>No tenés proyectos asignados.</Centro> : (
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+            {mios.map(p => (
+              <button key={p.id} onClick={() => setLead(p)}
+                style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
+                  padding: "11px 13px", background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`,
+                  cursor: "pointer", fontFamily: colors.font, fontSize: 13.5, color: colors.ink }}>
+                <GanttChartSquare size={15} color={colors.muted} />
+                {p.nombre}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (sinTablas) {
+    return (
+      <div style={{ fontFamily: colors.font }}>
+        <Volver onClick={() => setLead(null)} />
+        <Aviso>Falta correr la migración 076 para usar el cronograma.</Aviso>
+      </div>
+    );
+  }
+
+  const cal = calendario({
+    laborables: lead.crono_laborables || [1, 2, 3, 4, 5, 6],
+    feriados: lead.crono_feriados || [],
+  });
+  const plan = calcular({
+    actividades: actividades.map(a => ({ ...a, duracion: a.duracion })),
+    dependencias,
+    inicio: lead.crono_inicio || hoy(),
+    cal,
+  });
+
+  const porId = new Map(plan.actividades.map(a => [a.id, a]));
+  const todas = plan.actividades;
+  // La escala: del arranque al fin, en días hábiles, para dibujar las barras.
+  const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
+  const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
+  const largo = a => (a.inicio && a.fin ? Math.max(cal.entre(a.inicio, a.fin), 1) / diasTotales : 0);
+
+  async function agregar() {
+    if (!nueva?.nombre?.trim()) return;
+    setError("");
+    const { error: e } = await supabase.from("cronograma_actividades").insert({
+      lead_id: lead.id, obra_id: lead.obra_id || null,
+      nombre: nueva.nombre.trim(), duracion: Math.max(1, Number(nueva.duracion) || 1),
+      orden: actividades.length,
+    });
+    if (e) { setError(e.message); return; }
+    setNueva({ nombre: "", duracion: nueva.duracion });
+    await cargar();
+  }
+
+  async function cambiar(a, campos) {
+    await supabase.from("cronograma_actividades").update(campos).eq("id", a.id);
+    await cargar();
+  }
+
+  async function quitar(a) {
+    if (!window.confirm(`¿Borrar "${a.nombre}"?`)) return;
+    await supabase.from("cronograma_actividades").delete().eq("id", a.id);
+    await cargar();
+  }
+
+  async function unir(desde, hasta) {
+    if (desde === hasta) return;
+    const { error: e } = await supabase.from("cronograma_dependencias")
+      .insert({ actividad_id: hasta, depende_de_id: desde, tipo: "FC" });
+    if (e && !/duplicate/i.test(e.message)) setError(e.message);
+    setUniendo(null);
+    await cargar();
+  }
+
+  async function desunir(d) {
+    await supabase.from("cronograma_dependencias").delete().eq("id", d.id);
+    await cargar();
+  }
+
+  return (
+    <div style={{ fontFamily: colors.font }}>
+      <Volver onClick={() => setLead(null)} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>{lead.nombre}</div>
+          <div style={{ fontSize: 11.5, color: colors.muted }}>
+            {todas.length ? <>Del {dia(plan.inicio)} al <strong style={{ color: colors.ink }}>{dia(plan.fin)}</strong> · {plan.duracion} días de trabajo</> : "Sin actividades todavía"}
+          </div>
+        </div>
+        {editable && (
+          <input type="date" value={lead.crono_inicio || hoy()} style={{ ...inputStyle, width: 150, padding: "6px 9px", fontSize: 12, marginLeft: "auto" }}
+            onChange={async e => {
+              await supabase.from("leads").update({ crono_inicio: e.target.value }).eq("id", lead.id);
+              setLead(l => ({ ...l, crono_inicio: e.target.value }));
+            }} />
+        )}
+      </div>
+
+      {plan.ciclos.length > 0 && (
+        <Aviso>
+          Hay {plan.ciclos.length} actividades esperándose entre sí —A espera a B que espera a A—, así que no
+          se les puede calcular fecha. Quitá una de esas dependencias.
+        </Aviso>
+      )}
+
+      {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>{error}</div>}
+
+      {!todas.length ? (
+        <Centro>
+          Todavía no hay actividades. Empezá por las grandes —movimiento de tierra, estructura, mampostería— y
+          después las partís.
+        </Centro>
+      ) : (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.4fr) 54px 80px 80px 58px minmax(220px,2fr) 30px",
+            gap: 7, padding: "8px 12px", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+            <span>ACTIVIDAD</span>
+            <span style={{ textAlign: "center" }}>DÍAS</span>
+            <span>EMPIEZA</span>
+            <span>TERMINA</span>
+            <span style={{ textAlign: "center" }}>HOLGURA</span>
+            <span />
+            <span />
+          </div>
+
+          {todas.map(a => {
+            const deps = dependencias.filter(d => d.actividad_id === a.id);
+            return (
+              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.4fr) 54px 80px 80px 58px minmax(220px,2fr) 30px",
+                gap: 7, padding: "7px 12px", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center", fontSize: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {a.critica && <span title="Ruta crítica: no tiene colchón" style={{ color: colors.danger, marginRight: 4 }}>●</span>}
+                    {a.nombre}
+                  </div>
+                  {deps.length > 0 && (
+                    <div style={{ fontSize: 10, color: colors.muted, marginTop: 1 }}>
+                      después de {deps.map(d => porId.get(d.depende_de_id)?.nombre || "?").join(", ")}
+                      {editable && deps.map(d => (
+                        <button key={d.id} onClick={() => desunir(d)} title="Quitar esta dependencia"
+                          style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: "0 3px" }}>×</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <input type="number" min="1" value={a.duracion} disabled={!editable}
+                  onChange={e => cambiar(a, { duracion: Math.max(1, Number(e.target.value) || 1) })}
+                  style={{ ...inputStyle, padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
+                <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>
+                <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.fin)}</span>
+                <span style={{ textAlign: "center", fontSize: 11.5, fontWeight: a.critica ? 700 : 400,
+                  color: a.critica ? colors.danger : colors.muted }}>
+                  {a.enCiclo ? "—" : a.critica ? "0" : `${a.holgura}d`}
+                </span>
+
+                {/* La barra. Es para lo que se abre esta pantalla. */}
+                <div style={{ position: "relative", height: 16, background: colors.neutralSoft, borderRadius: 4 }}>
+                  {a.inicio && (
+                    <div title={`${dia(a.inicio)} → ${dia(a.fin)}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`}
+                      style={{ position: "absolute", top: 0, bottom: 0,
+                        left: `${posicion(a.inicio) * 100}%`, width: `${Math.max(largo(a) * 100, 2)}%`,
+                        background: a.critica ? colors.danger : colors.brand, borderRadius: 4,
+                        display: "flex", alignItems: "center", overflow: "hidden" }}>
+                      {/* Lo hecho, adentro de la barra: se lee el atraso sin
+                          comparar dos columnas de números. */}
+                      {a.avance_pct > 0 && (
+                        <div style={{ width: `${Math.min(100, a.avance_pct)}%`, height: "100%", background: "rgba(255,255,255,.45)" }} />
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {editable && (
+                  <div style={{ display: "flex", gap: 2 }}>
+                    <button onClick={() => (uniendo ? unir(uniendo, a.id) : setUniendo(a.id))}
+                      title={uniendo === a.id ? "Elegí ahora la que va después" : uniendo ? "Esta va después de la marcada" : "Marcar: lo que siga va después de esta"}
+                      style={{ background: uniendo === a.id ? colors.brand : "none", border: "none",
+                        color: uniendo === a.id ? "#fff" : colors.muted, borderRadius: 4, cursor: "pointer", display: "flex", padding: 2 }}>
+                      <Link2 size={12} />
+                    </button>
+                    <button onClick={() => quitar(a)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}>
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {editable && (
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          <input value={nueva?.nombre || ""} onChange={e => setNueva(v => ({ ...(v || { duracion: 5 }), nombre: e.target.value }))}
+            onKeyDown={e => { if (e.key === "Enter") agregar(); }}
+            placeholder="Nueva actividad. Ej: estructura de la planta baja"
+            style={{ ...inputStyle, flex: 1, minWidth: 220 }} />
+          <input type="number" min="1" value={nueva?.duracion || 5}
+            onChange={e => setNueva(v => ({ ...(v || { nombre: "" }), duracion: Number(e.target.value) || 1 }))}
+            style={{ ...inputStyle, width: 80 }} />
+          <Button variant="primary" size="sm" onClick={agregar}><Plus size={13} /> Agregar</Button>
+        </div>
+      )}
+
+      {uniendo && (
+        <div style={{ fontSize: 11.5, color: colors.brand, marginTop: 8 }}>
+          Marcaste <strong>{porId.get(uniendo)?.nombre}</strong>. Tocá el eslabón de la actividad que va después.
+          <button onClick={() => setUniendo(null)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", marginLeft: 6, fontFamily: colors.font }}>cancelar</button>
+        </div>
+      )}
+
+      {todas.length > 0 && (
+        <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 10, lineHeight: 1.55 }}>
+          Las barras <span style={{ color: colors.danger, fontWeight: 700 }}>rojas</span> son la ruta crítica: no tienen
+          colchón, y un día de atraso ahí es un día de atraso en la entrega. Las azules se pueden correr lo que diga
+          su holgura sin mover la fecha de fin.
+        </div>
+      )}
+    </div>
+  );
+}
+
+const Volver = ({ onClick }) => (
+  <button onClick={onClick} style={{ background: "none", border: "none", color: colors.inkSoft, fontSize: 12.5,
+    cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 4, padding: 0, marginBottom: 10 }}>
+    <ChevronLeft size={14} /> Cronograma
+  </button>
+);
+
+const Centro = ({ children }) => (
+  <div style={{ textAlign: "center", padding: "40px 20px", color: colors.muted, fontSize: 13, lineHeight: 1.6,
+    background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd }}>{children}</div>
+);
+
+const Aviso = ({ children }) => (
+  <div style={{ fontSize: 12.5, color: colors.warning, background: colors.warningSoft, display: "flex", gap: 7,
+    border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 13, marginBottom: 12 }}>
+    <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+    <span>{children}</span>
+  </div>
+);

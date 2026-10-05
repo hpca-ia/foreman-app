@@ -6,7 +6,9 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "../controlObra/calculos";
 import { mesesDe, nombreMes, curva, suma, cierra, tramo, previstoContraReal, desembolsos } from "./valorado";
 import { cargarValorado, armarDesdeObra, moverTramo, guardarCronograma, borrarValorado, ajustarPesos, guardarPesos,
-  pendientesDeSumar, sumarAlValorado } from "./valoradoDatos";
+  pendientesDeSumar, sumarAlValorado, armarConNova } from "./valoradoDatos";
+import { proponerValorado, aprenderDe } from "./novaValorado";
+import { supabase } from "../../lib/supabase";
 
 // El cronograma valorado de la obra.
 //
@@ -29,6 +31,8 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
   const [anticipo, setAnticipo] = useState("");
   // Lo que entró por órdenes de cambio después de armar el valorado.
   const [pendiente, setPendiente] = useState(null);
+  const [propuesta, setPropuesta] = useState(null);
+  const [pensando, setPensando] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -100,14 +104,73 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
               acabados al final— y lo que no toques igual suma el presupuesto entero.
             </div>
             {error && <div style={{ fontSize: 12, color: colors.danger }}>{error}</div>}
-            <div style={{ display: "flex", gap: 6 }}>
-              <Button variant="primary" size="sm" onClick={async () => {
-                setError("");
-                const r = await armarDesdeObra({ lead, obra, ...armando, quien: currentUser });
-                if (r.error) { setError(r.error); return; }
-                setArmando(null); await cargar();
-              }}>Armar</Button>
-              <Button variant="secondary" size="sm" onClick={() => setArmando(null)}>Cancelar</Button>
+
+            {/* Lo que NOVA propuso, para revisar antes de guardarlo. Un
+                valorado es lo que el cliente usa para mover plata: nada que
+                NOVA decida sola debería terminar en ese número sin que alguien
+                lo mire. */}
+            {propuesta && (
+              <div style={{ background: colors.bg, borderRadius: 8, padding: 11, display: "grid", gap: 7 }}>
+                <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55 }}>
+                  NOVA ubicó <strong>{propuesta.capitulos.length}</strong> capítulos en el tiempo y encontró{" "}
+                  <strong>{propuesta.especiales}</strong> rubros que se pagan antes de ejecutarse.
+                  {propuesta.sinCapitulo > 0 && (
+                    <span style={{ color: colors.warning }}> {propuesta.sinCapitulo} rubros quedaron sin ubicar y van estirados en toda la obra.</span>
+                  )}
+                </div>
+                <div style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 4 }}>
+                  {propuesta.lineas.filter(l => l.especial).slice(0, 12).map((l, i) => (
+                    <div key={i} style={{ fontSize: 11.5, color: colors.inkSoft, background: "#fff", borderRadius: 6, padding: "6px 8px" }}>
+                      <strong style={{ color: colors.ink }}>{l.rubro.descripcion?.slice(0, 60)}</strong>
+                      <span style={{ color: colors.brand, fontWeight: 600 }}> · {l.perfil}</span>
+                      <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
+                        {l.pesos.map((p, k) => (p > 0 ? `mes ${k + 1}: ${p}%` : null)).filter(Boolean).join(" · ")}
+                        {l.porque ? ` — ${l.porque}` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10.5, color: colors.muted }}>
+                  Se guarda como está y lo corregís en la matriz. Lo que dejes corregido lo recuerda para la próxima obra.
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {!propuesta ? (
+                <>
+                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                    setError(""); setPensando(true);
+                    const { data: rubros } = await supabase.from("obra_rubros")
+                      .select("id,numero,codigo,descripcion,capitulo,total_base")
+                      .eq("obra_id", obra.id).order("capitulo_orden").order("orden");
+                    const r = await proponerValorado({
+                      rubros: rubros || [], meses: armando.meses,
+                      mesInicio: armando.mesInicio, nombreObra: obra.nombre,
+                    });
+                    setPensando(false);
+                    if (r.error) { setError(r.error); return; }
+                    setPropuesta({ ...r, rubros });
+                  }}>{pensando ? "NOVA está leyendo el presupuesto…" : "Que lo arme NOVA"}</Button>
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    setError("");
+                    const r = await armarDesdeObra({ lead, obra, ...armando, quien: currentUser });
+                    if (r.error) { setError(r.error); return; }
+                    setArmando(null); await cargar();
+                  }}>Armarlo parejo y corregir a mano</Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="primary" size="sm" onClick={async () => {
+                    const r = await armarConNova({ lead, obra, mesInicio: armando.mesInicio, meses: armando.meses, propuesta, quien: currentUser });
+                    if (r.error) { setError(r.error); return; }
+                    await aprenderDe(propuesta.lineas, currentUser);
+                    setPropuesta(null); setArmando(null); await cargar();
+                  }}>Guardarlo así</Button>
+                  <Button variant="outline" size="sm" onClick={() => setPropuesta(null)}>Que lo piense de nuevo</Button>
+                </>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => { setArmando(null); setPropuesta(null); }}>Cancelar</Button>
             </div>
           </div>
         )}

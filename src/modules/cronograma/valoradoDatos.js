@@ -151,6 +151,40 @@ export async function sumarAlValorado(cronograma, rubros = [], desdeIndice = 0) 
   return null;
 }
 
+/**
+ * Armarlo con lo que propuso NOVA.
+ *
+ * Igual que armarDesdeObra, pero cada rubro entra con el reparto que NOVA le
+ * dio en vez de parejo. Los que marcó especiales —lo importado, lo que se
+ * fabrica, los contratos con anticipo— quedan señalados para revisar: son
+ * pocos y son los que de verdad hay que mirar, porque son los que mueven plata
+ * meses antes de que se vea algo en la obra.
+ */
+export async function armarConNova({ lead, obra, mesInicio, meses, propuesta, quien }) {
+  const { data: cronograma, error } = await supabase.from("cronograma_valorado").insert({
+    lead_id: lead.id, obra_id: obra.id, mes_inicio: mesInicio, meses,
+    created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+  }).select().single();
+  if (error) return { error: falta(error) ? "Falta correr la migración 074." : error.message };
+
+  const filas = propuesta.lineas.map((l, i) => ({
+    cronograma_id: cronograma.id, obra_rubro_id: l.rubro.id,
+    codigo: l.rubro.codigo || String(l.rubro.numero || i + 1),
+    descripcion: l.rubro.descripcion, capitulo: l.rubro.capitulo,
+    monto: Number(l.rubro.total_base) || 0, pesos: l.pesos,
+    revisar: !!l.especial, orden: i,
+  }));
+  for (let i = 0; i < filas.length; i += 100) {
+    let { error: e } = await supabase.from("cronograma_valorado_lineas").insert(filas.slice(i, i + 100));
+    if (e && /column|schema cache/i.test(e.message)) {
+      const limpias = filas.slice(i, i + 100).map(({ revisar, ...resto }) => resto);
+      ({ error: e } = await supabase.from("cronograma_valorado_lineas").insert(limpias));
+    }
+    if (e) return { error: "El cronograma se creó pero fallaron las líneas: " + e.message };
+  }
+  return { cronograma };
+}
+
 /** Mover el tramo de una línea: en qué mes empieza y en cuál termina. */
 export async function moverTramo(linea, desde, hasta, meses) {
   const pesos = repartirEntre(meses, desde, hasta);
