@@ -27,3 +27,22 @@ alter table public.ordenes_cambio add column if not exists visto_comentario text
 -- Cuándo se pidió: sirve para saber hace cuánto está esperando, que es la
 -- pregunta que uno se hace cuando la obra está frenada.
 alter table public.ordenes_cambio add column if not exists visto_pedido_at  timestamptz;
+
+-- ── Y la respuesta del cliente desde el portal ───────────────────────────
+--
+-- La orden le llega por correo con un enlace, entra sin contraseña, la lee con
+-- sus fotos y sus partidas, y contesta. Eso reemplaza al "dale" por WhatsApp
+-- que después nadie encuentra.
+--
+-- Su respuesta NO mete los rubros en el control de obra, y es a propósito. El
+-- cliente dice que sí; llevar esa plata al presupuesto sigue siendo un acto de
+-- la oficina, con alguien mirando que las partidas estén bien cargadas. Un
+-- clic de alguien de afuera no debería mover el total de una obra sin que
+-- nadie de adentro lo revise.
+--
+-- Se guarda aparte del `estado` por lo mismo: el estado lo mueve la oficina
+-- cuando lleva la orden al control. Esto es la evidencia de que el cliente
+-- aceptó, con su fecha.
+
+alter table public.ordenes_cambio add column if not exists cliente_acepto    boolean;
+alter table public.ordenes_cambio add column if not exists cliente_respondio_at timestamptz;

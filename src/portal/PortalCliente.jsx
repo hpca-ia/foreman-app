@@ -66,8 +66,9 @@ export default function PortalCliente({ token }) {
     );
   }
 
-  const { proyecto, recorridas, observaciones, avance, entregas } = info;
-  const porContestar = entregas.filter(e => e.estado === "enviado").length;
+  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [] } = info;
+  const ocPendientes = ordenes.filter(o => o.cliente_respondio_at == null);
+  const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length;
   const fotos = avance.filter(f => f.url).map(f => ({ ...f, titulo: f.titulo || dia(f.fecha) }));
 
   const solapas = [
@@ -154,12 +155,20 @@ export default function PortalCliente({ token }) {
 
       {/* ── Lo que esperamos que mire ──────────────────────────────── */}
       {solapa === "aprobar" && (
-        !entregas.length
+        !entregas.length && !ordenes.length
           ? <Vacio>No hay nada esperando tu respuesta.</Vacio>
-          : entregas.map(e => (
-            <Entrega key={e.id} e={e} enviando={enviando === e.id}
-              onContestar={(estado, nota) => contestar({ que: "entrega", id: e.id, estado, nota })} />
-          ))
+          : <>
+            {/* Las órdenes de cambio van primero: es plata que se suma al
+                contrato, y es lo único acá que cambia lo que se va a pagar. */}
+            {ordenes.map(o => (
+              <OrdenCambio key={o.id} o={o} enviando={enviando === o.id}
+                onContestar={(acepta, nota) => contestar({ que: "orden", id: o.id, conforme: acepta, nota })} />
+            ))}
+            {entregas.map(e => (
+              <Entrega key={e.id} e={e} enviando={enviando === e.id}
+                onContestar={(estado, nota) => contestar({ que: "entrega", id: e.id, estado, nota })} />
+            ))}
+          </>
       )}
 
       {mirando !== null && (
@@ -220,6 +229,103 @@ function Observacion({ o, onContestar, enviando }) {
             </div>
           </div>
         )
+      )}
+    </div>
+  );
+}
+
+/**
+ * Una orden de cambio, para que el cliente la apruebe.
+ *
+ * Con todo lo que la compone a la vista: por qué se pide, qué se agrega o se
+ * quita con su precio, cuántos días suma, y las fotos. Aprobar un número sin
+ * ver qué lo forma no es aprobar, es firmar — y eso es justo lo que vuelve
+ * discutible una orden tres meses después.
+ */
+function OrdenCambio({ o, onContestar, enviando }) {
+  const [nota, setNota] = useState("");
+  const [abierto, setAbierto] = useState(false);
+  const contestada = !!o.cliente_respondio_at;
+  const plata = v => `$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderLeft: `3px solid ${colors.brand}`,
+      borderRadius: 11, padding: 13, marginBottom: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
+        ORDEN DE CAMBIO {o.codigo || `N°${o.numero}`}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, lineHeight: 1.3, marginTop: 2 }}>{o.titulo}</div>
+      {o.tipo && <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 1 }}>{o.tipo}</div>}
+
+      {o.justificacion && (
+        <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 8, lineHeight: 1.55 }}>{o.justificacion}</div>
+      )}
+
+      {o.lineas?.length > 0 && (
+        <div style={{ marginTop: 10, background: colors.bg, borderRadius: 8, overflow: "hidden" }}>
+          {o.lineas.map((l, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, padding: "7px 10px",
+              borderTop: i ? `1px solid ${colors.neutralSoft}` : "none", fontSize: 12.5 }}>
+              <span style={{ color: colors.ink }}>
+                {l.tipo === "quita" && <span style={{ color: colors.danger, fontWeight: 700 }}>Se quita · </span>}
+                {l.descripcion}
+                <span style={{ color: colors.muted }}> · {l.cantidad} {l.unidad}</span>
+              </span>
+              <span style={{ fontWeight: 600, color: l.monto < 0 ? colors.danger : colors.ink, whiteSpace: "nowrap" }}>
+                {l.monto < 0 ? "−" : ""}{plata(l.monto)}
+              </span>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 10px",
+            borderTop: `2px solid ${colors.border}`, fontSize: 13.5, fontWeight: 700, color: colors.ink }}>
+            <span>{o.total < 0 ? "Se descuenta del contrato" : "Se suma al contrato"}</span>
+            <span style={{ color: o.total < 0 ? colors.danger : colors.brand }}>
+              {o.total < 0 ? "−" : "+"}{plata(o.total)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {(o.dias_impacto > 0 || o.impacto_cronograma) && (
+        <div style={{ fontSize: 12, color: colors.warning, marginTop: 8 }}>
+          {o.dias_impacto > 0 && <strong>Suma {o.dias_impacto} días al plazo. </strong>}
+          {o.impacto_cronograma}
+        </div>
+      )}
+
+      {o.fotos?.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+          {o.fotos.filter(f => f.url).map(f => (
+            <a key={f.id} href={f.url} target="_blank" rel="noreferrer">
+              <img src={f.url} alt="" style={{ width: 78, height: 78, objectFit: "cover", borderRadius: 7, border: `1px solid ${colors.border}`, display: "block" }} />
+            </a>
+          ))}
+        </div>
+      )}
+
+      {contestada ? (
+        <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12.5,
+          color: o.cliente_acepto ? colors.success : colors.warning, fontWeight: 600 }}>
+          {o.cliente_acepto ? "La aprobaste" : "La dejaste con observaciones"}
+          {o.contratante_comentario && <div style={{ color: colors.inkSoft, fontWeight: 400, marginTop: 2 }}>{o.contratante_comentario}</div>}
+        </div>
+      ) : (
+        <div style={{ marginTop: 11, paddingTop: 9, borderTop: `1px solid ${colors.neutralSoft}` }}>
+          {abierto && (
+            <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2}
+              placeholder="¿Qué habría que cambiar?" style={{ width: "100%", border: `1px solid ${colors.border}`, borderRadius: 8,
+                padding: "7px 9px", fontSize: 12.5, fontFamily: colors.font, marginBottom: 6, resize: "vertical" }} />
+          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button disabled={enviando} onClick={() => onContestar(true, nota)} style={botonSi}>Apruebo este cambio</button>
+            <button disabled={enviando}
+              onClick={() => (abierto ? onContestar(false, nota) : setAbierto(true))}
+              style={botonNo}>{abierto ? "Mandar" : "Tengo una observación"}</button>
+          </div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
+            Al aprobarlo queda registrado con la fecha de hoy y este monto se incorpora al contrato.
+          </div>
+        </div>
       )}
     </div>
   );

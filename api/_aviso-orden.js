@@ -94,12 +94,47 @@ export default async function handler(req, res) {
       <td style="padding:6px 8px;border:1px solid #E5E7EB;font-size:11.5px;color:#6B7280">${esc(comentario || "")}</td>
     </tr>`;
 
+  // El enlace del portal, si la obra lo tiene abierto. Sin él, el correo sigue
+  // sirviendo: dice que contesten por correo o por teléfono.
+  let enlacePortal = null;
+  if (obra?.lead_id) {
+    const { data: proy } = await sb.from("leads")
+      .select("portal_token,portal_activo").eq("id", obra.lead_id).maybeSingle();
+    if (proy?.portal_activo && proy?.portal_token) {
+      enlacePortal = `https://foreman-app-ebon.vercel.app/?cliente=${proy.portal_token}`;
+    }
+  }
+
   const html = plantilla({
     titulo: `Orden de Cambio ${codigo}`,
     subtitulo: proyecto,
     cuerpo: `
       ${orden.anulada ? `<div style="background:#FEF2F2;border:1px solid #FCA5A5;color:#B91C1C;font-weight:700;font-size:12.5px;padding:8px 10px;border-radius:6px;margin-bottom:14px;text-align:center">ORDEN DE CAMBIO ANULADA — NO EJECUTADA</div>` : ""}
       ${cuerpo ? `<p style="margin:0 0 14px">${esc(cuerpo)}</p>` : ""}
+
+      <!-- Qué tiene que hacer con esto. Sin decirlo, el cliente recibe un
+           documento formal y no sabe si hay que contestar, firmar, o nada: se
+           queda esperando una llamada y la obra se frena esperando un sí que
+           él no sabía que tenía que dar. -->
+      <div style="background:#F0F7F5;border:1px solid #CFE3DD;border-radius:8px;padding:14px 16px;margin:0 0 16px">
+        <div style="font-size:13.5px;font-weight:700;color:#0F3D3E;margin-bottom:6px">Necesitamos tu aprobación para seguir</div>
+        <div style="font-size:12.5px;color:#374151;line-height:1.6">
+          Abajo está el detalle del cambio: por qué se pide, qué se agrega o se quita con su precio,
+          y cuántos días suma al plazo. Leelo y contestanos.
+          ${enlacePortal ? `` : `Podés responder a este correo o llamarnos.`}
+        </div>
+        ${enlacePortal ? `
+        <div style="margin-top:12px">
+          <a href="${enlacePortal}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Aprobar o comentar →</a>
+        </div>
+        <div style="font-size:11.5px;color:#6B7280;margin-top:8px;line-height:1.5">
+          Ese enlace abre la obra en FOREMAN. No hace falta usuario ni contraseña, y desde ahí
+          podés aprobar este cambio o dejar una observación. Tu respuesta queda registrada con la fecha.
+        </div>` : ""}
+        <div style="font-size:11.5px;color:#6B7280;margin-top:8px;line-height:1.5">
+          Mientras no tengamos tu respuesta, este trabajo no se ejecuta${orden.dias_impacto ? ` y el plazo de obra queda en suspenso` : ""}.
+        </div>
+      </div>
 
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%">
         ${dato("CAMBIO N°:", codigo)}

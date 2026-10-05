@@ -100,6 +100,26 @@ async function armarInforme(lead) {
     `obra_avance_fotos?lead_id=eq.${lead.id}&visible_cliente=eq.true`
     + `&select=id,fecha,titulo,descripcion,storage_path&order=fecha.desc&order=id.desc`)) || [];
 
+  // Las órdenes de cambio ya mandadas. Es lo que más importa de todo el
+  // portal: plata que se suma al contrato, y hasta hoy el "sí" vivía en un
+  // WhatsApp. Solo las enviadas —una en borrador es conversación interna— y
+  // con sus partidas y sus fotos, porque aprobar un número sin ver qué lo
+  // compone no es aprobar.
+  let ordenes = [];
+  if (lead.obra_id) {
+    ordenes = await json(await rest(
+      `ordenes_cambio?obra_id=eq.${lead.obra_id}&estado=in.(enviada,aprobada)`
+      + `&select=id,numero,codigo,titulo,tipo,fecha,justificacion,impacto_cronograma,dias_impacto,`
+      + `estado,anulada,cliente_acepto,cliente_respondio_at,contratante_comentario&order=numero`)) || [];
+    ordenes = ordenes.filter(o => !o.anulada);
+  }
+  let lineasOC = [], fotosOC = [];
+  if (ordenes.length) {
+    const ids = ordenes.map(o => o.id).join(",");
+    lineasOC = await json(await rest(`orden_cambio_lineas?orden_id=in.(${ids})&select=*&order=id`)) || [];
+    fotosOC = await json(await rest(`orden_cambio_fotos?orden_id=in.(${ids})&select=id,orden_id,storage_path,descripcion&order=id`)) || [];
+  }
+
   const entregas = await json(await rest(
     `proyecto_entregas?lead_id=eq.${lead.id}`
     + `&select=id,tipo,titulo,descripcion,archivo_nombre,storage_path,estado,enviado_at,`
@@ -109,6 +129,7 @@ async function armarInforme(lead) {
     ...fotosObs.map(f => f.storage_path),
     ...avance.map(f => f.storage_path),
     ...entregas.filter(e => e.storage_path).map(e => e.storage_path),
+    ...fotosOC.map(f => f.storage_path),
   ].filter(Boolean));
 
   const conUrl = x => ({ ...x, url: enlaces[x.storage_path] || null, storage_path: undefined });
@@ -122,6 +143,21 @@ async function armarInforme(lead) {
     })),
     avance: avance.map(conUrl),
     entregas: entregas.map(conUrl),
+    ordenes: ordenes.map(o => {
+      const suyas = lineasOC.filter(l => l.orden_id === o.id);
+      const num = v => Number(v) || 0;
+      const monto = l => num(l.cantidad) * num(l.precio_unitario) * (l.tipo === "quita" ? -1 : 1);
+      return {
+        ...o,
+        lineas: suyas.map(l => ({
+          tipo: l.tipo, item: l.item, descripcion: l.descripcion, unidad: l.unidad,
+          cantidad: num(l.cantidad), precio_unitario: num(l.precio_unitario),
+          monto: Math.round(monto(l) * 100) / 100,
+        })),
+        total: Math.round(suyas.reduce((t, l) => t + monto(l), 0) * 100) / 100,
+        fotos: fotosOC.filter(f => f.orden_id === o.id).map(conUrl),
+      };
+    }),
   };
 }
 
@@ -159,6 +195,25 @@ async function contestar(req, res, lead) {
     });
     const filas = await json(r);
     if (!filas?.length) return res.status(404).json({ error: "No se encontró eso." });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (que === "orden") {
+    const acepto = !!conforme;
+    if (!acepto && !limpia) return res.status(400).json({ error: "Contanos qué hay que cambiar." });
+    // El filtro por la obra del proyecto de la llave, además del id: una orden
+    // de otra obra no se encuentra y no se escribe nada.
+    const r = await rest(`ordenes_cambio?id=eq.${Number(id)}&obra_id=eq.${lead.obra_id}&estado=eq.enviada`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        cliente_acepto: acepto, cliente_respondio_at: cuando,
+        contratante_fecha: cuando.slice(0, 10),
+        contratante_comentario: limpia,
+      }),
+    });
+    const filas = await json(r);
+    if (!filas?.length) return res.status(404).json({ error: "No se encontró esa orden de cambio." });
     return res.status(200).json({ ok: true });
   }
 
