@@ -10,6 +10,7 @@ import {
   cargarObservaciones, crearObservacion, guardarObservacion, borrarObservacion,
   marcarResuelta, verificar, reabrir, subirFotoObs, borrarFotoObs, enlacesDeFotosObs, asignarResponsables,
   notasDe, anotar, diasAbierta, resumenObservaciones, ordenarObservaciones, responsablesDe,
+  cargarRecorridas, crearRecorrida, TIPOS_RECORRIDA,
 } from "./observaciones";
 import FotosAlVuelo from "./FotosAlVuelo";
 import VisorFotos from "../../components/VisorFotos";
@@ -38,6 +39,13 @@ const NUEVA = {
   fotos: [],
 };
 
+const fichaRec = (puesta, color) => ({
+  border: `1px solid ${puesta ? color : colors.border}`,
+  background: puesta ? color : "#fff", color: puesta ? "#fff" : colors.inkSoft,
+  borderRadius: 20, padding: "4px 11px", fontSize: 11.5, fontWeight: 600,
+  cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap",
+});
+
 const COLOR = { danger: colors.danger, warning: colors.warning, success: colors.success, brand: colors.brand, muted: colors.muted, inkSoft: colors.inkSoft };
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
@@ -57,6 +65,10 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
   // que existe el módulo.
   const [mirando, setMirando] = useState(null);
   const [responsables, setResponsables] = useState({});
+  // La vuelta que se está mirando. null = todas.
+  const [recorridas, setRecorridas] = useState([]);
+  const [recorridaSel, setRecorridaSel] = useState(null);
+  const [nuevaRec, setNuevaRec] = useState(null);
   const [verCerradas, setVerCerradas] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -103,6 +115,8 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
     setFotos(r.fotos);
     setEnlaces(await enlacesDeFotosObs(Object.values(r.fotos).flat()));
     setResponsables(await responsablesDe(r.observaciones.map(o => o.id)));
+    const rec = await cargarRecorridas(lead.id);
+    setRecorridas(rec.recorridas);
   }, [lead?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -169,7 +183,8 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
 
   const r = resumenObservaciones(observaciones);
   const lista = ordenarObservaciones(observaciones)
-    .filter(o => verCerradas || ABIERTAS_OBS.includes(o.estado));
+    .filter(o => verCerradas || ABIERTAS_OBS.includes(o.estado))
+    .filter(o => !recorridaSel || o.recorrida_id === recorridaSel);
   const hoyISO = new Date().toISOString().split("T")[0];
 
   return (
@@ -181,7 +196,12 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>{lead.nombre}</div>
-        {puedeAnotar && <Button variant="primary" size="sm" onClick={() => setNueva({ ...NUEVA })}><Plus size={13} /> Observación</Button>}
+        {puedeAnotar && (
+          <Button variant="primary" size="sm"
+            onClick={() => setNueva({ ...NUEVA, recorrida_id: recorridaSel || "" })}>
+            <Plus size={13} /> Observación
+          </Button>
+        )}
       </div>
 
       {/* Los números que dicen cómo va la obra. El de la más vieja es el que
@@ -272,7 +292,11 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
             <Button variant="primary" size="sm" disabled={ocupado || !nueva.titulo.trim()}
               onClick={async () => {
                 setOcupado(true);
+                const rec = recorridas.find(x => x.id === (nueva.recorrida_id || recorridaSel));
                 const res = await crearObservacion(lead, { ...nueva, obra_id: lead.obra_id || null,
+                  recorrida_id: rec?.id || null,
+                  tipo_recorrida: rec?.tipo || "interna",
+                  fecha_visto: rec?.fecha || nueva.fecha_visto,
                   responsable_id: nueva.responsables[0]?.id || "",
                   responsable_nombre: nueva.responsables[0]?.name || null }, currentUser);
                 if (res.error) { setOcupado(false); setAviso(res.error); return; }
@@ -286,6 +310,71 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
                 setNueva(null); setAbierta(res.observacion.id); await cargar();
               }}>{ocupado ? "Guardando…" : "Guardar"}</Button>
             <Button variant="secondary" size="sm" onClick={() => setNueva(null)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Las vueltas. En la obra nadie anota observaciones sueltas: se camina
+          la obra un martes y de ahí salen once, que se discuten juntas y se
+          mandan juntas. Elegir una recorrida acá es ponerse en ese día. */}
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+        <button onClick={() => setRecorridaSel(null)}
+          style={fichaRec(recorridaSel === null, colors.ink)}>
+          Todas <span style={{ opacity: 0.7, fontWeight: 400 }}>{observaciones.length}</span>
+        </button>
+        {recorridas.map(rec => {
+          const t = TIPOS_RECORRIDA[rec.tipo] || TIPOS_RECORRIDA.interna;
+          const color = rec.tipo === "cliente" ? colors.brand : colors.inkSoft;
+          const cuantas = observaciones.filter(o => o.recorrida_id === rec.id).length;
+          return (
+            <button key={rec.id} onClick={() => setRecorridaSel(recorridaSel === rec.id ? null : rec.id)}
+              title={`${t.label} · ${t.pista}`} style={fichaRec(recorridaSel === rec.id, color)}>
+              {dia(rec.fecha)} · {t.label} <span style={{ opacity: 0.7, fontWeight: 400 }}>{cuantas}</span>
+            </button>
+          );
+        })}
+        {puedeAnotar && (
+          <button onClick={() => setNuevaRec({ fecha: hoyISO, tipo: "interna", participantes: "", nota: "" })}
+            style={{ ...fichaRec(false, colors.muted), borderStyle: "dashed" }}>
+            <Plus size={11} style={{ verticalAlign: -1 }} /> Recorrida
+          </button>
+        )}
+      </div>
+
+      {nuevaRec && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "grid", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 8 }}>
+            <input type="date" value={nuevaRec.fecha} onChange={e => setNuevaRec(v => ({ ...v, fecha: e.target.value }))} style={inputStyle} />
+            <input value={nuevaRec.participantes} onChange={e => setNuevaRec(v => ({ ...v, participantes: e.target.value }))}
+              placeholder="¿Quiénes caminaron la obra?" style={inputStyle} />
+          </div>
+          {/* El tipo no es decoración: una recorrida interna es interna, y ahí
+              se dicen cosas que no se le muestran al cliente. Una con el
+              cliente es un acta. De ahí sale si él ve cada observación. */}
+          <div style={{ display: "flex", gap: 6 }}>
+            {Object.entries(TIPOS_RECORRIDA).map(([id, t]) => {
+              const puesto = nuevaRec.tipo === id;
+              return (
+                <button key={id} onClick={() => setNuevaRec(v => ({ ...v, tipo: id }))}
+                  style={{ flex: 1, textAlign: "left", border: `1px solid ${puesto ? colors.brand : colors.border}`,
+                    background: puesto ? colors.brandSoft : "#fff", color: puesto ? colors.brand : colors.inkSoft,
+                    borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontFamily: colors.font,
+                    fontSize: 12.5, fontWeight: puesto ? 700 : 500 }}>
+                  {t.label}
+                  <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 1 }}>{t.pista}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Button variant="primary" size="sm" disabled={ocupado} onClick={async () => {
+              setOcupado(true);
+              const res = await crearRecorrida(lead, nuevaRec, currentUser);
+              setOcupado(false);
+              if (res.error) { setAviso(res.error); return; }
+              setNuevaRec(null); setRecorridaSel(res.recorrida.id); await cargar();
+            }}>Empezar la recorrida</Button>
+            <Button variant="secondary" size="sm" onClick={() => setNuevaRec(null)}>Cancelar</Button>
           </div>
         </div>
       )}

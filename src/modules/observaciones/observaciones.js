@@ -58,6 +58,10 @@ export async function crearObservacion(lead, datos, quien) {
 
   const { data, error } = await supabase.from("obra_observaciones").insert({
     lead_id: lead.id, obra_id: datos.obra_id || null,
+    // De qué vuelta salió. Y el tipo de esa vuelta decide si el cliente la ve:
+    // una casilla que alguien tiene que acordarse de marcar es cómo una nota
+    // interna termina en el correo del cliente.
+    recorrida_id: datos.recorrida_id ? Number(datos.recorrida_id) : null,
     titulo, detalle: datos.detalle?.trim() || null,
     ubicacion: datos.ubicacion?.trim() || null,
     prioridad: datos.prioridad || "media",
@@ -67,9 +71,24 @@ export async function crearObservacion(lead, datos, quien) {
     responsable_id: datos.responsable_id ? Number(datos.responsable_id) : null,
     responsable_nombre: datos.responsable_nombre || null,
     responsable_externo: datos.responsable_externo?.trim() || null,
-    visible_cliente: !!datos.visible_cliente,
+    visible_cliente: datos.visible_cliente ?? (datos.tipo_recorrida === "cliente"),
     created_by: quien?.id ?? null, created_nombre: quien?.name || null,
   }).select().single();
+  if (error && /column|schema cache/i.test(error.message)) {
+    // Sin la 072 no existe `recorrida_id`: la observación se anota igual.
+    const { recorrida_id, ...resto } = { ...datos };
+    const segunda = await supabase.from("obra_observaciones").insert({
+      lead_id: lead.id, obra_id: datos.obra_id || null, titulo,
+      detalle: datos.detalle?.trim() || null, ubicacion: datos.ubicacion?.trim() || null,
+      prioridad: datos.prioridad || "media", origen: datos.origen || "recorrida",
+      fecha_visto: datos.fecha_visto || new Date().toISOString().split("T")[0],
+      responsable_id: datos.responsable_id ? Number(datos.responsable_id) : null,
+      responsable_nombre: datos.responsable_nombre || null,
+      created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+    }).select().single();
+    if (segunda.error) return { error: segunda.error.message };
+    return { observacion: segunda.data };
+  }
   if (error) return { error: falta(error) ? "Falta correr la migración 062." : error.message };
   return { observacion: data };
 }
@@ -81,6 +100,70 @@ export async function crearObservacion(lead, datos, quien) {
  * pantallas y los correos de antes: mientras convivan, las dos cosas dicen lo
  * mismo en vez de contradecirse.
  */
+// ── Las recorridas ───────────────────────────────────────────────────────
+//
+// En la obra nadie anota observaciones sueltas: se camina la obra un martes,
+// con el cliente o sin él, y de esa vuelta salen once. Esas once son una cosa
+// —se discuten juntas, se mandan juntas, se cierran juntas— y hasta ahora no
+// tenían dónde vivir.
+
+export const TIPOS_RECORRIDA = {
+  interna: { label: "Interna", pista: "Entre nosotros. Lo que se anota no lo ve el cliente", color: "inkSoft" },
+  cliente: { label: "Con el cliente", pista: "Es un acta: lo anotado lo vio él, y lo puede dar por bueno", color: "brand" },
+};
+
+export async function cargarRecorridas(leadId) {
+  if (!leadId) return { recorridas: [], sinTabla: false };
+  const { data, error } = await supabase.from("obra_recorridas")
+    .select("*").eq("lead_id", leadId).order("fecha", { ascending: false }).order("id", { ascending: false });
+  if (error) return { recorridas: [], sinTabla: falta(error) };
+  return { recorridas: data || [], sinTabla: false };
+}
+
+export async function crearRecorrida(lead, datos, quien) {
+  const { data, error } = await supabase.from("obra_recorridas").insert({
+    lead_id: lead.id, obra_id: lead.obra_id || null,
+    fecha: datos.fecha || new Date().toISOString().split("T")[0],
+    tipo: datos.tipo || "interna",
+    nota: datos.nota?.trim() || null,
+    participantes: datos.participantes?.trim() || null,
+    created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+  }).select().single();
+  if (error) return { error: falta(error) ? "Falta correr la migración 072." : error.message };
+  return { recorrida: data };
+}
+
+export async function guardarRecorrida(id, campos) {
+  const { error } = await supabase.from("obra_recorridas").update(campos).eq("id", id);
+  return error ? error.message : null;
+}
+
+export async function borrarRecorrida(id) {
+  // Las observaciones no se van con ella: se quedan sueltas, como estaban
+  // antes de que existieran las recorridas. Borrar una vuelta no borra lo que
+  // se vio en la obra.
+  await supabase.from("obra_observaciones").update({ recorrida_id: null }).eq("recorrida_id", id);
+  const { error } = await supabase.from("obra_recorridas").delete().eq("id", id);
+  return error ? error.message : null;
+}
+
+/**
+ * Lo que el cliente dice de una observación.
+ *
+ * Que la vea no alcanza: lo que cierra una observación de una recorrida con el
+ * cliente es que él diga que quedó bien. Hoy eso pasa por teléfono y no queda
+ * en ningún lado, así que seis meses después "yo nunca aprobé eso" no se puede
+ * contestar.
+ */
+export async function clienteDice(obsId, { conforme, nota }) {
+  const { error } = await supabase.from("obra_observaciones").update({
+    cliente_visto_at: new Date().toISOString(),
+    cliente_conforme: conforme === null || conforme === undefined ? null : !!conforme,
+    cliente_nota: nota?.trim() || null,
+  }).eq("id", obsId);
+  return error ? error.message : null;
+}
+
 export async function asignarResponsables(observacionId, gente = []) {
   await supabase.from("observacion_responsables").delete().eq("observacion_id", observacionId);
   if (gente.length) {
