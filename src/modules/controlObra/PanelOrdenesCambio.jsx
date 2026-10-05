@@ -47,6 +47,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [linea, setLinea] = useState(LINEA_VACIA);
   // Los dos campos que casi nunca se usan, plegados hasta que alguien los pida.
   const [verDetalle, setVerDetalle] = useState(false);
+  // En qué orden está abierto el formulario de agregar línea. Cerrado, la
+  // tabla de arriba es lo único que se ve.
+  const [agregandoEn, setAgregandoEn] = useState(null);
   const [mandando, setMandando] = useState(null); // { orden, correos, cuerpo }
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -376,7 +379,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 {/* Agregar una línea: lo que se saca va con "Quita", y el signo
                     lo pone el sistema. Escribir montos en negativo a mano es de
                     donde salen las órdenes que no cuadran. */}
-                {editable && (
+                {/* El formulario estaba siempre abierto, debajo de la tabla de
+                    adiciones y reducciones. Un formulario con los mismos
+                    encabezados que la tabla de arriba se lee como una copia de
+                    lo que ya está, no como la forma de agregar algo. Una acción
+                    no debería parecerse al contenido. */}
+                {editable && (agregandoEn !== o.id ? (
+                    <button onClick={() => { setAgregandoEn(o.id); setLinea(LINEA_VACIA); }}
+                      style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 8,
+                        padding: "8px 12px", color: colors.inkSoft, fontSize: 12, cursor: "pointer",
+                        fontFamily: colors.font, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Plus size={12} /> Agregar una adición o una reducción
+                    </button>
+                  ) : (
                   <div style={{ background: colors.bg, borderRadius: 8, padding: 9, marginBottom: 8 }}>
                     <div style={{ display: "flex", gap: 5, marginBottom: 6 }}>
                       {/* Las mismas palabras que la tabla de arriba y que el
@@ -504,12 +519,17 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       onClick={async () => {
                         const r = await agregarLinea(o.id, { ...linea, orden: suyas.length }, suyas);
                         if (r.error) { setAviso(r.error); return; }
-                        setLinea(LINEA_VACIA); await cargar(); onCambio?.();
+                        setLinea(LINEA_VACIA); setVerDetalle(false); await cargar(); onCambio?.();
                       }}>
                       <Plus size={12} /> Agregar línea
                     </Button>
+                    <button onClick={() => { setAgregandoEn(null); setVerDetalle(false); }}
+                      style={{ background: "none", border: "none", marginLeft: 10, color: colors.muted,
+                        fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
+                      Cancelar
+                    </button>
                   </div>
-                )}
+                ))}
 
                 {/* El resultado, que es lo que se conversa con el cliente. */}
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
