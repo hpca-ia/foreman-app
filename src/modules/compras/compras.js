@@ -314,6 +314,50 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
 }
 
 /**
+ * Borrar el pedido.
+ *
+ * Se pide desde el teléfono, parado en la obra, y se escribe mal: el proyecto
+ * equivocado, dos veces el mismo, "200 sacos" donde iban 20. Sin poder
+ * borrarlo, lo que queda es un pedido muerto en la lista de todos —que alguien
+ * va a tener que anular, explicar o simplemente aprender a ignorar—. Una lista
+ * con basura adentro se deja de leer, y entonces el módulo no sirve.
+ *
+ * Lo borra quien lo pidió mientras no se haya comprado: después hay plata
+ * comprometida contra un rubro y un proveedor esperando. Gerencia y compras
+ * borran también después, salvo que ya tenga factura en el control de obra:
+ * ahí el gasto existe por su cuenta y borrar el pedido solo rompería el
+ * vínculo, dejando una factura que nadie puede explicar de dónde salió.
+ *
+ * Se lleva lo suyo: las cotizaciones del depósito, el historial, y la tarea
+ * que le dejó a alguien. Un aviso de algo que ya no existe es peor que
+ * ninguno: el que lo abre no entiende qué pasó.
+ */
+export async function borrarSolicitud(solicitud) {
+  if (solicitud.factura_id) {
+    return "Esta compra ya tiene su factura en el control de obra. Borrá la factura allá si hace falta; el pedido es el respaldo de ese gasto.";
+  }
+  const adjuntos = await adjuntosDe(solicitud.id);
+  const rutas = adjuntos.map(a => a.storage_path).filter(Boolean);
+  if (rutas.length) await supabase.storage.from("task-files").remove(rutas);
+  if (solicitud.tarea_id) await supabase.from("tasks").delete().eq("id", solicitud.tarea_id);
+  // El historial y los adjuntos se van solos por la llave foránea, pero no
+  // todas las bases tienen el borrado en cascada activo: se piden explícitos.
+  await supabase.from("compras_adjuntos").delete().eq("solicitud_id", solicitud.id);
+  await supabase.from("compras_historial").delete().eq("solicitud_id", solicitud.id);
+
+  const { error } = await supabase.from("compras_solicitudes").delete().eq("id", solicitud.id);
+  if (error) return error.message;
+
+  if (solicitud.lead_id) {
+    await supabase.from("lead_movimientos").insert({
+      lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
+      detalle: `Pedido borrado: ${solicitud.descripcion}`,
+    }).select();
+  }
+  return null;
+}
+
+/**
  * El pedido estaba en el proyecto equivocado.
  *
  * Pasa: se pide desde el teléfono, el selector venía con otro proyecto cargado

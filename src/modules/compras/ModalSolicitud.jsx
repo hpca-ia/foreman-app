@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, actualizarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
-  moverDeProyecto, facturarCompra, SIN_PROYECTO, leadDe } from "./compras";
+  moverDeProyecto, facturarCompra, borrarSolicitud, SIN_PROYECTO, leadDe } from "./compras";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
 import VisorAdjuntos from "./VisorAdjuntos";
@@ -164,6 +164,10 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // pudiera mover quien lo pidió, el pedido se iría de su vista y de la de su
   // gerente sin que ninguno de los dos se entere.
   const puedeMover = !editando || apruebo || gestionaCompras;
+  // Borrarlo: quien lo pidió mientras no se haya comprado —después hay plata
+  // comprometida y un proveedor esperando—, y gerencia o compras siempre.
+  const puedeBorrar = editando && (gestionaCompras || apruebo
+    || (esMia && !["comprada", "recibida"].includes(estado)));
 
   useEffect(() => { if (viva?.id) historialDe(viva.id).then(setHistorial); }, [viva?.id]);
 
@@ -828,6 +832,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         )}
 
         <Button variant="outline" onClick={onCerrar}>Cerrar</Button>
+
+        {puedeBorrar && (
+          <button disabled={ocupado} style={{ marginLeft: "auto", background: "none", border: "none",
+            color: colors.danger, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}
+            onClick={() => hacer(async () => {
+              if (!window.confirm(`¿Borrar "${viva.descripcion}"?\n\nSe van también sus cotizaciones y su historial. Esto no se deshace.`)) return { cerrar: false };
+              const err = await borrarSolicitud(viva);
+              return err ? { error: err } : {};
+            })}>
+            Borrar el pedido
+          </button>
+        )}
       </div>
 
       {/* Qué pasó con esto, en orden: quién pidió, quién aprobó, quién compró. */}
