@@ -131,23 +131,17 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
               })}
             </div>
           </div>
-          <div><label style={lS}>Asignar a</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+          <div><label style={lS}>Responsable</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
           <div><label style={lS}>Prioridad</label><select value={form.priority} onChange={e => inp("priority", e.target.value)} style={inputStyle} disabled={!admin}>{Object.entries(PRIORIDAD).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
         </div>
-        {creandoP && (
-          <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 10 }}>
-            <label style={lS}>Nombre del proyecto nuevo</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input value={nombreP} onChange={e => setNombreP(e.target.value)} onKeyDown={e => e.key === "Enter" && crearProyecto()} placeholder="Ej: Mensajería oficina" style={{ ...inputStyle, flex: 1 }} autoFocus />
-              <Button variant="primary" size="sm" onClick={crearProyecto} disabled={!nombreP.trim()}>Crear</Button>
-              <Button variant="outline" size="sm" onClick={() => { setCreandoP(false); setErrP(""); }}>×</Button>
-            </div>
-            {errP && <div style={{ color: colors.danger, fontSize: 11, marginTop: 5 }}>{errP}</div>}
-            <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Nace en el pipeline como lead (L). Ahí se le pone el tubo —Arquitectura o Construcción— cuando corresponda.</div>
-          </div>
-        )}
+
+        {/* Quién más la lleva, pegado a quién la lleva: son dos mitades de la
+            misma decisión y estaban separadas por el bloque del proyecto. Con
+            un desplegable arriba que dice un solo nombre y los demás catorce
+            líneas más abajo, cualquiera concluye que se asigna a uno solo —y
+            eso fue exactamente lo que pasó. */}
         <div>
-          <label style={lS}>Con quién más</label>
+          <label style={lS}>Y también la llevan</label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {asignables.filter(u => u.id !== form.assignee_id).map(u => {
               const on = conmigo.includes(u.id);
@@ -161,8 +155,23 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
             })}
             {!asignables.filter(u => u.id !== form.assignee_id).length && <span style={{ fontSize: 11, color: colors.muted }}>No hay más gente a quien sumar.</span>}
           </div>
-          <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Los recordatorios y la carga se cuentan al responsable principal; los demás la ven como suya y la pueden mover.</div>
+          <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>
+            Tocá a quien se suma. La ven en su tablero como propia y la pueden mover; los recordatorios y la
+            cuenta de carga van al responsable, para que no llegue el mismo aviso tres veces.
+          </div>
         </div>
+        {creandoP && (
+          <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 10 }}>
+            <label style={lS}>Nombre del proyecto nuevo</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={nombreP} onChange={e => setNombreP(e.target.value)} onKeyDown={e => e.key === "Enter" && crearProyecto()} placeholder="Ej: Mensajería oficina" style={{ ...inputStyle, flex: 1 }} autoFocus />
+              <Button variant="primary" size="sm" onClick={crearProyecto} disabled={!nombreP.trim()}>Crear</Button>
+              <Button variant="outline" size="sm" onClick={() => { setCreandoP(false); setErrP(""); }}>×</Button>
+            </div>
+            {errP && <div style={{ color: colors.danger, fontSize: 11, marginTop: 5 }}>{errP}</div>}
+            <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Nace en el pipeline como lead (L). Ahí se le pone el tubo —Arquitectura o Construcción— cuando corresponda.</div>
+          </div>
+        )}
         <div>
           <label style={lS}>Fecha límite *</label>
           {/* La hora, solo cuando hay día y para lo que se agenda: una reunión
