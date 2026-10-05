@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw, Camera, Download } from "lucide-react";
+import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw, Camera, Download, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -210,7 +210,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
         const editable = puedeEditar && o.estado !== "aprobada";
         return (
           <div key={o.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 8 }}>
+            {/* Una fila que se abre y no lo dice es una fila que nadie abre:
+                todo lo de la orden —los soportes, el PDF, borrarla— vivía acá
+                adentro y no había nada que invitara a tocarla. */}
             <div onClick={() => setAbierta(esta ? null : o.id)} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexWrap: "wrap" }}>
+              {esta ? <ChevronDown size={14} color={colors.muted} /> : <ChevronRight size={14} color={colors.muted} />}
               <span style={{ fontSize: 11, fontWeight: 700, color: colors.muted }}>{codigoDe(o)}</span>
               <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, fontWeight: 600, color: colors.ink }}>{o.titulo}</span>
               {chip(o.estado)}
@@ -502,7 +506,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 )}
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {suyas.length > 0 && (
+                  {/* El PDF, con líneas o sin ellas: es el formato de la orden,
+                      y uno quiere verlo antes de terminar de llenarla —no
+                      después. Escondiéndolo hasta que hubiera líneas, el
+                      formato parecía no existir. */}
+                  {(
                     <Button variant="outline" size="sm" disabled={bajando === o.id}
                       onClick={async () => {
                         setBajando(o.id); setAviso("");
@@ -545,8 +553,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       <X size={12} /> No se hace
                     </Button>
                   )}
-                  {puedeEditar && o.estado !== "aprobada" && (
-                    <button onClick={() => { if (window.confirm(`¿Borrar la ${codigoDe(o)}? Se van también sus líneas.`)) hacer(() => borrarOrden(o.id)); }}
+                  {/* Borrar, aunque esté aprobada: una orden cargada con un
+                      error hay que poder sacarla, y antes había que acordarse
+                      de deshacer la aprobación primero. Se lleva sus rubros
+                      del control, que es lo que corresponde: sin el papel que
+                      los justifica, esa plata no puede quedar en el total. */}
+                  {puedeEditar && (
+                    <button onClick={() => {
+                      const aviso = o.estado === "aprobada"
+                        ? `¿Borrar la ${codigoDe(o)}?\n\nEstá aprobada: sus rubros salen del control de obra y el presupuesto vuelve a lo de antes. Se van también sus líneas y sus soportes.`
+                        : `¿Borrar la ${codigoDe(o)}? Se van también sus líneas y sus soportes.`;
+                      if (window.confirm(aviso)) hacer(() => borrarOrden(o.id));
+                    }}
                       disabled={ocupado} style={{ marginLeft: "auto", background: "none", border: "none", color: colors.danger, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
                       Borrar
                     </button>

@@ -86,7 +86,21 @@ export async function guardarOrden(id, campos) {
   return error ? error.message : null;
 }
 
+/**
+ * Borrarla, con todo lo que dejó puesto.
+ *
+ * Una orden aprobada metió rubros en el control de obra. Si se borra la orden
+ * y esos rubros se quedan, aparecen en el presupuesto sin que exista ya el
+ * papel que los justifica: nadie puede explicar de dónde salieron y el total
+ * de la obra tiene una plata que no está en ningún contrato. Se van con ella.
+ *
+ * Los soportes también: son archivos de una orden que ya no existe.
+ */
 export async function borrarOrden(id) {
+  await supabase.from("obra_rubros").delete().eq("orden_cambio_id", id);
+  const { data: fotos } = await supabase.from("orden_cambio_fotos").select("storage_path").eq("orden_id", id);
+  const rutas = (fotos || []).map(f => f.storage_path).filter(Boolean);
+  if (rutas.length) await supabase.storage.from("task-files").remove(rutas);
   const { error } = await supabase.from("ordenes_cambio").delete().eq("id", id);
   return error ? error.message : null;
 }
