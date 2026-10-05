@@ -178,6 +178,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       {/* Una orden nueva: lo mínimo para poder empezar a listar qué cambia. */}
       {nueva === true && (
         <ModalOrdenCambio obra={obra} proyecto={proyecto} rubros={rubros} currentUser={currentUser}
+          puedeAprobar={puedeEditar}
           onCerrar={() => setNueva(null)}
           onCreada={async orden => { setNueva(null); await cargar(); setAbierta(orden.id); }} />
       )}

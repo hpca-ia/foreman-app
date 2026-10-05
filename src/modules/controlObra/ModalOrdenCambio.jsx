@@ -4,7 +4,7 @@ import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales } from "./ordenesDeCambio";
+import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
 
 // Una orden de cambio entera, de una sola vez.
 //
@@ -32,7 +32,7 @@ const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 
 
 const TIPOS = ["Requerimiento del cliente", "Vicio oculto", "Cambio de especificación", "Error de proyecto", "Condición del terreno"];
 
-export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentUser, onCerrar, onCreada }) {
+export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentUser, puedeAprobar = false, onCerrar, onCreada }) {
   const [f, setF] = useState(VACIA);
   const [lineas, setLineas] = useState([LINEA()]);
   const [fotos, setFotos] = useState([]);
@@ -45,7 +45,11 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
     ...l, cantidad: Number(l.cantidad) || 0, precio_unitario: Number(l.precio_unitario) || 0,
   })));
 
-  async function guardar() {
+  // Guardar y, de una, hacer lo que corresponda. El que puede aprobar suele
+  // ser el mismo que la escribe —una orden la redacta quien la decidió— y
+  // obligarlo a guardar, cerrar, buscarla en la lista, abrirla y recién ahí
+  // aprobarla son cuatro pasos para confirmar algo que ya decidió al escribir.
+  async function guardar(despues) {
     if (!f.titulo.trim()) { setError("Ponele un título: es lo que se cita después en las actas."); return; }
     if (!conMonto.length) { setError("Una orden de cambio sin partidas no se puede mandar a nadie."); return; }
     setGuardando(true); setError("");
@@ -82,6 +86,15 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
 
     for (const [i, archivo] of fotos.entries()) {
       await subirSoporte(orden, archivo, "", currentUser, i);
+    }
+
+    if (despues === "aprobar") {
+      // Las líneas tal como quedaron guardadas: aprobar necesita el
+      // obra_rubro_id de las reducciones para tachar el rubro del presupuesto.
+      const err = await aprobarOrden({ ...orden }, puestas, currentUser, { aprobada_por: currentUser?.name || "" });
+      if (err) { setError("La orden se guardó, pero no se pudo aprobar: " + err); setGuardando(false); return; }
+    } else if (despues === "visto") {
+      await darVisto({ ...orden }, currentUser, "");
     }
 
     setGuardando(false);
@@ -249,14 +262,25 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginTop: 10 }}>{error}</div>}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <Button variant="primary" onClick={guardar} disabled={guardando}>
+      <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+        <Button variant="primary" onClick={() => guardar()} disabled={guardando}>
           {guardando ? "Guardando…" : "Guardar la orden"}
         </Button>
+        {/* Para quien puede aprobar: de una. Una orden la redacta quien la
+            decidió, y guardar, cerrar, buscarla en la lista, abrirla y recién
+            ahí aprobarla son cuatro pasos para confirmar algo que ya quedó
+            decidido al escribirla. */}
+        {puedeAprobar && (
+          <Button variant="outline" onClick={() => guardar("aprobar")} disabled={guardando}>
+            Guardar y aprobar: va al control
+          </Button>
+        )}
         <Button variant="secondary" onClick={onCerrar}>Cancelar</Button>
       </div>
-      <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7 }}>
-        Después se decide qué hacer con ella: bajar el PDF, pedirle el visto al Director, o mandársela al cliente.
+      <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
+        {puedeAprobar
+          ? "Aprobada, sus adiciones entran al control de obra y lo que reduce queda tachado del presupuesto. Si preferís que la vea alguien antes, guardala y desde la lista pedís el visto o se la mandás al cliente."
+          : "Después se decide qué hacer con ella: bajar el PDF, pedirle el visto al Director, o mandársela al cliente."}
       </div>
     </Modal>
   );
