@@ -80,6 +80,77 @@ export async function armarDesdeObra({ lead, obra, mesInicio, meses, nivel = "ru
   return { cronograma };
 }
 
+/**
+ * Lo que entró después de armar el valorado.
+ *
+ * Una orden de cambio aprobada NO toca los rubros que ya estaban: agrega
+ * rubros nuevos, con monto negativo los que quitan. Así que el valorado no se
+ * desactualiza —sus líneas siguen siendo ciertas— pero se queda CORTO: la
+ * curva deja de sumar el presupuesto vigente y el cuadro de "previsto contra
+ * gastado" acusa un sobregasto que no existe, porque compara el gasto de hoy
+ * contra el presupuesto de marzo.
+ *
+ * Eso no se arregla solo y tampoco se avisa: la obra descubre que el valorado
+ * está viejo cuando el cliente pregunta por qué los números no coinciden.
+ */
+export async function pendientesDeSumar(cronograma) {
+  if (!cronograma?.obra_id) return { rubros: [], monto: 0, dias: 0, ordenes: [] };
+  const { data: rubros } = await supabase.from("obra_rubros")
+    .select("id,numero,codigo,descripcion,capitulo,total_base,orden_cambio_id")
+    .eq("obra_id", cronograma.obra_id);
+  const { data: lineas } = await supabase.from("cronograma_valorado_lineas")
+    .select("obra_rubro_id").eq("cronograma_id", cronograma.id);
+  const ya = new Set((lineas || []).map(l => l.obra_rubro_id).filter(Boolean));
+  const faltan = (rubros || []).filter(r => !ya.has(r.id));
+
+  // Y el tiempo: las órdenes aprobadas dicen cuántos días suman. Nadie lo
+  // estaba leyendo, así que una obra con tres órdenes aprobadas seguía
+  // mostrando la fecha de fin del contrato original.
+  const { data: ordenes } = await supabase.from("ordenes_cambio")
+    .select("id,numero,codigo,titulo,dias_impacto,estado")
+    .eq("obra_id", cronograma.obra_id).eq("estado", "aprobada");
+  const dias = (ordenes || []).reduce((t, o) => t + (Number(o.dias_impacto) || 0), 0);
+
+  return {
+    rubros: faltan,
+    monto: Math.round(faltan.reduce((t, r) => t + (Number(r.total_base) || 0), 0) * 100) / 100,
+    dias,
+    ordenes: ordenes || [],
+  };
+}
+
+/**
+ * Sumarlos a la curva, repartidos en lo que queda de obra.
+ *
+ * Se reparten desde el mes que viene hasta el final: una orden de cambio se
+ * ejecuta de ahora en adelante, no hacia atrás. Quedan marcadas para revisar
+ * —casi siempre van en dos o tres meses concretos y no estirados hasta el
+ * final—, pero la plata entra YA a la curva: dejarla afuera hasta que alguien
+ * la acomode es exactamente el error que esto viene a arreglar.
+ */
+export async function sumarAlValorado(cronograma, rubros = [], desdeIndice = 0) {
+  if (!rubros.length) return null;
+  const meses = cronograma.meses;
+  const pesos = repartirEntre(meses, Math.min(desdeIndice, meses - 1), meses - 1);
+  const filas = rubros.map((r, i) => ({
+    cronograma_id: cronograma.id, obra_rubro_id: r.id,
+    codigo: r.codigo || String(r.numero || ""), descripcion: r.descripcion, capitulo: r.capitulo,
+    monto: Number(r.total_base) || 0, pesos,
+    orden_cambio_id: r.orden_cambio_id || null,
+    revisar: true,
+    orden: 10000 + i,
+  }));
+  for (let i = 0; i < filas.length; i += 100) {
+    let { error } = await supabase.from("cronograma_valorado_lineas").insert(filas.slice(i, i + 100));
+    if (error && /column|schema cache/i.test(error.message)) {
+      const limpias = filas.slice(i, i + 100).map(({ orden_cambio_id, revisar, ...resto }) => resto);
+      ({ error } = await supabase.from("cronograma_valorado_lineas").insert(limpias));
+    }
+    if (error) return error.message;
+  }
+  return null;
+}
+
 /** Mover el tramo de una línea: en qué mes empieza y en cuál termina. */
 export async function moverTramo(linea, desde, hasta, meses) {
   const pesos = repartirEntre(meses, desde, hasta);

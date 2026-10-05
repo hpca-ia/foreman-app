@@ -52,7 +52,15 @@ create table if not exists public.cronograma_valorado_lineas (
   monto       numeric(14,2) not null default 0,
   -- Un porcentaje por mes: [50, 50] es mitad y mitad. La fila cierra en 100.
   pesos       jsonb not null default '[]'::jsonb,
-  orden       int not null default 0
+  orden       int not null default 0,
+  -- De qué orden de cambio entró esta línea, si no venía del presupuesto
+  -- original. Sin esto, un valorado armado en marzo y una orden aprobada en
+  -- junio conviven sin que nada diga que la curva se quedó corta.
+  orden_cambio_id bigint,
+  -- Entró después y todavía nadie dijo en qué meses va. La plata ya está en
+  -- la curva —repartida en lo que queda de obra— pero se marca para que
+  -- alguien la acomode, en vez de esconderla y descuadrar el total.
+  revisar     boolean not null default false
 );
 create index if not exists valorado_lineas on public.cronograma_valorado_lineas (cronograma_id, orden);
 

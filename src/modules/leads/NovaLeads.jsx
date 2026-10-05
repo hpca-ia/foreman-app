@@ -29,14 +29,20 @@ export default function NovaLeads({ leads, currentUser, catalogo, onCambio }) {
     if (!t) return;
     setPensando(true); setError(""); setDijo("");
     try {
-      const catalogo = leads.map(l => `${l.id}: ${l.nombre}${l.contacto ? ` (${l.contacto})` : ""} — ${l.etapa}`).join("\n") || "(todavía no hay leads)";
+      // Se llamaba `catalogo` y tapaba al `catalogo` que llega por props —el
+      // de las etapas—, así que doce líneas más abajo se le pedía .map a un
+      // texto y NOVA moría con "(e || g).map is not a function". Dos cosas
+      // distintas no pueden llamarse igual en el mismo alcance, y menos cuando
+      // una es una lista y la otra un párrafo.
+      const listaDeLeads = leads.map(l => `${l.id}: ${l.nombre}${l.contacto ? ` (${l.contacto})` : ""} — ${l.etapa}`).join("\n") || "(todavía no hay leads)";
+      const etapas = Array.isArray(catalogo) && catalogo.length ? catalogo : CATALOGO_BASE;
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5", max_tokens: 900,
           system: `Eres NOVA y llevas el seguimiento comercial de una constructora en Ecuador.
 Hoy es ${hoy()}. Estos son los leads abiertos:
-${catalogo}
+${listaDeLeads}
 
 Interpretas lo que dicta el director y devuelves SOLO JSON, sin markdown.
 
@@ -50,7 +56,7 @@ el presupuesto de Fowler el viernes", "solicitar los planos"—:
 Si además del lead nuevo dicta cosas por hacer, ponlas en "pasos" de la acción "crear".
 Si cambia la etapa —"ya firmamos", "lo perdimos"—:
 {"accion":"etapa","lead_id":3,"etapa":"ganado"}
-Etapas: ${(catalogo || CATALOGO_BASE).map(e => e.id).join(", ")}.
+Etapas: ${etapas.map(e => e.id).join(", ")}.
 
 Títulos cortos que empiecen con el verbo. Fechas en AAAA-MM-DD, interpretando
 "el viernes", "mañana", "en dos semanas" contra hoy. Sin fecha dicha, usa hoy.
