@@ -213,7 +213,12 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
 
         {conMonto.length > 0 && (
           <div style={{ display: "flex", gap: 16, background: colors.bg, borderRadius: 8, padding: "9px 12px", flexWrap: "wrap" }}>
-            {[["Agrega", sub.agrega, colors.brand], ["Quita", sub.quita, colors.danger], ["Neto", sub.total, sub.total < 0 ? colors.danger : colors.ink]].map(([k, v, c]) => (
+            {/* `subtotales` devuelve adiciones/reducciones, no agrega/quita.
+                Leyendo los nombres equivocados daban undefined → 0, y el
+                cuadro mostraba "AGREGA $0 · QUITA $0 · NETO $465,40": tres
+                números de los cuales uno solo era cierto, que es peor que no
+                mostrar ninguno. */}
+            {[["Agrega", sub.adiciones, colors.brand], ["Quita", sub.reducciones, colors.danger], ["Neto", sub.total, sub.total < 0 ? colors.danger : colors.ink]].map(([k, v, c]) => (
               <div key={k}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{k.toUpperCase()}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: c }}>
