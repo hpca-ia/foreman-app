@@ -196,11 +196,22 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>{lead.nombre}</div>
-        {puedeAnotar && (
-          <Button variant="primary" size="sm"
-            onClick={() => setNueva({ ...NUEVA, recorrida_id: recorridaSel || "" })}>
-            <Plus size={13} /> Observación
-          </Button>
+        {/* Un solo botón, y hace lo que corresponde según dónde uno está.
+            Había dos "+" al lado —"Recorrida" y "Observación"— con alcances
+            distintos: uno abre una vuelta a la obra, el otro anota algo dentro
+            de esa vuelta. Puestos juntos obligan a entender la jerarquía antes
+            de poder apretar nada.
+            Mirando "Todas" no hay dónde meter una observación, así que lo que
+            toca es empezar la vuelta. Adentro de una, lo que toca es anotar. */}
+        {puedeAnotar && (recorridaSel
+          ? <Button variant="primary" size="sm"
+              onClick={() => setNueva({ ...NUEVA, recorrida_id: recorridaSel })}>
+              <Plus size={13} /> Observación
+            </Button>
+          : <Button variant="primary" size="sm"
+              onClick={() => setNuevaRec({ fecha: hoyISO, tipo: "interna", participantes: "", nota: "" })}>
+              <Plus size={13} /> Empezar una recorrida
+            </Button>
         )}
       </div>
 
@@ -333,13 +344,20 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
             </button>
           );
         })}
-        {puedeAnotar && (
-          <button onClick={() => setNuevaRec({ fecha: hoyISO, tipo: "interna", participantes: "", nota: "" })}
-            style={{ ...fichaRec(false, colors.muted), borderStyle: "dashed" }}>
-            <Plus size={11} style={{ verticalAlign: -1 }} /> Recorrida
-          </button>
-        )}
       </div>
+
+      {/* Dentro de una vuelta se dice cuál, porque lo que se anote va ahí. */}
+      {recorridaSel && (() => {
+        const rec = recorridas.find(x => x.id === recorridaSel);
+        if (!rec) return null;
+        const t = TIPOS_RECORRIDA[rec.tipo] || TIPOS_RECORRIDA.interna;
+        return (
+          <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Estás en la recorrida del <strong style={{ color: colors.ink }}>{dia(rec.fecha)}</strong>
+            {rec.participantes ? ` con ${rec.participantes}` : ""} · {t.pista}
+          </div>
+        );
+      })()}
 
       {nuevaRec && (
         <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "grid", gap: 8 }}>
