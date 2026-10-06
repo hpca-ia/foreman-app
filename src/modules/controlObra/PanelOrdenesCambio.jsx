@@ -606,7 +606,10 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         try {
                           const doc = await pdfDeOrden({
                             orden: o, lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
-                            codigo: codigoDe(o), subtotales: sub, resumenContrato: resumen,
+                            codigo: codigoDe(o), subtotales: sub,
+                            // A cuánto asciende el contrato va solo si alguien
+                            // lo decidió para ESTA orden.
+                            resumenContrato: o.mostrar_contrato ? resumen : null,
                           });
                           doc.save(`${codigoDe(o)} - ${proyecto || obra.nombre}.pdf`);
                         } catch (e) { setAviso("No se pudo armar el PDF: " + e.message); }
@@ -675,6 +678,20 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     </button>
                   )}
                 </div>
+
+                {/* Una orden que baja el contrato es una buena noticia, y el
+                    cliente la lee como tal cuando ve la diferencia sola.
+                    Puesto el acumulado al lado, la conversación deja de ser
+                    sobre este cambio y pasa a ser sobre cuánto lleva gastado
+                    —otra discusión, y casi nunca la que uno quería tener. */}
+                {puedeEditar && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5,
+                    color: colors.inkSoft, cursor: "pointer", margin: "8px 0" }}>
+                    <input type="checkbox" checked={!!o.mostrar_contrato}
+                      onChange={e => hacer(() => guardarOrden(o.id, { mostrar_contrato: e.target.checked }))} />
+                    Mostrarle al cliente a cuánto asciende el contrato con esta orden
+                  </label>
+                )}
 
                 {o.estado === "aprobada" && (
                   <div style={{ fontSize: 11, color: colors.success, marginTop: 7 }}>

@@ -194,12 +194,20 @@ export default async function handler(req, res) {
         ${revisor("CONTRATANTE", orden.contratante_nombre, orden.contratante_fecha, orden.contratante_comentario)}
       </table>
 
+      <!-- A cuánto asciende el contrato sale solo si alguien lo decidió para
+           esta orden. Una que BAJA el contrato es una buena noticia y el
+           cliente la lee como tal viendo la diferencia sola; con el acumulado
+           al lado, la conversación pasa a ser sobre cuánto lleva gastado, que
+           es otra discusión y casi nunca la que uno quería tener ese día. -->
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:12px;background:#F9FAFB;border-radius:6px;margin-top:16px">
+        ${orden.mostrar_contrato ? `
         <tr><td style="padding:4px 8px;color:#6B7280">Contrato original</td><td style="padding:4px 8px;text-align:right">$${plata(base)}</td></tr>
-        <tr><td style="padding:4px 8px;color:#6B7280">Órdenes de cambio aprobadas</td><td style="padding:4px 8px;text-align:right">$${plata(adicionalesObra)}</td></tr>
-        <tr><td style="padding:4px 8px;color:#6B7280">Esta orden</td><td style="padding:4px 8px;text-align:right">${total < 0 ? "− " : ""}$${plata(Math.abs(total))}</td></tr>
+        <tr><td style="padding:4px 8px;color:#6B7280">Órdenes de cambio aprobadas</td><td style="padding:4px 8px;text-align:right">$${plata(adicionalesObra)}</td></tr>` : ""}
+        <tr><td style="padding:${orden.mostrar_contrato ? "4px" : "6px"} 8px;${orden.mostrar_contrato ? "color:#6B7280" : "font-weight:700"}">Esta orden</td>
+            <td style="padding:${orden.mostrar_contrato ? "4px" : "6px"} 8px;text-align:right;${orden.mostrar_contrato ? "" : "font-weight:700"}">${total < 0 ? "− " : "+ "}$${plata(Math.abs(total))}</td></tr>
+        ${orden.mostrar_contrato ? `
         <tr><td style="padding:6px 8px;font-weight:700;border-top:1px solid #E5E7EB">Nuevo valor del contrato</td>
-            <td style="padding:6px 8px;text-align:right;font-weight:700;border-top:1px solid #E5E7EB">$${plata(base + adicionalesObra + total)}</td></tr>
+            <td style="padding:6px 8px;text-align:right;font-weight:700;border-top:1px solid #E5E7EB">$${plata(base + adicionalesObra + total)}</td></tr>` : ""}
       </table>
 
       <p style="margin:14px 0 0;color:#6B7280;font-size:11.5px">
