@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { Plus, ChevronLeft, GanttChartSquare, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -9,6 +9,8 @@ import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo, nivel
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
+// El valorado baja aparte: es una matriz con su gráfico y pesa.
+const PanelValorado = lazy(() => import("./PanelValorado"));
 import PartirEnEtapas from "./PartirEnEtapas";
 import { guardarPlazo, desfase, diasDelPlazo } from "./plazo";
 import { fmt } from "../controlObra/calculos";
@@ -50,6 +52,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // se discute con el contrato— y cuál hace falta cambia según con quién se
   // esté hablando.
   const [escala, setEscala] = useState("fecha");
+  // Las dos vistas del mismo plan. Viven juntas porque son lo mismo contado
+  // de dos maneras —en tiempo y en plata— y las dos salen de las agrupaciones
+  // del control de obra. Tenerlas en módulos distintos era pedir que se
+  // separen, y una de las dos quedara vieja sin que nadie se entere.
+  const [vista, setVista] = useState("barras");
   // Cuántos píxeles mide un día. Un cronograma no se mira entero: se mira el
   // mes que viene, de cerca. Apretarlo para que entre en la pantalla es lo que
   // lo volvía ilegible —ocho meses en 300 píxeles son barras de dos milímetros
@@ -416,6 +423,75 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }
 
   /**
+   * Devolver el cronograma al orden del control de obra.
+   *
+   * El cronograma nace en ese orden, pero después se mueve —a mano, o porque
+   * se rearmó con NOVA— y termina diciendo otra cosa que el control. Cuando
+   * eso pasa no hay forma de leer los dos documentos uno al lado del otro, que
+   * es para lo que existen.
+   *
+   * No se hace solo: el orden de trabajo NO es el del presupuesto —el
+   * presupuesto se escribe por capítulos y la obra se hace por frentes— y
+   * reordenar sin que nadie lo pida borraría un trabajo que alguien hizo a
+   * propósito.
+   */
+  async function ordenarComoElControl() {
+    const pos = new Map(agrupaciones.map((g, i) => [g.id, g.orden ?? i]));
+    const ordenadas = [...actividades].sort((a, b) => {
+      // Las que no cuelgan de ninguna agrupación, al final: no tienen lugar
+      // en el orden del control porque no están en el control.
+      const pa = pos.has(a.obra_actividad_id) ? pos.get(a.obra_actividad_id) : 1e6;
+      const pb = pos.has(b.obra_actividad_id) ? pos.get(b.obra_actividad_id) : 1e6;
+      if (pa !== pb) return pa - pb;
+      // Dentro de un rubro, por el momento en que ocurre: anticipo, luego
+      // fabricación, luego entrega, luego instalación.
+      const e = ["anticipo", "fabricacion", "entrega", "instalacion", "ejecucion"];
+      const ea = e.indexOf(a.etapa || "ejecucion"), eb = e.indexOf(b.etapa || "ejecucion");
+      return ea !== eb ? ea - eb : (a.orden ?? 0) - (b.orden ?? 0);
+    });
+    setPensando(true);
+    for (const [i, a] of ordenadas.entries()) {
+      if ((a.orden ?? -1) !== i) await supabase.from("cronograma_actividades").update({ orden: i }).eq("id", a.id);
+    }
+    setPensando(false);
+    await cargar();
+  }
+
+  /**
+   * Cuadrar el reparto de plata de un rubro partido en etapas.
+   *
+   * Las etapas de un rubro tienen que repartirse el 100% de su plata. Cuando
+   * no cierran —un cronograma viejo, o NOVA que devolvió pesos que suman 35—
+   * ese rubro aporta de menos al valorado y el total deja de dar el
+   * presupuesto, que es el único defecto que lo vuelve inservible.
+   *
+   * Lo que falta o sobra se ajusta en la etapa más grande: es la que más
+   * absorbe en obra y la que menos se nota.
+   */
+  async function cuadrarReparto(agrupId) {
+    const suyas = actividades.filter(a => a.obra_actividad_id === agrupId);
+    if (suyas.length < 2) return;
+    const suma = suyas.reduce((t, a) => t + (Number(a.peso_pct) || 0), 0);
+    if (Math.abs(suma - 100) < 0.01) return;
+    setPensando(true);
+    if (!suma) {
+      // Sin ningún peso, partes iguales: es lo único honesto cuando no hay
+      // con qué ponderar.
+      const parejo = Math.round((100 / suyas.length) * 100) / 100;
+      for (const [i, a] of suyas.entries()) {
+        const v = i === suyas.length - 1 ? Math.round((100 - parejo * (suyas.length - 1)) * 100) / 100 : parejo;
+        await supabase.from("cronograma_actividades").update({ peso_pct: v }).eq("id", a.id);
+      }
+    } else {
+      const mayor = suyas.reduce((a, b) => ((Number(a.peso_pct) || 0) >= (Number(b.peso_pct) || 0) ? a : b));
+      const v = Math.round(((Number(mayor.peso_pct) || 0) + (100 - suma)) * 100) / 100;
+      await supabase.from("cronograma_actividades").update({ peso_pct: Math.max(0, v) }).eq("id", mayor.id);
+    }
+    setPensando(false);
+    await cargar();
+  }
+
+  /**
    * Señalar, dentro de un grupo, el rubro que de verdad está pendiente.
    *
    * El grupo se atrasa por UNA cosa: están todas las lámparas instaladas menos
@@ -484,6 +560,32 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   return (
     <div style={{ fontFamily: colors.font }}>
       <Volver onClick={() => setLead(null)} />
+      {/* LAS DOS VISTAS DEL MISMO PLAN.
+          El cronograma dice cuándo pasa cada cosa y el valorado cuánto cuesta
+          ese cuándo. Salen de las mismas agrupaciones del control de obra y en
+          su mismo orden. El valorado vivía en Control de Obra y el Gantt acá:
+          esa separación es la que hacía que uno se quedara viejo sin que nadie
+          se entere. */}
+      <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 8, padding: 3, marginBottom: 12 }}>
+        {[["barras", "Cronograma"], ["valorado", "Valorado"]].map(([v, l]) => (
+          <button key={v} onClick={() => setVista(v)}
+            style={{ padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font,
+              fontSize: 12.5, fontWeight: 600, background: vista === v ? "#fff" : "transparent",
+              color: vista === v ? colors.brand : colors.inkSoft }}>{l}</button>
+        ))}
+      </div>
+
+      {vista === "valorado" ? (
+        !obra ? (
+          <Aviso>Este proyecto todavía no tiene obra activa: el valorado sale de sus rubros.</Aviso>
+        ) : (
+          <Suspense fallback={<Centro>Cargando…</Centro>}>
+            <PanelValorado lead={lead} obra={{ id: lead.obra_id, nombre: lead.nombre, lead_id: lead.id }}
+              currentUser={currentUser} puedeEditar={editable} />
+          </Suspense>
+        )
+      ) : (
+      <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>{lead.nombre}</div>
@@ -796,6 +898,18 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 })}>
                   Bajar para Project
                 </Button>
+                {/* El orden del control, de vuelta.
+                    No se hace solo: el orden de trabajo NO es el del
+                    presupuesto —el presupuesto se escribe por capítulos y la
+                    obra se hace por frentes— así que reordenar sin que nadie
+                    lo pida borraría un trabajo hecho a propósito. */}
+                <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+                  if (!window.confirm(
+                    "¿Poner las actividades en el mismo orden que las agrupaciones del control de obra?\n\n" +
+                    "Dentro de cada rubro quedan por el momento en que ocurren: anticipo, fabricación, entrega, " +
+                    "instalación. No se tocan ni las fechas ni las dependencias.")) return;
+                  await ordenarComoElControl();
+                }}>Ordenar como el control</Button>
                 <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
                   setPensando(true);
                   // Con las cantidades del presupuesto: lo que vale para la
@@ -917,7 +1031,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
           onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
-          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro} />
+          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro} onCuadrarReparto={cuadrarReparto} />
       )}
 
       {editable && (
@@ -960,6 +1074,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           colchón, y un día de atraso ahí es un día de atraso en la entrega. Las azules se pueden correr lo que diga
           su holgura sin mover la fecha de fin.
         </div>
+      )}
+      </>
       )}
     </div>
   );

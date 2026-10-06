@@ -65,7 +65,7 @@ export default function TablaGantt({
   porId, cal, plan, escala, zoom, marcas = [], editable, conEtapas,
   uniendo, setUniendo, hoyISO, dia,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro,
-  rubros = [], sinSenalar, onSenalar,
+  rubros = [], sinSenalar, onSenalar, onCuadrarReparto,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -239,10 +239,16 @@ export default function TablaGantt({
                       </span>
                     )}
                     {malReparto && (
-                      <span title="Las etapas de un rubro tienen que repartirse el 100% de su plata. Así como está, el valorado no va a cuadrar con el presupuesto."
-                        style={{ fontSize: 9, fontWeight: 700, color: colors.warning, flexShrink: 0 }}>
-                        reparten {Math.round(pesos)}%
-                      </span>
+                      // Con el arreglo al lado: avisar de un descuadre y no dar
+                      // cómo cerrarlo obliga a corregir seis números a mano, y
+                      // es cuando se deja así.
+                      <button onClick={() => onCuadrarReparto?.(g.id)} disabled={!editable || !onCuadrarReparto}
+                        title="Las etapas de un rubro tienen que repartirse el 100% de su plata. Así como está, el valorado no cuadra con el presupuesto. Tocá para cerrarlo en la etapa más grande."
+                        style={{ fontSize: 9, fontWeight: 700, color: colors.warning, background: colors.warningSoft,
+                          border: `1px solid ${colors.warningBorder}`, borderRadius: 9, padding: "1px 7px",
+                          cursor: editable ? "pointer" : "default", flexShrink: 0, fontFamily: colors.font }}>
+                        reparten {Math.round(pesos)}% · cuadrar
+                      </button>
                     )}
                   </div>
                   <span title="De la primera etapa a la última, incluido lo que pasa en el medio sin trabajo en obra"

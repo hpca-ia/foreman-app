@@ -293,6 +293,8 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
     <div>
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 12 }}>
         Una agrupación junta los rubros que le compras al mismo proveedor, para no tener que repartir cada factura entre muchos rubros. Es a ellas que se asignan las facturas al planillar.
+        {" "}<strong style={{ color: colors.ink }}>Y son las que arman los dos cronogramas</strong> —el de barras y el
+        valorado, en el módulo Cronograma—, en este mismo orden: lo que cambies acá se ve allá.
         {sinActividad > 0 && <> Quedan <strong>{sinActividad}</strong> rubros sin agrupar.</>}
       </div>
 

@@ -21,9 +21,6 @@ import { comprometidoPorGrupo } from "./calculos";
 // escribiendo una URL o tocando un estado desde la consola. Esconder un botón
 // es cortesía; no mandar el código es la cerradura.
 const PanelFondos = lazy(() => import("./PanelFondos"));
-// El valorado baja aparte: es una matriz con su gráfico y no hace falta en
-// cada obra que alguien abre para mirar una factura.
-const PanelValorado = lazy(() => import("../cronograma/PanelValorado"));
 const PanelProveedores = lazy(() => import("./PanelProveedores"));
 const Cargando = () => <div style={{ textAlign: "center", color: colors.muted, padding: "30px 0", fontSize: 12.5 }}>Cargando…</div>;
 
@@ -158,7 +155,6 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
             residente controla el avance sin tener por qué saber cuánto
             anticipó el cliente ni cuánto se le debe a cada proveedor. */}
         {vePlata && <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>}
-        <button onClick={() => setTab("valorado")} style={tabS(tab === "valorado")}>Valorado</button>
         {veCaja && <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>}
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
@@ -229,12 +225,6 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
               currentUser={currentUser} puede={puede} onCambio={cargar} />
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
-          {tab === "valorado" && (
-            <Suspense fallback={<Cargando />}>
-              <PanelValorado lead={{ id: obra.lead_id }} obra={obra} facturas={facturas}
-                currentUser={currentUser} puedeEditar={puede ? puede("obras.crear") : true} />
-            </Suspense>
-          )}
 
           {tab === "fondos" && veCaja && (
             <Suspense fallback={<Cargando />}>

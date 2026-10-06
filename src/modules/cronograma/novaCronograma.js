@@ -196,9 +196,17 @@ cada una se lleva una parte del dinero.
   "etapa": anticipo | fabricacion | entrega | instalacion | ejecucion
   "peso": qué porcentaje de la plata de SU agrupación le toca a esta actividad.
 
-Las etapas de una misma agrupación tienen que sumar 100 de peso. Lo que se
-ejecuta y se paga mientras se hace es UNA sola actividad con etapa "ejecucion"
-y peso 100 — ese es el caso normal, es la mayoría, y no hay que partirlo.
+Las etapas de una misma agrupación tienen que sumar 100 de peso, y NO PUEDE
+HABER DOS DE LA MISMA CLASE: una agrupación no tiene tres "instalación".
+
+Lo que se ejecuta y se paga mientras se hace es UNA sola actividad con etapa
+"ejecucion" y peso 100 — ese es el caso normal, es la mayoría, y no hay que
+partirlo.
+
+LO QUE NUNCA SE PARTE: los gastos generales de obra, la dirección de proyecto,
+los honorarios, las pólizas, la fiscalización. No se anticipan ni se fabrican
+ni se instalan: se gastan a lo largo de toda la obra. Van como UNA actividad
+con etapa "ejecucion", peso 100, y una duración igual al plazo entero.
 
 Para lo importado o fabricado, partilo de verdad: el anticipo es una actividad
 CORTA (uno o dos días, es un pago) y va MESES antes de la instalación; entre
@@ -293,7 +301,7 @@ export function ordenar(p, agrupaciones, cal) {
   //   · la agrupación que NOVA se olvidó, entra igual.
   const inventadas = (p.actividades || []).filter(a => !porAgrup.has(Number(a.agrupacion_id))).length;
 
-  const actividades = (p.actividades || [])
+  let actividades = (p.actividades || [])
     .filter(a => porAgrup.has(Number(a.agrupacion_id)))
     .map((a, i) => {
       const g = porAgrup.get(Number(a.agrupacion_id));
@@ -311,6 +319,36 @@ export function ordenar(p, agrupaciones, cal) {
         orden: i,
       };
     });
+
+  // UNA ETAPA DE CADA CLASE POR RUBRO.
+  //
+  // Visto en una obra de verdad: "Gastos generales" partido en seis —anticipo,
+  // fabricación, entrega y TRES "instalación"—, repartiendo 35% entre todas.
+  // Tres barras con el mismo nombre no quieren decir nada, y los gastos
+  // generales no se anticipan ni se fabrican ni se instalan.
+  //
+  // La repetida se funde con la primera: se suman sus pesos y se queda la
+  // duración más larga. Fundir y no tirar, porque tirar perdería plata del
+  // rubro y el valorado dejaría de dar el presupuesto.
+  const unica = new Map();
+  const fundidas = [];
+  actividades.forEach(a => {
+    const k = `${a.agrupacion_id}·${a.etapa}`;
+    const ya = unica.get(k);
+    if (!ya) { unica.set(k, a); return; }
+    ya.peso = Math.round((n(ya.peso) + n(a.peso)) * 100) / 100;
+    ya.duracion = Math.max(ya.duracion, a.duracion);
+    fundidas.push(a.ref);
+  });
+  if (fundidas.length) {
+    const vivas = new Set([...unica.values()].map(a => a.ref));
+    actividades = actividades.filter(a => vivas.has(a.ref));
+    // Las dependencias de las que se fueron se reapuntan a la que quedó, que
+    // es la misma cosa con otro nombre.
+    const destino = new Map();
+    fundidas.forEach(ref => { destino.set(ref, null); });
+    p.dependencias = (p.dependencias || []).filter(d => !destino.has(Number(d.de)) && !destino.has(Number(d.a)));
+  }
 
   // Las que faltan, en el orden del control de obra. Con una duración que
   // alguien va a tener que corregir, y es correcto que se note: mejor una
