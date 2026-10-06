@@ -60,13 +60,34 @@ AGRUPACIONES del presupuesto (id · nombre · monto):
 ${agrupaciones.map(a => `${a.id} · ${a.nombre} · ${Math.round(a.monto)}`).join("\n")}
 
 Devuelves SOLO JSON, sin markdown:
-{"actividades":[{"ref":1,"agrupacion_id":12,"nombre":"Excavación y cimentación","duracion":18,"porque":"..."}],
+{"actividades":[{"ref":1,"agrupacion_id":12,"nombre":"Excavación y cimentación","duracion":18,"etapa":"ejecucion","peso":100,"porque":"..."}],
  "dependencias":[{"de":1,"a":2,"retardo":0,"porque":"..."}]}
 
 ACTIVIDADES: partí cada agrupación en una a cuatro actividades según su peso y
 su naturaleza. Una agrupación de 200 mil no es una barra sola. "duracion" en
 días HÁBILES. "ref" es un número tuyo, de 1 en adelante, para referirte a ellas
 en las dependencias. "agrupacion_id" es el id de la agrupación de la que sale.
+
+ETAPAS Y PLATA. Lo que se importa o se fabrica no pasa en un momento: se
+anticipa, se fabrica, llega y se instala. Son etapas separadas en el tiempo y
+cada una se lleva una parte del dinero.
+
+  "etapa": anticipo | fabricacion | entrega | instalacion | ejecucion
+  "peso": qué porcentaje de la plata de SU agrupación le toca a esta actividad.
+
+Las actividades de una misma agrupación tienen que sumar 100 de peso. Lo que se
+ejecuta y se paga mientras se hace es una sola actividad con etapa "ejecucion"
+y peso 100 — ese es el caso normal y no hay que partirlo.
+
+Para lo importado o fabricado, partilo de verdad: el anticipo es una actividad
+CORTA (uno o dos días, es un pago) y va MESES antes de la instalación; entre
+medio la fabricación, que es larga y no ocupa gente en obra; y la instalación al
+final, encadenada a lo que la permita. Ejemplo típico de una ventanería:
+anticipo 50% el día 1, fabricación 40% durante 60 días, instalación 10% cuando
+la obra está cerrada.
+
+Esto es lo que después deja que el cronograma y el valorado digan lo mismo: la
+plata cae en los meses en que de verdad sale, no repartida pareja.
 
 DEPENDENCIAS: "de" termina antes de que empiece "a". Usá el orden real de una
 obra, no el orden de la lista:
@@ -125,11 +146,32 @@ export function ordenar(p, agrupaciones, cal) {
       ref: Number(a.ref) || i + 1,
       nombre: String(a.nombre).trim().slice(0, 120),
       duracion: Math.max(1, Math.round(n(a.duracion)) || 5),
+      etapa: ["anticipo", "fabricacion", "entrega", "instalacion", "ejecucion"].includes(a.etapa) ? a.etapa : "ejecucion",
+      peso: n(a.peso),
       agrupacion_id: porAgrup.has(Number(a.agrupacion_id)) ? Number(a.agrupacion_id) : null,
       porque: a.porque || "",
       orden: i,
     }));
   const refs = new Set(actividades.map(a => a.ref));
+
+  // Los pesos de cada agrupación tienen que cerrar en 100: si no, la plata de
+  // esa agrupación entra de menos o de más al valorado y el total deja de dar
+  // el presupuesto. Lo que falte o sobre se ajusta en la etapa más grande, que
+  // es la que menos se nota y la que de verdad absorbe el resto en obra.
+  const etapasDe = new Map();
+  actividades.forEach(a => {
+    if (!a.agrupacion_id) return;
+    if (!etapasDe.has(a.agrupacion_id)) etapasDe.set(a.agrupacion_id, []);
+    etapasDe.get(a.agrupacion_id).push(a);
+  });
+  etapasDe.forEach(grupo => {
+    const suma = grupo.reduce((t, x) => t + n(x.peso), 0);
+    if (!suma) { grupo.forEach(x => { x.peso = Math.round((100 / grupo.length) * 100) / 100; }); return; }
+    if (Math.abs(suma - 100) < 0.01) return;
+    const mayor = grupo.reduce((a, b) => (n(a.peso) >= n(b.peso) ? a : b));
+    mayor.peso = Math.round((n(mayor.peso) + (100 - suma)) * 100) / 100;
+  });
+  actividades.filter(a => !a.agrupacion_id).forEach(a => { a.peso = n(a.peso) || 0; });
 
   let dependencias = (p.dependencias || [])
     .filter(d => refs.has(Number(d.de)) && refs.has(Number(d.a)) && Number(d.de) !== Number(d.a))
@@ -172,8 +214,15 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
     lead_id: lead.id, obra_id: obra?.id || null,
     nombre: a.nombre, duracion: a.duracion,
     obra_actividad_id: a.agrupacion_id, nota: a.porque || null, orden: a.orden,
+    etapa: a.etapa || "ejecucion", peso_pct: a.peso ?? null,
   }));
-  const { data: creadas, error } = await supabase.from("cronograma_actividades").insert(filas).select();
+  let { data: creadas, error } = await supabase.from("cronograma_actividades").insert(filas).select();
+  // Sin la 083 no existen etapa ni peso: el cronograma entra igual, y lo que
+  // se pierde es poder derivar el valorado de él.
+  if (error && /column|schema cache/i.test(error.message)) {
+    const limpias = filas.map(({ etapa, peso_pct, ...resto }) => resto);
+    ({ data: creadas, error } = await supabase.from("cronograma_actividades").insert(limpias).select());
+  }
   if (error) return { error: /schema cache|does not exist/i.test(error.message) ? "Falta correr la migración 076." : error.message };
 
   // De la referencia de NOVA al id de la base.

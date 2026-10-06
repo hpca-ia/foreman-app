@@ -26,6 +26,24 @@
 
 const DIA = 86400000;
 
+// Las etapas de un rubro que no pasa de una sola vez.
+//
+// La ventanería no "se hace": se anticipa, se fabrica dos meses, llega y se
+// instala. Son cuatro momentos separados y cada uno se lleva su parte de la
+// plata, así que son cuatro barras del cronograma y cuatro líneas del
+// valorado. Lo normal —lo que se ejecuta y se paga mientras se hace— es una
+// sola barra con etapa "ejecucion", y no hay que partirlo.
+//
+// Nombre corto y en castellano porque sale impreso en el valorado que ve el
+// cliente, al lado del nombre de la agrupación.
+export const ETAPAS = {
+  anticipo: "anticipo",
+  fabricacion: "fabricación",
+  entrega: "entrega",
+  instalacion: "instalación",
+  ejecucion: "ejecución",
+};
+
 export const TIPOS_DEP = {
   FC: { label: "Fin → Comienzo", pista: "La que sigue arranca cuando esta termina. Es la normal" },
   CC: { label: "Comienzo → Comienzo", pista: "Arrancan juntas" },

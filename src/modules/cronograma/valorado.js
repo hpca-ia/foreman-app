@@ -85,6 +85,71 @@ export function repartirEntre(meses, desde, hasta) {
   return pesos;
 }
 
+/**
+ * Los pesos de una actividad del cronograma, mes por mes.
+ *
+ * Esto es lo que ata el valorado al Gantt. Una actividad que va del 25 de
+ * mayo al 10 de junio no es "de mayo" ni "de junio": son nueve días de uno y
+ * siete del otro, y su plata cae en esa proporción. Repartirla parejo entre
+ * los dos meses adelanta plata que todavía no se gastó, que es exactamente el
+ * error que hace que el cliente desembolse de más en mayo.
+ *
+ * Se cuentan DÍAS HÁBILES, no corridos: el feriado y el domingo no se
+ * trabajan, así que no deberían arrastrar plata al mes donde caen.
+ *
+ * Lo que queda fuera de la ventana del valorado se arrima a la punta más
+ * cercana en vez de tirarse. Un anticipo que cae antes del primer mes es
+ * plata que de verdad sale; borrarla haría que el valorado sume menos que el
+ * presupuesto, y un valorado que no cuadra con el contrato no se usa.
+ *
+ * @param inicio   fecha de arranque (Date o "YYYY-MM-DD")
+ * @param fin      fecha de fin, incluida
+ * @param columnas los meses del valorado, como ["2026-03", "2026-04", …]
+ * @param trabaja  (fecha) => bool; sin esto cuenta todos los días
+ */
+export function pesosDeTramo(inicio, fin, columnas = [], trabaja = null) {
+  const total = columnas.length;
+  if (!total) return [];
+  const dia = f => new Date(`${String(f).slice(0, 10)}T12:00:00`);
+  const a = inicio instanceof Date ? inicio : dia(inicio);
+  const b = fin instanceof Date ? fin : dia(fin || inicio);
+  if (isNaN(a) || isNaN(b)) return repartirParejo(total);
+
+  const dias = Array(total).fill(0);
+  let hab = 0;
+  let f = new Date(a.getFullYear(), a.getMonth(), a.getDate(), 12);
+  const hasta = new Date(b.getFullYear(), b.getMonth(), b.getDate(), 12);
+  // El tope es por si alguien guardó un fin anterior al inicio o una fecha
+  // absurda: sin él, un dato malo cuelga la pantalla en vez de dar un número
+  // feo que se ve y se corrige.
+  for (let vuelta = 0; f <= hasta && vuelta < 4000; vuelta++) {
+    if (!trabaja || trabaja(f)) {
+      const clave = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}`;
+      let k = columnas.indexOf(clave);
+      if (k < 0) k = clave < columnas[0] ? 0 : total - 1;
+      dias[k] += 1;
+      hab += 1;
+    }
+    f = new Date(f.getTime() + 86400000);
+  }
+  // Una actividad entera en feriados no tiene día hábil ninguno. Pasa con los
+  // anticipos puestos un domingo; su plata va al mes donde empieza.
+  if (!hab) {
+    const clave = `${a.getFullYear()}-${String(a.getMonth() + 1).padStart(2, "0")}`;
+    let k = columnas.indexOf(clave);
+    if (k < 0) k = clave < columnas[0] ? 0 : total - 1;
+    const pesos = Array(total).fill(0);
+    pesos[k] = 100;
+    return pesos;
+  }
+
+  const pesos = dias.map(d => Math.floor((d / hab) * 10000) / 100);
+  // El resto al mes con más días, para que la fila cierre en 100 clavado.
+  const mayor = dias.indexOf(Math.max(...dias));
+  pesos[mayor] = redondo(pesos[mayor] + (100 - suma(pesos)));
+  return pesos;
+}
+
 /** En qué meses cae un rubro: para dibujar su barra sin leer siete números. */
 export function tramo(pesos = []) {
   const con = pesos.map((p, i) => (n(p) > 0 ? i : -1)).filter(i => i >= 0);

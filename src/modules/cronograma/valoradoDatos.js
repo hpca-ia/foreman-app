@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
-import { repartirEntre, repartirParejo } from "./valorado";
+import { repartirEntre, repartirParejo, mesesDe, pesosDeTramo } from "./valorado";
+import { ETAPAS } from "./cpm";
 
 // Leer y guardar el cronograma valorado.
 //
@@ -183,6 +184,125 @@ export async function armarConNova({ lead, obra, mesInicio, meses, propuesta, qu
     if (e) return { error: "El cronograma se creó pero fallaron las líneas: " + e.message };
   }
   return { cronograma };
+}
+
+/**
+ * El valorado, sacado del cronograma de barras.
+ *
+ * Son dos vistas de lo mismo y hasta ahora se armaban por separado, cada una
+ * con su propia consulta a NOVA. Eso garantiza que en algún momento digan
+ * cosas distintas sobre la misma ventanería, y entonces hay dos documentos
+ * para mantener de acuerdo a mano — que es como uno de los dos queda viejo sin
+ * que nadie se entere.
+ *
+ * Acá el cronograma manda. Cada actividad tiene su agrupación, su parte de la
+ * plata de esa agrupación y sus fechas; de ahí sale en qué mes cae cada peso.
+ * Y las ETAPAS caen solas: la ventanería que se anticipa en marzo, se fabrica
+ * hasta junio y se instala en agosto son tres actividades, y su plata va en
+ * esos tres momentos sin que nadie la reparta a mano.
+ *
+ * DOS CUIDADOS, porque de ellos depende que el valorado sirva:
+ *
+ *   · Los pesos de las actividades de una misma agrupación se normalizan a
+ *     100 entre ellas. Si se movió el cronograma a mano y quedaron en 70, la
+ *     agrupación aportaría el 70% de su plata y el valorado sumaría menos que
+ *     el contrato.
+ *   · La agrupación con plata y sin actividad en el cronograma entra igual,
+ *     marcada para revisar y repartida en todo el plazo. Dejarla afuera
+ *     escondería plata del presupuesto, que es peor que mostrarla mal puesta.
+ */
+export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], mesInicio, meses, quien, cal }) {
+  const { data: ags } = await supabase.from("obra_actividades")
+    .select("id,nombre,codigo,orden").eq("obra_id", obra.id).order("orden");
+  const { data: rubros } = await supabase.from("obra_rubros")
+    .select("actividad_id,total_base").eq("obra_id", obra.id);
+
+  const plata = new Map();
+  (rubros || []).forEach(r => {
+    if (r.actividad_id == null) return;
+    plata.set(Number(r.actividad_id), (plata.get(Number(r.actividad_id)) || 0) + (Number(r.total_base) || 0));
+  });
+  const agDe = new Map((ags || []).map(a => [Number(a.id), a]));
+
+  const conPlan = actividadesPlan.filter(a => a.obra_actividad_id && a.inicio && a.fin);
+  if (!conPlan.length) {
+    return { error: "El cronograma todavía no tiene actividades con agrupación y fechas. Armalo primero." };
+  }
+
+  // Lo que suma cada agrupación en el cronograma, para normalizar sus pesos.
+  const pesoTotal = new Map();
+  conPlan.forEach(a => {
+    const k = Number(a.obra_actividad_id);
+    pesoTotal.set(k, (pesoTotal.get(k) || 0) + (Number(a.peso_pct) || 0));
+  });
+
+  const columnas = mesesDe(mesInicio, meses);
+  const trabaja = cal ? f => cal.trabaja(f) : null;
+
+  const { data: cronograma, error } = await supabase.from("cronograma_valorado").insert({
+    lead_id: lead.id, obra_id: obra.id, mes_inicio: mesInicio, meses,
+    nombre: "Valorado del cronograma",
+    created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+  }).select().single();
+  if (error) return { error: falta(error) ? "Falta correr la migración 074." : error.message };
+
+  const filas = conPlan.map((a, i) => {
+    const k = Number(a.obra_actividad_id);
+    const total = plata.get(k) || 0;
+    const suyo = Number(a.peso_pct) || 0;
+    const deLaAgrup = pesoTotal.get(k) || 0;
+    // Sin pesos declarados —cronograma viejo o editado a mano— la agrupación
+    // se parte en partes iguales entre sus actividades.
+    const parte = deLaAgrup > 0
+      ? suyo / deLaAgrup
+      : 1 / conPlan.filter(x => Number(x.obra_actividad_id) === k).length;
+
+    const ag = agDe.get(k);
+    return {
+      cronograma_id: cronograma.id,
+      obra_actividad_id: k,
+      codigo: ag?.codigo || "",
+      descripcion: a.etapa && a.etapa !== "ejecucion"
+        ? `${ag?.nombre || a.nombre} · ${ETAPAS[a.etapa] || a.etapa}`
+        : (ag?.nombre || a.nombre),
+      monto: Math.round(total * parte * 100) / 100,
+      pesos: pesosDeTramo(a.inicio, a.fin, columnas, trabaja),
+      orden: i,
+    };
+  });
+
+  // Las agrupaciones con plata que el cronograma no nombra.
+  const enPlan = new Set(conPlan.map(a => Number(a.obra_actividad_id)));
+  const parejo = repartirParejo(meses);
+  [...plata.entries()].filter(([id, monto]) => monto > 0 && !enPlan.has(id)).forEach(([id, monto], j) => {
+    const ag = agDe.get(id);
+    filas.push({
+      cronograma_id: cronograma.id,
+      obra_actividad_id: id,
+      codigo: ag?.codigo || "",
+      descripcion: ag?.nombre || "Agrupación sin actividad",
+      monto: Math.round(monto * 100) / 100,
+      pesos: parejo,
+      orden: filas.length + j,
+      revisar: true,
+    });
+  });
+
+  for (let i = 0; i < filas.length; i += 100) {
+    const { error: e } = await supabase.from("cronograma_valorado_lineas").insert(filas.slice(i, i + 100));
+    if (e) return { error: "El valorado se creó pero fallaron las líneas: " + e.message };
+  }
+
+  const presupuesto = [...plata.values()].reduce((t, m) => t + m, 0);
+  const puesto = filas.reduce((t, f) => t + f.monto, 0);
+  return {
+    cronograma,
+    lineas: filas.length,
+    sinActividad: filas.filter(f => f.revisar).length,
+    // Si estos dos no coinciden, el valorado no sirve para pedir plata: mejor
+    // que lo diga la pantalla que descubrirlo cuando el cliente compara.
+    descuadre: Math.abs(presupuesto - puesto) > 1 ? Math.round((puesto - presupuesto) * 100) / 100 : 0,
+  };
 }
 
 /** Mover el tramo de una línea: en qué mes empieza y en cuál termina. */

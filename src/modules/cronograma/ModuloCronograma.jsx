@@ -4,9 +4,10 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { calendario, calcular, aFecha, claveFecha } from "./cpm";
+import { calendario, calcular, aFecha, claveFecha, ETAPAS } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
+import { guardarPlazo, desfase } from "./plazo";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -45,9 +46,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // se discute con el contrato— y cuál hace falta cambia según con quién se
   // esté hablando.
   const [escala, setEscala] = useState("fecha");
+  // Las agrupaciones de hoy, para saber si el cronograma quedó viejo.
+  const [agrupaciones, setAgrupaciones] = useState([]);
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead").order("nombre")
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,crono_meses,es_lead").order("nombre")
       .then(({ data }) => {
         // Todo lo que no se perdió, en curso o no.
         //
@@ -67,6 +70,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       .select("*").eq("lead_id", lead.id).order("orden");
     if (e) { setSinTablas(/relation|does not exist|schema cache/i.test(e.message)); return; }
     setActividades(act || []);
+    if (lead.obra_id) {
+      const { data: ags } = await supabase.from("obra_actividades")
+        .select("id,nombre,codigo,orden,extra").eq("obra_id", lead.obra_id).order("orden");
+      setAgrupaciones(ags || []);
+    }
     if (act?.length) {
       const { data: dep } = await supabase.from("cronograma_dependencias")
         .select("*").in("actividad_id", act.map(a => a.id));
@@ -140,6 +148,22 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   });
 
   const porId = new Map(plan.actividades.map(a => [a.id, a]));
+  // Si la columna existe, PostgREST la devuelve aunque esté en null.
+  const conEtapas = actividades.length > 0 && "etapa" in actividades[0];
+  // Lo que suman las etapas de cada agrupación. Si no da 100, esa agrupación
+  // aporta de menos o de más al valorado, y el valorado deja de cuadrar con
+  // el contrato — que es el único defecto que lo vuelve inservible.
+  const pesoDeAgrup = new Map();
+  actividades.forEach(a => {
+    if (!a.obra_actividad_id) return;
+    pesoDeAgrup.set(a.obra_actividad_id,
+      (pesoDeAgrup.get(a.obra_actividad_id) || 0) + Number(a.peso_pct ?? 100));
+  });
+  const etapasDeAgrup = new Map();
+  actividades.forEach(a => {
+    if (!a.obra_actividad_id) return;
+    etapasDeAgrup.set(a.obra_actividad_id, (etapasDeAgrup.get(a.obra_actividad_id) || 0) + 1);
+  });
   const todas = plan.actividades;
   // La escala: del arranque al fin, en días hábiles, para dibujar las barras.
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
@@ -193,6 +217,41 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     await cargar();
   }
 
+  /**
+   * Partir una agrupación en etapas.
+   *
+   * Lo que se importa o se fabrica no pasa de una vez: se anticipa, se fabrica
+   * dos meses y se instala al final. Son momentos separados y cada uno se
+   * lleva su parte del dinero, así que son barras distintas — y es lo que
+   * después hace que el valorado ponga el anticipo en marzo y la instalación
+   * en agosto, en vez de repartir todo parejo.
+   *
+   * La etapa nueva queda encadenada a la que se partió: así el cálculo le da
+   * fecha y no aparece el día uno junto con todo lo demás.
+   */
+  async function partirEnEtapas(a) {
+    const hechas = actividades.filter(x => x.obra_actividad_id === a.obra_actividad_id);
+    const orden = ["anticipo", "fabricacion", "entrega", "instalacion"];
+    const siguiente = orden.find(e => !hechas.some(x => x.etapa === e)) || "instalacion";
+    // La plata se parte entre las dos, no se inventa: si esta tenía el 100 de
+    // la agrupación, quedan 50 y 50 y el total sigue siendo el presupuesto.
+    const mio = Number(a.peso_pct ?? 100);
+    const deja = Math.round((mio / 2) * 100) / 100;
+    const { data: creada, error: e } = await supabase.from("cronograma_actividades").insert({
+      lead_id: lead.id, obra_id: lead.obra_id || null,
+      obra_actividad_id: a.obra_actividad_id,
+      nombre: `${a.nombre.split(" · ")[0]} · ${ETAPAS[siguiente]}`,
+      duracion: siguiente === "anticipo" ? 1 : 10,
+      etapa: siguiente, peso_pct: Math.round((mio - deja) * 100) / 100,
+      orden: actividades.length,
+    }).select().single();
+    if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 083 para partir en etapas." : e.message); return; }
+    await supabase.from("cronograma_actividades").update({ peso_pct: deja }).eq("id", a.id);
+    await supabase.from("cronograma_dependencias")
+      .insert({ actividad_id: creada.id, depende_de_id: a.id, tipo: "FC" });
+    await cargar();
+  }
+
   async function quitar(a) {
     if (!window.confirm(`¿Borrar "${a.nombre}"?`)) return;
     await supabase.from("cronograma_actividades").delete().eq("id", a.id);
@@ -242,12 +301,25 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             ))}
           </div>
         )}
+        {/* El plazo del proyecto: lo leen este cronograma y el valorado. Antes
+            cada uno tenía el suyo, que es dos campos para un solo hecho. */}
         {editable && (
-          <input type="date" value={lead.crono_inicio || hoy()} style={{ ...inputStyle, width: 150, padding: "6px 9px", fontSize: 12 }}
-            onChange={async e => {
-              await supabase.from("leads").update({ crono_inicio: e.target.value }).eq("id", lead.id);
-              setLead(l => ({ ...l, crono_inicio: e.target.value }));
-            }} />
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={lead.crono_inicio || hoy()} title="Cuándo arranca la obra"
+              style={{ ...inputStyle, width: 148, padding: "6px 9px", fontSize: 12 }}
+              onChange={async e => {
+                await guardarPlazo(lead.id, { inicio: e.target.value });
+                setLead(l => ({ ...l, crono_inicio: e.target.value }));
+              }} />
+            <input type="number" min="1" max="60" value={lead.crono_meses || ""} placeholder="meses"
+              title="Cuánto dura la obra. Lo usan este cronograma y el valorado."
+              style={{ ...inputStyle, width: 78, padding: "6px 9px", fontSize: 12 }}
+              onChange={async e => {
+                const m = Number(e.target.value) || null;
+                await guardarPlazo(lead.id, { meses: m });
+                setLead(l => ({ ...l, crono_meses: m }));
+              }} />
+          </div>
         )}
       </div>
 
@@ -306,7 +378,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 <>
                   <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
                     setPensando(true);
-                    const r = await guardarPropuesta({ lead, obra, propuesta: armando.propuesta, quien: currentUser });
+                    // El plazo que se usó queda en el proyecto: el valorado lo
+                  // va a leer de ahí y no hay que volver a escribirlo.
+                  await guardarPlazo(lead.id, { meses: armando.meses });
+                  const r = await guardarPropuesta({ lead, obra, propuesta: armando.propuesta, quien: currentUser });
                     setPensando(false);
                     if (r.error) { setError(r.error); return; }
                     setArmando(null); await cargar();
@@ -327,7 +402,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         ) : (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
             <Button variant={todas.length ? "outline" : "primary"} size="sm"
-              onClick={() => { setArmando({ meses: 6, propuesta: null }); setError(""); }}>
+              onClick={() => { setArmando({ meses: lead.crono_meses || 6, propuesta: null }); setError(""); }}>
               {todas.length ? "Rearmarlo con NOVA" : "Que lo arme NOVA del presupuesto"}
             </Button>
             {todas.length > 0 && (
@@ -352,6 +427,57 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           </div>
         )
       )}
+
+      {/* Lo que cambió en las agrupaciones desde que se armó esto. No hay que
+          corregirlo a mano: si FOREMAN se puede dar cuenta, avisa. Lo que no
+          hace es rehacerlo solo —un cronograma con avance cargado y fechas
+          comprometidas no se reescribe porque alguien tocó una agrupación. */}
+      {todas.length > 0 && agrupaciones.length > 0 && (() => {
+        const d = desfase(actividades.map(a => a.obra_actividad_id), agrupaciones);
+        if (!d.perdidas.length && !d.nuevas.length) return null;
+        return (
+          <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
+            border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 7, alignItems: "flex-start", marginBottom: d.nuevas.length && editable ? 7 : 0 }}>
+              <AlertTriangle size={13} color={colors.warning} style={{ marginTop: 1, flexShrink: 0 }} />
+              <div style={{ lineHeight: 1.55 }}>
+                {d.nuevas.length > 0 && (
+                  <div>
+                    Hay <strong>{d.nuevas.length}</strong> {d.nuevas.length === 1 ? "agrupación nueva" : "agrupaciones nuevas"} en
+                    el presupuesto que no están en el cronograma: {d.nuevas.map(a => a.nombre).join(", ")}.
+                  </div>
+                )}
+                {d.perdidas.length > 0 && (
+                  <div style={{ marginTop: d.nuevas.length ? 3 : 0 }}>
+                    Y {d.perdidas.length} {d.perdidas.length === 1 ? "actividad apunta" : "actividades apuntan"} a
+                    una agrupación que ya no existe. Siguen calculándose bien; solo perdieron de dónde salía su plata.
+                  </div>
+                )}
+              </div>
+            </div>
+            {d.nuevas.length > 0 && editable && (
+              <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                // Al final y sin encadenar: dónde van en el orden lo sabe quien
+                // hace la obra, y adivinarlo sería meter dependencias falsas
+                // que después hay que descubrir y borrar.
+                const filas = d.nuevas.map((a, i) => ({
+                  lead_id: lead.id, obra_id: lead.obra_id || null,
+                  nombre: a.nombre, duracion: 10, obra_actividad_id: a.id,
+                  orden: actividades.length + i,
+                  // Toda su plata en una sola barra, que es el caso normal.
+                  // Se escribe explícito —y no se deja en null— porque el
+                  // valorado reparte con estos pesos: una agrupación que entra
+                  // sin peso aportaría de menos.
+                  ...(conEtapas ? { etapa: "ejecucion", peso_pct: 100 } : {}),
+                }));
+                const { error: e } = await supabase.from("cronograma_actividades").insert(filas);
+                if (e) setError(e.message);
+                await cargar();
+              }}>Sumarlas al cronograma</Button>
+            )}
+          </div>
+        );
+      })()}
 
       {plan.ciclos.length > 0 && (
         <Aviso>
@@ -408,6 +534,41 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         <button key={d.id} onClick={() => desunir(d)} title="Quitar esta dependencia"
                           style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: "0 3px" }}>×</button>
                       ))}
+                    </div>
+                  )}
+
+                  {/* La etapa y su parte de la plata. Esto es lo que ata esta
+                      pantalla al cronograma valorado: la ventanería que se
+                      anticipa en marzo y se instala en agosto pone su plata en
+                      esos dos meses porque acá dice cuánto va en cada uno. */}
+                  {conEtapas && a.obra_actividad_id && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+                      <select value={a.etapa || "ejecucion"} disabled={!editable}
+                        onChange={e => cambiar(a, { etapa: e.target.value })}
+                        style={{ ...inputStyle, width: "auto", padding: "1px 4px", fontSize: 10, height: 19 }}>
+                        {Object.entries(ETAPAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                      </select>
+                      <input type="number" min="0" max="100" step="5" value={a.peso_pct ?? 100} disabled={!editable}
+                        onChange={e => cambiar(a, { peso_pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                        title="Qué parte de la plata de la agrupación se paga en esta etapa"
+                        style={{ ...inputStyle, width: 44, padding: "1px 4px", fontSize: 10, height: 19, textAlign: "center" }} />
+                      <span style={{ fontSize: 10, color: colors.muted }}>
+                        % de {agrupaciones.find(g => g.id === a.obra_actividad_id)?.nombre?.slice(0, 22) || "la agrupación"}
+                      </span>
+                      {editable && (
+                        <button onClick={() => partirEnEtapas(a)}
+                          title="Partirla: el anticipo ahora, la fabricación después, la instalación al final"
+                          style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 5,
+                            color: colors.brand, cursor: "pointer", fontSize: 9.5, fontWeight: 700,
+                            padding: "1px 5px", fontFamily: colors.font }}>+ etapa</button>
+                      )}
+                      {etapasDeAgrup.get(a.obra_actividad_id) > 1
+                        && Math.abs((pesoDeAgrup.get(a.obra_actividad_id) || 0) - 100) > 0.01 && (
+                        <span title="Las etapas de esta agrupación tienen que sumar 100: el valorado reparte su plata con estos pesos."
+                          style={{ fontSize: 9.5, fontWeight: 700, color: colors.warning }}>
+                          sus etapas suman {Math.round(pesoDeAgrup.get(a.obra_actividad_id))}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

@@ -6,7 +6,8 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "../controlObra/calculos";
 import { mesesDe, nombreMes, curva, suma, cierra, tramo, previstoContraReal, desembolsos } from "./valorado";
 import { cargarValorado, armarDesdeObra, moverTramo, guardarCronograma, borrarValorado, ajustarPesos, guardarPesos,
-  pendientesDeSumar, sumarAlValorado, armarConNova } from "./valoradoDatos";
+  pendientesDeSumar, sumarAlValorado, armarConNova, valoradoDelCronograma } from "./valoradoDatos";
+import { cargarPlan, leerPlazo } from "./plazo";
 import { proponerValorado, aprenderDe } from "./novaValorado";
 import { supabase } from "../../lib/supabase";
 
@@ -33,12 +34,19 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
   const [pendiente, setPendiente] = useState(null);
   const [propuesta, setPropuesta] = useState(null);
   const [pensando, setPensando] = useState(false);
+  // El cronograma de barras del proyecto, si ya existe: de ahí sale el
+  // valorado bien hecho, con las etapas en los meses en que de verdad caen.
+  const [gantt, setGantt] = useState(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
     const r = await cargarValorado(lead?.id);
     setCronograma(r.cronograma); setLineas(r.lineas); setSinTablas(r.sinTablas);
     setPendiente(r.cronograma ? await pendientesDeSumar(r.cronograma) : null);
+    if (!r.cronograma) {
+      const g = await cargarPlan(lead?.id);
+      setGantt(g.actividades.some(a => a.obra_actividad_id) ? g : null);
+    }
     setCargando(false);
   }, [lead?.id]);
   useEffect(() => { cargar(); }, [cargar]);
@@ -61,10 +69,67 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
             {!obra
               ? <div style={{ fontSize: 12.5, color: colors.warning }}>Este proyecto todavía no tiene obra activa: el valorado sale de sus rubros.</div>
               : puedeEditar && (
-                <Button variant="primary" size="sm"
-                  onClick={() => setArmando({ mesInicio: new Date().toISOString().slice(0, 7), meses: 6, nivel: "rubro" })}>
-                  Armarlo del presupuesto
+              <>
+                {/* El camino bueno, cuando el Gantt ya existe.
+                    El valorado y el cronograma de barras son dos vistas del
+                    mismo plan. Armarlos por separado —cada uno preguntándole a
+                    NOVA— garantiza que en algún momento digan cosas distintas
+                    sobre la misma ventanería, y entonces hay que mantenerlos
+                    de acuerdo a mano. Sacándolo de las barras, la plata cae en
+                    los meses en que las actividades de verdad pasan. */}
+                {gantt && (
+                  <div style={{ background: colors.brandSoft, border: `1px solid ${colors.brand}30`,
+                    borderRadius: 8, padding: 11, marginBottom: 9 }}>
+                    <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55, marginBottom: 8 }}>
+                      Este proyecto ya tiene <strong>cronograma de barras</strong> con{" "}
+                      {gantt.actividades.filter(a => a.obra_actividad_id).length} actividades.
+                      Sacá el valorado de ahí: la plata cae en los meses en que cada actividad pasa, y las etapas
+                      —el anticipo de la ventanería en marzo, su instalación en agosto— quedan en su mes sin que
+                      nadie las reparta a mano.
+                    </div>
+                    {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 7 }}>{error}</div>}
+                    <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                      setError(""); setPensando(true);
+                      const pl = await leerPlazo(lead?.id);
+                      // La ventana la manda el cronograma, no el plazo: si hay
+                      // un anticipo dos meses antes del día uno, esa plata
+                      // existe y el valorado tiene que tener dónde ponerla.
+                      const desde = (gantt.plan.inicio || "").slice(0, 7);
+                      const [a1, m1] = desde.split("-").map(Number);
+                      const [a2, m2] = (gantt.plan.fin || "").slice(0, 7).split("-").map(Number);
+                      const abarca = a1 && a2 ? (a2 - a1) * 12 + (m2 - m1) + 1 : (pl.meses || 6);
+                      const r = await valoradoDelCronograma({
+                        lead, obra, actividadesPlan: gantt.actividades, cal: gantt.cal,
+                        mesInicio: desde || new Date().toISOString().slice(0, 7),
+                        meses: Math.max(1, abarca, pl.meses || 0), quien: currentUser,
+                      });
+                      setPensando(false);
+                      if (r.error) { setError(r.error); return; }
+                      if (r.sinActividad > 0 || r.descuadre) {
+                        window.alert([
+                          "El valorado quedó armado.",
+                          r.sinActividad > 0 && `${r.sinActividad} ${r.sinActividad === 1 ? "agrupación" : "agrupaciones"} con plata no están en el cronograma de barras: entraron marcadas para revisar, repartidas en toda la obra.`,
+                          r.descuadre && `OJO: suma ${fmt(Math.abs(r.descuadre))} ${r.descuadre > 0 ? "más" : "menos"} que el presupuesto. Revisá los pesos de las actividades.`,
+                        ].filter(Boolean).join("\n\n"));
+                      }
+                      await cargar();
+                    }}>{pensando ? "Armando…" : "Sacarlo del cronograma de barras"}</Button>
+                  </div>
+                )}
+                <Button variant={gantt ? "outline" : "primary"} size="sm"
+                  onClick={async () => {
+                    // El plazo del proyecto, no uno nuevo: la obra dura lo que
+                    // dura, y preguntarlo otra vez acá es invitar a que el
+                    // valorado y el Gantt digan plazos distintos.
+                    const pl = await leerPlazo(lead?.id);
+                    setArmando({
+                      mesInicio: (pl.inicio || new Date().toISOString()).slice(0, 7),
+                      meses: pl.meses || 6, nivel: "rubro",
+                    });
+                  }}>
+                  {gantt ? "Armarlo aparte, del presupuesto" : "Armarlo del presupuesto"}
                 </Button>
+              </>
               )}
           </div>
         ) : (
@@ -361,7 +426,9 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
                   {l.codigo && <span style={{ color: colors.muted, marginRight: 5 }}>{l.codigo}</span>}
                   {l.descripcion}
                   {l.revisar && (
-                    <span title="Entró por una orden de cambio y se repartió en lo que queda de obra. Revisá en qué meses va."
+                    <span title={l.orden_cambio_id
+                      ? "Entró por una orden de cambio y se repartió en lo que queda de obra. Revisá en qué meses va."
+                      : "Nadie dijo en qué meses va: está repartida en toda la obra. Su plata ya suma, pero el mes está sin decidir."}
                       style={{ background: colors.warningSoft, color: colors.warning, borderRadius: 9, padding: "1px 6px",
                         fontSize: 9, fontWeight: 700, marginLeft: 5 }}>revisar</span>
                   )}
