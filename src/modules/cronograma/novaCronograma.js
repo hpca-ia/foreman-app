@@ -25,23 +25,97 @@ import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
 
 const n = v => Number(v) || 0;
 
-/** Lo que la obra ya tiene agrupado, con su plata. */
+// Las unidades escritas de veinte maneras son la misma unidad. Sin esto, los
+// 800 m2 de una obra salen como "600 M2 · 150 m² · 50 mt2" y dejan de sumar.
+const UNIDAD = u => {
+  const t = String(u || "").trim().toLowerCase()
+    .replace(/[.\s]/g, "").replace(/²/g, "2").replace(/³/g, "3");
+  if (/^(m2|mt2|metro2|metroscuadrados?)$/.test(t)) return "m2";
+  if (/^(m3|mt3|metro3|metroscubicos?)$/.test(t)) return "m3";
+  if (/^(ml|m|mt|metro|metros|metrolineal)$/.test(t)) return "ml";
+  if (/^(u|un|und|unid|unidad|unidades|c\/u|pto|ptos?|punto|puntos)$/.test(t)) return "u";
+  if (/^(kg|kilo|kilos|kgs)$/.test(t)) return "kg";
+  if (/^(glb|global|gbl)$/.test(t)) return "glb";
+  return t.slice(0, 6) || "u";
+};
+
+const miles = v => Math.round(v).toLocaleString("es-EC");
+
+/**
+ * Lo que la obra ya tiene agrupado, con su plata Y CON SU TAMAÑO.
+ *
+ * La plata sola no dice cuánto trabajo hay. Diez metros de pintura y mil
+ * pueden costar parecido si en un caso el material es importado y en el otro
+ * no, y no son ni de lejos el mismo tiempo de obra. Lo que de verdad manda
+ * para una duración es la CANTIDAD: 1.200 m2 de enlucido son 1.200 m2, los
+ * haga quien los haga.
+ *
+ * Por eso cada agrupación viaja con sus cantidades sumadas por unidad y con
+ * sus rubros más gruesos. Con eso una duración se puede razonar —cantidad
+ * dividido para lo que rinde una cuadrilla por día— en vez de adivinarse.
+ */
 export async function materiaPrima(obraId) {
   const [{ data: acts }, { data: rubros }] = await Promise.all([
     supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", obraId).order("orden"),
-    supabase.from("obra_rubros").select("id,actividad_id,total_base,capitulo,descripcion").eq("obra_id", obraId),
+    supabase.from("obra_rubros").select("id,actividad_id,total_base,capitulo,descripcion,unidad,cantidad").eq("obra_id", obraId),
   ]);
   const plata = new Map();
+  const porAgrup = new Map();
   (rubros || []).forEach(r => {
     if (r.actividad_id == null) return;
     plata.set(r.actividad_id, (plata.get(r.actividad_id) || 0) + n(r.total_base));
+    if (!porAgrup.has(r.actividad_id)) porAgrup.set(r.actividad_id, []);
+    porAgrup.get(r.actividad_id).push(r);
   });
+
   return (acts || [])
     // Las extras —salarios, oficina, logística— no son actividades de obra:
     // no se ejecutan, se gastan. Ponerlas en el Gantt lo llena de barras que
     // nadie puede empezar ni terminar.
     .filter(a => !a.extra)
-    .map(a => ({ ...a, monto: Math.round((plata.get(a.id) || 0) * 100) / 100 }));
+    .map(a => {
+      const suyos = porAgrup.get(a.id) || [];
+      const porUnidad = new Map();
+      suyos.forEach(r => {
+        const c = n(r.cantidad);
+        if (!c) return;
+        const u = UNIDAD(r.unidad);
+        // Lo global no es una magnitud: "1 glb" no dice nada del tamaño y
+        // sumado con los metros ensucia el único dato que sirve.
+        if (u === "glb") return;
+        porUnidad.set(u, (porUnidad.get(u) || 0) + c);
+      });
+      return {
+        ...a,
+        monto: Math.round((plata.get(a.id) || 0) * 100) / 100,
+        rubros: suyos.length,
+        // Ordenadas de mayor a menor: la primera unidad es la que define el
+        // tamaño de esa agrupación.
+        magnitud: [...porUnidad.entries()]
+          .map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 }))
+          .sort((x, y) => y.cantidad - x.cantidad),
+        // Los rubros gruesos, que son los que se tardan. Los chicos no mueven
+        // la duración y solo gastarían espacio en la consulta.
+        principales: [...suyos].sort((x, y) => n(y.total_base) - n(x.total_base)).slice(0, 4)
+          .filter(r => n(r.cantidad))
+          .map(r => ({
+            descripcion: String(r.descripcion || "").trim().slice(0, 52),
+            cantidad: Math.round(n(r.cantidad) * 100) / 100,
+            unidad: UNIDAD(r.unidad),
+          })),
+      };
+    });
+}
+
+/** Una agrupación dicha en una línea, para la consulta. */
+function enPalabras(a) {
+  const mag = a.magnitud?.length
+    ? a.magnitud.slice(0, 3).map(m => `${miles(m.cantidad)} ${m.unidad}`).join(" · ")
+    : "sin cantidades cargadas";
+  const princ = a.principales?.length
+    ? `\n     ${a.principales.map(r => `${r.descripcion} (${miles(r.cantidad)} ${r.unidad})`).join(" · ")}`
+    : "";
+  return `${a.id} · ${a.nombre} · $${miles(a.monto)} · ${a.rubros || 0} rubros\n     TAMAÑO: ${mag}${princ}`;
 }
 
 export async function proponerCronograma({ agrupaciones = [], meses = 6, dias: diasPlazo = 0, nombreObra = "", cal = calendario() }) {
@@ -60,8 +134,8 @@ ${memoriaEnPalabras(memoria)}
 
 La obra "${nombreObra}" dura ${meses} meses, que son unos ${dias} días de trabajo (lunes a sábado).
 
-AGRUPACIONES del presupuesto (id · nombre · monto):
-${agrupaciones.map(a => `${a.id} · ${a.nombre} · ${Math.round(a.monto)}`).join("\n")}
+AGRUPACIONES del presupuesto, con su plata y SU TAMAÑO medido:
+${agrupaciones.map(enPalabras).join("\n")}
 
 Devuelves SOLO JSON, sin markdown:
 {"actividades":[{"ref":1,"agrupacion_id":12,"nombre":"Excavación y cimentación","duracion":18,"etapa":"ejecucion","peso":100,"porque":"..."}],
@@ -72,6 +146,32 @@ ACTIVIDADES: partí cada agrupación en una a cuatro actividades según su peso 
 su naturaleza. Una agrupación de 200 mil no es una barra sola. "duracion" en
 días HÁBILES. "ref" es un número tuyo, de 1 en adelante, para referirte a ellas
 en las dependencias. "agrupacion_id" es el id de la agrupación de la que sale.
+
+LA DURACIÓN SALE DE LA CANTIDAD, NO DE LA PLATA. Esto es lo más importante de
+todo lo que sigue. Diez metros de pintura y mil metros de pintura pueden costar
+parecido —si en un caso el material es importado y en el otro no— y no son ni
+de lejos el mismo tiempo de obra. La plata dice cuánto pesa en el presupuesto;
+la cantidad dice cuánto trabajo hay.
+
+Para cada actividad hacé esta cuenta y escribila en "porque":
+
+  días = cantidad ÷ (lo que rinde una cuadrilla por día × cuántas cuadrillas)
+
+Los rendimientos los sabés: cuántos m2 de enlucido hace un albañil con su
+ayudante en un día, cuántos m2 de mampostería, cuántos de pintura, cuántos m3
+de hormigón pone una cuadrilla. Usá los de obra en Ecuador. Lo que NO podés
+hacer es poner "20 días" porque suena razonable: si la agrupación trae 1.240 m2
+y ponés 20 días, estás diciendo 62 m2 por día, y eso tiene que ser verdad o
+no serlo por una razón que escribas.
+
+Cuando el plazo no alcance, la salida es MÁS CUADRILLAS en los frentes que lo
+permiten —pintura, enlucido, mampostería se dividen por zonas— y decirlo en
+"porque". Lo que no se puede dividir así es el hormigón de una losa o el fragüe:
+esos tardan lo que tardan aunque se ponga el doble de gente.
+
+Si una agrupación dice "sin cantidades cargadas" es que su presupuesto no las
+tiene. Ahí sí estimá por la plata y por el tipo de trabajo, y aclaralo en
+"porque" para que quien revise sepa que ese número es el más flojo de todos.
 
 ETAPAS Y PLATA. Lo que se importa o se fabrica no pasa en un momento: se
 anticipa, se fabrica, llega y se instala. Son etapas separadas en el tiempo y
@@ -273,16 +373,41 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
  * alguien le cambió la duración a la mampostería de 20 a 35 días, eso es lo
  * que vale. Aprender de la propuesta sería que NOVA se dé la razón sola.
  */
-export async function aprenderDelCronograma(actividades = [], quien) {
+export async function aprenderDelCronograma(actividades = [], quien, agrupaciones = []) {
+  // El tamaño de cada agrupación, para poder anotar el rendimiento.
+  const tam = new Map();
+  const cuantas = new Map();
+  agrupaciones.forEach(g => { if (g.magnitud?.[0]) tam.set(g.id, g.magnitud[0]); });
+  actividades.forEach(a => {
+    if (a.obra_actividad_id) cuantas.set(a.obra_actividad_id, (cuantas.get(a.obra_actividad_id) || 0) + 1);
+  });
+
   for (const a of actividades) {
     if (!a.nombre || !a.duracion) continue;
+    const dias = Math.round(a.duracion);
+
+    // EL RENDIMIENTO ES LO QUE SIRVE PARA LA PRÓXIMA OBRA, no los días.
+    //
+    // "El enlucido lleva 70 días" no se puede usar en otro proyecto: la obra
+    // que viene tiene otros metros. "El enlucido rinde 18 m2 por día" sí, y
+    // es lo que de verdad quedó demostrado cuando alguien corrigió el número.
+    //
+    // Solo cuando la agrupación es UNA sola actividad: si está partida en
+    // anticipo, fabricación e instalación, los días de una etapa no se
+    // dividen por la cantidad entera — daría un rendimiento inventado.
+    const m = a.obra_actividad_id && cuantas.get(a.obra_actividad_id) === 1
+      ? tam.get(a.obra_actividad_id) : null;
+    const rinde = m && dias ? Math.round((m.cantidad / dias) * 10) / 10 : 0;
+
     await recordar({
       tema: "cronograma",
       descripcion: a.nombre,
       perfil: "duracion",
       pagos: null,
-      anticipacion: Math.round(a.duracion),
-      nota: `${Math.round(a.duracion)} días hábiles`,
+      anticipacion: dias,
+      nota: rinde
+        ? `${miles(m.cantidad)} ${m.unidad} en ${dias} días hábiles → ${rinde} ${m.unidad}/día`
+        : `${dias} días hábiles`,
       quien,
     });
   }

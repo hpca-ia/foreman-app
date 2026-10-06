@@ -596,9 +596,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 })}>
                   Bajar para Project
                 </Button>
-                <Button variant="outline" size="sm" onClick={async () => {
-                  const n = await aprenderDelCronograma(todas, currentUser);
-                  setError(""); window.alert(`NOVA anotó la duración de ${n} actividades para la próxima obra.`);
+                <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+                  setPensando(true);
+                  // Con las cantidades del presupuesto: lo que vale para la
+                  // obra siguiente no son los días —esa obra tiene otros
+                  // metros— sino cuánto rinde por día.
+                  const mp = obra?.id ? await materiaPrima(obra.id) : [];
+                  const n = await aprenderDelCronograma(todas, currentUser, mp);
+                  setPensando(false); setError("");
+                  window.alert(`NOVA anotó ${n} actividades para la próxima obra: los días, y dónde hay cantidades, el rendimiento por día.`);
                 }}>
                   Que NOVA lo aprenda
                 </Button>
