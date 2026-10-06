@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
@@ -46,6 +47,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // se discute con el contrato— y cuál hace falta cambia según con quién se
   // esté hablando.
   const [escala, setEscala] = useState("fecha");
+  // Cuántos píxeles mide un día. Un cronograma no se mira entero: se mira el
+  // mes que viene, de cerca. Apretarlo para que entre en la pantalla es lo que
+  // lo volvía ilegible —ocho meses en 300 píxeles son barras de dos milímetros
+  // pegadas unas a otras— y es por lo que un Gantt de verdad corre para el
+  // costado. Acá se elige el acercamiento y la pantalla se desplaza.
+  const [zoom, setZoom] = useState(14);
   // Las agrupaciones de hoy, para saber si el cronograma quedó viejo.
   const [agrupaciones, setAgrupaciones] = useState([]);
   // La 082 todavía no corrió en esta base.
@@ -190,6 +197,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
   const largo = a => (a.inicio && a.fin ? Math.max(cal.entre(a.inicio, a.fin), 1) / diasTotales : 0);
+  // El bloque de la izquierda —nombre, días, fechas, holgura— y el lienzo
+  // donde van las barras. El lienzo mide lo que tiene que medir; la pantalla
+  // se desplaza.
+  // Las columnas suman 490 y el bloque arranca 12 adentro, así que su carril
+  // mide 502. Si no, la última —HOLGURA— se sale por la derecha y se mezcla
+  // con la regla.
+  const COLS = "minmax(200px,1fr) 54px 76px 76px 56px";
+  const IZQ = 490 + 12;
+  const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
 
   // En qué día de obra cae una fecha. Negativo antes del arranque: el anticipo
   // de una importación es el día −18, y decirlo así es más claro que una fecha
@@ -206,8 +222,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // Las marcas de la regla: cada cuánto se pone una depende de lo que dure la
   // obra. Con marcas cada día, una obra de ocho meses es una mancha.
   const marcas = (() => {
-    const cuantas = Math.min(10, Math.max(4, Math.round(diasTotales / 20)));
-    const paso = Math.max(1, Math.round(diasTotales / cuantas));
+    // Una marca cada tantos píxeles, no cada tantos días: con el lienzo ancho
+    // caben muchas, y con el acercamiento chico se encimarían. Lo que decide
+    // es el espacio que ocupa la etiqueta, que son unos 46 píxeles.
+    const paso = Math.max(1, Math.ceil(46 / zoom));
     const out = [];
     for (let d = 0; d <= diasTotales; d += paso) {
       let f = aFecha(plan.inicio), saltos = 0, vueltas = 0;
@@ -234,7 +252,18 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }
 
   async function cambiar(a, campos) {
-    await supabase.from("cronograma_actividades").update(campos).eq("id", a.id);
+    // El error se muestra. Antes se descartaba, y entonces un campo que no se
+    // podía guardar —porque falta una migración, porque el permiso no da— se
+    // veía igual que uno guardado: se escribía el número, la pantalla
+    // recargaba, y volvía el valor viejo sin que nada dijera por qué.
+    const { error: e } = await supabase.from("cronograma_actividades").update(campos).eq("id", a.id);
+    if (e) {
+      setError(/column|schema cache/i.test(e.message)
+        ? "Falta correr la migración 083 para guardar la etapa y su peso."
+        : e.message);
+      return;
+    }
+    setError("");
     await cargar();
   }
 
@@ -313,36 +342,76 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           </div>
         </div>
         {todas.length > 0 && (
-          <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3, marginLeft: "auto" }}>
-            {[["fecha", "Fechas"], ["dia", "Días"]].map(([v, l]) => (
-              <button key={v} onClick={() => setEscala(v)}
-                style={{ padding: "4px 10px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: colors.font,
-                  fontSize: 11.5, fontWeight: 600, background: escala === v ? "#fff" : "transparent",
-                  color: escala === v ? colors.brand : colors.inkSoft }}>{l}</button>
-            ))}
-          </div>
-        )}
-        {/* El plazo del proyecto: lo leen este cronograma y el valorado. Antes
-            cada uno tenía el suyo, que es dos campos para un solo hecho. */}
-        {editable && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="date" value={lead.crono_inicio || hoy()} title="Cuándo arranca la obra"
-              style={{ ...inputStyle, width: 148, padding: "6px 9px", fontSize: 12 }}
-              onChange={async e => {
-                await guardarPlazo(lead.id, { inicio: e.target.value });
-                setLead(l => ({ ...l, crono_inicio: e.target.value }));
-              }} />
-            <input type="number" min="1" max="60" value={lead.crono_meses || ""} placeholder="meses"
-              title="Cuánto dura la obra. Lo usan este cronograma y el valorado."
-              style={{ ...inputStyle, width: 78, padding: "6px 9px", fontSize: 12 }}
-              onChange={async e => {
-                const m = Number(e.target.value) || null;
-                await guardarPlazo(lead.id, { meses: m });
-                setLead(l => ({ ...l, crono_meses: m }));
-              }} />
+          <div style={{ display: "flex", gap: 7, alignItems: "center", marginLeft: "auto" }}>
+            {/* El acercamiento. Un cronograma de ocho meses entero no se
+                puede leer: lo que se mira es el mes que viene, de cerca. */}
+            <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3 }}>
+              {[["−", -1, "Ver más plazo de una vez"], ["+", 1, "Acercar: barras más anchas"]].map(([l, dir, t]) => {
+                const pasos = [5, 8, 14, 24, 40];
+                const i = pasos.indexOf(zoom) < 0 ? 2 : pasos.indexOf(zoom);
+                const tope = dir < 0 ? i === 0 : i === pasos.length - 1;
+                return (
+                  <button key={l} title={t} disabled={tope}
+                    onClick={() => setZoom(pasos[Math.max(0, Math.min(pasos.length - 1, i + dir))])}
+                    style={{ width: 26, padding: "4px 0", borderRadius: 5, border: "none",
+                      cursor: tope ? "default" : "pointer", fontFamily: colors.font, fontSize: 13, fontWeight: 700,
+                      background: tope ? "transparent" : "#fff", color: tope ? colors.border : colors.inkSoft }}>{l}</button>
+                );
+              })}
+            </div>
+            <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3 }}>
+              {[["fecha", "Fechas"], ["dia", "Días"]].map(([v, l]) => (
+                <button key={v} onClick={() => setEscala(v)}
+                  style={{ padding: "4px 10px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: colors.font,
+                    fontSize: 11.5, fontWeight: 600, background: escala === v ? "#fff" : "transparent",
+                    color: escala === v ? colors.brand : colors.inkSoft }}>{l}</button>
+              ))}
+            </div>
           </div>
         )}
       </div>
+
+      {/* EL PLAZO DEL PROYECTO, con nombre y en un recuadro.
+          Estaban como dos campos sueltos al costado del título, sin etiqueta,
+          y no se encontraban — con razón: un dato que manda sobre dos
+          cronogramas no puede verse como un control de esta pantalla. Acá
+          dice qué es, y dice dónde aplica, porque eso es justo lo que uno
+          necesita saber antes de tocarlo. */}
+      {editable && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+          padding: "10px 12px", marginBottom: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div>
+            <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+              ARRANCA
+            </label>
+            <input type="date" value={lead.crono_inicio || hoy()}
+              style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }}
+              onChange={async e => {
+                const err = await guardarPlazo(lead.id, { inicio: e.target.value });
+                if (err) { setError(err); return; }
+                setError("");
+                setLead(l => ({ ...l, crono_inicio: e.target.value }));
+              }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+              DURA (MESES)
+            </label>
+            <Numero value={lead.crono_meses ?? null} min={1} max={120} vacio={null} placeholder="—"
+              style={{ width: 82, padding: "6px 9px", fontSize: 12 }}
+              onCommit={async m => {
+                const err = await guardarPlazo(lead.id, { meses: m });
+                if (err) { setError(err); return; }
+                setError("");
+                setLead(l => ({ ...l, crono_meses: m }));
+              }} />
+          </div>
+          <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, flex: 1, minWidth: 220 }}>
+            <strong style={{ color: colors.inkSoft }}>El plazo del proyecto.</strong> Se escribe una sola vez acá y lo
+            usan este cronograma y el cronograma valorado del control de obra. Escribilo y apretá Enter.
+          </div>
+        </div>
+      )}
 
       {/* Que lo arme NOVA: las agrupaciones ya dicen QUÉ hay que hacer, con
           su plata adentro. Lo que falta es el orden y la duración, y eso es
@@ -515,19 +584,29 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           después las partís.
         </Centro>
       ) : (
-        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.4fr) 54px 80px 80px 58px minmax(220px,2fr) 30px",
-            gap: 7, padding: "8px 12px", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
-            <span>ACTIVIDAD</span>
-            <span style={{ textAlign: "center" }}>DÍAS</span>
-            <span>EMPIEZA</span>
-            <span>TERMINA</span>
-            <span style={{ textAlign: "center" }}>HOLGURA</span>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+          overflowX: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px 30px`,
+            gap: 7, padding: "8px 12px 8px 0", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3,
+            width: "max-content", minWidth: "100%" }}>
+            <span style={{ display: "grid", gridTemplateColumns: COLS, gap: 7,
+              position: "sticky", left: 0, zIndex: 3, background: colors.bg,
+              paddingLeft: 12, boxSizing: "border-box", borderRight: `1px solid ${colors.border}` }}>
+              <span>ACTIVIDAD</span>
+              <span style={{ textAlign: "center" }}>DÍAS</span>
+              <span>EMPIEZA</span>
+              <span>TERMINA</span>
+              <span style={{ textAlign: "center" }}>HOLGURA</span>
+            </span>
             {/* La regla. Sin ella las barras flotan: se ve que una es más
                 larga que otra y no cuándo empieza ninguna. */}
             <span style={{ position: "relative", height: 12 }}>
               {marcas.map((m, k) => (
-                <span key={k} style={{ position: "absolute", left: `${m.x * 100}%`, transform: "translateX(-50%)",
+                // La primera y la última, hacia adentro: centradas se salen
+                // del lienzo —una por la izquierda, sobre la columna fija, y
+                // la otra por la derecha, cortada— y quedan ilegibles.
+                <span key={k} style={{ position: "absolute", left: `${m.x * 100}%`,
+                  transform: k === 0 ? "translateX(0)" : m.x > 0.97 ? "translateX(-100%)" : "translateX(-50%)",
                   fontSize: 8.5, color: m.dia === 1 ? colors.brand : colors.muted, whiteSpace: "nowrap",
                   fontWeight: m.dia === 1 ? 700 : 400 }}>
                   {escala === "fecha" ? dia(m.fecha) : (m.dia > 0 ? `d${m.dia}` : m.dia === 0 ? "" : `${m.dia}`)}
@@ -540,8 +619,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           {todas.map(a => {
             const deps = dependencias.filter(d => d.actividad_id === a.id);
             return (
-              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.4fr) 54px 80px 80px 58px minmax(220px,2fr) 30px",
-                gap: 7, padding: "7px 12px", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center", fontSize: 12 }}>
+              <div key={a.id} style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px 30px`,
+                gap: 7, padding: "7px 12px 7px 0", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center", fontSize: 12,
+                width: "max-content", minWidth: "100%" }}>
+                {/* Los datos de la actividad quedan quietos mientras el
+                    cronograma se desplaza: un plazo de ocho meses no entra en
+                    ninguna pantalla, y una barra sin su nombre al lado no dice
+                    nada. */}
+                <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 7, alignItems: "center",
+                  position: "sticky", left: 0, zIndex: 2, background: colors.surface,
+                  paddingLeft: 12, boxSizing: "border-box", borderRight: `1px solid ${colors.border}` }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {a.critica && <span title="Ruta crítica: no tiene colchón" style={{ color: colors.danger, marginRight: 4 }}>●</span>}
@@ -569,10 +656,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         style={{ ...inputStyle, width: "auto", padding: "1px 4px", fontSize: 10, height: 19 }}>
                         {Object.entries(ETAPAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                       </select>
-                      <input type="number" min="0" max="100" step="5" value={a.peso_pct ?? 100} disabled={!editable}
-                        onChange={e => cambiar(a, { peso_pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
-                        title="Qué parte de la plata de la agrupación se paga en esta etapa"
-                        style={{ ...inputStyle, width: 44, padding: "1px 4px", fontSize: 10, height: 19, textAlign: "center" }} />
+                      <Numero value={a.peso_pct ?? 100} min={0} max={100} entero={false} disabled={!editable}
+                        onCommit={v => cambiar(a, { peso_pct: v })}
+                        title="Qué parte de la plata de la agrupación se paga en esta etapa. Enter para guardar."
+                        style={{ width: 44, padding: "1px 4px", fontSize: 10, height: 19, textAlign: "center" }} />
                       <span style={{ fontSize: 10, color: colors.muted }}>
                         % de {agrupaciones.find(g => g.id === a.obra_actividad_id)?.nombre?.slice(0, 22) || "la agrupación"}
                       </span>
@@ -593,15 +680,18 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     </div>
                   )}
                 </div>
-                <input type="number" min="1" value={a.duracion} disabled={!editable}
-                  onChange={e => cambiar(a, { duracion: Math.max(1, Number(e.target.value) || 1) })}
-                  style={{ ...inputStyle, padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
+                <Numero value={a.duracion} min={1} max={2000} disabled={!editable}
+                  onCommit={v => cambiar(a, { duracion: v })}
+                  title="Cuántos días hábiles dura. Enter para guardar."
+                  style={{ padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
                 <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>
                 <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.fin)}</span>
                 <span style={{ textAlign: "center", fontSize: 11.5, fontWeight: a.critica ? 700 : 400,
                   color: a.critica ? colors.danger : colors.muted }}>
                   {a.enCiclo ? "—" : a.critica ? "0" : `${a.holgura}d`}
                 </span>
+
+                </div>
 
                 {/* La barra. Es para lo que se abre esta pantalla. */}
                 <div style={{ position: "relative", height: 16, background: colors.neutralSoft, borderRadius: 4 }}>
