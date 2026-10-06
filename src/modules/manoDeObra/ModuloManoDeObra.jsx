@@ -182,7 +182,14 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                     alignItems: "center", padding: "9px 12px", borderTop: `1px solid ${colors.neutralSoft}` }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nombre}</div>
-                      <div style={{ fontSize: 10.5, color: colors.muted }}>{p.cargo || "—"} · ${fmt(p.salario_mensual)}</div>
+                      <div style={{ fontSize: 10.5, color: colors.muted }}>
+                        {p.cargo || "—"} · ${fmt(p.salario_mensual)}
+                        {d?.horas > 0 && (
+                          <span style={{ color: colors.brand }}>
+                            {" · "}{d.horas}h = {Math.round((d.horas / (PARAMETROS.jornada || 8)) * 1000) / 1000} día
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {[[1, "Vino"], [0.5, "½ día"], [0, "Faltó"]].map(([v, label]) => (

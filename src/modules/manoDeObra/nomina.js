@@ -20,6 +20,7 @@ export const PARAMETROS = {
   horasMes: 240,          // la base del valor hora del Excel: salario / 240
   diasMes: 30,            // sueldo del período = salario / 30 × días trabajados
   sbu: 482,               // salario básico unificado, para el décimo cuarto
+  jornada: 8,             // horas normales de un día entero
   aportePersonal: 9.45,   // IESS, aporte del trabajador
   fondosReserva: 8.33,    // si acumula
 };
@@ -56,15 +57,27 @@ export function valoresHora(salarioMensual, par = PARAMETROS) {
  * residente pueda poner medio día es lo que evita la discusión de fin de mes
  * sobre el jueves que se fue a las once.
  */
-export function resumirAsistencia(dias = []) {
-  const r = { dias: 0, he25: 0, he50: 0, he75: 0, he100: 0, transporte: 0, alimentacion: 0 };
+export function resumirAsistencia(dias = [], par = PARAMETROS) {
+  const r = { dias: 0, horas: 0, he25: 0, he50: 0, he75: 0, he100: 0, transporte: 0, alimentacion: 0 };
   dias.forEach(d => {
-    r.dias += n(d.dias);
+    // Las horas mandan cuando están: alguien que entró a las diez y trabajó
+    // cinco no hizo medio día ni un día, y redondearlo le paga de menos o de
+    // más todos los días hasta que hace la cuenta.
+    const horas = d.horas == null || d.horas === "" ? null : n(d.horas);
+    r.horas += horas ?? n(d.dias) * (par.jornada || 8);
+    r.dias += horas != null ? horas / (par.jornada || 8) : n(d.dias);
     RECARGOS.forEach(x => { r[x.id] += n(d[x.id]); });
     r.transporte += n(d.transporte);
     r.alimentacion += n(d.alimentacion);
   });
-  Object.keys(r).forEach(k => { r[k] = redondo(r[k]); });
+  // Los días con tres decimales y no con dos: con jornada de ocho, cinco
+  // horas son 0,625 días exactos, y redondear a 0,63 ANTES de multiplicar por
+  // el salario le paga medio centavo de más todos los días. Poco, siempre, y
+  // en una dirección — que es como se descubre a los seis meses y con razón.
+  // La plata se redondea al final, que es donde corresponde.
+  Object.keys(r).forEach(k => {
+    r[k] = k === "dias" || k === "horas" ? Math.round(r[k] * 1000) / 1000 : redondo(r[k]);
+  });
   return r;
 }
 
@@ -131,7 +144,7 @@ export function calcularRol(persona = {}, asist = {}, extras = {}, par = PARAMET
 /** El rol de toda la obra, y lo que hay que tener en caja para pagarlo. */
 export function calcularNomina({ personal = [], asistencia = {}, extras = {}, par = PARAMETROS }) {
   const lineas = personal.map(p => {
-    const resumen = resumirAsistencia(asistencia[p.id] || []);
+    const resumen = resumirAsistencia(asistencia[p.id] || [], par);
     const rol = calcularRol(p, resumen, extras[p.id] || {}, par);
     return { persona: p, asistencia: resumen, ...rol };
   });
