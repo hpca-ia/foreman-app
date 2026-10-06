@@ -9,7 +9,7 @@ import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
 import { nivelDeAcceso, nivelDeArea, veLaTarea } from "./lib/acceso";
-import { esperaMiVisto } from "./lib/estadoDeCompra";
+import { esperaMiVisto, volvioAlVisto } from "./lib/estadoDeCompra";
 import { misObservaciones } from "./modules/observaciones/observaciones";
 import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
 
@@ -165,7 +165,7 @@ export default function App() {
     // y lo que le toca aprobar o comprar. El módulo ya sabe decirlo; acá solo
     // hace falta el número para el menú y la línea del tablero.
     supabase.from("compras_solicitudes")
-      .select("id,estado,solicitante_id,descripcion")
+      .select("id,estado,solicitante_id,descripcion,aprobado_at")
       .in("estado", ["pendiente_aprobacion", "requiere_info", "aprobada"])
       .then(({ data }) => setMisCompras(data || []));
     supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
@@ -652,6 +652,15 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   <span>
                     <strong style={{ color: colors.ink }}>{comprasQueMeTocan.length}</strong>{" "}
                     {comprasQueMeTocan.length === 1 ? "compra espera" : "compras esperan"} por vos
+                    {/* Cuántas de esas volvieron después de aprobadas. Sin
+                        esto, el que aprueba ve "sigue pendiente" después de
+                        que compras la devolvió y entiende que devolverla no
+                        hizo nada — cuando lo que hizo fue mandársela a él. */}
+                    {comprasQueMeTocan.filter(volvioAlVisto).length > 0 && (
+                      <span style={{ color: colors.warning, fontWeight: 600 }}>
+                        {" "}· {comprasQueMeTocan.filter(volvioAlVisto).length} que compras te devolvió
+                      </span>
+                    )}
                   </span>
                 </button>
               )}

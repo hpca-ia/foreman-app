@@ -24,3 +24,20 @@ export const esperaMiVisto = (tarea, usuarioId) =>
   tarea?.compra_estado === "pendiente_aprobacion"
   && tarea.status !== "listo"
   && tarea.assignee_id === usuarioId;
+
+/**
+ * ¿Esta compra VOLVIÓ al que la aprobó, o nunca se aprobó?
+ *
+ * Las dos están en "esperando visto" y no son lo mismo. Una es un pedido
+ * nuevo. La otra ya se aprobó, compras la empezó a gestionar y la devolvió
+ * porque el número cambió —aprobaron 500 y ahora son 800— así que el visto
+ * anterior ya no cubre lo que hay que pagar.
+ *
+ * Mostradas iguales, el que aprueba ve que "sigue pendiente" después de que
+ * alguien la devolvió y entiende que la devolución no hizo nada. Hizo algo:
+ * se la devolvió A ÉL, a propósito.
+ *
+ * No hace falta una columna: si tiene fecha de aprobación y está esperando
+ * visto otra vez, es que volvió.
+ */
+export const volvioAlVisto = c => c?.estado === "pendiente_aprobacion" && !!c?.aprobado_at;
