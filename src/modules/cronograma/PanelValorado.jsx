@@ -352,12 +352,31 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
               {cronograma.visible_cliente ? <><Eye size={11} /> El cliente lo ve</> : <><EyeOff size={11} /> El cliente no lo ve</>}
             </button>
             <button onClick={async () => {
-              if (!window.confirm("¿Borrar el cronograma valorado y empezar de nuevo?")) return;
-              await borrarValorado(cronograma.id); await cargar();
-            }} style={{ ...chico, marginLeft: "auto" }}><Trash2 size={11} /> Borrar</button>
+              if (!window.confirm(
+                `¿Borrar el cronograma valorado de este proyecto y empezar de cero?\n\n` +
+                `Se van sus ${lineas.length} líneas con lo que tengan repartido, y también cualquier valorado ` +
+                "anterior del proyecto — si no, al borrar este aparecería el viejo y parecería que no se borró.\n\n" +
+                "No se toca ni el presupuesto, ni el control de obra, ni el cronograma de barras.")) return;
+              const r = await borrarValorado(lead.id);
+              if (r.error) { setError(r.error); return; }
+              setError("");
+              await cargar();
+            }} style={{ ...chico, marginLeft: "auto", color: colors.danger }}>
+              <Trash2 size={11} /> Borrar y empezar de cero
+            </button>
           </>
         )}
       </div>
+
+      {/* El error, donde se produce. Vivía solo en las pantallas de armado,
+          así que un borrado que la base rechazaba no decía nada y la tabla
+          seguía ahí: indistinguible de un botón roto. */}
+      {error && (
+        <div style={{ fontSize: 12, color: colors.danger, background: colors.dangerSoft || colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "8px 11px", marginBottom: 9 }}>
+          {error}
+        </div>
+      )}
 
       <div style={{ overflowX: "auto", background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd }}>
         <div style={{ minWidth: 520 + meses.length * 58 }}>

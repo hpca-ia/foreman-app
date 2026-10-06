@@ -353,9 +353,26 @@ export async function guardarCronograma(id, campos) {
   return error ? error.message : null;
 }
 
-export async function borrarValorado(id) {
-  const { error } = await supabase.from("cronograma_valorado").delete().eq("id", id);
-  return error ? error.message : null;
+/**
+ * Borrar el valorado y empezar de cero.
+ *
+ * Se van TODOS los del proyecto, no el último. La pantalla muestra siempre el
+ * más nuevo, así que borrando uno solo aparecía el anterior —que casi siempre
+ * es una prueba vieja de hace meses— y parecía que el borrado no había
+ * funcionado. Peor: parecía que el valorado se había "arreglado" solo, con
+ * números de otra época.
+ *
+ * Con `select()` para saber si de verdad se borró: un DELETE que no tocó
+ * ninguna fila vuelve sin error, y una pantalla que sigue mostrando lo mismo
+ * después de borrar es indistinguible de una rota.
+ */
+export async function borrarValorado(leadId) {
+  const { data, error } = await supabase.from("cronograma_valorado")
+    .delete().eq("lead_id", leadId).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "No se borró nada: la base no dejó tocar esos cronogramas." };
+  // Las líneas se van solas: cuelgan del cronograma con borrado en cascada.
+  return { borrados: data.length };
 }
 
 /**
