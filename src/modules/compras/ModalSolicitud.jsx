@@ -813,6 +813,22 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           </span>
         )}
 
+        {/* COMPRAS TAMBIÉN PUEDE DEVOLVER MIENTRAS ESPERA EL VISTO.
+            Quien gestiona las compras ve pasar el pedido antes que nadie y es
+            quien primero nota que está mal: el proveedor no es, falta la
+            medida, ya se compró la semana pasada. Hasta ahora no podía hacer
+            nada hasta que lo aprobaran —tenía que pedirle al Director que lo
+            devolviera, o esperar a que le dieran el visto a algo que ya sabía
+            que estaba mal para recién ahí devolverlo—.
+            Devolver no es aprobar: es mandarlo a corregir. Lo primero sigue
+            siendo de quien tiene el visto; lo segundo, de quien lleva el
+            circuito. */}
+        {editando && estado === "pendiente_aprobacion" && gestionaCompras && !apruebo && (
+          <Button variant="outline" onClick={devolver} disabled={ocupado}>
+            <X size={13} /> Devolver a quien la pidió
+          </Button>
+        )}
+
         {editando && estado === "aprobada" && gestionaCompras && (
           <>
             <Button variant="primary" onClick={marcarComprada} disabled={ocupado}><ShoppingCart size={13} /> Ya la compré</Button>
