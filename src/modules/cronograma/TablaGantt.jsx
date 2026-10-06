@@ -213,10 +213,10 @@ export default function TablaGantt({
                       {/* De qué capítulo sale, debajo. El nombre de una
                           agrupación dice qué es; el capítulo, de dónde viene
                           en el presupuesto, que es como se la busca. */}
-                      <span style={{ display: "block", fontSize: 9, color: colors.muted, overflow: "hidden",
-                        textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400 }}>
-                        {g.capitulo}{g.capitulo && g.hijas.length > 1 ? " · " : ""}
-                        {g.hijas.length > 1 ? `${g.hijas.length} etapas` : ""}
+                      <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
+                        textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400, letterSpacing: 0.2 }}>
+                        {g.capitulo || <span style={{ color: colors.muted }}>sin capítulo</span>}
+                        {g.hijas.length > 1 ? ` · ${g.hijas.length} etapas` : ""}
                       </span>
                     </span>
                     <Senal ui={ui} g={g} senalados={senalados} misRubros={misRubros} />
@@ -305,10 +305,19 @@ export default function TablaGantt({
                             {g.simple && g.codigo && <span style={{ color: colors.muted, fontWeight: 600 }}>{g.codigo} </span>}
                             {g.simple ? a.nombre : (etapa || a.nombre)}
                           </span>
-                          {g.simple && g.capitulo && (
-                            <span style={{ display: "block", fontSize: 9, color: colors.muted, overflow: "hidden",
-                              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {g.capitulo}
+                          {/* El capítulo, legible. Estaba en 9px y en gris
+                              claro: técnicamente visible, que no es lo mismo
+                              que leerse. Es el dato con el que uno busca un
+                              rubro, así que tiene que poder leerse de un
+                              vistazo. */}
+                          {g.simple && (
+                            <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
+                              textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}>
+                              {g.capitulo || <span style={{ color: colors.muted }}>sin capítulo</span>}
+                              {!deps.length && (
+                                <span title="No depende de nada, así que arranca el día uno. Si tiene que ir después de algo, encadenala."
+                                  style={{ color: colors.warning, fontWeight: 600 }}> · arranca el día 1</span>
+                              )}
                             </span>
                           )}
                         </button>

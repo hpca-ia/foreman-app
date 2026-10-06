@@ -52,7 +52,7 @@ export async function cargarValorado(leadId) {
  */
 export async function armarDesdeObra({ lead, obra, mesInicio, meses, quien }) {
   const [{ data: rubros }, { data: acts }] = await Promise.all([
-    supabase.from("obra_rubros").select("id,total_base,actividad_id").eq("obra_id", obra.id),
+    supabase.from("obra_rubros").select("id,total_base,actividad_id,anulado_por_oc").eq("obra_id", obra.id),
     supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", obra.id).order("orden"),
   ]);
   if (!rubros?.length) return { error: "Esta obra todavía no tiene rubros cargados." };
@@ -67,8 +67,15 @@ export async function armarDesdeObra({ lead, obra, mesInicio, meses, quien }) {
   }).select().single();
   if (error) return { error: falta(error) ? "Falta correr la migración 074." : error.message };
 
+  // EL MISMO TOTAL QUE EL CONTROL DE OBRA, rubro por rubro.
+  //
+  // El rubro que una orden de cambio sacó del contrato sigue en la lista
+  // —tachado, con el número de la orden, porque es historia del presupuesto—
+  // pero su plata ya no es parte de lo que hay que hacer. El control lo
+  // excluye al sumar y el valorado lo estaba sumando: por eso los totales de
+  // una agrupación no coincidían entre las dos pantallas.
   const plata = new Map();
-  rubros.forEach(r => {
+  rubros.filter(r => !r.anulado_por_oc).forEach(r => {
     const k = r.actividad_id ?? 0;
     plata.set(k, (plata.get(k) || 0) + (Number(r.total_base) || 0));
   });
@@ -234,10 +241,12 @@ export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], 
   const { data: ags } = await supabase.from("obra_actividades")
     .select("id,nombre,codigo,orden").eq("obra_id", obra.id).order("orden");
   const { data: rubros } = await supabase.from("obra_rubros")
-    .select("actividad_id,total_base").eq("obra_id", obra.id);
+    .select("actividad_id,total_base,anulado_por_oc").eq("obra_id", obra.id);
 
+  // Sin los anulados por una orden de cambio: es lo que suma el control, y si
+  // acá se sumara distinto las dos pantallas dirían dos totales de lo mismo.
   const plata = new Map();
-  (rubros || []).forEach(r => {
+  (rubros || []).filter(r => !r.anulado_por_oc).forEach(r => {
     if (r.actividad_id == null) return;
     plata.set(Number(r.actividad_id), (plata.get(Number(r.actividad_id)) || 0) + (Number(r.total_base) || 0));
   });

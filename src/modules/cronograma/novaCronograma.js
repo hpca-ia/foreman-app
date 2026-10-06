@@ -64,11 +64,14 @@ const miles = v => Math.round(v).toLocaleString("es-EC");
 export async function materiaPrima(obraId) {
   const [{ data: acts }, { data: rubros }] = await Promise.all([
     supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", obraId).order("orden"),
-    supabase.from("obra_rubros").select("id,actividad_id,total_base,capitulo,descripcion,unidad,cantidad").eq("obra_id", obraId),
+    supabase.from("obra_rubros").select("id,actividad_id,total_base,capitulo,descripcion,unidad,cantidad,anulado_por_oc").eq("obra_id", obraId),
   ]);
   const plata = new Map();
   const porAgrup = new Map();
-  (rubros || []).forEach(r => {
+  // Los que una orden de cambio sacó del contrato no cuentan: siguen en la
+  // lista como historia, pero ya no son trabajo que haya que hacer ni plata
+  // que haya que planificar. Es lo mismo que hace el control de obra.
+  (rubros || []).filter(r => !r.anulado_por_oc).forEach(r => {
     if (r.actividad_id == null) return;
     plata.set(r.actividad_id, (plata.get(r.actividad_id) || 0) + n(r.total_base));
     if (!porAgrup.has(r.actividad_id)) porAgrup.set(r.actividad_id, []);

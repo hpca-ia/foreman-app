@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
-import { Plus, ChevronLeft, GanttChartSquare, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, GanttChartSquare, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -116,13 +116,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       // presupuesto, y hace falta para leerlo: "VENTANERÍA" dice poco si no se
       // ve que es de CARPINTERÍA METÁLICA.
       let { data: rub, error: eRub } = await supabase.from("obra_rubros")
-        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,crono_senalado,crono_nota")
+        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,anulado_por_oc,crono_senalado,crono_nota")
         .eq("obra_id", lead.obra_id).order("orden");
       // Sin la 085 no existen esas dos columnas: se lee sin ellas y todo sigue
       // andando, solo que no se puede señalar qué rubro está trabando.
       if (eRub) {
         ({ data: rub } = await supabase.from("obra_rubros")
-          .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo")
+          .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,anulado_por_oc")
           .eq("obra_id", lead.obra_id).order("orden"));
       }
       setSinSenalar(!!eRub);
@@ -137,6 +137,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         // Señalar un rubro NO lo saca del grupo: la barra sigue siendo la del
         // grupo, con toda su plata. Lo único que cambia es que se puede decir
         // qué falta en vez de dar el rubro entero por pendiente.
+        //
+        // Lo que SÍ sale es el rubro anulado por una orden de cambio: sigue en
+        // la lista como historia del presupuesto, pero su plata ya no es
+        // trabajo que haya que hacer. Es lo que suma el control de obra, y
+        // sumar distinto acá daba dos totales de la misma agrupación.
+        if (r.anulado_por_oc) return;
         m[r.actividad_id] = (m[r.actividad_id] || 0) + (Number(r.total_base) || 0);
       });
       setPlata(m);
@@ -490,6 +496,53 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     // La foto de la plata, para poder avisar después si una orden de cambio la
     // mueve y la barra se queda igual.
     await refrescarMontoRef(creadas || []);
+    await cargar();
+  }
+
+  /** Borrarlo entero y empezar de nuevo. */
+  async function borrarTodo() {
+    if (!window.confirm(
+      `¿Borrar el cronograma entero de ${lead.nombre}?\n\n` +
+      `Se van las ${actividades.length} actividades con sus dependencias, sus traslapes y sus etapas. ` +
+      "No se puede deshacer.\n\nEl control de obra y el presupuesto no se tocan.")) return;
+    setPensando(true);
+    if (actividades.length) {
+      await supabase.from("cronograma_dependencias").delete().in("actividad_id", actividades.map(a => a.id));
+      await supabase.from("cronograma_actividades").delete().eq("lead_id", lead.id);
+    }
+    setPensando(false); setError("");
+    await cargar();
+  }
+
+  /**
+   * Encadenar todas, una detrás de otra, en el orden en que están.
+   *
+   * El cronograma salía con unas barras encadenadas y otras no —NOVA encadena
+   * lo que entiende y deja suelto lo demás— y una barra sin dependencia
+   * arranca el día uno. Así quedaban quince actividades amontonadas al
+   * principio y el resto en fila, que no se puede leer ni corregir.
+   *
+   * Una cadena simple no es el orden real de la obra, pero es un punto de
+   * partida que se entiende de un vistazo: se ve qué va después de qué, y de
+   * ahí se traslapa lo que de verdad va en paralelo. Arrancar de algo legible
+   * y corregirlo es trabajo; arrancar de algo confuso es volver a empezar.
+   */
+  async function encadenarTodo() {
+    const orden = [...actividades].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+    if (orden.length < 2) return;
+    if (!window.confirm(
+      "¿Encadenar todas las actividades una detrás de otra, en el orden en que están?\n\n" +
+      "Se reemplazan las dependencias que haya. Las duraciones no se tocan.\n\n" +
+      "Es un punto de partida ordenado: desde ahí traslapás lo que va en paralelo poniendo los días en negativo.")) return;
+    setPensando(true);
+    await supabase.from("cronograma_dependencias").delete().in("actividad_id", orden.map(a => a.id));
+    const deps = orden.slice(1).map((a, i) => ({
+      actividad_id: a.id, depende_de_id: orden[i].id, tipo: "FC", retardo: 0,
+    }));
+    const { error: e } = await supabase.from("cronograma_dependencias").insert(deps);
+    setPensando(false);
+    if (e) { setError(e.message); return; }
+    setError("");
     await cargar();
   }
 
@@ -1089,6 +1142,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               <>
                 <Button variant="primary" size="sm" disabled={pensando} onClick={sincronizarConElControl}>
                   Ponerlo al día con el control
+                </Button>
+                <Button variant="outline" size="sm" disabled={pensando} onClick={encadenarTodo}>
+                  Encadenar todo en orden
+                </Button>
+                <Button variant="secondary" size="sm" disabled={pensando} onClick={borrarTodo}>
+                  <Trash2 size={13} /> Borrar y empezar de cero
                 </Button>
                 <Button variant="outline" size="sm" disabled={pensando}
                   onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
