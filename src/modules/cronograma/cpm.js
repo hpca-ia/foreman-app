@@ -165,11 +165,16 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
       const f = fin.get(d.depende_de_id), i = ini.get(d.depende_de_id);
       if (!f) return;
       let candidato;
-      if (d.tipo === "CC") candidato = cal.sumar(i, 1 + d.retardo);
-      else if (d.tipo === "FF") candidato = cal.sumar(f, 1 + d.retardo - a.duracion + 1);
-      else candidato = cal.sumar(new Date(f.getTime() + DIA), 1 + d.retardo);
-      // Con retardo 0 el sumar() de arriba devuelve el mismo día; el +DIA del
-      // caso normal es lo que hace que la siguiente empiece DESPUÉS.
+      // Comienzo→Comienzo: arrancan juntas, o con los días de desfase que diga
+      // el retardo. Es el traslape que se usa cuando una va pisándole los
+      // talones a la otra sin esperar a que termine.
+      if (d.tipo === "CC") candidato = desplazar(cal, i, d.retardo);
+      // Fin→Fin: terminan juntas. El arranque sale restando su duración.
+      else if (d.tipo === "FF") candidato = retroceder(cal, desplazar(cal, f, d.retardo), a.duracion);
+      // Fin→Comienzo, la normal: el día hábil siguiente al fin de la otra, y
+      // de ahí el retardo —positivo para esperar el fragüe, NEGATIVO para
+      // traslapar y arrancar antes de que la anterior termine—.
+      else candidato = desplazar(cal, cal.siguienteHabil(new Date(f.getTime() + DIA)), d.retardo);
       if (!candidato) return;
       if (candidato > desde) desde = candidato;
     });
@@ -205,14 +210,16 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
       const siguiente = porId.get(d.actividad_id);
       const iniS = iniT.get(d.actividad_id), finS = finT.get(d.actividad_id);
       if (!iniS) return;
+      // El espejo exacto de la pasada de arriba. Cada una devuelve lo más
+      // tarde que ESTA puede terminar sin mover a la que sigue.
       let candidato;
-      if (d.tipo === "CC") candidato = cal.sumar(iniS, a.duracion - d.retardo);
-      else if (d.tipo === "FF") candidato = retroceder(cal, finS, 1 + d.retardo);
+      if (d.tipo === "CC") candidato = cal.sumar(desplazar(cal, iniS, -d.retardo), a.duracion);
+      else if (d.tipo === "FF") candidato = desplazar(cal, finS, -d.retardo);
       // Fin→Comienzo: esta tiene que TERMINAR el día hábil anterior al que
       // arranca la que sigue, no el mismo. Retroceder uno solo la dejaba
       // terminando el mismo día que empieza la otra, y eso le regalaba un día
       // de holgura a toda la cadena — con lo que la ruta crítica salía vacía.
-      else candidato = retroceder(cal, iniS, 2 + d.retardo);
+      else candidato = desplazar(cal, retroceder(cal, iniS, 2), -d.retardo);
       if (!candidato) return;
       if (candidato < hasta) hasta = candidato;
       void siguiente;
@@ -249,6 +256,75 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
     ciclos: enCiclo,
     ruta: resultado.filter(a => a.critica).map(a => a.id),
   };
+}
+
+/**
+ * Correr una fecha tantos días hábiles, para adelante o para atrás.
+ *
+ * El signo es lo que hace falta y lo que faltaba. `sumar` y `retroceder`
+ * arrancan con `Math.max(1, …)`, así que un retardo negativo se volvía cero
+ * sin decir nada: TRASLAPAR DOS ACTIVIDADES ERA IMPOSIBLE —"que la mampostería
+ * arranque cinco días antes de que termine la estructura"— y el cronograma
+ * devolvía la obra entera en fila, más larga de lo que es.
+ */
+function desplazar(cal, d, n) {
+  const k = Math.round(Number(n) || 0);
+  return k >= 0 ? cal.sumar(d, k + 1) : retroceder(cal, d, -k + 1);
+}
+
+/**
+ * Estirar o encoger el cronograma para que entre en el plazo.
+ *
+ * El plazo de una obra no es el resultado de sumar actividades: es lo que dice
+ * el contrato. NOVA propone duraciones razonables y la cadena más larga sale
+ * en 180 días cuando el contrato dice 150 — y hasta ahora eso quedaba así, con
+ * el cronograma diciendo una cosa y el contrato otra. Corregirlo a mano son
+ * cuarenta actividades.
+ *
+ * Se escalan las duraciones por el factor que haga falta y se vuelve a
+ * calcular, porque al redondear y al cambiar cuál es la cadena más larga el
+ * resultado no cae exacto a la primera. Unas pocas vueltas alcanzan.
+ *
+ * NO toca las dependencias ni los traslapes: son decisiones de obra —qué va
+ * antes que qué— y cambiarlas para cuadrar un número sería inventar cómo se
+ * construye. Lo que se ajusta es cuánto dura cada cosa, que es lo que de
+ * verdad se negocia cuando hay que entregar antes: más gente en el frente.
+ *
+ * Devuelve [{ id, duracion }] con las que cambian, y a cuántos días llegó.
+ */
+export function ajustarAlPlazo({ actividades = [], dependencias = [], objetivo, inicio, cal = calendario() }) {
+  const meta = Math.max(1, Math.round(objetivo || 0));
+  if (!actividades.length || !meta) return { cambios: [], dias: 0, factor: 1 };
+
+  let dur = new Map(actividades.map(a => [a.id, Math.max(1, Math.round(a.duracion || 1))]));
+  const correr = d => calcular({
+    actividades: actividades.map(a => ({ ...a, duracion: d.get(a.id) })),
+    dependencias, inicio, cal,
+  }).duracion;
+
+  let dias = correr(dur), mejor = new Map(dur), mejorDias = dias;
+  for (let vuelta = 0; vuelta < 8 && dias !== meta; vuelta++) {
+    const factor = meta / dias;
+    const siguiente = new Map();
+    actividades.forEach(a => {
+      // Mínimo un día: una actividad de cero días no existe, y es lo que
+      // pasaría con las cortas al encoger mucho.
+      siguiente.set(a.id, Math.max(1, Math.round(dur.get(a.id) * factor)));
+    });
+    // Si el escalado no movió nada —todo tocó el piso de un día— no hay más
+    // que hacer: el plazo pedido es más corto que la obra más corta posible.
+    let igual = true;
+    siguiente.forEach((v, k) => { if (v !== dur.get(k)) igual = false; });
+    if (igual) break;
+    dur = siguiente;
+    dias = correr(dur);
+    if (Math.abs(dias - meta) < Math.abs(mejorDias - meta)) { mejor = new Map(dur); mejorDias = dias; }
+  }
+
+  const cambios = actividades
+    .map(a => ({ id: a.id, duracion: mejor.get(a.id) }))
+    .filter(c => c.duracion !== Math.max(1, Math.round(actividades.find(a => a.id === c.id).duracion || 1)));
+  return { cambios, dias: mejorDias, factor: mejorDias ? meta / mejorDias : 1 };
 }
 
 /** Restar días hábiles: el espejo de sumar. */

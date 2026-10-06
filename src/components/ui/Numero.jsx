@@ -57,18 +57,27 @@ export default function Numero({
   ...resto
 }) {
   const [txt, setTxt] = useState(value == null ? "" : String(value));
-  const [enFoco, setEnFoco] = useState(false);
+  const enFoco = useRef(false);
   const ultimo = useRef(value);
 
   // Lo de afuera manda, salvo mientras se está escribiendo.
+  //
+  // El foco va en un ref y no en un estado, y eso NO es un detalle: con un
+  // estado, soltar el campo lo cambia, el efecto vuelve a correr, y como el
+  // guardado todavía no volvió del servidor, `value` sigue siendo el número
+  // viejo y se lo escribe encima al que acabás de poner. Se veía como que el
+  // campo "no funciona": escribías 25, salías, y volvía 10.
+  //
+  // Con un ref el efecto corre solo cuando de verdad cambia lo de afuera, que
+  // es cuando hay algo nuevo que mostrar.
   useEffect(() => {
-    if (!enFoco) { setTxt(value == null ? "" : String(value)); ultimo.current = value; }
-  }, [value, enFoco]);
+    if (!enFoco.current) { setTxt(value == null ? "" : String(value)); ultimo.current = value; }
+  }, [value]);
 
   const limpiar = t => limpiarNumero(t, { min, max, entero, vacio });
 
   const confirmar = () => {
-    setEnFoco(false);
+    enFoco.current = false;
     const n = limpiar(txt);
     if (n === undefined) { setTxt(value == null ? "" : String(value)); return; }
     setTxt(n == null ? "" : String(n));
@@ -85,12 +94,12 @@ export default function Numero({
       disabled={disabled}
       title={title}
       placeholder={placeholder}
-      onFocus={e => { setEnFoco(true); e.target.select(); }}
+      onFocus={e => { enFoco.current = true; e.target.select(); }}
       onChange={e => setTxt(e.target.value)}
       onBlur={confirmar}
       onKeyDown={e => {
         if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
-        if (e.key === "Escape") { setTxt(value == null ? "" : String(value)); setEnFoco(false); e.target.blur(); }
+        if (e.key === "Escape") { setTxt(value == null ? "" : String(value)); enFoco.current = false; e.target.blur(); }
       }}
       style={{ ...inputStyle, ...style }}
       {...resto}

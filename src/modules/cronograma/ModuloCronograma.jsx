@@ -5,10 +5,10 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { calendario, calcular, aFecha, claveFecha, ETAPAS } from "./cpm";
+import { calendario, calcular, aFecha, claveFecha, ETAPAS, TIPOS_DEP, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
-import { guardarPlazo, desfase } from "./plazo";
+import { guardarPlazo, desfase, diasDelPlazo } from "./plazo";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -207,6 +207,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const IZQ = 490 + 12;
   const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
 
+  // El plazo contra el plan. Son dos cosas distintas y conviene no mezclarlas:
+  // el plazo es lo que dice el contrato, y el plan es lo que sale de sumar las
+  // actividades. Que no coincidan es normal al principio; que nadie lo diga es
+  // lo que hace que el cronograma deje de servir.
+  const diasDeContrato = diasDelPlazo(lead.crono_inicio || hoy(), lead.crono_meses, cal);
+  const desvio = diasDeContrato && todas.length ? plan.duracion - diasDeContrato : 0;
+
   // En qué día de obra cae una fecha. Negativo antes del arranque: el anticipo
   // de una importación es el día −18, y decirlo así es más claro que una fecha
   // suelta de diciembre en un cronograma que empieza en enero.
@@ -256,13 +263,19 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     // podía guardar —porque falta una migración, porque el permiso no da— se
     // veía igual que uno guardado: se escribía el número, la pantalla
     // recargaba, y volvía el valor viejo sin que nada dijera por qué.
-    const { error: e } = await supabase.from("cronograma_actividades").update(campos).eq("id", a.id);
+    // Con `select()`: sin él, un UPDATE que no tocó ninguna fila —porque el
+    // permiso no deja— vuelve SIN error, y el campo simplemente mostraba otra
+    // vez el valor viejo. Un guardado que no guarda y no avisa es peor que uno
+    // que falla: manda a pensar que el campo está roto.
+    const { data, error: e } = await supabase.from("cronograma_actividades")
+      .update(campos).eq("id", a.id).select();
     if (e) {
       setError(/column|schema cache/i.test(e.message)
         ? "Falta correr la migración 083 para guardar la etapa y su peso."
         : e.message);
       return;
     }
+    if (!data?.length) { setError("No se pudo guardar el cambio: la base no dejó tocar esa actividad."); return; }
     setError("");
     await cargar();
   }
@@ -280,7 +293,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
    * fecha y no aparece el día uno junto con todo lo demás.
    */
   async function partirEnEtapas(a) {
-    const hechas = actividades.filter(x => x.obra_actividad_id === a.obra_actividad_id);
+    const hechas = a.obra_actividad_id
+      ? actividades.filter(x => x.obra_actividad_id === a.obra_actividad_id)
+      : [a];
     const orden = ["anticipo", "fabricacion", "entrega", "instalacion"];
     const siguiente = orden.find(e => !hechas.some(x => x.etapa === e)) || "instalacion";
     // La plata se parte entre las dos, no se inventa: si esta tenía el 100 de
@@ -296,7 +311,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       orden: actividades.length,
     }).select().single();
     if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 083 para partir en etapas." : e.message); return; }
-    await supabase.from("cronograma_actividades").update({ peso_pct: deja }).eq("id", a.id);
+    if (a.obra_actividad_id) {
+      await supabase.from("cronograma_actividades").update({ peso_pct: deja }).eq("id", a.id);
+    }
+    setError("");
     await supabase.from("cronograma_dependencias")
       .insert({ actividad_id: creada.id, depende_de_id: a.id, tipo: "FC" });
     await cargar();
@@ -314,6 +332,23 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       .insert({ actividad_id: hasta, depende_de_id: desde, tipo: "FC" });
     if (e && !/duplicate/i.test(e.message)) setError(e.message);
     setUniendo(null);
+    await cargar();
+  }
+
+  /**
+   * Cambiarle el tipo o el retardo a una dependencia.
+   *
+   * Es lo que hacía falta para TRASLAPAR. "La mampostería arranca cinco días
+   * antes de que termine la estructura" no se podía decir: todas las uniones
+   * nacían fin→comienzo con cero de espera y no había dónde tocarlas, así que
+   * el cronograma salía todo en fila y más largo de lo que la obra es.
+   */
+  async function cambiarDep(d, campos) {
+    const { data, error: e } = await supabase.from("cronograma_dependencias")
+      .update(campos).eq("id", d.id).select();
+    if (e) { setError(e.message); return; }
+    if (!data?.length) { setError("No se pudo guardar: la base no dejó tocar esa dependencia."); return; }
+    setError("");
     await cargar();
   }
 
@@ -409,7 +444,47 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, flex: 1, minWidth: 220 }}>
             <strong style={{ color: colors.inkSoft }}>El plazo del proyecto.</strong> Se escribe una sola vez acá y lo
             usan este cronograma y el cronograma valorado del control de obra. Escribilo y apretá Enter.
+            {diasDeContrato > 0 && <> Son <strong style={{ color: colors.inkSoft }}>{diasDeContrato} días de trabajo</strong>.</>}
           </div>
+
+          {/* EL PLAN CONTRA EL CONTRATO.
+              El plazo no sale de sumar actividades: lo dice el contrato. Que
+              el plan dé otra cosa es normal al armarlo; lo que no puede pasar
+              es que nadie lo diga, porque entonces el cronograma promete una
+              fecha y el contrato otra, y la que manda es la del contrato. */}
+          {desvio !== 0 && (
+            <div style={{ flexBasis: "100%", borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 9,
+              display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ fontSize: 11.5, color: colors.ink, lineHeight: 1.5, flex: 1, minWidth: 240 }}>
+                El cronograma sale en <strong>{plan.duracion} días</strong> y el plazo son{" "}
+                <strong>{diasDeContrato}</strong>:{" "}
+                <strong style={{ color: desvio > 0 ? colors.danger : colors.brand }}>
+                  {desvio > 0 ? `${desvio} días de más` : `${-desvio} días de menos`}
+                </strong>
+                {desvio > 0 ? " que el contrato." : " que el contrato, así que sobra tiempo."}
+              </div>
+              <Button variant={desvio > 0 ? "primary" : "outline"} size="sm" disabled={pensando}
+                onClick={async () => {
+                  if (!window.confirm(
+                    `¿Ajustar las duraciones para que la obra entre en ${diasDeContrato} días?\n\n` +
+                    "Se estiran o encogen todas en proporción. No se tocan las dependencias ni los traslapes: " +
+                    "qué va antes que qué es una decisión de obra y no se cambia para cuadrar un número.")) return;
+                  setPensando(true);
+                  const { cambios, dias } = ajustarAlPlazo({
+                    actividades, dependencias, objetivo: diasDeContrato,
+                    inicio: lead.crono_inicio || hoy(), cal,
+                  });
+                  for (const c of cambios) {
+                    await supabase.from("cronograma_actividades").update({ duracion: c.duracion }).eq("id", c.id);
+                  }
+                  setPensando(false);
+                  if (!cambios.length) setError("No hay cómo ajustarlo más: las actividades ya están en su mínimo.");
+                  else setError("");
+                  await cargar();
+                  void dias;
+                }}>Ajustar al plazo</Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -421,17 +496,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       {editable && obra?.id && (
         armando ? (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "grid", gap: 9 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 8, alignItems: "end" }}>
-              <div>
-                <label style={{ fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 }}>¿CUÁNTO DURA LA OBRA?</label>
-                <input type="number" min="1" max="60" value={armando.meses}
-                  onChange={e => setArmando(v => ({ ...v, meses: Number(e.target.value) || 1 }))}
-                  style={{ ...inputStyle, padding: "7px 9px" }} />
-              </div>
-              <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
-                meses. NOVA parte las agrupaciones del presupuesto en actividades, les pone duración y las encadena
-                en el orden real de una obra.
-              </div>
+            {/* No se vuelve a preguntar cuánto dura. Ya está arriba, en el
+                plazo del proyecto: preguntarlo otra vez es pedir el mismo dato
+                dos veces y quedarse con dos respuestas que pueden no coincidir
+                — que es exactamente lo que se acaba de arreglar. */}
+            <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
+              {lead.crono_meses ? (
+                <>
+                  NOVA parte las agrupaciones del presupuesto en actividades, les pone duración y las encadena en el
+                  orden real de una obra, para que entre en el plazo del proyecto:{" "}
+                  <strong style={{ color: colors.ink }}>{lead.crono_meses} meses</strong>
+                  {diasDeContrato > 0 && <> · {diasDeContrato} días de trabajo</>}.
+                </>
+              ) : (
+                <span style={{ color: colors.warning }}>
+                  Primero poné cuántos meses dura la obra, arriba en el plazo del proyecto: es contra ese número que
+                  NOVA arma el cronograma.
+                </span>
+              )}
             </div>
 
             {armando.propuesta && (
@@ -441,6 +523,14 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   <strong>{armando.propuesta.dependencias.length}</strong> dependencias.
                   La obra sale en <strong>{armando.propuesta.dias} días de trabajo</strong>,
                   con {armando.propuesta.criticas} en la ruta crítica.
+                  {diasDeContrato > 0 && (
+                    Math.abs(armando.propuesta.dias - diasDeContrato) <= Math.max(3, diasDeContrato * 0.05)
+                      ? <span style={{ color: colors.brand }}> Entra en el plazo de {diasDeContrato} días.</span>
+                      : <span style={{ color: colors.warning }}>
+                          {" "}El plazo son {diasDeContrato}: le{armando.propuesta.dias > diasDeContrato ? "" : " falta"}n{" "}
+                          {Math.abs(armando.propuesta.dias - diasDeContrato)} días. Guardalo y ajustalo arriba, o pedile que lo piense de nuevo.
+                        </span>
+                  )}
                   {armando.propuesta.quitadas > 0 && (
                     <span style={{ color: colors.warning }}> Le quité {armando.propuesta.quitadas} dependencias que se mordían la cola.</span>
                   )}
@@ -456,10 +546,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
 
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {!armando.propuesta ? (
-                <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                <Button variant="primary" size="sm" disabled={pensando || !lead.crono_meses} onClick={async () => {
                   setError(""); setPensando(true);
                   const agrupaciones = await materiaPrima(obra.id);
-                  const r = await proponerCronograma({ agrupaciones, meses: armando.meses, nombreObra: lead.nombre, cal });
+                  const r = await proponerCronograma({
+                    agrupaciones, meses: lead.crono_meses, dias: diasDeContrato,
+                    nombreObra: lead.nombre, cal,
+                  });
                   setPensando(false);
                   if (r.error) { setError(r.error); return; }
                   setArmando(v => ({ ...v, propuesta: r }));
@@ -468,10 +561,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 <>
                   <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
                     setPensando(true);
-                    // El plazo que se usó queda en el proyecto: el valorado lo
-                  // va a leer de ahí y no hay que volver a escribirlo.
-                  await guardarPlazo(lead.id, { meses: armando.meses });
-                  const r = await guardarPropuesta({ lead, obra, propuesta: armando.propuesta, quien: currentUser });
+                    const r = await guardarPropuesta({ lead, obra, propuesta: armando.propuesta, quien: currentUser });
                     setPensando(false);
                     if (r.error) { setError(r.error); return; }
                     setArmando(null); await cargar();
@@ -492,7 +582,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         ) : (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
             <Button variant={todas.length ? "outline" : "primary"} size="sm"
-              onClick={() => { setArmando({ meses: lead.crono_meses || 6, propuesta: null }); setError(""); }}>
+              onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
               {todas.length ? "Rearmarlo con NOVA" : "Que lo arme NOVA del presupuesto"}
             </Button>
             {todas.length > 0 && (
@@ -634,35 +724,78 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     {a.critica && <span title="Ruta crítica: no tiene colchón" style={{ color: colors.danger, marginRight: 4 }}>●</span>}
                     {a.nombre}
                   </div>
-                  {deps.length > 0 && (
-                    <div style={{ fontSize: 10, color: colors.muted, marginTop: 1 }}>
-                      {a.inicio_fijo && <span style={{ color: colors.brand }}>fija el {dia(a.inicio_fijo)} · </span>}
-                      después de {deps.map(d => porId.get(d.depende_de_id)?.nombre || "?").join(", ")}
-                      {editable && deps.map(d => (
-                        <button key={d.id} onClick={() => desunir(d)} title="Quitar esta dependencia"
-                          style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: "0 3px" }}>×</button>
-                      ))}
-                    </div>
+                  {a.inicio_fijo && (
+                    <div style={{ fontSize: 10, color: colors.brand, marginTop: 1 }}>fija el {dia(a.inicio_fijo)}</div>
                   )}
+
+                  {/* UNA LÍNEA POR DEPENDENCIA, editable.
+                      Acá se traslapa: el retardo en negativo hace que esta
+                      arranque ANTES de que termine la otra. Es lo que uno hace
+                      en obra todo el tiempo —la mampostería entra mientras
+                      arriba se sigue fundiendo— y sin esto el cronograma salía
+                      todo en fila, más largo que la obra de verdad. */}
+                  {deps.map(d => {
+                    const r = Number(d.retardo) || 0;
+                    return (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 2, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10, color: colors.muted }}>↳</span>
+                        {editable ? (
+                          <select value={d.tipo || "FC"} onChange={e => cambiarDep(d, { tipo: e.target.value })}
+                            title={TIPOS_DEP[d.tipo || "FC"]?.pista}
+                            style={{ ...inputStyle, width: "auto", padding: "1px 3px", fontSize: 9.5, height: 18 }}>
+                            {Object.entries(TIPOS_DEP).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
+                          </select>
+                        ) : <span style={{ fontSize: 10, color: colors.muted }}>{TIPOS_DEP[d.tipo || "FC"]?.label}</span>}
+                        <span style={{ fontSize: 10, color: colors.inkSoft, maxWidth: 150, overflow: "hidden",
+                          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {porId.get(d.depende_de_id)?.nombre || "?"}
+                        </span>
+                        {editable && (
+                          <Numero value={r} min={-365} max={365} disabled={!editable}
+                            onCommit={v => cambiarDep(d, { retardo: v })}
+                            title="Días de espera. En NEGATIVO se traslapan: ésta arranca antes de que la otra termine."
+                            style={{ width: 42, padding: "1px 3px", fontSize: 9.5, height: 18, textAlign: "center" }} />
+                        )}
+                        <span style={{ fontSize: 9.5, fontWeight: r < 0 ? 700 : 400, color: r < 0 ? colors.brand : colors.muted }}>
+                          {r === 0 ? "días" : r < 0 ? `días de traslape` : "días de espera"}
+                        </span>
+                        {editable && (
+                          <button onClick={() => desunir(d)} title="Quitar esta dependencia"
+                            style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: "0 3px" }}>×</button>
+                        )}
+                      </div>
+                    );
+                  })}
 
                   {/* La etapa y su parte de la plata. Esto es lo que ata esta
                       pantalla al cronograma valorado: la ventanería que se
                       anticipa en marzo y se instala en agosto pone su plata en
                       esos dos meses porque acá dice cuánto va en cada uno. */}
-                  {conEtapas && a.obra_actividad_id && (
+                  {conEtapas && (
                     <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
                       <select value={a.etapa || "ejecucion"} disabled={!editable}
                         onChange={e => cambiar(a, { etapa: e.target.value })}
                         style={{ ...inputStyle, width: "auto", padding: "1px 4px", fontSize: 10, height: 19 }}>
                         {Object.entries(ETAPAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                       </select>
-                      <Numero value={a.peso_pct ?? 100} min={0} max={100} entero={false} disabled={!editable}
-                        onCommit={v => cambiar(a, { peso_pct: v })}
-                        title="Qué parte de la plata de la agrupación se paga en esta etapa. Enter para guardar."
-                        style={{ width: 44, padding: "1px 4px", fontSize: 10, height: 19, textAlign: "center" }} />
-                      <span style={{ fontSize: 10, color: colors.muted }}>
-                        % de {agrupaciones.find(g => g.id === a.obra_actividad_id)?.nombre?.slice(0, 22) || "la agrupación"}
-                      </span>
+                      {a.obra_actividad_id && (
+                        <Numero value={a.peso_pct ?? 100} min={0} max={100} entero={false} disabled={!editable}
+                          onCommit={v => cambiar(a, { peso_pct: v })}
+                          title="Qué parte de la plata de la agrupación se paga en esta etapa. Enter para guardar."
+                          style={{ width: 44, padding: "1px 4px", fontSize: 10, height: 19, textAlign: "center" }} />
+                      )}
+                      {/* El porcentaje solo quiere decir algo si la actividad
+                          cuelga de una agrupación: es su parte de ESA plata.
+                          Una actividad suelta —un trámite, una espera— no
+                          reparte nada, y mostrarle un "% de" sin de qué era
+                          justamente lo que confundía. */}
+                      {a.obra_actividad_id ? (
+                        <span style={{ fontSize: 10, color: colors.muted }}>
+                          % de {agrupaciones.find(g => g.id === a.obra_actividad_id)?.nombre?.slice(0, 22) || "su agrupación"}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: colors.muted }}>sin plata asignada</span>
+                      )}
                       {editable && (
                         <button onClick={() => partirEnEtapas(a)}
                           title="Partirla: el anticipo ahora, la fabricación después, la instalación al final"
@@ -758,10 +891,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             onKeyDown={e => { if (e.key === "Enter") agregar(); }}
             placeholder="Nueva actividad. Ej: estructura de la planta baja"
             style={{ ...inputStyle, flex: 1, minWidth: 220 }} />
-          <input type="number" min="1" value={nueva?.duracion || 5}
-            onChange={e => setNueva(v => ({ ...(v || { nombre: "" }), duracion: Number(e.target.value) || 1 }))}
-            style={{ ...inputStyle, width: 80 }} />
+          <Numero value={nueva?.duracion ?? 5} min={1} max={2000} title="Cuántos días hábiles dura"
+            onCommit={v => setNueva(x => ({ ...(x || { nombre: "" }), duracion: v }))}
+            style={{ width: 80 }} />
           <Button variant="primary" size="sm" onClick={agregar}><Plus size={13} /> Agregar</Button>
+        </div>
+      )}
+
+      {/* CÓMO SE USA, en una línea. Lo de encadenar y traslapar no se adivina
+          mirando la pantalla, y sin saberlo el cronograma queda como una lista
+          de barras sueltas que arrancan todas el día uno. */}
+      {todas.length > 0 && editable && !uniendo && (
+        <div style={{ fontSize: 11, color: colors.muted, marginTop: 8, lineHeight: 1.55 }}>
+          Para <strong style={{ color: colors.inkSoft }}>encadenar</strong>: tocá el eslabón de una actividad y después
+          el de la que va detrás. Para <strong style={{ color: colors.inkSoft }}>traslaparlas</strong> —que la segunda
+          arranque antes de que la primera termine— poné los días <strong style={{ color: colors.inkSoft }}>en
+          negativo</strong> en la línea de la dependencia; en positivo son días de espera. Para{" "}
+          <strong style={{ color: colors.inkSoft }}>partir una actividad en etapas</strong> —anticipo, fabricación,
+          instalación— usá <strong style={{ color: colors.inkSoft }}>+ etapa</strong>.
         </div>
       )}
 

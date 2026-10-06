@@ -44,12 +44,16 @@ export async function materiaPrima(obraId) {
     .map(a => ({ ...a, monto: Math.round((plata.get(a.id) || 0) * 100) / 100 }));
 }
 
-export async function proponerCronograma({ agrupaciones = [], meses = 6, nombreObra = "", cal = calendario() }) {
+export async function proponerCronograma({ agrupaciones = [], meses = 6, dias: diasPlazo = 0, nombreObra = "", cal = calendario() }) {
   if (!agrupaciones.length) {
     return { error: "Esta obra todavía no tiene agrupaciones. Se arman en Control de Obra → Agrupaciones." };
   }
+  if (!meses) return { error: "Falta el plazo del proyecto: cuántos meses dura la obra." };
   const { memoria } = await leerMemoria("cronograma");
-  const dias = Math.max(20, Math.round(meses * 26));   // días hábiles, de lunes a sábado
+  // Los días los cuenta el calendario de la obra, que sabe de domingos y
+  // feriados. La regla de tres de "26 días por mes" daba de más y era parte de
+  // por qué el cronograma no terminaba de coincidir con el plazo.
+  const dias = diasPlazo || Math.max(20, Math.round(meses * 26));
 
   const sistema = `Eres NOVA y armas el cronograma de obra de una constructora en Ecuador.
 ${memoriaEnPalabras(memoria)}
@@ -61,7 +65,8 @@ ${agrupaciones.map(a => `${a.id} · ${a.nombre} · ${Math.round(a.monto)}`).join
 
 Devuelves SOLO JSON, sin markdown:
 {"actividades":[{"ref":1,"agrupacion_id":12,"nombre":"Excavación y cimentación","duracion":18,"etapa":"ejecucion","peso":100,"porque":"..."}],
- "dependencias":[{"de":1,"a":2,"retardo":0,"porque":"..."}]}
+ "dependencias":[{"de":1,"a":2,"tipo":"FC","retardo":0,"porque":"..."},
+                 {"de":2,"a":3,"tipo":"FC","retardo":-5,"porque":"la mampostería entra antes de que termine la estructura"}]}
 
 ACTIVIDADES: partí cada agrupación en una a cuatro actividades según su peso y
 su naturaleza. Una agrupación de 200 mil no es una barra sola. "duracion" en
@@ -99,15 +104,29 @@ obra, no el orden de la lista:
 · carpintería y acabados al final, con el edificio cerrado
 · limpieza y entrega al último
 
-"retardo" en días para las esperas reales: el fragüe del hormigón antes de
-desencofrar, el secado de un empaste antes de pintar.
+TIPO Y RETARDO de cada dependencia, que es como se dice de verdad cómo se
+encadena una obra:
 
-Lo que puede ir en paralelo, ponelo en paralelo: un cronograma donde todo va
-en fila da una obra el doble de larga de lo que es. Pero no inventes
-dependencias para rellenar: si dos cosas no se traban, no las trabes.
+  "tipo": "FC" fin→comienzo (la normal), "CC" comienzo→comienzo (arrancan
+  juntas o con unos días de desfase), "FF" fin→fin (terminan juntas).
 
-La suma de la cadena más larga tiene que acercarse a ${dias} días hábiles sin
-pasarse mucho: ese es el plazo de la obra.
+  "retardo" en días hábiles. POSITIVO es una espera real —el fragüe del
+  hormigón antes de desencofrar, el secado del empaste antes de pintar—.
+  NEGATIVO es un TRASLAPE: la actividad arranca antes de que termine la otra,
+  que es lo que pasa todo el tiempo en obra. La mampostería de planta baja
+  entra cuando arriba todavía se está fundiendo; el enlucido empieza por donde
+  ya se cerró. Usalo: un cronograma sin traslapes da una obra mucho más larga
+  de lo que es.
+
+Lo que puede ir en paralelo, ponelo en paralelo. Pero no inventes dependencias
+para rellenar: si dos cosas no se traban, no las trabes.
+
+EL PLAZO MANDA. La obra tiene que salir en ${dias} días hábiles, que es lo que
+dice el contrato. No es una sugerencia: si tus duraciones dan mucho más, no
+alargues la obra — acortá las actividades, traslapá lo que se traslapa en la
+realidad, y poné en paralelo lo que no se traba. Si dan mucho menos, no las
+estires sin motivo: dales el tiempo que de verdad llevan y dejá el resto como
+holgura.
 
 "porque" en una línea, en español, para quien revisa.`;
 
@@ -175,7 +194,15 @@ export function ordenar(p, agrupaciones, cal) {
 
   let dependencias = (p.dependencias || [])
     .filter(d => refs.has(Number(d.de)) && refs.has(Number(d.a)) && Number(d.de) !== Number(d.a))
-    .map(d => ({ de: Number(d.de), a: Number(d.a), retardo: Math.max(0, Math.round(n(d.retardo))), porque: d.porque || "" }));
+    .map(d => ({
+      de: Number(d.de), a: Number(d.a),
+      tipo: ["FC", "CC", "FF"].includes(d.tipo) ? d.tipo : "FC",
+      // El retardo negativo es el traslape y antes se aplastaba a cero, que
+      // era tirar justo lo que hace que una obra entre en su plazo. El tope de
+      // 365 es contra un número absurdo, no contra el signo.
+      retardo: Math.max(-365, Math.min(365, Math.round(n(d.retardo)))),
+      porque: d.porque || "",
+    }));
 
   // Se prueban contra el cálculo de verdad: si quedan círculos, se van las
   // dependencias que los cierran, una por una, hasta que todo tenga fecha.
@@ -183,7 +210,10 @@ export function ordenar(p, agrupaciones, cal) {
   while (intento++ < 30) {
     const plan = calcular({
       actividades: actividades.map(a => ({ id: a.ref, duracion: a.duracion })),
-      dependencias: dependencias.map(d => ({ actividad_id: d.a, depende_de_id: d.de, retardo: d.retardo })),
+      // Con el tipo puesto: sin él, la duración que se le muestra a la
+      // persona se calculaba tratando todo como fin→comienzo, y entonces el
+      // número de días de la propuesta no era el que iba a salir al guardarla.
+      dependencias: dependencias.map(d => ({ actividad_id: d.a, depende_de_id: d.de, tipo: d.tipo, retardo: d.retardo })),
       inicio: new Date(), cal,
     });
     if (!plan.ciclos.length) {
@@ -228,7 +258,7 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
   // De la referencia de NOVA al id de la base.
   const porRef = new Map(propuesta.actividades.map((a, i) => [a.ref, creadas[i]?.id]));
   const deps = propuesta.dependencias
-    .map(d => ({ actividad_id: porRef.get(d.a), depende_de_id: porRef.get(d.de), tipo: "FC", retardo: d.retardo }))
+    .map(d => ({ actividad_id: porRef.get(d.a), depende_de_id: porRef.get(d.de), tipo: d.tipo || "FC", retardo: d.retardo }))
     .filter(d => d.actividad_id && d.depende_de_id);
   if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
 

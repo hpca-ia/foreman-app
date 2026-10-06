@@ -36,6 +36,24 @@ export async function guardarPlazo(leadId, { inicio, meses }) {
 }
 
 /**
+ * Cuántos días de trabajo son los meses del plazo.
+ *
+ * Contados en el calendario de la obra y no con una regla de tres: "26 días
+ * por mes" da de más en febrero y de menos en los meses con feriados, y esa
+ * diferencia es con la que después no cuadra el cronograma. Acá se cuentan los
+ * días hábiles de verdad entre el arranque y el mismo día N meses después.
+ */
+export function diasDelPlazo(inicio, meses, cal) {
+  if (!meses || !cal) return 0;
+  const f = new Date(`${String(inicio || new Date().toISOString()).slice(0, 10)}T12:00:00`);
+  if (isNaN(f)) return 0;
+  const fin = new Date(f.getFullYear(), f.getMonth() + Math.round(meses), f.getDate(), 12);
+  // El día del fin no se cuenta: de marzo a marzo son los meses de por medio,
+  // no uno más.
+  return Math.max(1, cal.entre(f, new Date(fin.getTime() - 86400000)));
+}
+
+/**
  * El cronograma de barras ya calculado, para quien lo necesite desde afuera.
  *
  * El valorado se arma en el control de obra y el Gantt vive en su propio
