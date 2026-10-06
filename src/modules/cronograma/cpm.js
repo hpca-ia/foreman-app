@@ -163,6 +163,21 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
     ? new Date(Math.max(...orden.map(id => fin.get(id).getTime())))
     : arranque;
 
+  // Lo que empieza ANTES del día uno.
+  //
+  // En obra pasa siempre: los permisos, el anticipo de una importación, el
+  // levantamiento topográfico. Son actividades del proyecto que ocurren antes
+  // de que la obra arranque, y meterlas con fecha del día uno corre todo lo
+  // demás y da un plazo que no es.
+  //
+  // Se consiguen con una fecha fija anterior al arranque —el cálculo ya la
+  // respeta—. Lo que faltaba era que la escala de la pantalla las contemplara:
+  // `inicio` es desde dónde se dibuja, y `arranque` sigue siendo el día uno,
+  // que es contra el que se cuentan los días.
+  const primero = orden.length
+    ? new Date(Math.min(arranque.getTime(), ...orden.map(id => ini.get(id).getTime())))
+    : arranque;
+
   // ── Hacia atrás: lo más tarde sin mover el fin ───────────────────────
   const finT = new Map(), iniT = new Map();
   [...orden].reverse().forEach(id => {
@@ -205,9 +220,14 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
 
   return {
     actividades: resultado,
-    inicio: claveFecha(arranque),
+    // Desde dónde se dibuja y desde dónde se cuenta: con actividades previas
+    // no son lo mismo, y confundirlos es lo que haría que el día 1 caiga en
+    // el medio de la barra de los permisos.
+    inicio: claveFecha(primero),
+    arranque: claveFecha(arranque),
     fin: claveFecha(finObra),
     duracion: cal.entre(arranque, finObra),
+    previos: cal.entre(primero, arranque) - 1,
     ciclos: enCiclo,
     ruta: resultado.filter(a => a.critica).map(a => a.id),
   };

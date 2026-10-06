@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, ChevronLeft, GanttChartSquare, AlertTriangle, Link2 } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, GanttChartSquare, AlertTriangle, Link2, CalendarClock } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -40,6 +40,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [uniendo, setUniendo] = useState(null);
   const [armando, setArmando] = useState(null);
   const [pensando, setPensando] = useState(false);
+  // La escala de arriba: en fechas o en días de obra. Las dos sirven para
+  // cosas distintas —"el 14 de marzo" se coordina con el cliente, "el día 62"
+  // se discute con el contrato— y cuál hace falta cambia según con quién se
+  // esté hablando.
+  const [escala, setEscala] = useState("fecha");
 
   useEffect(() => {
     supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead").order("nombre")
@@ -141,6 +146,35 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
   const largo = a => (a.inicio && a.fin ? Math.max(cal.entre(a.inicio, a.fin), 1) / diasTotales : 0);
 
+  // En qué día de obra cae una fecha. Negativo antes del arranque: el anticipo
+  // de una importación es el día −18, y decirlo así es más claro que una fecha
+  // suelta de diciembre en un cronograma que empieza en enero.
+  const diaDeObra = f => {
+    if (!f) return null;
+    const d = cal.entre(plan.arranque, f);
+    return aFecha(f) >= aFecha(plan.arranque) ? d : -(cal.entre(f, plan.arranque) - 1);
+  };
+  const hoyISO = hoy();
+  const dentro = aFecha(hoyISO) >= aFecha(plan.inicio) && aFecha(hoyISO) <= aFecha(plan.fin);
+  const diaHoy = diaDeObra(hoyISO);
+
+  // Las marcas de la regla: cada cuánto se pone una depende de lo que dure la
+  // obra. Con marcas cada día, una obra de ocho meses es una mancha.
+  const marcas = (() => {
+    const cuantas = Math.min(10, Math.max(4, Math.round(diasTotales / 20)));
+    const paso = Math.max(1, Math.round(diasTotales / cuantas));
+    const out = [];
+    for (let d = 0; d <= diasTotales; d += paso) {
+      let f = aFecha(plan.inicio), saltos = 0, vueltas = 0;
+      while (saltos < d && vueltas++ < 4000) {
+        f = new Date(f.getTime() + 86400000);
+        if (cal.trabaja(f)) saltos += 1;
+      }
+      out.push({ x: d / diasTotales, fecha: claveFecha(f), dia: diaDeObra(claveFecha(f)) });
+    }
+    return out;
+  })();
+
   async function agregar() {
     if (!nueva?.nombre?.trim()) return;
     setError("");
@@ -186,11 +220,30 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>{lead.nombre}</div>
           <div style={{ fontSize: 11.5, color: colors.muted }}>
-            {todas.length ? <>Del {dia(plan.inicio)} al <strong style={{ color: colors.ink }}>{dia(plan.fin)}</strong> · {plan.duracion} días de trabajo</> : "Sin actividades todavía"}
+            {todas.length ? (
+              <>
+                Del {dia(plan.arranque)} al <strong style={{ color: colors.ink }}>{dia(plan.fin)}</strong> · {plan.duracion} días de trabajo
+                {plan.previos > 0 && <> · {plan.previos} días de trabajos previos</>}
+                {dentro && diaHoy > 0 && (
+                  <> · hoy es el <strong style={{ color: colors.danger }}>día {diaHoy}</strong> de {plan.duracion}</>
+                )}
+                {dentro && diaHoy <= 0 && <> · la obra arranca en {Math.abs(diaHoy) + 1} días</>}
+              </>
+            ) : "Sin actividades todavía"}
           </div>
         </div>
+        {todas.length > 0 && (
+          <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3, marginLeft: "auto" }}>
+            {[["fecha", "Fechas"], ["dia", "Días"]].map(([v, l]) => (
+              <button key={v} onClick={() => setEscala(v)}
+                style={{ padding: "4px 10px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11.5, fontWeight: 600, background: escala === v ? "#fff" : "transparent",
+                  color: escala === v ? colors.brand : colors.inkSoft }}>{l}</button>
+            ))}
+          </div>
+        )}
         {editable && (
-          <input type="date" value={lead.crono_inicio || hoy()} style={{ ...inputStyle, width: 150, padding: "6px 9px", fontSize: 12, marginLeft: "auto" }}
+          <input type="date" value={lead.crono_inicio || hoy()} style={{ ...inputStyle, width: 150, padding: "6px 9px", fontSize: 12 }}
             onChange={async e => {
               await supabase.from("leads").update({ crono_inicio: e.target.value }).eq("id", lead.id);
               setLead(l => ({ ...l, crono_inicio: e.target.value }));
@@ -323,7 +376,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             <span>EMPIEZA</span>
             <span>TERMINA</span>
             <span style={{ textAlign: "center" }}>HOLGURA</span>
-            <span />
+            {/* La regla. Sin ella las barras flotan: se ve que una es más
+                larga que otra y no cuándo empieza ninguna. */}
+            <span style={{ position: "relative", height: 12 }}>
+              {marcas.map((m, k) => (
+                <span key={k} style={{ position: "absolute", left: `${m.x * 100}%`, transform: "translateX(-50%)",
+                  fontSize: 8.5, color: m.dia === 1 ? colors.brand : colors.muted, whiteSpace: "nowrap",
+                  fontWeight: m.dia === 1 ? 700 : 400 }}>
+                  {escala === "fecha" ? dia(m.fecha) : (m.dia > 0 ? `d${m.dia}` : m.dia === 0 ? "" : `${m.dia}`)}
+                </span>
+              ))}
+            </span>
             <span />
           </div>
 
@@ -339,6 +402,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   </div>
                   {deps.length > 0 && (
                     <div style={{ fontSize: 10, color: colors.muted, marginTop: 1 }}>
+                      {a.inicio_fijo && <span style={{ color: colors.brand }}>fija el {dia(a.inicio_fijo)} · </span>}
                       después de {deps.map(d => porId.get(d.depende_de_id)?.nombre || "?").join(", ")}
                       {editable && deps.map(d => (
                         <button key={d.id} onClick={() => desunir(d)} title="Quitar esta dependencia"
@@ -359,6 +423,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
 
                 {/* La barra. Es para lo que se abre esta pantalla. */}
                 <div style={{ position: "relative", height: 16, background: colors.neutralSoft, borderRadius: 4 }}>
+                  {/* Hoy, cruzando todas las barras: la pregunta que uno trae
+                      al abrir un cronograma es dónde estamos parados. */}
+                  {dentro && (
+                    <div style={{ position: "absolute", top: -4, bottom: -4, left: `${posicion(hoyISO) * 100}%`,
+                      width: 2, background: colors.danger, opacity: 0.75, zIndex: 1 }} />
+                  )}
                   {a.inicio && (
                     <div title={`${dia(a.inicio)} → ${dia(a.fin)}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`}
                       style={{ position: "absolute", top: 0, bottom: 0,
@@ -381,6 +451,23 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                       style={{ background: uniendo === a.id ? colors.brand : "none", border: "none",
                         color: uniendo === a.id ? "#fff" : colors.muted, borderRadius: 4, cursor: "pointer", display: "flex", padding: 2 }}>
                       <Link2 size={12} />
+                    </button>
+                    {/* Empezar antes del día uno: los permisos, el anticipo de
+                        una importación, el levantamiento. Son del proyecto y
+                        pasan antes de que la obra arranque; con fecha del día
+                        uno corren todo lo demás y dan un plazo que no es. */}
+                    <button onClick={() => {
+                      const f = window.prompt(
+                        a.inicio_fijo
+                          ? "Fecha fija de inicio (vacío para que la calcule el cronograma):"
+                          : "¿En qué fecha empieza? Puede ser antes del arranque de la obra —permisos, anticipos, importaciones.",
+                        a.inicio_fijo || plan.arranque);
+                      if (f === null) return;
+                      cambiar(a, { inicio_fijo: f.trim() || null });
+                    }} title={a.inicio_fijo ? `Empieza fijo el ${dia(a.inicio_fijo)}` : "Fijarle una fecha de inicio"}
+                      style={{ background: "none", border: "none", color: a.inicio_fijo ? colors.brand : colors.muted,
+                        cursor: "pointer", display: "flex", padding: 2 }}>
+                      <CalendarClock size={12} />
                     </button>
                     <button onClick={() => quitar(a)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}>
                       <Trash2 size={12} />
