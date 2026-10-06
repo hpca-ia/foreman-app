@@ -1,0 +1,23 @@
+-- 086 · Cuánta plata tenía la agrupación cuando se dibujó su barra.
+--
+-- El cronograma se arma una vez y la obra sigue. Entra una orden de cambio y
+-- la ventanería pasa de 90 mil a 130: son cuarenta mil de trabajo más que
+-- alguien tiene que hacer, y la barra sigue midiendo lo mismo. El cronograma
+-- promete una fecha que ya no es cierta, y nadie se entera hasta que no se
+-- cumple.
+--
+-- Al revés también: una orden que quita trabajo deja una barra más larga de lo
+-- que hace falta, y eso esconde holgura que la obra podría estar usando.
+--
+-- `monto_ref` es la foto: lo que valía esa agrupación la última vez que
+-- alguien miró su barra y dijo "esta duración está bien". Comparándola contra
+-- lo que vale hoy se sabe QUÉ cambió y CUÁNTO, que es lo único que hace falta
+-- para avisar — y para que NOVA proponga el ajuste sin rehacer el cronograma
+-- entero.
+--
+-- Sin esto solo se puede detectar lo grueso —una agrupación que aparece o que
+-- se borra—. Una que cambia de precio es invisible, y es el caso más común de
+-- todos: las órdenes de cambio casi nunca agregan rubros nuevos, modifican los
+-- que ya están.
+
+alter table public.cronograma_actividades add column if not exists monto_ref numeric(14,2);

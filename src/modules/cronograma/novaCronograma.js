@@ -440,6 +440,181 @@ export function ordenar(p, agrupaciones, cal) {
   return { actividades, dependencias, dias: 0, criticas: 0, quitadas: intento - 1 };
 }
 
+/**
+ * Acomodar el cronograma a lo que cambió en el control, sin rehacerlo.
+ *
+ * Este es el caso de verdad y el que hasta ahora no estaba. Un cronograma
+ * recién armado no vale nada; vale después de que alguien le corrigió las
+ * duraciones, lo encadenó como se trabaja, le puso los traslapes y partió en
+ * etapas lo que se importa. Eso es el trabajo, y rearmarlo de cero lo borra.
+ *
+ * Pero la obra sigue: entra una orden de cambio, se mueve una agrupación, se
+ * suma un rubro. Y entonces el cronograma dice una cosa y el control otra.
+ *
+ * Acá NOVA recibe EL PLAN QUE YA EXISTE —con sus fechas, sus cadenas y sus
+ * traslapes— y SOLO LO QUE CAMBIÓ, y devuelve operaciones puntuales: dónde
+ * meter lo nuevo, a qué barra alargarle la duración porque le entró más
+ * trabajo, qué sacar. No se le pide un cronograma: se le pide un parche.
+ *
+ * Es también la forma eficiente de preguntarlo. Mandar el plan entero y pedir
+ * otro plan entero cuesta caro, tarda, y cada vuelta es una oportunidad de que
+ * cambie algo que nadie quería que cambie.
+ */
+export async function acomodarCambios({ plan = [], dependencias = [], cambios, nombreObra = "", dias = 0 }) {
+  const nuevas = cambios?.nuevas || [];
+  const dePlata = cambios?.dePlata || [];
+  const perdidas = cambios?.perdidas || [];
+  if (!nuevas.length && !dePlata.length && !perdidas.length) {
+    return { error: "No hay nada que acomodar: el cronograma ya está de acuerdo con el control." };
+  }
+
+  const nombreDe = new Map(plan.map(a => [a.id, a.nombre]));
+  const planEnTexto = plan.map(a => {
+    const suyas = dependencias.filter(d => d.actividad_id === a.id)
+      .map(d => `${d.tipo || "FC"}${d.retardo ? ` ${d.retardo > 0 ? "+" : ""}${d.retardo}d` : ""} de ${nombreDe.get(d.depende_de_id) || "?"}`)
+      .join("; ");
+    return `${a.id} · ${a.nombre} · ${a.duracion}d · ${a.inicio} a ${a.fin}`
+      + `${a.critica ? " · CRÍTICA" : ` · ${a.holgura}d de colchón`}`
+      + (suyas ? ` · va después de: ${suyas}` : "");
+  }).join("\n");
+
+  const loQueCambio = [
+    nuevas.length && `AGRUPACIONES NUEVAS, que no están en el cronograma:\n${
+      nuevas.map(g => `  ${g.id} · ${g.nombre}${g.monto ? ` · $${Math.round(g.monto)}` : ""}`).join("\n")}`,
+    dePlata.length && `AGRUPACIONES QUE CAMBIARON DE MONTO —órdenes de cambio— y cuya barra sigue midiendo lo mismo:\n${
+      dePlata.map(c => `  ${c.id} · ${c.nombre} · de $${Math.round(c.antes)} a $${Math.round(c.ahora)} (${c.pct > 0 ? "+" : ""}${c.pct}%)`
+        + ` · hoy sus barras son: ${c.actividades.map(a => `«${a.nombre}» ${a.duracion}d`).join(", ")}`).join("\n")}`,
+    perdidas.length && `AGRUPACIONES BORRADAS del control, con barras que quedaron colgando: ${perdidas.join(", ")}`,
+  ].filter(Boolean).join("\n\n");
+
+  const sistema = `Eres NOVA y ajustas el cronograma de una obra en Ecuador que YA ESTÁ TRABAJADO.
+
+La obra "${nombreObra}"${dias ? ` tiene un plazo de ${dias} días hábiles` : ""}.
+
+NO REHAGAS EL CRONOGRAMA. Lo que ves abajo es trabajo de alguien que conoce la
+obra: duraciones corregidas, cadenas, traslapes, etapas. Tu trabajo es meter lo
+que cambió adentro de ese plan tocando lo MENOS posible.
+
+EL PLAN DE HOY (id · nombre · duración · fechas · holgura · de qué depende):
+${planEnTexto}
+
+LO QUE CAMBIÓ EN EL CONTROL DE OBRA:
+${loQueCambio}
+
+Devuelves SOLO JSON, sin markdown:
+{"agregar":[{"agrupacion_id":12,"duracion":14,"despues_de":31,"tipo":"FC","retardo":0,"porque":"..."}],
+ "ajustar":[{"actividad_id":27,"duracion":22,"porque":"le entró 44% más trabajo"}],
+ "quitar":[{"actividad_id":44,"porque":"su agrupación ya no existe"}]}
+
+AGREGAR: una por cada agrupación nueva. "despues_de" es el id de una actividad
+del plan de arriba —elegí la que de verdad la traba, no la última de la lista—.
+La duración, de la cantidad de trabajo que tenga; si no sabés, del monto
+comparado con barras parecidas que ya están en el plan.
+
+AJUSTAR: a la agrupación que le entró más plata le entró más trabajo, y su
+barra tiene que crecer en proporción. Al revés también: si le quitaron trabajo,
+la barra sobra y acortarla devuelve holgura que la obra puede usar. Si la
+agrupación está partida en etapas, ajustá la que de verdad ejecuta —la
+instalación o la ejecución—, no el anticipo, que es un pago de un día.
+
+NO ES PROPORCIONAL CIEGO: un 40% más de plata en ventanería importada puede ser
+cero días más de obra si lo que subió fue el precio del vidrio y no la
+cantidad. Decilo en "porque" cuando sea así y dejá la duración como está.
+
+QUITAR: solo las que te digo que quedaron colgando.
+
+NO TOQUES nada que no esté en lo que cambió. No reordenes, no cambies
+dependencias que ya existen, no repartas etapas de nuevo. Si creés que algo más
+hay que mover, decilo en el "porque" de la operación más cercana en vez de
+hacerlo.`;
+
+  try {
+    const res = await fetch("/api/nova", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5", max_tokens: 2000,
+        system: sistema,
+        messages: [{ role: "user", content: "Acomodá el cronograma a esos cambios. Solo JSON." }],
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo acomodarlo." };
+    const txt = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
+    const p = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
+    return limpiarParche(p, { plan, nuevas, perdidas, dePlata });
+  } catch (e) {
+    return { error: "NOVA devolvió algo que no se entiende: " + e.message };
+  }
+}
+
+/**
+ * Quedarse solo con lo que NOVA tenía permitido tocar.
+ *
+ * Lo mismo que con el cronograma entero: el prompt es un pedido y esto es la
+ * garantía. Una operación sobre una actividad que no estaba en lo que cambió
+ * es NOVA rehaciendo el plan por su cuenta, que es exactamente lo que no se le
+ * pidió y lo que borraría el trabajo de alguien.
+ */
+export function limpiarParche(p, { plan = [], nuevas = [], perdidas = [], dePlata = [] }) {
+  const existe = new Set(plan.map(a => a.id));
+  const puedeNacer = new Map(nuevas.map(g => [Number(g.id), g]));
+  // Solo se pueden ajustar las barras de las agrupaciones cuyo monto cambió.
+  const ajustables = new Set(dePlata.flatMap(c => c.actividades.map(a => a.id)));
+  const borrables = new Set((perdidas || []).map(Number));
+
+  // Lo que se le rechaza, contado sobre lo que NOVA mandó —no sobre lo que
+  // quedó—: las que entran solas por relleno taparían el número.
+  let descartadas = 0;
+  const agregar = (p.agregar || [])
+    .filter(x => { const si = puedeNacer.has(Number(x.agrupacion_id)); if (!si) descartadas += 1; return si; })
+    .map(x => ({
+      agrupacion_id: Number(x.agrupacion_id),
+      nombre: puedeNacer.get(Number(x.agrupacion_id)).nombre,
+      duracion: Math.max(1, Math.round(n(x.duracion)) || 10),
+      despues_de: existe.has(Number(x.despues_de)) ? Number(x.despues_de) : null,
+      tipo: ["FC", "CC", "FF"].includes(x.tipo) ? x.tipo : "FC",
+      retardo: Math.max(-365, Math.min(365, Math.round(n(x.retardo)))),
+      porque: x.porque || "",
+    }));
+  // Una agrupación nueva por la que NOVA no dijo nada entra igual, al final:
+  // olvidarla sería perder un rubro del plan.
+  const puestas = new Set(agregar.map(x => x.agrupacion_id));
+  nuevas.filter(g => !puestas.has(Number(g.id))).forEach(g => agregar.push({
+    agrupacion_id: Number(g.id), nombre: g.nombre, duracion: 10,
+    despues_de: null, tipo: "FC", retardo: 0,
+    porque: "NOVA no dijo dónde va; entró al final con duración a revisar.",
+  }));
+
+  const ajustar = (p.ajustar || [])
+    .filter(x => { const si = ajustables.has(Number(x.actividad_id)); if (!si) descartadas += 1; return si; })
+    .map(x => ({
+      actividad_id: Number(x.actividad_id),
+      duracion: Math.max(1, Math.round(n(x.duracion)) || 1),
+      porque: x.porque || "",
+    }))
+    .filter(x => {
+      const a = plan.find(y => y.id === x.actividad_id);
+      return a && x.duracion !== a.duracion;
+    });
+
+  const quitar = (p.quitar || [])
+    .map(x => ({ actividad_id: Number(x.actividad_id), porque: x.porque || "" }))
+    .filter(x => {
+      const a = plan.find(y => y.id === x.actividad_id);
+      const si = a && borrables.has(Number(a.obra_actividad_id));
+      if (!si) descartadas += 1;
+      return si;
+    });
+  // Las colgantes que NOVA no mencionó se van igual: su agrupación no existe.
+  const yaQuitadas = new Set(quitar.map(x => x.actividad_id));
+  plan.filter(a => borrables.has(Number(a.obra_actividad_id)) && !yaQuitadas.has(a.id))
+    .forEach(a => quitar.push({ actividad_id: a.id, porque: "Su agrupación ya no está en el control de obra." }));
+
+  // Se muestra: si NOVA se sale del parche seguido, el que hay que arreglar
+  // es el prompt, y eso solo se ve si se cuenta.
+  return { agregar, ajustar, quitar, descartadas };
+}
+
 /** Guardarlo. Reemplaza lo que hubiera: es un borrador que se vuelve a armar. */
 export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
   const { data: previas } = await supabase.from("cronograma_actividades").select("id").eq("lead_id", lead.id);

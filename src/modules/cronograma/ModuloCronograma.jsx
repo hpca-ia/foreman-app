@@ -6,7 +6,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo, nivelarPorPlata, curvaValorada } from "./cpm";
-import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
+import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
@@ -487,7 +487,43 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       actividad_id: a.id, depende_de_id: creadas[i].id, tipo: "FC", retardo: 0,
     }));
     if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
+    // La foto de la plata, para poder avisar después si una orden de cambio la
+    // mueve y la barra se queda igual.
+    await refrescarMontoRef(creadas || []);
     await cargar();
+  }
+
+  /**
+   * Guardar cuánta plata tenía cada agrupación cuando se miró su barra.
+   *
+   * Es la foto contra la que después se detecta que una orden de cambio movió
+   * el monto y la barra se quedó igual. Se saca después de acomodar: lo que
+   * ya se acomodó deja de estar desacomodado, y volver a avisar de lo mismo
+   * es ruido —y el ruido es lo que hace que los avisos dejen de leerse—.
+   *
+   * Se reparte entre las etapas con sus mismos pesos, para que la suma de un
+   * rubro dé lo que vale el rubro.
+   */
+  async function refrescarMontoRef(lista) {
+    const actuales = lista || actividades;
+    const cuantas = new Map();
+    actuales.forEach(a => {
+      const k = Number(a.obra_actividad_id);
+      if (k) cuantas.set(k, (cuantas.get(k) || 0) + (Number(a.peso_pct ?? 100) || 0));
+    });
+    for (const a of actuales) {
+      const k = Number(a.obra_actividad_id);
+      if (!k) continue;
+      const total = plata[k] || 0;
+      const suyo = Number(a.peso_pct ?? 100) || 0;
+      const base = cuantas.get(k) || 100;
+      const ref = Math.round((total * (base > 0 ? suyo / base : 1)) * 100) / 100;
+      const { error: e } = await supabase.from("cronograma_actividades")
+        .update({ monto_ref: ref }).eq("id", a.id);
+      // Sin la 086 no existe la columna: se sigue sin ella, y lo único que se
+      // pierde es poder avisar de un cambio de monto.
+      if (e && /column|schema cache/i.test(e.message)) return;
+    }
   }
 
   /**
@@ -590,6 +626,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     setPensando(false);
     await cargar();
     await ordenarComoElControl();
+    await refrescarMontoRef();
     window.alert([
       "Cronograma al día con el control de obra.",
       fuera && `· ${fuera} ${fuera === 1 ? "actividad apuntaba" : "actividades apuntaban"} a agrupaciones que ya no existen: se fueron.`,
@@ -1105,8 +1142,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           hace es rehacerlo solo —un cronograma con avance cargado y fechas
           comprometidas no se reescribe porque alguien tocó una agrupación. */}
       {todas.length > 0 && agrupaciones.length > 0 && (() => {
-        const d = desfase(actividades, agrupaciones);
-        if (!d.perdidas.length && !d.nuevas.length && !d.renombradas.length) return null;
+        const d = desfase(actividades, agrupaciones, plata);
+        if (!d.perdidas.length && !d.nuevas.length && !d.renombradas.length
+            && !d.dePlata.length && !d.reordenadas) return null;
         return (
           <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
             border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
@@ -1127,6 +1165,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     compararse.
                   </div>
                 )}
+                {/* LA PLATA CAMBIÓ Y LA BARRA NO.
+                    El caso más común y el único que no se veía: una orden de
+                    cambio casi nunca agrega rubros, modifica los que están. */}
+                {d.dePlata.length > 0 && (
+                  <div style={{ marginTop: d.nuevas.length || d.renombradas.length ? 3 : 0 }}>
+                    {d.dePlata.length === 1 ? "Una agrupación cambió" : `${d.dePlata.length} agrupaciones cambiaron`} de
+                    monto —órdenes de cambio— y su barra sigue midiendo lo mismo:{" "}
+                    {d.dePlata.slice(0, 4).map(c => `${c.nombre} ${c.pct > 0 ? "+" : ""}${c.pct}%`).join(", ")}
+                    {d.dePlata.length > 4 ? "…" : ""}. Más plata es más trabajo, y el cronograma está prometiendo una
+                    fecha que ya no es cierta.
+                  </div>
+                )}
+                {d.reordenadas && (
+                  <div style={{ marginTop: 3 }}>
+                    El orden de los rubros no es el del control de obra. Puede ser a propósito —el orden de trabajo no
+                    es el del presupuesto— pero conviene saberlo.
+                  </div>
+                )}
                 {d.perdidas.length > 0 && (
                   <div style={{ marginTop: d.nuevas.length ? 3 : 0 }}>
                     Y {d.perdidas.length} {d.perdidas.length === 1 ? "actividad apunta" : "actividades apuntan"} a
@@ -1135,6 +1191,68 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 )}
               </div>
             </div>
+            {/* QUE NOVA LO ACOMODE, sin rehacerlo.
+                Un cronograma recién armado no vale nada; vale después de que
+                alguien le corrigió las duraciones, lo encadenó como se trabaja
+                y le puso los traslapes. Eso es el trabajo, y rearmarlo de cero
+                lo borra. Acá NOVA recibe el plan que ya existe y SOLO lo que
+                cambió, y devuelve un parche. */}
+            {(d.nuevas.length > 0 || d.dePlata.length > 0 || d.perdidas.length > 0) && editable && (
+              <Button variant="primary" size="sm" disabled={pensando} style={{ marginRight: 6 }} onClick={async () => {
+                setPensando(true); setError("");
+                const r = await acomodarCambios({
+                  plan: todas, dependencias, cambios: d, nombreObra: lead.nombre, dias: diasDeContrato,
+                });
+                setPensando(false);
+                if (r.error) { setError(r.error); return; }
+                const resumen = [
+                  r.agregar.length && `Agregar ${r.agregar.length}:\n` + r.agregar.map(x => `  · ${x.nombre}, ${x.duracion} días${x.porque ? ` — ${x.porque}` : ""}`).join("\n"),
+                  r.ajustar.length && `Alargar o acortar ${r.ajustar.length}:\n` + r.ajustar.map(x => {
+                    const a = todas.find(y => y.id === x.actividad_id);
+                    return `  · ${a?.nombre}: de ${a?.duracion} a ${x.duracion} días${x.porque ? ` — ${x.porque}` : ""}`;
+                  }).join("\n"),
+                  r.quitar.length && `Quitar ${r.quitar.length}:\n` + r.quitar.map(x => {
+                    const a = todas.find(y => y.id === x.actividad_id);
+                    return `  · ${a?.nombre}${x.porque ? ` — ${x.porque}` : ""}`;
+                  }).join("\n"),
+                ].filter(Boolean).join("\n\n");
+                if (!resumen) { setError("NOVA no propuso ningún cambio."); return; }
+                if (!window.confirm(
+                  "NOVA propone esto, sobre el cronograma que ya tenés:\n\n" + resumen +
+                  "\n\nNo se tocan las dependencias que ya existen, ni el orden, ni las etapas." +
+                  (r.descartadas ? `\n\n(Le descarté ${r.descartadas} operaciones que salían de lo que cambió.)` : "") +
+                  "\n\n¿Lo aplico?")) return;
+
+                setPensando(true);
+                for (const x of r.quitar) {
+                  await supabase.from("cronograma_dependencias").delete().eq("actividad_id", x.actividad_id);
+                  await supabase.from("cronograma_dependencias").delete().eq("depende_de_id", x.actividad_id);
+                  await supabase.from("cronograma_actividades").delete().eq("id", x.actividad_id);
+                }
+                for (const x of r.ajustar) {
+                  await supabase.from("cronograma_actividades").update({ duracion: x.duracion }).eq("id", x.actividad_id);
+                }
+                for (const x of r.agregar) {
+                  const { data: creada, error: e } = await supabase.from("cronograma_actividades").insert({
+                    lead_id: lead.id, obra_id: lead.obra_id || null,
+                    obra_actividad_id: x.agrupacion_id, nombre: x.nombre,
+                    duracion: x.duracion, etapa: "ejecucion", peso_pct: 100,
+                    orden: actividades.length + 1,
+                  }).select().single();
+                  if (e) { setError(e.message); break; }
+                  if (x.despues_de) {
+                    await supabase.from("cronograma_dependencias").insert({
+                      actividad_id: creada.id, depende_de_id: x.despues_de, tipo: x.tipo, retardo: x.retardo,
+                    });
+                  }
+                }
+                // La foto de la plata se actualiza: lo acomodado deja de estar
+                // desacomodado, y avisar otra vez de lo mismo es ruido.
+                await refrescarMontoRef();
+                setPensando(false);
+                await cargar();
+              }}>{pensando ? "NOVA está mirando el plan…" : "Que NOVA lo acomode"}</Button>
+            )}
             {d.renombradas.length > 0 && editable && (
               <Button variant="primary" size="sm" disabled={pensando} style={{ marginRight: 6 }} onClick={async () => {
                 setPensando(true);

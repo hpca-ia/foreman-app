@@ -112,7 +112,7 @@ export async function cargarPlan(leadId) {
  * @param conAgrupacion ids de agrupación que el cronograma ya usa
  * @param agrupaciones  las que existen hoy en la obra
  */
-export function desfase(actividades = [], agrupaciones = []) {
+export function desfase(actividades = [], agrupaciones = [], plata = {}) {
   const hoy = new Map(agrupaciones.map(a => [Number(a.id), a]));
   // Acepta tanto una lista de ids como las actividades enteras: la primera
   // forma la usaba la pantalla antes de que hiciera falta mirar los nombres.
@@ -134,11 +134,64 @@ export function desfase(actividades = [], agrupaciones = []) {
     return String(a.nombre).split(" · ")[0].trim() !== String(g.nombre).trim();
   });
 
+  // LA PLATA CAMBIÓ Y LA BARRA NO.
+  //
+  // Es el caso más común y el único invisible: una orden de cambio casi nunca
+  // agrega rubros nuevos, modifica los que ya están. La ventanería pasa de 90
+  // mil a 130 —cuarenta mil de trabajo más que alguien tiene que hacer— y la
+  // barra sigue midiendo lo mismo. El cronograma promete una fecha que ya no
+  // es cierta y nadie se entera hasta que no se cumple.
+  //
+  // Se compara contra `monto_ref`: lo que valía la agrupación la última vez
+  // que alguien miró esa barra y dijo "esta duración está bien". Sin esa foto
+  // —si la 086 no corrió, o si la actividad es vieja— no se puede saber, y no
+  // se inventa: se calla.
+  const porAgrup = new Map();
+  filas.forEach(a => {
+    const id = Number(a.obra_actividad_id);
+    if (!id || a.monto_ref == null) return;
+    if (!porAgrup.has(id)) porAgrup.set(id, { ref: 0, actividades: [] });
+    porAgrup.get(id).ref += Number(a.monto_ref) || 0;
+    porAgrup.get(id).actividades.push(a);
+  });
+  const dePlata = [];
+  porAgrup.forEach((v, id) => {
+    const g = hoy.get(id);
+    if (!g) return;
+    const ahora = Math.round((Number(plata[id]) || 0) * 100) / 100;
+    const antes = Math.round(v.ref * 100) / 100;
+    if (!antes) return;
+    const dif = ahora - antes;
+    // Un 5% para no avisar por un redondeo o por un rubro de cien dólares.
+    if (Math.abs(dif) < Math.max(antes * 0.05, 50)) return;
+    dePlata.push({
+      id, nombre: g.nombre, antes, ahora, dif,
+      pct: Math.round((dif / antes) * 1000) / 10,
+      actividades: v.actividades,
+    });
+  });
+
+  // EL ORDEN SE SEPARÓ. Lo que el control dice primero, el cronograma lo tiene
+  // sexto. Puede ser a propósito —el orden de trabajo no es el del
+  // presupuesto— así que se informa y no se corrige solo.
+  const pos = new Map(agrupaciones.map((g, i) => [Number(g.id), g.orden ?? i]));
+  const enCrono = [];
+  const visto = new Set();
+  [...filas].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0)).forEach(a => {
+    const id = Number(a.obra_actividad_id);
+    if (!id || visto.has(id) || !pos.has(id)) return;
+    visto.add(id); enCrono.push(id);
+  });
+  const delControl = [...enCrono].sort((a, b) => pos.get(a) - pos.get(b));
+  const reordenadas = enCrono.some((id, i) => id !== delControl[i]);
+
   return {
     // Se borró la agrupación y quedaron actividades o líneas colgando.
     perdidas: [...usadas].filter(id => !hoy.has(id)),
     // Se agregó una agrupación y nadie la puso en el cronograma.
     nuevas: agrupaciones.filter(a => !a.extra && !usadas.has(Number(a.id))),
     renombradas,
+    dePlata,
+    reordenadas,
   };
 }
