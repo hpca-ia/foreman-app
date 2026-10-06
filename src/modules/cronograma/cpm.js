@@ -273,6 +273,93 @@ function desplazar(cal, d, n) {
 }
 
 /**
+ * Aplanar la curva de plata moviendo lo que tiene colchón.
+ *
+ * ESTE ES EL PUENTE ENTRE LOS DOS CRONOGRAMAS, y el orden importa: el Gantt
+ * se hace primero y el valorado sale de él, porque la plata sigue a la
+ * ejecución y no al revés —solo se puede planillar lo que se construyó—. De un
+ * valorado no se puede sacar un Gantt: un porcentaje mensual no dice qué traba
+ * a qué, ni qué no puede atrasarse.
+ *
+ * Pero hay UNA cosa que viaja de vuelta, y es esta. El cliente no desembolsa
+ * lo que el cronograma pide: desembolsa lo que puede. Si el plan concentra
+ * 180 mil en el mes 3 y el cliente pone 120, ese mes no se ejecuta como está
+ * escrito —se para la obra, que es la peor manera de enterarse—.
+ *
+ * Lo que se hace entonces no es alargar la obra: es correr hacia adelante las
+ * actividades QUE TIENEN HOLGURA, dentro de su holgura. Son las que pueden
+ * atrasarse sin arrastrar a nadie; eso es exactamente lo que significa tener
+ * colchón, y gastarlo en acomodar la plata es gastarlo bien.
+ *
+ * NO SE TOCA LA RUTA CRÍTICA. Si el mes no se puede aliviar moviendo solo lo
+ * que sobra, se dice que no se puede y por qué, en vez de correr algo que
+ * atrase la entrega sin avisar.
+ *
+ * @param montoDe  (actividad) => cuánta plata lleva esa actividad
+ * @param tope     lo máximo que puede salir en un mes
+ * @return { movidas: [{ id, inicio_fijo, dias }], curva, apretados, fin }
+ */
+export function nivelarPorPlata({ actividades = [], dependencias = [], inicio, cal = calendario(), montoDe, tope }) {
+  const techo = Number(tope) || 0;
+  const correr = fijos => {
+    const plan = calcular({
+      actividades: actividades.map(a => ({ ...a, inicio_fijo: fijos.get(a.id) || a.inicio_fijo || null })),
+      dependencias, inicio, cal,
+    });
+    const curva = curvaValorada(
+      plan.actividades.map(a => ({ ...a, monto: montoDe ? montoDe(a) : (a.monto || 0) })), cal, "mes");
+    return { plan, curva };
+  };
+
+  const fijos = new Map();
+  let { plan, curva } = correr(fijos);
+  const finOriginal = plan.fin;
+  if (!techo) return { movidas: [], curva, apretados: [], fin: plan.fin };
+
+  const movidas = new Map();
+  for (let vuelta = 0; vuelta < 40; vuelta++) {
+    const caro = curva.find(c => c.monto > techo);
+    if (!caro) break;
+
+    // Las que aportan plata en ese mes y tienen colchón, la de más holgura
+    // primero: mover la que más aguanta es lo que menos compromete.
+    const candidatas = plan.actividades
+      .filter(a => a.inicio && !a.enCiclo && (a.holgura || 0) > 0 && (montoDe ? montoDe(a) : a.monto) > 0)
+      .filter(a => claveFecha(a.inicio).slice(0, 7) <= caro.corte && claveFecha(a.fin).slice(0, 7) >= caro.corte)
+      .sort((x, y) => (y.holgura || 0) - (x.holgura || 0));
+    if (!candidatas.length) break;
+
+    let movio = false;
+    for (const a of candidatas) {
+      const dias = Math.min(a.holgura, 25);
+      if (dias < 1) continue;
+      const nuevo = claveFecha(cal.sumar(aFecha(a.inicio), dias + 1));
+      const prueba = new Map(fijos); prueba.set(a.id, nuevo);
+      const r = correr(prueba);
+      // La entrega no se mueve. Si moverla era el precio, no se paga.
+      if (r.plan.fin !== finOriginal) continue;
+      const peorAntes = Math.max(...curva.map(c => c.monto));
+      const peorAhora = Math.max(...r.curva.map(c => c.monto));
+      if (peorAhora >= peorAntes) continue;
+      fijos.set(a.id, nuevo);
+      movidas.set(a.id, { id: a.id, nombre: a.nombre, inicio_fijo: nuevo, dias });
+      ({ plan, curva } = r);
+      movio = true;
+      break;
+    }
+    if (!movio) break;
+  }
+
+  return {
+    movidas: [...movidas.values()],
+    curva,
+    // Los meses que siguen pasados del tope después de hacer lo que se podía.
+    apretados: curva.filter(c => c.monto > techo).map(c => ({ corte: c.corte, monto: c.monto, exceso: Math.round((c.monto - techo) * 100) / 100 })),
+    fin: plan.fin,
+  };
+}
+
+/**
  * Estirar o encoger el cronograma para que entre en el plazo.
  *
  * El plazo de una obra no es el resultado de sumar actividades: es lo que dice

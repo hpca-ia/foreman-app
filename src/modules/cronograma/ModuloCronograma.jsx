@@ -5,10 +5,11 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { calendario, calcular, aFecha, claveFecha, ETAPAS, TIPOS_DEP, ajustarAlPlazo } from "./cpm";
+import { calendario, calcular, aFecha, claveFecha, ETAPAS, TIPOS_DEP, ajustarAlPlazo, nivelarPorPlata, curvaValorada } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
 import { guardarPlazo, desfase, diasDelPlazo } from "./plazo";
+import { fmt } from "../controlObra/calculos";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -55,6 +56,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [zoom, setZoom] = useState(14);
   // Las agrupaciones de hoy, para saber si el cronograma quedó viejo.
   const [agrupaciones, setAgrupaciones] = useState([]);
+  // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
+  const [plata, setPlata] = useState({});
   // La 082 todavía no corrió en esta base.
   const [sinPlazo, setSinPlazo] = useState(false);
 
@@ -93,6 +96,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       const { data: ags } = await supabase.from("obra_actividades")
         .select("id,nombre,codigo,orden,extra").eq("obra_id", lead.obra_id).order("orden");
       setAgrupaciones(ags || []);
+      // La plata de cada agrupación: es lo que convierte este cronograma en
+      // uno valorado. Sin ella las barras dicen cuándo, y no cuánto.
+      const { data: rub } = await supabase.from("obra_rubros")
+        .select("actividad_id,total_base").eq("obra_id", lead.obra_id);
+      const m = {};
+      (rub || []).forEach(r => {
+        if (r.actividad_id == null) return;
+        m[r.actividad_id] = (m[r.actividad_id] || 0) + (Number(r.total_base) || 0);
+      });
+      setPlata(m);
     }
     if (act?.length) {
       const { data: dep } = await supabase.from("cronograma_dependencias")
@@ -211,6 +224,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // el plazo es lo que dice el contrato, y el plan es lo que sale de sumar las
   // actividades. Que no coincidan es normal al principio; que nadie lo diga es
   // lo que hace que el cronograma deje de servir.
+  // LO QUE ATA ESTE CRONOGRAMA CON EL VALORADO.
+  //
+  // El Gantt se hace primero y el valorado sale de él: la plata sigue a la
+  // ejecución, no al revés, porque solo se puede planillar lo que se
+  // construyó. Y de un valorado no se podría sacar un Gantt — un porcentaje
+  // mensual no dice qué traba a qué ni qué no puede atrasarse.
+  //
+  // Lo que sí viaja de vuelta es el techo de plata del cliente, y por eso
+  // acá se muestra cuánto sale cada mes: es donde se ve si el plan se puede
+  // pagar, que es la mitad de si se puede hacer.
+  const montoDe = a => (plata[a.obra_actividad_id] || 0) * ((Number(a.peso_pct) ?? 100) / 100);
+  const curvaPlata = todas.length ? curvaValorada(todas.map(a => ({ ...a, monto: montoDe(a) })), cal, "mes") : [];
+  const topeMes = Number(lead.crono_tope_mes) || 0;
+  const picoMes = curvaPlata.length ? Math.max(...curvaPlata.map(c => c.monto)) : 0;
+
   const diasDeContrato = diasDelPlazo(lead.crono_inicio || hoy(), lead.crono_meses, cal);
   const desvio = diasDeContrato && todas.length ? plan.duracion - diasDeContrato : 0;
 
@@ -446,6 +474,82 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             usan este cronograma y el cronograma valorado del control de obra. Escribilo y apretá Enter.
             {diasDeContrato > 0 && <> Son <strong style={{ color: colors.inkSoft }}>{diasDeContrato} días de trabajo</strong>.</>}
           </div>
+
+          {/* LA PLATA QUE PIDE EL PLAN, MES A MES.
+              Acá se ve que los dos cronogramas son el mismo: estas barras son
+              el cronograma valorado, dicho desde el lado del tiempo. Y es
+              donde se contesta la otra mitad de "¿se puede hacer?": si el
+              cliente no puede poner lo que el mes pide, ese mes no se ejecuta
+              como está escrito, y la obra se para — que es la peor manera de
+              enterarse de que el plan era optimista. */}
+          {curvaPlata.length > 0 && (
+            <div style={{ flexBasis: "100%", borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 9 }}>
+              <div style={{ display: "flex", gap: 9, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 7 }}>
+                <div>
+                  <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+                    EL CLIENTE PONE POR MES
+                  </label>
+                  <Numero value={topeMes || null} min={0} max={99999999} entero={false} vacio={null} placeholder="sin tope"
+                    style={{ width: 118, padding: "6px 9px", fontSize: 12 }}
+                    onCommit={async v => {
+                      const err = await guardarPlazo(lead.id, { topeMes: v });
+                      if (err) { setError(err); return; }
+                      setError(""); setLead(l => ({ ...l, crono_tope_mes: v }));
+                    }} />
+                </div>
+                <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, flex: 1, minWidth: 220 }}>
+                  Lo que pide el plan: <strong style={{ color: colors.inkSoft }}>{fmt(picoMes)}</strong> en el mes más
+                  cargado. Esto es el cronograma valorado visto desde el tiempo — el mismo plan, dicho en plata.
+                </div>
+                {topeMes > 0 && picoMes > topeMes && (
+                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                    if (!window.confirm(
+                      `¿Acomodar el cronograma para que ningún mes pase de ${fmt(topeMes)}?\n\n` +
+                      "Se corren hacia adelante solo las actividades QUE TIENEN COLCHÓN, y dentro de su colchón. " +
+                      "La ruta crítica no se toca y la fecha de entrega no se mueve: si no alcanza con eso, te lo digo.")) return;
+                    setPensando(true);
+                    const r = nivelarPorPlata({
+                      actividades, dependencias, inicio: lead.crono_inicio || hoy(), cal, montoDe, tope: topeMes,
+                    });
+                    for (const m of r.movidas) {
+                      await supabase.from("cronograma_actividades").update({ inicio_fijo: m.inicio_fijo }).eq("id", m.id);
+                    }
+                    setPensando(false);
+                    await cargar();
+                    window.alert(
+                      (r.movidas.length
+                        ? `Corrí ${r.movidas.length} ${r.movidas.length === 1 ? "actividad" : "actividades"} dentro de su colchón:\n` +
+                          r.movidas.slice(0, 8).map(m => `· ${m.nombre}, ${m.dias} días`).join("\n")
+                        : "No encontré nada con colchón para correr.") +
+                      (r.apretados.length
+                        ? `\n\nSiguen apretados ${r.apretados.length} ${r.apretados.length === 1 ? "mes" : "meses"}: ` +
+                          r.apretados.slice(0, 4).map(x => `${x.corte} (${fmt(x.exceso)} de más)`).join(", ") +
+                          ".\n\nPara alivianarlos habría que mover la ruta crítica, y eso atrasa la entrega. Esa decisión es tuya: " +
+                          "o se consigue más plata esos meses, o se corre la fecha."
+                        : "\n\nNingún mes pasa del tope.")
+                    );
+                  }}>Aplanar la curva</Button>
+                )}
+              </div>
+
+              {/* Las barras. Rojas las que se pasan de lo que el cliente pone. */}
+              <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 42 }}>
+                {curvaPlata.map(c => {
+                  const alto = picoMes ? Math.max(3, (c.monto / picoMes) * 38) : 3;
+                  const pasa = topeMes > 0 && c.monto > topeMes;
+                  return (
+                    <div key={c.corte} title={`${c.corte}: ${fmt(c.monto)}${pasa ? ` · ${fmt(c.monto - topeMes)} más de lo que entra` : ""}`}
+                      style={{ flex: 1, minWidth: 6, height: alto, borderRadius: 2,
+                        background: pasa ? colors.danger : colors.brand, opacity: pasa ? 0.9 : 0.55 }} />
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: colors.muted, marginTop: 2 }}>
+                <span>{curvaPlata[0]?.corte}</span>
+                <span>{curvaPlata[curvaPlata.length - 1]?.corte}</span>
+              </div>
+            </div>
+          )}
 
           {/* EL PLAN CONTRA EL CONTRATO.
               El plazo no sale de sumar actividades: lo dice el contrato. Que

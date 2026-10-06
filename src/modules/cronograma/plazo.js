@@ -26,13 +26,16 @@ export async function leerPlazo(leadId) {
   return { inicio: data?.crono_inicio || null, meses: data?.crono_meses || null };
 }
 
-export async function guardarPlazo(leadId, { inicio, meses }) {
+export async function guardarPlazo(leadId, { inicio, meses, topeMes }) {
   const campos = {};
   if (inicio !== undefined) campos.crono_inicio = inicio || null;
   if (meses !== undefined) campos.crono_meses = meses ? Math.max(1, Math.round(meses)) : null;
+  if (topeMes !== undefined) campos.crono_tope_mes = topeMes || null;
   if (!Object.keys(campos).length) return null;
   const { error } = await supabase.from("leads").update(campos).eq("id", leadId);
-  return error ? (/column|schema cache/i.test(error.message) ? "Falta correr la migración 082." : error.message) : null;
+  if (!error) return null;
+  if (/crono_tope_mes/.test(error.message)) return "Falta correr la migración 084.";
+  return /column|schema cache/i.test(error.message) ? "Falta correr la migración 082." : error.message;
 }
 
 /**

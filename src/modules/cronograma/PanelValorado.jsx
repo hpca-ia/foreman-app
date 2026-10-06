@@ -66,6 +66,17 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
               saber si <strong style={{ color: colors.ink }}>se está gastando acorde</strong> mes a mes, y decirle al
               cliente <strong style={{ color: colors.ink }}>cuándo tiene que desembolsar</strong>.
             </div>
+            {/* EL ORDEN, dicho donde se decide. Es la pregunta que uno trae al
+                abrir esta pantalla por primera vez. */}
+            <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.55, marginBottom: 10,
+              borderLeft: `2px solid ${colors.neutralSoft}`, paddingLeft: 9 }}>
+              <strong style={{ color: colors.inkSoft }}>Primero el cronograma de barras, después éste.</strong> La
+              plata sigue a la ejecución: solo se puede planillar lo que se construyó, así que las fechas mandan y el
+              dinero cae donde ellas digan. Al revés no se puede — un porcentaje mensual no dice qué traba a qué ni
+              qué no puede atrasarse. Lo único que vuelve del valorado al cronograma es cuánto puede poner el cliente
+              por mes, y eso se acomoda allá moviendo lo que tiene colchón.
+              {!gantt && <> Si todavía no hay barras, armalo del presupuesto y rehacelo cuando las haya.</>}
+            </div>
             {!obra
               ? <div style={{ fontSize: 12.5, color: colors.warning }}>Este proyecto todavía no tiene obra activa: el valorado sale de sus rubros.</div>
               : puedeEditar && (
