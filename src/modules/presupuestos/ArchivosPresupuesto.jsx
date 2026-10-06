@@ -3,6 +3,7 @@ import { Paperclip, Download, Trash2, Upload, Loader2 } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { listarOriginales, guardarOriginal, borrarOriginal, abrirOriginal } from "../../lib/archivosPresupuesto";
 import { aFecha } from "../../lib/dates";
+import VisorAdjuntos from "../compras/VisorAdjuntos";
 
 // Los archivos originales del presupuesto: el Excel con que se armó, las
 // proformas de los proveedores, lo que mandó el cliente.
@@ -47,6 +48,14 @@ export default function ArchivosPresupuesto({ presupuestoId, currentUser, soloLe
 
   if (faltaMigracion && !archivos.length) return null;
 
+  // Lo que el visor puede mostrar. El soltado del depósito ya no está en
+  // storage —vive en el respaldo— así que pedirle una vista previa daría un
+  // enlace muerto.
+  const papeles = archivos.filter(a => !a.soltado_at && a.ruta).map(a => ({
+    clave: `f${a.id}`, ruta: a.ruta, nombre: a.nombre,
+    etiqueta: TIPOS[a.tipo] || TIPOS.otro,
+  }));
+
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: archivos.length ? 8 : 0, flexWrap: "wrap" }}>
@@ -64,6 +73,18 @@ export default function ArchivosPresupuesto({ presupuestoId, currentUser, soloLe
       </div>
 
       {error && <div style={{ fontSize: 11.5, color: colors.danger, marginBottom: 6 }}>{error}</div>}
+
+      {/* VERLOS ACÁ, sin abrir una pestaña por archivo.
+          Para decidir si hay que comprar algo uno compara dos proformas, y
+          comparar con pestañas es abrir, mirar, cerrar y volver — dos veces—.
+          Es el mismo visor de las solicitudes de compra: imágenes y PDF se ven
+          adentro, y lo que el navegador no sabe dibujar —un Excel, un Word— lo
+          dice y se baja, en vez de mostrar un cuadro en blanco. */}
+      {papeles.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <VisorAdjuntos lista={papeles} />
+        </div>
+      )}
 
       {archivos.map(a => (
         <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>

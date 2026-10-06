@@ -18,7 +18,7 @@ import { colors } from "../../theme/colors";
 const esImagen = n => /\.(png|jpe?g|gif|webp|heic|avif)$/i.test(n || "");
 const esPDF = n => /\.pdf$/i.test(n || "");
 
-export default function VisorAdjuntos({ solicitudId, proformas = [] }) {
+export default function VisorAdjuntos({ solicitudId, proformas = [], lista = null, titulo = "" }) {
   const [papeles, setPapeles] = useState([]);
   const [i, setI] = useState(0);
   const [abierto, setAbierto] = useState(false);
@@ -28,6 +28,17 @@ export default function VisorAdjuntos({ solicitudId, proformas = [] }) {
   const [grande, setGrande] = useState(false);
 
   const cargar = useCallback(async () => {
+    // Con la lista dada —presupuestos, por ejemplo— el visor no averigua nada:
+    // le dicen qué papeles son y los muestra. Comparar tres cotizaciones sin
+    // abrir tres pestañas es lo mismo acá que en una solicitud de compra, así
+    // que el visor es el mismo y lo único que cambia es de dónde sale la lista.
+    if (lista) {
+      if (!lista.length) { setPapeles([]); return; }
+      const { data: firmados } = await supabase.storage.from("task-files")
+        .createSignedUrls(lista.map(x => x.ruta), 3600);
+      setPapeles(lista.map((x, k) => ({ ...x, url: firmados?.[k]?.signedUrl || null })));
+      return;
+    }
     if (!solicitudId) return;
     // Las proformas cuelgan de la solicitud; los anexos, de la carpeta que usa
     // InlineFiles. Dos lugares por historia, un solo visor por sentido común.
@@ -48,7 +59,7 @@ export default function VisorAdjuntos({ solicitudId, proformas = [] }) {
     const { data: firmados } = await supabase.storage.from("task-files")
       .createSignedUrls(todos.map(x => x.ruta), 3600);
     setPapeles(todos.map((x, k) => ({ ...x, url: firmados?.[k]?.signedUrl || null })));
-  }, [solicitudId, proformas]);
+  }, [solicitudId, proformas, lista]);
   useEffect(() => { cargar(); }, [cargar]);
 
   const actual = papeles[Math.min(i, papeles.length - 1)];
