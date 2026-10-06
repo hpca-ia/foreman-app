@@ -76,8 +76,9 @@ export default function TablaGantt({
   // La columna del nombre es la que se lee, así que es la que manda. Con 190
   // no entraba el nombre del rubro al lado del aviso de qué falta, y el nombre
   // se cortaba en "ILU…" — que es justo lo que uno necesita leer.
-  const COLS = "minmax(250px,1fr) 54px 76px 76px 56px";
-  const IZQ = 250 + 54 + 76 + 76 + 56 + 4 * 7 + 12;
+  // EMPIEZA y TERMINA se escriben, así que necesitan ancho de campo de fecha.
+  const COLS = "minmax(230px,1fr) 54px 112px 112px 52px";
+  const IZQ = 230 + 54 + 112 + 112 + 52 + 4 * 7 + 12;
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
   const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
@@ -255,6 +256,7 @@ export default function TablaGantt({
                     style={{ textAlign: "center", fontSize: 10.5, color: colors.muted }}>
                     {g.inicio && g.fin ? cal.entre(g.inicio, g.fin) : "—"}
                   </span>
+                  {/* Las del rubro no se escriben: salen de sus etapas. */}
                   <span style={{ fontSize: 11, color: colors.inkSoft }}>{dia(g.inicio)}</span>
                   <span style={{ fontSize: 11, color: colors.inkSoft }}>{dia(g.fin)}</span>
                   {/* El colchón de un rubro no es un número: cada etapa tiene
@@ -343,8 +345,38 @@ export default function TablaGantt({
                         onCommit={v => onCambiar(a, { duracion: v })}
                         title="Días hábiles. Enter para guardar."
                         style={{ padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
-                      <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>
-                      <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.fin)}</span>
+                      {/* LAS TRES SE ESCRIBEN, y las tres dicen lo mismo.
+                          Una duración en días es lo que uno sabe cuando
+                          estima; una fecha de fin es lo que uno sabe cuando la
+                          comprometió —"esto tiene que estar el 15 de
+                          diciembre"—. Obligar a convertir una en otra a mano es
+                          pedir una cuenta de días hábiles, con feriados, que
+                          nadie quiere hacer y que es justo lo que esta pantalla
+                          ya sabe hacer. */}
+                      {editable ? (
+                        <input type="date" value={a.inicio_fijo || a.inicio || ""}
+                          title={a.inicio_fijo
+                            ? "Arranca fijo este día. Vaciá el campo para que lo calcule el cronograma."
+                            : "Lo calcula el cronograma por sus dependencias. Si escribís una fecha, no arranca antes de ese día."}
+                          onChange={e => onCambiar(a, { inicio_fijo: e.target.value || null })}
+                          style={{ ...inputStyle, padding: "3px 5px", fontSize: 11, height: 25,
+                            color: a.inicio_fijo ? colors.brand : colors.inkSoft,
+                            fontWeight: a.inicio_fijo ? 600 : 400 }} />
+                      ) : <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>}
+                      {editable ? (
+                        <input type="date" value={a.fin || ""}
+                          title="Escribí hasta cuándo va y la duración se calcula sola, contando solo días de trabajo."
+                          onChange={e => {
+                            const hasta = e.target.value;
+                            if (!hasta || !a.inicio) return;
+                            // Los días hábiles entre su arranque y esa fecha.
+                            // Si la ponen antes del arranque queda en uno: una
+                            // actividad de cero días no existe.
+                            const d = hasta < a.inicio ? 1 : Math.max(1, cal.entre(a.inicio, hasta));
+                            if (d !== a.duracion) onCambiar(a, { duracion: d });
+                          }}
+                          style={{ ...inputStyle, padding: "3px 5px", fontSize: 11, height: 25, color: colors.inkSoft }} />
+                      ) : <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.fin)}</span>}
                       <span style={{ textAlign: "center", fontSize: 11.5, fontWeight: a.critica ? 700 : 400,
                         color: a.critica ? colors.danger : colors.muted }}>
                         {a.enCiclo ? "—" : a.critica ? "0" : `${a.holgura}d`}

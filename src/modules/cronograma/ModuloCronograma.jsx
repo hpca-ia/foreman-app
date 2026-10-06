@@ -1401,8 +1401,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           de barras sueltas que arrancan todas el día uno. */}
       {todas.length > 0 && editable && !uniendo && (
         <div style={{ fontSize: 11, color: colors.muted, marginTop: 8, lineHeight: 1.55 }}>
-          Tocá el <strong style={{ color: colors.inkSoft }}>nombre</strong> de una actividad y se abre su ficha: de qué
-          depende, en qué momento va, qué parte de la plata lleva y desde cuándo. Para{" "}
+          Los <strong style={{ color: colors.inkSoft }}>días</strong>, la fecha en que{" "}
+          <strong style={{ color: colors.inkSoft }}>empieza</strong> y la fecha en que{" "}
+          <strong style={{ color: colors.inkSoft }}>termina</strong> se escriben las tres: cambiás la que sepas y las
+          otras se acomodan. Tocá el <strong style={{ color: colors.inkSoft }}>nombre</strong> de una actividad y se
+          abre su ficha: de qué depende, en qué momento va y qué parte de la plata lleva. Para{" "}
           <strong style={{ color: colors.inkSoft }}>encadenar</strong>, tocá el eslabón de una y después el de la que va
           detrás. Para <strong style={{ color: colors.inkSoft }}>traslaparlas</strong> —que la segunda arranque antes de
           que la primera termine— poné los días <strong style={{ color: colors.inkSoft }}>en negativo</strong> en la
