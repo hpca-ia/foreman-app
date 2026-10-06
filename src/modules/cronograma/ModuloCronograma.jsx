@@ -5,6 +5,8 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { calendario, calcular, aFecha, claveFecha } from "./cpm";
+import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
+import { bajarProject } from "./exportarProject";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -36,6 +38,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [nueva, setNueva] = useState(null);
   const [error, setError] = useState("");
   const [uniendo, setUniendo] = useState(null);
+  const [armando, setArmando] = useState(null);
+  const [pensando, setPensando] = useState(false);
 
   useEffect(() => {
     supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead").order("nombre")
@@ -67,6 +71,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   useEffect(() => { cargar(); }, [cargar]);
 
   const editable = !lead || nivelProyecto?.(lead.id) === "editar";
+  // El cronograma vive en el proyecto; la obra es de dónde salen el
+  // presupuesto y sus agrupaciones. Un proyecto para cotizar todavía no tiene
+  // obra, y ahí el cronograma se arma a mano — que es justamente el caso.
+  const obra = lead?.obra_id ? { id: lead.obra_id, nombre: lead.nombre } : null;
 
   if (cargando) return <Centro>Cargando…</Centro>;
 
@@ -189,6 +197,108 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             }} />
         )}
       </div>
+
+      {/* Que lo arme NOVA: las agrupaciones ya dicen QUÉ hay que hacer, con
+          su plata adentro. Lo que falta es el orden y la duración, y eso es
+          saber de obra —la estructura antes que la mampostería, las
+          instalaciones antes del enlucido o hay que picar—. No sale de ningún
+          dato: sale de haber hecho obras. */}
+      {editable && obra?.id && (
+        armando ? (
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "grid", gap: 9 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 8, alignItems: "end" }}>
+              <div>
+                <label style={{ fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 }}>¿CUÁNTO DURA LA OBRA?</label>
+                <input type="number" min="1" max="60" value={armando.meses}
+                  onChange={e => setArmando(v => ({ ...v, meses: Number(e.target.value) || 1 }))}
+                  style={{ ...inputStyle, padding: "7px 9px" }} />
+              </div>
+              <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
+                meses. NOVA parte las agrupaciones del presupuesto en actividades, les pone duración y las encadena
+                en el orden real de una obra.
+              </div>
+            </div>
+
+            {armando.propuesta && (
+              <div style={{ background: colors.bg, borderRadius: 8, padding: 11 }}>
+                <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55, marginBottom: 6 }}>
+                  <strong>{armando.propuesta.actividades.length}</strong> actividades,{" "}
+                  <strong>{armando.propuesta.dependencias.length}</strong> dependencias.
+                  La obra sale en <strong>{armando.propuesta.dias} días de trabajo</strong>,
+                  con {armando.propuesta.criticas} en la ruta crítica.
+                  {armando.propuesta.quitadas > 0 && (
+                    <span style={{ color: colors.warning }}> Le quité {armando.propuesta.quitadas} dependencias que se mordían la cola.</span>
+                  )}
+                </div>
+                <div style={{ maxHeight: 150, overflowY: "auto", fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.6 }}>
+                  {armando.propuesta.actividades.slice(0, 14).map(a => (
+                    <div key={a.ref}>· {a.nombre} <span style={{ color: colors.muted }}>— {a.duracion} días</span></div>
+                  ))}
+                  {armando.propuesta.actividades.length > 14 && <div style={{ color: colors.muted }}>…y {armando.propuesta.actividades.length - 14} más</div>}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {!armando.propuesta ? (
+                <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                  setError(""); setPensando(true);
+                  const agrupaciones = await materiaPrima(obra.id);
+                  const r = await proponerCronograma({ agrupaciones, meses: armando.meses, nombreObra: lead.nombre, cal });
+                  setPensando(false);
+                  if (r.error) { setError(r.error); return; }
+                  setArmando(v => ({ ...v, propuesta: r }));
+                }}>{pensando ? "NOVA está leyendo el presupuesto…" : "Que lo arme NOVA"}</Button>
+              ) : (
+                <>
+                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                    setPensando(true);
+                    const r = await guardarPropuesta({ lead, obra, propuesta: armando.propuesta, quien: currentUser });
+                    setPensando(false);
+                    if (r.error) { setError(r.error); return; }
+                    setArmando(null); await cargar();
+                  }}>
+                    {todas.length ? "Reemplazar el cronograma" : "Guardarlo"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setArmando(v => ({ ...v, propuesta: null }))}>Que lo piense de nuevo</Button>
+                </>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => setArmando(null)}>Cancelar</Button>
+            </div>
+            {todas.length > 0 && !armando.propuesta && (
+              <div style={{ fontSize: 10.5, color: colors.warning }}>
+                Ya hay un cronograma: si guardás uno nuevo, reemplaza al de ahora con todo lo que le hayas corregido.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+            <Button variant={todas.length ? "outline" : "primary"} size="sm"
+              onClick={() => { setArmando({ meses: 6, propuesta: null }); setError(""); }}>
+              {todas.length ? "Rearmarlo con NOVA" : "Que lo arme NOVA del presupuesto"}
+            </Button>
+            {todas.length > 0 && (
+              <>
+                {/* A veces hay que entregarlo: una fiscalización lo pide en
+                    Project, un contrato público lo exige. Negarse obliga a
+                    llevar dos cronogramas, y el segundo queda viejo siempre. */}
+                <Button variant="outline" size="sm" onClick={() => bajarProject({
+                  nombre: `Cronograma ${lead.nombre}`, actividades: todas, dependencias,
+                  inicio: plan.inicio, fin: plan.fin, cal,
+                })}>
+                  Bajar para Project
+                </Button>
+                <Button variant="outline" size="sm" onClick={async () => {
+                  const n = await aprenderDelCronograma(todas, currentUser);
+                  setError(""); window.alert(`NOVA anotó la duración de ${n} actividades para la próxima obra.`);
+                }}>
+                  Que NOVA lo aprenda
+                </Button>
+              </>
+            )}
+          </div>
+        )
+      )}
 
       {plan.ciclos.length > 0 && (
         <Aviso>
