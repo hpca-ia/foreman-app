@@ -272,7 +272,7 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
             decidido al escribirla. */}
         {puedeAprobar && (
           <Button variant="outline" onClick={() => guardar("aprobar")} disabled={guardando}>
-            Guardar y aprobar: va al control
+            Guardar y aprobar
           </Button>
         )}
         <Button variant="secondary" onClick={onCerrar}>Cancelar</Button>

@@ -254,13 +254,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 </div>
                 {o.visto_at && (
                   <div style={{ fontSize: 11.5, color: colors.success, marginBottom: 6 }}>
-                    Visto bueno de {o.visto_nombre || "la dirección"} · {new Date(o.visto_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
+                    Aprobada por {o.visto_nombre || "la dirección"} · {new Date(o.visto_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
                     {o.visto_comentario && <span style={{ color: colors.inkSoft }}> — {o.visto_comentario}</span>}
                   </div>
                 )}
                 {!o.visto_at && o.visto_pedido_at && (
                   <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 6 }}>
-                    Esperando el visto del Director desde el {new Date(o.visto_pedido_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
+                    Esperando la aprobación del Director desde el {new Date(o.visto_pedido_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
                   </div>
                 )}
 
@@ -623,25 +623,15 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   {puedeEditar && suyas.length > 0 && !o.visto_at && !esDirector && (
                     <Button variant="outline" size="sm" disabled={ocupado}
                       onClick={() => hacer(() => pedirVisto(o.id))}>
-                      {o.visto_pedido_at ? "Visto pedido" : "Pedir el visto del Director"}
-                    </Button>
-                  )}
-                  {esDirector && suyas.length > 0 && !o.visto_at && (
-                    <Button variant="primary" size="sm" disabled={ocupado}
-                      onClick={() => {
-                        const c = window.prompt("¿Algo que aclarar antes de que salga? (opcional)", "");
-                        if (c === null) return;
-                        hacer(() => darVisto(o, currentUser, c));
-                      }}>
-                      <Check size={12} /> Dar el visto
+                      {o.visto_pedido_at ? "Aprobación pedida" : "Pedir aprobación al Director"}
                     </Button>
                   )}
                   {puedeEditar && suyas.length > 0 && (
                     <Button variant={o.visto_at || esDirector ? "outline" : "secondary"} size="sm"
-                      title={o.visto_at || esDirector ? "" : "Todavía no tiene el visto del Director"}
+                      title={o.visto_at || esDirector ? "" : "Todavía no la aprobó el Director"}
                       onClick={() => {
                         if (!o.visto_at && !esDirector &&
-                          !window.confirm("Esta orden no tiene el visto del Director.\n\nUna vez que el cliente ve el precio, bajarlo es una negociación y subirlo es imposible. ¿Mandarla igual?")) return;
+                          !window.confirm("Esta orden todavía no la aprobó el Director.\n\nUna vez que el cliente ve el precio, bajarlo es una negociación y subirlo es imposible. ¿Mandarla igual?")) return;
                         setMandando({ orden: o, correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email), cuerpo: "" });
                       }}>
                       <Mail size={12} /> Enviar al cliente
@@ -650,11 +640,10 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && (
                     <Button variant="primary" size="sm" disabled={ocupado}
                       onClick={() => {
-                        const quien = window.prompt("¿Quién la aprobó? (nombre del contratante o fiscalizador)", o.contratante_nombre || "");
-                        if (quien === null) return;
-                        hacer(() => aprobarOrden(o, suyas, currentUser, { aprobada_por: quien }));
+                        if (!window.confirm(`¿Aprobar la ${codigoDe(o)}?\n\nSus adiciones entran al control de obra y lo que reduce queda tachado del presupuesto.`)) return;
+                        hacer(() => aprobarOrden(o, suyas, currentUser, { aprobada_por: currentUser?.name || "" }));
                       }}>
-                      <Check size={12} /> Aprobada: llevar al control
+                      <Check size={12} /> Aprobar
                     </Button>
                   )}
                   {puedeEditar && o.estado === "aprobada" && (

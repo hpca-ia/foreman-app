@@ -237,6 +237,13 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   return guardarOrden(orden.id, {
     estado: "aprobada",
     aprobada_at: new Date().toISOString(),
+    // Aprobar deja también el visto interno: son la misma decisión. Separados,
+    // alguien "daba el visto", la orden seguía en borrador, y el consolidado
+    // —que suma solo las aprobadas— no la contaba. Dos botones para una cosa
+    // y un total que no cuadra.
+    visto_at: orden.visto_at || new Date().toISOString(),
+    visto_por: orden.visto_por ?? (quien?.id ?? null),
+    visto_nombre: orden.visto_nombre || quien?.name || null,
     contratante_nombre: aprobada_por?.trim() || orden.contratante_nombre || null,
     contratante_fecha: new Date().toISOString().split("T")[0],
     contratante_comentario: observaciones?.trim() || orden.contratante_comentario || null,
