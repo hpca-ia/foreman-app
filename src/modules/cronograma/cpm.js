@@ -44,12 +44,6 @@ export const ETAPAS = {
   ejecucion: "ejecución",
 };
 
-export const TIPOS_DEP = {
-  FC: { label: "Fin → Comienzo", pista: "La que sigue arranca cuando esta termina. Es la normal" },
-  CC: { label: "Comienzo → Comienzo", pista: "Arrancan juntas" },
-  FF: { label: "Fin → Fin", pista: "Terminan juntas" },
-};
-
 /** Una fecha, al mediodía: así ningún cambio de huso corre un día. */
 export const aFecha = f => {
   if (!f) return null;

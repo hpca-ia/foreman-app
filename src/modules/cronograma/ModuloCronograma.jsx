@@ -1,13 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, ChevronLeft, GanttChartSquare, AlertTriangle, Link2, CalendarClock } from "lucide-react";
+import { Plus, ChevronLeft, GanttChartSquare, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { calendario, calcular, aFecha, claveFecha, ETAPAS, TIPOS_DEP, ajustarAlPlazo, nivelarPorPlata, curvaValorada } from "./cpm";
+import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo, nivelarPorPlata, curvaValorada } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
+import TablaGantt from "./TablaGantt";
+import PartirEnEtapas from "./PartirEnEtapas";
 import { guardarPlazo, desfase, diasDelPlazo } from "./plazo";
 import { fmt } from "../controlObra/calculos";
 
@@ -58,6 +60,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [agrupaciones, setAgrupaciones] = useState([]);
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
+  // La actividad que se está partiendo en etapas, si hay alguna.
+  const [partiendo, setPartiendo] = useState(null);
   // La 082 todavía no corrió en esta base.
   const [sinPlazo, setSinPlazo] = useState(false);
 
@@ -208,17 +212,6 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const todas = plan.actividades;
   // La escala: del arranque al fin, en días hábiles, para dibujar las barras.
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
-  const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
-  const largo = a => (a.inicio && a.fin ? Math.max(cal.entre(a.inicio, a.fin), 1) / diasTotales : 0);
-  // El bloque de la izquierda —nombre, días, fechas, holgura— y el lienzo
-  // donde van las barras. El lienzo mide lo que tiene que medir; la pantalla
-  // se desplaza.
-  // Las columnas suman 490 y el bloque arranca 12 adentro, así que su carril
-  // mide 502. Si no, la última —HOLGURA— se sale por la derecha y se mezcla
-  // con la regla.
-  const COLS = "minmax(200px,1fr) 54px 76px 76px 56px";
-  const IZQ = 490 + 12;
-  const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
 
   // El plazo contra el plan. Son dos cosas distintas y conviene no mezclarlas:
   // el plazo es lo que dice el contrato, y el plan es lo que sale de sumar las
@@ -309,42 +302,50 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }
 
   /**
-   * Partir una agrupación en etapas.
+   * Partir una actividad en los momentos en que de verdad ocurre.
    *
    * Lo que se importa o se fabrica no pasa de una vez: se anticipa, se fabrica
-   * dos meses y se instala al final. Son momentos separados y cada uno se
-   * lleva su parte del dinero, así que son barras distintas — y es lo que
-   * después hace que el valorado ponga el anticipo en marzo y la instalación
-   * en agosto, en vez de repartir todo parejo.
+   * dos meses, llega y se instala. Son barras distintas con su parte de la
+   * plata, y es de eso que depende que el cronograma y el valorado digan lo
+   * mismo sobre la misma ventanería.
    *
-   * La etapa nueva queda encadenada a la que se partió: así el cálculo le da
-   * fecha y no aparece el día uno junto con todo lo demás.
+   * La primera etapa se queda con la actividad que ya existía —no se borra y
+   * se rehace: perdería sus dependencias con el resto de la obra, que es lo
+   * que más cuesta armar—. Las demás se crean encadenadas detrás.
    */
-  async function partirEnEtapas(a) {
-    const hechas = a.obra_actividad_id
-      ? actividades.filter(x => x.obra_actividad_id === a.obra_actividad_id)
-      : [a];
-    const orden = ["anticipo", "fabricacion", "entrega", "instalacion"];
-    const siguiente = orden.find(e => !hechas.some(x => x.etapa === e)) || "instalacion";
-    // La plata se parte entre las dos, no se inventa: si esta tenía el 100 de
-    // la agrupación, quedan 50 y 50 y el total sigue siendo el presupuesto.
-    const mio = Number(a.peso_pct ?? 100);
-    const deja = Math.round((mio / 2) * 100) / 100;
-    const { data: creada, error: e } = await supabase.from("cronograma_actividades").insert({
-      lead_id: lead.id, obra_id: lead.obra_id || null,
-      obra_actividad_id: a.obra_actividad_id,
-      nombre: `${a.nombre.split(" · ")[0]} · ${ETAPAS[siguiente]}`,
-      duracion: siguiente === "anticipo" ? 1 : 10,
-      etapa: siguiente, peso_pct: Math.round((mio - deja) * 100) / 100,
-      orden: actividades.length,
-    }).select().single();
-    if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 083 para partir en etapas." : e.message); return; }
-    if (a.obra_actividad_id) {
-      await supabase.from("cronograma_actividades").update({ peso_pct: deja }).eq("id", a.id);
-    }
+  async function partir(a, etapas = []) {
+    if (etapas.length < 2) return;
     setError("");
-    await supabase.from("cronograma_dependencias")
-      .insert({ actividad_id: creada.id, depende_de_id: a.id, tipo: "FC" });
+    const base = a.nombre.split(" · ")[0];
+    const [primera, ...resto] = etapas;
+
+    const { data, error: e } = await supabase.from("cronograma_actividades").update({
+      nombre: `${base} · ${ETAPAS[primera.id]}`,
+      duracion: primera.duracion, etapa: primera.id,
+      peso_pct: a.obra_actividad_id ? primera.peso : null,
+    }).eq("id", a.id).select();
+    if (e) {
+      setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 083 para partir en etapas." : e.message);
+      return;
+    }
+    if (!data?.length) { setError("No se pudo guardar: la base no dejó tocar esa actividad."); return; }
+
+    let anterior = a.id;
+    for (const [i, et] of resto.entries()) {
+      const { data: creada, error: e2 } = await supabase.from("cronograma_actividades").insert({
+        lead_id: lead.id, obra_id: lead.obra_id || null,
+        obra_actividad_id: a.obra_actividad_id,
+        nombre: `${base} · ${ETAPAS[et.id]}`,
+        duracion: et.duracion, etapa: et.id,
+        peso_pct: a.obra_actividad_id ? et.peso : null,
+        orden: (a.orden ?? 0) + i + 1,
+      }).select().single();
+      if (e2) { setError(e2.message); break; }
+      await supabase.from("cronograma_dependencias")
+        .insert({ actividad_id: creada.id, depende_de_id: anterior, tipo: "FC", retardo: 0 });
+      anterior = creada.id;
+    }
+    setPartiendo(null);
     await cargar();
   }
 
@@ -778,221 +779,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>{error}</div>}
 
+      {partiendo && (
+        <PartirEnEtapas actividad={partiendo} onCancelar={() => setPartiendo(null)}
+          onPartir={etapas => partir(partiendo, etapas)} />
+      )}
+
       {!todas.length ? (
         <Centro>
           Todavía no hay actividades. Empezá por las grandes —movimiento de tierra, estructura, mampostería— y
           después las partís.
         </Centro>
       ) : (
-        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
-          overflowX: "auto" }}>
-          <div style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px 30px`,
-            gap: 7, padding: "8px 12px 8px 0", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted, letterSpacing: 0.3,
-            width: "max-content", minWidth: "100%" }}>
-            <span style={{ display: "grid", gridTemplateColumns: COLS, gap: 7,
-              position: "sticky", left: 0, zIndex: 3, background: colors.bg,
-              paddingLeft: 12, boxSizing: "border-box", borderRight: `1px solid ${colors.border}` }}>
-              <span>ACTIVIDAD</span>
-              <span style={{ textAlign: "center" }}>DÍAS</span>
-              <span>EMPIEZA</span>
-              <span>TERMINA</span>
-              <span style={{ textAlign: "center" }}>HOLGURA</span>
-            </span>
-            {/* La regla. Sin ella las barras flotan: se ve que una es más
-                larga que otra y no cuándo empieza ninguna. */}
-            <span style={{ position: "relative", height: 12 }}>
-              {marcas.map((m, k) => (
-                // La primera y la última, hacia adentro: centradas se salen
-                // del lienzo —una por la izquierda, sobre la columna fija, y
-                // la otra por la derecha, cortada— y quedan ilegibles.
-                <span key={k} style={{ position: "absolute", left: `${m.x * 100}%`,
-                  transform: k === 0 ? "translateX(0)" : m.x > 0.97 ? "translateX(-100%)" : "translateX(-50%)",
-                  fontSize: 8.5, color: m.dia === 1 ? colors.brand : colors.muted, whiteSpace: "nowrap",
-                  fontWeight: m.dia === 1 ? 700 : 400 }}>
-                  {escala === "fecha" ? dia(m.fecha) : (m.dia > 0 ? `d${m.dia}` : m.dia === 0 ? "" : `${m.dia}`)}
-                </span>
-              ))}
-            </span>
-            <span />
-          </div>
-
-          {todas.map(a => {
-            const deps = dependencias.filter(d => d.actividad_id === a.id);
-            return (
-              <div key={a.id} style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px 30px`,
-                gap: 7, padding: "7px 12px 7px 0", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center", fontSize: 12,
-                width: "max-content", minWidth: "100%" }}>
-                {/* Los datos de la actividad quedan quietos mientras el
-                    cronograma se desplaza: un plazo de ocho meses no entra en
-                    ninguna pantalla, y una barra sin su nombre al lado no dice
-                    nada. */}
-                <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 7, alignItems: "center",
-                  position: "sticky", left: 0, zIndex: 2, background: colors.surface,
-                  paddingLeft: 12, boxSizing: "border-box", borderRight: `1px solid ${colors.border}` }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {a.critica && <span title="Ruta crítica: no tiene colchón" style={{ color: colors.danger, marginRight: 4 }}>●</span>}
-                    {a.nombre}
-                  </div>
-                  {a.inicio_fijo && (
-                    <div style={{ fontSize: 10, color: colors.brand, marginTop: 1 }}>fija el {dia(a.inicio_fijo)}</div>
-                  )}
-
-                  {/* UNA LÍNEA POR DEPENDENCIA, editable.
-                      Acá se traslapa: el retardo en negativo hace que esta
-                      arranque ANTES de que termine la otra. Es lo que uno hace
-                      en obra todo el tiempo —la mampostería entra mientras
-                      arriba se sigue fundiendo— y sin esto el cronograma salía
-                      todo en fila, más largo que la obra de verdad. */}
-                  {deps.map(d => {
-                    const r = Number(d.retardo) || 0;
-                    return (
-                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 2, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 10, color: colors.muted }}>↳</span>
-                        {editable ? (
-                          <select value={d.tipo || "FC"} onChange={e => cambiarDep(d, { tipo: e.target.value })}
-                            title={TIPOS_DEP[d.tipo || "FC"]?.pista}
-                            style={{ ...inputStyle, width: "auto", padding: "1px 3px", fontSize: 9.5, height: 18 }}>
-                            {Object.entries(TIPOS_DEP).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
-                          </select>
-                        ) : <span style={{ fontSize: 10, color: colors.muted }}>{TIPOS_DEP[d.tipo || "FC"]?.label}</span>}
-                        <span style={{ fontSize: 10, color: colors.inkSoft, maxWidth: 150, overflow: "hidden",
-                          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {porId.get(d.depende_de_id)?.nombre || "?"}
-                        </span>
-                        {editable && (
-                          <Numero value={r} min={-365} max={365} disabled={!editable}
-                            onCommit={v => cambiarDep(d, { retardo: v })}
-                            title="Días de espera. En NEGATIVO se traslapan: ésta arranca antes de que la otra termine."
-                            style={{ width: 42, padding: "1px 3px", fontSize: 9.5, height: 18, textAlign: "center" }} />
-                        )}
-                        <span style={{ fontSize: 9.5, fontWeight: r < 0 ? 700 : 400, color: r < 0 ? colors.brand : colors.muted }}>
-                          {r === 0 ? "días" : r < 0 ? `días de traslape` : "días de espera"}
-                        </span>
-                        {editable && (
-                          <button onClick={() => desunir(d)} title="Quitar esta dependencia"
-                            style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: "0 3px" }}>×</button>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {/* La etapa y su parte de la plata. Esto es lo que ata esta
-                      pantalla al cronograma valorado: la ventanería que se
-                      anticipa en marzo y se instala en agosto pone su plata en
-                      esos dos meses porque acá dice cuánto va en cada uno. */}
-                  {conEtapas && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
-                      <select value={a.etapa || "ejecucion"} disabled={!editable}
-                        onChange={e => cambiar(a, { etapa: e.target.value })}
-                        style={{ ...inputStyle, width: "auto", padding: "1px 4px", fontSize: 10, height: 19 }}>
-                        {Object.entries(ETAPAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                      </select>
-                      {a.obra_actividad_id && (
-                        <Numero value={a.peso_pct ?? 100} min={0} max={100} entero={false} disabled={!editable}
-                          onCommit={v => cambiar(a, { peso_pct: v })}
-                          title="Qué parte de la plata de la agrupación se paga en esta etapa. Enter para guardar."
-                          style={{ width: 44, padding: "1px 4px", fontSize: 10, height: 19, textAlign: "center" }} />
-                      )}
-                      {/* El porcentaje solo quiere decir algo si la actividad
-                          cuelga de una agrupación: es su parte de ESA plata.
-                          Una actividad suelta —un trámite, una espera— no
-                          reparte nada, y mostrarle un "% de" sin de qué era
-                          justamente lo que confundía. */}
-                      {a.obra_actividad_id ? (
-                        <span style={{ fontSize: 10, color: colors.muted }}>
-                          % de {agrupaciones.find(g => g.id === a.obra_actividad_id)?.nombre?.slice(0, 22) || "su agrupación"}
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 10, color: colors.muted }}>sin plata asignada</span>
-                      )}
-                      {editable && (
-                        <button onClick={() => partirEnEtapas(a)}
-                          title="Partirla: el anticipo ahora, la fabricación después, la instalación al final"
-                          style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 5,
-                            color: colors.brand, cursor: "pointer", fontSize: 9.5, fontWeight: 700,
-                            padding: "1px 5px", fontFamily: colors.font }}>+ etapa</button>
-                      )}
-                      {etapasDeAgrup.get(a.obra_actividad_id) > 1
-                        && Math.abs((pesoDeAgrup.get(a.obra_actividad_id) || 0) - 100) > 0.01 && (
-                        <span title="Las etapas de esta agrupación tienen que sumar 100: el valorado reparte su plata con estos pesos."
-                          style={{ fontSize: 9.5, fontWeight: 700, color: colors.warning }}>
-                          sus etapas suman {Math.round(pesoDeAgrup.get(a.obra_actividad_id))}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <Numero value={a.duracion} min={1} max={2000} disabled={!editable}
-                  onCommit={v => cambiar(a, { duracion: v })}
-                  title="Cuántos días hábiles dura. Enter para guardar."
-                  style={{ padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
-                <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>
-                <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.fin)}</span>
-                <span style={{ textAlign: "center", fontSize: 11.5, fontWeight: a.critica ? 700 : 400,
-                  color: a.critica ? colors.danger : colors.muted }}>
-                  {a.enCiclo ? "—" : a.critica ? "0" : `${a.holgura}d`}
-                </span>
-
-                </div>
-
-                {/* La barra. Es para lo que se abre esta pantalla. */}
-                <div style={{ position: "relative", height: 16, background: colors.neutralSoft, borderRadius: 4 }}>
-                  {/* Hoy, cruzando todas las barras: la pregunta que uno trae
-                      al abrir un cronograma es dónde estamos parados. */}
-                  {dentro && (
-                    <div style={{ position: "absolute", top: -4, bottom: -4, left: `${posicion(hoyISO) * 100}%`,
-                      width: 2, background: colors.danger, opacity: 0.75, zIndex: 1 }} />
-                  )}
-                  {a.inicio && (
-                    <div title={`${dia(a.inicio)} → ${dia(a.fin)}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`}
-                      style={{ position: "absolute", top: 0, bottom: 0,
-                        left: `${posicion(a.inicio) * 100}%`, width: `${Math.max(largo(a) * 100, 2)}%`,
-                        background: a.critica ? colors.danger : colors.brand, borderRadius: 4,
-                        display: "flex", alignItems: "center", overflow: "hidden" }}>
-                      {/* Lo hecho, adentro de la barra: se lee el atraso sin
-                          comparar dos columnas de números. */}
-                      {a.avance_pct > 0 && (
-                        <div style={{ width: `${Math.min(100, a.avance_pct)}%`, height: "100%", background: "rgba(255,255,255,.45)" }} />
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {editable && (
-                  <div style={{ display: "flex", gap: 2 }}>
-                    <button onClick={() => (uniendo ? unir(uniendo, a.id) : setUniendo(a.id))}
-                      title={uniendo === a.id ? "Elegí ahora la que va después" : uniendo ? "Esta va después de la marcada" : "Marcar: lo que siga va después de esta"}
-                      style={{ background: uniendo === a.id ? colors.brand : "none", border: "none",
-                        color: uniendo === a.id ? "#fff" : colors.muted, borderRadius: 4, cursor: "pointer", display: "flex", padding: 2 }}>
-                      <Link2 size={12} />
-                    </button>
-                    {/* Empezar antes del día uno: los permisos, el anticipo de
-                        una importación, el levantamiento. Son del proyecto y
-                        pasan antes de que la obra arranque; con fecha del día
-                        uno corren todo lo demás y dan un plazo que no es. */}
-                    <button onClick={() => {
-                      const f = window.prompt(
-                        a.inicio_fijo
-                          ? "Fecha fija de inicio (vacío para que la calcule el cronograma):"
-                          : "¿En qué fecha empieza? Puede ser antes del arranque de la obra —permisos, anticipos, importaciones.",
-                        a.inicio_fijo || plan.arranque);
-                      if (f === null) return;
-                      cambiar(a, { inicio_fijo: f.trim() || null });
-                    }} title={a.inicio_fijo ? `Empieza fijo el ${dia(a.inicio_fijo)}` : "Fijarle una fecha de inicio"}
-                      style={{ background: "none", border: "none", color: a.inicio_fijo ? colors.brand : colors.muted,
-                        cursor: "pointer", display: "flex", padding: 2 }}>
-                      <CalendarClock size={12} />
-                    </button>
-                    <button onClick={() => quitar(a)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}>
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <TablaGantt
+          todas={todas} dependencias={dependencias} agrupaciones={agrupaciones} plata={plata}
+          porId={porId} cal={cal} plan={plan} escala={escala} zoom={zoom} marcas={marcas}
+          editable={editable} conEtapas={conEtapas}
+          uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
+          onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
+          onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} />
       )}
 
       {editable && (
@@ -1013,12 +817,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           de barras sueltas que arrancan todas el día uno. */}
       {todas.length > 0 && editable && !uniendo && (
         <div style={{ fontSize: 11, color: colors.muted, marginTop: 8, lineHeight: 1.55 }}>
-          Para <strong style={{ color: colors.inkSoft }}>encadenar</strong>: tocá el eslabón de una actividad y después
-          el de la que va detrás. Para <strong style={{ color: colors.inkSoft }}>traslaparlas</strong> —que la segunda
-          arranque antes de que la primera termine— poné los días <strong style={{ color: colors.inkSoft }}>en
-          negativo</strong> en la línea de la dependencia; en positivo son días de espera. Para{" "}
-          <strong style={{ color: colors.inkSoft }}>partir una actividad en etapas</strong> —anticipo, fabricación,
-          instalación— usá <strong style={{ color: colors.inkSoft }}>+ etapa</strong>.
+          Tocá el <strong style={{ color: colors.inkSoft }}>nombre</strong> de una actividad y se abre su ficha: de qué
+          depende, en qué momento va, qué parte de la plata lleva y desde cuándo. Para{" "}
+          <strong style={{ color: colors.inkSoft }}>encadenar</strong>, tocá el eslabón de una y después el de la que va
+          detrás. Para <strong style={{ color: colors.inkSoft }}>traslaparlas</strong> —que la segunda arranque antes de
+          que la primera termine— poné los días <strong style={{ color: colors.inkSoft }}>en negativo</strong> en la
+          ficha; en positivo son días de espera.
         </div>
       )}
 
