@@ -423,6 +423,74 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }
 
   /**
+   * Armar el cronograma del control de obra. Sin NOVA.
+   *
+   * Esto es lo que debería haber existido desde el principio. Un cronograma
+   * que SOLO se puede armar preguntándole a un modelo es un cronograma que
+   * falla cuando el modelo se equivoca —y se equivoca: inventó actividades,
+   * renombró rubros, partió los gastos generales en seis etapas con tres
+   * "instalación"—. Y cuando falla, no hay de dónde agarrarse.
+   *
+   * Acá no hay nada que adivinar. La lista ya existe: son las agrupaciones del
+   * control de obra, en su orden, con su nombre y su capítulo. Una actividad
+   * por agrupación, encadenadas una detrás de otra, con una duración que sale
+   * de lo que pesa cada una en el presupuesto repartido en el plazo. Eso es un
+   * cronograma crudo pero CORRECTO, y sobre un cronograma correcto se puede
+   * trabajar: mover, traslapar, partir en etapas, o pedirle a NOVA que ponga
+   * las duraciones de verdad.
+   *
+   * NOVA queda para lo que NOVA sabe —cuánto dura cada cosa y qué traba a
+   * qué— y deja de ser el único camino para tener algo.
+   */
+  async function armarDelControl() {
+    const reales = agrupaciones.filter(g => !g.extra);
+    if (!reales.length) { setError("Esta obra todavía no tiene agrupaciones. Se arman en Control de Obra → Agrupaciones."); return; }
+    setPensando(true); setError("");
+
+    if (actividades.length) {
+      await supabase.from("cronograma_dependencias").delete().in("actividad_id", actividades.map(a => a.id));
+      await supabase.from("cronograma_actividades").delete().eq("lead_id", lead.id);
+    }
+
+    // La duración: el plazo repartido entre las agrupaciones a prorrata de su
+    // plata. Es una aproximación grosera y se nota —esa es la idea: un número
+    // que pide ser corregido es mejor que uno que parece pensado y no lo
+    // está—. Lo único que garantiza es que la suma dé el plazo.
+    const total = reales.reduce((t, g) => t + (plata[g.id] || 0), 0);
+    const dias = diasDeContrato || 120;
+    const filas = reales.map((g, i) => {
+      const parte = total > 0 ? (plata[g.id] || 0) / total : 1 / reales.length;
+      return {
+        lead_id: lead.id, obra_id: lead.obra_id || null,
+        obra_actividad_id: g.id, nombre: String(g.nombre).slice(0, 120),
+        duracion: Math.max(1, Math.round(dias * parte)),
+        etapa: "ejecucion", peso_pct: 100, orden: i,
+      };
+    });
+
+    let { data: creadas, error: e } = await supabase.from("cronograma_actividades").insert(filas).select();
+    if (e && /column|schema cache/i.test(e.message)) {
+      const limpias = filas.map(({ etapa, peso_pct, ...resto }) => resto);
+      ({ data: creadas, error: e } = await supabase.from("cronograma_actividades").insert(limpias).select());
+    }
+    setPensando(false);
+    if (e) { setError(e.message); return; }
+
+    // Encadenadas una detrás de otra, en el orden del control.
+    //
+    // Es el orden del presupuesto y NO es el orden de obra: la pintura no va
+    // después de la señalética porque sí. Pero una cadena se lee, se entiende
+    // y se corrige arrastrando; dejarlas todas arrancando el día uno daría un
+    // cronograma que dice que la obra dura lo que dura su rubro más largo, que
+    // es falso y peor.
+    const deps = (creadas || []).slice(1).map((a, i) => ({
+      actividad_id: a.id, depende_de_id: creadas[i].id, tipo: "FC", retardo: 0,
+    }));
+    if (deps.length) await supabase.from("cronograma_dependencias").insert(deps);
+    await cargar();
+  }
+
+  /**
    * Devolver el cronograma al orden del control de obra.
    *
    * El cronograma nace en ese orden, pero después se mueve —a mano, o porque
@@ -455,6 +523,82 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     }
     setPensando(false);
     await cargar();
+  }
+
+  /**
+   * Poner el cronograma de acuerdo con el control de obra, sin rehacerlo.
+   *
+   * Rearmarlo de cero arregla todo y tira todo: las duraciones corregidas, las
+   * dependencias, los traslapes, las etapas. Eso es semanas de trabajo de
+   * alguien y no se borra para corregir nombres.
+   *
+   * Esto hace lo mínimo que hace falta para que los dos documentos vuelvan a
+   * poder leerse juntos:
+   *
+   *   · la actividad que apunta a una agrupación que ya no existe, se va;
+   *   · la que se llama distinto, toma el nombre de su agrupación;
+   *   · la agrupación que no está en el cronograma, entra al final;
+   *   · y todo queda en el orden del control.
+   *
+   * Las duraciones, las dependencias y las etapas no se tocan.
+   */
+  async function sincronizarConElControl() {
+    const vivas = new Map(agrupaciones.filter(g => !g.extra).map(g => [Number(g.id), g]));
+    setPensando(true); setError("");
+    let fuera = 0, renombradas = 0, sumadas = 0;
+
+    // Las que apuntan a una agrupación borrada, o a ninguna.
+    const colgadas = actividades.filter(a => !vivas.has(Number(a.obra_actividad_id)));
+    if (colgadas.length) {
+      await supabase.from("cronograma_dependencias").delete().in("actividad_id", colgadas.map(a => a.id));
+      await supabase.from("cronograma_dependencias").delete().in("depende_de_id", colgadas.map(a => a.id));
+      await supabase.from("cronograma_actividades").delete().in("id", colgadas.map(a => a.id));
+      fuera = colgadas.length;
+    }
+
+    // Los nombres. El sufijo de la etapa se conserva: "· anticipo" no es un
+    // desfase, es cómo se escriben las etapas de un rubro.
+    for (const a of actividades) {
+      const g = vivas.get(Number(a.obra_actividad_id));
+      if (!g) continue;
+      const partes = String(a.nombre || "").split(" · ");
+      const sufijo = partes.length > 1 ? ` · ${partes.slice(1).join(" · ")}` : "";
+      const deberia = `${g.nombre}${sufijo}`.slice(0, 120);
+      if (a.nombre !== deberia) {
+        await supabase.from("cronograma_actividades").update({ nombre: deberia }).eq("id", a.id);
+        renombradas += 1;
+      }
+    }
+
+    // Las que faltan. Con una duración a revisar, y es correcto que se note:
+    // mejor una barra fea y presente que un rubro desaparecido del plan.
+    const puestas = new Set(actividades.filter(a => vivas.has(Number(a.obra_actividad_id)))
+      .map(a => Number(a.obra_actividad_id)));
+    const faltan = [...vivas.values()].filter(g => !puestas.has(Number(g.id)));
+    if (faltan.length) {
+      const filas = faltan.map((g, i) => ({
+        lead_id: lead.id, obra_id: lead.obra_id || null,
+        obra_actividad_id: g.id, nombre: String(g.nombre).slice(0, 120),
+        duracion: 10, etapa: "ejecucion", peso_pct: 100,
+        orden: actividades.length + i,
+      }));
+      const { error: e } = await supabase.from("cronograma_actividades").insert(filas);
+      if (e) { setPensando(false); setError(e.message); return; }
+      sumadas = faltan.length;
+    }
+
+    setPensando(false);
+    await cargar();
+    await ordenarComoElControl();
+    window.alert([
+      "Cronograma al día con el control de obra.",
+      fuera && `· ${fuera} ${fuera === 1 ? "actividad apuntaba" : "actividades apuntaban"} a agrupaciones que ya no existen: se fueron.`,
+      renombradas && `· ${renombradas} ${renombradas === 1 ? "tomó" : "tomaron"} el nombre de su agrupación.`,
+      sumadas && `· ${sumadas} ${sumadas === 1 ? "agrupación entró" : "agrupaciones entraron"} con duración a revisar.`,
+      !fuera && !renombradas && !sumadas && "No hacía falta cambiar nada: ya coincidían.",
+      "",
+      "Las duraciones, las dependencias y las etapas no se tocaron.",
+    ].filter(Boolean).join("\n"));
   }
 
   /**
@@ -882,11 +1026,39 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             )}
           </div>
         ) : (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-            <Button variant={todas.length ? "outline" : "primary"} size="sm"
-              onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
-              {todas.length ? "Rearmarlo con NOVA" : "Que lo arme NOVA del presupuesto"}
-            </Button>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+            {/* EL CAMINO QUE NO DEPENDE DE NADIE.
+                Un cronograma que solo se puede armar preguntándole a un modelo
+                es un cronograma que falla cuando el modelo se equivoca, y
+                entonces no hay de dónde agarrarse. Acá no hay nada que
+                adivinar: la lista son las agrupaciones del control, en su
+                orden. Crudo pero correcto, y sobre eso se trabaja. */}
+            {!todas.length ? (
+              <>
+                <Button variant="primary" size="sm" disabled={pensando || !obra?.id} onClick={async () => {
+                  if (!window.confirm(
+                    "¿Armar el cronograma con las agrupaciones del control de obra?\n\n" +
+                    "Una barra por agrupación, en el orden del control, encadenadas una detrás de otra. " +
+                    "Las duraciones salen de repartir el plazo según lo que pesa cada una: son un punto de " +
+                    "partida para corregir, no una estimación.")) return;
+                  await armarDelControl();
+                }}>Armarlo del control de obra</Button>
+                <Button variant="outline" size="sm" disabled={pensando}
+                  onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
+                  Que NOVA le ponga las duraciones
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="primary" size="sm" disabled={pensando} onClick={sincronizarConElControl}>
+                  Ponerlo al día con el control
+                </Button>
+                <Button variant="outline" size="sm" disabled={pensando}
+                  onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
+                  Rearmarlo con NOVA
+                </Button>
+              </>
+            )}
             {todas.length > 0 && (
               <>
                 {/* A veces hay que entregarlo: una fiscalización lo pide en

@@ -290,12 +290,27 @@ export default function TablaGantt({
                     <Fijo ui={ui} fondo={esta ? colors.brandSoft : undefined}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, paddingLeft: g.simple ? 0 : 18 }}>
                         {a.critica && <span title="Ruta crítica: no tiene colchón" style={{ color: colors.danger, flexShrink: 0 }}>●</span>}
+                        {/* EL CAPÍTULO VA EN TODA FILA, no solo en el
+                            encabezado de los rubros partidos en etapas.
+                            La mayoría de las agrupaciones son una sola barra y
+                            no tienen encabezado, así que salían peladas: el
+                            nombre y nada más. Por eso "no traía los capítulos"
+                            — los traía, y no los mostraba donde se miran. */}
                         <button onClick={() => setAbierta(esta ? null : a.id)}
                           title="Ver y cambiar de qué depende, su etapa y su fecha"
                           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
-                            fontSize: 12, color: colors.ink, textAlign: "left", flex: "1 1 auto", minWidth: 40,
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {g.simple ? a.nombre : (etapa || a.nombre)}
+                            textAlign: "left", flex: "1 1 auto", minWidth: 40, overflow: "hidden" }}>
+                          <span style={{ display: "block", fontSize: 12, color: colors.ink, fontWeight: g.simple ? 600 : 400,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.25 }}>
+                            {g.simple && g.codigo && <span style={{ color: colors.muted, fontWeight: 600 }}>{g.codigo} </span>}
+                            {g.simple ? a.nombre : (etapa || a.nombre)}
+                          </span>
+                          {g.simple && g.capitulo && (
+                            <span style={{ display: "block", fontSize: 9, color: colors.muted, overflow: "hidden",
+                              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {g.capitulo}
+                            </span>
+                          )}
                         </button>
                         {etapa && !g.simple && (
                           <span style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>

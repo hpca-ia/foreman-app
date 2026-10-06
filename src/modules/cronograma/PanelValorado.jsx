@@ -6,9 +6,8 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "../controlObra/calculos";
 import { mesesDe, nombreMes, curva, suma, cierra, tramo, previstoContraReal, desembolsos } from "./valorado";
 import { cargarValorado, armarDesdeObra, moverTramo, guardarCronograma, borrarValorado, ajustarPesos, guardarPesos,
-  pendientesDeSumar, sumarAlValorado, armarConNova, valoradoDelCronograma } from "./valoradoDatos";
+  pendientesDeSumar, sumarAlValorado, valoradoDelCronograma } from "./valoradoDatos";
 import { cargarPlan, leerPlazo } from "./plazo";
-import { proponerValorado, aprenderDe } from "./novaValorado";
 import { supabase } from "../../lib/supabase";
 
 // El cronograma valorado de la obra.
@@ -32,7 +31,6 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
   const [anticipo, setAnticipo] = useState("");
   // Lo que entró por órdenes de cambio después de armar el valorado.
   const [pendiente, setPendiente] = useState(null);
-  const [propuesta, setPropuesta] = useState(null);
   const [pensando, setPensando] = useState(false);
   // El cronograma de barras del proyecto, si ya existe: de ahí sale el
   // valorado bien hecho, con las etapas en los meses en que de verdad caen.
@@ -135,7 +133,7 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
                     const pl = await leerPlazo(lead?.id);
                     setArmando({
                       mesInicio: (pl.inicio || new Date().toISOString()).slice(0, 7),
-                      meses: pl.meses || 6, nivel: "rubro",
+                      meses: pl.meses || 6,
                     });
                   }}>
                   {gantt ? "Armarlo aparte, del presupuesto" : "Armarlo del presupuesto"}
@@ -156,97 +154,40 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
                   onChange={e => setArmando(a => ({ ...a, meses: Number(e.target.value) || 1 }))} style={inputStyle} />
               </div>
             </div>
-            <div>
-              <label style={lbl}>¿CON CUÁNTO DETALLE?</label>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[["rubro", "Por rubro", "Como el Excel. Preciso, y son muchas filas"],
-                  ["agrupacion", "Por agrupación", "Grueso. Se arma en una tarde y alcanza para la curva"]].map(([id, label, pista]) => {
-                  const puesto = armando.nivel === id;
-                  return (
-                    <button key={id} onClick={() => setArmando(a => ({ ...a, nivel: id }))}
-                      style={{ flex: 1, textAlign: "left", border: `1px solid ${puesto ? colors.brand : colors.border}`,
-                        background: puesto ? colors.brandSoft : "#fff", color: puesto ? colors.brand : colors.inkSoft,
-                        borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontFamily: colors.font,
-                        fontSize: 12.5, fontWeight: puesto ? 700 : 500 }}>
-                      {label}
-                      <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85, marginTop: 1 }}>{pista}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* UNA LÍNEA POR AGRUPACIÓN. Nunca por rubro.
+                Antes se podía elegir, y "por rubro" venía marcado. Eso no era
+                una preferencia: el control de obra se planilla por agrupación
+                y el cronograma de barras se arma por agrupación, así que un
+                valorado por rubro no se puede comparar con ninguno de los dos
+                — tres documentos de la misma obra hablando de tres cosas. */}
             <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
-              Arranca con todo repartido parejo. Desde ahí corregís lo que sabés distinto —la estructura adelante, los
-              acabados al final— y lo que no toques igual suma el presupuesto entero.
+              Una línea por <strong style={{ color: colors.inkSoft }}>agrupación del control de obra</strong>, en su
+              mismo orden. Arranca con todo repartido parejo; desde ahí corregís lo que sabés distinto —la estructura
+              adelante, los acabados al final— y lo que no toques igual suma el presupuesto entero.
             </div>
             {error && <div style={{ fontSize: 12, color: colors.danger }}>{error}</div>}
 
-            {/* Lo que NOVA propuso, para revisar antes de guardarlo. Un
-                valorado es lo que el cliente usa para mover plata: nada que
-                NOVA decida sola debería terminar en ese número sin que alguien
-                lo mire. */}
-            {propuesta && (
-              <div style={{ background: colors.bg, borderRadius: 8, padding: 11, display: "grid", gap: 7 }}>
-                <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55 }}>
-                  NOVA ubicó <strong>{propuesta.capitulos.length}</strong> capítulos en el tiempo y encontró{" "}
-                  <strong>{propuesta.especiales}</strong> rubros que se pagan antes de ejecutarse.
-                  {propuesta.sinCapitulo > 0 && (
-                    <span style={{ color: colors.warning }}> {propuesta.sinCapitulo} rubros quedaron sin ubicar y van estirados en toda la obra.</span>
-                  )}
-                </div>
-                <div style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 4 }}>
-                  {propuesta.lineas.filter(l => l.especial).slice(0, 12).map((l, i) => (
-                    <div key={i} style={{ fontSize: 11.5, color: colors.inkSoft, background: "#fff", borderRadius: 6, padding: "6px 8px" }}>
-                      <strong style={{ color: colors.ink }}>{l.rubro.descripcion?.slice(0, 60)}</strong>
-                      <span style={{ color: colors.brand, fontWeight: 600 }}> · {l.perfil}</span>
-                      <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
-                        {l.pesos.map((p, k) => (p > 0 ? `mes ${k + 1}: ${p}%` : null)).filter(Boolean).join(" · ")}
-                        {l.porque ? ` — ${l.porque}` : ""}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ fontSize: 10.5, color: colors.muted }}>
-                  Se guarda como está y lo corregís en la matriz. Lo que dejes corregido lo recuerda para la próxima obra.
-                </div>
-              </div>
-            )}
-
+            {/* Un solo camino, y por agrupación.
+                El que había de "que lo arme NOVA" trabajaba rubro por rubro
+                —otra vez la mezcla— y lo que de verdad hace falta para un
+                valorado inteligente es el cronograma de barras: ahí la plata
+                cae en los meses en que cada agrupación de verdad ocurre, y
+                eso NOVA sí lo arma bien porque son las mismas agrupaciones. */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {!propuesta ? (
-                <>
-                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
-                    setError(""); setPensando(true);
-                    const { data: rubros } = await supabase.from("obra_rubros")
-                      .select("id,numero,codigo,descripcion,capitulo,total_base")
-                      .eq("obra_id", obra.id).order("capitulo_orden").order("orden");
-                    const r = await proponerValorado({
-                      rubros: rubros || [], meses: armando.meses,
-                      mesInicio: armando.mesInicio, nombreObra: obra.nombre,
-                    });
-                    setPensando(false);
-                    if (r.error) { setError(r.error); return; }
-                    setPropuesta({ ...r, rubros });
-                  }}>{pensando ? "NOVA está leyendo el presupuesto…" : "Que lo arme NOVA"}</Button>
-                  <Button variant="outline" size="sm" onClick={async () => {
-                    setError("");
-                    const r = await armarDesdeObra({ lead, obra, ...armando, quien: currentUser });
-                    if (r.error) { setError(r.error); return; }
-                    setArmando(null); await cargar();
-                  }}>Armarlo parejo y corregir a mano</Button>
-                </>
-              ) : (
-                <>
-                  <Button variant="primary" size="sm" onClick={async () => {
-                    const r = await armarConNova({ lead, obra, mesInicio: armando.mesInicio, meses: armando.meses, propuesta, quien: currentUser });
-                    if (r.error) { setError(r.error); return; }
-                    await aprenderDe(propuesta.lineas, currentUser);
-                    setPropuesta(null); setArmando(null); await cargar();
-                  }}>Guardarlo así</Button>
-                  <Button variant="outline" size="sm" onClick={() => setPropuesta(null)}>Que lo piense de nuevo</Button>
-                </>
-              )}
-              <Button variant="secondary" size="sm" onClick={() => { setArmando(null); setPropuesta(null); }}>Cancelar</Button>
+              <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                setError(""); setPensando(true);
+                const r = await armarDesdeObra({ lead, obra, ...armando, quien: currentUser });
+                setPensando(false);
+                if (r.error) { setError(r.error); return; }
+                setArmando(null); await cargar();
+                if (r.sinAgrupar > 0) {
+                  window.alert(
+                    `El valorado quedó armado con ${r.lineas} líneas.\n\n` +
+                    `Hay ${fmt(r.sinAgrupar)} en rubros que todavía no están en ninguna agrupación: entraron en una ` +
+                    "línea aparte marcada para revisar. Agrupalos en Control de Obra y rehacé el valorado.");
+                }
+              }}>{pensando ? "Armando…" : "Armarlo de las agrupaciones"}</Button>
+              <Button variant="secondary" size="sm" onClick={() => setArmando(null)}>Cancelar</Button>
             </div>
           </div>
         )}

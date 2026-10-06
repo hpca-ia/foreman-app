@@ -33,11 +33,32 @@ export async function cargarValorado(leadId) {
  *
  * @param nivel "rubro" (como el Excel) o "agrupacion" (uno grueso, de una tarde)
  */
-export async function armarDesdeObra({ lead, obra, mesInicio, meses, nivel = "rubro", quien }) {
-  const { data: rubros } = await supabase.from("obra_rubros")
-    .select("id,numero,codigo,descripcion,capitulo,capitulo_orden,orden,total_base,actividad_id")
-    .eq("obra_id", obra.id).order("capitulo_orden").order("orden");
+/**
+ * Armar el valorado de las AGRUPACIONES de la obra. Nunca de los rubros.
+ *
+ * Antes se podía elegir "por rubro" o "por agrupación", y por rubro era lo que
+ * venía marcado. Eso estaba mal y no era un detalle de preferencia: el control
+ * de obra se planilla por agrupación, el cronograma de barras se arma por
+ * agrupación, y un valorado por rubro no se puede comparar con ninguno de los
+ * dos. Tres documentos de la misma obra hablando de tres cosas distintas.
+ *
+ * Una línea por agrupación, en el orden del control de obra, con su código y
+ * su nombre. Las que no están agrupadas se juntan en una sola línea al final,
+ * que es lo que son: plata del presupuesto que todavía nadie ordenó.
+ *
+ * Arranca con todo repartido parejo —un valorado malo pero completo— y desde
+ * ahí se corrige lo que se sabe distinto. Al revés, arrancando vacío, el
+ * primer valorado queda a medio llenar y no sirve para nada.
+ */
+export async function armarDesdeObra({ lead, obra, mesInicio, meses, quien }) {
+  const [{ data: rubros }, { data: acts }] = await Promise.all([
+    supabase.from("obra_rubros").select("id,total_base,actividad_id").eq("obra_id", obra.id),
+    supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", obra.id).order("orden"),
+  ]);
   if (!rubros?.length) return { error: "Esta obra todavía no tiene rubros cargados." };
+  if (!acts?.length) {
+    return { error: "Esta obra todavía no tiene agrupaciones. Se arman en Control de Obra → Agrupaciones, y de ahí salen los dos cronogramas." };
+  }
 
   const { data: cronograma, error } = await supabase.from("cronograma_valorado").insert({
     lead_id: lead.id, obra_id: obra.id,
@@ -46,39 +67,37 @@ export async function armarDesdeObra({ lead, obra, mesInicio, meses, nivel = "ru
   }).select().single();
   if (error) return { error: falta(error) ? "Falta correr la migración 074." : error.message };
 
+  const plata = new Map();
+  rubros.forEach(r => {
+    const k = r.actividad_id ?? 0;
+    plata.set(k, (plata.get(k) || 0) + (Number(r.total_base) || 0));
+  });
+
   const parejo = repartirParejo(meses);
-  let filas;
-  if (nivel === "agrupacion") {
-    const { data: acts } = await supabase.from("obra_actividades")
-      .select("id,codigo,nombre,orden").eq("obra_id", obra.id).order("orden");
-    const porAct = new Map();
-    rubros.forEach(r => {
-      const k = r.actividad_id ?? 0;
-      porAct.set(k, (porAct.get(k) || 0) + (Number(r.total_base) || 0));
+  const filas = acts.map((a, i) => ({
+    cronograma_id: cronograma.id, obra_actividad_id: a.id,
+    codigo: a.codigo || "", descripcion: a.nombre,
+    monto: Math.round((plata.get(a.id) || 0) * 100) / 100,
+    pesos: parejo, orden: i,
+  })).filter(f => f.monto > 0);
+
+  // Lo que quedó sin agrupar, en una línea y dicho como lo que es. Esconderlo
+  // haría que el valorado sume menos que el presupuesto, y un valorado que no
+  // cuadra con el contrato no se usa.
+  const suelto = Math.round((plata.get(0) || 0) * 100) / 100;
+  if (suelto > 0) {
+    filas.push({
+      cronograma_id: cronograma.id, obra_actividad_id: null,
+      codigo: "", descripcion: "Rubros todavía sin agrupar",
+      monto: suelto, pesos: parejo, orden: filas.length, revisar: true,
     });
-    filas = [...porAct.entries()].map(([id, monto], i) => {
-      const a = (acts || []).find(x => x.id === id);
-      return {
-        cronograma_id: cronograma.id, obra_actividad_id: id || null,
-        codigo: a?.codigo || "", descripcion: a?.nombre || "Sin agrupar",
-        monto: Math.round(monto * 100) / 100, pesos: parejo, orden: a?.orden ?? 9000 + i,
-      };
-    });
-  } else {
-    filas = rubros.map((r, i) => ({
-      cronograma_id: cronograma.id, obra_rubro_id: r.id,
-      codigo: r.codigo || String(r.numero || i + 1),
-      descripcion: r.descripcion, capitulo: r.capitulo,
-      monto: Number(r.total_base) || 0, pesos: parejo, orden: i,
-    }));
   }
 
-  // De a tandas: 170 rubros en un solo insert llega al límite y falla entero.
   for (let i = 0; i < filas.length; i += 100) {
     const { error: e } = await supabase.from("cronograma_valorado_lineas").insert(filas.slice(i, i + 100));
     if (e) return { error: "El cronograma se creó pero fallaron las líneas: " + e.message };
   }
-  return { cronograma };
+  return { cronograma, lineas: filas.length, sinAgrupar: suelto };
 }
 
 /**
