@@ -13,8 +13,16 @@ import { calendario, calcular } from "./cpm";
 
 export async function leerPlazo(leadId) {
   if (!leadId) return { inicio: null, meses: null };
-  const { data } = await supabase.from("leads")
+  const { data, error } = await supabase.from("leads")
     .select("crono_inicio,crono_meses").eq("id", leadId).maybeSingle();
+  // Sin la 082 la consulta falla entera y se perdería también la fecha de
+  // arranque, que sí existe. Se vuelve a pedir sin los meses: devolver menos
+  // es aceptable, devolver nada cuando se tiene la mitad no.
+  if (error) {
+    const { data: d2 } = await supabase.from("leads")
+      .select("crono_inicio").eq("id", leadId).maybeSingle();
+    return { inicio: d2?.crono_inicio || null, meses: null, sinPlazo: true };
+  }
   return { inicio: data?.crono_inicio || null, meses: data?.crono_meses || null };
 }
 

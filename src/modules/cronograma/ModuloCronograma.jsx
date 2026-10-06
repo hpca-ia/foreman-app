@@ -48,20 +48,32 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [escala, setEscala] = useState("fecha");
   // Las agrupaciones de hoy, para saber si el cronograma quedó viejo.
   const [agrupaciones, setAgrupaciones] = useState([]);
+  // La 082 todavía no corrió en esta base.
+  const [sinPlazo, setSinPlazo] = useState(false);
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,crono_meses,es_lead").order("nombre")
-      .then(({ data }) => {
-        // Todo lo que no se perdió, en curso o no.
-        //
-        // Un cronograma no es solo de una obra en marcha: el presupuesto se
-        // entrega CON un cronograma, y ese se arma antes de que el proyecto
-        // sea proyecto. Filtrar por "ganado" dejaba vacía la pantalla
-        // justamente cuando más se la necesita — cuando hay que mostrarle al
-        // cliente en cuánto tiempo se le hace la obra.
-        setProyectos((data || []).filter(l => l.resultado !== "perdido"));
-        setCargando(false);
-      });
+    // El plazo en meses lo agrega la 082. Pedirlo junto con todo lo demás hace
+    // que la consulta ENTERA falle si no corrió, y entonces la pantalla queda
+    // vacía como si el usuario no tuviera proyectos. Eso es una mentira, y
+    // manda a buscar el problema al lugar equivocado: lo que falta es una
+    // migración, no los proyectos. Se pide, y si no está se sigue sin él.
+    const base = "id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead";
+    (async () => {
+      let { data, error } = await supabase.from("leads").select(`${base},crono_meses`).order("nombre");
+      if (error) {
+        setSinPlazo(/crono_meses/.test(error.message));
+        ({ data } = await supabase.from("leads").select(base).order("nombre"));
+      }
+      // Todo lo que no se perdió, en curso o no.
+      //
+      // Un cronograma no es solo de una obra en marcha: el presupuesto se
+      // entrega CON un cronograma, y ese se arma antes de que el proyecto sea
+      // proyecto. Filtrar por "ganado" dejaba vacía la pantalla justamente
+      // cuando más se la necesita — cuando hay que mostrarle al cliente en
+      // cuánto tiempo se le hace la obra.
+      setProyectos((data || []).filter(l => l.resultado !== "perdido"));
+      setCargando(false);
+    })();
   }, []);
 
   const cargar = useCallback(async () => {
@@ -99,6 +111,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         <div style={{ fontSize: 12.5, color: colors.muted, marginBottom: 14 }}>
           Qué se hace, cuándo, y qué no puede esperar.
         </div>
+        {/* Decir qué falta, en vez de mostrar una lista corta sin explicación:
+            una pantalla que calla cuando algo le falta manda a buscar el
+            problema donde no está. */}
+        {sinPlazo && (
+          <Aviso>
+            Falta correr la migración 082: el plazo de la obra —fecha de arranque y cuántos meses dura— no se
+            puede guardar todavía, así que el Gantt y el cronograma valorado no comparten plazo. Lo demás funciona.
+          </Aviso>
+        )}
         {!mios.length ? <Centro>No tenés proyectos asignados.</Centro> : (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
             {mios.map(p => {
