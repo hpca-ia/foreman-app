@@ -5,7 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo, nivelarPorPlata, curvaValorada } from "./cpm";
+import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
@@ -260,26 +260,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // el plazo es lo que dice el contrato, y el plan es lo que sale de sumar las
   // actividades. Que no coincidan es normal al principio; que nadie lo diga es
   // lo que hace que el cronograma deje de servir.
-  // LO QUE ATA ESTE CRONOGRAMA CON EL VALORADO.
-  //
-  // El Gantt se hace primero y el valorado sale de él: la plata sigue a la
-  // ejecución, no al revés, porque solo se puede planillar lo que se
-  // construyó. Y de un valorado no se podría sacar un Gantt — un porcentaje
-  // mensual no dice qué traba a qué ni qué no puede atrasarse.
-  //
-  // Lo que sí viaja de vuelta es el techo de plata del cliente, y por eso
-  // acá se muestra cuánto sale cada mes: es donde se ve si el plan se puede
-  // pagar, que es la mitad de si se puede hacer.
-  const montoDe = a => (plata[a.obra_actividad_id] || 0) * ((Number(a.peso_pct) ?? 100) / 100);
-  const curvaPlata = todas.length ? curvaValorada(todas.map(a => ({ ...a, monto: montoDe(a) })), cal, "mes") : [];
-  const topeMes = Number(lead.crono_tope_mes) || 0;
-  const picoMes = curvaPlata.length ? Math.max(...curvaPlata.map(c => c.monto)) : 0;
-
+  // El cronograma habla de tiempo. La plata que pide mes a mes —y el techo de
+  // lo que el cliente puede poner— se mira en el valorado, que es la misma
+  // información dicha en dinero: mezclarlas acá obliga a traducir entre las
+  // dos para hacer cualquiera de las dos cosas.
   // Barras repetidas: la misma agrupación y el mismo momento, dos veces.
   const repetidas = (() => {
     const vistas = new Set(); let n = 0;
     actividades.forEach(a => {
-      const k = `${a.obra_actividad_id || 0}·${a.etapa || "ejecucion"}`;
+      const k = `${a.obra_actividad_id || 0}·${a.etapa || "ejecucion"}·${(a.nombre || "").trim()}`;
       if (vistas.has(k)) n += 1; else vistas.add(k);
     });
     return n;
@@ -373,8 +362,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     const [primera, ...resto] = etapas;
 
     const { data, error: e } = await supabase.from("cronograma_actividades").update({
-      nombre: `${base} · ${ETAPAS[primera.id]}`,
-      duracion: primera.duracion, etapa: primera.id,
+      nombre: `${base} · ${primera.nombre}`.slice(0, 120),
+      duracion: primera.duracion, etapa: primera.etapa || "ejecucion",
       peso_pct: a.obra_actividad_id ? primera.peso : null,
     }).eq("id", a.id).select();
     if (e) {
@@ -388,8 +377,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       const { data: creada, error: e2 } = await supabase.from("cronograma_actividades").insert({
         lead_id: lead.id, obra_id: lead.obra_id || null,
         obra_actividad_id: a.obra_actividad_id,
-        nombre: `${base} · ${ETAPAS[et.id]}`,
-        duracion: et.duracion, etapa: et.id,
+        nombre: `${base} · ${et.nombre}`.slice(0, 120),
+        duracion: et.duracion, etapa: et.etapa || "ejecucion",
         peso_pct: a.obra_actividad_id ? et.peso : null,
         orden: (a.orden ?? 0) + i + 1,
       }).select().single();
@@ -554,7 +543,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   async function quitarRepetidas() {
     const porClave = new Map();
     [...actividades].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0) || a.id - b.id).forEach(a => {
-      const k = `${a.obra_actividad_id || 0}·${a.etapa || "ejecucion"}`;
+      // El nombre entra en la cuenta: un rubro puede tener tres barras de
+      // "ejecución" —las eléctricas entran tres veces a la obra— y esas no son
+      // repetidas, son tramos distintos. Repetida es la misma cosa, igual.
+      const k = `${a.obra_actividad_id || 0}·${a.etapa || "ejecucion"}·${(a.nombre || "").trim()}`;
       if (!porClave.has(k)) porClave.set(k, []);
       porClave.get(k).push(a);
     });
@@ -1004,82 +996,6 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             {diasDeContrato > 0 && <> Son <strong style={{ color: colors.inkSoft }}>{diasDeContrato} días de trabajo</strong>.</>}
           </div>
 
-          {/* LA PLATA QUE PIDE EL PLAN, MES A MES.
-              Acá se ve que los dos cronogramas son el mismo: estas barras son
-              el cronograma valorado, dicho desde el lado del tiempo. Y es
-              donde se contesta la otra mitad de "¿se puede hacer?": si el
-              cliente no puede poner lo que el mes pide, ese mes no se ejecuta
-              como está escrito, y la obra se para — que es la peor manera de
-              enterarse de que el plan era optimista. */}
-          {curvaPlata.length > 0 && (
-            <div style={{ flexBasis: "100%", borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 9 }}>
-              <div style={{ display: "flex", gap: 9, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 7 }}>
-                <div>
-                  <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
-                    EL CLIENTE PONE POR MES
-                  </label>
-                  <Numero value={topeMes || null} min={0} max={99999999} entero={false} vacio={null} placeholder="sin tope"
-                    style={{ width: 118, padding: "6px 9px", fontSize: 12 }}
-                    onCommit={async v => {
-                      const err = await guardarPlazo(lead.id, { topeMes: v });
-                      if (err) { setError(err); return; }
-                      setError(""); setLead(l => ({ ...l, crono_tope_mes: v }));
-                    }} />
-                </div>
-                <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, flex: 1, minWidth: 220 }}>
-                  Lo que pide el plan: <strong style={{ color: colors.inkSoft }}>{fmt(picoMes)}</strong> en el mes más
-                  cargado. Esto es el cronograma valorado visto desde el tiempo — el mismo plan, dicho en plata.
-                </div>
-                {topeMes > 0 && picoMes > topeMes && (
-                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
-                    if (!window.confirm(
-                      `¿Acomodar el cronograma para que ningún mes pase de ${fmt(topeMes)}?\n\n` +
-                      "Se corren hacia adelante solo las actividades QUE TIENEN COLCHÓN, y dentro de su colchón. " +
-                      "La ruta crítica no se toca y la fecha de entrega no se mueve: si no alcanza con eso, te lo digo.")) return;
-                    setPensando(true);
-                    const r = nivelarPorPlata({
-                      actividades, dependencias, inicio: lead.crono_inicio || hoy(), cal, montoDe, tope: topeMes,
-                    });
-                    for (const m of r.movidas) {
-                      await supabase.from("cronograma_actividades").update({ inicio_fijo: m.inicio_fijo }).eq("id", m.id);
-                    }
-                    setPensando(false);
-                    await cargar();
-                    window.alert(
-                      (r.movidas.length
-                        ? `Corrí ${r.movidas.length} ${r.movidas.length === 1 ? "actividad" : "actividades"} dentro de su colchón:\n` +
-                          r.movidas.slice(0, 8).map(m => `· ${m.nombre}, ${m.dias} días`).join("\n")
-                        : "No encontré nada con colchón para correr.") +
-                      (r.apretados.length
-                        ? `\n\nSiguen apretados ${r.apretados.length} ${r.apretados.length === 1 ? "mes" : "meses"}: ` +
-                          r.apretados.slice(0, 4).map(x => `${x.corte} (${fmt(x.exceso)} de más)`).join(", ") +
-                          ".\n\nPara alivianarlos habría que mover la ruta crítica, y eso atrasa la entrega. Esa decisión es tuya: " +
-                          "o se consigue más plata esos meses, o se corre la fecha."
-                        : "\n\nNingún mes pasa del tope.")
-                    );
-                  }}>Aplanar la curva</Button>
-                )}
-              </div>
-
-              {/* Las barras. Rojas las que se pasan de lo que el cliente pone. */}
-              <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 42 }}>
-                {curvaPlata.map(c => {
-                  const alto = picoMes ? Math.max(3, (c.monto / picoMes) * 38) : 3;
-                  const pasa = topeMes > 0 && c.monto > topeMes;
-                  return (
-                    <div key={c.corte} title={`${c.corte}: ${fmt(c.monto)}${pasa ? ` · ${fmt(c.monto - topeMes)} más de lo que entra` : ""}`}
-                      style={{ flex: 1, minWidth: 6, height: alto, borderRadius: 2,
-                        background: pasa ? colors.danger : colors.brand, opacity: pasa ? 0.9 : 0.55 }} />
-                  );
-                })}
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: colors.muted, marginTop: 2 }}>
-                <span>{curvaPlata[0]?.corte}</span>
-                <span>{curvaPlata[curvaPlata.length - 1]?.corte}</span>
-              </div>
-            </div>
-          )}
-
           {/* EL PLAN CONTRA EL CONTRATO.
               El plazo no sale de sumar actividades: lo dice el contrato. Que
               el plan dé otra cosa es normal al armarlo; lo que no puede pasar
@@ -1163,6 +1079,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                           {" "}El plazo son {diasDeContrato}: le{armando.propuesta.dias > diasDeContrato ? "" : " falta"}n{" "}
                           {Math.abs(armando.propuesta.dias - diasDeContrato)} días. Guardalo y ajustalo arriba, o pedile que lo piense de nuevo.
                         </span>
+                  )}
+                  {armando.propuesta.cortado && (
+                    <span style={{ color: colors.warning }}>
+                      {" "}La respuesta vino cortada: guardé lo que llegó entero y completé el resto con las
+                      agrupaciones del control, con duración a revisar.
+                    </span>
                   )}
                   {armando.propuesta.quitadas > 0 && (
                     <span style={{ color: colors.warning }}> Le quité {armando.propuesta.quitadas} dependencias que se mordían la cola.</span>

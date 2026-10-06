@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { calcular, calendario } from "./cpm";
 import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
+import { jsonTolerante } from "../../lib/jsonTolerante";
 
 // NOVA arma el cronograma de la obra desde las agrupaciones del presupuesto.
 //
@@ -255,22 +256,31 @@ realidad, y poné en paralelo lo que no se traba. Si dan mucho menos, no las
 estires sin motivo: dales el tiempo que de verdad llevan y dejá el resto como
 holgura.
 
-"porque" en una línea, en español, para quien revisa.`;
+"porque" CORTO —una frase de diez palabras— en español, para quien revisa. No
+es un informe: es la razón, y si te extendés la respuesta no entra entera.`;
 
   try {
     const res = await fetch("/api/nova", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5", max_tokens: 4000,
+        // Con espacio de sobra: veinte agrupaciones con sus dependencias y el
+        // porqué de cada una no entran en 4000, y la respuesta vuelve cortada
+        // a la mitad. Pasó.
+        model: "claude-sonnet-4-5", max_tokens: 12000,
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma de ${meses} meses. Solo JSON.` }],
       }),
     });
     const data = await res.json();
     if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo armarlo." };
-    const txt = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
-    const p = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
-    return ordenar(p, agrupaciones, cal);
+    // Tolerante al corte: si la respuesta no entró entera, se salva lo que
+    // llegó completo en vez de perder todo por el último renglón. Las
+    // agrupaciones que falten las agrega `ordenar` igual, con duración a
+    // revisar, así que un corte no deja el cronograma incompleto — deja unas
+    // cuantas duraciones sin pensar, y eso se ve.
+    const { datos, cortado } = jsonTolerante(data.content?.[0]?.text);
+    if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
+    return { ...ordenar(datos, agrupaciones, cal), cortado };
   } catch (e) {
     return { error: "NOVA devolvió algo que no se entiende: " + e.message };
   }
@@ -336,7 +346,10 @@ export function ordenar(p, agrupaciones, cal) {
   const unica = new Map();
   const fundidas = [];
   actividades.forEach(a => {
-    const k = `${a.agrupacion_id}·${a.etapa}`;
+    // Con el nombre: un rubro puede tener varias barras de "ejecución" —las
+    // eléctricas entran tres veces a la obra— y esas no son repetidas. Lo que
+    // no existe es la misma cosa dicha dos veces igual.
+    const k = `${a.agrupacion_id}·${a.etapa}·${(a.nombre || "").trim()}`;
     const ya = unica.get(k);
     if (!ya) { unica.set(k, a); return; }
     ya.peso = Math.round((n(ya.peso) + n(a.peso)) * 100) / 100;
@@ -535,16 +548,16 @@ hacerlo.`;
     const res = await fetch("/api/nova", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5", max_tokens: 2000,
+        model: "claude-sonnet-4-5", max_tokens: 4000,
         system: sistema,
         messages: [{ role: "user", content: "Acomodá el cronograma a esos cambios. Solo JSON." }],
       }),
     });
     const data = await res.json();
     if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo acomodarlo." };
-    const txt = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
-    const p = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
-    return limpiarParche(p, { plan, nuevas, perdidas, dePlata });
+    const { datos } = jsonTolerante(data.content?.[0]?.text);
+    if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
+    return limpiarParche(datos, { plan, nuevas, perdidas, dePlata });
   } catch (e) {
     return { error: "NOVA devolvió algo que no se entiende: " + e.message };
   }
