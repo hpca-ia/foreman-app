@@ -275,6 +275,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const topeMes = Number(lead.crono_tope_mes) || 0;
   const picoMes = curvaPlata.length ? Math.max(...curvaPlata.map(c => c.monto)) : 0;
 
+  // Barras repetidas: la misma agrupación y el mismo momento, dos veces.
+  const repetidas = (() => {
+    const vistas = new Set(); let n = 0;
+    actividades.forEach(a => {
+      const k = `${a.obra_actividad_id || 0}·${a.etapa || "ejecucion"}`;
+      if (vistas.has(k)) n += 1; else vistas.add(k);
+    });
+    return n;
+  })();
+
   const diasDeContrato = diasDelPlazo(lead.crono_inicio || hoy(), lead.crono_meses, cal);
   const desvio = diasDeContrato && todas.length ? plan.duracion - diasDeContrato : 0;
 
@@ -453,10 +463,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     if (!reales.length) { setError("Esta obra todavía no tiene agrupaciones. Se arman en Control de Obra → Agrupaciones."); return; }
     setPensando(true); setError("");
 
-    if (actividades.length) {
-      await supabase.from("cronograma_dependencias").delete().in("actividad_id", actividades.map(a => a.id));
-      await supabase.from("cronograma_actividades").delete().eq("lead_id", lead.id);
-    }
+    const limpio = await vaciarCronograma();
+    if (limpio.error) { setPensando(false); setError(limpio.error); return; }
 
     // La duración: el plazo repartido entre las agrupaciones a prorrata de su
     // plata. Es una aproximación grosera y se nota —esa es la idea: un número
@@ -499,6 +507,97 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     await cargar();
   }
 
+  /**
+   * Vaciar el cronograma en la base, y comprobar que se vació.
+   *
+   * ACÁ NACIÓ EL CRONOGRAMA DUPLICADO. Esto estaba escrito dos veces y las dos
+   * adentro de un `if (actividades.length)`: o sea, se le preguntaba al ESTADO
+   * DE LA PANTALLA si en la base había algo. Si la pantalla todavía no había
+   * recargado —o si alguien apretó el botón dos veces— el estado decía que no
+   * había nada, el borrado se saltaba, y el armado agregaba un SEGUNDO juego
+   * completo encima del primero. Dos barras por agrupación, cada una con peso
+   * 100: de ahí el "reparten 200%" y el aviso falso de "-50% de monto".
+   *
+   * Lo que hay en la base no se deduce de lo que la pantalla recuerda: se le
+   * pregunta a la base. Y se comprueba que el borrado haya borrado, porque un
+   * DELETE que no tocó ninguna fila vuelve sin error.
+   */
+  async function vaciarCronograma() {
+    const { data: previas, error } = await supabase.from("cronograma_actividades")
+      .select("id").eq("lead_id", lead.id);
+    if (error) return { error: error.message };
+    if (!previas?.length) return { borradas: 0 };
+
+    await supabase.from("cronograma_dependencias").delete().in("actividad_id", previas.map(a => a.id));
+    const { data: borradas, error: e2 } = await supabase.from("cronograma_actividades")
+      .delete().eq("lead_id", lead.id).select("id");
+    if (e2) return { error: e2.message };
+    if ((borradas?.length || 0) < previas.length) {
+      return { error: "No se pudo borrar el cronograma anterior: la base dejó filas sin tocar." };
+    }
+    return { borradas: borradas.length };
+  }
+
+  /**
+   * Quitar las barras repetidas: dos de la misma agrupación y el mismo momento.
+   *
+   * Una agrupación puede tener varias barras —anticipo, fabricación,
+   * instalación— y eso es correcto. Lo que no existe es la misma agrupación
+   * con dos "ejecución": son la misma cosa dibujada dos veces, y su efecto no
+   * es solo visual. Cada una lleva peso 100, así que el rubro reparte 200% y
+   * el valorado le pone el doble de la plata que tiene.
+   *
+   * Se queda la primera —la que probablemente tenga las dependencias que
+   * alguien armó— y las demás le ceden lo suyo antes de irse: sus
+   * dependencias se reapuntan a la que queda, para no romper la cadena.
+   */
+  async function quitarRepetidas() {
+    const porClave = new Map();
+    [...actividades].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0) || a.id - b.id).forEach(a => {
+      const k = `${a.obra_actividad_id || 0}·${a.etapa || "ejecucion"}`;
+      if (!porClave.has(k)) porClave.set(k, []);
+      porClave.get(k).push(a);
+    });
+    const sobran = [...porClave.values()].filter(g => g.length > 1);
+    if (!sobran.length) { setError("No hay barras repetidas."); return; }
+
+    const cuantas = sobran.reduce((t, g) => t + g.length - 1, 0);
+    if (!window.confirm(
+      `Hay ${cuantas} ${cuantas === 1 ? "barra repetida" : "barras repetidas"}: la misma agrupación dibujada dos ` +
+      "veces en el mismo momento.\n\n¿Las quito? De cada par se queda una, y lo que dependía de la que se va queda " +
+      "colgando de la que queda.")) return;
+
+    setPensando(true);
+    for (const grupo of sobran) {
+      const [queda, ...fuera] = grupo;
+      for (const a of fuera) {
+        // Lo que colgaba de la repetida pasa a colgar de la que queda, y lo
+        // que ella esperaba también. Borrarlas sin esto corta la cadena en
+        // silencio y el cronograma se acorta solo.
+        await supabase.from("cronograma_dependencias")
+          .update({ depende_de_id: queda.id }).eq("depende_de_id", a.id);
+        await supabase.from("cronograma_dependencias")
+          .update({ actividad_id: queda.id }).eq("actividad_id", a.id);
+        await supabase.from("cronograma_actividades").delete().eq("id", a.id);
+      }
+      // El peso vuelve a ser el de una sola.
+      if (queda.peso_pct != null) {
+        await supabase.from("cronograma_actividades").update({ peso_pct: 100 }).eq("id", queda.id);
+      }
+    }
+    // Y se limpian las que se quedaron apuntándose a sí mismas, que es lo que
+    // pasa cuando las dos de un par estaban encadenadas entre ellas.
+    const { data: deps } = await supabase.from("cronograma_dependencias")
+      .select("id,actividad_id,depende_de_id");
+    const suicidas = (deps || []).filter(d => d.actividad_id === d.depende_de_id);
+    if (suicidas.length) {
+      await supabase.from("cronograma_dependencias").delete().in("id", suicidas.map(d => d.id));
+    }
+    setPensando(false); setError("");
+    await cargar();
+    await refrescarMontoRef();
+  }
+
   /** Borrarlo entero y empezar de nuevo. */
   async function borrarTodo() {
     if (!window.confirm(
@@ -506,10 +605,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       `Se van las ${actividades.length} actividades con sus dependencias, sus traslapes y sus etapas. ` +
       "No se puede deshacer.\n\nEl control de obra y el presupuesto no se tocan.")) return;
     setPensando(true);
-    if (actividades.length) {
-      await supabase.from("cronograma_dependencias").delete().in("actividad_id", actividades.map(a => a.id));
-      await supabase.from("cronograma_actividades").delete().eq("lead_id", lead.id);
-    }
+    const limpio = await vaciarCronograma();
+    if (limpio.error) { setPensando(false); setError(limpio.error); return; }
     setPensando(false); setError("");
     await cargar();
   }
@@ -1143,6 +1240,14 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 <Button variant="primary" size="sm" disabled={pensando} onClick={sincronizarConElControl}>
                   Ponerlo al día con el control
                 </Button>
+                {/* Solo cuando hay algo que arreglar: un botón que casi
+                    nunca hace falta, ofrecido siempre, es un botón que alguien
+                    aprieta por curiosidad el día equivocado. */}
+                {repetidas > 0 && (
+                  <Button variant="primary" size="sm" disabled={pensando} onClick={quitarRepetidas}>
+                    Quitar {repetidas} {repetidas === 1 ? "barra repetida" : "barras repetidas"}
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" disabled={pensando} onClick={encadenarTodo}>
                   Encadenar todo en orden
                 </Button>

@@ -247,7 +247,8 @@ export default function TablaGantt({
                         title="Las etapas de un rubro tienen que repartirse el 100% de su plata. Así como está, el valorado no cuadra con el presupuesto. Tocá para cerrarlo en la etapa más grande."
                         style={{ fontSize: 9, fontWeight: 700, color: colors.warning, background: colors.warningSoft,
                           border: `1px solid ${colors.warningBorder}`, borderRadius: 9, padding: "1px 7px",
-                          cursor: editable ? "pointer" : "default", flexShrink: 0, fontFamily: colors.font }}>
+                          cursor: editable ? "pointer" : "default", flexShrink: 3, minWidth: 0, maxWidth: 130,
+                          overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontFamily: colors.font }}>
                         reparten {Math.round(pesos)}% · cuadrar
                       </button>
                     )}
