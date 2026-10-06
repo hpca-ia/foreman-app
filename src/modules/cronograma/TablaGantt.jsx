@@ -65,7 +65,7 @@ export default function TablaGantt({
   porId, cal, plan, escala, zoom, marcas = [], editable, conEtapas,
   uniendo, setUniendo, hoyISO, dia,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro,
-  rubros = [], sinSenalar, onSenalar, onCuadrarReparto,
+  rubros = [], sinSenalar, onSenalar, onCuadrarReparto, platas = null,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -191,8 +191,14 @@ export default function TablaGantt({
         const plegado = plegados.has(g.id);
         const misRubros = rubrosDe.get(g.id) || [];
         const senalados = misRubros.filter(r => r.crono_senalado);
-        const pesos = g.hijas.reduce((t, a) => t + Number(a.peso_pct ?? 100), 0);
-        const malReparto = g.id && g.hijas.length > 1 && Math.abs(pesos - 100) > 0.01;
+        // El aviso de reparto es solo para las barras que van por porcentaje.
+        // Las que tienen sus rubros asignados no reparten nada: su plata es la
+        // suma de lo que llevan adentro, y por construcción las partes suman
+        // el capítulo. Avisar ahí sería avisar de un problema que no existe.
+        const conRubros = g.hijas.filter(a => platas?.asignados?.get(a.id));
+        const porPeso = g.hijas.filter(a => !platas?.asignados?.get(a.id));
+        const pesos = porPeso.reduce((t, a) => t + Number(a.peso_pct ?? 100), 0);
+        const malReparto = g.id && g.hijas.length > 1 && !conRubros.length && Math.abs(pesos - 100) > 0.01;
 
         return (
           <div key={g.id}>
@@ -324,9 +330,15 @@ export default function TablaGantt({
                             </span>
                           )}
                         </button>
-                        {etapa && !g.simple && (
+                        {/* Lo que lleva esta barra. Cuando sale de rubros
+                            asignados se dice así —"$30.000 · 12 rubros"— y no
+                            en porcentaje: el porcentaje es un número que
+                            alguien inventó, la suma de los rubros es el dato. */}
+                        {!g.simple && platas && (
                           <span style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>
-                            {a.peso_pct != null ? `${a.peso_pct}%` : ""}
+                            {platas.asignados?.get(a.id)
+                              ? `$${Math.round(platas.porActividad.get(a.id) || 0).toLocaleString("es-EC")} · ${platas.asignados.get(a.id)} rubros`
+                              : (a.peso_pct != null ? `${a.peso_pct}%` : "")}
                           </span>
                         )}
                         {deps.length > 0 && (
@@ -537,8 +549,11 @@ export default function TablaGantt({
                 <div style={{ position: "sticky", left: 0, width: "min(820px, calc(100vw - 150px))", padding: "10px 13px" }}>
                   <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, marginBottom: 7 }}>
                     Los <strong style={{ color: colors.inkSoft }}>{misRubros.length} rubros</strong> de {g.nombre}.
-                    Señalá el que está trabando al grupo: el cronograma deja de decir que falta todo el rubro y pasa a
-                    decir qué falta. {sinSenalar && <span style={{ color: colors.warning }}>Falta correr la migración 085.</span>}
+                    {g.hijas.length > 1 && <> Decí <strong style={{ color: colors.inkSoft }}>en qué parte va cada uno</strong>:
+                      la plata de cada barra pasa a ser la suma de sus rubros, en vez de un porcentaje. Las fechas y las
+                      dependencias siguen siendo de la barra — un rubro no se encadena, se encadena la barra donde va.</>}
+                    {" "}Y señalá el que esté trabando al grupo: el cronograma deja de decir que falta todo el rubro y
+                    pasa a decir qué falta. {sinSenalar && <span style={{ color: colors.warning }}>Falta correr la migración 085.</span>}
                   </div>
                   <div style={{ maxHeight: 240, overflowY: "auto", display: "grid", gap: 3 }}>
                     {misRubros.map(r => (
@@ -556,6 +571,24 @@ export default function TablaGantt({
                         </label>
                         {/* Por qué falta. Un pendiente sin motivo obliga a
                             preguntar, que es justo lo que esto viene a evitar. */}
+                        {/* A QUÉ PARTE VA ESTE RUBRO.
+                            Solo cuando el capítulo está partido: con una sola
+                            barra no hay nada que elegir. Y el rubro no lleva
+                            fechas ni dependencias propias —eso es de la barra—:
+                            acá solo se dice en cuál de las barras va su plata. */}
+                        {g.hijas.length > 1 && editable && (
+                          <select value={r.crono_actividad_id || ""}
+                            onChange={e => onSenalar(r, { crono_actividad_id: e.target.value ? Number(e.target.value) : null })}
+                            title="En qué parte del capítulo va este rubro. Su plata se suma a esa barra."
+                            style={{ ...inputStyle, width: "auto", maxWidth: 190, padding: "2px 5px", fontSize: 10.5, height: 22 }}>
+                            <option value="">— repartido por porcentaje —</option>
+                            {g.hijas.map(h => (
+                              <option key={h.id} value={h.id}>
+                                {(h.etapa && h.etapa !== "ejecucion" ? ETAPAS[h.etapa] : h.nombre.split(" · ").slice(1).join(" · ") || h.nombre).slice(0, 34)}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                         {r.crono_senalado && editable && (
                           <input defaultValue={r.crono_nota || ""} placeholder="¿por qué falta? ej: llega en el embarque de noviembre"
                             onBlur={e => { if ((e.target.value || "") !== (r.crono_nota || "")) onSenalar(r, { crono_nota: e.target.value || null }); }}

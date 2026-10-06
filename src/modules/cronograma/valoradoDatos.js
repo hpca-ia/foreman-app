@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { repartirEntre, repartirParejo, mesesDe, pesosDeTramo } from "./valorado";
 import { ETAPAS } from "./cpm";
+import { plataDelPlan } from "./plataDelPlan";
 
 // Leer y guardar el cronograma valorado.
 //
@@ -241,15 +242,13 @@ export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], 
   const { data: ags } = await supabase.from("obra_actividades")
     .select("id,nombre,codigo,orden").eq("obra_id", obra.id).order("orden");
   const { data: rubros } = await supabase.from("obra_rubros")
-    .select("actividad_id,total_base,anulado_por_oc").eq("obra_id", obra.id);
+    .select("actividad_id,total_base,anulado_por_oc,crono_actividad_id").eq("obra_id", obra.id);
 
-  // Sin los anulados por una orden de cambio: es lo que suma el control, y si
-  // acá se sumara distinto las dos pantallas dirían dos totales de lo mismo.
-  const plata = new Map();
-  (rubros || []).filter(r => !r.anulado_por_oc).forEach(r => {
-    if (r.actividad_id == null) return;
-    plata.set(Number(r.actividad_id), (plata.get(Number(r.actividad_id)) || 0) + (Number(r.total_base) || 0));
-  });
+  // La misma cuenta que el cronograma: de los rubros asignados cuando los hay,
+  // del porcentaje cuando no, y sin los anulados por una orden de cambio. Un
+  // solo lugar donde se decide cuánta plata lleva una barra, para que las dos
+  // pantallas no digan dos totales de lo mismo.
+  const { porActividad, porAgrupacion } = plataDelPlan(actividadesPlan, rubros || []);
   const agDe = new Map((ags || []).map(a => [Number(a.id), a]));
 
   const conPlan = actividadesPlan.filter(a => a.obra_actividad_id && a.inicio && a.fin);
@@ -276,15 +275,6 @@ export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], 
 
   const filas = conPlan.map((a, i) => {
     const k = Number(a.obra_actividad_id);
-    const total = plata.get(k) || 0;
-    const suyo = Number(a.peso_pct) || 0;
-    const deLaAgrup = pesoTotal.get(k) || 0;
-    // Sin pesos declarados —cronograma viejo o editado a mano— la agrupación
-    // se parte en partes iguales entre sus actividades.
-    const parte = deLaAgrup > 0
-      ? suyo / deLaAgrup
-      : 1 / conPlan.filter(x => Number(x.obra_actividad_id) === k).length;
-
     const ag = agDe.get(k);
     return {
       cronograma_id: cronograma.id,
@@ -293,7 +283,7 @@ export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], 
       descripcion: a.etapa && a.etapa !== "ejecucion"
         ? `${ag?.nombre || a.nombre} · ${ETAPAS[a.etapa] || a.etapa}`
         : (ag?.nombre || a.nombre),
-      monto: Math.round(total * parte * 100) / 100,
+      monto: Math.round((porActividad.get(a.id) || 0) * 100) / 100,
       pesos: pesosDeTramo(a.inicio, a.fin, columnas, trabaja),
       orden: i,
     };
@@ -302,7 +292,7 @@ export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], 
   // Las agrupaciones con plata que el cronograma no nombra.
   const enPlan = new Set(conPlan.map(a => Number(a.obra_actividad_id)));
   const parejo = repartirParejo(meses);
-  [...plata.entries()].filter(([id, monto]) => monto > 0 && !enPlan.has(id)).forEach(([id, monto], j) => {
+  [...porAgrupacion.entries()].filter(([id, monto]) => id && monto > 0 && !enPlan.has(id)).forEach(([id, monto], j) => {
     const ag = agDe.get(id);
     filas.push({
       cronograma_id: cronograma.id,
@@ -321,7 +311,7 @@ export async function valoradoDelCronograma({ lead, obra, actividadesPlan = [], 
     if (e) return { error: "El valorado se creó pero fallaron las líneas: " + e.message };
   }
 
-  const presupuesto = [...plata.values()].reduce((t, m) => t + m, 0);
+  const presupuesto = [...porAgrupacion.values()].reduce((t, m) => t + m, 0);
   const puesto = filas.reduce((t, f) => t + f.monto, 0);
   return {
     cronograma,

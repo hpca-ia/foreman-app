@@ -13,6 +13,7 @@ import TablaGantt from "./TablaGantt";
 const PanelValorado = lazy(() => import("./PanelValorado"));
 import PartirEnEtapas from "./PartirEnEtapas";
 import { guardarPlazo, desfase, diasDelPlazo } from "./plazo";
+import { plataDelPlan } from "./plataDelPlan";
 import { fmt } from "../controlObra/calculos";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
@@ -116,7 +117,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       // presupuesto, y hace falta para leerlo: "VENTANERÍA" dice poco si no se
       // ve que es de CARPINTERÍA METÁLICA.
       let { data: rub, error: eRub } = await supabase.from("obra_rubros")
-        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,anulado_por_oc,crono_senalado,crono_nota")
+        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,anulado_por_oc,crono_senalado,crono_nota,crono_actividad_id")
         .eq("obra_id", lead.obra_id).order("orden");
       // Sin la 085 no existen esas dos columnas: se lee sin ellas y todo sigue
       // andando, solo que no se puede señalar qué rubro está trabando.
@@ -273,6 +274,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     });
     return n;
   })();
+
+  // La plata de cada barra. Sale de los rubros que se le asignaron cuando los
+  // tiene, y del porcentaje del capítulo cuando no. Una sola cuenta, para que
+  // el Gantt, el valorado y la foto de referencia digan lo mismo.
+  const platas = plataDelPlan(actividades, rubros);
 
   const diasDeContrato = diasDelPlazo(lead.crono_inicio || hoy(), lead.crono_meses, cal);
   const desvio = diasDeContrato && todas.length ? plan.duracion - diasDeContrato : 0;
@@ -648,18 +654,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
    */
   async function refrescarMontoRef(lista) {
     const actuales = lista || actividades;
-    const cuantas = new Map();
-    actuales.forEach(a => {
-      const k = Number(a.obra_actividad_id);
-      if (k) cuantas.set(k, (cuantas.get(k) || 0) + (Number(a.peso_pct ?? 100) || 0));
-    });
+    const { porActividad } = plataDelPlan(actuales, rubros);
     for (const a of actuales) {
-      const k = Number(a.obra_actividad_id);
-      if (!k) continue;
-      const total = plata[k] || 0;
-      const suyo = Number(a.peso_pct ?? 100) || 0;
-      const base = cuantas.get(k) || 100;
-      const ref = Math.round((total * (base > 0 ? suyo / base : 1)) * 100) / 100;
+      if (!a.obra_actividad_id) continue;
+      const ref = Math.round((porActividad.get(a.id) || 0) * 100) / 100;
       const { error: e } = await supabase.from("cronograma_actividades")
         .update({ monto_ref: ref }).eq("id", a.id);
       // Sin la 086 no existe la columna: se sigue sin ella, y lo único que se
@@ -1407,7 +1405,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
           onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
-          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro} onCuadrarReparto={cuadrarReparto} />
+          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro} onCuadrarReparto={cuadrarReparto}
+          platas={platas} />
       )}
 
       {editable && (
