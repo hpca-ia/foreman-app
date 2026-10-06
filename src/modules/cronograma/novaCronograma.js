@@ -25,6 +25,13 @@ import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
 
 const n = v => Number(v) || 0;
 
+// El sufijo que distingue las barras de un mismo rubro. Corto a propósito: el
+// nombre de la agrupación ya ocupa su lugar y es el que tiene que leerse.
+const ETAPA_CORTA = {
+  anticipo: "anticipo", fabricacion: "fabricación", entrega: "entrega",
+  instalacion: "instalación", ejecucion: "",
+};
+
 // Las unidades escritas de veinte maneras son la misma unidad. Sin esto, los
 // 800 m2 de una obra salen como "600 M2 · 150 m² · 50 mt2" y dejan de sumar.
 const UNIDAD = u => {
@@ -142,10 +149,19 @@ Devuelves SOLO JSON, sin markdown:
  "dependencias":[{"de":1,"a":2,"tipo":"FC","retardo":0,"porque":"..."},
                  {"de":2,"a":3,"tipo":"FC","retardo":-5,"porque":"la mampostería entra antes de que termine la estructura"}]}
 
-ACTIVIDADES: partí cada agrupación en una a cuatro actividades según su peso y
-su naturaleza. Una agrupación de 200 mil no es una barra sola. "duracion" en
-días HÁBILES. "ref" es un número tuyo, de 1 en adelante, para referirte a ellas
-en las dependencias. "agrupacion_id" es el id de la agrupación de la que sale.
+LAS ACTIVIDADES SON LAS AGRUPACIONES. Ni una más ni una menos. No inventes
+otras, no las renombres, no las partas en pedazos de tu cosecha ni juntes dos
+en una. Esa lista la armó la oficina a mano en el control de obra y es contra
+la que se planilla, se factura y se pide plata: si el cronograma dice otra
+cosa, los dos documentos dejan de poder compararse y no sirve ninguno.
+
+Una actividad por agrupación, con SU nombre y SU id. La única división
+permitida es por ETAPAS —momentos separados en el tiempo de esa misma
+agrupación— y solo cuando de verdad ocurren separados.
+
+"duracion" en días HÁBILES. "ref" es un número tuyo, de 1 en adelante, para
+referirte a ellas en las dependencias. "agrupacion_id" es obligatorio y sale de
+la lista de arriba.
 
 LA DURACIÓN SALE DE LA CANTIDAD, NO DE LA PLATA. Esto es lo más importante de
 todo lo que sigue. Diez metros de pintura y mil metros de pintura pueden costar
@@ -180,9 +196,9 @@ cada una se lleva una parte del dinero.
   "etapa": anticipo | fabricacion | entrega | instalacion | ejecucion
   "peso": qué porcentaje de la plata de SU agrupación le toca a esta actividad.
 
-Las actividades de una misma agrupación tienen que sumar 100 de peso. Lo que se
-ejecuta y se paga mientras se hace es una sola actividad con etapa "ejecucion"
-y peso 100 — ese es el caso normal y no hay que partirlo.
+Las etapas de una misma agrupación tienen que sumar 100 de peso. Lo que se
+ejecuta y se paga mientras se hace es UNA sola actividad con etapa "ejecucion"
+y peso 100 — ese es el caso normal, es la mayoría, y no hay que partirlo.
 
 Para lo importado o fabricado, partilo de verdad: el anticipo es una actividad
 CORTA (uno o dos días, es un pago) y va MESES antes de la instalación; entre
@@ -259,18 +275,69 @@ holgura.
  */
 export function ordenar(p, agrupaciones, cal) {
   const porAgrup = new Map(agrupaciones.map(a => [Number(a.id), a]));
+
+  // EL CRONOGRAMA ES EL ESPEJO DE LAS AGRUPACIONES, y eso no se le pide a
+  // NOVA: se hace cumplir acá.
+  //
+  // Un prompt es una instrucción, no una garantía. Si NOVA inventa una
+  // actividad, renombra una agrupación o se olvida de otra, el cronograma deja
+  // de poder compararse con el control de obra —que es contra lo que se
+  // planilla y se factura— y los dos documentos se vuelven inútiles a la vez.
+  //
+  // Así que lo que vuelve se usa para lo que NOVA sí sabe —el orden, la
+  // duración, qué traba a qué, qué conviene partir en etapas— y la LISTA la
+  // pone el control de obra:
+  //
+  //   · lo que no apunta a una agrupación de verdad, se tira;
+  //   · el nombre lo pone la agrupación, no NOVA;
+  //   · la agrupación que NOVA se olvidó, entra igual.
+  const inventadas = (p.actividades || []).filter(a => !porAgrup.has(Number(a.agrupacion_id))).length;
+
   const actividades = (p.actividades || [])
-    .filter(a => String(a.nombre || "").trim())
-    .map((a, i) => ({
-      ref: Number(a.ref) || i + 1,
-      nombre: String(a.nombre).trim().slice(0, 120),
-      duracion: Math.max(1, Math.round(n(a.duracion)) || 5),
-      etapa: ["anticipo", "fabricacion", "entrega", "instalacion", "ejecucion"].includes(a.etapa) ? a.etapa : "ejecucion",
-      peso: n(a.peso),
-      agrupacion_id: porAgrup.has(Number(a.agrupacion_id)) ? Number(a.agrupacion_id) : null,
-      porque: a.porque || "",
-      orden: i,
-    }));
+    .filter(a => porAgrup.has(Number(a.agrupacion_id)))
+    .map((a, i) => {
+      const g = porAgrup.get(Number(a.agrupacion_id));
+      const etapa = ["anticipo", "fabricacion", "entrega", "instalacion", "ejecucion"].includes(a.etapa) ? a.etapa : "ejecucion";
+      return {
+        ref: Number(a.ref) || i + 1,
+        // El nombre es el de la agrupación. La etapa se agrega como sufijo
+        // para distinguir las barras de un mismo rubro, y nada más.
+        nombre: (etapa === "ejecucion" ? g.nombre : `${g.nombre} · ${ETAPA_CORTA[etapa]}`).slice(0, 120),
+        duracion: Math.max(1, Math.round(n(a.duracion)) || 5),
+        etapa,
+        peso: n(a.peso),
+        agrupacion_id: Number(a.agrupacion_id),
+        porque: a.porque || "",
+        orden: i,
+      };
+    });
+
+  // Las que faltan, en el orden del control de obra. Con una duración que
+  // alguien va a tener que corregir, y es correcto que se note: mejor una
+  // barra fea y presente que un rubro que desapareció del plan.
+  let proximaRef = Math.max(0, ...actividades.map(a => a.ref)) + 1;
+  const puestas = new Set(actividades.map(a => a.agrupacion_id));
+  const olvidadas = agrupaciones.filter(g => !puestas.has(Number(g.id)));
+  olvidadas.forEach(g => {
+    actividades.push({
+      ref: proximaRef++, nombre: String(g.nombre).slice(0, 120),
+      duracion: 10, etapa: "ejecucion", peso: 100,
+      agrupacion_id: Number(g.id),
+      porque: "NOVA no la puso en su propuesta; entró del control de obra con una duración a revisar.",
+      orden: actividades.length,
+    });
+  });
+
+  // En el orden del control de obra, que es el que la oficina ya decidió. Lo
+  // que viene después —moverlas al orden real de trabajo— se hace en el
+  // cronograma, a mano, que es donde se sabe.
+  const ordenDe = new Map(agrupaciones.map((g, i) => [Number(g.id), g.orden ?? i]));
+  actividades.sort((a, b) => {
+    const d = (ordenDe.get(a.agrupacion_id) ?? 0) - (ordenDe.get(b.agrupacion_id) ?? 0);
+    return d !== 0 ? d : a.orden - b.orden;
+  });
+  actividades.forEach((a, i) => { a.orden = i; });
+
   const refs = new Set(actividades.map(a => a.ref));
 
   // Los pesos de cada agrupación tienen que cerrar en 100: si no, la plata de
@@ -322,6 +389,9 @@ export function ordenar(p, agrupaciones, cal) {
         dias: plan.duracion,
         criticas: plan.ruta.length,
         quitadas: intento - 1,
+        // Lo que hubo que corregirle. Se muestra: si NOVA se desvía seguido,
+        // es el prompt el que hay que arreglar, y eso solo se ve si se cuenta.
+        inventadas, olvidadas: olvidadas.length,
       };
     }
     const enCiclo = new Set(plan.ciclos);

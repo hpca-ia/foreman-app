@@ -60,6 +60,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [agrupaciones, setAgrupaciones] = useState([]);
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
+  // Los rubros de la obra, para poder señalar cuál es el que está trabando a
+  // su grupo.
+  const [rubros, setRubros] = useState([]);
+  const [sinSenalar, setSinSenalar] = useState(false);
   // La actividad que se está partiendo en etapas, si hay alguna.
   const [partiendo, setPartiendo] = useState(null);
   // La 082 todavía no corrió en esta base.
@@ -99,17 +103,43 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     if (lead.obra_id) {
       const { data: ags } = await supabase.from("obra_actividades")
         .select("id,nombre,codigo,orden,extra").eq("obra_id", lead.obra_id).order("orden");
-      setAgrupaciones(ags || []);
-      // La plata de cada agrupación: es lo que convierte este cronograma en
-      // uno valorado. Sin ella las barras dicen cuándo, y no cuánto.
-      const { data: rub } = await supabase.from("obra_rubros")
-        .select("actividad_id,total_base").eq("obra_id", lead.obra_id);
+      // La plata y el capítulo de cada agrupación. La plata es lo que
+      // convierte este cronograma en uno valorado —sin ella las barras dicen
+      // cuándo y no cuánto—. El capítulo es de dónde sale ese rubro en el
+      // presupuesto, y hace falta para leerlo: "VENTANERÍA" dice poco si no se
+      // ve que es de CARPINTERÍA METÁLICA.
+      let { data: rub, error: eRub } = await supabase.from("obra_rubros")
+        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,crono_senalado,crono_nota")
+        .eq("obra_id", lead.obra_id).order("orden");
+      // Sin la 085 no existen esas dos columnas: se lee sin ellas y todo sigue
+      // andando, solo que no se puede señalar qué rubro está trabando.
+      if (eRub) {
+        ({ data: rub } = await supabase.from("obra_rubros")
+          .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo")
+          .eq("obra_id", lead.obra_id).order("orden"));
+      }
+      setSinSenalar(!!eRub);
+      setRubros(rub || []);
+
       const m = {};
+      const caps = new Map();
       (rub || []).forEach(r => {
         if (r.actividad_id == null) return;
+        if (!caps.has(r.actividad_id)) caps.set(r.actividad_id, new Set());
+        if (r.capitulo) caps.get(r.actividad_id).add(r.capitulo);
+        // Señalar un rubro NO lo saca del grupo: la barra sigue siendo la del
+        // grupo, con toda su plata. Lo único que cambia es que se puede decir
+        // qué falta en vez de dar el rubro entero por pendiente.
         m[r.actividad_id] = (m[r.actividad_id] || 0) + (Number(r.total_base) || 0);
       });
       setPlata(m);
+      // Una agrupación puede cruzar capítulos a propósito —"muebles" toca
+      // carpintería, herrajes e instalación— y en ese caso decir uno solo
+      // sería mentir. Se dice cuántos cruza.
+      setAgrupaciones((ags || []).map(a => {
+        const c = [...(caps.get(a.id) || [])];
+        return { ...a, capitulo: c.length === 1 ? c[0] : null, capitulos: c.length };
+      }));
     }
     if (act?.length) {
       const { data: dep } = await supabase.from("cronograma_dependencias")
@@ -346,6 +376,71 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       anterior = creada.id;
     }
     setPartiendo(null);
+    await cargar();
+  }
+
+  /**
+   * Mover un rubro entero arriba o abajo en el cronograma.
+   *
+   * El cronograma nace en el orden del control de obra, que es el que la
+   * oficina ya decidió. Pero el orden del presupuesto no es el orden de
+   * trabajo: el presupuesto se escribe por capítulos y la obra se hace por
+   * frentes. Así que acá se reordena, y ese orden es del cronograma — no toca
+   * el control de obra, que se lee de otra manera y por otra gente.
+   */
+  async function moverRubro(ids, direccion) {
+    // El orden actual de los rubros, tal como se ven.
+    const grupos = [];
+    const vistos = new Set();
+    [...actividades].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0)).forEach(a => {
+      const k = a.obra_actividad_id || 0;
+      if (vistos.has(k)) return;
+      vistos.add(k); grupos.push(k);
+    });
+    const i = grupos.indexOf(ids);
+    const j = i + direccion;
+    if (i < 0 || j < 0 || j >= grupos.length) return;
+    [grupos[i], grupos[j]] = [grupos[j], grupos[i]];
+
+    // Reescribir el orden de todas: dentro de cada rubro se respeta el que
+    // tenían, que es el de sus etapas.
+    let pos = 0;
+    for (const k of grupos) {
+      const suyas = actividades.filter(a => (a.obra_actividad_id || 0) === k)
+        .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+      for (const a of suyas) {
+        await supabase.from("cronograma_actividades").update({ orden: pos++ }).eq("id", a.id);
+      }
+    }
+    await cargar();
+  }
+
+  /**
+   * Señalar, dentro de un grupo, el rubro que de verdad está pendiente.
+   *
+   * El grupo se atrasa por UNA cosa: están todas las lámparas instaladas menos
+   * una, y el cronograma dice "LÁMPARAS: pendiente". Quien lo lee —y sobre
+   * todo el cliente— entiende que falta el rubro entero, que es falso y es
+   * caro: genera una llamada, una reunión y una desconfianza que no
+   * correspondían.
+   *
+   * NO le da barra propia ni lo saca del grupo. El cronograma trae
+   * exclusivamente las agrupaciones del control de obra, y eso no se toca:
+   * agregar barras de rubro rompería justamente lo que hace que el cronograma
+   * y el control se puedan comparar. Lo único que cambia es que el grupo deja
+   * de decir "pendiente" a secas y pasa a decir QUÉ falta.
+   */
+  async function senalarRubro(rubro, campos) {
+    setError("");
+    const { data, error: e } = await supabase.from("obra_rubros")
+      .update(campos).eq("id", rubro.id).select();
+    if (e) {
+      setError(/column|schema cache/i.test(e.message)
+        ? "Falta correr la migración 085 para señalar un rubro."
+        : e.message);
+      return;
+    }
+    if (!data?.length) { setError("No se pudo guardar: la base no dejó tocar ese rubro."); return; }
     await cargar();
   }
 
@@ -724,8 +819,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           hace es rehacerlo solo —un cronograma con avance cargado y fechas
           comprometidas no se reescribe porque alguien tocó una agrupación. */}
       {todas.length > 0 && agrupaciones.length > 0 && (() => {
-        const d = desfase(actividades.map(a => a.obra_actividad_id), agrupaciones);
-        if (!d.perdidas.length && !d.nuevas.length) return null;
+        const d = desfase(actividades, agrupaciones);
+        if (!d.perdidas.length && !d.nuevas.length && !d.renombradas.length) return null;
         return (
           <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
             border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
@@ -738,6 +833,14 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     el presupuesto que no están en el cronograma: {d.nuevas.map(a => a.nombre).join(", ")}.
                   </div>
                 )}
+                {d.renombradas.length > 0 && (
+                  <div style={{ marginTop: d.nuevas.length ? 3 : 0 }}>
+                    {d.renombradas.length === 1 ? "Una actividad se llama" : `${d.renombradas.length} actividades se llaman`}{" "}
+                    distinto que su agrupación en el control de obra: la renombraron, la fusionaron, o la tocó una
+                    orden de cambio. Son las mismas cosas con dos nombres, y así los dos documentos dejan de poder
+                    compararse.
+                  </div>
+                )}
                 {d.perdidas.length > 0 && (
                   <div style={{ marginTop: d.nuevas.length ? 3 : 0 }}>
                     Y {d.perdidas.length} {d.perdidas.length === 1 ? "actividad apunta" : "actividades apuntan"} a
@@ -746,6 +849,23 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 )}
               </div>
             </div>
+            {d.renombradas.length > 0 && editable && (
+              <Button variant="primary" size="sm" disabled={pensando} style={{ marginRight: 6 }} onClick={async () => {
+                setPensando(true);
+                // Solo el nombre. La duración, el orden y las dependencias son
+                // decisiones del cronograma y no salen del control de obra:
+                // pisarlas sería rehacer el plan por un cambio de etiqueta.
+                const porId2 = new Map(agrupaciones.map(g => [Number(g.id), g]));
+                for (const a of d.renombradas) {
+                  const g = porId2.get(Number(a.obra_actividad_id));
+                  const sufijo = String(a.nombre).includes(" · ") ? ` · ${String(a.nombre).split(" · ").slice(1).join(" · ")}` : "";
+                  await supabase.from("cronograma_actividades")
+                    .update({ nombre: `${g.nombre}${sufijo}`.slice(0, 120) }).eq("id", a.id);
+                }
+                setPensando(false);
+                await cargar();
+              }}>Traer los nombres del control</Button>
+            )}
             {d.nuevas.length > 0 && editable && (
               <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
                 // Al final y sin encadenar: dónde van en el orden lo sabe quien
@@ -796,7 +916,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           editable={editable} conEtapas={conEtapas}
           uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
           onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
-          onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} />
+          onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
+          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro} />
       )}
 
       {editable && (

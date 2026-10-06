@@ -112,13 +112,33 @@ export async function cargarPlan(leadId) {
  * @param conAgrupacion ids de agrupación que el cronograma ya usa
  * @param agrupaciones  las que existen hoy en la obra
  */
-export function desfase(conAgrupacion = [], agrupaciones = []) {
+export function desfase(actividades = [], agrupaciones = []) {
   const hoy = new Map(agrupaciones.map(a => [Number(a.id), a]));
-  const usadas = new Set(conAgrupacion.map(Number).filter(Boolean));
+  // Acepta tanto una lista de ids como las actividades enteras: la primera
+  // forma la usaba la pantalla antes de que hiciera falta mirar los nombres.
+  const filas = actividades.map(a => (typeof a === "object" && a !== null ? a : { obra_actividad_id: a }));
+  const usadas = new Set(filas.map(a => Number(a.obra_actividad_id)).filter(Boolean));
+
+  // EL NOMBRE SE QUEDÓ VIEJO.
+  //
+  // Alguien renombra una agrupación en el control de obra —o la fusiona con
+  // otra, o una orden de cambio la toca— y el cronograma sigue diciendo el
+  // nombre de antes. Las dos cosas son la misma y se llaman distinto, que es
+  // exactamente el problema que estos dos documentos tienen que no tener.
+  //
+  // Se compara contra el nombre pelado: las etapas llevan sufijo —"VENTANERÍA
+  // · anticipo"— y eso no es un desfase, es cómo se escriben.
+  const renombradas = filas.filter(a => {
+    const g = hoy.get(Number(a.obra_actividad_id));
+    if (!g || !a.nombre) return false;
+    return String(a.nombre).split(" · ")[0].trim() !== String(g.nombre).trim();
+  });
+
   return {
     // Se borró la agrupación y quedaron actividades o líneas colgando.
     perdidas: [...usadas].filter(id => !hoy.has(id)),
     // Se agregó una agrupación y nadie la puso en el cronograma.
     nuevas: agrupaciones.filter(a => !a.extra && !usadas.has(Number(a.id))),
+    renombradas,
   };
 }
