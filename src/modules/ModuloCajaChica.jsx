@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react";
+import { proponerCierre, cerrarCaja, cargarCierres, reabrirCierre } from "./cajaChica/cierres";
+import { inputStyle } from "../components/ui/Input";
 import { Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { subirArchivo, abrirArchivo } from "../lib/archivos";
@@ -25,6 +27,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   // la mitad de la respuesta.
   const [buscaGasto, setBuscaGasto] = useState({ texto: "", min: "", max: "" });
   const [anticipos, setAnticipos] = useState([]);
+  // Las vueltas ya rendidas de esta caja. Una caja chica no es una cuenta que
+  // corre para siempre: va por vueltas, y el abono nuevo es el acuse de que la
+  // anterior se rindió.
+  const [cierres, setCierres] = useState([]);
+  const [sinCierres, setSinCierres] = useState(false);
+  const [cerrando, setCerrando] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [novaLeyendo, setNovaLeyendo] = useState(false);
   const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", ruc:"", numero_factura:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
@@ -105,6 +113,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   }
   async function fetchGastos(id) { const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setGastos(data||[]); }
   async function fetchAnticipos(id) { const { data } = await supabase.from("cajas_anticipos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setAnticipos(data||[]); }
+  async function fetchCierres(id) { const r = await cargarCierres(id); setCierres(r.cierres); setSinCierres(r.sinTabla); }
 
   // Una caja que ya alimentó un control de obra no se borra: sus gastos son
   // facturas dentro de una planilla, y borrarlas por esta puerta dejaría el
@@ -155,7 +164,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       const { lead_id, capitulo, obra_actividad_id, ...resto } = fila;
       ({ data, error } = await supabase.from("cajas_chicas").insert(resto).select().single());
     }
-    if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setSubVista("detalle"); fetchCajas(); }
+    if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setCierres([]); setSubVista("detalle"); fetchCajas(); }
   }
 
   async function agregarAnticipo() {
@@ -451,7 +460,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
               : "Sin cajas chicas."}
           </div>
           :cajasVisibles.map(c=>(
-            <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);setSubVista("detalle");}}
+            <div key={c.id} onClick={()=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);fetchCierres(c.id);setSubVista("detalle");}}
               style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px",marginBottom:8,cursor:"pointer"}}
               onMouseEnter={e=>e.currentTarget.style.borderColor="var(--brand)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -645,6 +654,102 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                 <div style={{fontSize:11,color:"var(--danger)"}}>Johanna debe revisar y entregar más dinero</div></div>
             </div>
           )}
+          {/* CERRAR LA VUELTA.
+              Una caja chica va por vueltas: se entrega un fondo, se gasta, se
+              rinde, y recién entonces se repone. El abono nuevo ES el acuse de
+              que la anterior se rindió —nadie repone una caja que todavía no
+              le rindieron— y por eso es lo que habilita el cierre.
+              Sin esto la caja es una lista que crece sin fin: al mes cuatro
+              nadie sabe qué gastos ya se revisaron, el responsable no tiene
+              con qué probar que rindió, y una diferencia de hace tres meses se
+              discute con el listado entero abierto. */}
+          {(() => {
+            const prop = proponerCierre({ anticipos, gastos, cierres });
+            if (sinCierres) return null;
+            if (!prop.puede) return null;
+            return (
+              <div style={{background:"var(--warning-soft)",border:"1.5px solid var(--warning-border)",borderRadius:10,
+                padding:"11px 14px",marginBottom:12}}>
+                <div style={{fontSize:13,fontWeight:700,color:"var(--ink)",marginBottom:3}}>
+                  Hay una vuelta para cerrar
+                </div>
+                <div style={{fontSize:11.5,color:"var(--ink-soft)",lineHeight:1.55,marginBottom:9}}>
+                  Entró un abono de <strong>${fmt(prop.abono.monto)}</strong>
+                  {prop.abono.fecha ? ` el ${prop.abono.fecha}` : ""}, así que lo de antes ya se dio por rendido.
+                  Se cierran <strong>{prop.gastos.length}</strong> {prop.gastos.length===1?"gasto":"gastos"} por{" "}
+                  <strong>${fmt(prop.totalGastado)}</strong>, contra <strong>${fmt(prop.totalAbonado)}</strong> entregados:
+                  queda un saldo de <strong>${fmt(prop.saldo)}</strong>.
+                </div>
+                {cerrando ? (
+                  <div style={{display:"grid",gap:7}}>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+                      <div>
+                        <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>HASTA QUÉ DÍA ENTRA</label>
+                        <input type="date" value={cerrando.hasta}
+                          onChange={e=>setCerrando(c=>({...c,hasta:e.target.value}))}
+                          style={{...inputStyle,width:160,padding:"6px 9px",fontSize:12}}/>
+                      </div>
+                      <div style={{flex:1,minWidth:180}}>
+                        <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>NOTA (OPCIONAL)</label>
+                        <input value={cerrando.nota} placeholder="ej: devolvió $18 en efectivo"
+                          onChange={e=>setCerrando(c=>({...c,nota:e.target.value}))}
+                          style={{...inputStyle,padding:"6px 9px",fontSize:12}}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <button onClick={async()=>{
+                        const r = await cerrarCaja({ caja:cajaActiva, hasta:cerrando.hasta, nota:cerrando.nota,
+                          quien:currentUser, anticipos, gastos, cierres });
+                        if (r.error) { alert(r.error); return; }
+                        setCerrando(null);
+                        await fetchCierres(cajaActiva.id); await fetchGastos(cajaActiva.id); await fetchAnticipos(cajaActiva.id);
+                      }} style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",
+                        fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Cerrar la vuelta</button>
+                      <button onClick={()=>setCerrando(null)} style={{background:"none",border:"1px solid var(--border)",
+                        borderRadius:8,padding:"7px 14px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={()=>setCerrando({hasta:prop.hasta,nota:""})}
+                    style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",
+                      fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    Cerrar hasta el {prop.hasta}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Las vueltas ya rendidas. La foto de cada una, guardada: si mañana
+              alguien corrige un gasto viejo, la rendición firmada no cambia. */}
+          {cierres.length>0&&<div style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:6}}>
+              Vueltas cerradas ({cierres.length})
+            </div>
+            {cierres.map((c,i)=>(
+              <div key={c.id} style={{background:"var(--neutral-soft)",borderRadius:8,padding:"8px 12px",marginBottom:5,
+                display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:12,color:"var(--ink)"}}>
+                    Cierre {c.numero} · hasta el {c.hasta} · {c.gastos} {c.gastos===1?"gasto":"gastos"}
+                  </div>
+                  <div style={{fontSize:10,color:"var(--muted)"}}>
+                    entregado ${fmt(c.total_abonado)} · gastado ${fmt(c.total_gastado)} · saldo ${fmt(c.saldo)}
+                    {c.cerrado_nombre?` · ${c.cerrado_nombre}`:""}{c.nota?` · ${c.nota}`:""}
+                  </div>
+                </div>
+                {i===0&&puede?.("borrar.definitivo")&&(
+                  <button onClick={async()=>{
+                    if(!window.confirm(`¿Reabrir el cierre ${c.numero}?\n\nSus gastos vuelven a quedar por rendir.`))return;
+                    const e = await reabrirCierre(c);
+                    if (e) { alert(e); return; }
+                    await fetchCierres(cajaActiva.id); await fetchGastos(cajaActiva.id); await fetchAnticipos(cajaActiva.id);
+                  }} style={{background:"none",border:"none",color:"var(--muted)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>reabrir</button>
+                )}
+              </div>
+            ))}
+          </div>}
+
           {anticipos.length>0&&<div style={{marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:600,color:"#7C3AED",marginBottom:6}}>Anticipos</div>
             {anticipos.map(a=>(
