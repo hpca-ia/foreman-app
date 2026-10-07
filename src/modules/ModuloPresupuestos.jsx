@@ -503,11 +503,39 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     const fallo = res.find(r => r.error);
     if (fallo) alert("No se pudo guardar el orden: " + fallo.error.message);
   }
+  // El rubro marcado para mover de lugar, si hay alguno.
+  const [moviendo, setMoviendo] = useState(null);
+
   async function moverRubro(item, direccion) {
     const ids = items.filter(i => i.capitulo === item.capitulo).sort((a, b) => a.orden - b.orden).map(i => i.id);
     const k = ids.indexOf(item.id), j = k + direccion;
     if (k < 0 || j < 0 || j >= ids.length) return;
     [ids[k], ids[j]] = [ids[j], ids[k]];
+    await guardarOrden(numerar(capitulosActivos, items, { [item.capitulo]: ids }));
+  }
+
+  /**
+   * Mover un rubro a cualquier lugar de su capítulo, en dos toques.
+   *
+   * Con las flechas, bajar un rubro veinte lugares son veinte clics, y en un
+   * capítulo de 38 rubros eso no se hace: se deja mal ordenado. Acá se marca
+   * el que se quiere mover y se toca dónde va; la distancia da igual y la
+   * lista puede desplazarse en el medio, que es justo lo que una pantalla
+   * larga necesita y lo que arrastrar no soporta bien.
+   *
+   * Es el mismo gesto del eslabón del cronograma —marcar uno, tocar el otro—
+   * para no inventar un segundo idioma dentro de la misma app.
+   */
+  async function moverRubroJuntoA(item, destino) {
+    if (!item || !destino || item.id === destino.id) return;
+    const lista = items.filter(i => i.capitulo === item.capitulo).sort((a, b) => a.orden - b.orden);
+    const ids = lista.map(i => i.id).filter(id => id !== item.id);
+    const j = ids.indexOf(destino.id);
+    if (j < 0) return;
+    // Queda ENCIMA del que se tocó: uno mira la fila donde quiere que esté y
+    // la toca. Dejarlo debajo obliga a pensar "toco el de arriba del lugar",
+    // que es una traducción de más en cada movimiento.
+    ids.splice(j, 0, item.id);
     await guardarOrden(numerar(capitulosActivos, items, { [item.capitulo]: ids }));
   }
 
@@ -1540,6 +1568,17 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                 </div>
                 {capItems.length>0&&(
                   <div className="pres-tabla">
+                  {/* Qué está pasando, mientras pasa. Un modo invisible —en el
+                      que los botones de las filas hacen otra cosa— se nota
+                      apretando el equivocado. */}
+                  {moviendo && moviendo.capitulo===cap.nombre && (
+                    <div style={{fontSize:11.5,color:"var(--brand)",background:"var(--brand-soft)",borderRadius:7,
+                      padding:"6px 10px",marginBottom:6,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <span>Moviendo <strong>{moviendo.descripcion?.slice(0,50)}</strong>. Tocá <strong>acá</strong> en la fila donde querés que quede.</span>
+                      <button onClick={()=>setMoviendo(null)} style={{background:"none",border:"none",color:"var(--muted)",
+                        cursor:"pointer",fontFamily:"inherit",fontSize:11}}>cancelar</button>
+                    </div>
+                  )}
                   <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
                     <colgroup>
                       <col style={{width:70}}/><col/><col style={{width:64}}/><col style={{width:104}}/>
@@ -1554,15 +1593,35 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       {capItems.map(item=>{
                       const itemIdx=posEnCap.get(item.id);
                       return(
-                        <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)"}}>
+                        <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)",
+                          background: moviendo?.id===item.id ? "var(--brand-soft)" : undefined}}>
                           <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>
                             <div style={{display:"flex",alignItems:"center",gap:4}}>
                               <div style={{display:"flex",flexDirection:"column"}}>
-                                <button onClick={()=>moverRubro(item,-1)} disabled={itemIdx===0} title="Subir"
+                                <button onClick={()=>moverRubro(item,-1)} disabled={itemIdx===0} title="Subir uno"
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===0?"default":"pointer",color:itemIdx===0?"var(--border)":"var(--muted)"}}>▲</button>
-                                <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===todosDelCap.length-1} title="Bajar"
+                                <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===todosDelCap.length-1} title="Bajar uno"
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===todosDelCap.length-1?"default":"pointer",color:itemIdx===todosDelCap.length-1?"var(--border)":"var(--muted)"}}>▼</button>
                               </div>
+                              {/* MOVER LEJOS, EN DOS TOQUES.
+                                  Con las flechas, bajar un rubro veinte lugares
+                                  son veinte clics, y en un capítulo de 38 eso no
+                                  se hace: se deja mal ordenado. Se marca este y
+                                  se toca la fila donde va. */}
+                              {moviendo && moviendo.capitulo===item.capitulo && moviendo.id!==item.id ? (
+                                <button onClick={async()=>{ await moverRubroJuntoA(moviendo,item); setMoviendo(null); }}
+                                  title={`Poner «${moviendo.descripcion?.slice(0,40)}» acá`}
+                                  style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:5,
+                                    padding:"1px 6px",fontSize:9.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                                  acá
+                                </button>
+                              ) : (
+                                <button onClick={()=>setMoviendo(moviendo?.id===item.id?null:item)}
+                                  title={moviendo?.id===item.id?"Cancelar":"Moverlo de lugar: tocá esto y después la fila donde va"}
+                                  style={{background:moviendo?.id===item.id?"var(--brand)":"none",
+                                    color:moviendo?.id===item.id?"#fff":"var(--border)",border:"none",borderRadius:5,
+                                    padding:"1px 4px",fontSize:10,cursor:"pointer",fontFamily:"inherit",lineHeight:1.2}}>⇕</button>
+                              )}
                               {cap.orden}.{itemIdx+1}
                               {/* Listo o todavía en proceso. */}
                               <input type="checkbox" checked={!!item.listo} onChange={e=>actualizarItemMulti(item.id,{listo:e.target.checked})}
