@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
-import { Plus, Trash2, ChevronLeft, GanttChartSquare, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, GanttChartSquare, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -74,6 +74,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [sinSenalar, setSinSenalar] = useState(false);
   // La actividad que se está partiendo en etapas, si hay alguna.
   const [partiendo, setPartiendo] = useState(null);
+  // El menú de lo que se hace de vez en cuando: bajarlo para Project,
+  // reordenarlo, borrarlo. Afuera queda lo que uno viene a hacer.
+  const [menu, setMenu] = useState(false);
   // La 082 todavía no corrió en esta base.
   const [sinPlazo, setSinPlazo] = useState(false);
 
@@ -1140,6 +1143,14 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 entonces no hay de dónde agarrarse. Acá no hay nada que
                 adivinar: la lista son las agrupaciones del control, en su
                 orden. Crudo pero correcto, y sobre eso se trabaja. */}
+            {/* DOS ACCIONES A LA VISTA Y EL RESTO EN UN MENÚ.
+                Había siete botones en fila, varios con nombres parecidos
+                —"Ponerlo al día con el control" y "Ordenar como el control"—
+                y todos visibles siempre. Una barra así no se lee: se escanea,
+                se duda, y se termina apretando el que suena parecido.
+                Los que arreglan algo salieron de acá: aparecen DENTRO del
+                aviso del problema que arreglan, y solo cuando ese problema
+                existe. Lo que queda es lo que uno hace a propósito. */}
             {!todas.length ? (
               <>
                 <Button variant="primary" size="sm" disabled={pensando || !obra?.id} onClick={async () => {
@@ -1157,64 +1168,68 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               </>
             ) : (
               <>
-                <Button variant="primary" size="sm" disabled={pensando} onClick={sincronizarConElControl}>
-                  Ponerlo al día con el control
-                </Button>
-                {/* Solo cuando hay algo que arreglar: un botón que casi
-                    nunca hace falta, ofrecido siempre, es un botón que alguien
-                    aprieta por curiosidad el día equivocado. */}
-                {repetidas > 0 && (
-                  <Button variant="primary" size="sm" disabled={pensando} onClick={quitarRepetidas}>
-                    Quitar {repetidas} {repetidas === 1 ? "barra repetida" : "barras repetidas"}
-                  </Button>
-                )}
-                <Button variant="outline" size="sm" disabled={pensando} onClick={encadenarTodo}>
-                  Encadenar todo en orden
-                </Button>
-                <Button variant="secondary" size="sm" disabled={pensando} onClick={borrarTodo}>
-                  <Trash2 size={13} /> Borrar y empezar de cero
-                </Button>
                 <Button variant="outline" size="sm" disabled={pensando}
                   onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
                   Rearmarlo con NOVA
                 </Button>
-              </>
-            )}
-            {todas.length > 0 && (
-              <>
-                {/* A veces hay que entregarlo: una fiscalización lo pide en
-                    Project, un contrato público lo exige. Negarse obliga a
-                    llevar dos cronogramas, y el segundo queda viejo siempre. */}
-                <Button variant="outline" size="sm" onClick={() => bajarProject({
-                  nombre: `Cronograma ${lead.nombre}`, actividades: todas, dependencias,
-                  inicio: plan.inicio, fin: plan.fin, cal,
-                })}>
-                  Bajar para Project
-                </Button>
-                {/* El orden del control, de vuelta.
-                    No se hace solo: el orden de trabajo NO es el del
-                    presupuesto —el presupuesto se escribe por capítulos y la
-                    obra se hace por frentes— así que reordenar sin que nadie
-                    lo pida borraría un trabajo hecho a propósito. */}
-                <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
-                  if (!window.confirm(
-                    "¿Poner las actividades en el mismo orden que las agrupaciones del control de obra?\n\n" +
-                    "Dentro de cada rubro quedan por el momento en que ocurren: anticipo, fabricación, entrega, " +
-                    "instalación. No se tocan ni las fechas ni las dependencias.")) return;
-                  await ordenarComoElControl();
-                }}>Ordenar como el control</Button>
-                <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
-                  setPensando(true);
-                  // Con las cantidades del presupuesto: lo que vale para la
-                  // obra siguiente no son los días —esa obra tiene otros
-                  // metros— sino cuánto rinde por día.
-                  const mp = obra?.id ? await materiaPrima(obra.id) : [];
-                  const n = await aprenderDelCronograma(todas, currentUser, mp);
-                  setPensando(false); setError("");
-                  window.alert(`NOVA anotó ${n} actividades para la próxima obra: los días, y dónde hay cantidades, el rendimiento por día.`);
-                }}>
-                  Que NOVA lo aprenda
-                </Button>
+                <div style={{ position: "relative" }}>
+                  <Button variant="outline" size="sm" disabled={pensando} onClick={() => setMenu(m => !m)}>
+                    Más <ChevronDown size={12} />
+                  </Button>
+                  {menu && (
+                    <>
+                      {/* Un paño invisible: tocar en cualquier lado lo cierra,
+                          que es lo que uno intenta hacer. */}
+                      <div onClick={() => setMenu(false)}
+                        style={{ position: "fixed", inset: 0, zIndex: 20 }} />
+                      <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 21,
+                        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 9,
+                        boxShadow: "0 8px 24px rgba(0,0,0,.12)", minWidth: 250, overflow: "hidden" }}>
+                        {[
+                          ["Encadenar todo en orden", "Una detrás de otra, en el orden que están", encadenarTodo],
+                          ["Ordenar como el control", "El orden de las agrupaciones del control de obra", async () => {
+                            if (!window.confirm(
+                              "¿Poner las actividades en el mismo orden que las agrupaciones del control de obra?\n\n" +
+                              "Dentro de cada rubro quedan por el momento en que ocurren: anticipo, fabricación, " +
+                              "entrega, instalación. No se tocan ni las fechas ni las dependencias.")) return;
+                            await ordenarComoElControl();
+                          }],
+                          ["Bajar para Project", "Para una fiscalización que lo pide en su formato", () => bajarProject({
+                            nombre: `Cronograma ${lead.nombre}`, actividades: todas, dependencias,
+                            inicio: plan.inicio, fin: plan.fin, cal,
+                          })],
+                          ["Que NOVA lo aprenda", "Los rendimientos de esta obra, para la próxima", async () => {
+                            setPensando(true);
+                            // Lo que vale para la obra siguiente no son los días
+                            // —esa obra tiene otros metros— sino cuánto rinde por día.
+                            const mp = obra?.id ? await materiaPrima(obra.id) : [];
+                            const n = await aprenderDelCronograma(todas, currentUser, mp);
+                            setPensando(false); setError("");
+                            window.alert(`NOVA anotó ${n} actividades para la próxima obra: los días, y dónde hay cantidades, el rendimiento por día.`);
+                          }],
+                        ].map(([label, pista, accion]) => (
+                          <button key={label} onClick={async () => { setMenu(false); await accion(); }}
+                            style={{ display: "block", width: "100%", textAlign: "left", background: "none",
+                              border: "none", borderBottom: `1px solid ${colors.neutralSoft}`, padding: "9px 12px",
+                              cursor: "pointer", fontFamily: colors.font }}>
+                            <div style={{ fontSize: 12.5, color: colors.ink }}>{label}</div>
+                            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>{pista}</div>
+                          </button>
+                        ))}
+                        <button onClick={async () => { setMenu(false); await borrarTodo(); }}
+                          style={{ display: "block", width: "100%", textAlign: "left", background: "none",
+                            border: "none", padding: "9px 12px", cursor: "pointer", fontFamily: colors.font }}>
+                          <div style={{ fontSize: 12.5, color: colors.danger, display: "flex", alignItems: "center", gap: 5 }}>
+                            <Trash2 size={12} /> Borrar y empezar de cero
+                          </div>
+                          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
+                            Se van las barras; el control de obra no se toca
+                          </div>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -1337,46 +1352,41 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 await cargar();
               }}>{pensando ? "NOVA está mirando el plan…" : "Que NOVA lo acomode"}</Button>
             )}
-            {d.renombradas.length > 0 && editable && (
-              <Button variant="primary" size="sm" disabled={pensando} style={{ marginRight: 6 }} onClick={async () => {
-                setPensando(true);
-                // Solo el nombre. La duración, el orden y las dependencias son
-                // decisiones del cronograma y no salen del control de obra:
-                // pisarlas sería rehacer el plan por un cambio de etiqueta.
-                const porId2 = new Map(agrupaciones.map(g => [Number(g.id), g]));
-                for (const a of d.renombradas) {
-                  const g = porId2.get(Number(a.obra_actividad_id));
-                  const sufijo = String(a.nombre).includes(" · ") ? ` · ${String(a.nombre).split(" · ").slice(1).join(" · ")}` : "";
-                  await supabase.from("cronograma_actividades")
-                    .update({ nombre: `${g.nombre}${sufijo}`.slice(0, 120) }).eq("id", a.id);
-                }
-                setPensando(false);
-                await cargar();
-              }}>Traer los nombres del control</Button>
-            )}
-            {d.nuevas.length > 0 && editable && (
-              <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
-                // Al final y sin encadenar: dónde van en el orden lo sabe quien
-                // hace la obra, y adivinarlo sería meter dependencias falsas
-                // que después hay que descubrir y borrar.
-                const filas = d.nuevas.map((a, i) => ({
-                  lead_id: lead.id, obra_id: lead.obra_id || null,
-                  nombre: a.nombre, duracion: 10, obra_actividad_id: a.id,
-                  orden: actividades.length + i,
-                  // Toda su plata en una sola barra, que es el caso normal.
-                  // Se escribe explícito —y no se deja en null— porque el
-                  // valorado reparte con estos pesos: una agrupación que entra
-                  // sin peso aportaría de menos.
-                  ...(conEtapas ? { etapa: "ejecucion", peso_pct: 100 } : {}),
-                }));
-                const { error: e } = await supabase.from("cronograma_actividades").insert(filas);
-                if (e) setError(e.message);
-                await cargar();
-              }}>Sumarlas al cronograma</Button>
+            {/* UN SOLO BOTÓN PARA TODA ESTA FAMILIA.
+                Había tres —"Traer los nombres del control", "Sumarlas al
+                cronograma" y este— para tres caras del mismo problema: el
+                cronograma y el control se separaron. Nadie quiere elegir cuál
+                de las tres caras le tocó; quiere que vuelvan a coincidir.
+                "Ponerlo al día" hace las tres y dice qué hizo. */}
+            {(d.renombradas.length > 0 || d.nuevas.length > 0 || d.perdidas.length > 0) && editable && (
+              <Button variant={d.dePlata.length ? "outline" : "primary"} size="sm" disabled={pensando}
+                style={{ marginRight: 6 }} onClick={sincronizarConElControl}>
+                Ponerlo al día con el control
+              </Button>
             )}
           </div>
         );
       })()}
+
+      {/* Barras repetidas: su propio aviso, con su arreglo al lado.
+          Estaba como un botón más en la barra de acciones, al lado de cosas
+          que uno hace a propósito. Esto no se hace a propósito: es un
+          desperfecto, y un desperfecto se anuncia. */}
+      {repetidas > 0 && editable && (
+        <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+          padding: "10px 12px", marginBottom: 12, display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+          <AlertTriangle size={13} color={colors.warning} style={{ flexShrink: 0 }} />
+          <div style={{ lineHeight: 1.55, flex: 1, minWidth: 240 }}>
+            Hay <strong>{repetidas}</strong> {repetidas === 1 ? "barra repetida" : "barras repetidas"}: la misma
+            agrupación dibujada dos veces en el mismo momento. Cada una se lleva su parte de la plata, así que el
+            rubro reparte de más y el valorado le pone el doble de lo que tiene.
+          </div>
+          <Button variant="primary" size="sm" disabled={pensando} onClick={quitarRepetidas}>
+            Quitarlas
+          </Button>
+        </div>
+      )}
 
       {plan.ciclos.length > 0 && (
         <Aviso>

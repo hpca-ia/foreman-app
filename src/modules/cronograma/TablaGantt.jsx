@@ -58,6 +58,12 @@ const MODOS = [
   { id: "FF", label: "termina con", pista: "Las dos terminan a la vez." },
 ];
 
+// Lo que queda del nombre después del rubro: "Eléctricas · cableado" → "cableado".
+const sufijo = nombre => {
+  const p = String(nombre || "").split(" · ");
+  return p.length > 1 ? p.slice(1).join(" · ") : nombre;
+};
+
 const titulito = { fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 };
 
 export default function TablaGantt({
@@ -77,8 +83,12 @@ export default function TablaGantt({
   // no entraba el nombre del rubro al lado del aviso de qué falta, y el nombre
   // se cortaba en "ILU…" — que es justo lo que uno necesita leer.
   // EMPIEZA y TERMINA se escriben, así que necesitan ancho de campo de fecha.
-  const COLS = "minmax(230px,1fr) 54px 112px 112px 52px";
-  const IZQ = 230 + 54 + 112 + 112 + 52 + 4 * 7 + 12;
+  // Los botones de la fila van ADENTRO del bloque fijo. Estaban al final de
+  // todo, después del lienzo: en un cronograma de ocho meses eso son dos mil
+  // píxeles a la derecha, así que para partir una actividad había que
+  // desplazar hasta el final, apretar, y volver.
+  const COLS = "minmax(230px,1fr) 54px 112px 112px 52px 46px";
+  const IZQ = 230 + 54 + 112 + 112 + 52 + 46 + 5 * 7 + 12;
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
   const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
@@ -163,7 +173,7 @@ export default function TablaGantt({
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflowX: "auto" }}>
       {/* Encabezado */}
-      <div style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px 30px`, gap: 7,
+      <div style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px`, gap: 7,
         padding: "8px 12px 8px 0", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted,
         letterSpacing: 0.3, width: "max-content", minWidth: "100%" }}>
         <span style={{ display: "grid", gridTemplateColumns: COLS, gap: 7, position: "sticky", left: 0, zIndex: 3,
@@ -173,6 +183,7 @@ export default function TablaGantt({
           <span>EMPIEZA</span>
           <span>TERMINA</span>
           <span style={{ textAlign: "center" }}>COLCHÓN</span>
+          <span />
         </span>
         <span style={{ position: "relative", height: 12 }}>
           {marcas.map((m, k) => (
@@ -211,7 +222,11 @@ export default function TablaGantt({
                       style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex", padding: 0 }}>
                       {plegado ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                     </button>
-                    <span style={{ minWidth: 0, flex: 1 }}>
+                    {/* El nombre manda. Con `flex: 1` y los avisos al lado sin
+                        poder encogerse, se quedaba en cero píxeles y el rubro
+                        salía sin nombre — el dato por el que uno mira la fila.
+                        Un piso de 84px: antes se recorta el aviso. */}
+                    <span style={{ minWidth: 84, flex: "1 1 auto", overflow: "hidden" }}>
                       <span style={{ display: "block", fontWeight: 700, color: colors.ink, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.25 }}>
                         {g.codigo && <span style={{ color: colors.muted, fontWeight: 600 }}>{g.codigo} </span>}
@@ -220,10 +235,22 @@ export default function TablaGantt({
                       {/* De qué capítulo sale, debajo. El nombre de una
                           agrupación dice qué es; el capítulo, de dónde viene
                           en el presupuesto, que es como se la busca. */}
-                      <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
+                      <span title={[g.capitulo, g.hijas.length > 1 ? `${g.hijas.length} partes` : "",
+                        g.monto > 0 ? fmt(g.monto) : ""].filter(Boolean).join(" · ")}
+                        style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400, letterSpacing: 0.2 }}>
                         {g.capitulo || <span style={{ color: colors.muted }}>sin capítulo</span>}
-                        {g.hijas.length > 1 ? ` · ${g.hijas.length} etapas` : ""}
+                        {g.hijas.length > 1 ? ` · ${g.hijas.length} partes` : ""}
+                        {g.monto > 0 ? ` · ${fmt(g.monto)}` : ""}
+                        {/* Lo que falta, en la segunda línea: arriba competía
+                            por el ancho con el nombre del rubro y lo dejaba en
+                            "Instalacione…", que es peor que no decirlo. */}
+                        {senalados.length > 0 && (
+                          <span title={senalados.map(r => `${r.descripcion}${r.crono_nota ? ` — ${r.crono_nota}` : ""}`).join("\n")}
+                            style={{ color: colors.warning, fontWeight: 700 }}>
+                            {" "}· falta {senalados.length === 1 ? senalados[0].descripcion : `${senalados.length} rubros`}
+                          </span>
+                        )}
                       </span>
                     </span>
                     <Senal ui={ui} g={g} senalados={senalados} misRubros={misRubros} />
@@ -239,12 +266,7 @@ export default function TablaGantt({
                         </button>
                       </span>
                     )}
-                    {g.monto > 0 && (
-                      <span title={`Lo que vale este rubro en el presupuesto: ${fmt(g.monto)}. Se reparte entre sus etapas.`}
-                        style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>
-                        · ${Math.round(g.monto).toLocaleString("es-EC")}
-                      </span>
-                    )}
+
                     {malReparto && (
                       // Con el arreglo al lado: avisar de un descuadre y no dar
                       // cómo cerrarlo obliga a corregir seis números a mano, y
@@ -269,6 +291,7 @@ export default function TablaGantt({
                   {/* El colchón de un rubro no es un número: cada etapa tiene
                       el suyo y sumarlos no querría decir nada. */}
                   <span />
+                  <span />
                 </Fijo>
                 {/* La barra del rubro de punta a punta: lo que se importa en
                     marzo y se instala en agosto es UNA cosa que abarca medio
@@ -284,7 +307,6 @@ export default function TablaGantt({
                   )}
                   {g.hijas.map(a => <Barra key={a.id} ui={ui} a={a} tenue />)}
                 </Lienzo>
-                <span />
               </Fila>
             )}
 
@@ -312,7 +334,12 @@ export default function TablaGantt({
                           <span style={{ display: "block", fontSize: 12, color: colors.ink, fontWeight: g.simple ? 600 : 400,
                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.25 }}>
                             {g.simple && g.codigo && <span style={{ color: colors.muted, fontWeight: 600 }}>{g.codigo} </span>}
-                            {g.simple ? a.nombre : (etapa || a.nombre)}
+                            {/* Adentro de un rubro alcanza con el nombre de la
+                                parte: el encabezado de arriba ya dijo de qué
+                                rubro es, y repetirlo en cada fila lo empuja
+                                fuera de la columna —"Instalaciones elé…" en
+                                las tres, sin poder distinguirlas—. */}
+                            {g.simple ? a.nombre : (etapa || sufijo(a.nombre))}
                           </span>
                           {/* El capítulo, legible. Estaba en 9px y en gris
                               claro: técnicamente visible, que no es lo mismo
@@ -337,7 +364,7 @@ export default function TablaGantt({
                         {!g.simple && platas && (
                           <span style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>
                             {platas.asignados?.get(a.id)
-                              ? `$${Math.round(platas.porActividad.get(a.id) || 0).toLocaleString("es-EC")} · ${platas.asignados.get(a.id)} rubros`
+                              ? `$${Math.round(platas.porActividad.get(a.id) || 0).toLocaleString("es-EC")} · ${platas.asignados.get(a.id)} ${platas.asignados.get(a.id) === 1 ? "rubro" : "rubros"}`
                               : (a.peso_pct != null ? `${a.peso_pct}%` : "")}
                           </span>
                         )}
@@ -394,16 +421,33 @@ export default function TablaGantt({
                         color: a.critica ? colors.danger : colors.muted }}>
                         {a.enCiclo ? "—" : a.critica ? "0" : `${a.holgura}d`}
                       </span>
-                    </Fijo>
-                    <Lienzo ui={ui}><Barra ui={ui} a={a} /></Lienzo>
                     {editable ? (
+                      <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                      {/* PARTIR, A LA VISTA.
+                          NOVA parte sola lo que se importa —anticipo,
+                          fabricación, instalación— y hacerlo a mano estaba
+                          escondido adentro de la ficha: había que tocar el
+                          nombre, leer, y recién ahí encontrarlo. Lo que el
+                          programa hace solo, uno tiene que poder hacerlo
+                          igual de fácil. */}
+                      {conEtapas && (
+                        <button onClick={() => onPartir(a)}
+                          title="Partirla: entra varias veces a la obra, o se compra y se instala"
+                          style={{ background: "none", border: "none", color: colors.muted, borderRadius: 4,
+                            cursor: "pointer", display: "flex", padding: 2 }}>
+                          <Scissors size={12} />
+                        </button>
+                      )}
                       <button onClick={() => (uniendo ? onUnir(uniendo, a.id) : setUniendo(a.id))}
                         title={uniendo === a.id ? "Elegí ahora la que va después" : uniendo ? "Esta va después de la marcada" : "Encadenar: marcá ésta y después la que va detrás"}
                         style={{ background: uniendo === a.id ? colors.brand : "none", border: "none",
                           color: uniendo === a.id ? "#fff" : colors.muted, borderRadius: 4, cursor: "pointer", display: "flex", padding: 2 }}>
                         <Link2 size={12} />
                       </button>
+                      </div>
                     ) : <span />}
+                    </Fijo>
+                    <Lienzo ui={ui}><Barra ui={ui} a={a} /></Lienzo>
                   </Fila>
 
                   {/* LA FICHA. Todo lo que se cambia de vez en cuando vive acá
@@ -613,7 +657,7 @@ export default function TablaGantt({
 // ── Las piezas de la tabla ──────────────────────────────────────────────────
 
 const Fila = ({ ui, children, fondo }) => (
-  <div style={{ display: "grid", gridTemplateColumns: `${ui.IZQ}px ${ui.anchoLienzo}px 30px`, gap: 7,
+  <div style={{ display: "grid", gridTemplateColumns: `${ui.IZQ}px ${ui.anchoLienzo}px`, gap: 7,
     padding: "7px 12px 7px 0", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center",
     fontSize: 12, width: "max-content", minWidth: "100%", background: fondo || "transparent" }}>
     {children}
@@ -666,14 +710,6 @@ const Barra = ({ ui, a, tenue }) => a.inicio && (
  */
 const Senal = ({ ui, g, senalados, misRubros }) => (
   <>
-    {senalados.length > 0 && (
-      <span title={senalados.map(r => `${r.descripcion}${r.crono_nota ? ` — ${r.crono_nota}` : ""}`).join("\n")}
-        style={{ fontSize: 9.5, fontWeight: 700, color: colors.warning, background: colors.warningSoft,
-          borderRadius: 9, padding: "1px 7px", flexShrink: 2, minWidth: 0, maxWidth: 140, overflow: "hidden",
-          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        falta {senalados.length === 1 ? senalados[0].descripcion : `${senalados.length} rubros`}
-      </span>
-    )}
     {misRubros.length > 0 && (
       <button onClick={() => ui.setVerRubros(ui.verRubros === g.id ? null : g.id)}
         title={`Ver los ${misRubros.length} rubros de este grupo y señalar el que esté trabando`}
