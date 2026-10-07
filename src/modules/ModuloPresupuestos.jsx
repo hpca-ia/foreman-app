@@ -503,8 +503,14 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     const fallo = res.find(r => r.error);
     if (fallo) alert("No se pudo guardar el orden: " + fallo.error.message);
   }
-  // El rubro marcado para mover de lugar, si hay alguno.
-  const [moviendo, setMoviendo] = useState(null);
+  // Los rubros marcados para mover. Varios, y de cualquier capítulo: casi
+  // nunca se mueve uno solo —un presupuesto importado trae cinco rubros de
+  // carpintería metidos en albañilería— y moverlos de a uno son cinco idas y
+  // vueltas para un solo error del Excel.
+  const [moviendo, setMoviendo] = useState([]);
+  const marcado = id => moviendo.some(x => x.id === id);
+  const marcar = item => setMoviendo(ms =>
+    ms.some(x => x.id === item.id) ? ms.filter(x => x.id !== item.id) : [...ms, item]);
 
   async function moverRubro(item, direccion) {
     const ids = items.filter(i => i.capitulo === item.capitulo).sort((a, b) => a.orden - b.orden).map(i => i.id);
@@ -526,44 +532,36 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
    * Es el mismo gesto del eslabón del cronograma —marcar uno, tocar el otro—
    * para no inventar un segundo idioma dentro de la misma app.
    */
-  async function moverRubroJuntoA(item, destino) {
-    if (!item || !destino || item.id === destino.id) return;
-    const lista = items.filter(i => i.capitulo === item.capitulo).sort((a, b) => a.orden - b.orden);
-    const ids = lista.map(i => i.id).filter(id => id !== item.id);
+  async function moverRubrosJuntoA(marcados, destino) {
+    const mover = (marcados || []).filter(m => m.id !== destino?.id);
+    if (!mover.length || !destino) return;
+    const capDestino = destino.capitulo;
+
+    // Los que vienen de otro capítulo cambian de capítulo primero. Es la
+    // misma operación que antes vivía en un selector aparte: moverlo de lugar
+    // y moverlo de capítulo son la misma acción para quien ordena un
+    // presupuesto, y tener dos controles al lado solo obligaba a elegir cuál.
+    const deOtroCap = mover.filter(m => m.capitulo !== capDestino);
+    if (deOtroCap.length) {
+      const { error } = await supabase.from("presupuesto_items")
+        .update({ capitulo: capDestino }).in("id", deOtroCap.map(m => m.id));
+      if (error) { alert("No se pudo mover de capítulo: " + error.message); return; }
+    }
+
+    const movidos = new Set(mover.map(m => m.id));
+    const conCapitulo = items.map(i => (movidos.has(i.id) ? { ...i, capitulo: capDestino } : i));
+    const ids = conCapitulo.filter(i => i.capitulo === capDestino)
+      .sort((a, b) => a.orden - b.orden).map(i => i.id)
+      .filter(id => !movidos.has(id));
     const j = ids.indexOf(destino.id);
     if (j < 0) return;
-    // Queda ENCIMA del que se tocó: uno mira la fila donde quiere que esté y
-    // la toca. Dejarlo debajo obliga a pensar "toco el de arriba del lugar",
-    // que es una traducción de más en cada movimiento.
-    ids.splice(j, 0, item.id);
-    await guardarOrden(numerar(capitulosActivos, items, { [item.capitulo]: ids }));
-  }
-
-  /**
-   * Mandar un rubro a otro capítulo.
-   *
-   * Un presupuesto importado trae rubros en el capítulo equivocado —el lector
-   * los puso donde decía el Excel, y el Excel a veces está mal— y sin esto la
-   * única salida es borrarlo y volver a cargarlo a mano con su precio y su
-   * cantidad.
-   *
-   * Entra PRIMERO en el capítulo de destino, por lo mismo que lo nuevo entra
-   * arriba: queda a la vista, recién movido, y acomodarlo desde ahí es corto.
-   */
-  async function moverRubroACapitulo(item, capitulo) {
-    if (!capitulo || capitulo === item.capitulo) return;
-    const destino = capitulosActivos.find(c => c.nombre === capitulo);
-    if (!destino) return;
-
-    const { error } = await supabase.from("presupuesto_items")
-      .update({ capitulo }).eq("id", item.id);
-    if (error) return;
-
-    // Primero del destino; los que estaban ahí corren un lugar. El de origen
-    // se renumera solo al pasar por numerar(), que no deja huecos.
-    const movido = { ...item, capitulo, orden: destino.orden * 1000 - 1 };
-    const nuevos = items.map(i => (i.id === item.id ? movido : i));
-    await guardarOrden(numerar(capitulosActivos, nuevos));
+    // Quedan ENCIMA del que se tocó, y en el orden en que estaban: uno mira la
+    // fila donde quiere que estén y la toca. Dejarlos debajo obliga a pensar
+    // "toco el de arriba del lugar", que es una traducción de más en cada
+    // movimiento.
+    const enOrden = conCapitulo.filter(i => movidos.has(i.id)).sort((a, b) => a.orden - b.orden).map(i => i.id);
+    ids.splice(j, 0, ...enOrden);
+    await guardarOrden(numerar(capitulosActivos, conCapitulo, { [capDestino]: ids }));
   }
 
   /**
@@ -1570,12 +1568,20 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   <div className="pres-tabla">
                   {/* Qué está pasando, mientras pasa. Un modo invisible —en el
                       que los botones de las filas hacen otra cosa— se nota
-                      apretando el equivocado. */}
-                  {moviendo && moviendo.capitulo===cap.nombre && (
+                      apretando el equivocado.
+                      Va en TODOS los capítulos, no solo en el de origen: los
+                      marcados pueden ir a cualquier otro, y el aviso tiene que
+                      estar donde uno va a soltarlos. */}
+                  {moviendo.length > 0 && (
                     <div style={{fontSize:11.5,color:"var(--brand)",background:"var(--brand-soft)",borderRadius:7,
                       padding:"6px 10px",marginBottom:6,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                      <span>Moviendo <strong>{moviendo.descripcion?.slice(0,50)}</strong>. Tocá <strong>acá</strong> en la fila donde querés que quede.</span>
-                      <button onClick={()=>setMoviendo(null)} style={{background:"none",border:"none",color:"var(--muted)",
+                      <span>
+                        Moviendo <strong>{moviendo.length===1
+                          ? moviendo[0].descripcion?.slice(0,50)
+                          : `${moviendo.length} rubros`}</strong>. Tocá <strong>acá</strong> en la fila donde van —
+                        puede ser de otro capítulo.
+                      </span>
+                      <button onClick={()=>setMoviendo([])} style={{background:"none",border:"none",color:"var(--muted)",
                         cursor:"pointer",fontFamily:"inherit",fontSize:11}}>cancelar</button>
                     </div>
                   )}
@@ -1594,7 +1600,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       const itemIdx=posEnCap.get(item.id);
                       return(
                         <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)",
-                          background: moviendo?.id===item.id ? "var(--brand-soft)" : undefined}}>
+                          background: marcado(item.id) ? "var(--brand-soft)" : undefined}}>
                           <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>
                             <div style={{display:"flex",alignItems:"center",gap:4}}>
                               <div style={{display:"flex",flexDirection:"column"}}>
@@ -1603,23 +1609,28 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===todosDelCap.length-1} title="Bajar uno"
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===todosDelCap.length-1?"default":"pointer",color:itemIdx===todosDelCap.length-1?"var(--border)":"var(--muted)"}}>▼</button>
                               </div>
-                              {/* MOVER LEJOS, EN DOS TOQUES.
-                                  Con las flechas, bajar un rubro veinte lugares
-                                  son veinte clics, y en un capítulo de 38 eso no
-                                  se hace: se deja mal ordenado. Se marca este y
-                                  se toca la fila donde va. */}
-                              {moviendo && moviendo.capitulo===item.capitulo && moviendo.id!==item.id ? (
-                                <button onClick={async()=>{ await moverRubroJuntoA(moviendo,item); setMoviendo(null); }}
-                                  title={`Poner «${moviendo.descripcion?.slice(0,40)}» acá`}
+                              {/* UN SOLO CONTROL PARA MOVER.
+                                  Antes había dos pegados —el ⇕ de mover de
+                                  lugar y un ⇅ de mover de capítulo— y encima
+                                  del número, todo amontonado en la misma
+                                  celda. Para quien ordena un presupuesto es la
+                                  misma acción: este rubro va en otro lado.
+                                  Se marcan los que sea —de cualquier capítulo—
+                                  y se toca "acá" donde van. */}
+                              {moviendo.length > 0 && !marcado(item.id) ? (
+                                <button onClick={async()=>{ const ms=moviendo; setMoviendo([]); await moverRubrosJuntoA(ms,item); }}
+                                  title={moviendo.length===1
+                                    ? `Poner «${moviendo[0].descripcion?.slice(0,40)}» acá`
+                                    : `Poner los ${moviendo.length} marcados acá`}
                                   style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:5,
                                     padding:"1px 6px",fontSize:9.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                                   acá
                                 </button>
                               ) : (
-                                <button onClick={()=>setMoviendo(moviendo?.id===item.id?null:item)}
-                                  title={moviendo?.id===item.id?"Cancelar":"Moverlo de lugar: tocá esto y después la fila donde va"}
-                                  style={{background:moviendo?.id===item.id?"var(--brand)":"none",
-                                    color:moviendo?.id===item.id?"#fff":"var(--border)",border:"none",borderRadius:5,
+                                <button onClick={()=>marcar(item)}
+                                  title={marcado(item.id)?"Sacarlo de la selección":"Moverlo: marcalo y tocá «acá» donde va. Podés marcar varios, de cualquier capítulo."}
+                                  style={{background:marcado(item.id)?"var(--brand)":"none",
+                                    color:marcado(item.id)?"#fff":"var(--border)",border:"none",borderRadius:5,
                                     padding:"1px 4px",fontSize:10,cursor:"pointer",fontFamily:"inherit",lineHeight:1.2}}>⇕</button>
                               )}
                               {cap.orden}.{itemIdx+1}
@@ -1627,19 +1638,6 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                               <input type="checkbox" checked={!!item.listo} onChange={e=>actualizarItemMulti(item.id,{listo:e.target.checked})}
                                 title={item.listo?"Rubro listo":"En proceso: todavía se está trabajando"}
                                 style={{margin:"0 0 0 3px",cursor:"pointer",accentColor:"var(--ink)"}}/>
-                              {/* Mandarlo a otro capítulo. Un presupuesto
-                                  importado trae rubros donde no van, y sin esto
-                                  hay que borrarlo y volver a cargarlo entero. */}
-                              {capitulosActivos.length>1&&(
-                                <select value="" title="Mover este rubro a otro capítulo"
-                                  onChange={e=>{const c=e.target.value; e.target.value=""; moverRubroACapitulo(item,c);}}
-                                  style={{border:"none",background:"none",color:"var(--border)",fontSize:11,cursor:"pointer",padding:0,width:16,appearance:"none",outline:"none"}}>
-                                  <option value="">⇅</option>
-                                  {capitulosActivos.filter(c=>c.nombre!==item.capitulo).map(c=>(
-                                    <option key={c.nombre} value={c.nombre}>Mover a {c.orden}. {c.nombre}</option>
-                                  ))}
-                                </select>
-                              )}
                             </div>
                           </td>
                           <td style={{padding:"3px 4px"}}>
