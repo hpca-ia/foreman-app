@@ -109,27 +109,84 @@ export async function armarDesdeObra({ lead, obra, mesInicio, meses, quien }) {
 }
 
 /**
- * Lo que entró después de armar el valorado.
+ * Lo que cambió en el control desde que se armó el valorado.
  *
- * Una orden de cambio aprobada NO toca los rubros que ya estaban: agrega
- * rubros nuevos, con monto negativo los que quitan. Así que el valorado no se
- * desactualiza —sus líneas siguen siendo ciertas— pero se queda CORTO: la
- * curva deja de sumar el presupuesto vigente y el cuadro de "previsto contra
- * gastado" acusa un sobregasto que no existe, porque compara el gasto de hoy
- * contra el presupuesto de marzo.
+ * SE COMPARA POR AGRUPACIÓN, que es la unidad del valorado. Antes se comparaba
+ * por rubro —de cuando el valorado se armaba rubro por rubro— y desde que pasó
+ * a armarse por agrupación eso daba una alarma falsa enorme: ninguna línea
+ * tenía rubro, así que TODOS los rubros del presupuesto figuraban como recién
+ * entrados por órdenes de cambio. Una alarma que grita un número inventado es
+ * peor que no tener alarma: la segunda vez ya nadie la lee.
  *
- * Eso no se arregla solo y tampoco se avisa: la obra descubre que el valorado
- * está viejo cuando el cliente pregunta por qué los números no coinciden.
+ * Dos cosas pasan y son distintas:
+ *
+ *   AGRUPACIONES NUEVAS. Una orden de cambio trajo trabajo que no estaba, o
+ *   alguien agregó un capítulo en el control. Falta su plata en la curva.
+ *
+ *   AGRUPACIONES QUE CAMBIARON DE MONTO. Es lo más común: la orden no agrega
+ *   un capítulo, modifica rubros de uno que ya estaba. La línea del valorado
+ *   sigue diciendo lo que valía en marzo, así que la curva deja de sumar el
+ *   presupuesto vigente y el cuadro de "previsto contra gastado" acusa un
+ *   sobregasto que no existe.
+ *
+ * Nada de esto se arregla solo, y sin aviso la obra se entera cuando el
+ * cliente pregunta por qué los números no coinciden.
  */
 export async function pendientesDeSumar(cronograma) {
-  if (!cronograma?.obra_id) return { rubros: [], monto: 0, dias: 0, ordenes: [] };
-  const { data: rubros } = await supabase.from("obra_rubros")
-    .select("id,numero,codigo,descripcion,capitulo,total_base,orden_cambio_id")
-    .eq("obra_id", cronograma.obra_id);
-  const { data: lineas } = await supabase.from("cronograma_valorado_lineas")
-    .select("obra_rubro_id").eq("cronograma_id", cronograma.id);
-  const ya = new Set((lineas || []).map(l => l.obra_rubro_id).filter(Boolean));
-  const faltan = (rubros || []).filter(r => !ya.has(r.id));
+  const vacio = { nuevas: [], cambiadas: [], monto: 0, dias: 0, ordenes: [] };
+  if (!cronograma?.obra_id) return vacio;
+
+  const [{ data: rubros }, { data: acts }, { data: lineas }] = await Promise.all([
+    supabase.from("obra_rubros").select("id,total_base,actividad_id,anulado_por_oc").eq("obra_id", cronograma.obra_id),
+    supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", cronograma.obra_id).order("orden"),
+    supabase.from("cronograma_valorado_lineas").select("obra_actividad_id,monto").eq("cronograma_id", cronograma.id),
+  ]);
+
+  // Lo que vale hoy cada agrupación, con la misma regla que el control: sin
+  // los rubros que una orden de cambio sacó del contrato.
+  const hoy = new Map();
+  (rubros || []).filter(r => !r.anulado_por_oc).forEach(r => {
+    const k = Number(r.actividad_id) || 0;
+    hoy.set(k, Math.round(((hoy.get(k) || 0) + (Number(r.total_base) || 0)) * 100) / 100);
+  });
+
+  // Lo que el valorado tiene escrito para cada una.
+  const enCurva = new Map();
+  (lineas || []).forEach(l => {
+    const k = Number(l.obra_actividad_id) || 0;
+    enCurva.set(k, Math.round(((enCurva.get(k) || 0) + (Number(l.monto) || 0)) * 100) / 100);
+  });
+
+  const nombreDe = new Map((acts || []).map(a => [Number(a.id), a]));
+  const nuevas = [];
+  const cambiadas = [];
+  hoy.forEach((monto, id) => {
+    if (!id || monto <= 0) return;
+    const ag = nombreDe.get(id);
+    if (!ag || ag.extra) return;
+    if (!enCurva.has(id)) { nuevas.push({ ...ag, monto }); return; }
+    const antes = enCurva.get(id);
+    const dif = Math.round((monto - antes) * 100) / 100;
+    // Un dólar de diferencia es un redondeo, no una orden de cambio.
+    if (Math.abs(dif) < 1) return;
+    cambiadas.push({ ...ag, antes, ahora: monto, dif });
+  });
+
+  // EL CAPÍTULO QUE SE QUEDÓ SIN PLATA.
+  //
+  // Una orden de cambio puede anular TODOS los rubros de un capítulo. Entonces
+  // ese capítulo deja de existir en el presupuesto de hoy, así que recorrer
+  // solo lo que hay hoy nunca lo encuentra — y su plata se queda en la curva
+  // para siempre, sumando un trabajo que ya nadie va a hacer. Hay que mirar
+  // también del otro lado: lo que la curva tiene y el control ya no.
+  enCurva.forEach((antes, id) => {
+    if (!id || antes <= 0 || (hoy.get(id) || 0) > 0) return;
+    const ag = nombreDe.get(id);
+    cambiadas.push({
+      ...(ag || { id, nombre: "Capítulo que ya no está" }),
+      antes, ahora: 0, dif: Math.round(-antes * 100) / 100,
+    });
+  });
 
   // Y el tiempo: las órdenes aprobadas dicen cuántos días suman. Nadie lo
   // estaba leyendo, así que una obra con tres órdenes aprobadas seguía
@@ -140,8 +197,9 @@ export async function pendientesDeSumar(cronograma) {
   const dias = (ordenes || []).reduce((t, o) => t + (Number(o.dias_impacto) || 0), 0);
 
   return {
-    rubros: faltan,
-    monto: Math.round(faltan.reduce((t, r) => t + (Number(r.total_base) || 0), 0) * 100) / 100,
+    nuevas, cambiadas,
+    monto: Math.round((nuevas.reduce((t, a) => t + a.monto, 0)
+      + cambiadas.reduce((t, a) => t + a.dif, 0)) * 100) / 100,
     dias,
     ordenes: ordenes || [],
   };
@@ -156,25 +214,56 @@ export async function pendientesDeSumar(cronograma) {
  * final—, pero la plata entra YA a la curva: dejarla afuera hasta que alguien
  * la acomode es exactamente el error que esto viene a arreglar.
  */
-export async function sumarAlValorado(cronograma, rubros = [], desdeIndice = 0) {
-  if (!rubros.length) return null;
+export async function sumarAlValorado(cronograma, pendiente, desdeIndice = 0) {
+  const nuevas = pendiente?.nuevas || [];
+  const cambiadas = pendiente?.cambiadas || [];
+  if (!nuevas.length && !cambiadas.length) return null;
   const meses = cronograma.meses;
   const pesos = repartirEntre(meses, Math.min(desdeIndice, meses - 1), meses - 1);
-  const filas = rubros.map((r, i) => ({
-    cronograma_id: cronograma.id, obra_rubro_id: r.id,
-    codigo: r.codigo || String(r.numero || ""), descripcion: r.descripcion, capitulo: r.capitulo,
-    monto: Number(r.total_base) || 0, pesos,
-    orden_cambio_id: r.orden_cambio_id || null,
-    revisar: true,
-    orden: 10000 + i,
-  }));
-  for (let i = 0; i < filas.length; i += 100) {
-    let { error } = await supabase.from("cronograma_valorado_lineas").insert(filas.slice(i, i + 100));
-    if (error && /column|schema cache/i.test(error.message)) {
-      const limpias = filas.slice(i, i + 100).map(({ orden_cambio_id, revisar, ...resto }) => resto);
-      ({ error } = await supabase.from("cronograma_valorado_lineas").insert(limpias));
+
+  // Las que cambiaron de monto se corrigen en su línea: su plata ya está en la
+  // curva repartida en los meses que alguien decidió, y rehacer ese reparto
+  // porque cambió el total sería tirar ese trabajo. Se ajusta el monto y el
+  // reparto se respeta.
+  for (const a of cambiadas) {
+    const { data: suyas } = await supabase.from("cronograma_valorado_lineas")
+      .select("id,monto").eq("cronograma_id", cronograma.id).eq("obra_actividad_id", a.id);
+    if (!suyas?.length) continue;
+    // Repartido entre sus líneas en la misma proporción que tenían: una
+    // agrupación partida en etapas no se vuelve una sola línea por esto.
+    const total = suyas.reduce((t, l) => t + (Number(l.monto) || 0), 0);
+    for (const [i, l] of suyas.entries()) {
+      const parte = total > 0 ? (Number(l.monto) || 0) / total : 1 / suyas.length;
+      const monto = i === suyas.length - 1
+        ? Math.round((a.ahora - suyas.slice(0, -1).reduce((t, x, k) => {
+            const p = total > 0 ? (Number(x.monto) || 0) / total : 1 / suyas.length;
+            void k; return t + Math.round(a.ahora * p * 100) / 100;
+          }, 0)) * 100) / 100
+        : Math.round(a.ahora * parte * 100) / 100;
+      await supabase.from("cronograma_valorado_lineas").update({ monto, revisar: true }).eq("id", l.id);
     }
-    if (error) return error.message;
+  }
+
+  // Las nuevas entran repartidas en lo que queda de obra: una orden de cambio
+  // se ejecuta de ahora en adelante, no hacia atrás. Quedan marcadas para
+  // revisar —casi siempre van en dos o tres meses concretos y no estiradas
+  // hasta el final— pero la plata entra YA a la curva: dejarla afuera hasta
+  // que alguien la acomode es tener un valorado que no suma el contrato.
+  if (nuevas.length) {
+    const filas = nuevas.map((a, i) => ({
+      cronograma_id: cronograma.id, obra_actividad_id: a.id,
+      codigo: a.codigo || "", descripcion: a.nombre,
+      monto: Math.round(a.monto * 100) / 100, pesos,
+      revisar: true, orden: 10000 + i,
+    }));
+    for (let i = 0; i < filas.length; i += 100) {
+      let { error } = await supabase.from("cronograma_valorado_lineas").insert(filas.slice(i, i + 100));
+      if (error && /column|schema cache/i.test(error.message)) {
+        const limpias = filas.slice(i, i + 100).map(({ revisar, ...resto }) => resto);
+        ({ error } = await supabase.from("cronograma_valorado_lineas").insert(limpias));
+      }
+      if (error) return error.message;
+    }
   }
   return null;
 }

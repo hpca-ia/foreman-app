@@ -220,21 +220,36 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
       {/* Lo que una orden de cambio aprobada le hizo al valorado. Es la
           pregunta que nadie se acuerda de hacerse, y la que desalinea la
           curva sin que nada avise. */}
-      {pendiente && (pendiente.rubros.length > 0 || pendiente.dias > 0) && (
+      {pendiente && (pendiente.nuevas.length > 0 || pendiente.cambiadas.length > 0 || pendiente.dias > 0) && (
         <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`,
           borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
           <div style={{ display: "flex", gap: 6, alignItems: "flex-start", marginBottom: 7 }}>
             <AlertTriangle size={13} color={colors.warning} style={{ marginTop: 1, flexShrink: 0 }} />
             <div style={{ lineHeight: 1.55 }}>
-              {pendiente.rubros.length > 0 && (
+              {pendiente.cambiadas.length > 0 && (
                 <div>
-                  Entraron <strong>{pendiente.rubros.length}</strong> rubros por órdenes de cambio,
-                  por <strong>${fmt(pendiente.monto)}</strong>, que todavía no están en la curva.
-                  Mientras no se sumen, el cuadro de arriba compara el gasto de hoy contra el presupuesto viejo.
+                  {pendiente.cambiadas.length === 1 ? "Un capítulo cambió" : `${pendiente.cambiadas.length} capítulos cambiaron`} de
+                  monto en el control de obra y la curva sigue diciendo lo de antes:{" "}
+                  {pendiente.cambiadas.slice(0, 3).map(c => `${c.nombre} ${c.dif > 0 ? "+" : ""}${fmt(c.dif)}`).join(", ")}
+                  {pendiente.cambiadas.length > 3 ? "…" : ""}.
+                </div>
+              )}
+              {pendiente.nuevas.length > 0 && (
+                <div style={{ marginTop: pendiente.cambiadas.length ? 4 : 0 }}>
+                  {pendiente.nuevas.length === 1 ? "Hay un capítulo" : `Hay ${pendiente.nuevas.length} capítulos`} con
+                  plata que todavía no está en la curva:{" "}
+                  {pendiente.nuevas.slice(0, 3).map(a => a.nombre).join(", ")}
+                  {pendiente.nuevas.length > 3 ? "…" : ""}.
+                </div>
+              )}
+              {(pendiente.nuevas.length > 0 || pendiente.cambiadas.length > 0) && (
+                <div style={{ marginTop: 4 }}>
+                  Son <strong>{fmt(Math.abs(pendiente.monto))}</strong> de diferencia. Mientras no se acomode, el
+                  cuadro de arriba compara el gasto de hoy contra el presupuesto viejo y acusa un desvío que no existe.
                 </div>
               )}
               {pendiente.dias > 0 && (
-                <div style={{ marginTop: pendiente.rubros.length ? 4 : 0 }}>
+                <div style={{ marginTop: 4 }}>
                   Las órdenes aprobadas suman <strong>{pendiente.dias} días</strong> de plazo
                   {cronograma.meses * 30 < pendiente.dias + 1 ? "" : ""} — unos {Math.ceil(pendiente.dias / 30)}{" "}
                   {Math.ceil(pendiente.dias / 30) === 1 ? "mes" : "meses"} más de obra.
@@ -244,16 +259,16 @@ export default function PanelValorado({ lead, obra, facturas = [], currentUser, 
           </div>
           {puedeEditar && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {pendiente.rubros.length > 0 && (
+              {(pendiente.nuevas.length > 0 || pendiente.cambiadas.length > 0) && (
                 <Button variant="primary" size="sm" onClick={async () => {
                   // Desde el mes en curso: una orden de cambio se ejecuta de
                   // ahora en adelante, no hacia atrás.
                   const hoyMes = new Date().toISOString().slice(0, 7);
                   const i = Math.max(0, meses.indexOf(hoyMes));
-                  const err = await sumarAlValorado(cronograma, pendiente.rubros, i);
+                  const err = await sumarAlValorado(cronograma, pendiente, i);
                   if (err) { setError(err); return; }
-                  await cargar();
-                }}>Sumarlos a la curva</Button>
+                  setError(""); await cargar();
+                }}>Ponerlo al día con el control</Button>
               )}
               {pendiente.dias > 0 && (
                 <Button variant="outline" size="sm" onClick={async () => {
