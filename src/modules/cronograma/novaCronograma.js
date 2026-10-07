@@ -28,6 +28,16 @@ const n = v => Number(v) || 0;
 
 // El sufijo que distingue las barras de un mismo rubro. Corto a propósito: el
 // nombre de la agrupación ya ocupa su lugar y es el que tiene que leerse.
+// Si lo que NOVA llamó a una parte es una de las etapas de compra, se
+// reconoce aunque venga con tilde o en mayúsculas; si es otra cosa —"montaje",
+// "refuerzos", "pintura base"— es un trabajo de obra y va como ejecución, con
+// su nombre tal cual.
+const SIN_TILDE = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+const etapaDe = etiqueta => {
+  const t = SIN_TILDE(etiqueta);
+  return ["anticipo", "fabricacion", "entrega", "instalacion", "ejecucion"].includes(t) ? t : "ejecucion";
+};
+
 const ETAPA_CORTA = {
   anticipo: "anticipo", fabricacion: "fabricación", entrega: "entrega",
   instalacion: "instalación", ejecucion: "",
@@ -153,12 +163,23 @@ Devuelves SOLO JSON, sin markdown. USA EL ID DE LA AGRUPACIÓN COMO REFERENCIA
 control de obra y es el que vale.
 
 {"actividades":[{"id":12,"dias":18},
-                {"id":13,"dias":40,"etapas":[["anticipo",1,50],["fabricacion",45,40],["instalacion",12,10]]}],
+                {"id":13,"dias":40,"partes":[["fabricación",5,40],["montaje",5,35],["instalación de grada",3,25]]}],
  "dependencias":[[12,13,0],[13,14,-5]]}
 
 "actividades": una por agrupación. "id" es el id de la agrupación, "dias" los
-días hábiles que lleva. "etapas" SOLO si de verdad se parte —[nombre, días,
-% de su plata]— y si está, "dias" se ignora.
+días hábiles que lleva.
+
+"partes" cuando el capítulo son VARIOS TRABAJOS que pasan en momentos
+distintos —[nombre, días, % de su plata]—. Si está, "dias" se ignora. El
+nombre es libre y en castellano de obra, y se usa tal cual:
+
+  Estructura metálica → [["fabricación",5,40],["montaje",5,35],["refuerzos",2,10],["instalación de grada",3,15]]
+  Ventanería importada → [["anticipo",1,50],["fabricación",45,40],["instalación",12,10]]
+
+Partí SOLO cuando los trabajos ocurren de verdad separados en el tiempo y se
+reconocen en los rubros del capítulo —que te paso arriba—. Lo que se ejecuta
+de corrido es una actividad y punto: no inventes etapas para que se vea más
+detallado. Las partes van encadenadas en el orden en que las escribas.
 
 "dependencias": [de, a, retardo] y nada más. El retardo en días: positivo es
 una espera real, NEGATIVO es un traslape. Si hace falta otro tipo de enlace,
@@ -325,12 +346,22 @@ function expandir(p) {
     // La forma larga, tal cual.
     if (a.agrupacion_id != null || a.nombre != null) return a;
     const base = { ref: Number(a.id), agrupacion_id: Number(a.id), nombre: "", porque: a.porque || "" };
-    if (!Array.isArray(a.etapas) || a.etapas.length < 2) {
+    const partes = Array.isArray(a.partes) ? a.partes : a.etapas;
+    if (!Array.isArray(partes) || partes.length < 2) {
       return { ...base, duracion: n(a.dias) || 10, etapa: "ejecucion", peso: 100 };
     }
-    return a.etapas.map(e => {
-      const [nombre, dias, peso] = Array.isArray(e) ? e : [e.etapa, e.dias, e.peso];
-      return { ...base, duracion: n(dias) || 5, etapa: String(nombre || "ejecucion"), peso: n(peso) };
+    return partes.map(e => {
+      const [etiqueta, dias, peso] = Array.isArray(e) ? e : [e.etapa, e.dias, e.peso];
+      // El nombre de la parte se CONSERVA. Antes se lo trataba solo como
+      // etapa, y como "montaje de estructura" no está entre las cinco etapas
+      // de compra, caía en "ejecucion" y el nombre se perdía: las tres partes
+      // terminaban llamándose igual que el capítulo y el detector de
+      // repetidas las fundía en una. O sea que NOVA podía partir un capítulo
+      // en trabajos y el resultado era un capítulo sin partir.
+      return {
+        ...base, duracion: n(dias) || 5, peso: n(peso),
+        etapa: etapaDe(etiqueta), parte: String(etiqueta || "").trim(),
+      };
     });
   }).flat();
 
@@ -372,11 +403,17 @@ export function ordenar(entrada, agrupaciones, cal) {
     .map((a, i) => {
       const g = porAgrup.get(Number(a.agrupacion_id));
       const etapa = ["anticipo", "fabricacion", "entrega", "instalacion", "ejecucion"].includes(a.etapa) ? a.etapa : "ejecucion";
+      const sufijo = (a.parte && SIN_TILDE(a.parte) !== SIN_TILDE(g.nombre))
+        ? a.parte
+        : (etapa === "ejecucion" ? "" : ETAPA_CORTA[etapa]);
       return {
         ref: Number(a.ref) || i + 1,
         // El nombre es el de la agrupación. La etapa se agrega como sufijo
         // para distinguir las barras de un mismo rubro, y nada más.
-        nombre: (etapa === "ejecucion" ? g.nombre : `${g.nombre} · ${ETAPA_CORTA[etapa]}`).slice(0, 120),
+        // El nombre del capítulo, y detrás cómo se llama esta parte: la
+        // etiqueta que puso NOVA si la hay —"montaje de estructura"— o el
+        // nombre de la etapa de compra. Sin parte, el capítulo a secas.
+        nombre: (sufijo ? `${g.nombre} · ${sufijo}` : g.nombre).slice(0, 120),
         duracion: Math.max(1, Math.round(n(a.duracion)) || 5),
         etapa,
         peso: n(a.peso),
