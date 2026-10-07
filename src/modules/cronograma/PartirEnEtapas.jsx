@@ -36,10 +36,13 @@ const COMPRA = [
   { nombre: "instalación", etapa: "instalacion", peso: 10, duracion: 12, pista: "Al final, con el edificio cerrado" },
 ];
 
+// Vacíos a propósito: los nombres los pone la obra. "primera entrada" y
+// "remates" eran los míos, y nadie llama así a nada — se borraban antes de
+// escribir los de verdad.
 const TRAMOS = [
-  { nombre: "primera entrada", etapa: "ejecucion", peso: 40, duracion: 10, pista: "" },
-  { nombre: "segunda entrada", etapa: "ejecucion", peso: 40, duracion: 10, pista: "" },
-  { nombre: "remates", etapa: "ejecucion", peso: 20, duracion: 5, pista: "" },
+  { nombre: "", etapa: "ejecucion", peso: 34, duracion: 10, pista: "" },
+  { nombre: "", etapa: "ejecucion", peso: 33, duracion: 10, pista: "" },
+  { nombre: "", etapa: "ejecucion", peso: 33, duracion: 10, pista: "" },
 ];
 
 let proximo = 1;
@@ -81,15 +84,15 @@ export default function PartirEnEtapas({ actividad, onCancelar, onPartir }) {
           Partir «{actividad?.nombre}» en varias
         </div>
         <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginTop: 2 }}>
-          Cada parte es una barra del cronograma con sus propias fechas, y una línea del valorado con su plata.
-          Quedan encadenadas una detrás de otra; después movés cada una a donde va, que casi nunca es apenas
-          termina la anterior.
+          Cada parte es <strong style={{ color: colors.inkSoft }}>una barra con sus propias fechas</strong>, y quedan
+          encadenadas en este orden: la segunda arranca cuando termina la primera. Después cambiás lo que haga falta
+          —que dos vayan a la vez, o que una espere unos días— con la flecha de cada fila.
         </div>
       </div>
 
       {/* Las dos formas en que un rubro se parte de verdad. */}
       <div style={{ display: "flex", gap: 6 }}>
-        {[["tramos", "Entra varias veces a la obra", "Eléctricas: mangueras, cableado, aparatos"],
+        {[["tramos", "Son varios trabajos, uno después de otro", "Estructura: columnas → deck → hormigonado"],
           ["compra", "Se compra y se instala", "Importado: anticipo, fabricación, instalación"]].map(([id, label, pista]) => {
           const puesto = modo === id;
           return (
@@ -168,8 +171,13 @@ export default function PartirEnEtapas({ actividad, onCancelar, onPartir }) {
       </div>
 
       <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
-        Los nombres de compra —{Object.values(ETAPAS).filter(Boolean).join(", ")}— sirven para que el valorado sepa
-        que un anticipo es un pago y no un trabajo. Para los tramos de obra el nombre es libre: se usa tal cual.
+        {conPlata
+          ? <>El porcentaje es un reparto provisorio. Cuando termines, abrí la lista de rubros del capítulo
+              —el ícono de la lista— y decí <strong style={{ color: colors.inkSoft }}>qué rubros van en cada
+              parte</strong>: ahí la plata de cada barra deja de ser un porcentaje y pasa a ser la suma exacta de
+              lo que lleva adentro.</>
+          : <>Los nombres de compra —{Object.values(ETAPAS).filter(Boolean).join(", ")}— le dicen al valorado que un
+              anticipo es un pago y no un trabajo. En los trabajos de obra el nombre es libre: se usa tal cual.</>}
       </div>
     </div>
   );
