@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link2, Trash2, CalendarClock, ChevronRight, ChevronDown, ChevronUp, Scissors, X, List } from "lucide-react";
+import { Link2, Trash2, CalendarClock, ChevronRight, ChevronDown, ChevronUp, Scissors, X, List, ArrowDown, ArrowRight } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
@@ -71,7 +71,7 @@ export default function TablaGantt({
   porId, cal, plan, escala, zoom, marcas = [], editable, conEtapas,
   uniendo, setUniendo, hoyISO, dia,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro,
-  rubros = [], sinSenalar, onSenalar, onCuadrarReparto, platas = null,
+  rubros = [], sinSenalar, onSenalar, platas = null,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -87,8 +87,8 @@ export default function TablaGantt({
   // todo, después del lienzo: en un cronograma de ocho meses eso son dos mil
   // píxeles a la derecha, así que para partir una actividad había que
   // desplazar hasta el final, apretar, y volver.
-  const COLS = "minmax(230px,1fr) 54px 112px 112px 52px 46px";
-  const IZQ = 230 + 54 + 112 + 112 + 52 + 46 + 5 * 7 + 12;
+  const COLS = "minmax(230px,1fr) 54px 112px 112px 52px 68px";
+  const IZQ = 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12;
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
   const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
@@ -206,10 +206,6 @@ export default function TablaGantt({
         // Las que tienen sus rubros asignados no reparten nada: su plata es la
         // suma de lo que llevan adentro, y por construcción las partes suman
         // el capítulo. Avisar ahí sería avisar de un problema que no existe.
-        const conRubros = g.hijas.filter(a => platas?.asignados?.get(a.id));
-        const porPeso = g.hijas.filter(a => !platas?.asignados?.get(a.id));
-        const pesos = porPeso.reduce((t, a) => t + Number(a.peso_pct ?? 100), 0);
-        const malReparto = g.id && g.hijas.length > 1 && !conRubros.length && Math.abs(pesos - 100) > 0.01;
 
         return (
           <div key={g.id}>
@@ -267,19 +263,15 @@ export default function TablaGantt({
                       </span>
                     )}
 
-                    {malReparto && (
-                      // Con el arreglo al lado: avisar de un descuadre y no dar
-                      // cómo cerrarlo obliga a corregir seis números a mano, y
-                      // es cuando se deja así.
-                      <button onClick={() => onCuadrarReparto?.(g.id)} disabled={!editable || !onCuadrarReparto}
-                        title="Las etapas de un rubro tienen que repartirse el 100% de su plata. Así como está, el valorado no cuadra con el presupuesto. Tocá para cerrarlo en la etapa más grande."
-                        style={{ fontSize: 9, fontWeight: 700, color: colors.warning, background: colors.warningSoft,
-                          border: `1px solid ${colors.warningBorder}`, borderRadius: 9, padding: "1px 7px",
-                          cursor: editable ? "pointer" : "default", flexShrink: 3, minWidth: 0, maxWidth: 130,
-                          overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontFamily: colors.font }}>
-                        reparten {Math.round(pesos)}% · cuadrar
-                      </button>
-                    )}
+                    {/* Acá vivía el aviso de "reparten 90% · cuadrar", y se
+                        fue porque el problema que anunciaba ya no existe: el
+                        reparto se normaliza, así que unos pesos que suman 90
+                        reparten igual TODO el dinero del rubro, en esa
+                        proporción. No hay plata que se pierda y no hay nada
+                        que cuadrar a mano. Un aviso de un problema resuelto es
+                        ruido, y el ruido es lo que hace que los demás avisos
+                        dejen de leerse. */}
+
                   </div>
                   <span title="De la primera etapa a la última, incluido lo que pasa en el medio sin trabajo en obra"
                     style={{ textAlign: "center", fontSize: 10.5, color: colors.muted }}>
@@ -357,15 +349,19 @@ export default function TablaGantt({
                             </span>
                           )}
                         </button>
-                        {/* Lo que lleva esta barra. Cuando sale de rubros
-                            asignados se dice así —"$30.000 · 12 rubros"— y no
-                            en porcentaje: el porcentaje es un número que
-                            alguien inventó, la suma de los rubros es el dato. */}
-                        {!g.simple && platas && (
-                          <span style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>
-                            {platas.asignados?.get(a.id)
-                              ? `$${Math.round(platas.porActividad.get(a.id) || 0).toLocaleString("es-EC")} · ${platas.asignados.get(a.id)} ${platas.asignados.get(a.id) === 1 ? "rubro" : "rubros"}`
-                              : (a.peso_pct != null ? `${a.peso_pct}%` : "")}
+                        {/* EL PORCENTAJE NO SE MUESTRA ACÁ.
+                            Un cronograma habla de tiempo. "40%" es plata, y
+                            puesto en una fila de barras obliga a cambiar de
+                            idioma para leer una línea. La plata se mira en el
+                            valorado, que es la misma información dicha en
+                            dinero.
+                            Lo que sí dice algo del alcance de la barra es
+                            cuántos rubros lleva adentro: eso no es plata, es
+                            de qué está hecha. */}
+                        {!g.simple && platas?.asignados?.get(a.id) > 0 && (
+                          <span title="Los rubros del capítulo que van en esta parte"
+                            style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>
+                            {platas.asignados.get(a.id)} {platas.asignados.get(a.id) === 1 ? "rubro" : "rubros"}
                           </span>
                         )}
                         {deps.length > 0 && (
@@ -430,6 +426,29 @@ export default function TablaGantt({
                           nombre, leer, y recién ahí encontrarlo. Lo que el
                           programa hace solo, uno tiene que poder hacerlo
                           igual de fácil. */}
+                      {/* "A LA VEZ" EN UN CLIC.
+                          Poner dos cosas en paralelo era lo más difícil de
+                          armar a mano: había que abrir la ficha, encontrar el
+                          campo del retardo y escribir un número NEGATIVO —que
+                          hay que explicar antes de que signifique algo—.
+                          En obra no se piensa en retardos negativos: se piensa
+                          "esto va al mismo tiempo que aquello". Este botón
+                          cambia entre las dos y no hay nada más que entender.
+                          Solo cuando depende de UNA cosa: con dos o más, cuál
+                          va en paralelo es una decisión y se toma en la ficha. */}
+                      {deps.length === 1 && (
+                        <button onClick={() => onCambiarDep(deps[0], {
+                          tipo: deps[0].tipo === "CC" ? "FC" : "CC", retardo: 0,
+                        })}
+                          title={deps[0].tipo === "CC"
+                            ? `Va al mismo tiempo que «${porId.get(deps[0].depende_de_id)?.nombre}». Tocá para que vaya después.`
+                            : `Va después de «${porId.get(deps[0].depende_de_id)?.nombre}». Tocá para que vayan a la vez.`}
+                          style={{ background: deps[0].tipo === "CC" ? colors.brandSoft : "none", border: "none",
+                            color: deps[0].tipo === "CC" ? colors.brand : colors.muted, borderRadius: 4,
+                            cursor: "pointer", display: "flex", padding: 2 }}>
+                          {deps[0].tipo === "CC" ? <ArrowRight size={12} /> : <ArrowDown size={12} />}
+                        </button>
+                      )}
                       {conEtapas && (
                         <button onClick={() => onPartir(a)}
                           title="Partirla: entra varias veces a la obra, o se compra y se instala"

@@ -148,10 +148,25 @@ La obra "${nombreObra}" dura ${meses} meses, que son unos ${dias} días de traba
 AGRUPACIONES del presupuesto, con su plata y SU TAMAÑO medido:
 ${agrupaciones.map(enPalabras).join("\n")}
 
-Devuelves SOLO JSON, sin markdown:
-{"actividades":[{"ref":1,"agrupacion_id":12,"nombre":"Excavación y cimentación","duracion":18,"etapa":"ejecucion","peso":100,"porque":"..."}],
- "dependencias":[{"de":1,"a":2,"tipo":"FC","retardo":0,"porque":"..."},
-                 {"de":2,"a":3,"tipo":"FC","retardo":-5,"porque":"la mampostería entra antes de que termine la estructura"}]}
+Devuelves SOLO JSON, sin markdown. USA EL ID DE LA AGRUPACIÓN COMO REFERENCIA
+—no inventes otra numeración— y no mandes el nombre: ya lo tengo, es el del
+control de obra y es el que vale.
+
+{"actividades":[{"id":12,"dias":18},
+                {"id":13,"dias":40,"etapas":[["anticipo",1,50],["fabricacion",45,40],["instalacion",12,10]]}],
+ "dependencias":[[12,13,0],[13,14,-5]]}
+
+"actividades": una por agrupación. "id" es el id de la agrupación, "dias" los
+días hábiles que lleva. "etapas" SOLO si de verdad se parte —[nombre, días,
+% de su plata]— y si está, "dias" se ignora.
+
+"dependencias": [de, a, retardo] y nada más. El retardo en días: positivo es
+una espera real, NEGATIVO es un traslape. Si hace falta otro tipo de enlace,
+[de, a, retardo, "CC"] con "CC" o "FF".
+
+CORTO A PROPÓSITO. Lo que no te pido no lo mandes: no mandes nombres, no
+mandes explicaciones por actividad, no repitas la lista. Cada palabra de más
+es una chance de que la respuesta no entre entera y se corte a la mitad.
 
 LAS ACTIVIDADES SON LAS AGRUPACIONES. Ni una más ni una menos. No inventes
 otras, no las renombres, no las partas en pedazos de tu cosecha ni juntes dos
@@ -294,7 +309,45 @@ es un informe: es la razón, y si te extendés la respuesta no entra entera.`;
  * dependencia que lo cierra, porque un cronograma con un círculo no tiene
  * fechas y la pantalla no podría dibujar nada.
  */
-export function ordenar(p, agrupaciones, cal) {
+/**
+ * De la forma corta que devuelve NOVA a la que usa el resto del módulo.
+ *
+ * Se le pide lo mínimo —el id de la agrupación y los días— porque todo lo
+ * demás ya lo tenemos: el nombre es el del control de obra, y el "porque" de
+ * cada una es texto que nadie lee y que ocupa el lugar donde después no entra
+ * la última actividad. Pedir menos es la única forma real de que no se corte.
+ *
+ * Sigue entendiendo la forma larga: una respuesta vieja, o un modelo que se
+ * acuerda del formato anterior, no tienen por qué fallar.
+ */
+function expandir(p) {
+  const acts = (p.actividades || []).map((a, i) => {
+    // La forma larga, tal cual.
+    if (a.agrupacion_id != null || a.nombre != null) return a;
+    const base = { ref: Number(a.id), agrupacion_id: Number(a.id), nombre: "", porque: a.porque || "" };
+    if (!Array.isArray(a.etapas) || a.etapas.length < 2) {
+      return { ...base, duracion: n(a.dias) || 10, etapa: "ejecucion", peso: 100 };
+    }
+    return a.etapas.map(e => {
+      const [nombre, dias, peso] = Array.isArray(e) ? e : [e.etapa, e.dias, e.peso];
+      return { ...base, duracion: n(dias) || 5, etapa: String(nombre || "ejecucion"), peso: n(peso) };
+    });
+  }).flat();
+
+  // Las referencias en la forma corta son los ids de agrupación, así que una
+  // agrupación partida en etapas tiene varias actividades con la misma ref.
+  // Una dependencia hacia ella apunta a la PRIMERA —el anticipo—, que es lo
+  // que uno quiere decir con "después de la ventanería".
+  const deps = (p.dependencias || []).map(d => {
+    if (!Array.isArray(d)) return d;
+    const [de, a, retardo, tipo] = d;
+    return { de: Number(de), a: Number(a), retardo: n(retardo), tipo: tipo || "FC" };
+  });
+  return { ...p, actividades: acts, dependencias: deps };
+}
+
+export function ordenar(entrada, agrupaciones, cal) {
+  const p = expandir(entrada);
   const porAgrup = new Map(agrupaciones.map(a => [Number(a.id), a]));
 
   // EL CRONOGRAMA ES EL ESPEJO DE LAS AGRUPACIONES, y eso no se le pide a

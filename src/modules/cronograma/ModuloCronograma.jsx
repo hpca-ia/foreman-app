@@ -782,40 +782,6 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }
 
   /**
-   * Cuadrar el reparto de plata de un rubro partido en etapas.
-   *
-   * Las etapas de un rubro tienen que repartirse el 100% de su plata. Cuando
-   * no cierran —un cronograma viejo, o NOVA que devolvió pesos que suman 35—
-   * ese rubro aporta de menos al valorado y el total deja de dar el
-   * presupuesto, que es el único defecto que lo vuelve inservible.
-   *
-   * Lo que falta o sobra se ajusta en la etapa más grande: es la que más
-   * absorbe en obra y la que menos se nota.
-   */
-  async function cuadrarReparto(agrupId) {
-    const suyas = actividades.filter(a => a.obra_actividad_id === agrupId);
-    if (suyas.length < 2) return;
-    const suma = suyas.reduce((t, a) => t + (Number(a.peso_pct) || 0), 0);
-    if (Math.abs(suma - 100) < 0.01) return;
-    setPensando(true);
-    if (!suma) {
-      // Sin ningún peso, partes iguales: es lo único honesto cuando no hay
-      // con qué ponderar.
-      const parejo = Math.round((100 / suyas.length) * 100) / 100;
-      for (const [i, a] of suyas.entries()) {
-        const v = i === suyas.length - 1 ? Math.round((100 - parejo * (suyas.length - 1)) * 100) / 100 : parejo;
-        await supabase.from("cronograma_actividades").update({ peso_pct: v }).eq("id", a.id);
-      }
-    } else {
-      const mayor = suyas.reduce((a, b) => ((Number(a.peso_pct) || 0) >= (Number(b.peso_pct) || 0) ? a : b));
-      const v = Math.round(((Number(mayor.peso_pct) || 0) + (100 - suma)) * 100) / 100;
-      await supabase.from("cronograma_actividades").update({ peso_pct: Math.max(0, v) }).eq("id", mayor.id);
-    }
-    setPensando(false);
-    await cargar();
-  }
-
-  /**
    * Señalar, dentro de un grupo, el rubro que de verdad está pendiente.
    *
    * El grupo se atrasa por UNA cosa: están todas las lámparas instaladas menos
@@ -1415,7 +1381,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
           onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
-          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro} onCuadrarReparto={cuadrarReparto}
+          rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
           platas={platas} />
       )}
 
