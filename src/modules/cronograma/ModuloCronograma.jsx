@@ -1138,9 +1138,20 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             <strong style={{ fontSize: 12.5, color: colors.ink }}>
               NOVA propone {revision.ops.length} {revision.ops.length === 1 ? "cambio" : "cambios"}
             </strong>
-            <span style={{ fontSize: 11.5, color: colors.muted, flex: 1, minWidth: 180 }}>{revision.nota}</span>
+            <span style={{ flex: 1 }} />
             <Button variant="secondary" size="sm" onClick={() => setRevision(null)}>Cerrar</Button>
           </div>
+          {/* La nota, en su propio renglón y entera. Es donde NOVA dice lo que
+              NO pudo traducir —"no hay una barra para el desmontaje eléctrico"—
+              y eso suele valer más que las operaciones que sí propuso: avisa de
+              algo que falta en el cronograma. Apretada contra el título se
+              leía cortada. */}
+          {revision.nota && (
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55, marginBottom: 8,
+              background: colors.bg, borderRadius: 7, padding: "7px 9px" }}>
+              {revision.nota}
+            </div>
+          )}
           <div style={{ display: "grid", gap: 5 }}>
             {revision.ops.map((x, k) => {
               const nombre = id => todas.find(a => a.id === id)?.nombre || `#${id}`;
@@ -1166,9 +1177,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         .update({ duracion: x.duracion }).eq("id", x.id);
                       err = r.error?.message || null;
                     } else if (x.tipo === "encadenar") {
-                      const r = await supabase.from("cronograma_dependencias")
-                        .insert({ actividad_id: x.a, depende_de_id: x.de, tipo: x.enlace || "FC", retardo: x.retardo });
-                      err = r.error?.message || null;
+                      // REEMPLAZA SI YA EXISTE, no inserta a ciegas.
+                      //
+                      // Dos actividades solo pueden estar unidas una vez —la
+                      // base lo exige— y casi siempre el enlace que propone
+                      // NOVA es un CAMBIO del que ya está: "este CC reemplaza
+                      // el FC -8d". Insertando sin más, la base rechazaba la
+                      // operación con un error de llave duplicada y lo que la
+                      // pantalla mostraba era eso, en inglés, sin decir qué
+                      // hacer.
+                      const campos = { tipo: x.enlace || "FC", retardo: x.retardo };
+                      const upd = await supabase.from("cronograma_dependencias")
+                        .update(campos).eq("actividad_id", x.a).eq("depende_de_id", x.de).select();
+                      if (upd.error) err = upd.error.message;
+                      else if (!upd.data?.length) {
+                        const ins = await supabase.from("cronograma_dependencias")
+                          .insert({ actividad_id: x.a, depende_de_id: x.de, ...campos });
+                        err = ins.error?.message || null;
+                      }
                     } else if (x.tipo === "desencadenar") {
                       const r = await supabase.from("cronograma_dependencias")
                         .delete().eq("actividad_id", x.a).eq("depende_de_id", x.de);

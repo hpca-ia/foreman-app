@@ -767,7 +767,7 @@ cronograma está bien, mandá {"nota":"..."} y nada más.`;
         .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
       reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
         .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
-      nota: String(datos.nota || "").slice(0, 300),
+      nota: String(datos.nota || "").slice(0, 1200),
     };
   } catch (e) {
     return { error: e.message };
@@ -879,7 +879,10 @@ Las listas son opcionales: mandá solo las que tengan algo.`;
         .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
       reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
         .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
-      nota: String(datos.nota || "").slice(0, 400),
+      // Largo de sobra: la nota es donde NOVA dice lo que NO pudo
+      // traducir —"no hay barra para el desmontaje eléctrico"— y cortarla a la
+      // mitad de una frase borra justo la parte que avisa de un problema.
+      nota: String(datos.nota || "").slice(0, 1200),
     };
   } catch (e) {
     return { error: e.message };
