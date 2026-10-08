@@ -1618,10 +1618,11 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   )}
                   <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
                     <colgroup>
-                      {/* 70 no alcanzaba: entre las flechas, el número, el
-                          control de mover y el estado, el contenido pedía 80 y
-                          se montaba encima. */}
-                      <col style={{width:112}}/><col/><col style={{width:64}}/><col style={{width:104}}/>
+                      {/* 70 no alcanzaba, y 112 tampoco: con un número de
+                          cinco dígitos —11.15— y el "acá" visible el contenido
+                          pide 109, y se montaba sobre la descripción. Medido
+                          en el navegador con el peor caso, no estimado. */}
+                      <col style={{width:134}}/><col/><col style={{width:64}}/><col style={{width:104}}/>
                       <col style={{width:96}}/><col style={{width:70}}/><col style={{width:112}}/><col style={{width:118}}/><col style={{width:34}}/>
                     </colgroup>
                     <thead><tr style={{background:"var(--bg)"}}>
@@ -1635,7 +1636,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       return(
                         <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)",
                           background: marcado(item.id) ? "var(--brand-soft)" : undefined}}>
-                          <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>
+                          <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500,overflow:"hidden"}}>
                             <div style={{display:"flex",alignItems:"center",gap:3,minWidth:0}}>
                               <div style={{display:"flex",flexDirection:"column",flexShrink:0}}>
                                 <button onClick={()=>moverRubro(item,-1)} disabled={itemIdx===0} title="Subir uno"
@@ -1682,7 +1683,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 title={item.listo?"Listo. Tocá para volver a marcarlo en proceso.":"Todavía en proceso. Tocá cuando esté listo."}
                                 style={{background:"none",border:"none",padding:"0 2px",cursor:"pointer",fontFamily:"inherit",
                                   fontSize:12,fontWeight:700,lineHeight:1,flexShrink:0,
-                                  color:item.listo?"var(--success)":"var(--border)"}}>
+                                  color:item.listo?"var(--success)":"var(--muted)"}}>
                                 {item.listo?"✓":"✗"}
                               </button>
                             </div>

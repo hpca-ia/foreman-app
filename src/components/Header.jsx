@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { VERSION, COMPILADO } from "../version";
 import { Search, X, AlertTriangle, Settings, LogOut, Plus } from "lucide-react";
 import { colors } from "../theme/colors";
 import { logoEmpresa } from "../lib/marca";
@@ -30,7 +31,15 @@ export default function Header({ busqueda, setBusqueda, alertCount, onOpenAlerts
                 style={{ height: 22, maxWidth: 96, objectFit: "contain", display: "block" }} />}
           <span style={{ width: 1, height: 18, background: colors.border }} />
           <span className="app-marca-texto" style={{ color: colors.ink, fontSize: 16, fontWeight: 700, letterSpacing: 0.2 }}>FOREMAN</span>
-          <span className="header-label" style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 4 }}>BETA</span>
+          {/* Qué versión se está mirando.
+              Sin esto, "no me aparece el botón" y "ya lo desplegué" conviven
+              sin contradecirse: su navegador puede tener un bundle de hace
+              veinte minutos y no hay forma de saberlo salvo adivinando. Con el
+              commit a la vista, se compara y se termina la discusión. */}
+          <span className="header-label" title={`Versión ${VERSION} · compilada ${COMPILADO}`}
+            style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 4 }}>
+            BETA · {VERSION}
+          </span>
         </div>
         {buscaAca ? (
           <div className="header-search" style={{ background: colors.neutralSoft, borderRadius: colors.radiusMd, padding: "4px 12px", display: "flex", alignItems: "center", gap: 8 }}>

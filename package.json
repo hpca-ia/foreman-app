@@ -21,7 +21,8 @@
     "revisar": "npm run nombres && npm run hooks && npm run sombra",
     "migrar": "node scripts/migrar.mjs",
     "sombra": "node scripts/sombra-de-props.mjs",
-    "clave": "node scripts/clave.mjs"
+    "clave": "node scripts/clave.mjs",
+    "prebuild": "node scripts/version.mjs"
   },
   "browserslist": {
     "production": [
