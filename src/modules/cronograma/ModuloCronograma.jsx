@@ -6,7 +6,8 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
-import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios } from "./novaCronograma";
+import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios,
+  revisarCronograma } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
@@ -85,6 +86,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [sinSenalar, setSinSenalar] = useState(false);
   // La actividad que se está partiendo en etapas, si hay alguna.
   const [partiendo, setPartiendo] = useState(null);
+  // Lo que NOVA propone mejorar sobre el cronograma que ya hay. Se acepta de a
+  // una: un parche entero aceptado a ciegas es volver a rehacerlo.
+  const [revision, setRevision] = useState(null);
   // El menú de lo que se hace de vez en cuando: bajarlo para Project,
   // reordenarlo, borrarlo. Afuera queda lo que uno viene a hacer.
   const [menu, setMenu] = useState(false);
@@ -836,6 +840,38 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     await cargar();
   }
 
+  /**
+   * Mover una etapa dentro de su agrupación.
+   *
+   * NOVA propone un orden —anticipo, fabricación, instalación— y a veces en
+   * esta obra el montaje va antes que otra cosa, o la entrega se adelanta.
+   * Sin esto había que borrar la partición y volver a hacerla entera.
+   *
+   * Se intercambian los dos `orden` y nada más: reescribir todas las barras
+   * por mover una es pedirle a la base veinte escrituras por un clic.
+   */
+  async function moverEtapa(a, direccion) {
+    const hermanas = actividades
+      .filter(x => (x.obra_actividad_id || 0) === (a.obra_actividad_id || 0))
+      .sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0));
+    const i = hermanas.findIndex(x => x.id === a.id);
+    const j = i + direccion;
+    if (i < 0 || j < 0 || j >= hermanas.length) return;
+    const otra = hermanas[j];
+    // Si quedaron con el mismo orden —o sin ninguno— intercambiar no movería
+    // nada: se les da el lugar que ocupan en la lista antes de cambiarlas.
+    const mio = a.orden ?? i;
+    const suyo = otra.orden ?? j;
+    const [o1, o2] = mio === suyo ? [j, i] : [suyo, mio];
+    setError("");
+    const [e1, e2] = await Promise.all([
+      supabase.from("cronograma_actividades").update({ orden: o1 }).eq("id", a.id),
+      supabase.from("cronograma_actividades").update({ orden: o2 }).eq("id", otra.id),
+    ]);
+    if (e1.error || e2.error) { setError("No se pudo mover: " + (e1.error || e2.error).message); return; }
+    await cargar();
+  }
+
   async function quitar(a) {
     if (!window.confirm(`¿Borrar "${a.nombre}"?`)) return;
     await supabase.from("cronograma_actividades").delete().eq("id", a.id);
@@ -1085,6 +1121,119 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 }}>Ajustar al plazo</Button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* LO QUE NOVA PROPONE, de a una.
+          Un parche entero aceptado a ciegas es volver a rehacer el cronograma
+          con otro nombre. Cada operación dice QUÉ cambia y POR QUÉ, y se
+          aplica sola: lo que no convence se descarta y no pasa nada. */}
+      {revision && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`,
+          borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <Sparkles size={13} color={colors.brand} />
+            <strong style={{ fontSize: 12.5, color: colors.ink }}>
+              NOVA propone {revision.ops.length} {revision.ops.length === 1 ? "cambio" : "cambios"}
+            </strong>
+            <span style={{ fontSize: 11.5, color: colors.muted, flex: 1, minWidth: 180 }}>{revision.nota}</span>
+            <Button variant="secondary" size="sm" onClick={() => setRevision(null)}>Cerrar</Button>
+          </div>
+          <div style={{ display: "grid", gap: 5 }}>
+            {revision.ops.map((x, k) => {
+              const nombre = id => todas.find(a => a.id === id)?.nombre || `#${id}`;
+              const dice = x.tipo === "ajustar"
+                  ? `«${nombre(x.id)}» pasa a ${x.duracion} días`
+                : x.tipo === "encadenar"
+                  ? `«${nombre(x.a)}» va después de «${nombre(x.de)}»${x.retardo ? ` con ${x.retardo > 0 ? "+" : ""}${x.retardo} días` : ""}${x.enlace && x.enlace !== "FC" ? ` (${x.enlace})` : ""}`
+                : x.tipo === "desencadenar"
+                  ? `Soltar: «${nombre(x.a)}» deja de esperar a «${nombre(x.de)}»`
+                  : `«${nombre(x.id)}» va antes de «${nombre(x.antes_de)}»`;
+              return (
+                <div key={k} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                  padding: "6px 9px", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 12, color: colors.ink }}>{dice}</div>
+                    {x.porque && <div style={{ fontSize: 11, color: colors.muted }}>{x.porque}</div>}
+                  </div>
+                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                    setPensando(true); setError("");
+                    let err = null;
+                    if (x.tipo === "ajustar") {
+                      const r = await supabase.from("cronograma_actividades")
+                        .update({ duracion: x.duracion }).eq("id", x.id);
+                      err = r.error?.message || null;
+                    } else if (x.tipo === "encadenar") {
+                      const r = await supabase.from("cronograma_dependencias")
+                        .insert({ actividad_id: x.a, depende_de_id: x.de, tipo: x.enlace || "FC", retardo: x.retardo });
+                      err = r.error?.message || null;
+                    } else if (x.tipo === "desencadenar") {
+                      const r = await supabase.from("cronograma_dependencias")
+                        .delete().eq("actividad_id", x.a).eq("depende_de_id", x.de);
+                      err = r.error?.message || null;
+                    } else {
+                      // Reordenar: se le da el lugar de la otra y a la otra el suyo.
+                      const yo = todas.find(a => a.id === x.id);
+                      const otra = todas.find(a => a.id === x.antes_de);
+                      if (yo && otra) {
+                        const [e1, e2] = await Promise.all([
+                          supabase.from("cronograma_actividades").update({ orden: otra.orden ?? 0 }).eq("id", yo.id),
+                          supabase.from("cronograma_actividades").update({ orden: yo.orden ?? 0 }).eq("id", otra.id),
+                        ]);
+                        err = (e1.error || e2.error)?.message || null;
+                      }
+                    }
+                    setPensando(false);
+                    if (err) { setError(err); return; }
+                    setRevision(r => ({ ...r, ops: r.ops.filter((_, i) => i !== k) }));
+                    await cargar();
+                  }}>Aplicar</Button>
+                  <Button variant="secondary" size="sm"
+                    onClick={() => setRevision(r => ({ ...r, ops: r.ops.filter((_, i) => i !== k) }))}>
+                    No
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* QUE NOVA REVISE LO QUE YA HAY.
+          Distinto de armarlo: esto no borra nada. Hasta acá, si uno trabajaba
+          el cronograma y quería una segunda opinión, el único botón era
+          "armarlo", que lo tira entero y empieza de cero — o sea que el trabajo
+          de corregir duraciones, encadenar y partir en etapas castigaba a quien
+          lo hacía. Acá NOVA lee lo que hay, propone operaciones sueltas con su
+          porqué, y cada una se acepta o no. */}
+      {todas.length > 0 && editable && (
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+            setPensando(true); setError("");
+            const r = await revisarCronograma({
+              plan: todas, dependencias, nombreObra: lead.nombre, dias: diasDeContrato, cal,
+            });
+            setPensando(false);
+            if (r.error) { setError(r.error); return; }
+            const ops = [
+              ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
+              // `enlace` y no `tipo`: la etiqueta de la operación pisaría el
+              // tipo del enlace que mandó NOVA, y un CC o un FF se guardaría
+              // como fin→comienzo sin que nadie lo note.
+              ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
+              ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
+              ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
+            ];
+            if (!ops.length) {
+              window.alert(r.nota || "NOVA no le encontró nada para mejorar.");
+              return;
+            }
+            setRevision({ ops, nota: r.nota });
+          }}><Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA lo revise"}</Button>
+          <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+            Lee el cronograma como está —con tus duraciones, cadenas y etapas— y propone mejoras sueltas.
+            No borra nada: vos aceptás una por una.
+          </span>
         </div>
       )}
 
@@ -1465,6 +1614,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
           onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
+          onMoverEtapa={moverEtapa}
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
           platas={platas} />
       )}

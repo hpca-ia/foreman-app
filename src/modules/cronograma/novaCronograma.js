@@ -949,3 +949,115 @@ ${lista}`;
     return { error: e.message };
   }
 }
+
+/**
+ * Que NOVA REVISE el cronograma que ya trabajó una persona.
+ *
+ * Distinto de `acomodarCambios`, que entra cuando el control cambió. Esto es
+ * para cuando no cambió nada y uno quiere una segunda lectura de su propio
+ * trabajo: duraciones que quedaron flojas, cadenas que faltan, traslapes que la
+ * obra permite y nadie puso, etapas en un orden que no es el real.
+ *
+ * NO REHACE NADA. Devuelve el mismo tipo de parche que `acomodarCambios` —una
+ * lista de operaciones, cada una con su porqué— y la persona decide. Un
+ * cronograma con avance cargado y fechas comprometidas no se reescribe porque
+ * un modelo tenga una opinión.
+ *
+ * Y puede REORDENAR ETAPAS, que es lo que no sabía hacer: si el montaje va
+ * antes que la entrega en esta obra, lo dice en vez de callárselo.
+ */
+export async function revisarCronograma({ plan = [], dependencias = [], nombreObra = "", dias = 0, cal = calendario() }) {
+  if (!plan.length) return { error: "No hay cronograma que revisar." };
+  const { memoria } = await leerMemoria("cronograma");
+
+  const nombreDe = new Map(plan.map(a => [a.id, a.nombre]));
+  const planEnTexto = plan.map(a => {
+    const suyas = dependencias.filter(d => d.actividad_id === a.id)
+      .map(d => `${d.tipo || "FC"}${d.retardo ? ` ${d.retardo > 0 ? "+" : ""}${d.retardo}d` : ""} de ${nombreDe.get(d.depende_de_id) || "?"}`)
+      .join("; ");
+    return `${a.id} · ${a.nombre} · ${a.duracion}d · ${a.inicio} a ${a.fin}`
+      + `${a.critica ? " · CRÍTICA" : ` · ${a.holgura}d de colchón`}`
+      + (suyas ? ` · va después de: ${suyas}` : " · SIN DEPENDENCIAS");
+  }).join("\n");
+
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  const jornada = L.length === 7 ? "los siete días"
+    : L.includes(6) ? "de lunes a sábado" : "de lunes a viernes, sin sábados";
+
+  const sistema = `Sos NOVA y REVISÁS el cronograma de una obra en Ecuador que YA ESTÁ TRABAJADO.
+${memoriaEnPalabras(memoria)}
+
+La obra "${nombreObra}"${dias ? ` tiene un plazo de ${dias} días hábiles` : ""} y se trabaja ${jornada}.
+
+ESTO NO ES REHACERLO. Lo que ves abajo lo armó alguien que conoce la obra:
+corrigió duraciones, encadenó, puso traslapes, partió en etapas. Tu trabajo es
+leerlo como lo leería un colega con experiencia y decir qué MEJORARÍA, poco y
+bien fundado. Si está bien, decilo y no propongas nada: una revisión que
+siempre encuentra diez cosas es una revisión en la que nadie confía.
+
+EL PLAN DE HOY (id · nombre · duración · fechas · holgura · de qué depende):
+${planEnTexto}
+
+QUÉ MIRAR, en este orden:
+
+1. ACTIVIDADES SIN DEPENDENCIAS. Una barra que no depende de nada arranca el
+   día uno. En una obra casi nada arranca el día uno: si ves varias sueltas,
+   es lo más valioso que podés corregir.
+
+2. TRASLAPES QUE FALTAN. La mampostería de planta baja entra cuando arriba
+   todavía se funde; el enlucido empieza por donde ya se cerró. Un retardo
+   NEGATIVO es eso. Un cronograma sin traslapes da una obra mucho más larga de
+   lo que es.
+
+3. DURACIONES QUE NO CIERRAN con el tamaño del trabajo o con lo que rinde una
+   cuadrilla. Decí la cuenta.
+
+4. EL ORDEN DE LAS ETAPAS de una misma agrupación. El anticipo va primero y la
+   instalación al final; si ves una entrega después de su instalación, o un
+   montaje antes de su fabricación, está al revés.
+
+5. EL PLAZO. Si el plan sale muy por encima, decí dónde se gana —traslapes,
+   paralelo, más cuadrillas— y no estires nada.
+
+Devolvés SOLO JSON, sin markdown. Cada operación con su "porque" en diez
+palabras, que es lo que lee quien decide:
+
+{"ajustar":[{"id":12,"duracion":22,"porque":"1240 m2 / 2 cuadrillas x 28 m2 dia"}],
+ "encadenar":[{"de":12,"a":13,"tipo":"FC","retardo":-5,"porque":"enlucido entra por lo ya cerrado"}],
+ "desencadenar":[{"de":8,"a":9,"porque":"no se traban entre si"}],
+ "reordenar":[{"id":15,"antes_de":14,"porque":"el montaje va antes de la entrega"}],
+ "nota":"una frase sobre cómo está el cronograma en general"}
+
+Las cuatro listas son opcionales: mandá solo las que tengan algo. Si el
+cronograma está bien, mandá {"nota":"..."} y nada más.`;
+
+  try {
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 6000,
+      system: sistema,
+      messages: [{ role: "user", content: "Revisá este cronograma. Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo revisarlo." };
+    const texto = textoDeNova(data);
+    const { datos } = jsonTolerante(texto);
+    if (!datos) {
+      return { error: `NOVA devolvió algo que no se entiende. Empezaba así:\n\n${String(texto || "").slice(0, 220) || "(vacío)"}` };
+    }
+    const vivos = new Set(plan.map(a => a.id));
+    const lim = (xs, ok) => (Array.isArray(xs) ? xs : []).filter(ok).slice(0, 30);
+    return {
+      ajustar: lim(datos.ajustar, x => vivos.has(Number(x.id)) && n(x.duracion) > 0)
+        .map(x => ({ id: Number(x.id), duracion: Math.max(1, Math.round(n(x.duracion))), porque: x.porque || "" })),
+      encadenar: lim(datos.encadenar, x => vivos.has(Number(x.de)) && vivos.has(Number(x.a)) && Number(x.de) !== Number(x.a))
+        .map(x => ({ de: Number(x.de), a: Number(x.a), tipo: ["FC", "CC", "FF"].includes(x.tipo) ? x.tipo : "FC",
+          retardo: Math.max(-365, Math.min(365, Math.round(n(x.retardo)))), porque: x.porque || "" })),
+      desencadenar: lim(datos.desencadenar, x => vivos.has(Number(x.de)) && vivos.has(Number(x.a)))
+        .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
+      reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
+        .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
+      nota: String(datos.nota || "").slice(0, 300),
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}

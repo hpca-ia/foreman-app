@@ -70,7 +70,7 @@ export default function TablaGantt({
   todas = [], dependencias = [], agrupaciones = [], plata = {},
   porId, cal, plan, escala, zoom, marcas = [], editable, conEtapas,
   uniendo, setUniendo, hoyISO, dia,
-  onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro,
+  onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
   rubros = [], sinSenalar, onSenalar, platas = null,
 }) {
   const [abierta, setAbierta] = useState(null);
@@ -303,7 +303,7 @@ export default function TablaGantt({
             )}
 
             {/* Las actividades */}
-            {(!plegado || g.simple) && g.hijas.map(a => {
+            {(!plegado || g.simple) && g.hijas.map((a, j) => {
               const deps = dependencias.filter(d => d.actividad_id === a.id);
               const esta = abierta === a.id;
               const etapa = a.etapa && a.etapa !== "ejecucion" ? ETAPAS[a.etapa] : null;
@@ -319,6 +319,26 @@ export default function TablaGantt({
                             no tienen encabezado, así que salían peladas: el
                             nombre y nada más. Por eso "no traía los capítulos"
                             — los traía, y no los mostraba donde se miran. */}
+                        {/* MOVER LA ETAPA DENTRO DE SU AGRUPACIÓN.
+                            Las flechas del encabezado mueven la agrupación
+                            entera; estas mueven una etapa entre sus hermanas.
+                            Hacía falta: NOVA propone un orden —anticipo,
+                            fabricación, instalación— y a veces en esta obra el
+                            montaje va antes que algo, o la entrega se adelanta.
+                            Sin esto había que borrar y volver a partir. */}
+                        {editable && !g.simple && onMoverEtapa && (
+                          <div style={{ display: "flex", flexDirection: "column", flexShrink: 0, marginRight: 1 }}>
+                            <button onClick={e => { e.stopPropagation(); onMoverEtapa(a, -1); }}
+                              disabled={j === 0} title="Subir esta etapa"
+                              style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 8,
+                                cursor: j === 0 ? "default" : "pointer", color: j === 0 ? colors.border : colors.muted }}>▲</button>
+                            <button onClick={e => { e.stopPropagation(); onMoverEtapa(a, 1); }}
+                              disabled={j === g.hijas.length - 1} title="Bajar esta etapa"
+                              style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 8,
+                                cursor: j === g.hijas.length - 1 ? "default" : "pointer",
+                                color: j === g.hijas.length - 1 ? colors.border : colors.muted }}>▼</button>
+                          </div>
+                        )}
                         <button onClick={() => setAbierta(esta ? null : a.id)}
                           title="Ver y cambiar de qué depende, su etapa y su fecha"
                           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
