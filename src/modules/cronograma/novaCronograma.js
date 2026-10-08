@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { calcular, calendario } from "./cpm";
 import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
 import { jsonTolerante } from "../../lib/jsonTolerante";
-import { JUICIO } from "../../lib/modelos";
+import { JUICIO, pedirANova } from "../../lib/modelos";
 
 // NOVA arma el cronograma de la obra desde las agrupaciones del presupuesto.
 //
@@ -331,9 +331,9 @@ mucho menos, no las estires: dales el tiempo que llevan y dejá el resto como
 holgura.`;
 
   try {
-    const res = await fetch("/api/nova", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Con respaldo: si la cuenta no tiene el modelo fuerte, reintenta con el
+    // conocido en vez de dejar el cronograma sin armar.
+    const { res, data } = await pedirANova({
         // Con espacio de sobra: veinte agrupaciones con sus dependencias y el
         // porqué de cada una no entran en 4000, y la respuesta vuelve cortada
         // a la mitad. Pasó.
@@ -350,16 +350,14 @@ holgura.`;
         model: JUICIO, max_tokens: 12000,
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma de ${meses} meses. Solo JSON.` }],
-      }),
     });
-    const data = await res.json();
-    if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo armarlo." };
+    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo armarlo." };
     // Tolerante al corte: si la respuesta no entró entera, se salva lo que
     // llegó completo en vez de perder todo por el último renglón. Las
     // agrupaciones que falten las agrega `ordenar` igual, con duración a
     // revisar, así que un corte no deja el cronograma incompleto — deja unas
     // cuantas duraciones sin pensar, y eso se ve.
-    const { datos, cortado } = jsonTolerante(data.content?.[0]?.text);
+    const { datos, cortado } = jsonTolerante(data?.content?.[0]?.text);
     if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
     return { ...ordenar(datos, agrupaciones, cal), cortado };
   } catch (e) {
@@ -748,17 +746,15 @@ hay que mover, decilo en el "porque" de la operación más cercana en vez de
 hacerlo.`;
 
   try {
-    const res = await fetch("/api/nova", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Con respaldo, como el resto del cronograma: si la cuenta no tiene el
+    // modelo fuerte, contesta el conocido en vez de no contestar nadie.
+    const { res, data } = await pedirANova({
         model: JUICIO, max_tokens: 4000,
         system: sistema,
         messages: [{ role: "user", content: "Acomodá el cronograma a esos cambios. Solo JSON." }],
-      }),
     });
-    const data = await res.json();
-    if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo acomodarlo." };
-    const { datos } = jsonTolerante(data.content?.[0]?.text);
+    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo acomodarlo." };
+    const { datos } = jsonTolerante(data?.content?.[0]?.text);
     if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
     return limpiarParche(datos, { plan, nuevas, perdidas, dePlata });
   } catch (e) {

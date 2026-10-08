@@ -1,6 +1,6 @@
 import { repartirEntre } from "./valorado";
 import { leerMemoria, memoriaEnPalabras, recordar, patronDe } from "./memoriaNova";
-import { JUICIO } from "../../lib/modelos";
+import { JUICIO, pedirANova } from "../../lib/modelos";
 
 // NOVA arma el cronograma valorado del presupuesto.
 //
@@ -107,17 +107,15 @@ No marques como especial lo que se ejecuta y se paga al mismo tiempo —hormigó
 mampostería, mano de obra, enlucidos—: eso sigue a su capítulo.`;
 
   try {
-    const res = await fetch("/api/nova", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Con respaldo, como el resto del cronograma: si la cuenta no tiene el
+    // modelo fuerte, contesta el conocido en vez de no contestar nadie.
+    const { res, data } = await pedirANova({
         model: JUICIO, max_tokens: 4000,
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma valorado de ${meses} meses. Solo JSON.` }],
-      }),
     });
-    const data = await res.json();
-    if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo armarlo." };
-    const txt = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
+    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo armarlo." };
+    const txt = (data?.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
     const p = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
     return armar(p, rubros, meses, mesInicio);
   } catch (e) {

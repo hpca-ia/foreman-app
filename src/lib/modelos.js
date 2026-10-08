@@ -22,21 +22,53 @@
  * revisar a mano algo mal pensado.
  */
 
-// ───────────────────────────────────────────────────────────────────────────
-// DE VUELTA EN claude-sonnet-4-5, QUE ES EL QUE SE SABE QUE FUNCIONA.
+// PROBADO EN CARNE PROPIA: cambiar los tres de un saque dejó a NOVA sin hacer
+// nada en TODAS las pantallas —facturas, presupuestos, briefing, cronograma—,
+// porque todas pasan por acá. Si un identificador de modelo no está habilitado
+// en la cuenta, no falla una pantalla: fallan todas a la vez.
 //
-// Se cambiaron los tres a la generación 5 y NOVA dejó de hacer nada. No está
-// confirmado que sea la causa —puede ser otra cosa— pero el riesgo no es
-// simétrico: si un identificador de modelo no está habilitado en la cuenta,
-// NO falla una pantalla, fallan TODAS, porque todas pasan por acá. Facturas,
-// presupuestos, cronograma, briefing.
-//
-// Así que vuelve al conocido hasta poder probar los nuevos con una sesión de
-// verdad. La estructura se queda: tener los tres nombres en un solo archivo es
-// lo que permite hacer este cambio en diez segundos en vez de en diecinueve
-// archivos.
-// ───────────────────────────────────────────────────────────────────────────
-export const JUICIO = "claude-sonnet-4-5";
+// Por eso lo nuevo entra de a una pantalla, y SIEMPRE con respaldo: si la
+// cuenta lo rechaza, se reintenta con el conocido. NOVA puede contestar peor;
+// lo que no puede es quedarse muda.
+export const JUICIO = "claude-opus-5-5";
+
+// El que se sabe que funciona. Es a donde cae cualquier llamada cuyo modelo la
+// cuenta no acepte.
+export const CONOCIDO = "claude-sonnet-4-5";
+
+/**
+ * Pedirle algo a NOVA con un modelo y, si ese modelo no está disponible,
+ * reintentar con el conocido.
+ *
+ * Solo reintenta cuando el error habla del MODELO. Un error de verdad —la
+ * sesión vencida, la API caída, un JSON mal armado— se devuelve tal cual: dos
+ * intentos de lo mismo no lo arreglan y esconderlo sería peor.
+ */
+export async function pedirANova(cuerpo, respaldo = CONOCIDO) {
+  const llamar = async model => {
+    const res = await fetch("/api/nova", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...cuerpo, model }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* respuesta no-JSON */ }
+    return { res, data };
+  };
+
+  const primero = await llamar(cuerpo.model || respaldo);
+  // EL ERROR SE BUSCA EN EL CUERPO, no en el estado. La puerta de NOVA devolvía
+  // 200 aunque la API fallara, con el error adentro; ya se arregló, pero
+  // mirar las dos cosas cuesta nada y cubre un despliegue a medias.
+  const falló = !primero.res.ok || !!primero.data?.error || primero.data?.type === "error";
+  const texto = JSON.stringify(primero.data?.error || primero.data || "");
+  const esDelModelo = falló
+    && /model|not_found|not found|permission|unsupported|invalid_request/i.test(texto);
+  if (!esDelModelo || (cuerpo.model || respaldo) === respaldo) {
+    return { ...primero, modelo: cuerpo.model || respaldo };
+  }
+  const segundo = await llamar(respaldo);
+  return { ...segundo, modelo: respaldo, cayoAlRespaldo: true };
+}
 
 /**
  * LECTURA. Sacar datos de un documento que ya los tiene.

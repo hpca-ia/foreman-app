@@ -26,7 +26,11 @@ async function claude(body) {
     headers,
     body: JSON.stringify(body),
   });
-  return r.json();
+  // El estado de verdad viaja con la respuesta. Antes se devolvía siempre 200
+  // con el error adentro del cuerpo, y entonces un modelo que la cuenta no
+  // acepta —o la API caída— llegaban al navegador como "todo bien, acá está tu
+  // nada". Por eso NOVA podía dejar de funcionar sin que nadie viera un error.
+  return { estado: r.status, cuerpo: await r.json() };
 }
 
 function parseJSONSafe(text) {
@@ -46,8 +50,8 @@ export default async function handler(req, res) {
   try {
     const body = req.body;
     if (body._modo === "presupuesto_pdf") return await pdfHandler(req, res, body);
-    const data = await claude(body);
-    return res.status(200).json(data);
+    const { estado, cuerpo } = await claude(body);
+    return res.status(estado).json(cuerpo);
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -58,7 +62,7 @@ async function pdfHandler(req, res, body) {
 
   const sys1 = "Analiza este presupuesto. Extrae TODOS los subtotales. Responde SOLO JSON: {\"s\":[{\"n\":\"NOMBRE\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0}. n=nombre seccion max 4 palabras, v=monto subtotal. tg=subtotal general obra, th=con honorarios, ti=total con IVA. Sin texto extra.";
 
-  const d1 = await claude({
+  const { cuerpo: d1 } = await claude({
     model: LECTURA,
     max_tokens: 6000,
     system: sys1,
@@ -95,7 +99,7 @@ async function pdfHandler(req, res, body) {
 
   const sys2 = "Eres experto en presupuestos de construccion Ecuador. Recibiras secciones con formato INDICE:NOMBRE=MONTO separadas por |. Agrupa las de igual naturaleza en rubros sumando montos. No mezcles: electricas, sanitarias, mobiliario, acabados, seguridad, climatizacion van separados. IMPORTANTE: en el campo ids incluye los indices de las secciones que pertenecen a ese rubro. Responde SOLO JSON: {\"r\":[{\"nm\":\"Nombre\",\"ct\":\"Categoria\",\"ids\":[0,1,2]}],\"tt\":0}";
 
-  const d2 = await claude({
+  const { cuerpo: d2 } = await claude({
     model: JUICIO,
     max_tokens: 3000,
     system: sys2,
