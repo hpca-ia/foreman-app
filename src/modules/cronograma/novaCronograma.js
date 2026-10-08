@@ -767,6 +767,19 @@ cronograma está bien, mandá {"nota":"..."} y nada más.`;
         .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
       reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
         .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
+      // Partir una barra para darle lugar a un trabajo que no tiene actividad
+      // propia. No rompe el espejo con el control: la agrupación sigue siendo
+      // la misma, lo que cambia es que adentro tiene dos momentos en vez de
+      // uno. Es la única subdivisión permitida, y acá es donde hacía falta.
+      partir: lim(datos.partir, x => vivos.has(Number(x.id)) && String(x.nombre || "").trim())
+        .map(x => ({
+          id: Number(x.id),
+          nombre: String(x.nombre).trim().slice(0, 60),
+          dias: Math.max(1, Math.round(n(x.dias)) || 3),
+          peso: Math.min(95, Math.max(1, Math.round(n(x.peso)) || 10)),
+          primero: x.primero !== false,
+          porque: x.porque || "",
+        })),
       nota: String(datos.nota || "").slice(0, 1200),
     };
   } catch (e) {
@@ -851,7 +864,26 @@ palabras, y el porqué sale de LO QUE ÉL DIJO, no de tu criterio:
  "encadenar":[{"de":12,"a":13,"tipo":"FC","retardo":-5,"porque":"entra por planta baja antes de terminar"}],
  "desencadenar":[{"de":8,"a":9,"porque":"dijo que no se traban"}],
  "reordenar":[{"id":15,"antes_de":14,"porque":"el montaje va antes de la entrega"}],
+ "partir":[{"id":20,"nombre":"desmontaje eléctrico","dias":5,"peso":15,"primero":true,
+            "porque":"lo nombró y no tiene barra propia"}],
  "nota":"lo que no pudiste traducir, o lo que haría falta para poder hacerlo"}
+
+"partir" ES LO QUE USÁS CUANDO NOMBRA UN TRABAJO QUE NO TIENE BARRA.
+
+Pasa seguido y es lo más útil que podés hacer: habla del "desmontaje de las
+instalaciones eléctricas" o del "paso de tubería", y eso no es un rubro del
+presupuesto ni tiene actividad propia —vive adentro del capítulo eléctrico—.
+En vez de dejarlo afuera, PARTÍ esa barra: le agregás una parte con su nombre,
+sus días y qué porcentaje de la plata del capítulo se lleva.
+
+  "id" es la actividad que se parte. "nombre" el trabajo, en castellano de obra.
+  "dias" cuánto lleva. "peso" qué % de la plata de esa agrupación se lleva
+  —se le resta a la barra original, así que entre las dos siguen sumando 100—.
+  "primero": true si va ANTES de lo que ya estaba (un desmontaje va antes),
+  false si va después.
+
+No inventes trabajos que no nombró. Partir es para darle lugar a algo que él
+dijo y el cronograma no tiene.
 
 Las listas son opcionales: mandá solo las que tengan algo.`;
 
@@ -879,6 +911,19 @@ Las listas son opcionales: mandá solo las que tengan algo.`;
         .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
       reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
         .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
+      // Partir una barra para darle lugar a un trabajo que no tiene actividad
+      // propia. No rompe el espejo con el control: la agrupación sigue siendo
+      // la misma, lo que cambia es que adentro tiene dos momentos en vez de
+      // uno. Es la única subdivisión permitida, y acá es donde hacía falta.
+      partir: lim(datos.partir, x => vivos.has(Number(x.id)) && String(x.nombre || "").trim())
+        .map(x => ({
+          id: Number(x.id),
+          nombre: String(x.nombre).trim().slice(0, 60),
+          dias: Math.max(1, Math.round(n(x.dias)) || 3),
+          peso: Math.min(95, Math.max(1, Math.round(n(x.peso)) || 10)),
+          primero: x.primero !== false,
+          porque: x.porque || "",
+        })),
       // Largo de sobra: la nota es donde NOVA dice lo que NO pudo
       // traducir —"no hay barra para el desmontaje eléctrico"— y cortarla a la
       // mitad de una frase borra justo la parte que avisa de un problema.

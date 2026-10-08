@@ -1161,7 +1161,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   ? `«${nombre(x.a)}» va después de «${nombre(x.de)}»${x.retardo ? ` con ${x.retardo > 0 ? "+" : ""}${x.retardo} días` : ""}${x.enlace && x.enlace !== "FC" ? ` (${x.enlace})` : ""}`
                 : x.tipo === "desencadenar"
                   ? `Soltar: «${nombre(x.a)}» deja de esperar a «${nombre(x.de)}»`
-                  : `«${nombre(x.id)}» va antes de «${nombre(x.antes_de)}»`;
+                : x.tipo === "reordenar"
+                  ? `«${nombre(x.id)}» va antes de «${nombre(x.antes_de)}»`
+                  : `Partir «${nombre(x.id)}»: agregarle «${x.nombre}», ${x.dias} días, ${x.peso}% de su plata`;
               return (
                 <div key={k} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
                   padding: "6px 9px", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm }}>
@@ -1199,6 +1201,50 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                       const r = await supabase.from("cronograma_dependencias")
                         .delete().eq("actividad_id", x.a).eq("depende_de_id", x.de);
                       err = r.error?.message || null;
+                    } else if (x.tipo === "partir") {
+                      // PARTIR UNA BARRA para darle lugar a un trabajo que no
+                      // tiene actividad propia: el desmontaje eléctrico, el
+                      // paso de tubería, los picados. No son rubros del
+                      // presupuesto —viven adentro de su capítulo— y sin esto
+                      // quedaban afuera del cronograma aunque alguien los
+                      // nombrara.
+                      //
+                      // No rompe el espejo con el control: la agrupación sigue
+                      // siendo la misma, lo que cambia es que adentro tiene dos
+                      // momentos en vez de uno.
+                      const madre = todas.find(a => a.id === x.id);
+                      if (!madre) { err = "Esa actividad ya no existe."; }
+                      else {
+                        const base = String(madre.nombre || "").split(" · ")[0];
+                        const quedaba = Number(madre.peso_pct ?? 100);
+                        const { data: creada, error: e1 } = await supabase.from("cronograma_actividades")
+                          .insert({
+                            lead_id: lead.id, obra_id: lead.obra_id || null,
+                            obra_actividad_id: madre.obra_actividad_id,
+                            nombre: `${base} · ${x.nombre}`.slice(0, 120),
+                            duracion: x.dias, etapa: "ejecucion",
+                            // La plata sale de la barra que se parte, no se
+                            // inventa: entre las dos siguen sumando lo que la
+                            // agrupación tenía, o el valorado deja de dar el
+                            // presupuesto.
+                            peso_pct: madre.obra_actividad_id ? x.peso : null,
+                            orden: (madre.orden ?? 0) + (x.primero ? -1 : 1),
+                          }).select().single();
+                        if (e1) err = e1.message;
+                        else {
+                          if (madre.obra_actividad_id) {
+                            await supabase.from("cronograma_actividades")
+                              .update({ peso_pct: Math.max(0, Math.round((quedaba - x.peso) * 100) / 100) })
+                              .eq("id", madre.id);
+                          }
+                          // En fila: un desmontaje va ANTES de lo que estaba;
+                          // lo que se agrega al final va después.
+                          const de = x.primero ? creada.id : madre.id;
+                          const a = x.primero ? madre.id : creada.id;
+                          await supabase.from("cronograma_dependencias")
+                            .insert({ actividad_id: a, depende_de_id: de, tipo: "FC", retardo: 0 });
+                        }
+                      }
                     } else {
                       // Reordenar: se le da el lugar de la otra y a la otra el suyo.
                       const yo = todas.find(a => a.id === x.id);
@@ -1272,6 +1318,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
                   ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
                   ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
+                  ...(r.partir || []).map(x => ({ ...x, tipo: "partir" })),
                 ];
                 if (!ops.length) {
                   window.alert(r.nota || "NOVA no encontró nada que traducir. Probá nombrando las actividades como están en el cronograma.");
@@ -1316,6 +1363,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
               ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
               ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
+                  ...(r.partir || []).map(x => ({ ...x, tipo: "partir" })),
             ];
             if (!ops.length) {
               window.alert(r.nota || "NOVA no le encontró nada para mejorar.");
