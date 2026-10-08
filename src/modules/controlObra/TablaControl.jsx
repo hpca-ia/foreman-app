@@ -43,7 +43,8 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
   );
 }
 
-export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null }) {
+export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null,
+  fuera = [], obra = null }) {
   const [verDetalle, setVerDetalle] = useState(false);
   // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
   // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
@@ -246,6 +247,39 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* PEDIDOS QUE EL CONTROL NO ESTÁ CONTANDO, y por qué.
+              Un pedido que la regla deja afuera es plata que alguien pidió y
+              que no aparece en ningún número de esta pantalla. Que falte puede
+              estar bien —es de otra obra— o puede ser un dato mal puesto, y
+              desde acá no había manera de distinguirlo: simplemente no estaba.
+              Ahora está, con su motivo, que es lo que dice cómo arreglarlo. */}
+          {fuera.length > 0 && (
+            <div style={{ padding: "9px 14px", background: colors.warningSoft,
+              borderBottom: `1px solid ${colors.warningBorder}`, fontSize: 11.5, color: colors.warning, lineHeight: 1.6 }}>
+              <div style={{ fontWeight: 700, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={12} />
+                {fuera.length === 1 ? "Un pedido de compra no entra en este control" : `${fuera.length} pedidos de compra no entran en este control`}
+              </div>
+              {fuera.map(f => (
+                <div key={f.id} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ color: colors.ink }}>{f.descripcion || `#${f.id}`}</span>
+                  <span style={{ fontWeight: 700 }}>
+                    ${fmt(Number(f.monto ?? f.monto_estimado) || 0)}
+                  </span>
+                  <span>· {f.porque}</span>
+                  <span style={{ color: colors.muted }}>
+                    (pedido obra {f.obra_id ?? "—"} / proyecto {f.lead_id ?? "—"})
+                  </span>
+                </div>
+              ))}
+              <div style={{ color: colors.muted, marginTop: 4 }}>
+                Esta obra es la <strong>{obra?.id}</strong> y su proyecto es el{" "}
+                <strong>{obra?.lead_id ?? "— (ninguno)"}</strong>. Un pedido entra si apunta a esta obra,
+                o si no apunta a ninguna y es de este proyecto.
+              </div>
             </div>
           )}
 

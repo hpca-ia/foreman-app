@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { sincronizarCapitulos } from "./sincronizarCapitulos";
 import Button from "../../components/ui/Button";
-import { fmt, calcularControl, agrupar, totalesObra, solicitudesDeLaObra } from "./calculos";
+import { fmt, calcularControl, agrupar, totalesObra, repartirSolicitudes } from "./calculos";
 import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
@@ -34,6 +34,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   // todavía no es factura. Se muestra al lado del invertido, no sumado: una
   // cosa es lo que salió y otra lo que está por salir.
   const [solicitudes, setSolicitudes] = useState([]);
+  const [solicitudesFuera, setSolicitudesFuera] = useState([]);
   useEffect(() => {
     if (!obra.lead_id && !obra.id) return;
     let vivo = true;
@@ -60,8 +61,13 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
       // Con los dos campos sueltos y no con `obra`: el objeto cambia de
       // identidad en cada dibujo y tenerlo de dependencia dispararía las dos
       // consultas sin parar.
-      setSolicitudes(solicitudesDeLaObra(
-        [...(a.data || []), ...(b.data || [])], { id: obra.id, lead_id: obra.lead_id }));
+      const r = repartirSolicitudes(
+        [...(a.data || []), ...(b.data || [])], { id: obra.id, lead_id: obra.lead_id });
+      setSolicitudes(r.dentro);
+      // Lo que quedó afuera, para poder decirlo en pantalla. Un pedido que no
+      // entra al control es plata que alguien pidió y que no está en ningún
+      // número: desaparecer en silencio no es una opción.
+      setSolicitudesFuera(r.fuera);
     })();
     return () => { vivo = false; };
   }, [obra.id, obra.lead_id]);
@@ -205,7 +211,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
                   </span>
                 )}
               </div>
-              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} comprometido={comprometido} />
+              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor}
+                comprometido={comprometido} fuera={solicitudesFuera} obra={obra} />
 
               {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.
                   Debajo de la tabla porque es mantenimiento, no lectura: uno

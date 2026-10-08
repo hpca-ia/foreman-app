@@ -440,13 +440,37 @@ export const TIPOS_GASTO = [
  * la obra existiera y desaparecían sin dejar rastro.
  */
 export function solicitudesDeLaObra(filas = [], obra = {}) {
+  return repartirSolicitudes(filas, obra).dentro;
+}
+
+/**
+ * Lo mismo, pero diciendo también QUÉ QUEDÓ AFUERA Y POR QUÉ.
+ *
+ * Un pedido que no entra al control no puede desaparecer en silencio: es plata
+ * que alguien pidió y que no está en ningún número. Hasta acá, cuando la regla
+ * lo dejaba afuera no quedaba rastro, y desde la pantalla era imposible saber
+ * si faltaba porque no correspondía o porque algo estaba mal configurado.
+ *
+ * Los ids se comparan como NÚMEROS. PostgREST puede devolver un bigint como
+ * texto, y `"7" === 7` es falso: bastaba eso para que un pedido no se
+ * reconociera como de su obra.
+ */
+export function repartirSolicitudes(filas = [], obra = {}) {
+  const mismo = (a, b) => a != null && b != null && Number(a) === Number(b);
   const vistas = new Set();
-  return filas.filter(s => {
-    if (!s || vistas.has(s.id)) return false;
-    const suya = obra.id != null && s.obra_id === obra.id;
-    const delProyecto = s.obra_id == null && obra.lead_id != null && s.lead_id === obra.lead_id;
-    if (!suya && !delProyecto) return false;
+  const dentro = [], fuera = [];
+  (filas || []).forEach(s => {
+    if (!s || vistas.has(s.id)) return;
     vistas.add(s.id);
-    return true;
+    if (mismo(s.obra_id, obra.id)) { dentro.push(s); return; }
+    const delProyecto = s.obra_id == null && mismo(s.lead_id, obra.lead_id);
+    if (delProyecto) { dentro.push(s); return; }
+    // Por qué no entró. Cada motivo se arregla de una manera distinta, así que
+    // vale la pena distinguirlos en vez de decir solo "no es de acá".
+    const porque = s.obra_id != null ? "apunta a otra obra"
+      : obra.lead_id == null ? "esta obra no está ligada a ningún proyecto"
+      : "es de otro proyecto";
+    fuera.push({ ...s, porque });
   });
+  return { dentro, fuera };
 }
