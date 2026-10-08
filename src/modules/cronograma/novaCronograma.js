@@ -318,7 +318,17 @@ holgura.`;
         // Con espacio de sobra: veinte agrupaciones con sus dependencias y el
         // porqué de cada una no entran en 4000, y la respuesta vuelve cortada
         // a la mitad. Pasó.
-        model: "claude-sonnet-4-5", max_tokens: 12000,
+        // EL MODELO MÁS FUERTE, solo acá.
+        //
+        // Armar un cronograma es el trabajo de criterio más difícil que hace
+        // NOVA: hay que sacar rendimientos de memoria, deducir el orden real
+        // de una obra que no vio, y decidir qué se traslapa con qué. No se
+        // parece a leer una factura.
+        //
+        // Se arma una vez por obra y después se corrige a mano, así que el
+        // costo de usar el modelo bueno acá es despreciable contra el de
+        // revisar un cronograma mal pensado.
+        model: "claude-opus-5-5", max_tokens: 12000,
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma de ${meses} meses. Solo JSON.` }],
       }),
