@@ -35,6 +35,9 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // Una factura se reparte entre varias actividades, que pueden estar en
   // capítulos distintos. El rubro directo queda como salida para cuando sí se
   // sabe el rubro exacto y se quiere el monto sin prorratear.
+  // El capítulo elegido, para después elegir su rubro. Dos pasos, como se
+  // piensa una factura: "esto es de albañilería… del bloque de 15".
+  const [capElegido, setCapElegido] = useState("");
   const [repartos, setRepartos] = useState(
     asignacionesFactura.map(a => a.obra_actividad_id != null
       ? { tipo: "actividad", id: a.obra_actividad_id, monto: a.monto }
@@ -134,10 +137,15 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         iva: n(p.iva), total: n(p.total),
         tipo: p.tipo || f.tipo,
       }));
+      // SI NOVA ENCONTRÓ EL RUBRO EXACTO, SE USA EL RUBRO.
+      //
+      // Antes se lo cambiaba por su agrupación, y eso tiraba a la basura el
+      // único dato preciso que había: el monto se repartía a prorrata entre
+      // todos los rubros del capítulo, así que una factura de cemento sumaba
+      // un poco a cada renglón y nada al que correspondía. Lo que se ve
+      // después es un capítulo entero avanzando parejo, que no es lo que pasó.
       if (p.rubro_id && rubros.some(r => r.id === p.rubro_id) && repartos.length === 0) {
-        const act = rubros.find(r => r.id === p.rubro_id)?.actividad_id;
-        if (act != null) setRepartos([{ tipo: "actividad", id: act, monto: n(p.total) }]);
-        else setRepartos([{ tipo: "rubro", id: p.rubro_id, monto: n(p.total) }]);
+        setRepartos([{ tipo: "rubro", id: p.rubro_id, monto: n(p.total) }]);
       }
       await revisarDuplicados({ ruc: p.ruc, numero_factura: p.numero_factura, razon_social: p.razon_social, total: n(p.total), fecha: p.fecha });
     } catch {
@@ -264,6 +272,12 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
     setGuardando(false);
     onGuardado();
   }
+
+  // Los capítulos que de verdad tienen rubros vivos: los escondidos y los que
+  // una orden de cambio anuló no son destinos posibles.
+  const capitulosDeRubros = [...new Set(
+    rubros.filter(r => !r.oculto && !r.anulado_por_oc).map(r => r.capitulo).filter(Boolean)
+  )];
 
   const coincidencias = busqueda.trim()
     ? rubros.filter(r => r.descripcion.toLowerCase().includes(busqueda.toLowerCase()) || String(r.numero) === busqueda.trim()).slice(0, 8)
@@ -412,9 +426,36 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
           );
         })}
 
+        {/* CAPÍTULO Y DESPUÉS RUBRO, que es como se piensa una factura.
+            Elegir el rubro exacto estaba escondido detrás de un enlace
+            subrayado y era una búsqueda por texto: había que acordarse del
+            nombre. Lo fácil era asignar a la agrupación, y eso PRORRATEA el
+            monto entre todos sus rubros —la factura de cemento suma un poco a
+            cada renglón y nada al que corresponde—. Lo exacto tiene que ser lo
+            cómodo. */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 6, marginTop: 6 }}>
+          <select value={capElegido} onChange={e => { setCapElegido(e.target.value); setBusqueda(""); }}
+            style={mini}>
+            <option value="">Capítulo…</option>
+            {capitulosDeRubros.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value="" disabled={!capElegido}
+            onChange={e => { if (e.target.value) agregar("rubro", Number(e.target.value)); }}
+            style={mini}>
+            <option value="">{capElegido ? "Rubro…" : "elegí el capítulo primero"}</option>
+            {rubros.filter(r => r.capitulo === capElegido && !r.oculto && !r.anulado_por_oc
+                && !repartos.some(x => x.tipo === "rubro" && x.id === r.id))
+              .map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.numero} · {r.descripcion}
+                </option>
+              ))}
+          </select>
+        </div>
+
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <select value="" onChange={e => agregar("actividad", Number(e.target.value))} style={{ ...mini, flex: 1 }}>
-            <option value="">Agregar una agrupación...</option>
+            <option value="">…o a una agrupación entera (se reparte a prorrata)</option>
             {actividades.filter(a => !repartos.some(r => r.tipo === "actividad" && r.id === a.id))
               .map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
           </select>
