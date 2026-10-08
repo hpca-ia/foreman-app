@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
-import { Plus, Trash2, ChevronLeft, ChevronDown, GanttChartSquare, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, GanttChartSquare, AlertTriangle, Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";

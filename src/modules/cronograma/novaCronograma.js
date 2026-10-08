@@ -1061,3 +1061,115 @@ cronograma está bien, mandá {"nota":"..."} y nada más.`;
     return { error: e.message };
   }
 }
+
+/**
+ * Dictarle el cronograma a NOVA con palabras.
+ *
+ * El tercer modo, y el que falta entre los otros dos. "Armalo" supone que NOVA
+ * sabe de esta obra lo que sabe quien la dirige, y no lo sabe. "Revisalo"
+ * supone que ya está armado. En el medio está lo que de verdad pasa: alguien
+ * tiene el orden en la cabeza —"la mampostería va detrás de la estructura pero
+ * puede entrar por planta baja; la ventanería pedila ya que tarda ocho
+ * semanas"— y traducir eso a flechas, retardos negativos y duraciones es media
+ * hora de clics.
+ *
+ * SIN TIEMPOS, a propósito. Quien lleva la obra sabe el ORDEN mucho mejor que
+ * las duraciones; las duraciones las puede calcular NOVA de las cantidades. Se
+ * puede escribir solo el orden y dejar que ella ponga los días.
+ *
+ * Devuelve el mismo parche que `revisarCronograma` —operaciones sueltas con su
+ * porqué— y se aceptan de a una en la misma pantalla: lo que NOVA entendió mal
+ * se descarta en un clic en vez de quedar metido adentro del plan.
+ */
+export async function ordenarConPalabras({ plan = [], dependencias = [], texto = "", nombreObra = "", dias = 0, cal = calendario() }) {
+  const dicho = String(texto || "").trim();
+  if (!dicho) return { error: "Escribí cómo va la obra." };
+  if (!plan.length) return { error: "Primero tiene que haber actividades en el cronograma." };
+
+  const nombreDe = new Map(plan.map(a => [a.id, a.nombre]));
+  const planEnTexto = plan.map(a => {
+    const suyas = dependencias.filter(d => d.actividad_id === a.id)
+      .map(d => `${d.tipo || "FC"}${d.retardo ? ` ${d.retardo > 0 ? "+" : ""}${d.retardo}d` : ""} de ${nombreDe.get(d.depende_de_id) || "?"}`)
+      .join("; ");
+    return `${a.id} · ${a.nombre} · ${a.duracion}d`
+      + (suyas ? ` · hoy va después de: ${suyas}` : " · hoy SIN DEPENDENCIAS");
+  }).join("\n");
+
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  const jornada = L.length === 7 ? "los siete días"
+    : L.includes(6) ? "de lunes a sábado" : "de lunes a viernes, sin sábados";
+
+  const sistema = `Sos NOVA. Alguien que dirige la obra "${nombreObra}" te está DICTANDO cómo se
+construye, con sus palabras, y tu trabajo es traducirlo a operaciones sobre el
+cronograma que ya existe.${dias ? ` El plazo son ${dias} días hábiles` : ""} y se trabaja ${jornada}.
+
+LAS BARRAS QUE HAY HOY (id · nombre · duración · de qué depende):
+${planEnTexto}
+
+LO QUE TE ESTÁ DICTANDO:
+"""
+${dicho.slice(0, 4000)}
+"""
+
+CÓMO LEERLO:
+
+· "A va después de B" → encadenar B→A.
+· "A y B van juntas" o "a la vez" → encadenar con tipo "CC".
+· "A entra cuando B va por la mitad" → encadenar con retardo NEGATIVO: ese
+  traslape es lo que hace que una obra entre en su plazo.
+· "hay que esperar X días" → retardo POSITIVO (fragüe, secado, curado).
+· "A no depende de nada" o "sacale la dependencia" → desencadenar.
+· "esto tarda tres semanas" → ajustar la duración a días hábiles.
+· "pedila ya", "hay que anticipar", "tarda ocho semanas en llegar" → es un
+  trabajo que se compra: si la barra no está partida, decilo en la "nota" para
+  que la partan; no inventes partes vos.
+
+SI NO MENCIONA TIEMPOS, NO INVENTES DEPENDENCIAS NI DURACIONES que no te pidió.
+Pero sí podés ajustar una duración si lo que dicta la contradice de frente.
+
+NOMBRES APROXIMADOS. Va a decir "la mampostería" y la barra se llama
+"MAMPOSTERÍA Y ENLUCIDOS". Emparejalo por sentido. Lo que no puedas emparejar
+con confianza, NO lo adivines: escribilo en la "nota" diciendo qué no
+encontraste. Una operación sobre la barra equivocada es peor que no hacerla.
+
+Devolvés SOLO JSON, sin markdown. Cada operación con su "porque" en diez
+palabras, y el porqué sale de LO QUE ÉL DIJO, no de tu criterio:
+
+{"ajustar":[{"id":12,"duracion":22,"porque":"dijo tres semanas"}],
+ "encadenar":[{"de":12,"a":13,"tipo":"FC","retardo":-5,"porque":"entra por planta baja antes de terminar"}],
+ "desencadenar":[{"de":8,"a":9,"porque":"dijo que no se traban"}],
+ "reordenar":[{"id":15,"antes_de":14,"porque":"el montaje va antes de la entrega"}],
+ "nota":"lo que no pudiste traducir, o lo que haría falta para poder hacerlo"}
+
+Las listas son opcionales: mandá solo las que tengan algo.`;
+
+  try {
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 6000,
+      system: sistema,
+      messages: [{ role: "user", content: "Traducí lo que te dictó. Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo entenderlo." };
+    const salida = textoDeNova(data);
+    const { datos } = jsonTolerante(salida);
+    if (!datos) {
+      return { error: `NOVA devolvió algo que no se entiende. Empezaba así:\n\n${String(salida || "").slice(0, 220) || "(vacío)"}` };
+    }
+    const vivos = new Set(plan.map(a => a.id));
+    const lim = (xs, ok) => (Array.isArray(xs) ? xs : []).filter(ok).slice(0, 40);
+    return {
+      ajustar: lim(datos.ajustar, x => vivos.has(Number(x.id)) && n(x.duracion) > 0)
+        .map(x => ({ id: Number(x.id), duracion: Math.max(1, Math.round(n(x.duracion))), porque: x.porque || "" })),
+      encadenar: lim(datos.encadenar, x => vivos.has(Number(x.de)) && vivos.has(Number(x.a)) && Number(x.de) !== Number(x.a))
+        .map(x => ({ de: Number(x.de), a: Number(x.a), tipo: ["FC", "CC", "FF"].includes(x.tipo) ? x.tipo : "FC",
+          retardo: Math.max(-365, Math.min(365, Math.round(n(x.retardo)))), porque: x.porque || "" })),
+      desencadenar: lim(datos.desencadenar, x => vivos.has(Number(x.de)) && vivos.has(Number(x.a)))
+        .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
+      reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
+        .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
+      nota: String(datos.nota || "").slice(0, 400),
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
