@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, X, Check, AlertTriangle, CalendarDays, Send } from "lucide-react";
+import { Plus, X, Check, AlertTriangle, CalendarDays, Send, Printer } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
@@ -7,6 +7,7 @@ import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHech
   diasEntre, loQueTocaEstaSemana, comoSalio } from "./planSemanalDatos";
 import { cargarPlan as cargarGantt } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
+import { pdfPlanSemanal } from "./pdfPlanSemanal";
 
 // La semana que viene, escrita antes.
 //
@@ -363,6 +364,27 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
           padding: "11px 13px", marginBottom: 12 }}>
           {!mandando ? (
             <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+              {/* IMPRIMIRLO. En la obra no se lee un correo: se mira una hoja
+                  clavada en la pared del contenedor, con las casillas para ir
+                  tachando. Y sale con el logo, porque es un papel que circula
+                  entre el contratista, el fiscalizador y el cliente. */}
+              <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
+                setOcupado(true); setError("");
+                try {
+                  // Lo que quedó sin hacer la semana anterior, igual que en el
+                  // correo: el plan se lee contra eso.
+                  const antes = new Date(`${desde}T12:00:00`);
+                  antes.setDate(antes.getDate() - 7);
+                  const previa = await cargarPlan(lead.id, antes.toISOString().slice(0, 10), masDias(desde, -1));
+                  const quedaron = previa.items
+                    .filter(i => (i.tipo || "tarea") !== "material" && !i.hecha);
+                  const doc = await pdfPlanSemanal({
+                    proyecto: lead.nombre, desde, hasta, dias, items, quedaron,
+                  });
+                  doc.save(`Plan ${lead.nombre} ${desde} a ${hasta}.pdf`);
+                } catch (e) { setError("No se pudo armar el PDF: " + e.message); }
+                setOcupado(false);
+              }}><Printer size={13} /> Imprimir o bajar</Button>
               <Button variant="primary" size="sm" onClick={() => {
                 const equipo = equipoEnCache() || [];
                 // El gerente y el director vienen marcados; el resto del
