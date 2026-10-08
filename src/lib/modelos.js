@@ -21,7 +21,22 @@
  * vez por obra. El costo del modelo bueno acá es despreciable contra el de
  * revisar a mano algo mal pensado.
  */
-export const JUICIO = "claude-opus-5-5";
+
+// ───────────────────────────────────────────────────────────────────────────
+// DE VUELTA EN claude-sonnet-4-5, QUE ES EL QUE SE SABE QUE FUNCIONA.
+//
+// Se cambiaron los tres a la generación 5 y NOVA dejó de hacer nada. No está
+// confirmado que sea la causa —puede ser otra cosa— pero el riesgo no es
+// simétrico: si un identificador de modelo no está habilitado en la cuenta,
+// NO falla una pantalla, fallan TODAS, porque todas pasan por acá. Facturas,
+// presupuestos, cronograma, briefing.
+//
+// Así que vuelve al conocido hasta poder probar los nuevos con una sesión de
+// verdad. La estructura se queda: tener los tres nombres en un solo archivo es
+// lo que permite hacer este cambio en diez segundos en vez de en diecinueve
+// archivos.
+// ───────────────────────────────────────────────────────────────────────────
+export const JUICIO = "claude-sonnet-4-5";
 
 /**
  * LECTURA. Sacar datos de un documento que ya los tiene.
@@ -30,7 +45,7 @@ export const JUICIO = "claude-opus-5-5";
  * precisión, no de criterio: el dato está en el papel. Acá importa acertar y
  * no inventar, y eso ya lo hace bien un modelo intermedio.
  */
-export const LECTURA = "claude-sonnet-5-5";
+export const LECTURA = "claude-sonnet-4-5";
 
 /**
  * CORTO. Una frase que entra, una estructura que sale.
@@ -39,4 +54,4 @@ export const LECTURA = "claude-sonnet-5-5";
  * muchas veces por día y la respuesta se ve al instante: lo que importa es que
  * conteste rápido.
  */
-export const RAPIDO = "claude-haiku-5-5";
+export const RAPIDO = "claude-sonnet-4-5";

@@ -6,8 +6,9 @@
 
 // Razonar: agrupar las secciones de un presupuesto ajeno en rubros, decidir qué
 // va con qué. Es la decisión que después manda sobre el control entero.
-export const JUICIO = "claude-opus-5-5";
+// De vuelta en el conocido: ver la nota en src/lib/modelos.js.
+export const JUICIO = "claude-sonnet-4-5";
 
 // Leer: sacar los subtotales de un PDF, armar el resumen del día con datos que
 // ya están. Volumen y precisión, no criterio.
-export const LECTURA = "claude-sonnet-5-5";
+export const LECTURA = "claude-sonnet-4-5";
