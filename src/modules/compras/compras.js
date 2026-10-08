@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
 import { solicitudesDeLaObra } from "../controlObra/calculos";
+import { registrarPago as pagarFactura } from "../controlObra/pagos";
 
 // El flujo de una compra, de punta a punta.
 //
@@ -489,6 +490,32 @@ export async function registrarPago(solicitud, { monto, quien, comentario }) {
   };
   const { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
   if (error) return /column|schema cache/i.test(error.message) ? "Falta correr la migración 065." : error.message;
+
+  // Y EL PAGO ENTRA AL CONTROL, que es donde se mira lo que se debe.
+  //
+  // Hasta acá esto solo marcaba el pedido como pagado. Proveedores calcula el
+  // saldo restando los pagos de `obra_pagos` al total del documento, así que
+  // una factura pagada desde Compras seguía apareciendo como que se debe: el
+  // pago existía en una pantalla y no en la otra. Alguien iba a pagar dos
+  // veces, o a discutir con un proveedor que ya había cobrado.
+  //
+  // Si el pedido todavía no tiene factura en el control no hay contra qué
+  // registrarlo, y ahí la marca del pedido es todo lo que se puede guardar.
+  if (solicitud.factura_id && campos.pagado_monto) {
+    const { data: f } = await supabase.from("obra_facturas")
+      .select("id,obra_id").eq("id", solicitud.factura_id).maybeSingle();
+    if (f) {
+      // Sin duplicar: si alguien ya registró este pago en el control —al
+      // facturar, por ejemplo— no se suma de nuevo.
+      const { data: ya } = await supabase.from("obra_pagos")
+        .select("monto").eq("factura_id", f.id);
+      const pagado = (ya || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+      const falta = Math.round((Number(campos.pagado_monto) - pagado) * 100) / 100;
+      if (falta > 0.005) {
+        await pagarFactura(f, { monto: falta, forma: "otro", nota: "Registrado desde Compras" }, quien);
+      }
+    }
+  }
 
   const cuanto = campos.pagado_monto ? ` · $${Number(campos.pagado_monto).toFixed(2)}` : "";
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, `Pagado${cuanto}${comentario ? ` · ${comentario}` : ""}`);
