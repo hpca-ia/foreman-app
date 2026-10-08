@@ -18,11 +18,12 @@
     "build": "react-scripts build",
     "nombres": "eslint --no-eslintrc -c .eslintrc.nombres.js --ext .js,.jsx src/",
     "hooks": "node scripts/hooks-despues-del-return.mjs",
-    "revisar": "npm run nombres && npm run hooks && npm run sombra",
+    "revisar": "npm run nombres && npm run hooks && npm run sombra && npm run pruebas",
     "migrar": "node scripts/migrar.mjs",
     "sombra": "node scripts/sombra-de-props.mjs",
     "clave": "node scripts/clave.mjs",
-    "prebuild": "node scripts/version.mjs"
+    "prebuild": "node scripts/version.mjs",
+    "pruebas": "node --test \"pruebas/*.test.mjs\""
   },
   "browserslist": {
     "production": [
