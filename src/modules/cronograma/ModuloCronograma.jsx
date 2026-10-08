@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios,
-  revisarCronograma } from "./novaCronograma";
+  revisarCronograma, ordenarConPalabras } from "./novaCronograma";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
@@ -89,6 +89,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // Lo que NOVA propone mejorar sobre el cronograma que ya hay. Se acepta de a
   // una: un parche entero aceptado a ciegas es volver a rehacerlo.
   const [revision, setRevision] = useState(null);
+  // Lo que se le dicta a NOVA sobre cómo va esta obra.
+  const [dictado, setDictado] = useState("");
   // El menú de lo que se hace de vez en cuando: bajarlo para Project,
   // reordenarlo, borrarlo. Afuera queda lo que uno viene a hacer.
   const [menu, setMenu] = useState(false);
@@ -1195,6 +1197,71 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* DECIRLE CÓMO VA LA OBRA, con palabras.
+          El modo que faltaba, y el único donde el conocimiento entra de verdad.
+          "Armalo" supone que NOVA sabe de esta obra lo que sabe quien la
+          dirige, y no lo sabe: no vio el terreno, no conoce a las cuadrillas,
+          no sabe que la grúa entra recién en marzo. "Revisalo" solo mira lo que
+          ya está escrito.
+
+          Acá se dicta el orden como se piensa —"la mampostería va detrás de la
+          estructura pero puede entrar por planta baja; la ventanería pedila ya
+          que tarda ocho semanas"— y NOVA lo traduce a cadenas, traslapes y
+          duraciones. SIN TIEMPOS si uno quiere: el orden lo sabe quien dirige
+          mucho mejor que las duraciones, y las duraciones salen de las
+          cantidades.
+
+          Devuelve operaciones sueltas que se aceptan de a una, igual que la
+          revisión: lo que entendió mal se descarta en un clic en vez de quedar
+          metido adentro del plan. */}
+      {todas.length > 0 && editable && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+          <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3,
+            display: "block", marginBottom: 4 }}>
+            DECILE A NOVA CÓMO VA ESTA OBRA
+          </label>
+          <textarea value={dictado} onChange={e => setDictado(e.target.value)} rows={3}
+            placeholder={"La mampostería va detrás de la estructura, pero puede entrar por planta baja cuando arriba todavía se funde.\n"
+              + "La ventanería hay que pedirla ya: tarda ocho semanas en llegar.\n"
+              + "Los acabados recién con el edificio cerrado."}
+            style={{ ...inputStyle, fontSize: 12.5, padding: "8px 10px", resize: "vertical",
+              lineHeight: 1.55, fontFamily: colors.font }} />
+          <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginTop: 7 }}>
+            <Button variant="primary" size="sm" disabled={pensando || !dictado.trim()}
+              onClick={async () => {
+                setPensando(true); setError("");
+                const r = await ordenarConPalabras({
+                  plan: todas, dependencias, texto: dictado,
+                  nombreObra: lead.nombre, dias: diasDeContrato, cal,
+                });
+                setPensando(false);
+                if (r.error) { setError(r.error); return; }
+                const ops = [
+                  ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
+                  ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
+                  ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
+                  ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
+                ];
+                if (!ops.length) {
+                  window.alert(r.nota || "NOVA no encontró nada que traducir. Probá nombrando las actividades como están en el cronograma.");
+                  return;
+                }
+                setRevision({ ops, nota: r.nota });
+              }}>
+              <Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA lo ordene"}
+            </Button>
+            {dictado.trim() && (
+              <Button variant="secondary" size="sm" onClick={() => setDictado("")}>Borrar</Button>
+            )}
+            <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+              Escribilo como lo pensás, sin formato. Podés no decir ningún tiempo: el orden lo sabés vos,
+              las duraciones salen de las cantidades. Lo que proponga se acepta de a una.
+            </span>
           </div>
         </div>
       )}
