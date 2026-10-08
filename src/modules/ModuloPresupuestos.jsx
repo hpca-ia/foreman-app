@@ -1683,7 +1683,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 title={item.listo?"Listo. Tocá para volver a marcarlo en proceso.":"Todavía en proceso. Tocá cuando esté listo."}
                                 style={{background:"none",border:"none",padding:"0 2px",cursor:"pointer",fontFamily:"inherit",
                                   fontSize:12,fontWeight:700,lineHeight:1,flexShrink:0,
-                                  color:item.listo?"var(--success)":"var(--muted)"}}>
+                                  // La cruz en rojo: lo que falta tiene que
+                                  // saltar en una lista de cuarenta renglones.
+                                  color:item.listo?"var(--success)":"var(--danger)"}}>
                                 {item.listo?"✓":"✗"}
                               </button>
                             </div>

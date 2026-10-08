@@ -1,4 +1,6 @@
 import { cargarPDF } from "../../lib/exportar";
+// `logoParaPDF` carga y rasteriza cualquier imagen por URL, no solo logos:
+// sirve igual para meter un plano o la foto de una consulta en una hoja.
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 
@@ -34,8 +36,11 @@ const seguro = t => String(t ?? "")
  * @param dias   [{ fecha, horario, personal, permisos, consideraciones }]
  * @param items  [{ plan_dia_id, tipo, texto, hecha, motivo }]
  * @param quedaron lo de la semana anterior que no se hizo, con su motivo
+ * @param observaciones lo del plan entero: consultas, acuerdos, pendientes
+ * @param archivos [{ nombre, tipo, url }] planos y fotos; las imágenes se dibujan
  */
-export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items = [], quedaron = [], logoUrl }) {
+export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items = [], quedaron = [],
+  observaciones = "", archivos = [], logoUrl }) {
   const { jsPDF, autoTable } = await cargarPDF();
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
@@ -129,6 +134,64 @@ export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items 
     });
     y += 10;
   });
+
+  // LAS OBSERVACIONES, al pie. Son del plan entero y no de un día: la consulta
+  // abierta, lo que se acordó en obra, lo que hay que resolver antes del
+  // cierre. En la hoja clavada en la pared es lo que se lee al final.
+  const obs = String(observaciones || "").trim();
+  if (obs) {
+    if (y > 700) { doc.addPage(); y = 50; }
+    y += 4;
+    doc.setDrawColor(...GRIS); doc.setLineWidth(0.5);
+    doc.line(margen, y, ancho - margen, y);
+    y += 14;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...TINTA);
+    doc.text("Observaciones", margen, y); y += 13;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(17, 24, 39);
+    obs.split(/\n/).forEach(parrafo => {
+      doc.splitTextToSize(seguro(parrafo) || " ", ancho - margen * 2).forEach(linea => {
+        if (y > 790) { doc.addPage(); y = 50; }
+        doc.text(linea, margen, y); y += 11.5;
+      });
+    });
+    y += 8;
+  }
+
+  // LOS ADJUNTOS. Primero la lista —para que la hoja impresa diga qué venía
+  // con el plan, aunque se imprima suelta— y después cada imagen en su página.
+  // Un plano que se manda por aparte del plan es el que nadie encuentra.
+  const conArchivos = archivos.filter(a => a?.nombre);
+  if (conArchivos.length) {
+    if (y > 730) { doc.addPage(); y = 50; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...TINTA);
+    doc.text(seguro(`Adjuntos (${conArchivos.length})`), margen, y); y += 13;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GRIS);
+    conArchivos.forEach(a => {
+      if (y > 790) { doc.addPage(); y = 50; }
+      doc.text(seguro(`- ${a.nombre}${a.descripcion ? ` - ${a.descripcion}` : ""}`), margen, y);
+      y += 11;
+    });
+  }
+
+  // Y las imágenes, una por página y lo más grande que entre: un plano en
+  // miniatura no sirve para nada, y el que lo recibe no va a abrir la app.
+  for (const a of conArchivos) {
+    if (!/^image\//.test(a.tipo || "") || !a.url) continue;
+    const img = await logoParaPDF(a.url);   // carga y rasteriza cualquier imagen
+    if (!img) continue;
+    doc.addPage();
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...TINTA);
+    doc.text(seguro(a.nombre), margen, 50);
+    if (a.descripcion) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GRIS);
+      doc.text(seguro(a.descripcion), margen, 63);
+    }
+    const arriba = a.descripcion ? 76 : 62;
+    const cabe = { w: ancho - margen * 2, h: 800 - arriba };
+    const escala = Math.min(cabe.w / img.width, cabe.h / img.height);
+    doc.addImage(img.dataUrl, "PNG", margen, arriba,
+      img.width * escala, img.height * escala);
+  }
 
   // Pie con la página, para una hoja que se reparte y se vuelve a juntar.
   const total = doc.internal.getNumberOfPages();

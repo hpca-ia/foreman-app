@@ -13,7 +13,7 @@
 // es optimista por construcción; lo que explica una obra es lo que se había
 // planificado y no pasó, con su motivo. Eso arriba, antes de lo nuevo.
 
-import { rest, configurado } from "./_supabase.js";
+import { rest, configurado, SUPABASE_URL } from "./_supabase.js";
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
 
 const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -37,16 +37,34 @@ export default async function handler(req, res) {
   const lead = await uno(`leads?id=eq.${lead_id}&select=nombre&limit=1`);
   const dias = await json(await rest(
     `obra_plan_dias?lead_id=eq.${lead_id}&fecha=gte.${desde}&fecha=lte.${hasta}&select=*&order=fecha`));
-  if (!dias?.length) return res.status(400).json({ error: "No hay nada planificado en ese período" });
+  // Un plan sin días pero con observaciones o un plano cargado sí es algo que
+  // mandar; se chequea más abajo, cuando ya se leyó el período.
 
-  const items = await json(await rest(
-    `obra_plan_items?plan_dia_id=in.(${dias.map(d => d.id).join(",")})&select=*&order=orden`));
+  const items = dias?.length ? await json(await rest(
+    `obra_plan_items?plan_dia_id=in.(${dias.map(d => d.id).join(",")})&select=*&order=orden`)) : [];
   const todos = items || [];
 
-  // Lo de la semana ANTERIOR que quedó sin hacer. Es lo primero que el que
-  // lee tiene que ver: la semana que viene se planifica contra eso.
+  // El período: trae las observaciones y los adjuntos, que son del plan entero
+  // y no de un día. Si la 090 no está corrida esto devuelve nada y el correo
+  // sale igual — un plan sin observaciones sirve, un envío que falla no.
+  const periodo = await uno(
+    `obra_plan_periodos?lead_id=eq.${lead_id}&desde=eq.${String(desde).slice(0, 10)}&select=*&limit=1`);
+  const archivos = periodo
+    ? (await json(await rest(`obra_plan_archivos?periodo_id=eq.${periodo.id}&select=*&order=created_at`))) || []
+    : [];
+
+  // Lo del período ANTERIOR que quedó sin hacer. Es lo primero que el que lee
+  // tiene que ver: lo que viene se planifica contra eso.
+  //
+  // Y el anterior es el del mismo corte. La semana de obra no es de lunes a
+  // sábado: si va de miércoles a martes, "la anterior" empieza el miércoles de
+  // antes. Restar siete días a ciegas traía media semana de otro plan.
+  const unDia = 86400000;
+  const largo = Math.round(
+    (new Date(`${String(hasta).slice(0, 10)}T12:00:00`) - new Date(`${String(desde).slice(0, 10)}T12:00:00`)) / unDia) + 1;
+  const paso = largo <= 8 ? 7 : largo;
   const antes = new Date(`${String(desde).slice(0, 10)}T12:00:00`);
-  antes.setDate(antes.getDate() - 7);
+  antes.setDate(antes.getDate() - paso);
   const diasAntes = await json(await rest(
     `obra_plan_dias?lead_id=eq.${lead_id}&fecha=gte.${antes.toISOString().slice(0, 10)}`
     + `&fecha=lt.${String(desde).slice(0, 10)}&select=id,fecha`));
@@ -60,7 +78,7 @@ export default async function handler(req, res) {
       .map(i => ({ ...i, fecha: fechaDe.get(i.plan_dia_id) }));
   }
 
-  const bloque = dias.map(d => {
+  const bloque = (dias || []).map(d => {
     const suyos = todos.filter(i => i.plan_dia_id === d.id);
     const tareas = suyos.filter(i => (i.tipo || "tarea") !== "material");
     const materiales = suyos.filter(i => i.tipo === "material");
@@ -96,6 +114,51 @@ export default async function handler(req, res) {
       </ul>
     </td></tr>` : "";
 
+  // Nada de nada: ni días, ni observaciones, ni un plano. Eso sí es un correo
+  // que no vale mandar, y conviene decirlo antes de armarlo.
+  if (!dias?.length && !String(periodo?.observaciones || "").trim() && !archivos.length) {
+    return res.status(400).json({ error: "No hay nada planificado en ese período" });
+  }
+
+  const obs = String(periodo?.observaciones || "").trim();
+  const observaciones = obs ? `
+    <tr><td style="padding:14px 0 0;border-top:1px solid #e3e6ea">
+      <div style="font-size:13px;font-weight:700;color:#0F3D3E;margin-bottom:4px">Observaciones</div>
+      <div style="font-size:13px;color:#1f2937;line-height:1.6;white-space:pre-line">${esc(obs)}</div>
+    </td></tr>` : "";
+
+  // LOS PLANOS VAN ADJUNTOS, no enlazados: un enlace del depósito caduca en una
+  // hora y el que abre el correo el miércoles se encuentra con un plano roto.
+  // Hasta seis y hasta 12 MB, que es lo que un correo aguanta sin rebotar; lo
+  // que no entra se nombra en la lista para que se sepa que existe.
+  const adjuntos = [];
+  let peso = 0;
+  const quedaronFuera = [];
+  for (const a of archivos.slice(0, 6)) {
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/task-files/${a.storage_path}`,
+        { headers: { apikey: process.env.SUPABASE_SECRET_KEY || "", Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY || ""}` } });
+      if (!resp.ok) { quedaronFuera.push(a.nombre); continue; }
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      if (peso + buffer.length > 12 * 1024 * 1024) { quedaronFuera.push(a.nombre); continue; }
+      peso += buffer.length;
+      adjuntos.push({ filename: a.nombre || a.storage_path.split("/").pop(), content: buffer.toString("base64") });
+    } catch { quedaronFuera.push(a.nombre); }
+  }
+  if (archivos.length > 6) quedaronFuera.push(...archivos.slice(6).map(a => a.nombre));
+
+  const lista = archivos.length ? `
+    <tr><td style="padding:12px 0 0">
+      <div style="font-size:12px;font-weight:700;color:#0F3D3E;margin-bottom:3px">
+        Adjuntos (${archivos.length})
+      </div>
+      <ul style="margin:0;padding-left:18px;font-size:12px;color:#6B7280;line-height:1.6">
+        ${archivos.map(a => `<li>${esc(a.nombre)}${a.descripcion ? ` — ${esc(a.descripcion)}` : ""}${
+          quedaronFuera.includes(a.nombre) ? ' <span style="color:#92400E">(pedilo por aparte: no entraba en el correo)</span>' : ""
+        }</li>`).join("")}
+      </ul>
+    </td></tr>` : "";
+
   const html = plantilla({
     titulo: `Plan de obra · ${esc(lead?.nombre || "Proyecto")}`,
     subtitulo: `Del ${comoSeLee(desde)} al ${comoSeLee(hasta)}${de ? ` · lo envía ${esc(de)}` : ""}`,
@@ -104,6 +167,8 @@ export default async function handler(req, res) {
         ${pendientes}
         ${nota ? `<tr><td style="padding:10px 0;font-size:13px;color:#1f2937;line-height:1.6">${esc(nota)}</td></tr>` : ""}
         ${bloque || `<tr><td style="padding:14px 0;font-size:13px;color:#6B7280">Nada planificado todavía para ese período.</td></tr>`}
+        ${observaciones}
+        ${lista}
       </table>`,
   });
 
@@ -111,7 +176,11 @@ export default async function handler(req, res) {
     to: correos,
     subject: `Plan de obra · ${lead?.nombre || "Proyecto"} · ${comoSeLee(desde)} al ${comoSeLee(hasta)}`,
     html,
+    adjuntos,
   });
   if (r?.error) return res.status(502).json({ error: r.error });
-  return res.status(200).json({ enviado: correos.length, pendientes: quedaron.length, id: r?.id || null });
+  return res.status(200).json({
+    enviado: correos.length, pendientes: quedaron.length,
+    adjuntos: adjuntos.length, sinAdjuntar: quedaronFuera.length, id: r?.id || null,
+  });
 }

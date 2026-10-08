@@ -39,26 +39,196 @@ export function diasEntre(desde, hasta, cal = null) {
   return out;
 }
 
+const masDias = (f, n) => {
+  const d = new Date(`${String(f).slice(0, 10)}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const cuantosDias = (a, b) =>
+  Math.round((new Date(`${String(b).slice(0, 10)}T12:00:00`) - new Date(`${String(a).slice(0, 10)}T12:00:00`)) / 86400000) + 1;
+
+/**
+ * Qué período proponer al abrir la pantalla.
+ *
+ * ¿Y SI LA OBRA EMPIEZA UN MIÉRCOLES? Entonces la semana de esa obra es de
+ * miércoles a martes, y lo va a ser hasta que termine. El corte no es una
+ * propiedad del calendario, es de la obra: se hereda del arranque y después
+ * del último plan que se escribió, y la pantalla abre donde corresponde sin
+ * que nadie toque las dos fechas.
+ *
+ * Tres fuentes, en orden:
+ *  1. El último plan guardado — su día de arranque y su largo son EL corte de
+ *     esta obra, decidido por quien la lleva. Manda sobre cualquier regla.
+ *  2. El arranque de la obra (`crono_inicio`) — si empieza el miércoles 8, el
+ *     primer plan va del 8 al martes 14.
+ *  3. Sin ninguno de los dos, lunes a sábado, que es lo más común.
+ *
+ * Y después CORRE HASTA HOY manteniendo el corte, de a un paso: el que abre un
+ * lunes de marzo no quiere que le ofrezcan la semana de enero porque fue la
+ * última que escribió, quiere la de ahora cortada igual que las de enero.
+ */
+export function proponerPeriodo({ hoy, inicioObra = null, ultimoDesde = null, ultimoHasta = null } = {}) {
+  const dia = String(hoy || new Date().toISOString()).slice(0, 10);
+  let ancla, largo;
+  if (ultimoDesde && ultimoHasta && cuantosDias(ultimoDesde, ultimoHasta) > 0) {
+    ancla = String(ultimoDesde).slice(0, 10);
+    largo = cuantosDias(ultimoDesde, ultimoHasta);
+  } else if (inicioObra) {
+    ancla = String(inicioObra).slice(0, 10);
+    largo = 7;                         // miércoles a martes
+  } else {
+    ancla = lunesDeLaSemana(dia);
+    largo = 6;                         // lunes a sábado
+  }
+  // El paso es la semana salvo que el período sea más largo. "De lunes a
+  // lunes" son 8 días y se pisan en un día a propósito: el paso sigue siendo
+  // 7 y el lunes de cierre es el de apertura del siguiente.
+  const paso = largo <= 8 ? 7 : largo;
+  // La obra no empezó todavía: el primer plan es el del arranque.
+  if (dia <= ancla) return { desde: ancla, hasta: masDias(ancla, largo - 1) };
+  const saltos = Math.floor(cuantosDias(ancla, dia) / paso - 1 / paso);
+  const desde = masDias(ancla, Math.max(0, saltos) * paso);
+  return { desde, hasta: masDias(desde, largo - 1) };
+}
+
+/** El período anterior y el siguiente, conservando el corte y el largo. */
+export function correrPeriodo(desde, hasta, haciaDonde) {
+  const largo = Math.max(1, cuantosDias(desde, hasta));
+  const paso = largo <= 8 ? 7 : largo;
+  const d = masDias(desde, paso * (haciaDonde < 0 ? -1 : 1));
+  return { desde: d, hasta: masDias(d, largo - 1) };
+}
+
 export async function cargarPlan(leadId, desde, hasta) {
-  if (!leadId) return { dias: [], items: [], sinTablas: false };
+  if (!leadId) return { dias: [], items: [], periodo: null, sinTablas: false };
   const { data: dias, error } = await supabase.from("obra_plan_dias")
     .select("*").eq("lead_id", leadId).gte("fecha", desde).lte("fecha", hasta).order("fecha");
-  if (error) return { dias: [], items: [], sinTablas: falta(error) };
-  if (!dias?.length) return { dias: [], items: [], sinTablas: false };
+  if (error) return { dias: [], items: [], periodo: null, sinTablas: falta(error) };
+  // El período se lee aunque no haya días: puede existir con observaciones y
+  // un plano cargado antes de escribir la primera actividad.
+  const periodo = await periodoSiExiste(leadId, desde, hasta);
+  if (!dias?.length) return { dias: [], items: [], periodo, sinTablas: false };
   const { data: items } = await supabase.from("obra_plan_items")
     .select("*").in("plan_dia_id", dias.map(d => d.id)).order("orden");
-  return { dias, items: items || [], sinTablas: false };
+  return { dias, items: items || [], periodo, sinTablas: false };
+}
+
+/**
+ * El período: desde, hasta, y lo que es del plan entero.
+ *
+ * Existe porque la semana de obra no es de lunes a sábado. Se planifica de
+ * miércoles a martes, de lunes a domingo, de lunes a lunes — y un rango que
+ * cruza dos lunes no se puede reconstruir agrupando por lunes: se guardaba
+ * partido en dos y al volver traía la mitad. Guardado, el plan vuelve entero.
+ *
+ * Se busca por `desde`, que es su llave: si alguien corre el `hasta` —porque
+ * la semana se estiró al domingo— sigue siendo el mismo plan, y se actualiza.
+ */
+async function periodoSiExiste(leadId, desde, hasta) {
+  const { data, error } = await supabase.from("obra_plan_periodos")
+    .select("*").eq("lead_id", leadId).eq("desde", String(desde).slice(0, 10)).maybeSingle();
+  if (error || !data) return null;
+  if (hasta && data.hasta !== String(hasta).slice(0, 10)) {
+    await supabase.from("obra_plan_periodos").update({ hasta: String(hasta).slice(0, 10) }).eq("id", data.id);
+    return { ...data, hasta: String(hasta).slice(0, 10) };
+  }
+  return data;
+}
+
+export async function periodoDelPlan(leadId, desde, hasta, quien) {
+  if (!leadId || !desde) return { error: "Falta el proyecto o el período." };
+  const ya = await periodoSiExiste(leadId, desde, hasta);
+  if (ya) return { periodo: ya };
+  const { data, error } = await supabase.from("obra_plan_periodos").insert({
+    lead_id: leadId, desde: String(desde).slice(0, 10), hasta: String(hasta).slice(0, 10),
+    created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+  }).select().single();
+  if (error) {
+    if (falta(error)) return { error: "Falta correr la migración 090." };
+    // Dos pestañas abiertas pueden crearlo a la vez; el único que quedó sirve.
+    const otro = await periodoSiExiste(leadId, desde, hasta);
+    return otro ? { periodo: otro } : { error: error.message };
+  }
+  return { periodo: data };
+}
+
+/** Lo que no entra en ninguna casilla. Va al pie del informe, del PDF y del correo. */
+export async function guardarObservaciones(periodoId, texto) {
+  const { error } = await supabase.from("obra_plan_periodos")
+    .update({ observaciones: String(texto || "").trim() || null }).eq("id", periodoId);
+  return error ? error.message : null;
+}
+
+/**
+ * Planos, fotos, PDFs del plan.
+ *
+ * Cuelgan del período y no del día porque no son del martes: son del plan. Un
+ * plano que se manda por aparte del plan es el plano que después nadie
+ * encuentra, y la consulta que se resolvió con una foto por WhatsApp es la que
+ * un mes más tarde no existe.
+ */
+export async function archivosDelPlan(periodoId) {
+  if (!periodoId) return [];
+  const { data } = await supabase.from("obra_plan_archivos")
+    .select("*").eq("periodo_id", periodoId).order("created_at");
+  return data || [];
+}
+
+export async function subirArchivoDelPlan(periodo, archivo, descripcion, quien) {
+  if (!periodo?.id) return { error: "Guardá primero el período." };
+  if (archivo.size > 25 * 1024 * 1024) return { error: "El archivo pasa de 25 MB." };
+  const limpio = archivo.name.replace(/[^\w.\-]/g, "_").slice(-60);
+  const ruta = `plan-${periodo.id}/${Date.now()}-${limpio}`;
+  const { error } = await supabase.storage.from("task-files").upload(ruta, archivo, { upsert: false });
+  if (error) return { error: error.message };
+  const { data, error: e2 } = await supabase.from("obra_plan_archivos").insert({
+    periodo_id: periodo.id, storage_path: ruta, nombre: archivo.name.slice(0, 180),
+    tipo: archivo.type || null, tamano: archivo.size,
+    descripcion: String(descripcion || "").trim() || null,
+    subido_por: quien?.id ?? null, subido_nombre: quien?.name || null,
+  }).select().single();
+  // Si la fila no entró, el archivo subido queda huérfano: se borra.
+  if (e2) {
+    await supabase.storage.from("task-files").remove([ruta]);
+    return { error: falta(e2) ? "Falta correr la migración 090." : e2.message };
+  }
+  return { archivo: data };
+}
+
+export async function borrarArchivoDelPlan(a) {
+  await supabase.storage.from("task-files").remove([a.storage_path]);
+  const { error } = await supabase.from("obra_plan_archivos").delete().eq("id", a.id);
+  return error ? error.message : null;
+}
+
+/** Enlaces temporales para mirarlos, que el depósito es privado. */
+export async function enlacesDeArchivos(archivos = []) {
+  if (!archivos.length) return {};
+  const { data } = await supabase.storage.from("task-files")
+    .createSignedUrls(archivos.map(a => a.storage_path), 3600);
+  const mapa = {};
+  (data || []).forEach((x, i) => { if (x?.signedUrl) mapa[archivos[i].id] = x.signedUrl; });
+  return mapa;
 }
 
 /** El día, creándolo si hace falta: se escribe en él apenas se toca algo. */
-export async function diaDelPlan(leadId, fecha, quien) {
+export async function diaDelPlan(leadId, fecha, quien, periodoId = null) {
   const { data } = await supabase.from("obra_plan_dias")
     .select("*").eq("lead_id", leadId).eq("fecha", fecha).maybeSingle();
-  if (data) return { dia: data };
-  const { data: creado, error } = await supabase.from("obra_plan_dias").insert({
+  if (data) {
+    // Un día escrito antes de que el período existiera se engancha ahora.
+    if (periodoId && !data.periodo_id) {
+      await supabase.from("obra_plan_dias").update({ periodo_id: periodoId }).eq("id", data.id);
+      return { dia: { ...data, periodo_id: periodoId } };
+    }
+    return { dia: data };
+  }
+  const fila = {
     lead_id: leadId, fecha,
     created_by: quien?.id ?? null, created_nombre: quien?.name || null,
-  }).select().single();
+  };
+  if (periodoId) fila.periodo_id = periodoId;
+  const { data: creado, error } = await supabase.from("obra_plan_dias").insert(fila).select().single();
   if (error) return { error: falta(error) ? "Falta correr la migración 089." : error.message };
   return { dia: creado };
 }
@@ -184,10 +354,27 @@ export function lunesDeLaSemana(fecha) {
  */
 export async function historialDePlanes(leadId) {
   if (!leadId) return { semanas: [], sinTablas: false };
-  const { data: dias, error } = await supabase.from("obra_plan_dias")
-    .select("id,fecha").eq("lead_id", leadId).order("fecha", { ascending: false });
+  // Con `periodo_id`, y sin él si la 090 todavía no se corrió: PostgREST falla
+  // la consulta ENTERA cuando se le pide una columna que no existe, así que
+  // pedirla sin más dejaría el histórico vacío hasta que alguien corra la
+  // migración. Se pide, y si no está se vuelve a pedir lo que sí hay.
+  let { data: dias, error } = await supabase.from("obra_plan_dias")
+    .select("id,fecha,periodo_id").eq("lead_id", leadId).order("fecha", { ascending: false });
+  if (error && falta(error)) {
+    ({ data: dias, error } = await supabase.from("obra_plan_dias")
+      .select("id,fecha").eq("lead_id", leadId).order("fecha", { ascending: false }));
+  }
   if (error) return { semanas: [], sinTablas: falta(error) };
-  if (!dias?.length) return { semanas: [], sinTablas: false };
+
+  // Los períodos guardados. Son los que mandan: un plan de miércoles a martes
+  // cruza dos lunes, y agrupado por lunes se partía en dos entradas que al
+  // abrirlas traían la mitad del plan. De ahí venía que no se pudiera volver a
+  // uno y editarlo. Lo que no tiene período —lo escrito antes de la 090— se
+  // sigue agrupando por lunes para que no desaparezca de la lista.
+  const { data: periodos } = await supabase.from("obra_plan_periodos")
+    .select("id,desde,hasta,observaciones").eq("lead_id", leadId).order("desde", { ascending: false });
+  const vacios = (periodos || []).filter(p => !(dias || []).some(d => d.periodo_id === p.id));
+  if (!dias?.length && !vacios.length) return { semanas: [], sinTablas: false };
 
   const { data: items } = await supabase.from("obra_plan_items")
     .select("plan_dia_id,tipo,hecha,motivo").in("plan_dia_id", dias.map(d => d.id));
@@ -197,21 +384,40 @@ export async function historialDePlanes(leadId) {
     porDia.get(i.plan_dia_id).push(i);
   });
 
+  const porId = new Map((periodos || []).map(p => [p.id, p]));
   const semanas = new Map();
-  dias.forEach(d => {
-    const k = lunesDeLaSemana(d.fecha);
-    if (!semanas.has(k)) semanas.set(k, { lunes: k, desde: d.fecha, hasta: d.fecha, dias: 0, items: [] });
+  (dias || []).forEach(d => {
+    const p = d.periodo_id ? porId.get(d.periodo_id) : null;
+    // La llave es el período si existe, y el lunes si no. Nunca se mezclan: un
+    // día con período no puede caer en el grupo por lunes de otro plan.
+    const k = p ? `p${p.id}` : `l${lunesDeLaSemana(d.fecha)}`;
+    if (!semanas.has(k)) {
+      semanas.set(k, p
+        ? { clave: k, periodo_id: p.id, desde: p.desde, hasta: p.hasta,
+            observaciones: p.observaciones || null, fijo: true, dias: 0, items: [] }
+        : { clave: k, periodo_id: null, desde: d.fecha, hasta: d.fecha, fijo: false, dias: 0, items: [] });
+    }
     const s = semanas.get(k);
     s.dias += 1;
-    if (d.fecha < s.desde) s.desde = d.fecha;
-    if (d.fecha > s.hasta) s.hasta = d.fecha;
+    // Las fechas del período guardado no se corren con los días que tenga: el
+    // plan va del miércoles al martes aunque solo se haya escrito el jueves.
+    if (!s.fijo) {
+      if (d.fecha < s.desde) s.desde = d.fecha;
+      if (d.fecha > s.hasta) s.hasta = d.fecha;
+    }
     s.items.push(...(porDia.get(d.id) || []));
   });
+  // Un período con observaciones o un plano cargado, y ningún día escrito
+  // todavía, también es un plan que existe y al que hay que poder volver.
+  vacios.forEach(p => semanas.set(`p${p.id}`, {
+    clave: `p${p.id}`, periodo_id: p.id, desde: p.desde, hasta: p.hasta,
+    observaciones: p.observaciones || null, fijo: true, dias: 0, items: [],
+  }));
 
   return {
     semanas: [...semanas.values()]
-      .map(s => ({ ...s, ...comoSalio(s.items) }))
-      .sort((a, b) => b.lunes.localeCompare(a.lunes)),
+      .map(s => ({ ...s, lunes: s.desde, ...comoSalio(s.items) }))
+      .sort((a, b) => b.desde.localeCompare(a.desde)),
     sinTablas: false,
   };
 }

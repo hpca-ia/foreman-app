@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, X, Check, AlertTriangle, CalendarDays, Send, Printer } from "lucide-react";
+import { Plus, X, Check, AlertTriangle, CalendarDays, Send, Printer, Paperclip, FileText, Image as Imagen } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHecha, guardarMotivo,
-  diasEntre, loQueTocaEstaSemana, comoSalio, historialDePlanes } from "./planSemanalDatos";
-import { cargarPlan as cargarGantt } from "../cronograma/plazo";
+  diasEntre, loQueTocaEstaSemana, comoSalio, historialDePlanes, proponerPeriodo, correrPeriodo,
+  periodoDelPlan, guardarObservaciones, archivosDelPlan, subirArchivoDelPlan, borrarArchivoDelPlan,
+  enlacesDeArchivos } from "./planSemanalDatos";
+import { cargarPlan as cargarGantt, leerPlazo } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
 import { pdfPlanSemanal } from "./pdfPlanSemanal";
 
@@ -27,16 +29,6 @@ const comoSeLee = f => {
   const d = new Date(`${f}T12:00:00`);
   return `${DIAS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
 };
-const lunesDe = f => {
-  const d = new Date(`${f}T12:00:00`);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
-};
-const masDias = (f, n) => {
-  const d = new Date(`${f}T12:00:00`);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-};
 
 const CAMPOS = [
   { id: "horario", label: "Horarios de trabajo", pista: "7h00 a 17h00 · almuerzo 12h30 a 13h30" },
@@ -47,8 +39,18 @@ const CAMPOS = [
 
 export default function PlanSemanal({ lead, currentUser, puedeEscribir = true }) {
   const hoy = new Date().toISOString().slice(0, 10);
-  const [desde, setDesde] = useState(lunesDe(hoy));
-  const [hasta, setHasta] = useState(masDias(lunesDe(hoy), 5));
+  // El período arranca en lo que propone la obra, no en el lunes del
+  // calendario: si la obra empezó un miércoles, su semana es de miércoles a
+  // martes. Esto es solo el primer dibujo —sin saber todavía el arranque ni el
+  // último plan— y el efecto de abajo lo corrige con lo que diga la base.
+  const inicial = proponerPeriodo({ hoy });
+  const [desde, setDesde] = useState(inicial.desde);
+  const [hasta, setHasta] = useState(inicial.hasta);
+  const [corteListo, setCorteListo] = useState(false);
+  const [periodo, setPeriodo] = useState(null);
+  const [archivos, setArchivos] = useState([]);
+  const [enlaces, setEnlaces] = useState({});
+  const [subiendo, setSubiendo] = useState(false);
   const [dias, setDias] = useState([]);
   const [items, setItems] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -66,9 +68,39 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
 
   const cargar = useCallback(async () => {
     const r = await cargarPlan(lead?.id, desde, hasta);
-    setDias(r.dias); setItems(r.items); setSinTablas(r.sinTablas);
+    setDias(r.dias); setItems(r.items); setSinTablas(r.sinTablas); setPeriodo(r.periodo || null);
+    const a = r.periodo ? await archivosDelPlan(r.periodo.id) : [];
+    setArchivos(a);
+    setEnlaces(a.length ? await enlacesDeArchivos(a) : {});
   }, [lead?.id, desde, hasta]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // EL CORTE DE LA SEMANA LO DECIDE LA OBRA. Se lee una vez, al entrar: el
+  // arranque del cronograma y el último plan escrito. Si la obra empezó un
+  // miércoles, la pantalla abre en miércoles-martes sin que nadie toque las
+  // dos fechas; y si quien la lleva cortó distinto la semana pasada, se
+  // respeta eso, que vale más que cualquier regla.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      if (!lead?.id) return;
+      const [{ inicio }, hist] = await Promise.all([
+        leerPlazo(lead.id).catch(() => ({ inicio: null })),
+        historialDePlanes(lead.id).catch(() => ({ semanas: [] })),
+      ]);
+      if (!vivo) return;
+      const ultimo = (hist.semanas || [])[0] || null;
+      const p = proponerPeriodo({
+        hoy, inicioObra: inicio,
+        ultimoDesde: ultimo?.desde || null, ultimoHasta: ultimo?.hasta || null,
+      });
+      setDesde(p.desde); setHasta(p.hasta); setCorteListo(true);
+    })();
+    return () => { vivo = false; };
+    // Al cambiar de obra, y una vez por día. `hoy` es una fecha en texto, así
+    // que no cambia entre dibujos: el efecto no pisa el período que el usuario
+    // haya elegido a mano.
+  }, [lead?.id, hoy]);
 
   // El histórico se vuelve a leer cuando cambia el plan: marcar una tarea
   // cambia el "12 de 15" de su semana, y una lista que no se entera es una
@@ -107,10 +139,20 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   const toca = loQueTocaEstaSemana(gantt, desde, hasta);
   const resumen = comoSalio(items);
 
+  // El período se crea al primer dato que se escribe, no al abrir la
+  // pantalla: mirar una semana no debería dejar un plan vacío en el histórico.
+  async function asegurarPeriodo() {
+    if (periodo) return { periodo };
+    const r = await periodoDelPlan(lead.id, desde, hasta, currentUser);
+    if (r.periodo) setPeriodo(r.periodo);
+    return r;
+  }
+
   async function sumar(fecha, tipo, texto, extra = {}) {
     if (!String(texto || "").trim()) return;
     setOcupado(true); setError("");
-    const { dia, error: e } = await diaDelPlan(lead.id, fecha, currentUser);
+    const { periodo: p } = await asegurarPeriodo();
+    const { dia, error: e } = await diaDelPlan(lead.id, fecha, currentUser, p?.id || null);
     if (e) { setOcupado(false); setError(e); return; }
     const orden = items.filter(i => i.plan_dia_id === dia.id && (i.tipo || "tarea") === tipo).length;
     const r = await agregarItem(dia, { tipo, texto, orden, ...extra });
@@ -121,7 +163,8 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   }
 
   async function tocarCampo(fecha, campo, valor) {
-    const { dia, error: e } = await diaDelPlan(lead.id, fecha, currentUser);
+    const { periodo: p } = await asegurarPeriodo();
+    const { dia, error: e } = await diaDelPlan(lead.id, fecha, currentUser, p?.id || null);
     if (e) { setError(e); return; }
     const err = await guardarDia(dia.id, { [campo]: valor || null });
     if (err) { setError(err); return; }
@@ -130,8 +173,11 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
 
   return (
     <div style={{ fontFamily: colors.font }}>
-      {/* El período. Por defecto la semana en curso, de lunes a sábado, que es
-          como se trabaja acá y lo que uno viene a planificar. */}
+      {/* EL PERÍODO, LIBRE. No hay una "semana" acá: hay el corte de esta obra.
+          Se planifica de miércoles a martes, de lunes a domingo, de lunes a
+          lunes, y si la obra empezó un miércoles su semana empieza un
+          miércoles hasta que termine. Las dos fechas se escogen a mano y la
+          pantalla abre en el corte que viene usando esta obra. */}
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12,
         background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px" }}>
         <div>
@@ -144,12 +190,30 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
           <input type="date" value={hasta} onChange={e => setHasta(e.target.value)}
             style={{ ...inputStyle, width: 150, padding: "6px 9px", fontSize: 12 }} />
         </div>
-        <Button variant="outline" size="sm" onClick={() => { setDesde(lunesDe(hoy)); setHasta(masDias(lunesDe(hoy), 5)); }}>
-          Esta semana
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => { const l = masDias(lunesDe(hoy), 7); setDesde(l); setHasta(masDias(l, 5)); }}>
-          La que viene
-        </Button>
+        {/* Ir y venir CONSERVANDO EL CORTE. Era lo que faltaba para volver a un
+            plan ya pasado: la lista de abajo sirve para saltar lejos, pero
+            para corregir el de la semana anterior —que es lo más común— uno
+            quiere una flecha, no buscarse en una lista.
+
+            Y mueve el período entero, no siete días fijos: si la semana de
+            esta obra va de miércoles a martes, atrás es el miércoles anterior. */}
+        <Button variant="outline" size="sm" title="El período anterior, con el mismo corte"
+          onClick={() => { const p = correrPeriodo(desde, hasta, -1); setDesde(p.desde); setHasta(p.hasta); }}>◀</Button>
+        <Button variant="outline" size="sm" title="El período en el que cae hoy"
+          onClick={() => {
+            const p = proponerPeriodo({ hoy, inicioObra: desde, ultimoDesde: desde, ultimoHasta: hasta });
+            setDesde(p.desde); setHasta(p.hasta);
+          }}>Hoy</Button>
+        <Button variant="outline" size="sm" title="El período siguiente, con el mismo corte"
+          onClick={() => { const p = correrPeriodo(desde, hasta, 1); setDesde(p.desde); setHasta(p.hasta); }}>▶</Button>
+
+        {/* Qué corte quedó. Las dos fechas se eligen libres —de miércoles a
+            martes, de lunes a domingo, de lunes a lunes— y conviene ver en
+            palabras lo que se escogió antes de mandarlo. */}
+        <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45, paddingBottom: 2 }}>
+          {DIAS[new Date(`${desde}T12:00:00`).getDay()]} a {DIAS[new Date(`${hasta}T12:00:00`).getDay()]}
+          <br />{fechas.length} {fechas.length === 1 ? "día" : "días"}
+        </div>
 
         {/* CÓMO SALIÓ. El número que importa no es cuántas se hicieron: es
             cuáles NO y por qué. Una semana al 80% con las dos de la ruta
@@ -266,7 +330,10 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                     }}
                     title={t.hecha ? "Hecha. Tocá para desmarcarla." : "Marcarla hecha: se escribe sola en el libro de ese día."}
                     style={{ background: "none", border: "none", cursor: puedeEscribir ? "pointer" : "default",
-                      color: t.hecha ? colors.success : colors.muted, display: "flex", padding: 0, marginTop: 1, flexShrink: 0 }}>
+                      // La cruz en ROJO. En gris, una lista de quince
+                      // actividades a medio hacer se lee como quince renglones
+                      // iguales: lo que falta tiene que saltar.
+                      color: t.hecha ? colors.success : colors.danger, display: "flex", padding: 0, marginTop: 1, flexShrink: 0 }}>
                     {t.hecha ? <Check size={14} /> : <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1 }}>✗</span>}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -330,7 +397,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                           if (r.error) setError(r.error); else await cargar();
                         }}
                         style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
-                          color: m.hecha ? colors.success : colors.muted, display: "flex" }}>
+                          color: m.hecha ? colors.success : colors.danger, display: "flex" }}>
                         {m.hecha ? <Check size={13} /> : <span style={{ fontSize: 12, fontWeight: 700 }}>✗</span>}
                       </button>
                       <span style={{ flex: 1, color: colors.ink, textDecoration: m.hecha ? "line-through" : "none",
@@ -393,15 +460,22 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
               <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
                 setOcupado(true); setError("");
                 try {
-                  // Lo que quedó sin hacer la semana anterior, igual que en el
-                  // correo: el plan se lee contra eso.
-                  const antes = new Date(`${desde}T12:00:00`);
-                  antes.setDate(antes.getDate() - 7);
-                  const previa = await cargarPlan(lead.id, antes.toISOString().slice(0, 10), masDias(desde, -1));
+                  // Lo que quedó sin hacer el período anterior, igual que en
+                  // el correo: el plan se lee contra eso. Y el anterior es el
+                  // del mismo corte —si la semana va de miércoles a martes, el
+                  // miércoles de antes—, no siete días para atrás a ciegas.
+                  const ant = correrPeriodo(desde, hasta, -1);
+                  const previa = await cargarPlan(lead.id, ant.desde, ant.hasta);
                   const quedaron = previa.items
                     .filter(i => (i.tipo || "tarea") !== "material" && !i.hecha);
+                  // Los enlaces del depósito duran una hora y los de la
+                  // pantalla pueden llevar rato abiertos: se piden de nuevo,
+                  // porque un plano que no carga deja el PDF sin la hoja.
+                  const frescos = archivos.length ? await enlacesDeArchivos(archivos) : {};
                   const doc = await pdfPlanSemanal({
                     proyecto: lead.nombre, desde, hasta, dias, items, quedaron,
+                    observaciones: periodo?.observaciones || "",
+                    archivos: archivos.map(a => ({ ...a, url: frescos[a.id] || enlaces[a.id] })),
                   });
                   doc.save(`Plan ${lead.nombre} ${desde} a ${hasta}.pdf`);
                 } catch (e) { setError("No se pudo armar el PDF: " + e.message); }
@@ -470,12 +544,122 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
         </div>
       )}
 
+      {/* OBSERVACIONES Y ADJUNTOS. Van al pie porque se escriben al final, con
+          el plan ya armado, y porque son del PLAN ENTERO y no de un día: una
+          consulta abierta, lo que se acordó en obra, el plano que hay que
+          mirar para ejecutar la semana.
+
+          Y ES LA MITAD QUE FALTABA PARA QUE ESTO SEA UN INFORME. Un plan que
+          dice "montar la grada según plano" sin el plano obliga al que lo
+          recibe a pedirlo por aparte, y el plano que llega por aparte es el
+          que un mes después nadie encuentra. Acá viaja con el plan: al PDF, al
+          correo y al histórico. */}
+      <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+        borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+        <label style={lbl}>OBSERVACIONES</label>
+        <textarea key={`obs-${periodo?.id || desde}`} defaultValue={periodo?.observaciones || ""}
+          disabled={!puedeEscribir} rows={3}
+          placeholder="Consultas abiertas, lo que se acordó en obra, lo que hay que resolver antes del cierre…"
+          onBlur={async e => {
+            const txt = e.target.value;
+            if (txt === (periodo?.observaciones || "")) return;
+            const { periodo: p, error: e1 } = await asegurarPeriodo();
+            if (e1) { setError(e1); return; }
+            const err = await guardarObservaciones(p.id, txt);
+            if (err) { setError(err); return; }
+            setError(""); await cargar();
+          }}
+          style={{ ...inputStyle, fontSize: 12.5, padding: "7px 9px", resize: "vertical",
+            lineHeight: 1.5, fontFamily: colors.font }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          <label style={{ ...lbl, marginBottom: 0 }}>PLANOS, FOTOS, PDFs</label>
+          {puedeEscribir && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: subiendo ? "wait" : "pointer",
+              border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "4px 9px",
+              fontSize: 11.5, color: colors.inkSoft, background: "#fff" }}>
+              <Paperclip size={12} />{subiendo ? "Subiendo…" : "Adjuntar"}
+              <input type="file" multiple disabled={subiendo}
+                accept="image/*,application/pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx"
+                onChange={async e => {
+                  const elegidos = [...(e.target.files || [])];
+                  e.target.value = "";
+                  if (!elegidos.length) return;
+                  setSubiendo(true); setError("");
+                  const { periodo: p, error: e1 } = await asegurarPeriodo();
+                  if (e1) { setSubiendo(false); setError(e1); return; }
+                  // Uno por uno y sin cortar al primer tropiezo: si el tercero
+                  // pesa 30 MB, los otros dos ya subidos tienen que quedar.
+                  const malos = [];
+                  for (const f of elegidos) {
+                    const r = await subirArchivoDelPlan(p, f, "", currentUser);
+                    if (r.error) malos.push(`${f.name}: ${r.error}`);
+                  }
+                  setSubiendo(false);
+                  setError(malos.join(" · "));
+                  await cargar();
+                }}
+                style={{ display: "none" }} />
+            </label>
+          )}
+        </div>
+
+        {archivos.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
+            {archivos.map(a => {
+              const esImagen = /^image\//.test(a.tipo || "");
+              const url = enlaces[a.id];
+              return (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 6,
+                  border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
+                  padding: "4px 5px 4px 7px", background: "#fff", maxWidth: 260 }}>
+                  {/* La miniatura: un plano se reconoce mirándolo, no leyendo
+                      "IMG_4821.jpg". */}
+                  {esImagen && url
+                    ? <img src={url} alt={a.nombre} style={{ width: 26, height: 26, objectFit: "cover",
+                        borderRadius: 3, flexShrink: 0, border: `1px solid ${colors.neutralSoft}` }} />
+                    : (esImagen ? <Imagen size={13} color={colors.muted} /> : <FileText size={13} color={colors.muted} />)}
+                  <a href={url || "#"} target="_blank" rel="noreferrer"
+                    onClick={ev => { if (!url) ev.preventDefault(); }}
+                    title={a.nombre}
+                    style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: url ? colors.brand : colors.muted,
+                      textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {a.nombre}
+                  </a>
+                  <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>
+                    {a.tamano ? `${Math.max(1, Math.round(a.tamano / 1024))} kB` : ""}
+                  </span>
+                  {puedeEscribir && (
+                    <button title="Quitar"
+                      onClick={async () => {
+                        if (!window.confirm(`¿Quitar ${a.nombre} del plan?`)) return;
+                        const err = await borrarArchivoDelPlan(a);
+                        if (err) { setError(err); return; }
+                        setError(""); await cargar();
+                      }}
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                        color: colors.muted, display: "flex", flexShrink: 0 }}>
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 5, lineHeight: 1.5 }}>
+            Nada adjunto. Un plano, la foto de una consulta o el detalle que hay que mirar para
+            ejecutar la semana viaja con el plan: al PDF, al correo y al histórico.
+          </div>
+        )}
+      </div>
+
       {/* LAS SEMANAS ANTERIORES.
           Una lista de semanas con su "12 de 15" al lado es lo que deja ver que
           la obra viene cumpliendo el 80%, y que hace tres semanas lo que falla
           es lo mismo. Eso no se ve mirando una semana sola, y es la única
           razón por la que vale la pena guardar las viejas. */}
-      {historial.length > 1 && (
+      {historial.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
             SEMANAS ANTERIORES
@@ -484,7 +668,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
             {historial.map(sem => {
               const puesta = sem.desde === desde && sem.hasta === hasta;
               return (
-                <button key={sem.lunes} onClick={() => { setDesde(sem.desde); setHasta(sem.hasta); }}
+                <button key={sem.clave || sem.lunes} onClick={() => { setDesde(sem.desde); setHasta(sem.hasta); }}
                   style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
                     padding: "9px 12px", background: puesta ? colors.brandSoft : "none", border: "none",
                     borderTop: `1px solid ${colors.neutralSoft}`, cursor: "pointer", fontFamily: colors.font }}>
