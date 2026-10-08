@@ -11,9 +11,23 @@ import { supabase } from "../../lib/supabase";
 // guardado se desincroniza el día que alguien corrige un pago, y ahí hay dos
 // verdades y ninguna sirve.
 
+/**
+ * Con qué papel llega un gasto.
+ *
+ * No todo lo que se compra en una obra viene con factura, y fingir que sí es
+ * lo que hace que la mitad de los gastos chicos no se registren: el ferretero
+ * del barrio da NOTA DE VENTA, el maestro que presta un servicio da RECIBO, y
+ * esa plata se gastó igual. Si la app solo acepta "factura" o "proforma", lo
+ * que entra se llama factura aunque no lo sea —y en el SRI eso es otra cosa.
+ *
+ * Los cuatro valen para el control de obra. La diferencia que importa para la
+ * contabilidad es si da crédito tributario, y por eso se dice en la pista.
+ */
 export const CLASES_DOC = {
-  factura:  { label: "Factura",  pista: "El documento definitivo" },
-  proforma: { label: "Proforma", pista: "Todavía hay que pedir la factura" },
+  factura:       { label: "Factura",        pista: "El documento definitivo, con crédito tributario" },
+  nota_venta:    { label: "Nota de venta",  pista: "Régimen simplificado: es gasto válido y NO da crédito tributario" },
+  recibo:        { label: "Recibo",         pista: "Un respaldo simple: honorarios, un servicio suelto" },
+  proforma:      { label: "Proforma",       pista: "Todavía hay que pedir el documento definitivo" },
 };
 
 export const FORMAS_PAGO = ["transferencia", "cheque", "efectivo", "otro"];

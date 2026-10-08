@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText, Paperclip, Banknote } from "lucide-react";
+import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText, Paperclip, Banknote, Sparkles } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
@@ -13,7 +13,7 @@ import PanelBodega from "./PanelBodega";
 import VisorAdjuntos from "./VisorAdjuntos";
 import { CLASES_PEDIDO, vaABodega } from "./bodega";
 import CampoProveedor from "../../components/CampoProveedor";
-import { leerProforma, proveedorCanonico } from "./leerProforma";
+import { leerProforma, leerDocumentoDeCompra, proveedorCanonico } from "./leerProforma";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -180,6 +180,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [avisoPapel, setAvisoPapel] = useState("");
   const [verAnexos, setVerAnexos] = useState(!!solicitud);
   const proformaRef = useRef(null);
+  // El documento con el que se concreta la compra: factura, nota de venta o
+  // recibo. Lo lee NOVA y llena los campos; no guarda nada hasta que la
+  // persona revisa.
+  const docRef = useRef(null);
+  const [leyendoDoc, setLeyendoDoc] = useState(false);
+  const [avisoDoc, setAvisoDoc] = useState("");
 
   const cargarPapeles = useCallback(async () => {
     if (!viva?.id) return;
@@ -708,6 +714,66 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               <input value={compra.ruc} onChange={ev => setCompra(c => ({ ...c, ruc: ev.target.value }))}
                 placeholder="RUC" style={mini} />
             </div>
+            {/* QUE NOVA LEA EL DOCUMENTO, acá también.
+                Hasta ahora NOVA leía el papel UNA sola vez en toda la vida de
+                una compra —la cotización, para aprobarla— y después, cuando
+                llega la factura de verdad, alguien tecleaba proveedor, RUC,
+                número y total. Justo los datos que más cuesta tipear y donde
+                más caro sale equivocarse: un número de factura mal copiado es
+                una factura que nadie vuelve a encontrar.
+
+                Llena los campos y no guarda nada: lo que leyó se ve, se
+                corrige y recién después se guarda. */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+              background: colors.brandSoft, borderRadius: 8, padding: "8px 10px" }}>
+              <Sparkles size={14} color={colors.brand} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 11.5, color: colors.brand, flex: 1, minWidth: 170 }}>
+                {leyendoDoc ? "NOVA está leyendo el documento…"
+                  : "Subí la factura, nota de venta o recibo y NOVA llena los datos."}
+              </span>
+              <Button variant="primary" size="sm" disabled={leyendoDoc}
+                onClick={() => docRef.current?.click()}>
+                <Upload size={12} /> {leyendoDoc ? "Leyendo…" : "Leer con NOVA"}
+              </Button>
+              <input ref={docRef} type="file" accept="image/*,.pdf" style={{ display: "none" }}
+                onChange={async ev => {
+                  const archivo = ev.target.files?.[0]; ev.target.value = "";
+                  if (!archivo) return;
+                  setLeyendoDoc(true); setAvisoDoc("");
+                  const leido = await leerDocumentoDeCompra(archivo).catch(e => ({ error: e.message }));
+                  if (leido.error) { setLeyendoDoc(false); setAvisoDoc(leido.error); return; }
+                  // El proveedor pasa por el canónico: "Kiwy", "FERRETERIA
+                  // KIWY" y "kywi" son el mismo, y si entran como tres la
+                  // cuenta por proveedor deja de servir.
+                  const canon = leido.proveedor ? await proveedorCanonico(leido).catch(() => ({})) : {};
+                  setCompra(c => ({
+                    ...c,
+                    clase: leido.clase || c.clase,
+                    proveedor: canon.proveedor || leido.proveedor || c.proveedor,
+                    ruc: leido.ruc || canon.ruc || c.ruc,
+                    numero: leido.numero || c.numero,
+                    fecha: leido.fecha || c.fecha,
+                    monto: leido.monto != null ? String(leido.monto) : c.monto,
+                  }));
+                  // Y el papel queda guardado: leerlo y no conservarlo deja el
+                  // número cargado sin respaldo de dónde salió.
+                  const sol = await asegurarSolicitud();
+                  if (sol) {
+                    await subirAdjunto(sol, archivo, {
+                      tipo: "respaldo", quien: currentUser,
+                      proveedor: canon.proveedor || leido.proveedor || null,
+                      monto: leido.monto || null, nota: leido.detalle || null,
+                    });
+                    await cargarPapeles();
+                  }
+                  setLeyendoDoc(false);
+                  const faltan = [!leido.numero && "el número", !leido.fecha && "la fecha",
+                    !leido.monto && "el total"].filter(Boolean);
+                  setAvisoDoc(faltan.length ? `Revisá ${faltan.join(" y ")}: no se leyó del papel.` : "");
+                }} />
+            </div>
+            {avisoDoc && <div style={{ fontSize: 11, color: colors.warning }}>{avisoDoc}</div>}
+
             <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 130px 120px", gap: 8 }}>
               <select value={compra.clase} onChange={ev => setCompra(c => ({ ...c, clase: ev.target.value }))} style={mini}>
                 {Object.entries(CLASES_DOC).map(([id, x]) => <option key={id} value={id}>{x.label}</option>)}
