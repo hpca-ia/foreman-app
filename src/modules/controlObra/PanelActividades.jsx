@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
-import { Plus, Sparkles, Check, X, ChevronRight, ChevronDown, Trash2, Pencil, CornerDownRight, AlertTriangle, Merge } from "lucide-react";
+import { Plus, Sparkles, Check, X, ChevronRight, ChevronDown, Trash2, Pencil, CornerDownRight, AlertTriangle, Merge, Briefcase } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import { EXTRAS_SUGERIDAS, sembrarExtras, crearExtra, reordenar, guardarOrden } from "./agrupacionesExtra";
 
 const SIN = "__sin__";
 
@@ -26,6 +27,17 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
   const [error, setError] = useState("");
   const [actsSel, setActsSel] = useState(new Set());   // marcadas para fusionar
   const [fuera, setFuera] = useState(0);               // rubros que NOVA dejó sin agrupar
+  // Las agrupaciones marcadas para cambiar de lugar. Mismo gesto que en
+  // Presupuestos: se marcan con ⇕ y se sueltan con "acá".
+  const [moviendo, setMoviendo] = useState([]);
+  const [extraNueva, setExtraNueva] = useState("");
+  // Cuáles de las de siempre le faltan a ESTA obra. Se compara por nombre: una
+  // obra puede haberlas creado a mano con otro código, y duplicar "GASTOS DE
+  // OFICINA" partiría el gasto en dos renglones que nadie vuelve a juntar.
+  const faltanExtras = useMemo(() => {
+    const ya = new Set(actividades.map(a => String(a.nombre || "").trim().toLocaleUpperCase("es")));
+    return EXTRAS_SUGERIDAS.filter(x => !ya.has(x.nombre.toLocaleUpperCase("es")));
+  }, [actividades]);
 
   const grupos = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -111,6 +123,42 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
     setGuardando(false);
     if (e1.error || e2.error) { setError("No se pudo mover: " + (e1.error || e2.error).message); return; }
     onCambio();
+  }
+
+  /**
+   * Soltar las marcadas donde se tocó "acá".
+   *
+   * Subir de a una con la flecha es insoportable cuando la agrupación nació
+   * última y va tercera: dieciséis clics y la lista saltando bajo el cursor.
+   */
+  async function soltarEn(destino) {
+    const cambios = reordenar(actividades, moviendo, destino.id);
+    setMoviendo([]);
+    if (!cambios.length) return;
+    setGuardando(true); setError("");
+    const err = await guardarOrden(cambios);
+    setGuardando(false);
+    if (err) { setError("No se pudo mover: " + err); return; }
+    onCambio();
+  }
+
+  /** Las de siempre que esta obra todavía no tiene. */
+  async function ponerExtras(cuales) {
+    setGuardando(true); setError("");
+    const r = await sembrarExtras(obra.id, cuales);
+    setGuardando(false);
+    if (r.error) { setError("No se pudieron crear: " + r.error); return; }
+    onCambio();
+  }
+
+  async function ponerExtraPropia() {
+    const nombre = extraNueva.trim();
+    if (!nombre) return;
+    setGuardando(true); setError("");
+    const r = await crearExtra(obra.id, nombre);
+    setGuardando(false);
+    if (r.error) { setError(r.error); return; }
+    setExtraNueva(""); onCambio();
   }
 
   async function moverANueva() {
@@ -359,6 +407,69 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
 
       <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro o capítulo..." style={{ ...inputStyle, marginBottom: 10 }} />
 
+      {/* Qué está pasando, mientras pasa: un modo invisible —en el que los
+          botones de las filas hacen otra cosa— se descubre apretando el
+          equivocado. */}
+      {moviendo.length > 0 && (
+        <div style={{ fontSize: 11.5, color: colors.brand, background: colors.brandSoft, borderRadius: 7,
+          padding: "6px 10px", marginBottom: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span>
+            Moviendo <strong>{moviendo.length === 1 ? "una agrupación" : `${moviendo.length} agrupaciones`}</strong>.
+            {" "}Tocá <strong>acá</strong> en la que va justo debajo.
+          </span>
+          <button onClick={() => setMoviendo([])}
+            style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer",
+              fontFamily: colors.font, fontSize: 11 }}>cancelar</button>
+        </div>
+      )}
+
+      {/* LAS QUE NO ESTÁN EN EL PRESUPUESTO.
+          Una obra gasta en cosas que nadie contrató: la vivienda del residente,
+          el flete, la papelería, el imprevisto. No es un capítulo del contrato
+          y no puede colgar de uno —una planilla que le cobra al cliente
+          "gastos de oficina" dentro de ALBAÑILERÍA es un problema bastante
+          peor que uno de software—, pero es plata de la obra y va al control.
+
+          Se ofrecen y se agregan a mano: las sugeridas con un toque, y
+          cualquier otra escribiéndola. Arrancan en cero, así que el saldo se
+          va a negativo con el primer gasto. Eso no es un descuadre: es el dato. */}
+      {(
+        <div style={{ background: colors.surface, border: `1px dashed ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+            <Briefcase size={13} color={colors.muted} />
+            <span style={{ fontSize: 11.5, color: colors.inkSoft, flex: 1, minWidth: 180 }}>
+              Agrupaciones de control — gasto de obra que no está en el presupuesto.
+            </span>
+            {faltanExtras.length > 1 && (
+              <Button variant="outline" size="sm" disabled={guardando}
+                onClick={() => ponerExtras(faltanExtras)}>
+                <Plus size={12} /> Poner las {faltanExtras.length}
+              </Button>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {faltanExtras.map(x => (
+              <button key={x.nombre} onClick={() => ponerExtras([x])} disabled={guardando}
+                style={{ background: "transparent", border: `1px solid ${colors.border}`, borderRadius: 20,
+                  padding: "4px 11px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
+                  fontFamily: colors.font }}>
+                <Plus size={10} style={{ verticalAlign: "-1px", marginRight: 3 }} />{x.nombre}
+              </button>
+            ))}
+            <input value={extraNueva} onChange={e => setExtraNueva(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") ponerExtraPropia(); }}
+              placeholder="…u otra: escribila y Enter"
+              style={{ ...inputStyle, flex: 1, minWidth: 170, padding: "4px 9px", fontSize: 11.5 }} />
+            {extraNueva.trim() && (
+              <Button variant="primary" size="sm" disabled={guardando} onClick={ponerExtraPropia}>
+                <Plus size={12} /> Crear
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {seleccion.size > 0 && (
         <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 12, marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.brand, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
@@ -448,6 +559,27 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
                 </button>
                 {!esSin && (
                   <>
+                    {/* MARCAR Y SOLTAR, igual que en Presupuestos. Las flechas
+                        siguen para el ajuste de a uno; el ⇕ marca —se pueden
+                        marcar varias— y "acá" las suelta donde van. Subir una
+                        agrupación que nació última hasta el tercer lugar eran
+                        dieciséis clics con la lista saltando bajo el cursor. */}
+                    <button onClick={() => setMoviendo(prev => prev.includes(g.act.id)
+                        ? prev.filter(x => x !== g.act.id) : [...prev, g.act.id])}
+                      title={moviendo.includes(g.act.id)
+                        ? "Sacarla de la selección"
+                        : "Marcarla para moverla. Podés marcar varias."}
+                      style={{ background: moviendo.includes(g.act.id) ? colors.brand : "none",
+                        color: moviendo.includes(g.act.id) ? "#fff" : colors.muted, border: "none",
+                        borderRadius: 5, padding: "1px 4px", fontSize: 10, cursor: "pointer",
+                        fontFamily: colors.font, lineHeight: 1.2, flexShrink: 0 }}>⇕</button>
+                    {moviendo.length > 0 && !moviendo.includes(g.act.id) && (
+                      <button onClick={() => soltarEn(g.act)} disabled={guardando}
+                        title={moviendo.length === 1 ? "Poner la marcada acá" : `Poner las ${moviendo.length} marcadas acá`}
+                        style={{ background: colors.brand, color: "#fff", border: "none", borderRadius: 5,
+                          padding: "1px 5px", fontSize: 9.5, fontWeight: 700, cursor: "pointer",
+                          fontFamily: colors.font, flexShrink: 0 }}>acá</button>
+                    )}
                     {/* El orden de las agrupaciones es el orden en que se lee
                         el control: las de NOVA salen como venían en el Excel. */}
                     <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>

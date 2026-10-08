@@ -6,6 +6,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import ElegirProyecto from "../../components/ElegirProyecto";
 import { fmt } from "./calculos";
+import { sembrarExtras } from "./agrupacionesExtra";
 
 export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
   const [presupuestos, setPresupuestos] = useState([]);
@@ -84,6 +85,13 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
 
     const { error: e2 } = await supabase.from("obra_rubros").insert(filas);
     if (e2) { setError("La obra se creó pero fallaron los rubros: " + e2.message); setGuardando(false); return; }
+
+    // Las agrupaciones que no vienen del presupuesto —vivienda, logística,
+    // oficina, imprevistos—. La migración 068 las creó una vez, en las obras
+    // que existían ese día; las nuevas quedaban sin ellas porque nada en la
+    // app las sembraba. Si falla no se frena: una obra sin ellas se arregla
+    // con un botón, una obra a medio crear no.
+    await sembrarExtras(obra.id).catch(() => {});
 
     // Primera planilla, lista para recibir facturas
     await supabase.from("planillas").insert({
