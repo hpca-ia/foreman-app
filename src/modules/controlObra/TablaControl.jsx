@@ -193,6 +193,28 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             </div>
           )}
 
+          {/* COMPRADO Y SIN FACTURA: el hueco entre que sale la plata y llega
+              el papel. No es comprometido —ya se gastó— ni está planillado
+              —no hay documento—, así que si no tuviera su propio renglón sería
+              gasto real que no aparece en ninguna columna. Dura días o semanas
+              y es donde se pierde el gasto si nadie lo mira. */}
+          {comprometido?.compradas > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "9px 14px",
+              background: colors.warningSoft, borderBottom: `1px solid ${colors.warningBorder}`,
+              fontSize: 11.5, color: colors.warning, alignItems: "center" }}>
+              <span style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}
+                title={comprometido.detalleComprado.map(d => `${d.descripcion}: $${fmt(d.monto)}`).join("\n")}>
+                <AlertTriangle size={12} /> COMPRADO, FALTA LA FACTURA
+                <span style={{ fontWeight: 400 }}>
+                  ({comprometido.compradas} {comprometido.compradas === 1 ? "compra" : "compras"})
+                </span>
+              </span>
+              <span /><span />
+              <span style={{ textAlign: "right", fontWeight: 700 }}>${fmt(comprometido.comprado)}</span>
+              <span /><span /><span /><span /><span /><span />
+            </div>
+          )}
+
           {/* DE QUÉ ESTÁ HECHO EL COMPROMETIDO, renglón por renglón.
               Un total que no se puede abrir no se puede discutir ni corregir,
               y un número de plata que nadie puede auditar es peor que no

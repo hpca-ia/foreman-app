@@ -155,30 +155,41 @@ const SIN_ACTIVIDAD = "SIN AGRUPAR";
  * la factura entra a Control de Obra, ese monto deja de estar comprometido
  * porque ya está invertido: contarlo dos veces inflaría el capítulo.
  */
-// Las que comprometen plata de verdad.
+// LOS TRES CAJONES, Y NO SE PISAN NUNCA.
 //
-// NO entra "requiere_info" —que en pantalla se llama DEVUELTA—: un pedido que
-// el gerente rebotó es justo lo contrario de plata comprometida. Nadie se
-// comprometió a nada; está esperando que lo corrijan o que muera. Contarlo
-// inflaba el comprometido con pedidos rechazados, que es como aparecían
-// $1.830 comprometidos en una obra sin una sola factura.
+// La misma plata no puede estar en dos columnas: si está comprometida y además
+// planillada, el control la cuenta dos veces y el avance miente. Hasta acá eso
+// se evitaba enganchando el pedido a su factura —`factura_id`—, y dependía de
+// que quien carga la factura se acordara de elegir el pedido. Una regla que
+// depende de que alguien se acuerde no es una regla.
 //
-// Tampoco "borrador" (no se pidió todavía), "anulada" (se mató) ni "recibida"
-// (ya llegó: su plata entra por la factura, y contarla dos veces la duplica).
-const VIVAS = ["pendiente_aprobacion", "aprobada", "comprada"];
+// Ahora los separa el ESTADO, que es excluyente por construcción:
+//
+//   COMPROMETIDO   lo pedido y lo aprobado — todavía no se compró.
+//   COMPRADO       ya se compró y la factura no llegó al control. No es
+//                  comprometido: la plata ya salió. No es planillado: no hay
+//                  documento. Es su propio cajón, y tiene que verse, porque es
+//                  gasto real que no está en ningún total.
+//   PLANILLADO     tiene factura en el control. Vive en las columnas de
+//                  invertido, por su asignación.
+//
+// En el momento en que Johanna marca una compra como comprada, sale del
+// comprometido sola. No hace falta que nadie enganche nada para que el número
+// deje de estar duplicado: engancharlo mejora el dato —trae el rubro y la
+// factura—, pero ya no es lo que evita contar dos veces.
+const VIVAS = ["pendiente_aprobacion", "aprobada"];
+
+// Comprado y sin factura en el control: el hueco entre que sale la plata y
+// llega el papel. Dura días o semanas, y es donde se pierde el gasto si nadie
+// lo mira.
+const COMPRADAS = ["comprada", "recibida"];
 
 // Lo pedido y todavía sin aprobar es más blando que lo aprobado: se muestra
 // aparte para que el número grande no mezcle dos cosas distintas.
 const BLANDAS = ["pendiente_aprobacion"];
 
-// LO DEVUELTO SE CUENTA APARTE, y no dentro del comprometido.
-//
-// Un pedido devuelto va para ATRÁS: alguien lo miró y lo rebotó. Lo que
-// importa de él no es la plata —nadie la autorizó— sino que hay una persona
-// que tiene que corregirlo o dejarlo morir. Mostrarlo como comprometido
-// mezcla una deuda con una tarea, y además deja un número que no baja solo:
-// una devuelta que nadie arregla se queda viva para siempre, y el comprometido
-// —que al final de la obra tiene que dar cero— nunca llega.
+// LO DEVUELTO no es plata de la obra: es una tarea de quien lo pidió. Vive en
+// Compras y no en el control. Se cuenta solo para poder decir que existe.
 const DEVUELTAS = ["requiere_info"];
 
 export function comprometidoPorGrupo(solicitudes = [], rubros = [], adjuntos = []) {
@@ -192,13 +203,22 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = [], adjuntos = [
   let total = 0;
   const rubroDe = new Map(rubros.map(r => [r.id, r]));
   let devuelto = 0, devueltas = 0;
-  const detalleDevueltas = [];
+  let comprado = 0, compradas = 0;
+  const detalleDevueltas = [], detalleComprado = [];
   solicitudes.forEach(s => {
     if (DEVUELTAS.includes(s.estado) && !s.factura_id) {
       const m = montoDeSolicitud(s, adjuntos).monto;
       devuelto += m;
       devueltas += 1;
       detalleDevueltas.push({ id: s.id, monto: m, descripcion: s.descripcion || "", estado: s.estado });
+    }
+    // Comprado y sin factura: su propio cajón. Con factura ya es planillado y
+    // no se cuenta acá, que es lo que evita el doble conteo.
+    if (COMPRADAS.includes(s.estado) && !s.factura_id) {
+      const m = montoDeSolicitud(s, adjuntos).monto;
+      comprado += m;
+      compradas += 1;
+      detalleComprado.push({ id: s.id, monto: m, descripcion: s.descripcion || "", estado: s.estado });
     }
     if (!VIVAS.includes(s.estado) || s.factura_id) return;
     // EL DOCUMENTO LE GANA AL ESTIMADO. Si hay una proforma subida, la plata
@@ -243,7 +263,7 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = [], adjuntos = [
   detalle.forEach(d => { porEstado[d.estado] = (porEstado[d.estado] || 0) + d.monto; });
   const firme = detalle.filter(d => d.firme).reduce((t, d) => t + d.monto, 0);
   return { porCapitulo, porActividad, porRubro, detalle, porEstado, firme, total,
-    devuelto, devueltas, detalleDevueltas };
+    devuelto, devueltas, detalleDevueltas, comprado, compradas, detalleComprado };
 }
 
 /**
