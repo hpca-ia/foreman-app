@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { sincronizarCapitulos } from "./sincronizarCapitulos";
 import Button from "../../components/ui/Button";
-import { fmt, calcularControl, agrupar, totalesObra } from "./calculos";
+import { fmt, calcularControl, agrupar, totalesObra, solicitudesDeLaObra } from "./calculos";
 import TablaControl from "./TablaControl";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
@@ -36,14 +36,34 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   const [solicitudes, setSolicitudes] = useState([]);
   useEffect(() => {
     if (!obra.lead_id && !obra.id) return;
-    supabase.from("compras_solicitudes").select("*").eq("obra_id", obra.id)
-      .then(({ data, error }) => {
-        if (!error && data?.length) { setSolicitudes(data); return; }
-        // Una solicitud puede haberse cargado antes de que la obra existiera:
-        // ahí cuelga solo del proyecto.
-        if (obra.lead_id) supabase.from("compras_solicitudes").select("*").eq("lead_id", obra.lead_id)
-          .then(({ data: d2 }) => setSolicitudes(d2 || []));
-      });
+    let vivo = true;
+    // LAS DOS CONSULTAS, Y DESPUÉS SE UNEN.
+    //
+    // Antes iban en cadena con un `return` en el medio: se pedían las de la
+    // obra y, SOLO si no había ninguna, las del proyecto. Con que un pedido
+    // tuviera `obra_id`, los que colgaban solo del proyecto no se buscaban
+    // nunca —y son la mayoría, porque una compra se pide contra el proyecto y
+    // el `obra_id` recién se escribe al facturarla—.
+    //
+    // Así el control mostraba 1 pedido comprometido de $330 donde Compras
+    // tenía 3 aprobados: los otros dos se habían pedido antes de que la obra
+    // existiera y desaparecían sin dejar rastro. `solicitudesDeLaObra` decide
+    // cuál es de quién.
+    (async () => {
+      const [a, b] = await Promise.all([
+        obra.id ? supabase.from("compras_solicitudes").select("*").eq("obra_id", obra.id)
+          : Promise.resolve({ data: [] }),
+        obra.lead_id ? supabase.from("compras_solicitudes").select("*").eq("lead_id", obra.lead_id)
+          : Promise.resolve({ data: [] }),
+      ]);
+      if (!vivo) return;
+      // Con los dos campos sueltos y no con `obra`: el objeto cambia de
+      // identidad en cada dibujo y tenerlo de dependencia dispararía las dos
+      // consultas sin parar.
+      setSolicitudes(solicitudesDeLaObra(
+        [...(a.data || []), ...(b.data || [])], { id: obra.id, lead_id: obra.lead_id }));
+    })();
+    return () => { vivo = false; };
   }, [obra.id, obra.lead_id]);
   useEffect(() => {
     let vivo = true;

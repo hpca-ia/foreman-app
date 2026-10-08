@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
+import { solicitudesDeLaObra } from "../controlObra/calculos";
 
 // El flujo de una compra, de punta a punta.
 //
@@ -551,21 +552,18 @@ export async function proformasPorRubro(leadId) {
  */
 export async function comprasSinFacturar(obraId, leadId) {
   const vivas = ["aprobada", "comprada", "recibida"];
-  let q = supabase.from("compras_solicitudes")
-    .select("id,descripcion,estado,monto,monto_estimado,proveedor,obra_rubro_id,obra_actividad_id")
+  const campos = "id,descripcion,estado,monto,monto_estimado,proveedor,obra_id,lead_id,obra_rubro_id,obra_actividad_id";
+  const base = () => supabase.from("compras_solicitudes").select(campos)
     .is("factura_id", null).in("estado", vivas);
-  q = obraId ? q.eq("obra_id", obraId) : q.eq("lead_id", leadId);
-  const { data, error } = await q;
-  if (error) return [];
-  // Y si la obra no tiene ninguna propia, las del proyecto: una compra puede
-  // haberse pedido antes de que la obra existiera.
-  if (!data?.length && obraId && leadId) {
-    const { data: d2 } = await supabase.from("compras_solicitudes")
-      .select("id,descripcion,estado,monto,monto_estimado,proveedor,obra_rubro_id,obra_actividad_id")
-      .is("factura_id", null).in("estado", vivas).eq("lead_id", leadId);
-    return d2 || [];
-  }
-  return data || [];
+  // LAS DOS, Y DESPUÉS SE UNEN. Pedir las del proyecto solo cuando la obra no
+  // tiene ninguna propia esconde las que se pidieron antes de que la obra
+  // existiera —que son la mayoría, porque el `obra_id` recién se escribe al
+  // facturar—. `solicitudesDeLaObra` decide cuál es de quién.
+  const [a, b] = await Promise.all([
+    obraId ? base().eq("obra_id", obraId) : Promise.resolve({ data: [] }),
+    leadId ? base().eq("lead_id", leadId) : Promise.resolve({ data: [] }),
+  ]);
+  return solicitudesDeLaObra([...(a.data || []), ...(b.data || [])], { id: obraId, lead_id: leadId });
 }
 
 /**

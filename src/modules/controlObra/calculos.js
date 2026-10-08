@@ -419,3 +419,34 @@ export const TIPOS_GASTO = [
   { id: "honorarios", label: "Honorarios" },
   { id: "otro", label: "Otro" },
 ];
+
+/**
+ * Qué pedidos de compra son de esta obra.
+ *
+ * Tiene su propia función porque la regla NO es "los que tienen esta obra".
+ * Una compra se pide contra el PROYECTO —muchas veces antes de que la obra
+ * exista en Control de Obra, que es un paso posterior— y recién al facturarla
+ * se le escribe el `obra_id`. Así que un pedido es de esta obra si:
+ *
+ *   · apunta a esta obra, o
+ *   · no apunta a ninguna y es del proyecto de esta obra.
+ *
+ * Y NO ES de esta obra si apunta a otra: ahí ya tiene dueño.
+ *
+ * Antes se pedían las dos cosas pero en cadena, con un `return` en el medio:
+ * si había aunque fuera UN pedido con `obra_id`, los del proyecto no se
+ * buscaban nunca. Con eso el control mostraba 1 pedido comprometido de $330
+ * donde Compras tenía 3 aprobados: los otros dos se habían pedido antes de que
+ * la obra existiera y desaparecían sin dejar rastro.
+ */
+export function solicitudesDeLaObra(filas = [], obra = {}) {
+  const vistas = new Set();
+  return filas.filter(s => {
+    if (!s || vistas.has(s.id)) return false;
+    const suya = obra.id != null && s.obra_id === obra.id;
+    const delProyecto = s.obra_id == null && obra.lead_id != null && s.lead_id === obra.lead_id;
+    if (!suya && !delProyecto) return false;
+    vistas.add(s.id);
+    return true;
+  });
+}
