@@ -53,7 +53,7 @@ export async function cargarValorado(leadId) {
  */
 export async function armarDesdeObra({ lead, obra, mesInicio, meses, quien }) {
   const [{ data: rubros }, { data: acts }] = await Promise.all([
-    supabase.from("obra_rubros").select("id,total_base,actividad_id,anulado_por_oc").eq("obra_id", obra.id),
+    supabase.from("obra_rubros").select("id,total_base,actividad_id,anulado_por_oc,oculto").eq("obra_id", obra.id),
     supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", obra.id).order("orden"),
   ]);
   if (!rubros?.length) return { error: "Esta obra todavía no tiene rubros cargados." };
@@ -76,7 +76,7 @@ export async function armarDesdeObra({ lead, obra, mesInicio, meses, quien }) {
   // excluye al sumar y el valorado lo estaba sumando: por eso los totales de
   // una agrupación no coincidían entre las dos pantallas.
   const plata = new Map();
-  rubros.filter(r => !r.anulado_por_oc).forEach(r => {
+  rubros.filter(r => !r.anulado_por_oc && !r.oculto).forEach(r => {
     const k = r.actividad_id ?? 0;
     plata.set(k, (plata.get(k) || 0) + (Number(r.total_base) || 0));
   });
@@ -137,7 +137,7 @@ export async function pendientesDeSumar(cronograma) {
   if (!cronograma?.obra_id) return vacio;
 
   const [{ data: rubros }, { data: acts }, { data: lineas }] = await Promise.all([
-    supabase.from("obra_rubros").select("id,total_base,actividad_id,anulado_por_oc").eq("obra_id", cronograma.obra_id),
+    supabase.from("obra_rubros").select("id,total_base,actividad_id,anulado_por_oc,oculto").eq("obra_id", cronograma.obra_id),
     supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", cronograma.obra_id).order("orden"),
     supabase.from("cronograma_valorado_lineas").select("obra_actividad_id,monto").eq("cronograma_id", cronograma.id),
   ]);
@@ -145,7 +145,7 @@ export async function pendientesDeSumar(cronograma) {
   // Lo que vale hoy cada agrupación, con la misma regla que el control: sin
   // los rubros que una orden de cambio sacó del contrato.
   const hoy = new Map();
-  (rubros || []).filter(r => !r.anulado_por_oc).forEach(r => {
+  (rubros || []).filter(r => !r.anulado_por_oc && !r.oculto).forEach(r => {
     const k = Number(r.actividad_id) || 0;
     hoy.set(k, Math.round(((hoy.get(k) || 0) + (Number(r.total_base) || 0)) * 100) / 100);
   });

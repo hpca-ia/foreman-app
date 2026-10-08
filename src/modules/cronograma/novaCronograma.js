@@ -73,16 +73,29 @@ const miles = v => Math.round(v).toLocaleString("es-EC");
  * dividido para lo que rinde una cuadrilla por día— en vez de adivinarse.
  */
 export async function materiaPrima(obraId) {
-  const [{ data: acts }, { data: rubros }] = await Promise.all([
+  const campos = "id,actividad_id,total_base,capitulo,descripcion,unidad,cantidad,anulado_por_oc";
+  const [{ data: acts }, traidos] = await Promise.all([
     supabase.from("obra_actividades").select("id,codigo,nombre,orden,extra").eq("obra_id", obraId).order("orden"),
-    supabase.from("obra_rubros").select("id,actividad_id,total_base,capitulo,descripcion,unidad,cantidad,anulado_por_oc").eq("obra_id", obraId),
+    // Los ESCONDIDOS no entran. Son los rubros en $0 que alguien sacó del
+    // control por inútiles —títulos sueltos, partidas sin precio— y acá hacen
+    // doble daño: inflan el conteo de rubros de cada agrupación, y sobre todo
+    // ocupan lugar en la consulta a NOVA, que tiene que leer treinta y siete
+    // renglones que no son trabajo para encontrar los que sí.
+    supabase.from("obra_rubros").select(`${campos},oculto`).eq("obra_id", obraId),
   ]);
+  let rubros = traidos.data;
+  if (traidos.error) {
+    // Sin la 092 no existe la columna y la consulta falla entera: se vuelve a
+    // pedir sin ella antes que dejar el cronograma sin materia prima.
+    const { data } = await supabase.from("obra_rubros").select(campos).eq("obra_id", obraId);
+    rubros = data;
+  }
   const plata = new Map();
   const porAgrup = new Map();
   // Los que una orden de cambio sacó del contrato no cuentan: siguen en la
   // lista como historia, pero ya no son trabajo que haya que hacer ni plata
   // que haya que planificar. Es lo mismo que hace el control de obra.
-  (rubros || []).filter(r => !r.anulado_por_oc).forEach(r => {
+  (rubros || []).filter(r => !r.anulado_por_oc && !r.oculto).forEach(r => {
     if (r.actividad_id == null) return;
     plata.set(r.actividad_id, (plata.get(r.actividad_id) || 0) + n(r.total_base));
     if (!porAgrup.has(r.actividad_id)) porAgrup.set(r.actividad_id, []);
@@ -149,11 +162,21 @@ export async function proponerCronograma({ agrupaciones = [], meses = 6, dias: d
   // feriados. La regla de tres de "26 días por mes" daba de más y era parte de
   // por qué el cronograma no terminaba de coincidir con el plazo.
   const dias = diasPlazo || Math.max(20, Math.round(meses * 26));
+  // Qué días se trabaja en ESTA obra. Estaba escrito "lunes a sábado" fijo en
+  // la consulta, y desde que la jornada se puede elegir eso era mentira para
+  // cualquier obra que no trabaje sábados: NOVA calculaba contra una semana
+  // que no existe y las duraciones salían cortas.
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  const jornada = L.length === 7 ? "se trabaja los siete días"
+    : L.includes(6) && !L.includes(0) ? "se trabaja de lunes a sábado"
+    : !L.includes(6) && !L.includes(0) ? "se trabaja de lunes a viernes, SIN sábados"
+    : `se trabaja ${L.length} días por semana`;
 
   const sistema = `Eres NOVA y armas el cronograma de obra de una constructora en Ecuador.
 ${memoriaEnPalabras(memoria)}
 
-La obra "${nombreObra}" dura ${meses} meses, que son unos ${dias} días de trabajo (lunes a sábado).
+La obra "${nombreObra}" dura ${meses} meses, que son ${dias} días de trabajo
+contados en el calendario de ESTA obra: ${jornada}.
 
 AGRUPACIONES del presupuesto, con su plata y SU TAMAÑO medido:
 ${agrupaciones.map(enPalabras).join("\n")}
@@ -162,12 +185,13 @@ Devuelves SOLO JSON, sin markdown. USA EL ID DE LA AGRUPACIÓN COMO REFERENCIA
 —no inventes otra numeración— y no mandes el nombre: ya lo tengo, es el del
 control de obra y es el que vale.
 
-{"actividades":[{"id":12,"dias":18},
-                {"id":13,"dias":40,"partes":[["fabricación",5,40],["montaje",5,35],["instalación de grada",3,25]]}],
+{"actividades":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia"},
+                {"id":13,"dias":40,"porque":"importada, 8 semanas de fabricacion",
+                 "partes":[["anticipo",1,50],["fabricación",30,40],["instalación de grada",9,10]]}],
  "dependencias":[[12,13,0],[13,14,-5]]}
 
 "actividades": una por agrupación. "id" es el id de la agrupación, "dias" los
-días hábiles que lleva.
+días hábiles que lleva, "porque" la cuenta que te llevó a ese número.
 
 "partes" cuando el capítulo son VARIOS TRABAJOS que pasan en momentos
 distintos —[nombre, días, % de su plata]—. Si está, "dias" se ignora. El
@@ -185,9 +209,11 @@ detallado. Las partes van encadenadas en el orden en que las escribas.
 una espera real, NEGATIVO es un traslape. Si hace falta otro tipo de enlace,
 [de, a, retardo, "CC"] con "CC" o "FF".
 
-CORTO A PROPÓSITO. Lo que no te pido no lo mandes: no mandes nombres, no
-mandes explicaciones por actividad, no repitas la lista. Cada palabra de más
-es una chance de que la respuesta no entre entera y se corte a la mitad.
+ESOS CUATRO CAMPOS Y NINGUNO MÁS: "id", "dias", "porque" y, si hace falta,
+"partes". No mandes el nombre de la agrupación —ya lo tengo—, no repitas la
+lista, no agregues campos que no te pedí y no expliques fuera de "porque", que
+va en diez palabras. Cada palabra de más es una chance de que la respuesta no
+entre entera y se corte a la mitad.
 
 LAS ACTIVIDADES SON LAS AGRUPACIONES. Ni una más ni una menos. No inventes
 otras, no las renombres, no las partas en pedazos de tu cosecha ni juntes dos
@@ -199,64 +225,54 @@ Una actividad por agrupación, con SU nombre y SU id. La única división
 permitida es por ETAPAS —momentos separados en el tiempo de esa misma
 agrupación— y solo cuando de verdad ocurren separados.
 
-"duracion" en días HÁBILES. "ref" es un número tuyo, de 1 en adelante, para
-referirte a ellas en las dependencias. "agrupacion_id" es obligatorio y sale de
-la lista de arriba.
+CÓMO SALE LA DURACIÓN: DE LA CANTIDAD, NO DE LA PLATA.
 
-LA DURACIÓN SALE DE LA CANTIDAD, NO DE LA PLATA. Esto es lo más importante de
-todo lo que sigue. Diez metros de pintura y mil metros de pintura pueden costar
-parecido —si en un caso el material es importado y en el otro no— y no son ni
-de lejos el mismo tiempo de obra. La plata dice cuánto pesa en el presupuesto;
-la cantidad dice cuánto trabajo hay.
+Esto es lo más importante de todo. Diez metros de pintura y mil metros pueden
+costar parecido —si en un caso el material es importado y en el otro no— y no
+son ni de lejos el mismo tiempo de obra. La plata dice cuánto pesa en el
+presupuesto; la cantidad dice cuánto trabajo hay.
 
-Para cada actividad hacé esta cuenta y escribila en "porque":
+Para cada agrupación hacé esta cuenta:
 
   días = cantidad ÷ (lo que rinde una cuadrilla por día × cuántas cuadrillas)
 
 Los rendimientos los sabés: cuántos m2 de enlucido hace un albañil con su
-ayudante en un día, cuántos m2 de mampostería, cuántos de pintura, cuántos m3
-de hormigón pone una cuadrilla. Usá los de obra en Ecuador. Lo que NO podés
-hacer es poner "20 días" porque suena razonable: si la agrupación trae 1.240 m2
-y ponés 20 días, estás diciendo 62 m2 por día, y eso tiene que ser verdad o
-no serlo por una razón que escribas.
+ayudante en un día, cuántos de mampostería, cuántos de pintura, cuántos m3 de
+hormigón pone una cuadrilla. Usá los de obra en Ecuador. Lo que NO podés hacer
+es poner "20 días" porque suena razonable: si la agrupación trae 1.240 m2 y
+ponés 20 días, estás diciendo 62 m2 por día, y eso tiene que ser verdad.
 
-Cuando el plazo no alcance, la salida es MÁS CUADRILLAS en los frentes que lo
-permiten —pintura, enlucido, mampostería se dividen por zonas— y decirlo en
-"porque". Lo que no se puede dividir así es el hormigón de una losa o el fragüe:
-esos tardan lo que tardan aunque se ponga el doble de gente.
+Esa cuenta va en "porque", en diez palabras: "1240 m2 ÷ 2 cuadrillas × 31
+m2/día". Es lo que lee quien revisa para saber si creerte.
 
 Si una agrupación dice "sin cantidades cargadas" es que su presupuesto no las
-tiene. Ahí sí estimá por la plata y por el tipo de trabajo, y aclaralo en
-"porque" para que quien revise sepa que ese número es el más flojo de todos.
+tiene. Ahí estimá por la plata y el tipo de trabajo, y escribí "estimado sin
+cantidades" en "porque": quien revise tiene que saber que ese número es el más
+flojo de todos.
 
-ETAPAS Y PLATA. Lo que se importa o se fabrica no pasa en un momento: se
-anticipa, se fabrica, llega y se instala. Son etapas separadas en el tiempo y
-cada una se lleva una parte del dinero.
+CUÁNDO PARTIR EN "partes".
 
-  "etapa": anticipo | fabricacion | entrega | instalacion | ejecucion
-  "peso": qué porcentaje de la plata de SU agrupación le toca a esta actividad.
+Lo que se importa o se fabrica no pasa en un momento: se anticipa, se fabrica,
+llega y se instala. Son momentos separados en el tiempo y cada uno se lleva una
+parte del dinero —el tercer número de cada parte, que es su % de la plata de
+esa agrupación y entre todas suman 100—.
 
-Las etapas de una misma agrupación tienen que sumar 100 de peso, y NO PUEDE
-HABER DOS DE LA MISMA CLASE: una agrupación no tiene tres "instalación".
+El anticipo es CORTO (uno o dos días: es un pago) y va meses antes; la
+fabricación es larga y no ocupa gente en obra; la instalación va al final.
+Ejemplo de una ventanería importada:
 
-Lo que se ejecuta y se paga mientras se hace es UNA sola actividad con etapa
-"ejecucion" y peso 100 — ese es el caso normal, es la mayoría, y no hay que
-partirlo.
-
-LO QUE NUNCA SE PARTE: los gastos generales de obra, la dirección de proyecto,
-los honorarios, las pólizas, la fiscalización. No se anticipan ni se fabrican
-ni se instalan: se gastan a lo largo de toda la obra. Van como UNA actividad
-con etapa "ejecucion", peso 100, y una duración igual al plazo entero.
-
-Para lo importado o fabricado, partilo de verdad: el anticipo es una actividad
-CORTA (uno o dos días, es un pago) y va MESES antes de la instalación; entre
-medio la fabricación, que es larga y no ocupa gente en obra; y la instalación al
-final, encadenada a lo que la permita. Ejemplo típico de una ventanería:
-anticipo 50% el día 1, fabricación 40% durante 60 días, instalación 10% cuando
-la obra está cerrada.
+  [["anticipo",1,50],["fabricación",60,40],["instalación",12,10]]
 
 Esto es lo que después deja que el cronograma y el valorado digan lo mismo: la
 plata cae en los meses en que de verdad sale, no repartida pareja.
+
+LO QUE NUNCA SE PARTE: los gastos generales de obra, la dirección de proyecto,
+los honorarios, las pólizas, la fiscalización. No se anticipan ni se fabrican
+ni se instalan: se gastan a lo largo de toda la obra. Van como UNA actividad,
+con una duración igual al plazo entero.
+
+Y lo que se ejecuta de corrido tampoco se parte: es una actividad y punto. No
+inventes etapas para que se vea más detallado.
 
 DEPENDENCIAS: "de" termina antes de que empiece "a". Usá el orden real de una
 obra, no el orden de la lista:
@@ -268,32 +284,32 @@ obra, no el orden de la lista:
 · carpintería y acabados al final, con el edificio cerrado
 · limpieza y entrega al último
 
-TIPO Y RETARDO de cada dependencia, que es como se dice de verdad cómo se
-encadena una obra:
+EL RETARDO, que es el tercer número de cada dependencia:
 
-  "tipo": "FC" fin→comienzo (la normal), "CC" comienzo→comienzo (arrancan
-  juntas o con unos días de desfase), "FF" fin→fin (terminan juntas).
+  POSITIVO es una espera real —el fragüe del hormigón antes de desencofrar, el
+  secado del empaste antes de pintar—.
 
-  "retardo" en días hábiles. POSITIVO es una espera real —el fragüe del
-  hormigón antes de desencofrar, el secado del empaste antes de pintar—.
   NEGATIVO es un TRASLAPE: la actividad arranca antes de que termine la otra,
   que es lo que pasa todo el tiempo en obra. La mampostería de planta baja
   entra cuando arriba todavía se está fundiendo; el enlucido empieza por donde
-  ya se cerró. Usalo: un cronograma sin traslapes da una obra mucho más larga
+  ya se cerró. USALO: un cronograma sin traslapes da una obra mucho más larga
   de lo que es.
+
+El cuarto elemento, opcional, es el tipo: "CC" cuando arrancan juntas, "FF"
+cuando terminan juntas. Sin él es fin→comienzo, que es la normal.
 
 Lo que puede ir en paralelo, ponelo en paralelo. Pero no inventes dependencias
 para rellenar: si dos cosas no se traban, no las trabes.
 
 EL PLAZO MANDA. La obra tiene que salir en ${dias} días hábiles, que es lo que
 dice el contrato. No es una sugerencia: si tus duraciones dan mucho más, no
-alargues la obra — acortá las actividades, traslapá lo que se traslapa en la
-realidad, y poné en paralelo lo que no se traba. Si dan mucho menos, no las
-estires sin motivo: dales el tiempo que de verdad llevan y dejá el resto como
-holgura.
-
-"porque" CORTO —una frase de diez palabras— en español, para quien revisa. No
-es un informe: es la razón, y si te extendés la respuesta no entra entera.`;
+alargues la obra — acortá, traslapá lo que se traslapa en la realidad, y poné
+en paralelo lo que no se traba. La salida es MÁS CUADRILLAS en los frentes que
+lo permiten —pintura, enlucido y mampostería se dividen por zonas— y decirlo en
+"porque". Lo que no se puede dividir así es el hormigón de una losa o el
+fragüe: esos tardan lo que tardan aunque se ponga el doble de gente. Si dan
+mucho menos, no las estires: dales el tiempo que llevan y dejá el resto como
+holgura.`;
 
   try {
     const res = await fetch("/api/nova", {
