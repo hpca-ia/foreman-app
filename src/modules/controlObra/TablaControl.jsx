@@ -164,6 +164,34 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             );
           })}
 
+          {/* PLATA QUE NO ESTÁ EN ESTOS TOTALES.
+              Una factura sin planilla no tiene corte al cual sumarse, así que
+              `calcularControl` la saltea. Hasta acá eso pasaba en silencio: el
+              gasto existía, se veía en el libro de facturas, y en el control
+              valía cero. Un control que pierde plata sin avisar es peor que no
+              tener control, porque igual se decide con él. */}
+          {porRubro?._fueraDePlanilla > 0.005 && (
+            <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "9px 14px",
+              background: colors.warningSoft, borderBottom: `1px solid ${colors.warningBorder}`,
+              fontSize: 11.5, color: colors.warning, alignItems: "center" }}>
+              <span style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                <AlertTriangle size={12} /> FUERA DE PLANILLA — NO SUMA ACÁ
+              </span>
+              <span /><span />
+              <span style={{ textAlign: "right", fontWeight: 700 }}>${fmt(porRubro._fueraDePlanilla)}</span>
+              <span /><span /><span /><span /><span /><span />
+            </div>
+          )}
+          {porRubro?._fueraDePlanilla > 0.005 && (
+            <div style={{ padding: "7px 14px 9px", background: colors.warningSoft,
+              borderBottom: `1px solid ${colors.border}`, fontSize: 11, color: colors.warning, lineHeight: 1.55 }}>
+              {porRubro._facturasFueraDePlanilla === 1 ? "Una factura está" : `${porRubro._facturasFueraDePlanilla} facturas están`}{" "}
+              cargadas y asignadas a su rubro, pero sin planilla. Sin un corte al cual sumarse no entran en
+              ninguna columna de arriba: el invertido y el avance de esta tabla están <strong>por debajo</strong> de
+              lo que realmente se gastó. Asignales planilla en el libro de facturas y entran solas.
+            </div>
+          )}
+
           {/* DE QUÉ ESTÁ HECHO EL COMPROMETIDO, renglón por renglón.
               Un total que no se puede abrir no se puede discutir ni corregir,
               y un número de plata que nadie puede auditar es peor que no

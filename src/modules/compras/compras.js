@@ -535,3 +535,64 @@ export async function proformasPorRubro(leadId) {
   });
   return { grupos: [...grupos.values()].sort((a, b) => a.capitulo.localeCompare(b.capitulo)), solicitudes: solicitudes || [] };
 }
+
+/**
+ * Los pedidos de esta obra que todavía no tienen su factura.
+ *
+ * Son los que están pesando como "comprometido" en el control. Se ofrecen al
+ * cargar una factura para poder engancharlos: hasta acá la factura entraba por
+ * Control de Obra y el pedido se quedaba comprometido para siempre, así que la
+ * misma plata pesaba dos veces sobre el mismo rubro —una como invertido y otra
+ * como comprometido— y el comprometido no llegaba a cero nunca.
+ *
+ * `facturarCompra` sí los engancha, pero solo sirve cuando la factura se carga
+ * DESDE la compra. Casi nunca pasa: la factura llega a la oficina y se carga
+ * donde se cargan las facturas.
+ */
+export async function comprasSinFacturar(obraId, leadId) {
+  const vivas = ["aprobada", "comprada", "recibida"];
+  let q = supabase.from("compras_solicitudes")
+    .select("id,descripcion,estado,monto,monto_estimado,proveedor,obra_rubro_id,obra_actividad_id")
+    .is("factura_id", null).in("estado", vivas);
+  q = obraId ? q.eq("obra_id", obraId) : q.eq("lead_id", leadId);
+  const { data, error } = await q;
+  if (error) return [];
+  // Y si la obra no tiene ninguna propia, las del proyecto: una compra puede
+  // haberse pedido antes de que la obra existiera.
+  if (!data?.length && obraId && leadId) {
+    const { data: d2 } = await supabase.from("compras_solicitudes")
+      .select("id,descripcion,estado,monto,monto_estimado,proveedor,obra_rubro_id,obra_actividad_id")
+      .is("factura_id", null).in("estado", vivas).eq("lead_id", leadId);
+    return d2 || [];
+  }
+  return data || [];
+}
+
+/**
+ * Enganchar un pedido a una factura que ya se cargó en el control.
+ *
+ * Con esto el pedido deja de contarse como comprometido. Y si el pedido sabía
+ * contra qué iba y la factura no tiene asignación, se le pone: lo eligió quien
+ * pidió, hace semanas, y volver a preguntarlo es pedirle a quien carga la
+ * factura que adivine de qué era la compra.
+ */
+export async function engancharFactura(solicitud, factura, quien) {
+  if (!solicitud?.id || !factura?.id) return "Falta el pedido o la factura.";
+  const { error } = await supabase.from("compras_solicitudes")
+    .update({ factura_id: factura.id, obra_id: factura.obra_id ?? solicitud.obra_id ?? null })
+    .eq("id", solicitud.id);
+  if (error) return error.message;
+
+  const { data: yaTiene } = await supabase.from("obra_asignaciones")
+    .select("id").eq("factura_id", factura.id).limit(1);
+  const destino = solicitud.obra_rubro_id
+    ? { obra_rubro_id: solicitud.obra_rubro_id }
+    : solicitud.obra_actividad_id ? { obra_actividad_id: solicitud.obra_actividad_id } : null;
+  if (!yaTiene?.length && destino) {
+    await supabase.from("obra_asignaciones")
+      .insert({ factura_id: factura.id, ...destino, monto: Number(factura.total) || 0 });
+  }
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
+    `Enganchada a la factura ${factura.numero_factura || `#${factura.id}`} del control de obra`);
+  return null;
+}

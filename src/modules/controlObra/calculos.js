@@ -73,9 +73,22 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   let sinRepartir = 0;
   const porActividad = {};
 
+  // LA PLATA QUE NO ENTRA A NINGÚN TOTAL.
+  //
+  // Una factura sin planilla se saltea —no hay corte al cual sumarla— y hasta
+  // acá eso pasaba en silencio: el gasto existía, se veía en el libro de
+  // facturas, y en el control valía cero. Un control que pierde plata sin
+  // avisar es peor que no tener control, porque igual se decide con él.
+  // Se cuenta aparte y la tabla lo grita.
+  let fueraDePlanilla = 0, facturasFueraDePlanilla = new Set();
+
   asignaciones.forEach(a => {
     const num = planillaDeFactura[a.factura_id];
-    if (num == null) return;                       // factura todavía sin planilla
+    if (num == null) {
+      fueraDePlanilla += n(a.monto);
+      facturasFueraDePlanilla.add(a.factura_id);
+      return;
+    }
     const campo = planillaNumero == null || num < planillaNumero ? "anterior"
       : num === planillaNumero ? "periodo"
       : null;                                      // planillas posteriores no cuentan
@@ -115,6 +128,8 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
 
   porRubro._sinRepartir = sinRepartir;
   porRubro._porActividad = porActividad;
+  porRubro._fueraDePlanilla = fueraDePlanilla;
+  porRubro._facturasFueraDePlanilla = facturasFueraDePlanilla.size;
   return porRubro;
 }
 

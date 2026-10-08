@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Upload, Trash2, Plus, Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { subirArchivo } from "../../lib/archivos";
@@ -12,12 +12,20 @@ import { buscarDuplicados, hashArchivo } from "./duplicados";
 import { comprimirImagen } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
+import { comprasSinFacturar, engancharFactura } from "../compras/compras";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
 
 export default function ModalFactura({ obra, rubros, actividades = [], planilla, factura, asignacionesFactura = [], currentUser, onCerrar, onGuardado }) {
   const editando = !!factura;
+  // Los pedidos de compra que todavía no tienen factura. Son los que están
+  // pesando como "comprometido" en el control: engancharle uno a esta factura
+  // es lo que hace que ese número baje. Sin esto la misma plata pesaba dos
+  // veces —invertido por la factura, comprometido por el pedido— y el
+  // comprometido no llegaba a cero nunca.
+  const [pedidos, setPedidos] = useState([]);
+  const [pedidoId, setPedidoId] = useState("");
   const [form, setForm] = useState(factura ? { ...factura } : {
     fecha: hoy(), tipo_documento: "FACTURA", clase: "factura", numero_factura: "", ruc: "", razon_social: "",
     detalle: "", justificacion: "", numero_cheque: "", tipo: "material",
@@ -45,6 +53,14 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   const fileRef = useRef(null);
 
   // La detección corre sobre los datos ya cargados, no sobre el criterio de NOVA.
+  useEffect(() => {
+    let vivo = true;
+    comprasSinFacturar(obra?.id, obra?.lead_id)
+      .then(ps => { if (vivo) setPedidos(ps); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [obra?.id, obra?.lead_id]);
+
   async function revisarDuplicados(extra = {}) {
     const datos = { ...form, ...extra };
     if (!datos.numero_factura && !datos.razon_social && !archivoHash) { setDups({ exactos: [], posibles: [] }); return; }
@@ -227,6 +243,23 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       if (e2) { setError("La factura se guardó pero la asignación falló: " + e2.message); setGuardando(false); return; }
     }
 
+    // ENGANCHAR EL PEDIDO. Es lo que hace que el comprometido baje: sin esto
+    // el pedido sigue pesando como plata por gastar aunque la factura ya esté
+    // cargada, y la misma plata cuenta dos veces sobre el mismo rubro.
+    if (pedidoId) {
+      const pedido = pedidos.find(p => String(p.id) === String(pedidoId));
+      if (pedido) {
+        const err = await engancharFactura(pedido, { id: facturaId, obra_id: obra.id,
+          numero_factura: payload.numero_factura, total: payload.total }, currentUser);
+        // Si falla, la factura ya está guardada: se avisa y no se pierde nada.
+        if (err) {
+          setGuardando(false);
+          setError("La factura se guardó, pero no se pudo enganchar al pedido: " + err);
+          return;
+        }
+      }
+    }
+
     setGuardando(false);
     onGuardado();
   }
@@ -244,6 +277,44 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink }}>{editando ? "Editar factura" : "Nueva factura"}</div>
         <button onClick={onCerrar} style={{ marginLeft: "auto", background: colors.neutralSoft, border: "none", borderRadius: 6, width: 28, height: 28, color: colors.inkSoft, cursor: "pointer", fontSize: 15 }}>×</button>
       </div>
+
+      {/* ¿DE QUÉ PEDIDO ES ESTA FACTURA?
+          Mientras no se enganche, el pedido sigue contando como comprometido
+          aunque la factura ya esté acá: la misma plata pesa dos veces sobre el
+          mismo rubro y el comprometido no baja nunca. Enganchar también trae
+          contra qué iba —lo eligió quien pidió, hace semanas— y evita que
+          quien carga la factura tenga que adivinar de qué era la compra. */}
+      {!editando && pedidos.length > 0 && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
+          <label style={{ fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 4 }}>
+            ¿ES DE UN PEDIDO DE COMPRA?
+          </label>
+          <select value={pedidoId} onChange={e => {
+            setPedidoId(e.target.value);
+            // Se trae lo que el pedido ya sabía, para no tipearlo de nuevo.
+            const p = pedidos.find(x => String(x.id) === String(e.target.value));
+            if (p) setForm(f => ({
+              ...f,
+              razon_social: f.razon_social || p.proveedor || "",
+              detalle: f.detalle || p.descripcion || "",
+            }));
+          }} style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+            <option value="">No — es una factura suelta</option>
+            {pedidos.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.descripcion}{p.proveedor ? ` · ${p.proveedor}` : ""}
+                {` · $${(Number(p.monto ?? p.monto_estimado) || 0).toFixed(2)}`}
+                {p.obra_rubro_id || p.obra_actividad_id ? "" : " · SIN ASIGNAR"}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 4, lineHeight: 1.45 }}>
+            Hay {pedidos.length} {pedidos.length === 1 ? "pedido" : "pedidos"} sin factura pesando como
+            comprometido. Engancharlo acá es lo que hace que ese número baje.
+          </div>
+        </div>
+      )}
 
       {!editando && (
         <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
