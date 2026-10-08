@@ -8,6 +8,7 @@ import ModalSolicitud from "./ModalSolicitud";
 import BuscadorDeGastos from "../../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../../lib/filtrarGastos";
 import Proformas from "./Proformas";
+import { montoDeSolicitud } from "../controlObra/calculos";
 
 // Compras: lo que hace falta en obra, pedido, aprobado y comprado.
 //
@@ -37,6 +38,9 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   const [verProformas, setVerProformas] = useState(false);
   const [proyectoProformas, setProyectoProformas] = useState("");
 
+  // Las proformas de todos los pedidos visibles: ahí está la plata cuando
+  // nadie llegó a elegir una.
+  const [adjuntos, setAdjuntos] = useState([]);
   const gestionaCompras = puede("compras.gestionar");
   const esDirector = currentUser?.role === "owner";
   // Aprobar tiene su propio permiso. Antes colgaba de "Asignar tareas a
@@ -57,6 +61,15 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
       supabase.from("leads").select("id,nombre,obra_id,resultado").order("nombre"),
     ]);
     setSolicitudes(s);
+    // Las proformas de esos pedidos. Una consulta más, y es la que hace que la
+    // columna de montos deje de estar vacía: la plata de la mayoría de los
+    // pedidos vive en un papel subido, no en el campo `monto`.
+    const ids = (s || []).map(x => x.id);
+    if (ids.length) {
+      const { data: ad } = await supabase.from("compras_adjuntos")
+        .select("id,solicitud_id,monto,proveedor,tipo").in("solicitud_id", ids);
+      setAdjuntos(ad || []);
+    } else setAdjuntos([]);
     setSinTablas(falta);
     setProyectos((ls || []).filter(l => l.resultado !== "perdido"));
     setCargando(false);
@@ -275,12 +288,16 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                     más exacto, solo lo hace invisible. */}
                 <div style={{ textAlign: "right", fontSize: 12, whiteSpace: "nowrap" }}>
                   {(() => {
-                    const firme = s.monto != null && Number(s.monto) !== 0;
-                    const v = firme ? Number(s.monto) : Number(s.monto_estimado) || 0;
-                    if (!v) return null;
+                    // EL DOCUMENTO LE GANA AL ESTIMADO. `monto` solo se
+                    // escribe cuando alguien ELIGE una proforma, y casi nunca
+                    // pasa: se suben dos o tres y ahí queda. Por eso la
+                    // columna salía vacía en pedidos que tenían su plata en un
+                    // papel subido. La misma regla que usa el control.
+                    const { monto: v, de } = montoDeSolicitud(s, adjuntos);
+                    if (!v) return <span style={{ color: colors.warning, fontSize: 10.5 }}>sin monto</span>;
+                    const firme = de !== "estimado";
                     return (
-                      <span style={{ color: firme ? colors.inkSoft : colors.muted }}
-                        title={firme ? "De la proforma elegida" : "Estimado del pedido: todavía no se eligió proforma"}>
+                      <span style={{ color: firme ? colors.inkSoft : colors.muted }} title={`Monto: ${de}`}>
                         ${v.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         {firme ? "" : <span style={{ fontSize: 9.5, marginLeft: 2 }}>e</span>}
                       </span>

@@ -232,7 +232,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                         title={d.descripcion}>{d.descripcion || `#${d.id}`}</span>
                       <span style={{ color: colors.muted }}>{ETIQUETA[d.estado] || d.estado}</span>
                       <span style={{ textAlign: "right", color: colors.ink, fontWeight: 600 }}
-                        title={d.deProforma ? "De la proforma elegida" : "Lo que se pidió (estimado)"}>
+                        title={`Monto: ${d.deDonde}`}>
                         ${fmt(d.monto)}{d.deProforma ? "" : " e"}
                       </span>
                       <span style={{ color: d.destino === "SIN ASIGNAR" ? colors.warning : colors.muted,
@@ -241,9 +241,10 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     </div>
                   ))}
                   <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6, lineHeight: 1.5 }}>
-                    La <strong>e</strong> al lado del monto quiere decir que es el estimado de la solicitud, porque
-                    todavía no se eligió proforma. Lo que dice <strong>SIN ASIGNAR</strong> suma al total y no aparece
-                    en ninguna fila de arriba: asignalo a un rubro desde Compras y cae en su capítulo.
+    Cuando hay una proforma subida manda el documento, no lo que alguien calculó al pedir; la{" "}
+                    <strong>e</strong> aparece solo cuando no hay ningún papel y el monto es el estimado. Pasá el mouse
+                    por la cifra y dice de dónde salió. Lo que dice <strong>SIN ASIGNAR</strong> suma al total y no
+                    aparece en ninguna fila de arriba: asignalo a un rubro desde Compras y cae en su capítulo.
                   </div>
                 </div>
               )}

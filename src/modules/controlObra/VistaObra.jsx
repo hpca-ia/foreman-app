@@ -35,6 +35,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   // cosa es lo que salió y otra lo que está por salir.
   const [solicitudes, setSolicitudes] = useState([]);
   const [solicitudesFuera, setSolicitudesFuera] = useState([]);
+  const [adjuntos, setAdjuntos] = useState([]);
   useEffect(() => {
     if (!obra.lead_id && !obra.id) return;
     let vivo = true;
@@ -64,6 +65,14 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
       const r = repartirSolicitudes(
         [...(a.data || []), ...(b.data || [])], { id: obra.id, lead_id: obra.lead_id });
       setSolicitudes(r.dentro);
+      // Y las proformas de esos pedidos: ahí está la plata de verdad cuando
+      // nadie llegó a elegir una, que es casi siempre.
+      const ids = r.dentro.map(x => x.id);
+      if (ids.length) {
+        const { data: ad } = await supabase.from("compras_adjuntos")
+          .select("id,solicitud_id,monto,proveedor,tipo").in("solicitud_id", ids);
+        if (vivo) setAdjuntos(ad || []);
+      } else if (vivo) setAdjuntos([]);
       // Lo que quedó afuera, para poder decirlo en pantalla. Un pedido que no
       // entra al control es plata que alguien pidió y que no está en ningún
       // número: desaparecer en silencio no es una opción.
@@ -134,7 +143,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
   const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: planillaActual?.numero ?? null });
   const grupos = agrupar(rubros, porRubro, agruparPor, actividades);
-  const comprometido = comprometidoPorGrupo(solicitudes, rubros);
+  const comprometido = comprometidoPorGrupo(solicitudes, rubros, adjuntos);
   const totales = totalesObra(grupos);
 
   // Las dos pantallas de plata. El Director siempre; los demás, si se lo

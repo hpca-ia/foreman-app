@@ -181,7 +181,7 @@ const BLANDAS = ["pendiente_aprobacion"];
 // —que al final de la obra tiene que dar cero— nunca llega.
 const DEVUELTAS = ["requiere_info"];
 
-export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
+export function comprometidoPorGrupo(solicitudes = [], rubros = [], adjuntos = []) {
   const capituloDeRubro = new Map(rubros.map(r => [r.id, r.capitulo || SIN_CAPITULO]));
   const actividadDeRubro = new Map(rubros.map(r => [r.id, r.actividad_id ?? null]));
   const porCapitulo = {}, porActividad = {}, porRubro = {};
@@ -195,13 +195,15 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   const detalleDevueltas = [];
   solicitudes.forEach(s => {
     if (DEVUELTAS.includes(s.estado) && !s.factura_id) {
-      const m = n(s.monto ?? s.monto_estimado);
+      const m = montoDeSolicitud(s, adjuntos).monto;
       devuelto += m;
       devueltas += 1;
       detalleDevueltas.push({ id: s.id, monto: m, descripcion: s.descripcion || "", estado: s.estado });
     }
     if (!VIVAS.includes(s.estado) || s.factura_id) return;
-    const monto = n(s.monto ?? s.monto_estimado);
+    // EL DOCUMENTO LE GANA AL ESTIMADO. Si hay una proforma subida, la plata
+    // es la del papel y no la que alguien calculó al pedir.
+    const { monto, de } = montoDeSolicitud(s, adjuntos);
     if (!monto) return;
     const capitulo = s.obra_rubro_id ? capituloDeRubro.get(s.obra_rubro_id) : (s.capitulo || SIN_CAPITULO);
     porCapitulo[capitulo || SIN_CAPITULO] = (porCapitulo[capitulo || SIN_CAPITULO] || 0) + monto;
@@ -223,10 +225,11 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
         : s.obra_actividad_id ? "una agrupación"
         : s.capitulo ? `capítulo ${s.capitulo}`
         : "SIN ASIGNAR",
-      // De qué campo salió el monto: `monto` lo pone la proforma elegida y
-      // `monto_estimado` es lo que se pidió. Si el número no cuadra con
-      // Compras, acá se ve por qué.
-      deProforma: s.monto != null,
+      // De dónde salió el monto, dicho en palabras: acordado, proforma
+      // elegida, su única proforma, la más barata, o el estimado. Si el
+      // número no cuadra con Compras, acá se ve por qué.
+      deDonde: de,
+      deProforma: de !== "estimado" && de !== "sin monto",
       // Un pedido que no apunta a ningún rubro ni a ninguna agrupación es el
       // que después aparece en el total y en ninguna fila.
       suelto: !s.obra_rubro_id && !s.obra_actividad_id,
@@ -473,4 +476,52 @@ export function repartirSolicitudes(filas = [], obra = {}) {
     fuera.push({ ...s, porque });
   });
   return { dentro, fuera };
+}
+
+/**
+ * Cuánta plata es un pedido de compra.
+ *
+ * No es `monto`. Ese campo solo se escribe cuando alguien ELIGE una proforma
+ * —`elegirProforma` lo copia—, y en la práctica se suben dos o tres proformas y
+ * nadie llega a elegir: el pedido queda con `monto` nulo y, si además no se
+ * tecleó un estimado, valiendo CERO. Así, un control con tres compras aprobadas
+ * mostraba $330 comprometidos: era el único pedido que tenía un número escrito,
+ * mientras los otros dos tenían su plata en las proformas y nadie la miraba.
+ *
+ * El orden es del dato más firme al más blando, y cada escalón dice de dónde
+ * salió para poder mostrarlo:
+ *
+ *   1. `monto`            — lo acordado; ya se decidió.
+ *   2. la proforma ELEGIDA — el documento que se eligió.
+ *   3. la ÚNICA proforma   — si hay una sola con monto, es esa y no hay duda.
+ *   4. la más barata       — con varias sin elegir, es la cota baja honesta.
+ *   5. `monto_estimado`    — lo que alguien calculó al pedir.
+ *
+ * Nunca se suman las proformas: son alternativas entre sí, no partes de un
+ * total. Sumarlas inventaría plata que nadie va a gastar.
+ */
+export function montoDeSolicitud(s = {}, adjuntos = []) {
+  const mios = (adjuntos || [])
+    .filter(a => Number(a.solicitud_id) === Number(s.id) && n(a.monto) > 0);
+
+  if (s.monto != null && n(s.monto) !== 0) return { monto: n(s.monto), de: "acordado" };
+
+  const elegida = s.proforma_id != null
+    ? mios.find(a => Number(a.id) === Number(s.proforma_id)) : null;
+  if (elegida) return { monto: n(elegida.monto), de: "proforma elegida" };
+
+  if (mios.length === 1) return { monto: n(mios[0].monto), de: "su única proforma" };
+
+  if (mios.length > 1) {
+    const barata = mios.reduce((m, a) => (n(a.monto) < n(m.monto) ? a : m));
+    return { monto: n(barata.monto), de: `la más barata de ${mios.length} proformas` };
+  }
+
+  if (s.monto_estimado != null && n(s.monto_estimado) !== 0) {
+    return { monto: n(s.monto_estimado), de: "estimado" };
+  }
+  // SIN NINGÚN NÚMERO. No es cero: es que nadie puso cuánto. Decirlo es la
+  // diferencia entre "esta compra no cuesta nada" y "esta compra no se sabe
+  // cuánto cuesta", que para un control son cosas opuestas.
+  return { monto: 0, de: "sin monto" };
 }
