@@ -142,8 +142,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
 
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
   const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: planillaActual?.numero ?? null });
-  const grupos = agrupar(rubros, porRubro, agruparPor, actividades);
+  // El comprometido PRIMERO: los grupos lo necesitan para poder dibujar el
+  // bloque de gasto fuera del presupuesto cuando lo único que hay ahí todavía
+  // es una compra aprobada sin factura.
   const comprometido = comprometidoPorGrupo(solicitudes, rubros, adjuntos);
+  const grupos = agrupar(rubros, porRubro, agruparPor, actividades, comprometido);
   const totales = totalesObra(grupos);
 
   // Las dos pantallas de plata. El Director siempre; los demás, si se lo

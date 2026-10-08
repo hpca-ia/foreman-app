@@ -225,7 +225,17 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = [], adjuntos = [
     // es la del papel y no la que alguien calculó al pedir.
     const { monto, de } = montoDeSolicitud(s, adjuntos);
     if (!monto) return;
-    const capitulo = s.obra_rubro_id ? capituloDeRubro.get(s.obra_rubro_id) : (s.capitulo || SIN_CAPITULO);
+    // DÓNDE CAE EN LA VISTA POR CAPÍTULOS.
+    //
+    // Si apunta a un rubro, al capítulo de ese rubro. Si apunta a una
+    // AGRUPACIÓN —vivienda, logística, gastos de oficina— no tiene capítulo del
+    // contrato, porque no está contratado: es gasto fuera del presupuesto, y
+    // ese bloque ya existe en la tabla. Antes caía en "SIN CAPÍTULO", que no
+    // tiene fila, y entonces una compra asignada a VIVIENDA sumaba en el total
+    // y no aparecía en ningún renglón: estaba asignada y seguía invisible.
+    const capitulo = s.obra_rubro_id ? capituloDeRubro.get(s.obra_rubro_id)
+      : s.obra_actividad_id ? FUERA_DE_PRESUPUESTO
+      : (s.capitulo || SIN_CAPITULO);
     porCapitulo[capitulo || SIN_CAPITULO] = (porCapitulo[capitulo || SIN_CAPITULO] || 0) + monto;
     // La misma plata leída por la otra vista. Se pide por agrupación; si el
     // pedido apunta a un rubro, la agrupación es la de ese rubro. La clave es
@@ -287,7 +297,7 @@ export function totalAdicionales(ordenes = [], lineasPorOrden = {}) {
     .reduce((t, o) => t + totalOrden(lineasPorOrden[o.id] || []), 0);
 }
 
-export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividades = []) {
+export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividades = [], comprometido = null) {
   const porActividad = modo === "actividad";
   const dic = new Map(actividades.map(a => [a.id, a]));
 
@@ -353,7 +363,11 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
     const fuera = Object.values(sueltos).reduce(
       (t, x) => ({ anterior: t.anterior + x.anterior, periodo: t.periodo + x.periodo }),
       { anterior: 0, periodo: 0 });
-    if (fuera.anterior || fuera.periodo) {
+    // También cuando lo único que hay es comprometido. Una compra aprobada
+    // contra "vivienda" todavía no tiene factura, así que no mueve invertido —y
+    // sin esto el bloque no se dibujaba y la plata no aparecía en ningún lado.
+    const pedido = n(comprometido?.porCapitulo?.[FUERA_DE_PRESUPUESTO]);
+    if (fuera.anterior || fuera.periodo || pedido) {
       mapa.set(FUERA_DE_PRESUPUESTO, {
         clave: FUERA_DE_PRESUPUESTO, capitulo: FUERA_DE_PRESUPUESTO, codigo: "", capitulo_orden: 9998,
         capitulos: new Set(), rubros: [],
