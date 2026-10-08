@@ -347,11 +347,18 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
       const clave = `a${a.id}`;
       if (mapa.has(clave)) return;
       const acc = sueltos[a.id] || { anterior: 0, periodo: 0 };
+      // SU PRESUPUESTO, si alguien se lo puso. Vivienda, oficina y logística
+      // no están en el contrato pero sí están presupuestadas: hay un número
+      // que dice cuánto se puede gastar ahí antes de que la obra deje de ser
+      // rentable. Sin ese número el saldo arranca en cero y todo gasto sale
+      // como sobregiro, que es ruido y no información.
+      const base = n(a.presupuesto);
+      const gastado = acc.anterior + acc.periodo;
       mapa.set(clave, {
         clave, capitulo: a.nombre, codigo: a.codigo || "", capitulo_orden: a.orden ?? 9999,
         capitulos: new Set(), rubros: [],
-        base: 0, anterior: acc.anterior, periodo: acc.periodo,
-        acumulado: acc.anterior + acc.periodo, saldo: -(acc.anterior + acc.periodo),
+        base, anterior: acc.anterior, periodo: acc.periodo,
+        acumulado: gastado, saldo: base - gastado,
         pct: 0, estimado: false, extra: !!a.extra,
       });
     });

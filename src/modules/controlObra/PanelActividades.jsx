@@ -596,6 +596,37 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
                       style={{ background: actsSel.has(g.act.id) ? colors.brand : "transparent", border: "none", borderRadius: 4, padding: 2, color: actsSel.has(g.act.id) ? "#fff" : colors.muted, cursor: "pointer", display: "flex" }}>
                       <Merge size={12} />
                     </button>
+                    {/* CUÁNTO SE PUEDE GASTAR ACÁ.
+                        Solo para las que no vienen del presupuesto: vivienda,
+                        oficina, logística. No están en el contrato pero sí
+                        están presupuestadas —hay un número que dice cuánto se
+                        puede gastar antes de que la obra deje de ser rentable—
+                        y sin él el control las muestra en sobregiro desde el
+                        primer gasto, que es ruido y no información. */}
+                    {g.act.extra && (
+                      <input defaultValue={g.act.presupuesto ?? ""} inputMode="decimal"
+                        placeholder="tope $"
+                        title="Cuánto se puede gastar en esta agrupación. En blanco: sin tope."
+                        onBlur={async e => {
+                          const txt = e.target.value.trim().replace(",", ".");
+                          const v = txt === "" ? null : Number(txt);
+                          if (v !== null && !Number.isFinite(v)) { setError("El tope tiene que ser un número."); return; }
+                          if (String(g.act.presupuesto ?? "") === String(v ?? "")) return;
+                          setGuardando(true); setError("");
+                          const { error: er } = await supabase.from("obra_actividades")
+                            .update({ presupuesto: v }).eq("id", g.act.id).select();
+                          setGuardando(false);
+                          if (er) {
+                            setError(/column|schema cache/i.test(er.message)
+                              ? "Falta correr la migración 094 para ponerle un tope."
+                              : er.message);
+                            return;
+                          }
+                          onCambio();
+                        }}
+                        style={{ ...inputStyle, width: 86, padding: "3px 7px", fontSize: 11,
+                          textAlign: "right", flexShrink: 0 }} />
+                    )}
                     <button onClick={() => editar(g.act)} title="Nombre y código"
                       style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Pencil size={12} /></button>
                     <button onClick={() => disolver(g.act, g.rubros.length)} title="Quitar la agrupación"
