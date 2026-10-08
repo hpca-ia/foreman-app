@@ -439,10 +439,24 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
    * Sin la migración 064 no pasa nada: se sigue trabajando como antes, con los
    * capítulos deducidos de los rubros.
    */
+  /**
+   * Guardar la lista de capítulos y su orden.
+   *
+   * ES LO QUE HACE QUE EL ORDEN SOBREVIVA A SALIR Y VOLVER. Al abrir un
+   * presupuesto la lista sale de esta columna; lo que no esté acá se deduce de
+   * los rubros y SE AGREGA AL FINAL. Así que una pantalla que reordena, agrega
+   * o renombra un capítulo sin llamar a esto deja un orden que se ve bien
+   * hasta que alguien recarga, y entonces el capítulo reaparece último — o dos
+   * veces, con el nombre viejo y el nuevo.
+   *
+   * El error se avisa: un guardado que falla en silencio es indistinguible de
+   * uno que funcionó, y el que lo ordenó se entera recién al día siguiente.
+   */
   async function guardarCapitulos(lista, pid = presupuestoActivo?.id) {
     if (!pid || !Array.isArray(lista)) return;
     const limpia = lista.map((c, k) => ({ nombre: c.nombre, orden: c.orden ?? k + 1 }));
-    await supabase.from("presupuestos").update({ capitulos: limpia }).eq("id", pid);
+    const { error } = await supabase.from("presupuestos").update({ capitulos: limpia }).eq("id", pid);
+    if (error) alert("No se pudo guardar el orden de los capítulos: " + error.message);
   }
   async function saveCapituloToDB(nombre) {
     if (!capitulosDB.includes(nombre)) {
@@ -572,7 +586,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
    * diecinueve capítulos son dieciocho clics en la flechita. Puesto arriba,
    * está a la vista y bajarlo a su sitio son unos pocos.
    */
-  function agregarCapitulo(nombre) {
+  async function agregarCapitulo(nombre) {
     const trimmed = nombre.trim();
     if (!trimmed || capitulosActivos.find(c=>c.nombre===trimmed)) return;
     // Se vuelve a numerar la lista entera desde 1. Sumarle uno al orden de
@@ -583,22 +597,22 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     setCapitulosActivos(reordenados);
     // Los rubros llevan su capítulo codificado en el orden: si el capítulo se
     // mueve y ellos no, quedan en otro lado.
-    guardarOrden(numerar(reordenados, items));
-    guardarCapitulos(reordenados);
+    await guardarOrden(numerar(reordenados, items));
+    await guardarCapitulos(reordenados);
     saveCapituloToDB(trimmed);
     setNuevoCapitulo(""); setShowAddCap(false);
   }
 
-  function eliminarCapitulo(nombre) {
+  async function eliminarCapitulo(nombre) {
     if (items.some(i=>i.capitulo===nombre)) { alert(`Elimina primero los rubros de "${nombre}".`); return; }
     const updated = capitulosActivos.filter(c=>c.nombre!==nombre)
       .map((c,i)=>({...c, orden:i+1}));
     setCapitulosActivos(updated);
-    guardarOrden(numerar(updated, items));
-    guardarCapitulos(updated);
+    await guardarOrden(numerar(updated, items));
+    await guardarCapitulos(updated);
   }
 
-  function moverCapitulo(nombre, direccion) {
+  async function moverCapitulo(nombre, direccion) {
     const idx = capitulosActivos.findIndex(c=>c.nombre===nombre);
     if (idx<0) return;
     const newIdx = idx+direccion;
@@ -607,8 +621,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     [updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]];
     const reordered = updated.map((c,i)=>({...c,orden:i+1}));
     setCapitulosActivos(reordered);
-    guardarOrden(numerar(reordered, items));
-    guardarCapitulos(reordered);
+    // Con await: sin él, salir del presupuesto apenas se mueve un capítulo
+    // deja los dos guardados a mitad de camino.
+    await guardarOrden(numerar(reordered, items));
+    await guardarCapitulos(reordered);
   }
 
   async function agregarItem(capitulo, rubro) {
@@ -813,7 +829,11 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     if (!cotizacionResult?.rubros||!presupuestoActivo) return;
     const capNombre = "COTIZACIÓN PROVEEDOR";
     if (!capitulosActivos.find(c=>c.nombre===capNombre)) {
-      setCapitulosActivos(prev=>[...prev,{nombre:capNombre,orden:prev.length+1}]);
+      // Guardada, no solo en pantalla: si no, al volver a abrir el capítulo
+      // importado reaparece al final, donde nadie lo puso.
+      const conNuevo=[...capitulosActivos,{nombre:capNombre,orden:capitulosActivos.length+1}];
+      setCapitulosActivos(conNuevo);
+      await guardarCapitulos(conNuevo);
     }
     const newItems=[];
     // Filter out empty rubros
@@ -1179,7 +1199,11 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             const existente = capitulosActivos.find(c=>c.nombre===capN);
             const capOrden = existente ? existente.orden : Math.max(0,...capitulosActivos.map(c=>c.orden))+1;
             const yaEnCap = items.filter(i=>i.capitulo===capN).length;
-            if (!existente) setCapitulosActivos(prev=>[...prev,{nombre:capN,orden:capOrden}]);
+            if (!existente) {
+              const conNuevo=[...capitulosActivos,{nombre:capN,orden:capOrden}];
+              setCapitulosActivos(conNuevo);
+              guardarCapitulos(conNuevo);
+            }
             const newItems=[];
             const rubrosValidos=rubros.filter(r=>r.descripcion&&r.descripcion.trim());
             supabase.from("presupuesto_items").insert(rubrosValidos.map((r,idx)=>({
@@ -1536,8 +1560,15 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                         if(!nuevoNombre||nuevoNombre===cap.nombre) return;
                         // Update items with old capitulo name
                         await supabase.from("presupuesto_items").update({capitulo:nuevoNombre}).eq("presupuesto_id",presupuestoActivo.id).eq("capitulo",cap.nombre);
-                        setCapitulosActivos(prev=>prev.map(c=>c.nombre===cap.nombre?{...c,nombre:nuevoNombre}:c));
+                        const renombrada = capitulosActivos.map(c=>c.nombre===cap.nombre?{...c,nombre:nuevoNombre}:c);
+                        setCapitulosActivos(renombrada);
                         setItems(prev=>prev.map(i=>i.capitulo===cap.nombre?{...i,capitulo:nuevoNombre}:i));
+                        // Y en la lista guardada. Sin esto quedaba con el
+                        // nombre viejo: al volver a abrir, el capítulo
+                        // renombrado no se reconocía, aparecía al final como
+                        // si fuera nuevo, y el nombre viejo seguía ahí como un
+                        // capítulo fantasma sin rubros.
+                        await guardarCapitulos(renombrada);
                       }}
                       title={cap.nombre}
                       style={{fontSize:13,fontWeight:700,color:"var(--brand)",background:"transparent",border:"none",borderBottom:"1.5px dashed var(--border)",outline:"none",flex:1,minWidth:0,width:"100%",fontFamily:"var(--font)"}}
