@@ -239,6 +239,47 @@ export async function guardarPermisoUsuario(usuarioId, permiso, activo) {
  * El Director siempre puede: si sus permisos fueran editables, un error de
  * edición lo dejaría fuera de su propia app.
  */
+/**
+ * ¿Es TU trabajo? — que es otra pregunta que "¿podés?".
+ *
+ * El Director puede todo por código, y eso está bien para ENTRAR a cualquier
+ * pantalla: si sus permisos fueran editables, un error de edición lo dejaría
+ * fuera de su propia app.
+ *
+ * Pero una bandeja de "esto espera por vos" no pregunta quién PUEDE: pregunta
+ * a quién le TOCA. Con el pase libre del Director, todo lo pendiente de la
+ * oficina caía en su bandeja —incluidas las compras ya aprobadas, que ejecuta
+ * quien compra— y una bandeja que siempre tiene de todo es una bandeja que se
+ * aprende a ignorar. Que es lo peor que le puede pasar a un aviso.
+ *
+ * Acá no hay pase libre: manda lo que se le puso a esa persona y, si no se le
+ * puso nada, su rol.
+ */
+export function crearLeToca(usuario, mapa, porUsuario = {}) {
+  return permiso => {
+    if (!usuario) return false;
+    const suyo = porUsuario?.[usuario.id]?.[permiso];
+    if (suyo !== undefined) return suyo;
+    return !!mapa?.[usuario.role]?.[permiso];
+  };
+}
+
+/**
+ * ¿Hay alguien más en la oficina a quien le toque esto?
+ *
+ * La red de seguridad de `crearLeToca`: si nadie tiene el permiso, lo
+ * pendiente no puede quedar esperando a nadie. Ahí vuelve a ser del Director,
+ * que es quien responde por lo que no tiene dueño.
+ */
+export function hayQuienHaga(permiso, equipo = [], mapa = {}, porUsuario = {}, exceptoId = null) {
+  return (equipo || []).some(u => {
+    if (!u || u.activo === false || u.id === exceptoId) return false;
+    const suyo = porUsuario?.[u.id]?.[permiso];
+    if (suyo !== undefined) return suyo;
+    return !!mapa?.[u.role ?? u.rol]?.[permiso];
+  });
+}
+
 export function crearPuede(usuario, mapa, porUsuario = {}) {
   return permiso => {
     if (!usuario) return false;

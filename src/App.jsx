@@ -4,7 +4,7 @@ import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
 import { esAdmin } from "./lib/roles";
-import { cargarPermisos, cargarPermisosUsuario, crearPuede } from "./lib/permisos";
+import { cargarPermisos, cargarPermisosUsuario, crearPuede, crearLeToca, hayQuienHaga } from "./lib/permisos";
 import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
@@ -360,6 +360,9 @@ export default function App() {
 
   const admin = esAdmin(usuario.role);
   const puede = crearPuede(usuario, permisos, permisosUsuario);
+  // `puede` contesta si tenés acceso; `leToca`, si es tu trabajo. Para una
+  // bandeja de pendientes manda la segunda: ver más abajo, en las compras.
+  const leToca = crearLeToca(usuario, permisos, permisosUsuario);
   // Se calcula acá y no antes: `puede` todavía no existe más arriba.
   //
   // Decía `puede("leads.ver") || tienePipeline`, y `tienePipeline` es "existe
@@ -526,9 +529,22 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
   // A quién le toca cada paso de una compra. Es la misma regla del módulo,
   // dicha acá para poder contar sin cargar la pantalla entera.
+  // A QUIÉN LE TOCA, no quién puede.
+  //
+  // El Director puede todo por código —y tiene que poder, si no un error de
+  // permisos lo deja fuera de su app—, pero con esa regla una compra APROBADA
+  // le aparecía como "espera por vos" cuando ya no espera por él: la aprobó, y
+  // ahora la ejecuta quien compra. Una bandeja que siempre tiene de todo se
+  // aprende a ignorar, que es lo peor que le puede pasar a un aviso.
+  //
+  // El visto sigue siendo suyo: ahí sí decide. Lo que sale es el paso
+  // siguiente, que es de otro.
+  const hayQuienCompre = hayQuienHaga("compras.gestionar", users, permisos, permisosUsuario, usuario.id);
   const comprasQueMeTocan = misCompras.filter(c => {
     if (c.estado === "pendiente_aprobacion") return puede("compras.aprobar");
-    if (c.estado === "aprobada") return puede("compras.gestionar");
+    // Si no hay nadie que compre, vuelve a ser del Director: lo que no tiene
+    // dueño no puede quedar esperando a nadie.
+    if (c.estado === "aprobada") return leToca("compras.gestionar") || !hayQuienCompre;
     return c.solicitante_id === usuario.id;        // requiere_info: se la devolvieron
   });
   // El nivel de esta persona en el proyecto de una tarea. Las de los proyectos

@@ -44,6 +44,7 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
 }
 
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null }) {
+  const [verDetalle, setVerDetalle] = useState(false);
   // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
   // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
   const [cerrados, setCerrados] = useState(() => new Set());
@@ -76,13 +77,12 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
     : comprometido?.porCapitulo?.[g.capitulo]) || 0), 0);
   const sinUbicar = (comprometido?.total || 0) - ubicado;
   const detalle = comprometido?.detalle || [];
-  const claves = new Set(grupos.map(g => (modo === "actividad" ? g.clave : g.capitulo)));
-  const sueltos = detalle.filter(d => !claves.has(modo === "actividad" ? d.claveAct : d.capitulo));
   // De qué está hecho el comprometido. Un número solo no se puede discutir ni
   // bajar; sabiendo que son tres aprobadas y una esperando visto, se sabe a
   // quién ir a buscar. Al final de la obra tiene que quedar en cero.
   const ETIQUETA = {
-    pendiente_aprobacion: "esperando visto", aprobada: "aprobadas", comprada: "compradas",
+    pendiente_aprobacion: "esperando visto", aprobada: "aprobada", comprada: "comprada",
+    requiere_info: "devuelta",
   };
   const desgloseComprometido = Object.entries(comprometido?.porEstado || {})
     .sort((a, b) => b[1] - a[1])
@@ -164,39 +164,60 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             );
           })}
 
-          {/* LO COMPROMETIDO QUE NO CAE EN NINGUNA FILA.
-              Un pedido de compra que no apunta a un rubro ni a una agrupación
-              —o que apunta a un capítulo con un nombre que no existe en esta
-              obra— sumaba en el TOTAL y no aparecía en ningún renglón. El que
-              lo mira ve "$1.830 comprometido" sin una sola factura cargada y
-              no tiene de dónde agarrarse para averiguar de qué viene.
-
-              Se calcula contra lo que las filas REALMENTE mostraron, no contra
-              una regla: así aparece cualquiera sea el motivo por el que no
-              encontró su grupo. */}
-          {sinUbicar > 0.005 && (
-            <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "9px 14px",
-              background: colors.warningSoft, borderBottom: `1px solid ${colors.warningBorder}`,
-              fontSize: 11.5, color: colors.warning, alignItems: "center" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
-                COMPROMETIDO SIN UBICAR
-              </span>
-              <span /><span /><span /><span /><span /><span />
-              <span style={{ textAlign: "right", fontWeight: 700 }}>${fmt(sinUbicar)}</span>
-              <span /><span />
-            </div>
-          )}
-          {sinUbicar > 0.005 && (
-            <div style={{ padding: "7px 14px 9px", background: colors.warningSoft,
-              borderBottom: `1px solid ${colors.border}`, fontSize: 11, color: colors.warning, lineHeight: 1.55 }}>
-              {sueltos.length > 0
-                ? <>Sale de {sueltos.length === 1 ? "un pedido de compra que no apunta" : `${sueltos.length} pedidos de compra que no apuntan`} a
-                    ningún rubro ni agrupación de esta obra:{" "}
-                    {sueltos.slice(0, 4).map(d => `${d.descripcion || "sin detalle"} ($${fmt(d.monto)})`).join(" · ")}
-                    {sueltos.length > 4 ? ` y ${sueltos.length - 4} más` : ""}.
-                    {" "}Asignalos a un rubro desde Compras y van a caer en su capítulo.</>
-                : <>Son pedidos de compra vivos cuyo capítulo no coincide con ninguno de esta obra.
-                    Revisá en Compras a qué apuntan.</>}
+          {/* DE QUÉ ESTÁ HECHO EL COMPROMETIDO, renglón por renglón.
+              Un total que no se puede abrir no se puede discutir ni corregir,
+              y un número de plata que nadie puede auditar es peor que no
+              tenerlo: se toman decisiones con él. Acá está cada pedido vivo con
+              su estado, su monto, a qué apunta y de qué campo salió la cifra
+              —`monto` lo pone la proforma elegida, `monto_estimado` es lo que
+              se pidió—, para poder contrastarlo contra la pantalla de Compras
+              línea por línea. */}
+          {detalle.length > 0 && (
+            <div style={{ borderBottom: `1px solid ${colors.border}`, background: colors.surface }}>
+              <button onClick={() => setVerDetalle(v => !v)}
+                style={{ width: "100%", textAlign: "left", background: "none", border: "none",
+                  padding: "8px 14px", cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11.5, color: colors.inkSoft, display: "flex", gap: 7, alignItems: "center" }}>
+                <span style={{ color: colors.brand, fontWeight: 700 }}>
+                  {verDetalle ? "▾" : "▸"} De qué está hecho el comprometido
+                </span>
+                <span style={{ color: colors.muted }}>
+                  {detalle.length} {detalle.length === 1 ? "pedido vivo" : "pedidos vivos"} · ${fmt(comprometido.total)}
+                  {sinUbicar > 0.005 && ` · $${fmt(sinUbicar)} sin ubicar en ninguna fila`}
+                </span>
+              </button>
+              {verDetalle && (
+                <div style={{ padding: "0 14px 10px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(140px,1fr) 100px 92px minmax(120px,1.2fr)",
+                    gap: 8, fontSize: 9.5, fontWeight: 700, color: colors.muted, padding: "4px 0",
+                    borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                    <span>PEDIDO</span><span>ESTADO</span>
+                    <span style={{ textAlign: "right" }}>MONTO</span><span>CONTRA QUÉ</span>
+                  </div>
+                  {detalle.map(d => (
+                    <div key={d.id} style={{ display: "grid",
+                      gridTemplateColumns: "minmax(140px,1fr) 100px 92px minmax(120px,1.2fr)", gap: 8,
+                      fontSize: 11, padding: "5px 0", borderBottom: `1px solid ${colors.neutralSoft}`,
+                      alignItems: "center" }}>
+                      <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={d.descripcion}>{d.descripcion || `#${d.id}`}</span>
+                      <span style={{ color: colors.muted }}>{ETIQUETA[d.estado] || d.estado}</span>
+                      <span style={{ textAlign: "right", color: colors.ink, fontWeight: 600 }}
+                        title={d.deProforma ? "De la proforma elegida" : "Lo que se pidió (estimado)"}>
+                        ${fmt(d.monto)}{d.deProforma ? "" : " e"}
+                      </span>
+                      <span style={{ color: d.destino === "SIN ASIGNAR" ? colors.warning : colors.muted,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={d.destino}>{d.destino}</span>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6, lineHeight: 1.5 }}>
+                    La <strong>e</strong> al lado del monto quiere decir que es el estimado de la solicitud, porque
+                    todavía no se eligió proforma. Lo que dice <strong>SIN ASIGNAR</strong> suma al total y no aparece
+                    en ninguna fila de arriba: asignalo a un rubro desde Compras y cae en su capítulo.
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

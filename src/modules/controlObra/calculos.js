@@ -175,11 +175,15 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   // vino: el número queda ahí, sin explicación y sin forma de bajarlo.
   const detalle = [];
   let total = 0;
+  const rubroDe = new Map(rubros.map(r => [r.id, r]));
   let devuelto = 0, devueltas = 0;
+  const detalleDevueltas = [];
   solicitudes.forEach(s => {
     if (DEVUELTAS.includes(s.estado) && !s.factura_id) {
-      devuelto += n(s.monto ?? s.monto_estimado);
+      const m = n(s.monto ?? s.monto_estimado);
+      devuelto += m;
       devueltas += 1;
+      detalleDevueltas.push({ id: s.id, monto: m, descripcion: s.descripcion || "", estado: s.estado });
     }
     if (!VIVAS.includes(s.estado) || s.factura_id) return;
     const monto = n(s.monto ?? s.monto_estimado);
@@ -197,6 +201,17 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
       id: s.id, monto, estado: s.estado, firme: !BLANDAS.includes(s.estado),
       descripcion: s.descripcion || "",
       capitulo: capitulo || SIN_CAPITULO, claveAct,
+      // A qué apunta, dicho como se lee. Sin esto no hay manera de contrastar
+      // el número contra la pantalla de Compras.
+      destino: s.obra_rubro_id
+        ? `rubro ${rubroDe.get(s.obra_rubro_id)?.numero ?? s.obra_rubro_id}: ${rubroDe.get(s.obra_rubro_id)?.descripcion || ""}`
+        : s.obra_actividad_id ? "una agrupación"
+        : s.capitulo ? `capítulo ${s.capitulo}`
+        : "SIN ASIGNAR",
+      // De qué campo salió el monto: `monto` lo pone la proforma elegida y
+      // `monto_estimado` es lo que se pidió. Si el número no cuadra con
+      // Compras, acá se ve por qué.
+      deProforma: s.monto != null,
       // Un pedido que no apunta a ningún rubro ni a ninguna agrupación es el
       // que después aparece en el total y en ninguna fila.
       suelto: !s.obra_rubro_id && !s.obra_actividad_id,
@@ -209,7 +224,8 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   const porEstado = {};
   detalle.forEach(d => { porEstado[d.estado] = (porEstado[d.estado] || 0) + d.monto; });
   const firme = detalle.filter(d => d.firme).reduce((t, d) => t + d.monto, 0);
-  return { porCapitulo, porActividad, porRubro, detalle, porEstado, firme, total, devuelto, devueltas };
+  return { porCapitulo, porActividad, porRubro, detalle, porEstado, firme, total,
+    devuelto, devueltas, detalleDevueltas };
 }
 
 /**
