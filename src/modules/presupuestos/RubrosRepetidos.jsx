@@ -5,7 +5,7 @@ import { principalDe, leerLocales, guardarLocales } from "../../lib/agruparRepet
 import { pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { normalizarUnidad, etiquetaUnidad, UNIDADES } from "../../lib/unidades";
 import { SelectorUnidad } from "./camposRubro";
-import { LECTURA } from "../../lib/modelos";
+import { LECTURA, textoDeNova } from "../../lib/modelos";
 
 // Los rubros que aparecen dos o más veces en el mismo presupuesto, juntos.
 //
@@ -99,7 +99,7 @@ ${JSON.stringify(lista)}`;
     try {
       const data = await pedirNova({ model: LECTURA, max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
       if (data?.error) throw new Error(typeof data.error === "string" ? data.error : data.error.message || "NOVA no respondió");
-      const parsed = parseJSONTolerante(data?.content?.[0]?.text || "");
+      const parsed = parseJSONTolerante(textoDeNova(data) || "");
       const propuestas = {};
       (parsed?.grupos || []).forEach(p => {
         const g = visibles[Number(p.g)];

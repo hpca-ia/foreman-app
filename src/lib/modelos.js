@@ -87,3 +87,27 @@ export const LECTURA = "claude-sonnet-4-5";
  * conteste rápido.
  */
 export const RAPIDO = "claude-sonnet-4-5";
+
+/**
+ * El TEXTO de una respuesta de NOVA.
+ *
+ * No es `content[0].text`, y eso costó caro. Un modelo con razonamiento
+ * extendido devuelve primero un bloque `{"type":"thinking"}` y el texto viene
+ * después; leyendo el primero se obtiene `undefined`, y de ahí salía "NOVA
+ * devolvió algo que no se entiende" con una respuesta perfectamente buena del
+ * otro lado. El modelo andaba: lo que no andaba era cómo se lo leía.
+ *
+ * Se busca el bloque de texto, se ignora lo demás, y si hay varios se pegan:
+ * una respuesta larga puede venir partida.
+ */
+export function textoDeNova(data) {
+  const bloques = data?.content;
+  if (typeof bloques === "string") return bloques;
+  if (!Array.isArray(bloques)) return "";
+  return bloques
+    .filter(b => b?.type === "text" && typeof b.text === "string")
+    .map(b => b.text)
+    .join("")
+    // Sin bloques de texto: puede ser una respuesta vieja sin `type`.
+    || (typeof bloques[0]?.text === "string" ? bloques[0].text : "");
+}

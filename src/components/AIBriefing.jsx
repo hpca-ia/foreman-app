@@ -2,7 +2,7 @@ import { useState } from "react";
 import { daysUntil } from "../lib/dates";
 import { colors } from "../theme/colors";
 import NovaMark from "./NovaMark";
-import { LECTURA } from "../lib/modelos";
+import { LECTURA, textoDeNova } from "../lib/modelos";
 
 export default function AIBriefing({ tasks, currentUser, users, projects }) {
   const [data, setData] = useState(null);
@@ -40,7 +40,7 @@ Máximo 3 recomendaciones específicas y accionables para ${currentUser.name} ho
         }),
       });
       const resp = await res.json();
-      const text = resp.content?.[0]?.text || "{}";
+      const text = textoDeNova(resp) || "{}";
       const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
       setData({ tareas: todas, recomendaciones: parsed.recomendaciones || [] });
     } catch {

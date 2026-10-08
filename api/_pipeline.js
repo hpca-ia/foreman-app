@@ -5,6 +5,13 @@
 import { rest } from "./_supabase.js";
 import { LECTURA } from "./_modelos.js";
 
+// El texto de una respuesta de NOVA. No es content[0]: un modelo con
+// razonamiento extendido devuelve primero un bloque "thinking" y leer el
+// primero da undefined, con la respuesta buena ahí al lado.
+const textoDeNova = d => (Array.isArray(d?.content)
+  ? d.content.filter(b => b?.type === "text").map(b => b.text).join("") || d.content[0]?.text || ""
+  : "");
+
 export const hoy = () => new Date().toISOString().split("T")[0];
 export const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
@@ -120,7 +127,7 @@ Máximo 180 palabras. No inventes nada que no esté en los datos; si algo no est
       body: JSON.stringify({ model: LECTURA, max_tokens: 700, system: sistema, messages: [{ role: "user", content: cuerpo }] }),
     });
     const datos = await r.json();
-    const texto = datos.content?.[0]?.text?.trim();
+    const texto = textoDeNova(datos)?.trim();
     return texto || resumenPlano(d);
   } catch {
     return resumenPlano(d);

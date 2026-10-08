@@ -15,7 +15,7 @@ import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 import BuscadorDeGastos from "../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 import CampoProveedor from "../components/CampoProveedor";
-import { LECTURA } from "../lib/modelos";
+import { LECTURA, textoDeNova } from "../lib/modelos";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -245,7 +245,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       if (!res.ok) { setNovaError(`NOVA no respondió (error ${res.status}). Llena los datos a mano.`); setNovaLeyendo(false); return; }
       const d=await res.json();
       if (d.error) { setNovaError("NOVA: "+(d.error.message||JSON.stringify(d.error))); setNovaLeyendo(false); return; }
-      const texto=(d.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
+      const texto=(textoDeNova(d)||"").replace(/```json|```/g,"").trim();
       let parsed=null;
       try { parsed=JSON.parse(texto); } catch { const m=texto.match(/\{[\s\S]*\}/); if(m) try{parsed=JSON.parse(m[0]);}catch{} }
       if (!parsed) { setNovaError("NOVA no pudo leer esta factura. Llena los datos a mano."); setNovaLeyendo(false); return; }

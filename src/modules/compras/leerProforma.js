@@ -1,5 +1,5 @@
 import { buscarOCrear } from "../../lib/proveedores";
-import { LECTURA } from "../../lib/modelos";
+import { LECTURA, textoDeNova } from "../../lib/modelos";
 
 // NOVA lee la proforma que acaban de subir.
 //
@@ -45,7 +45,7 @@ Escríbelo tal como aparece en el membrete, completo, sin abreviar ni agregar na
   const data = await res.json();
   if (!res.ok || data.error) return { error: data.error?.message || "NOVA no pudo leerla." };
   try {
-    const txt = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
+    const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
     const p = JSON.parse(txt);
     return {
       proveedor: (p.proveedor || "").trim(),

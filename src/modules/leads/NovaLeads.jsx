@@ -5,7 +5,7 @@ import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CATALOGO_BASE } from "./constantes";
 import { useDictado } from "../../lib/dictado";
-import { LECTURA } from "../../lib/modelos";
+import { LECTURA, textoDeNova } from "../../lib/modelos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 
@@ -66,7 +66,7 @@ Si no entiendes a qué lead se refiere: {"accion":"nada","motivo":"..."}`,
         }),
       });
       const data = await res.json();
-      const raw = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
+      const raw = (textoDeNova(data) || "").replace(/```json|```/g, "").trim();
       const p = JSON.parse(raw.match(/\{[\s\S]*\}/)[0]);
 
       const nuevoPaso = (leadId, x, i, base) => ({

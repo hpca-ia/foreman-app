@@ -3,6 +3,7 @@ import { daysUntil } from "../lib/dates";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
+import { textoDeNova } from "../lib/modelos";
 
 export default function WhatsAppDraftModal({ task, users, projects }) {
   const [msg, setMsg] = useState("");
@@ -20,7 +21,7 @@ export default function WhatsAppDraftModal({ task, users, projects }) {
     const vence = task.status === "listo" ? "está completada" : d < 0 ? `tiene ${Math.abs(d)} días de retraso` : d === 0 ? "vence HOY" : `vence en ${d} días`;
     try {
       const res = await fetch("/api/nova", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 300, system: "Recordatorio WhatsApp para director de construcción. Español. Máx 3 oraciones. Directo. Solo el mensaje.", messages: [{ role: "user", content: `Para ${m?.name || "equipo"}: "${task.title}" en ${p?.name}. ${vence}. Prioridad: ${task.priority}.` }] }) });
-      const data = await res.json(); setMsg(data.content?.[0]?.text || "");
+      const data = await res.json(); setMsg(textoDeNova(data) || "");
     } catch { setMsg("Error."); }
     setLoading(false);
   }

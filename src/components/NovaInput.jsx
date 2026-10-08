@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import Button from "./ui/Button";
 import NovaMark from "./NovaMark";
-import { RAPIDO } from "../lib/modelos";
+import { RAPIDO, textoDeNova } from "../lib/modelos";
 
 export default function NovaInput({ currentUser, projects, users, puedeAsignarATodos = true, tareas = [], onCambiarEstado, onTaskCreated }) {
   const [texto, setTexto] = useState("");
@@ -123,7 +123,7 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
         }),
       });
       const data = await res.json();
-      const raw = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
+      const raw = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
       const p = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
       const ids = new Set(abiertas.map(t => t.id));
       if (p.accion === "completar") {

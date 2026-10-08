@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { calcular, calendario } from "./cpm";
 import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
 import { jsonTolerante } from "../../lib/jsonTolerante";
-import { JUICIO, pedirANova } from "../../lib/modelos";
+import { JUICIO, pedirANova, textoDeNova } from "../../lib/modelos";
 
 // NOVA arma el cronograma de la obra desde las agrupaciones del presupuesto.
 //
@@ -307,7 +307,7 @@ holgura.`;
     // agrupaciones que falten las agrega `ordenar` igual, con duración a
     // revisar, así que un corte no deja el cronograma incompleto — deja unas
     // cuantas duraciones sin pensar, y eso se ve.
-    const texto = data?.content?.[0]?.text;
+    const texto = textoDeNova(data);
     const { datos, cortado } = jsonTolerante(texto);
     if (!datos) {
       // QUÉ DEVOLVIÓ, no solo que no se entiende. "Probá de nuevo" manda a
@@ -712,7 +712,7 @@ hacerlo.`;
         messages: [{ role: "user", content: "Acomodá el cronograma a esos cambios. Solo JSON." }],
     });
     if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo acomodarlo." };
-    const { datos } = jsonTolerante(data?.content?.[0]?.text);
+    const { datos } = jsonTolerante(textoDeNova(data));
     if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
     return limpiarParche(datos, { plan, nuevas, perdidas, dePlata });
   } catch (e) {
@@ -936,7 +936,7 @@ ${lista}`;
       messages: [{ role: "user", content: "Qué se hace adentro de cada una. Solo JSON." }],
     });
     if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo proponerlos." };
-    const { datos } = jsonTolerante(data?.content?.[0]?.text);
+    const { datos } = jsonTolerante(textoDeNova(data));
     if (!datos) return { error: "NOVA devolvió algo que no se entiende." };
     const limpio = {};
     Object.entries(datos).forEach(([id, xs]) => {

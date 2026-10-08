@@ -13,7 +13,7 @@ import { comprimirImagen } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
 import { comprasSinFacturar, engancharFactura } from "../compras/compras";
-import { LECTURA } from "../../lib/modelos";
+import { LECTURA, textoDeNova } from "../../lib/modelos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -120,7 +120,7 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         }),
       });
       const data = await res.json();
-      const txt = (data.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim();
+      const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
       const p = JSON.parse(txt);
       setForm(f => ({
         ...f,

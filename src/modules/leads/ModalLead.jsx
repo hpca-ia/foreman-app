@@ -17,7 +17,7 @@ import TuboProyecto from "./TuboProyecto";
 import { TUNELES, asegurarEtapas } from "./tubo";
 import { useDictado } from "../../lib/dictado";
 import ArchivosDelProyecto from "./ArchivosDelProyecto";
-import { LECTURA } from "../../lib/modelos";
+import { LECTURA, textoDeNova } from "../../lib/modelos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
@@ -203,7 +203,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
         }),
       });
       const data = await res.json();
-      const txt = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
+      const txt = (textoDeNova(data) || "").replace(/```json|```/g, "").trim();
       pasos = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]).pasos;
     } catch { pasos = null; }
 

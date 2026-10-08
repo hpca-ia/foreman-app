@@ -5,7 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { EXTRAS_SUGERIDAS, sembrarExtras, crearExtra, reordenar, guardarOrden } from "./agrupacionesExtra";
-import { JUICIO } from "../../lib/modelos";
+import { JUICIO, textoDeNova } from "../../lib/modelos";
 
 const SIN = "__sin__";
 
@@ -291,7 +291,7 @@ en vez de inventar uno parecido; solo crea un nombre nuevo si de verdad no encaj
         }),
       });
       const data = await res.json();
-      const txt = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
+      const txt = (textoDeNova(data) || "").replace(/```json|```/g, "").trim();
       let parsed = null;
       try { parsed = JSON.parse(txt); } catch { const m = txt.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
       if (!parsed?.actividades?.length) { setError("NOVA no pudo agrupar los rubros. Intenta de nuevo o hazlo a mano."); setSugiriendo(false); return; }

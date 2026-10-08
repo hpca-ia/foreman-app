@@ -2,6 +2,13 @@
 import { sesionValida } from "./_supabase.js";
 import { JUICIO, LECTURA } from "./_modelos.js";
 
+// El texto de una respuesta de NOVA. No es content[0]: un modelo con
+// razonamiento extendido devuelve primero un bloque "thinking" y leer el
+// primero da undefined, con la respuesta buena ahí al lado.
+const textoDeNova = d => (Array.isArray(d?.content)
+  ? d.content.filter(b => b?.type === "text").map(b => b.text).join("") || d.content[0]?.text || ""
+  : "");
+
 export const config = {
   api: {
     bodyParser: {
@@ -77,7 +84,7 @@ async function pdfHandler(req, res, body) {
 
   if (d1.error) return res.status(200).json({ error: "API: " + JSON.stringify(d1.error) });
 
-  const raw1 = d1.content?.[0]?.text || "";
+  const raw1 = textoDeNova(d1) || "";
   let p1 = parseJSONSafe(raw1);
 
   if (!p1 || !p1.s) {
@@ -111,7 +118,7 @@ async function pdfHandler(req, res, body) {
 
   if (d2.error) return res.status(200).json({ error: "Paso2: " + JSON.stringify(d2.error) });
 
-  const raw2 = d2.content?.[0]?.text || "";
+  const raw2 = textoDeNova(d2) || "";
   let p2 = parseJSONSafe(raw2);
 
   if (!p2 || !p2.r || !p2.r.length) {
