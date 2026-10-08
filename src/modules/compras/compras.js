@@ -119,12 +119,75 @@ export async function guardarSolicitud(id, datos) {
     monto_estimado: datos.monto_estimado ? Number(datos.monto_estimado) : null,
     destino: datos.destino?.trim() || null,
   };
-  let { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", id);
+  // CON `select()`, y mirando cuántas filas tocó.
+  //
+  // Sin él, un UPDATE que no cambió NADA —porque una política de la base no
+  // deja tocar el pedido de otra persona— devuelve éxito igual. La pantalla
+  // dice que guardó, la asignación no se guardó, y el que la hizo se entera
+  // recién cuando vuelve a abrir el pedido y lo ve vacío otra vez. Es
+  // exactamente lo que pasaba al intentar asignarle agrupación a un pedido
+  // hecho por el residente.
+  let { data, error } = await supabase.from("compras_solicitudes")
+    .update(campos).eq("id", id).select();
+
   if (error && /column|schema cache/i.test(error.message)) {
-    const { capitulo, clase, obra_actividad_id, obra_rubro_id, monto_estimado, destino, ...resto } = campos;
-    ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", id));
+    // El reintento SOLO saca lo que la base dice que no tiene, no todo de un
+    // saque. Antes tiraba juntos capítulo, agrupación, rubro, monto y destino
+    // —o sea, justo lo que uno acababa de asignar— y devolvía que había
+    // guardado bien. Perder un dato en silencio es peor que no guardarlo.
+    const falta = c => new RegExp(c, "i").test(error.message);
+    const resto = { ...campos };
+    const perdidos = [];
+    ["capitulo", "clase", "obra_actividad_id", "obra_rubro_id", "monto_estimado", "destino"]
+      .forEach(c => { if (falta(c)) { delete resto[c]; perdidos.push(c); } });
+    if (!perdidos.length) return error.message;
+    ({ data, error } = await supabase.from("compras_solicitudes")
+      .update(resto).eq("id", id).select());
+    if (!error && data?.length) {
+      return `Se guardó, pero esta base todavía no tiene ${perdidos.join(", ")}: falta una migración.`;
+    }
   }
-  return error ? error.message : null;
+
+  if (error) return error.message;
+  if (!data?.length) {
+    return "No se pudo guardar: la base no dejó tocar este pedido. "
+      + "Suele ser el permiso sobre un pedido de otra persona.";
+  }
+  return null;
+}
+
+/**
+ * Guardar SOLO contra qué va la compra.
+ *
+ * Existe aparte porque es la corrección más común de la obra y la hace alguien
+ * que no pidió la compra: el residente apunta como puede y quien mira el
+ * presupuesto entero lo corrige. Con el "Guardar" general esa corrección
+ * viajaba con la descripción, la justificación y la fecha —campos que el que
+ * corrige no tocó y no tiene por qué reescribir— y encima quedaba escondido al
+ * final de un formulario largo.
+ *
+ * Escribe cuatro campos y nada más, y DICE SI GUARDÓ: con `select()`, porque
+ * un update que no tocó ninguna fila devuelve éxito igual, y entonces la
+ * pantalla dice que guardó mientras la asignación sigue vacía.
+ */
+export async function guardarImputacion(id, { obra_actividad_id, obra_rubro_id, capitulo, destino }) {
+  const campos = {
+    obra_actividad_id: obra_actividad_id ? Number(obra_actividad_id) : null,
+    obra_rubro_id: obra_rubro_id ? Number(obra_rubro_id) : null,
+    capitulo: capitulo || null,
+    destino: destino?.trim() || null,
+  };
+  const { data, error } = await supabase.from("compras_solicitudes")
+    .update(campos).eq("id", id).select();
+  if (error) {
+    return falta(error)
+      ? "Falta correr la migración 067: esta base todavía no guarda la agrupación de una compra."
+      : error.message;
+  }
+  if (!data?.length) {
+    return "No se pudo guardar: la base no dejó tocar este pedido.";
+  }
+  return null;
 }
 
 /**

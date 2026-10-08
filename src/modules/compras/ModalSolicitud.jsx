@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, actualizarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
-  moverDeProyecto, facturarCompra, borrarSolicitud, SIN_PROYECTO, leadDe } from "./compras";
+  moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe } from "./compras";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
 import VisorAdjuntos from "./VisorAdjuntos";
@@ -186,6 +186,10 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const docRef = useRef(null);
   const [leyendoDoc, setLeyendoDoc] = useState(false);
   const [avisoDoc, setAvisoDoc] = useState("");
+  // Guardar contra qué va la compra, por su cuenta: lo corrige quien no la
+  // pidió, y tiene que poder hacerlo sin tocar el resto del pedido.
+  const [guardandoImp, setGuardandoImp] = useState(false);
+  const [avisoImp, setAvisoImp] = useState("");
 
   const cargarPapeles = useCallback(async () => {
     if (!viva?.id) return;
@@ -517,6 +521,41 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 {actividades.map(a => <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
               </select>
             </div>
+            {/* GUARDAR LA ASIGNACIÓN, acá mismo.
+                Es la corrección más común de la obra y la hace alguien que NO
+                pidió la compra: el residente apunta como puede y quien mira el
+                presupuesto entero corrige. Con el "Guardar" del final esa
+                corrección viajaba junto con la descripción y la justificación
+                —campos que el que corrige no tocó— y quedaba escondida abajo de
+                un formulario largo. Acá se ve, se guarda sola, y dice si
+                guardó: un update que no toca ninguna fila devuelve éxito
+                igual, y así la pantalla decía "listo" con la asignación vacía. */}
+            {editando && puedeEditarImputacion && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <Button variant="primary" size="sm" disabled={ocupado || guardandoImp}
+                  onClick={async () => {
+                    setGuardandoImp(true); setAvisoImp("");
+                    const err = await guardarImputacion(viva.id, form);
+                    setGuardandoImp(false);
+                    if (err) { setAvisoImp(err); return; }
+                    setViva(v => ({ ...v,
+                      obra_actividad_id: form.obra_actividad_id ? Number(form.obra_actividad_id) : null,
+                      obra_rubro_id: form.obra_rubro_id ? Number(form.obra_rubro_id) : null,
+                      capitulo: form.capitulo || null,
+                    }));
+                    setAvisoImp("Guardado.");
+                    onCambio?.();
+                  }}>
+                  {guardandoImp ? "Guardando…" : "Guardar la asignación"}
+                </Button>
+                {avisoImp && (
+                  <span style={{ fontSize: 11.5, color: avisoImp === "Guardado." ? colors.success : colors.danger }}>
+                    {avisoImp}
+                  </span>
+                )}
+              </div>
+            )}
+
             {form.obra_actividad_id && deLaAgrupacion.length > 0 && (
               <div>
                 <label style={lbl}>RUBRO (SI SE SABE CUÁL)</label>
