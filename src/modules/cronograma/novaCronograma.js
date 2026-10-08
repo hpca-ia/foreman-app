@@ -186,63 +186,13 @@ Devuelves SOLO JSON, sin markdown. USA EL ID DE LA AGRUPACIÓN COMO REFERENCIA
 —no inventes otra numeración— y no mandes el nombre: ya lo tengo, es el del
 control de obra y es el que vale.
 
-{"actividades":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia",
-                 "incluye":["replanteo y nivelación","mampostería de bloque","mochetas y dinteles","curado"]},
+{"actividades":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia"},
                 {"id":13,"dias":40,"porque":"importada, 8 semanas de fabricacion",
                  "partes":[["anticipo",1,50],["fabricación",30,40],["instalación de grada",9,10]]}],
  "dependencias":[[12,13,0],[13,14,-5]]}
 
 "actividades": una por agrupación. "id" es el id de la agrupación, "dias" los
 días hábiles que lleva, "porque" la cuenta que te llevó a ese número.
-
-"incluye": QUÉ SE HACE ADENTRO DE ESA BARRA Y NO ES UN RUBRO. Cuatro a seis
-renglones, cortos, en castellano de obra y EN EL ORDEN EN QUE SE EJECUTAN.
-
-El presupuesto cobra "montaje de estructura"; adentro de ese montaje hay
-replanteo, nivelación de placas, izaje, torque de pernos, soldadura de
-rigidizadores y pruebas. Nada de eso es un rubro y es exactamente lo que se
-programa y se supervisa. Eso es lo que va acá.
-
-Sacalo de los rubros que te paso: si el capítulo trae "enlucido vertical" y
-"enlucido de fajas", lo que hay adentro es picado, maestreado, champeado,
-enlucido y curado. Lo que NO va: repetir el nombre del capítulo, repetir los
-rubros tal cual, ni poner "ejecución de los trabajos", que no dice nada.
-
-Si una agrupación no tiene trabajo de obra adentro —gastos generales,
-honorarios, pólizas, dirección de proyecto— mandá "incluye" vacío o no lo
-mandes. No inventes tareas para llenarlo.
-
-"partes" cuando el capítulo son VARIOS TRABAJOS que pasan en momentos
-distintos —[nombre, días, % de su plata]—. Si está, "dias" se ignora. El
-nombre es libre y en castellano de obra, y se usa tal cual:
-
-  Estructura metálica → [["fabricación",5,40],["montaje",5,35],["refuerzos",2,10],["instalación de grada",3,15]]
-  Ventanería importada → [["anticipo",1,50],["fabricación",45,40],["instalación",12,10]]
-
-Partí SOLO cuando los trabajos ocurren de verdad separados en el tiempo y se
-reconocen en los rubros del capítulo —que te paso arriba—. Lo que se ejecuta
-de corrido es una actividad y punto: no inventes etapas para que se vea más
-detallado. Las partes van encadenadas en el orden en que las escribas.
-
-"dependencias": [de, a, retardo] y nada más. El retardo en días: positivo es
-una espera real, NEGATIVO es un traslape. Si hace falta otro tipo de enlace,
-[de, a, retardo, "CC"] con "CC" o "FF".
-
-ESOS CINCO CAMPOS Y NINGUNO MÁS: "id", "dias", "porque", "incluye" y, si hace
-falta, "partes". No mandes el nombre de la agrupación —ya lo tengo—, no repitas la
-lista, no agregues campos que no te pedí y no expliques fuera de "porque", que
-va en diez palabras. Cada palabra de más es una chance de que la respuesta no
-entre entera y se corte a la mitad.
-
-LAS ACTIVIDADES SON LAS AGRUPACIONES. Ni una más ni una menos. No inventes
-otras, no las renombres, no las partas en pedazos de tu cosecha ni juntes dos
-en una. Esa lista la armó la oficina a mano en el control de obra y es contra
-la que se planilla, se factura y se pide plata: si el cronograma dice otra
-cosa, los dos documentos dejan de poder compararse y no sirve ninguno.
-
-Una actividad por agrupación, con SU nombre y SU id. La única división
-permitida es por ETAPAS —momentos separados en el tiempo de esa misma
-agrupación— y solo cuando de verdad ocurren separados.
 
 CÓMO SALE LA DURACIÓN: DE LA CANTIDAD, NO DE LA PLATA.
 
@@ -357,8 +307,16 @@ holgura.`;
     // agrupaciones que falten las agrega `ordenar` igual, con duración a
     // revisar, así que un corte no deja el cronograma incompleto — deja unas
     // cuantas duraciones sin pensar, y eso se ve.
-    const { datos, cortado } = jsonTolerante(data?.content?.[0]?.text);
-    if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
+    const texto = data?.content?.[0]?.text;
+    const { datos, cortado } = jsonTolerante(texto);
+    if (!datos) {
+      // QUÉ DEVOLVIÓ, no solo que no se entiende. "Probá de nuevo" manda a
+      // repetir a ciegas algo que va a fallar igual; con los primeros
+      // renglones se ve en dos segundos si contestó en prosa, si se cortó, o
+      // si la API devolvió un error en vez de una respuesta.
+      const muestra = String(texto ?? JSON.stringify(data ?? "")).trim().slice(0, 220);
+      return { error: `NOVA devolvió algo que no se entiende. Empezaba así:\n\n${muestra || "(vacío)"}` };
+    }
     return { ...ordenar(datos, agrupaciones, cal), cortado };
   } catch (e) {
     return { error: "NOVA devolvió algo que no se entiende: " + e.message };
@@ -917,4 +875,77 @@ export async function aprenderDelCronograma(actividades = [], quien, agrupacione
     });
   }
   return actividades.length;
+}
+
+/**
+ * Qué se hace adentro de cada barra, en una consulta APARTE.
+ *
+ * Venía pegado al cronograma y fue un error: cuatro a seis renglones por barra
+ * multiplican el tamaño de la respuesta, y el formato compacto del cronograma
+ * existe justamente para que entre entera. Con veinte agrupaciones la
+ * respuesta se cortaba tan adentro que ya no se podía salvar nada, y el
+ * cronograma —que es lo importante— no se armaba por culpa de un adorno.
+ *
+ * Separado, lo peor que pasa si falla es quedarse sin los trabajos de adentro.
+ * El cronograma ya está hecho.
+ */
+export async function proponerQueIncluye(actividades = [], agrupaciones = []) {
+  const porId = new Map(agrupaciones.map(a => [Number(a.id), a]));
+  // Solo las que son trabajo de obra: honorarios, pólizas y dirección no
+  // tienen nada adentro que ejecutar, y preguntarlo invita a inventar.
+  const utiles = actividades
+    .filter(a => a.obra_actividad_id && porId.has(Number(a.obra_actividad_id)))
+    .slice(0, 40);
+  if (!utiles.length) return { incluye: {} };
+
+  const lista = utiles.map(a => {
+    const g = porId.get(Number(a.obra_actividad_id));
+    const mag = g.magnitud?.length
+      ? g.magnitud.slice(0, 2).map(m => `${miles(m.cantidad)} ${m.unidad}`).join(" · ") : "";
+    return `${a.id} · ${a.nombre}${mag ? ` · ${mag}` : ""}`;
+  }).join("\n");
+
+  const sistema = `Sos NOVA y conocés la obra en Ecuador.
+
+Para cada actividad de abajo, decí QUÉ SE HACE ADENTRO Y NO ES UN RUBRO del
+presupuesto. El presupuesto cobra "montaje de estructura"; adentro de ese
+montaje hay replanteo, nivelación de placas, izaje, torque de pernos y pruebas.
+Nada de eso es un rubro y es exactamente lo que se programa y se supervisa.
+
+Tres a cinco renglones por actividad, cortos, en castellano de obra y EN EL
+ORDEN EN QUE SE EJECUTAN.
+
+NO pongas: el nombre de la actividad otra vez, ni "ejecución de los trabajos",
+ni nada que no se pueda ver haciéndose en la obra.
+
+Si una actividad no tiene trabajo de obra adentro —honorarios, pólizas,
+dirección de proyecto, gastos generales— devolvé una lista vacía.
+
+Devolvés SOLO JSON, sin markdown, con el id de la actividad como llave:
+
+{"42":["replanteo y nivelación","mampostería de bloque","mochetas y dinteles","curado"],
+ "43":[]}
+
+ACTIVIDADES:
+${lista}`;
+
+  try {
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 6000,
+      system: sistema,
+      messages: [{ role: "user", content: "Qué se hace adentro de cada una. Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo proponerlos." };
+    const { datos } = jsonTolerante(data?.content?.[0]?.text);
+    if (!datos) return { error: "NOVA devolvió algo que no se entiende." };
+    const limpio = {};
+    Object.entries(datos).forEach(([id, xs]) => {
+      if (!Array.isArray(xs)) return;
+      const lim = xs.map(x => String(x || "").trim().slice(0, 80)).filter(Boolean).slice(0, 6);
+      if (lim.length) limpio[id] = lim;
+    });
+    return { incluye: limpio };
+  } catch (e) {
+    return { error: e.message };
+  }
 }
