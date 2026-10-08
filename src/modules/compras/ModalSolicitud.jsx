@@ -188,6 +188,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [avisoDoc, setAvisoDoc] = useState("");
   // Guardar contra qué va la compra, por su cuenta: lo corrige quien no la
   // pidió, y tiene que poder hacerlo sin tocar el resto del pedido.
+  // El documento de la compra y el comprobante del pago. Los mira cualquiera
+  // que abra el pedido —sobre todo quien lo pidió, que es el que después va a
+  // reclamarle al proveedor—.
+  const [papelesCierre, setPapelesCierre] = useState([]);
+  const pagoRef = useRef(null);
+  const [subiendoPago, setSubiendoPago] = useState(false);
   const [guardandoImp, setGuardandoImp] = useState(false);
   const [avisoImp, setAvisoImp] = useState("");
 
@@ -195,8 +201,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     if (!viva?.id) return;
     const todos = await adjuntosDe(viva.id);
     const cotizaciones = todos.filter(a => a.tipo === "cotizacion");
+    // Lo que NO es cotización: el documento con el que se cerró la compra y el
+    // comprobante de pago. Antes se subían y no se mostraban en ningún lado
+    // —se cargaban al depósito y ahí quedaban—, así que quien pidió la compra
+    // no tenía cómo ver el papel con el que reclamarle al proveedor.
+    const cierre = todos.filter(a => a.tipo === "respaldo" || a.tipo === "pago");
     setProformas(cotizaciones);
-    setEnlaces(await enlacesDeAdjuntos(cotizaciones));
+    setPapelesCierre(cierre);
+    setEnlaces(await enlacesDeAdjuntos([...cotizaciones, ...cierre]));
   }, [viva?.id]);
   useEffect(() => { cargarPapeles(); }, [cargarPapeles]);
 
@@ -637,6 +649,40 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             </div>
           )}
 
+          {/* EL DOCUMENTO Y EL COMPROBANTE, a la vista de todos.
+              Quien pidió la compra es el que después le reclama al proveedor
+              —"no llegó", "llegó incompleto", "esto no es lo que pedí"— y para
+              eso necesita el papel: la factura y el comprobante de que se pagó.
+              Subirlos y no mostrarlos era dejarlos en un depósito al que esa
+              persona no entra. */}
+          {papelesCierre.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <label style={lbl}>DOCUMENTO Y PAGO</label>
+              {papelesCierre.map(a => (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px",
+                  marginBottom: 4, background: colors.bg, borderRadius: 8 }}>
+                  <FileText size={13} color={a.tipo === "pago" ? colors.success : colors.muted} style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: colors.ink, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {a.proveedor || a.nombre || "documento"}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: colors.muted }}>
+                      {a.tipo === "pago" ? "comprobante de pago" : "documento de la compra"}
+                      {a.monto ? ` · $${Number(a.monto).toFixed(2)}` : ""}
+                    </div>
+                  </div>
+                  {enlaces[a.id] && (
+                    <a href={enlaces[a.id]} target="_blank" rel="noreferrer"
+                      style={{ fontSize: 11.5, color: colors.brand, textDecoration: "none", flexShrink: 0 }}>
+                      abrir
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <label style={lbl}>
             {soloMiro ? "COTIZACIONES" : "PROFORMAS"}
             {proformas.length ? ` · ${proformas.length}` : ""}
@@ -861,6 +907,52 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               <input type="number" step="0.01" value={pago.monto} onChange={ev => setPago({ monto: ev.target.value })}
                 placeholder={viva.monto ? `Cuánto se pagó (por defecto $${Number(viva.monto).toFixed(2)})` : "Cuánto se pagó"} style={mini} />
               <Button variant="outline" onClick={marcarPagada} disabled={ocupado}><Banknote size={13} /> Se pagó</Button>
+            </div>
+          )
+        )}
+
+        {/* EL COMPROBANTE DEL PAGO.
+            Lo sube quien paga y lo usa quien pidió: con la transferencia en la
+            mano se le reclama al proveedor —"ya está pagado, mandá el
+            material"— sin tener que pedírsela a la oficina y esperar. Es el
+            papel que más circula por WhatsApp en una obra, y el que nunca
+            queda guardado en ningún lado.
+
+            Va aparte del "Se pagó" a propósito: muchas veces se marca el pago
+            el día que se hace y el comprobante llega después. */}
+        {editando && (gestionaCompras || apruebo || esMia) && estado !== "borrador" && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <Button variant="outline" size="sm" disabled={subiendoPago}
+              onClick={() => pagoRef.current?.click()}>
+              <Upload size={12} /> {subiendoPago ? "Subiendo…" : "Subir comprobante de pago"}
+            </Button>
+            <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 190, lineHeight: 1.45 }}>
+              La transferencia o el cheque. Queda visible para quien pidió la compra, que es el que
+              le reclama al proveedor.
+            </span>
+            <input ref={pagoRef} type="file" accept="image/*,.pdf" style={{ display: "none" }}
+              onChange={async ev => {
+                const archivo = ev.target.files?.[0]; ev.target.value = "";
+                if (!archivo) return;
+                setSubiendoPago(true);
+                const sol = await asegurarSolicitud();
+                if (!sol) { setSubiendoPago(false); return; }
+                const r = await subirAdjunto(sol, archivo, {
+                  tipo: "pago", quien: currentUser,
+                  proveedor: viva?.proveedor || archivo.name.replace(/\.[^.]+$/, "").slice(0, 60),
+                  monto: viva?.pagado_monto || null,
+                  nota: "Comprobante de pago",
+                });
+                setSubiendoPago(false);
+                if (r.error) { setError(r.error); return; }
+                await cargarPapeles();
+              }} />
+          </div>
+        )}
+
+        {false && (
+          viva.pagado_at ? <span /> : (
+            <div>
             </div>
           )
         )}
