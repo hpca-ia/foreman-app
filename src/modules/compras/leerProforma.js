@@ -1,4 +1,5 @@
 import { buscarOCrear } from "../../lib/proveedores";
+import { LECTURA } from "../../lib/modelos";
 
 // NOVA lee la proforma que acaban de subir.
 //
@@ -22,7 +23,7 @@ export async function leerProforma(archivo) {
   const res = await fetch("/api/nova", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5", max_tokens: 700,
+      model: LECTURA, max_tokens: 700,
       system: `Eres NOVA. Lees proformas y cotizaciones de proveedores de construcción en Ecuador y devuelves SOLO JSON, sin markdown:
 {"proveedor":"","ruc":"","monto":0,"validez":"","detalle":""}
 "proveedor" es la razón social o el nombre comercial de QUIEN COTIZA, nunca el cliente.

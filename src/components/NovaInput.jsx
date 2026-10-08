@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import Button from "./ui/Button";
 import NovaMark from "./NovaMark";
+import { RAPIDO } from "../lib/modelos";
 
 export default function NovaInput({ currentUser, projects, users, puedeAsignarATodos = true, tareas = [], onCambiarEstado, onTaskCreated }) {
   const [texto, setTexto] = useState("");
@@ -97,7 +98,7 @@ export default function NovaInput({ currentUser, projects, users, puedeAsignarAT
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 600,
+          model: RAPIDO, max_tokens: 600,
           system: `Eres NOVA, la asistente de tareas de una constructora en Ecuador. Hoy: ${hoy}.
 Decide si la persona quiere CREAR una tarea nueva o dar por TERMINADA una que ya existe.
 Responde SOLO JSON, sin markdown.

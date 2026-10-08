@@ -2,6 +2,7 @@ import { useState } from "react";
 import { daysUntil } from "../lib/dates";
 import { colors } from "../theme/colors";
 import NovaMark from "./NovaMark";
+import { LECTURA } from "../lib/modelos";
 
 export default function AIBriefing({ tasks, currentUser, users, projects }) {
   const [data, setData] = useState(null);
@@ -31,7 +32,7 @@ export default function AIBriefing({ tasks, currentUser, users, projects }) {
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 600,
+          model: LECTURA, max_tokens: 600,
           system: `Eres NOVA. Analiza las tareas y responde SOLO con JSON válido sin markdown:
 {"recomendaciones":["rec1","rec2","rec3"]}
 Máximo 3 recomendaciones específicas y accionables para ${currentUser.name} hoy.`,

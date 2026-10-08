@@ -6,8 +6,9 @@
 // de inventarlo, y lo que hace se cuenta tal cual quedó.
 
 import { herramientas, ejecutar } from "./_herramientas.js";
+import { LECTURA } from "./_modelos.js";
 
-const MODELO = "claude-sonnet-4-5";
+const MODELO = LECTURA;
 const VUELTAS = 5;                       // tanteos con herramientas antes de rendirse
 
 export async function preguntarAClaude(cuerpo) {

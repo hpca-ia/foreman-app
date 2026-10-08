@@ -9,6 +9,7 @@ import { colors } from "../../theme/colors";
 import { preciosDeLaBase } from "../../lib/baseRubros";
 import { pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { UNIDADES, normalizarUnidad, etiquetaUnidad } from "../../lib/unidades";
+import { LECTURA } from "../../lib/modelos";
 
 // Revisar un presupuesto antes de mandarlo: la misma información, mirada de
 // otra forma.
@@ -276,7 +277,7 @@ Reglas:
 
 Rubros (n = número, cap = capítulo, d = descripción, u = unidad, q = cantidad, p = precio unitario):
 ${JSON.stringify(lista)}`;
-        const data = await pedirNova({ model: "claude-sonnet-4-5", max_tokens: 8000, messages: [{ role: "user", content: prompt }] });
+        const data = await pedirNova({ model: LECTURA, max_tokens: 8000, messages: [{ role: "user", content: prompt }] });
         if (data?.error) throw new Error(typeof data.error === "string" ? data.error : data.error.message || "NOVA no respondió");
         const parsed = parseJSONTolerante(data?.content?.[0]?.text || "");
         (parsed?.obs || []).forEach(o => {

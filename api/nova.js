@@ -1,5 +1,6 @@
 // api/nova.js — Vercel Serverless Function
 import { sesionValida } from "./_supabase.js";
+import { JUICIO, LECTURA } from "./_modelos.js";
 
 export const config = {
   api: {
@@ -58,7 +59,7 @@ async function pdfHandler(req, res, body) {
   const sys1 = "Analiza este presupuesto. Extrae TODOS los subtotales. Responde SOLO JSON: {\"s\":[{\"n\":\"NOMBRE\",\"v\":123.45}],\"tg\":0,\"th\":0,\"ti\":0}. n=nombre seccion max 4 palabras, v=monto subtotal. tg=subtotal general obra, th=con honorarios, ti=total con IVA. Sin texto extra.";
 
   const d1 = await claude({
-    model: "claude-sonnet-4-5",
+    model: LECTURA,
     max_tokens: 6000,
     system: sys1,
     messages: [{
@@ -95,7 +96,7 @@ async function pdfHandler(req, res, body) {
   const sys2 = "Eres experto en presupuestos de construccion Ecuador. Recibiras secciones con formato INDICE:NOMBRE=MONTO separadas por |. Agrupa las de igual naturaleza en rubros sumando montos. No mezcles: electricas, sanitarias, mobiliario, acabados, seguridad, climatizacion van separados. IMPORTANTE: en el campo ids incluye los indices de las secciones que pertenecen a ese rubro. Responde SOLO JSON: {\"r\":[{\"nm\":\"Nombre\",\"ct\":\"Categoria\",\"ids\":[0,1,2]}],\"tt\":0}";
 
   const d2 = await claude({
-    model: "claude-sonnet-4-5",
+    model: JUICIO,
     max_tokens: 3000,
     system: sys2,
     messages: [{

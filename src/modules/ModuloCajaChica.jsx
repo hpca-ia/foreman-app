@@ -15,6 +15,7 @@ import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 import BuscadorDeGastos from "../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 import CampoProveedor from "../components/CampoProveedor";
+import { LECTURA } from "../lib/modelos";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -240,7 +241,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         ? {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}}
         : {type:"image",source:{type:"base64",media_type:file.type,data:base64}};
       const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|recibo|otro"}. "numero_factura" es el número impreso de la factura (formato 001-001-000000123). "monto" es el TOTAL a pagar.'}];
-      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:700,messages:[{role:"user",content}]})});
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:LECTURA,max_tokens:700,messages:[{role:"user",content}]})});
       if (!res.ok) { setNovaError(`NOVA no respondió (error ${res.status}). Llena los datos a mano.`); setNovaLeyendo(false); return; }
       const d=await res.json();
       if (d.error) { setNovaError("NOVA: "+(d.error.message||JSON.stringify(d.error))); setNovaLeyendo(false); return; }

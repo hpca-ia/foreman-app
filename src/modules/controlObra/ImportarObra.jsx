@@ -15,6 +15,7 @@ import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase }
 import { interpretarPresupuesto, aplicarDecisiones } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
+import { LECTURA } from "../../lib/modelos";
 
 const n = v => Number(v) || 0;
 const CAP_CARGOS = "HONORARIOS Y CARGOS";
@@ -170,7 +171,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       contenido = [{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }];
     }
 
-    const data = await pedirNova({ model: "claude-sonnet-4-5", max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal);
+    const data = await pedirNova({ model: LECTURA, max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal);
     const parsed = parseJSONTolerante(data.content?.[0]?.text || "");
     if (!parsed?.rubros?.length) {
       setError("NOVA no pudo leer el presupuesto. Si es muy grande, prueba subirlo por capítulos.");

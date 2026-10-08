@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { calcular, calendario } from "./cpm";
 import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
 import { jsonTolerante } from "../../lib/jsonTolerante";
+import { JUICIO } from "../../lib/modelos";
 
 // NOVA arma el cronograma de la obra desde las agrupaciones del presupuesto.
 //
@@ -328,7 +329,7 @@ holgura.`;
         // Se arma una vez por obra y después se corrige a mano, así que el
         // costo de usar el modelo bueno acá es despreciable contra el de
         // revisar un cronograma mal pensado.
-        model: "claude-opus-5-5", max_tokens: 12000,
+        model: JUICIO, max_tokens: 12000,
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma de ${meses} meses. Solo JSON.` }],
       }),
@@ -726,7 +727,7 @@ hacerlo.`;
     const res = await fetch("/api/nova", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5", max_tokens: 4000,
+        model: JUICIO, max_tokens: 4000,
         system: sistema,
         messages: [{ role: "user", content: "Acomodá el cronograma a esos cambios. Solo JSON." }],
       }),

@@ -17,6 +17,7 @@ import TuboProyecto from "./TuboProyecto";
 import { TUNELES, asegurarEtapas } from "./tubo";
 import { useDictado } from "../../lib/dictado";
 import ArchivosDelProyecto from "./ArchivosDelProyecto";
+import { LECTURA } from "../../lib/modelos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
@@ -190,7 +191,7 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 800,
+          model: LECTURA, max_tokens: 800,
           system: `Conviertes lo que dicta un director comercial en pasos de seguimiento de un lead.
 Hoy es ${hoy()}. El lead se llama "${lead.nombre}"${form.contacto ? `, contacto ${form.contacto}` : ""}.
 Puede venir más de un paso en una frase. Devuelve SOLO JSON, sin markdown:

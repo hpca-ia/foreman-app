@@ -27,6 +27,7 @@ import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRu
 import ResultadosBase from "./presupuestos/ResultadosBase";
 import { puntaje } from "../lib/buscarRubros";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
+import { LECTURA } from "../lib/modelos";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
@@ -786,7 +787,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+prompt}];
       }
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:LECTURA,max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       console.log("NOVA response:", JSON.stringify(data).slice(0,500));
       if(data.error){setCotizacionResult({error:"Error API: "+JSON.stringify(data.error)});setUploadingCotizacion(false);e.target.value="";return;}
@@ -893,7 +894,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       }
 
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:16000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:LECTURA,max_tokens:16000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       let rawText = (data.content?.[0]?.text||"").trim();
       let parsed = null;

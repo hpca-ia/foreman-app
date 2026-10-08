@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { EXTRAS_SUGERIDAS, sembrarExtras, crearExtra, reordenar, guardarOrden } from "./agrupacionesExtra";
+import { JUICIO } from "../../lib/modelos";
 
 const SIN = "__sin__";
 
@@ -244,7 +245,7 @@ export default function PanelActividades({ obra, rubros, actividades = [], onCam
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 8000,
+          model: JUICIO, max_tokens: 8000,
           system: `Agrupas los rubros de un presupuesto de obra en AGRUPACIONES DE COMPRA.
 
 La pregunta para cada grupo es una sola: **¿a quién le voy a comprar esto?**

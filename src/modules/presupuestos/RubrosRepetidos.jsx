@@ -5,6 +5,7 @@ import { principalDe, leerLocales, guardarLocales } from "../../lib/agruparRepet
 import { pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { normalizarUnidad, etiquetaUnidad, UNIDADES } from "../../lib/unidades";
 import { SelectorUnidad } from "./camposRubro";
+import { LECTURA } from "../../lib/modelos";
 
 // Los rubros que aparecen dos o más veces en el mismo presupuesto, juntos.
 //
@@ -96,7 +97,7 @@ Reglas:
 Grupos (n = número, cap = capítulo, d = descripción, u = unidad, q = cantidad, p = precio unitario):
 ${JSON.stringify(lista)}`;
     try {
-      const data = await pedirNova({ model: "claude-sonnet-4-5", max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
+      const data = await pedirNova({ model: LECTURA, max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
       if (data?.error) throw new Error(typeof data.error === "string" ? data.error : data.error.message || "NOVA no respondió");
       const parsed = parseJSONTolerante(data?.content?.[0]?.text || "");
       const propuestas = {};

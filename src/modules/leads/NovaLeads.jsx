@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CATALOGO_BASE } from "./constantes";
 import { useDictado } from "../../lib/dictado";
+import { LECTURA } from "../../lib/modelos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 
@@ -39,7 +40,7 @@ export default function NovaLeads({ leads, currentUser, catalogo, onCambio }) {
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 900,
+          model: LECTURA, max_tokens: 900,
           system: `Eres NOVA y llevas el seguimiento comercial de una constructora en Ecuador.
 Hoy es ${hoy()}. Estos son los leads abiertos:
 ${listaDeLeads}

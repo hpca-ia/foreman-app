@@ -3,6 +3,7 @@
 // se manda a mano y el resumen diario.
 
 import { rest } from "./_supabase.js";
+import { LECTURA } from "./_modelos.js";
 
 export const hoy = () => new Date().toISOString().split("T")[0];
 export const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
@@ -116,7 +117,7 @@ Máximo 180 palabras. No inventes nada que no esté en los datos; si algo no est
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 700, system: sistema, messages: [{ role: "user", content: cuerpo }] }),
+      body: JSON.stringify({ model: LECTURA, max_tokens: 700, system: sistema, messages: [{ role: "user", content: cuerpo }] }),
     });
     const datos = await r.json();
     const texto = datos.content?.[0]?.text?.trim();

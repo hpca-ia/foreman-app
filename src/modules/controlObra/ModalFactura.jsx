@@ -13,6 +13,7 @@ import { comprimirImagen } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
 import { comprasSinFacturar, engancharFactura } from "../compras/compras";
+import { LECTURA } from "../../lib/modelos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -102,7 +103,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 1200,
+          model: LECTURA, max_tokens: 1200,
           system: `Eres NOVA. Lees facturas de construcción de Ecuador y devuelves SOLO JSON, sin markdown:
 {"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null}
 subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.

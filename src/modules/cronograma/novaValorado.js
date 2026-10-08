@@ -1,5 +1,6 @@
 import { repartirEntre } from "./valorado";
 import { leerMemoria, memoriaEnPalabras, recordar, patronDe } from "./memoriaNova";
+import { JUICIO } from "../../lib/modelos";
 
 // NOVA arma el cronograma valorado del presupuesto.
 //
@@ -109,7 +110,7 @@ mampostería, mano de obra, enlucidos—: eso sigue a su capítulo.`;
     const res = await fetch("/api/nova", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5", max_tokens: 4000,
+        model: JUICIO, max_tokens: 4000,
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma valorado de ${meses} meses. Solo JSON.` }],
       }),

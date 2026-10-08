@@ -4,6 +4,7 @@
 
 import { supabase } from "./supabase";
 import { MAPA_PROMPT, buscarFormato, firmaEncabezado, soloColumnas } from "../modules/controlObra/leerPresupuesto";
+import { LECTURA } from "./modelos";
 
 // La hoja con el presupuesto: la que se llama así, o la más larga.
 export function hojaPresupuesto(XLSX, wb) {
@@ -64,7 +65,7 @@ export async function reconocerExcel(file, { signal, onPaso } = {}) {
     onPaso?.("NOVA está viendo de quién es el presupuesto...");
     let datos = {};
     try {
-      const d = await pedirNova({ model: "claude-sonnet-4-5", max_tokens: 300,
+      const d = await pedirNova({ model: LECTURA, max_tokens: 300,
         messages: [{ role: "user", content: [{ type: "text", text: `${muestra(filas, 15)}\n\n${DATOS_PROMPT}` }] }] }, signal);
       datos = parseJSONTolerante(d.content?.[0]?.text || "") || {};
     } catch (e) { if (e.name === "AbortError") throw e; }
@@ -72,7 +73,7 @@ export async function reconocerExcel(file, { signal, onPaso } = {}) {
   }
 
   onPaso?.("NOVA está reconociendo las columnas...");
-  const d = await pedirNova({ model: "claude-sonnet-4-5", max_tokens: 1000,
+  const d = await pedirNova({ model: LECTURA, max_tokens: 1000,
     messages: [{ role: "user", content: [{ type: "text", text: `${muestra(filas, 40)}\n\n${MAPA_PROMPT}` }] }] }, signal);
   const mapa = parseJSONTolerante(d.content?.[0]?.text || "");
   return { filas, mapa: mapa || { fila_encabezado: 0 }, origen: { tipo: "nova" }, datos: mapa || {} };
