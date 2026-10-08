@@ -249,19 +249,12 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             </div>
           )}
 
-          {/* LO DEVUELTO, que no es comprometido pero tampoco es nada.
-              Nadie autorizó esa plata —el pedido se rebotó—, así que no entra
-              en el número de arriba. Pero hay alguien que tiene que corregirlo
-              o dejarlo morir, y eso es lo único que hay que saber de él. */}
-          {comprometido?.devueltas > 0 && (
-            <div style={{ padding: "8px 14px", background: colors.surface,
-              borderBottom: `1px solid ${colors.border}`, fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
-              Hay <strong style={{ color: colors.danger }}>${fmt(comprometido.devuelto)}</strong> en{" "}
-              {comprometido.devueltas === 1 ? "un pedido devuelto" : `${comprometido.devueltas} pedidos devueltos`}{" "}
-              sin resolver. No cuenta como comprometido —nadie lo aprobó— pero alguien tiene que corregirlo
-              o anularlo: mientras siga ahí, no es plata hablada, es una tarea sin dueño.
-            </div>
-          )}
+          {/* Lo DEVUELTO no vive acá: vive en Compras.
+              Estuvo un rato en esta tabla y estaba de más. El control dice en
+              qué va la plata de la obra; un pedido rebotado no es plata de la
+              obra —nadie la aprobó— sino una tarea de quien lo pidió. Ponerlo
+              acá obliga a leer, en la pantalla de los números, algo sobre lo
+              que esta pantalla no puede hacer nada. */}
 
           {/* Total */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "11px 14px", background: colors.ink, fontSize: 12, fontWeight: 700, color: "#fff", alignItems: "center" }}>

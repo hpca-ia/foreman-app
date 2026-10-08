@@ -19,7 +19,8 @@ import Proformas from "./Proformas";
 // La pantalla arranca por lo que a uno le toca hacer, no por la lista completa:
 // esa es la pregunta con la que se entra acá.
 
-export default function ModuloCompras({ currentUser, puede, users = [], asignados = new Set(), abrir = null, onAbierta }) {
+export default function ModuloCompras({ currentUser, puede, leToca = null, hayQuienCompre = true,
+  users = [], asignados = new Set(), abrir = null, onAbierta }) {
   const [solicitudes, setSolicitudes] = useState([]);
   const [proyectos, setProyectos] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -98,9 +99,19 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
     : proyectos.filter(p => asignados.has(p.id));
 
   // A quién le toca cada estado: es lo que decide qué ve uno en "Me toca a mí".
+  // QUIÉN PUEDE vs A QUIÉN LE TOCA.
+  //
+  // El Director puede todo por código —si no, un error de permisos lo deja
+  // fuera de su propia app—, pero una bandeja no pregunta quién puede: con el
+  // pase libre, las compras ya APROBADAS le seguían saliendo como "me toca a
+  // mí" cuando él ya las aprobó y ahora las ejecuta quien compra.
+  //
+  // Con red: si no hay nadie que compre, vuelven a ser suyas, porque lo que no
+  // tiene dueño no puede quedar esperando a nadie.
+  const comproYo = (leToca ? leToca("compras.gestionar") : gestionaCompras) || !hayQuienCompre;
   const meToca = s => {
     if (s.estado === "pendiente_aprobacion") return apruebo;
-    if (s.estado === "aprobada") return gestionaCompras;
+    if (s.estado === "aprobada") return comproYo;
     if (s.estado === "borrador" || s.estado === "requiere_info" || s.estado === "comprada") {
       return s.solicitante_id === currentUser.id;
     }
@@ -125,6 +136,10 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
     { id: "mias",      label: "Me toca a mí", filtra: s => ABIERTAS.concat("borrador").includes(s.estado) && meToca(s) },
     { id: "abiertas",  label: "Abiertas",     filtra: s => ABIERTAS.includes(s.estado) || s.estado === "borrador" },
     { id: "aprobadas", label: "Aprobadas",    filtra: s => s.estado === "aprobada" },
+    // DEVUELTAS. Es la cola que de verdad se atasca: un pedido rebotado no le
+    // aparece a nadie como urgente y se queda vivo para siempre. Sin una ficha
+    // propia había que acordarse de que existen.
+    { id: "devueltas", label: "Devueltas",    filtra: s => s.estado === "requiere_info" },
     { id: "pagadas",   label: "Pagadas",      filtra: s => !!s.pagado_at },
     { id: "todas",     label: "Todas",        filtra: () => true },
   ];
@@ -249,8 +264,28 @@ export default function ModuloCompras({ currentUser, puede, users = [], asignado
                   {s.pagado_at && <span style={{ color: colors.success, marginLeft: 5 }}>· PAGADO</span>}
                   {e.quien && !s.pagado_at && <span style={{ color: colors.muted, fontWeight: 400 }}> · {e.quien}</span>}
                 </div>
-                <div style={{ textAlign: "right", fontSize: 12, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                  {s.monto ? `$${Number(s.monto).toLocaleString("es-EC", { minimumFractionDigits: 2 })}` : ""}
+                {/* EL MONTO, SIEMPRE QUE HAYA UNO.
+                    Antes solo salía `monto`, que es el de la proforma elegida,
+                    y la mayoría de los pedidos no llega nunca a tener una: la
+                    columna quedaba vacía en toda la lista y había que abrir uno
+                    por uno para saber de cuánta plata se estaba hablando.
+
+                    El estimado se muestra igual, en gris y con una "e": es un
+                    número menos firme, pero un número. Esconderlo no lo hace
+                    más exacto, solo lo hace invisible. */}
+                <div style={{ textAlign: "right", fontSize: 12, whiteSpace: "nowrap" }}>
+                  {(() => {
+                    const firme = s.monto != null && Number(s.monto) !== 0;
+                    const v = firme ? Number(s.monto) : Number(s.monto_estimado) || 0;
+                    if (!v) return null;
+                    return (
+                      <span style={{ color: firme ? colors.inkSoft : colors.muted }}
+                        title={firme ? "De la proforma elegida" : "Estimado del pedido: todavía no se eligió proforma"}>
+                        ${v.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {firme ? "" : <span style={{ fontSize: 9.5, marginLeft: 2 }}>e</span>}
+                      </span>
+                    );
+                  })()}
                   {meToca(s) && <AlertTriangle size={12} color={colors.warning} style={{ marginLeft: 6, verticalAlign: "middle" }} />}
                 </div>
               </div>

@@ -806,7 +806,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {puede("compras.ver") && vista === "compras" && (
-              <ModuloCompras currentUser={usuario} puede={puede} users={users} asignados={leadsAsignados}
+              <ModuloCompras currentUser={usuario} puede={puede} leToca={leToca}
+                hayQuienCompre={hayQuienCompre} users={users} asignados={leadsAsignados}
                 abrir={compraAbierta} onAbierta={() => setCompraAbierta(null)} />
             )}
             {puede("libro.ver") && vista === "libro" && (
