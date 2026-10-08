@@ -357,17 +357,70 @@ holgura.`;
  * Sigue entendiendo la forma larga: una respuesta vieja, o un modelo que se
  * acuerda del formato anterior, no tienen por qué fallar.
  */
+/**
+ * De la forma corta de NOVA a la forma que usa el resto.
+ *
+ * CADA PARTE LLEVA SU PROPIA REFERENCIA, y acá estaba el error más caro de
+ * todos. Antes todas las partes de una agrupación heredaban el mismo `ref` —el
+ * id de la agrupación—, con dos consecuencias:
+ *
+ *   · el CPM recibía tres actividades con el MISMO id, así que no podía
+ *     distinguirlas ni fecharlas por separado;
+ *   · y no había forma de encadenarlas entre sí, porque una dependencia de
+ *     "ref 13 a ref 13" no dice nada.
+ *
+ * O sea: una ventanería partida en anticipo, fabricación e instalación salía
+ * con las tres barras arrancando el mismo día. Justo lo contrario de para qué
+ * se parte —el anticipo va meses antes de la instalación—, y encima el prompt
+ * prometía que iban encadenadas, cosa que ningún código hacía.
+ *
+ * Ahora cada parte tiene ref propia, SE ENCADENAN en el orden en que vinieron,
+ * y las dependencias que NOVA escribió contra la agrupación se traducen:
+ * "después de la ventanería" apunta a su ÚLTIMA parte —la agrupación termina
+ * cuando termina lo último— y "antes de" apunta a la PRIMERA.
+ */
 function expandir(p) {
-  const acts = (p.actividades || []).map((a, i) => {
+  let proxima = 1;
+  // Lo que ya tiene ref propia no se toca: la forma larga llega así.
+  (p.actividades || []).forEach(a => {
+    if (a.ref != null) proxima = Math.max(proxima, Number(a.ref) + 1);
+  });
+
+  // De cada agrupación: por dónde se entra y por dónde se sale.
+  const puerta = new Map();
+  const encadenadas = [];
+
+  const acts = (p.actividades || []).map(a => {
     // La forma larga, tal cual.
-    if (a.agrupacion_id != null || a.nombre != null) return a;
-    const base = { ref: Number(a.id), agrupacion_id: Number(a.id), nombre: "", porque: a.porque || "" };
-    const partes = Array.isArray(a.partes) ? a.partes : a.etapas;
-    if (!Array.isArray(partes) || partes.length < 2) {
-      return { ...base, duracion: n(a.dias) || 10, etapa: "ejecucion", peso: 100 };
+    if (a.agrupacion_id != null || a.nombre != null) {
+      const id = Number(a.agrupacion_id);
+      const ref = a.ref != null ? Number(a.ref) : proxima++;
+      if (!puerta.has(id)) puerta.set(id, { primera: ref, ultima: ref });
+      else puerta.get(id).ultima = ref;
+      return { ...a, ref };
     }
-    return partes.map(e => {
+    const id = Number(a.id);
+    const base = { agrupacion_id: id, nombre: "", porque: a.porque || "" };
+    const partes = Array.isArray(a.partes) ? a.partes : a.etapas;
+
+    if (!Array.isArray(partes) || partes.length < 2) {
+      const ref = proxima++;
+      puerta.set(id, { primera: ref, ultima: ref });
+      return { ...base, ref, duracion: n(a.dias) || 10, etapa: "ejecucion", peso: 100 };
+    }
+
+    let anterior = null;
+    const salida = partes.map(e => {
       const [etiqueta, dias, peso] = Array.isArray(e) ? e : [e.etapa, e.dias, e.peso];
+      const ref = proxima++;
+      if (anterior != null) {
+        // En fila india, que es lo que el pedido promete: no se fabrica antes
+        // de anticipar ni se instala antes de que llegue.
+        encadenadas.push({ de: anterior, a: ref, retardo: 0, tipo: "FC" });
+      }
+      anterior = ref;
+      if (!puerta.has(id)) puerta.set(id, { primera: ref, ultima: ref });
+      else puerta.get(id).ultima = ref;
       // El nombre de la parte se CONSERVA. Antes se lo trataba solo como
       // etapa, y como "montaje de estructura" no está entre las cinco etapas
       // de compra, caía en "ejecucion" y el nombre se perdía: las tres partes
@@ -375,22 +428,31 @@ function expandir(p) {
       // repetidas las fundía en una. O sea que NOVA podía partir un capítulo
       // en trabajos y el resultado era un capítulo sin partir.
       return {
-        ...base, duracion: n(dias) || 5, peso: n(peso),
+        ...base, ref, duracion: n(dias) || 5, peso: n(peso),
         etapa: etapaDe(etiqueta), parte: String(etiqueta || "").trim(),
       };
     });
+    return salida;
   }).flat();
 
-  // Las referencias en la forma corta son los ids de agrupación, así que una
-  // agrupación partida en etapas tiene varias actividades con la misma ref.
-  // Una dependencia hacia ella apunta a la PRIMERA —el anticipo—, que es lo
-  // que uno quiere decir con "después de la ventanería".
+  // Las dependencias de NOVA hablan de AGRUPACIONES —sus ids— porque es lo
+  // único que se le pasó. Se traducen a las puertas de cada una.
   const deps = (p.dependencias || []).map(d => {
     if (!Array.isArray(d)) return d;
     const [de, a, retardo, tipo] = d;
-    return { de: Number(de), a: Number(a), retardo: n(retardo), tipo: tipo || "FC" };
+    const salida = puerta.get(Number(de));
+    const entrada = puerta.get(Number(a));
+    return {
+      de: salida ? salida.ultima : Number(de),
+      a: entrada ? entrada.primera : Number(a),
+      retardo: n(retardo), tipo: tipo || "FC",
+    };
   });
-  return { ...p, actividades: acts, dependencias: deps };
+
+  // Las de las partes van primero: son estructura de la agrupación, no una
+  // opinión sobre el orden de la obra, y no se pueden perder al desarmar
+  // ciclos.
+  return { ...p, actividades: acts, dependencias: [...encadenadas, ...deps] };
 }
 
 export function ordenar(entrada, agrupaciones, cal) {
