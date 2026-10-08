@@ -1587,7 +1587,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   )}
                   <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
                     <colgroup>
-                      <col style={{width:70}}/><col/><col style={{width:64}}/><col style={{width:104}}/>
+                      {/* 70 no alcanzaba: entre las flechas, el número, el
+                          control de mover y el estado, el contenido pedía 80 y
+                          se montaba encima. */}
+                      <col style={{width:112}}/><col/><col style={{width:64}}/><col style={{width:104}}/>
                       <col style={{width:96}}/><col style={{width:70}}/><col style={{width:112}}/><col style={{width:118}}/><col style={{width:34}}/>
                     </colgroup>
                     <thead><tr style={{background:"var(--bg)"}}>
@@ -1602,42 +1605,55 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                         <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)",
                           background: marcado(item.id) ? "var(--brand-soft)" : undefined}}>
                           <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500}}>
-                            <div style={{display:"flex",alignItems:"center",gap:4}}>
-                              <div style={{display:"flex",flexDirection:"column"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:3,minWidth:0}}>
+                              <div style={{display:"flex",flexDirection:"column",flexShrink:0}}>
                                 <button onClick={()=>moverRubro(item,-1)} disabled={itemIdx===0} title="Subir uno"
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===0?"default":"pointer",color:itemIdx===0?"var(--border)":"var(--muted)"}}>▲</button>
                                 <button onClick={()=>moverRubro(item,1)} disabled={itemIdx===todosDelCap.length-1} title="Bajar uno"
                                   style={{background:"none",border:"none",padding:"0 2px",lineHeight:1,fontSize:9,cursor:itemIdx===todosDelCap.length-1?"default":"pointer",color:itemIdx===todosDelCap.length-1?"var(--border)":"var(--muted)"}}>▼</button>
                               </div>
-                              {/* UN SOLO CONTROL PARA MOVER.
-                                  Antes había dos pegados —el ⇕ de mover de
-                                  lugar y un ⇅ de mover de capítulo— y encima
-                                  del número, todo amontonado en la misma
-                                  celda. Para quien ordena un presupuesto es la
-                                  misma acción: este rubro va en otro lado.
-                                  Se marcan los que sea —de cualquier capítulo—
-                                  y se toca "acá" donde van. */}
-                              {moviendo.length > 0 && !marcado(item.id) ? (
+                              {/* MARCAR Y SOLTAR, Y SE PUEDEN MARCAR VARIOS.
+                                  El ⇕ está SIEMPRE: antes, apenas se marcaba
+                                  uno, las demás filas cambiaban el ⇕ por "acá"
+                                  y ya no había cómo marcar un segundo. Por eso
+                                  solo dejaba mover de a uno.
+                                  Ahora marcar y soltar son dos cosas distintas
+                                  y conviven: el ⇕ suma o saca de la selección,
+                                  y "acá" —que solo aparece mientras hay algo
+                                  marcado— es el destino. */}
+                              <button onClick={()=>marcar(item)}
+                                title={marcado(item.id)?"Sacarlo de la selección":"Marcarlo para moverlo. Podés marcar varios, de cualquier capítulo."}
+                                style={{background:marcado(item.id)?"var(--brand)":"none",
+                                  // Gris de borde era casi invisible, y un
+                                  // control que no se ve es un control que no
+                                  // existe: parte de por qué parecía que solo
+                                  // se podía marcar uno.
+                                  color:marcado(item.id)?"#fff":"var(--muted)",border:"none",borderRadius:5,
+                                  padding:"1px 4px",fontSize:10,cursor:"pointer",fontFamily:"inherit",lineHeight:1.2,flexShrink:0}}>⇕</button>
+                              {moviendo.length > 0 && !marcado(item.id) && (
                                 <button onClick={async()=>{ const ms=moviendo; setMoviendo([]); await moverRubrosJuntoA(ms,item); }}
                                   title={moviendo.length===1
                                     ? `Poner «${moviendo[0].descripcion?.slice(0,40)}» acá`
                                     : `Poner los ${moviendo.length} marcados acá`}
                                   style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:5,
-                                    padding:"1px 6px",fontSize:9.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                                    padding:"1px 5px",fontSize:9.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                   acá
                                 </button>
-                              ) : (
-                                <button onClick={()=>marcar(item)}
-                                  title={marcado(item.id)?"Sacarlo de la selección":"Moverlo: marcalo y tocá «acá» donde va. Podés marcar varios, de cualquier capítulo."}
-                                  style={{background:marcado(item.id)?"var(--brand)":"none",
-                                    color:marcado(item.id)?"#fff":"var(--border)",border:"none",borderRadius:5,
-                                    padding:"1px 4px",fontSize:10,cursor:"pointer",fontFamily:"inherit",lineHeight:1.2}}>⇕</button>
                               )}
-                              {cap.orden}.{itemIdx+1}
-                              {/* Listo o todavía en proceso. */}
-                              <input type="checkbox" checked={!!item.listo} onChange={e=>actualizarItemMulti(item.id,{listo:e.target.checked})}
-                                title={item.listo?"Rubro listo":"En proceso: todavía se está trabajando"}
-                                style={{margin:"0 0 0 3px",cursor:"pointer",accentColor:"var(--ink)"}}/>
+                              <span style={{flexShrink:0}}>{cap.orden}.{itemIdx+1}</span>
+                              {/* LISTO O NO, CON UNA MARCA QUE SE LEE.
+                                  Era una casilla del navegador: vacía no dice
+                                  "falta", dice nada —y en una lista de cuarenta
+                                  filas, cuarenta casillas vacías no se
+                                  distinguen de cuarenta sin revisar—. Un ✓ y
+                                  una ✗ se leen de corrido. */}
+                              <button onClick={()=>actualizarItemMulti(item.id,{listo:!item.listo})}
+                                title={item.listo?"Listo. Tocá para volver a marcarlo en proceso.":"Todavía en proceso. Tocá cuando esté listo."}
+                                style={{background:"none",border:"none",padding:"0 2px",cursor:"pointer",fontFamily:"inherit",
+                                  fontSize:12,fontWeight:700,lineHeight:1,flexShrink:0,
+                                  color:item.listo?"var(--success)":"var(--border)"}}>
+                                {item.listo?"✓":"✗"}
+                              </button>
                             </div>
                           </td>
                           <td style={{padding:"3px 4px"}}>
