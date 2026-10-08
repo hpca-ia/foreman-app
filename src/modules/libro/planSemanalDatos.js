@@ -1,7 +1,15 @@
 import { supabase } from "../../lib/supabase";
-import { anotar } from "./libro";
+import { anotar, abrirDia } from "./libro";
 
-// La semana que viene, escrita antes.
+// La semana que viene, escrita antes. (Los datos; la pantalla es PlanSemanal.jsx.)
+//
+// El nombre lleva "Datos" a propósito: este archivo y la pantalla no pueden
+// llamarse igual cambiando solo una mayúscula. En macOS el resolvedor de
+// módulos ignora las mayúsculas y puede traer uno por el otro —pasó: importar
+// "./PlanSemanal" traía este y el build decía que no tenía default export—, y
+// en el Linux de producción resolvería distinto. Dos archivos que solo se
+// distinguen por una mayúscula son un error que aparece en un entorno y no en
+// el otro.
 //
 // El Libro de Obra registra lo que pasó; esto, lo que va a pasar. Es el mismo
 // día visto desde el otro lado, y por eso vive acá y no en un módulo aparte:
@@ -85,7 +93,7 @@ export async function borrarItem(id) {
  * pasó es el registro, y un registro que se puede deshacer con un clic deja de
  * servir para lo único que sirve un libro de obra. Se anota la corrección.
  */
-export async function marcarHecha(item, hecha, quien, lead) {
+export async function marcarHecha(item, hecha, quien, { leadId, fecha } = {}) {
   const campos = {
     hecha,
     hecha_at: hecha ? new Date().toISOString() : null,
@@ -100,12 +108,15 @@ export async function marcarHecha(item, hecha, quien, lead) {
   if (error) return { error: error.message };
   if (!data?.length) return { error: "No se pudo guardar: la base no dejó tocar esa tarea." };
 
-  if (!lead?.id) return { item: data[0] };
-  const { dia } = await (await import("./libro")).abrirDia(lead, item.fecha, quien) || {};
-  if (!dia) return { item: data[0] };
+  // Y el libro de ese día se entera. Si el día ya pasó y no tiene libro,
+  // `abrirDia` devuelve null a propósito —un día pasado sin libro no se
+  // inventa— y acá eso no es un error: la tarea queda marcada igual.
+  if (!leadId || !fecha) return { item: data[0] };
+  const { dia } = await abrirDia(leadId, fecha, quien);
+  if (!dia) return { item: data[0], sinLibro: true };
 
   if (hecha && !item.libro_entrada_id) {
-    const entrada = await anotar(dia, "actividades", item.texto, quien);
+    const { entrada } = await anotar(dia, "actividades", item.texto, quien);
     if (entrada?.id) {
       await supabase.from("obra_plan_items").update({ libro_entrada_id: entrada.id }).eq("id", item.id);
     }

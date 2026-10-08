@@ -5,7 +5,15 @@
 // tiene que decir lo mismo que la base, y un correo armado del lado del que lo
 // manda es un correo que puede decir otra cosa.
 
-import { db, configurado } from "./_supabase.js";
+import { rest, configurado, SUPABASE_URL } from "./_supabase.js";
+
+// `db()` no existe en _supabase.js: nunca existió. Este archivo lo importaba
+// igual, así que el módulo fallaba AL IMPORTARSE y la orden de cambio por
+// correo devolvía 500 sin llegar a mirar nada. Nadie se enteró porque un
+// correo que no sale se parece mucho a un correo que el destinatario no
+// contestó. Se consulta con `rest`, como los demás avisos.
+const json = async r => { try { return await r.json(); } catch { return null; } };
+const uno = async ruta => (await json(await rest(ruta)))?.[0] || null;
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
 
 const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -19,26 +27,25 @@ export default async function handler(req, res) {
   const correos = (Array.isArray(destinatarios) ? destinatarios : []).map(x => String(x).trim()).filter(Boolean);
   if (!orden_id || !correos.length) return res.status(400).json({ error: "Falta la orden o a quién mandarla" });
 
-  const sb = db();
-  const { data: orden } = await sb.from("ordenes_cambio").select("*").eq("id", orden_id).maybeSingle();
+  const orden = await uno(`ordenes_cambio?id=eq.${orden_id}&select=*&limit=1`);
   if (!orden) return res.status(404).json({ error: "Esa orden de cambio no existe" });
 
-  const [{ data: lineas }, { data: obra }, { data: soportes }] = await Promise.all([
-    sb.from("orden_cambio_lineas").select("*").eq("orden_id", orden.id).order("orden"),
-    sb.from("obras").select("id,nombre,cliente_nombre,lead_id").eq("id", orden.obra_id).maybeSingle(),
-    sb.from("orden_cambio_fotos").select("*").eq("orden_id", orden.id).order("orden"),
+  const [lineas, obra, soportes] = await Promise.all([
+    json(await rest(`orden_cambio_lineas?orden_id=eq.${orden.id}&select=*&order=orden`)),
+    uno(`obras?id=eq.${orden.obra_id}&select=id,nombre,cliente_nombre,lead_id&limit=1`),
+    json(await rest(`orden_cambio_fotos?orden_id=eq.${orden.id}&select=*&order=orden`)),
   ]);
 
   // El nombre que manda es el del proyecto, como en toda la app.
   let proyecto = obra?.nombre || "";
   if (obra?.lead_id) {
-    const { data: lead } = await sb.from("leads").select("nombre").eq("id", obra.lead_id).maybeSingle();
+    const lead = await uno(`leads?id=eq.${obra.lead_id}&select=nombre&limit=1`);
     if (lead?.nombre) proyecto = lead.nombre;
   }
 
   // La línea base del contrato y lo que ya se pactó después, para que el
   // número nuevo se lea contra algo y no en el aire.
-  const { data: rubros } = await sb.from("obra_rubros").select("total_base,origen").eq("obra_id", orden.obra_id);
+  const rubros = await json(await rest(`obra_rubros?obra_id=eq.${orden.obra_id}&select=total_base,origen`));
   const base = (rubros || []).filter(r => r.origen !== "orden_cambio").reduce((s, r) => s + Number(r.total_base || 0), 0);
   const adicionalesObra = (rubros || []).filter(r => r.origen === "orden_cambio").reduce((s, r) => s + Number(r.total_base || 0), 0);
 
@@ -98,8 +105,7 @@ export default async function handler(req, res) {
   // sirviendo: dice que contesten por correo o por teléfono.
   let enlacePortal = null;
   if (obra?.lead_id) {
-    const { data: proy } = await sb.from("leads")
-      .select("portal_token,portal_activo").eq("id", obra.lead_id).maybeSingle();
+    const proy = await uno(`leads?id=eq.${obra.lead_id}&select=portal_token,portal_activo&limit=1`);
     if (proy?.portal_activo && proy?.portal_token) {
       enlacePortal = `https://foreman-app-ebon.vercel.app/?cliente=${proy.portal_token}`;
     }
@@ -224,9 +230,13 @@ export default async function handler(req, res) {
   let peso = 0;
   for (const f of (soportes || []).slice(0, 6)) {
     try {
-      const { data: archivo, error } = await sb.storage.from("task-files").download(f.storage_path);
-      if (error || !archivo) continue;
-      const buffer = Buffer.from(await archivo.arrayBuffer());
+      // El depósito por HTTP, con la misma llave: no hay cliente de Supabase
+      // acá y traerlo entero por una descarga sería cargar medio megabyte de
+      // librería en cada envío.
+      const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/task-files/${f.storage_path}`,
+        { headers: { apikey: process.env.SUPABASE_SECRET_KEY || "", Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY || ""}` } });
+      if (!resp.ok) continue;
+      const buffer = Buffer.from(await resp.arrayBuffer());
       if (peso + buffer.length > 12 * 1024 * 1024) break;
       peso += buffer.length;
       adjuntos.push({ filename: f.storage_path.split("/").pop(), content: buffer.toString("base64") });

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import PlanSemanal from "./PlanSemanal";
 import { BookOpen, ChevronLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -23,6 +24,10 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
   const [fecha, setFecha] = useState(null);
   const [sinTablas, setSinTablas] = useState(false);
   const [cargando, setCargando] = useState(true);
+  // Las dos mitades del mismo día: lo que va a pasar y lo que pasó. Juntas y
+  // no en módulos distintos, porque el valor está en compararlas — y porque
+  // dos pantallas que piden lo mismo al residente terminan con una vacía.
+  const [vista, setVista] = useState("libro");
   // Los accesos llegan después que la lista: por eso se filtra al pintar y no
   // al cargar, que si no la primera vuelta deja la pantalla vacía.
   const proyectos = todos.filter(l => !!nivelProyecto(l.id));
@@ -82,6 +87,20 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
         </button>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, marginBottom: 12 }}>{lead.nombre}</div>
 
+        <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 8, padding: 3, marginBottom: 14 }}>
+          {[["libro", "Lo que pasó"], ["plan", "Lo que viene"]].map(([v, l]) => (
+            <button key={v} onClick={() => setVista(v)}
+              style={{ padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font,
+                fontSize: 12.5, fontWeight: 600, background: vista === v ? "#fff" : "transparent",
+                color: vista === v ? colors.brand : colors.inkSoft }}>{l}</button>
+          ))}
+        </div>
+
+        {vista === "plan" ? (
+          <PlanSemanal lead={lead} currentUser={currentUser}
+            puedeEscribir={nivelProyecto(lead.id) === "editar"} />
+        ) : (
+        <>
         <button onClick={() => setFecha(hoy)}
           style={{ width: "100%", background: colors.brand, border: "none", borderRadius: colors.radiusMd, padding: "14px 16px",
             color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, textAlign: "left", marginBottom: 14 }}>
@@ -105,6 +124,8 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
               </div>
             ))}
           </div>
+        )}
+        </>
         )}
       </div>
     );
