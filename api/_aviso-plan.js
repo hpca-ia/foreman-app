@@ -159,11 +159,25 @@ export default async function handler(req, res) {
       </ul>
     </td></tr>` : "";
 
+  // SI ESTÁ CERRADO O NO, arriba de todo. Un plan abierto que llega por correo
+  // se va a seguir moviendo, y el que lo lee tiene derecho a saberlo antes de
+  // mandar a la cuadrilla a trabajar contra él.
+  const cerrado = !!periodo?.cerrado_at;
+  const sello = cerrado
+    ? `<tr><td style="padding:0 0 10px;font-size:12px;color:#6B7280">
+         Plan cerrado${periodo.cerrado_nombre ? ` por ${esc(periodo.cerrado_nombre)}` : ""}.
+       </td></tr>`
+    : `<tr><td style="padding:10px 12px;background:#FEF3C7;border-radius:8px;margin-bottom:10px">
+         <div style="font-size:12.5px;font-weight:700;color:#92400E">Borrador — el plan todavía no está cerrado</div>
+         <div style="font-size:12px;color:#78350F;margin-top:3px">Puede cambiar antes de quedar firme.</div>
+       </td></tr>`;
+
   const html = plantilla({
     titulo: `Plan de obra · ${esc(lead?.nombre || "Proyecto")}`,
     subtitulo: `Del ${comoSeLee(desde)} al ${comoSeLee(hasta)}${de ? ` · lo envía ${esc(de)}` : ""}`,
     cuerpo: `
       <table width="100%" cellpadding="0" cellspacing="0">
+        ${sello}
         ${pendientes}
         ${nota ? `<tr><td style="padding:10px 0;font-size:13px;color:#1f2937;line-height:1.6">${esc(nota)}</td></tr>` : ""}
         ${bloque || `<tr><td style="padding:14px 0;font-size:13px;color:#6B7280">Nada planificado todavía para ese período.</td></tr>`}
@@ -174,7 +188,8 @@ export default async function handler(req, res) {
 
   const r = await enviarCorreo({
     to: correos,
-    subject: `Plan de obra · ${lead?.nombre || "Proyecto"} · ${comoSeLee(desde)} al ${comoSeLee(hasta)}`,
+    subject: `${cerrado ? "" : "[Borrador] "}Plan de obra · ${lead?.nombre || "Proyecto"}`
+      + ` · ${comoSeLee(desde)} al ${comoSeLee(hasta)}`,
     html,
     adjuntos,
   });

@@ -32,6 +32,32 @@ export function hoyEnObra() {
 }
 
 /** El libro de un día: si es hoy y no existe, se abre solo al entrar. */
+/**
+ * En qué estado está un día del libro. UNA sola respuesta, para todas las
+ * pantallas.
+ *
+ * Existe porque cada pantalla lo decidía por su cuenta y decían cosas
+ * distintas del mismo día: la lista miraba solo `estado` y mostraba "Abierto",
+ * y adentro el día salía con candado porque ahí además se exigía que fuera
+ * hoy. Abrir algo que la lista promete abierto y encontrarlo cerrado es de las
+ * cosas que hacen desconfiar de todo lo demás.
+ *
+ * Y LA VERDAD ES LA DEL CANDADO: en el libro de obra solo se escribe el mismo
+ * día. No es una restricción técnica, es lo que hace que el libro valga como
+ * registro —uno rellenado tres semanas después no prueba nada—. Lo que
+ * faltaba era NOMBRAR ese estado: un día pasado que nadie cerró no está
+ * abierto, quedó SIN CERRAR, y es distinto de uno que se cerró como se debe.
+ * Esa diferencia importa: un libro lleno de días sin cerrar dice que el
+ * residente no está cerrando, y antes no se veía en ningún lado.
+ */
+export function estadoDelDia(dia, hoy = hoyEnObra()) {
+  if (!dia) return { clave: "sin_abrir", etiqueta: "Sin abrir", seEscribe: false };
+  if (dia.estado === "aprobado") return { clave: "aprobado", etiqueta: "Aprobado", seEscribe: false };
+  if (dia.estado === "cerrado") return { clave: "cerrado", etiqueta: "Cerrado", seEscribe: false };
+  if (dia.fecha === hoy) return { clave: "abierto", etiqueta: "Abierto", seEscribe: true };
+  return { clave: "sin_cerrar", etiqueta: "Sin cerrar", seEscribe: false };
+}
+
 export async function abrirDia(leadId, fecha, quien) {
   const { data, error } = await supabase.from("libro_obra_dias")
     .select("*").eq("lead_id", leadId).eq("fecha", fecha).maybeSingle();

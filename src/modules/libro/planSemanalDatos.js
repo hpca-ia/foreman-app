@@ -152,6 +152,43 @@ export async function periodoDelPlan(leadId, desde, hasta, quien) {
   return { periodo: data };
 }
 
+/**
+ * Cerrar el plan: esto es lo que se va a hacer, y queda dicho.
+ *
+ * Sin el cierre no hay versión. El plan se arma durante la semana —se agregan
+ * actividades, se corrige un horario, se adjunta un plano— y el que recibió el
+ * correo del lunes no tiene cómo saber si lo que leyó es lo que quedó. Cerrarlo
+ * es el acto que convierte una lista en un documento, y por eso mandarlo o
+ * imprimirlo viene DESPUÉS.
+ *
+ * Lo que se congela es el PLAN, no la obra: las tareas se siguen marcando
+ * hechas después de cerrado, que es justamente lo que pasa en la semana. Si se
+ * congelaran las marcas, el plan cerrado nunca podría compararse con la
+ * realidad, que es para lo único que sirve guardarlo.
+ */
+export async function cerrarPlan(periodoId, quien) {
+  const { data, error } = await supabase.from("obra_plan_periodos").update({
+    cerrado_at: new Date().toISOString(),
+    cerrado_por: quien?.id ?? null,
+    cerrado_nombre: quien?.name || null,
+  }).eq("id", periodoId).select();
+  if (error) return { error: falta(error) ? "Falta correr la migración 090." : error.message };
+  if (!data?.length) return { error: "No se pudo cerrar: la base no dejó tocar ese plan." };
+  return { periodo: data[0] };
+}
+
+/**
+ * Reabrirlo. Se puede, y queda sin la marca de cerrado a propósito: un plan
+ * que se reabre y se vuelve a cerrar es una versión nueva, y lo honesto es que
+ * la fecha de cierre sea la de la última vez. Lo que ya se mandó por correo,
+ * mandado está —eso no se puede deshacer y por eso el aviso al reabrir.
+ */
+export async function reabrirPlan(periodoId) {
+  const { error } = await supabase.from("obra_plan_periodos")
+    .update({ cerrado_at: null, cerrado_por: null, cerrado_nombre: null }).eq("id", periodoId);
+  return error ? error.message : null;
+}
+
 /** Lo que no entra en ninguna casilla. Va al pie del informe, del PDF y del correo. */
 export async function guardarObservaciones(periodoId, texto) {
   const { error } = await supabase.from("obra_plan_periodos")
@@ -372,7 +409,7 @@ export async function historialDePlanes(leadId) {
   // uno y editarlo. Lo que no tiene período —lo escrito antes de la 090— se
   // sigue agrupando por lunes para que no desaparezca de la lista.
   const { data: periodos } = await supabase.from("obra_plan_periodos")
-    .select("id,desde,hasta,observaciones").eq("lead_id", leadId).order("desde", { ascending: false });
+    .select("id,desde,hasta,observaciones,cerrado_at").eq("lead_id", leadId).order("desde", { ascending: false });
   const vacios = (periodos || []).filter(p => !(dias || []).some(d => d.periodo_id === p.id));
   if (!dias?.length && !vacios.length) return { semanas: [], sinTablas: false };
 
@@ -394,7 +431,8 @@ export async function historialDePlanes(leadId) {
     if (!semanas.has(k)) {
       semanas.set(k, p
         ? { clave: k, periodo_id: p.id, desde: p.desde, hasta: p.hasta,
-            observaciones: p.observaciones || null, fijo: true, dias: 0, items: [] }
+            observaciones: p.observaciones || null, cerrado_at: p.cerrado_at || null,
+            fijo: true, dias: 0, items: [] }
         : { clave: k, periodo_id: null, desde: d.fecha, hasta: d.fecha, fijo: false, dias: 0, items: [] });
     }
     const s = semanas.get(k);
@@ -411,7 +449,8 @@ export async function historialDePlanes(leadId) {
   // todavía, también es un plan que existe y al que hay que poder volver.
   vacios.forEach(p => semanas.set(`p${p.id}`, {
     clave: `p${p.id}`, periodo_id: p.id, desde: p.desde, hasta: p.hasta,
-    observaciones: p.observaciones || null, fijo: true, dias: 0, items: [],
+    observaciones: p.observaciones || null, cerrado_at: p.cerrado_at || null,
+    fijo: true, dias: 0, items: [],
   }));
 
   return {

@@ -5,8 +5,7 @@ import { inputStyle } from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
 import {
   CATEGORIAS, CLIMAS, abrirDia, contenidoDe, anotar, borrarEntrada,
-  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra,
-} from "./libro";
+  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia } from "./libro";
 
 // El día de obra, pensado para el teléfono y para una mano sucia de cemento.
 //
@@ -34,7 +33,11 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
   const camRef = useRef(null);
 
   const esHoy = fecha === hoyEnObra();
-  const abierto = dia?.estado === "abierto" && esHoy;
+  // El estado lo dice `estadoDelDia`, igual que la lista. Cuando cada pantalla
+  // lo decidía por su cuenta, la lista prometía "Abierto" un día que adentro
+  // salía con candado.
+  const estado = estadoDelDia(dia, hoyEnObra());
+  const abierto = estado.seEscribe;
   const sePuede = abierto && puedeEscribir;
 
   const cargar = useCallback(async () => {
@@ -102,9 +105,9 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "12px 14px", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, textTransform: "capitalize", flex: 1, minWidth: 160 }}>{diaLargo(fecha)}</div>
-          {!abierto && (
+          {!abierto && dia && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: colors.inkSoft, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "3px 9px" }}>
-              <Lock size={11} /> {dia.estado === "aprobado" ? "APROBADO" : "CERRADO"}
+              <Lock size={11} /> {estado.etiqueta.toUpperCase()}
             </span>
           )}
         </div>

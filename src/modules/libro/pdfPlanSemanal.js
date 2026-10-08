@@ -40,7 +40,7 @@ const seguro = t => String(t ?? "")
  * @param archivos [{ nombre, tipo, url }] planos y fotos; las imágenes se dibujan
  */
 export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items = [], quedaron = [],
-  observaciones = "", archivos = [], logoUrl }) {
+  observaciones = "", archivos = [], borrador = false, cerradoPor = "", cerradoAt = null, logoUrl }) {
   const { jsPDF, autoTable } = await cargarPDF();
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
@@ -62,6 +62,19 @@ export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items 
   doc.text(seguro(proyecto || ""), ancho - margen, y + 16, { align: "right" });
   doc.text(seguro(`Del ${comoSeLee(desde)} al ${comoSeLee(hasta)}`), ancho - margen, y + 29, { align: "right" });
   y += 48;
+
+  // BORRADOR, dicho en la hoja. Un plan sin cerrar impreso y clavado en la
+  // pared del contenedor se lee como definitivo, y la cuadrilla trabaja contra
+  // él mientras en la oficina alguien le sigue moviendo actividades. Si está
+  // cerrado, dice quién lo cerró: eso es lo que lo hace un documento.
+  if (borrador) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...AMBAR);
+    doc.text("BORRADOR - el plan no esta cerrado todavia", margen, y - 32);
+  } else if (cerradoPor || cerradoAt) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GRIS);
+    doc.text(seguro(`Cerrado${cerradoPor ? ` por ${cerradoPor}` : ""}`
+      + `${cerradoAt ? ` el ${comoSeLee(cerradoAt)}` : ""}`), margen, y - 32);
+  }
   doc.setDrawColor(...TINTA); doc.setLineWidth(1.2);
   doc.line(margen, y, ancho - margen, y);
   y += 16;

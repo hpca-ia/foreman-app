@@ -4,7 +4,7 @@ import { BookOpen, ChevronLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import DiaDeObra from "./DiaDeObra";
-import { diasDe, hoyEnObra } from "./libro";
+import { diasDe, hoyEnObra, estadoDelDia } from "./libro";
 
 // Libro de Obra: el registro diario de cada obra.
 //
@@ -118,9 +118,17 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderTop: `1px solid ${colors.neutralSoft}`, cursor: "pointer" }}>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: colors.ink, textTransform: "capitalize" }}>{diaLargo(d.fecha)}</span>
                 {d.sin_novedades && <span style={{ fontSize: 11, color: colors.muted }}>sin novedades</span>}
-                <span style={{ fontSize: 11, fontWeight: 700, color: d.estado === "aprobado" ? colors.success : d.estado === "cerrado" ? colors.inkSoft : colors.warning }}>
-                  {d.estado === "aprobado" ? "Aprobado" : d.estado === "cerrado" ? "Cerrado" : "Abierto"}
-                </span>
+                {/* El mismo estado que se ve adentro. Antes la lista miraba
+                    solo `estado` y decía "Abierto" de un día pasado que no se
+                    puede escribir; al abrirlo salía con candado. */}
+                {(() => {
+                  const e = estadoDelDia(d, hoy);
+                  const tinta = { aprobado: colors.success, cerrado: colors.inkSoft,
+                    abierto: colors.warning, sin_cerrar: colors.danger }[e.clave] || colors.muted;
+                  return (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: tinta }}>{e.etiqueta}</span>
+                  );
+                })()}
               </div>
             ))}
           </div>

@@ -34,6 +34,20 @@ create table if not exists public.obra_plan_periodos (
 );
 create index if not exists plan_periodos_obra on public.obra_plan_periodos (lead_id, desde desc);
 
+-- EL CIERRE. El plan se arma durante la semana y en algún momento se da por
+-- hecho: ahí se cierra, y recién entonces se manda o se imprime. Sin ese acto
+-- no hay versión: el que recibió el correo del lunes no sabe si lo que leyó es
+-- lo que quedó, y el que imprimió el jueves tiene un papel que ya no vale.
+--
+-- Cerrarlo no congela las tareas —se siguen marcando hechas, que es lo que
+-- pasa en la obra después—; congela EL PLAN: lo que se dijo que se iba a hacer.
+--
+-- Como `alter` y no dentro del `create`, para que sirva igual si la tabla ya
+-- se creó con la primera versión de esta migración.
+alter table public.obra_plan_periodos add column if not exists cerrado_at     timestamptz;
+alter table public.obra_plan_periodos add column if not exists cerrado_por    bigint;
+alter table public.obra_plan_periodos add column if not exists cerrado_nombre text;
+
 -- El día sabe de qué plan es. Nulo en lo que ya estaba escrito: el histórico
 -- agrupa por lunes lo que no tiene período, y así lo viejo se sigue viendo.
 alter table public.obra_plan_dias add column if not exists periodo_id bigint

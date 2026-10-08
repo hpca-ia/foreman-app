@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, X, Check, AlertTriangle, CalendarDays, Send, Printer, Paperclip, FileText, Image as Imagen } from "lucide-react";
+import { Plus, X, Check, AlertTriangle, CalendarDays, Send, Printer, Paperclip, FileText, Image as Imagen, Lock, Unlock } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHecha, guardarMotivo,
   diasEntre, loQueTocaEstaSemana, comoSalio, historialDePlanes, proponerPeriodo, correrPeriodo,
   periodoDelPlan, guardarObservaciones, archivosDelPlan, subirArchivoDelPlan, borrarArchivoDelPlan,
-  enlacesDeArchivos } from "./planSemanalDatos";
+  enlacesDeArchivos, cerrarPlan, reabrirPlan } from "./planSemanalDatos";
 import { cargarPlan as cargarGantt, leerPlazo } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
 import { pdfPlanSemanal } from "./pdfPlanSemanal";
@@ -138,6 +138,11 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   };
   const toca = loQueTocaEstaSemana(gantt, desde, hasta);
   const resumen = comoSalio(items);
+  const cerrado = !!periodo?.cerrado_at;
+  // ARMAR el plan es lo que se cierra; MARCAR lo hecho, no. Un plan cerrado
+  // que no se pudiera marcar nunca podría compararse con lo que pasó, y esa
+  // comparación es para lo único que vale la pena guardarlo.
+  const puedeArmar = puedeEscribir && !cerrado;
 
   // El período se crea al primer dato que se escribe, no al abrir la
   // pantalla: mirar una semana no debería dejar un plan vacío en el histórico.
@@ -245,7 +250,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
 
       {/* Lo que el cronograma dice que toca esta semana, para no escribirlo a
           mano: se toca y entra como tarea del día que uno elija. */}
-      {toca.length > 0 && puedeEscribir && (
+      {toca.length > 0 && puedeArmar && (
         <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
           <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 7 }}>
             <strong style={{ color: colors.ink }}>El cronograma dice que esta semana toca esto.</strong> Tocá una para
@@ -359,7 +364,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                       <div style={{ fontSize: 11, color: colors.warning, marginTop: 2 }}>{t.motivo}</div>
                     )}
                   </div>
-                  {puedeEscribir && (
+                  {puedeArmar && (
                     <button onClick={async () => { const e = await borrarItem(t.id); if (e) setError(e); else await cargar(); }}
                       style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 0, flexShrink: 0 }}>
                       <X size={13} />
@@ -369,7 +374,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
               ))}
             </div>
 
-            {puedeEscribir && (
+            {puedeArmar && (
               <div style={{ display: "flex", gap: 5, marginBottom: 9 }}>
                 <input value={nuevo[`${f}·tarea`] || ""} placeholder="¿qué se hace ese día?"
                   onChange={e => setNuevo(n => ({ ...n, [`${f}·tarea`]: e.target.value }))}
@@ -383,7 +388,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
             {/* Material y compras: una lista con su marca, no un párrafo. Lo
                 que hay que tener ese día se tacha cuando llega, igual que una
                 tarea, y así al final del día se ve qué no llegó. */}
-            {(materiales.length > 0 || puedeEscribir) && (
+            {(materiales.length > 0 || puedeArmar) && (
               <div style={{ marginBottom: 9 }}>
                 <label style={lbl}>MATERIAL Y COMPRAS</label>
                 <div style={{ display: "grid", gap: 3, marginBottom: 4 }}>
@@ -402,7 +407,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                       </button>
                       <span style={{ flex: 1, color: colors.ink, textDecoration: m.hecha ? "line-through" : "none",
                         opacity: m.hecha ? 0.65 : 1 }}>{m.texto}</span>
-                      {puedeEscribir && (
+                      {puedeArmar && (
                         <button onClick={async () => { const e = await borrarItem(m.id); if (e) setError(e); else await cargar(); }}
                           style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex" }}>
                           <X size={12} />
@@ -411,7 +416,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                     </div>
                   ))}
                 </div>
-                {puedeEscribir && (
+                {puedeArmar && (
                   <div style={{ display: "flex", gap: 5 }}>
                     <input value={nuevo[`${f}·material`] || ""} placeholder="qué tiene que estar ese día"
                       onChange={e => setNuevo(n => ({ ...n, [`${f}·material`]: e.target.value }))}
@@ -431,7 +436,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
               {CAMPOS.map(c => (
                 <div key={c.id}>
                   <label style={lbl}>{c.label.toUpperCase()}</label>
-                  {puedeEscribir ? (
+                  {puedeArmar ? (
                     <input defaultValue={d?.[c.id] || ""} placeholder={c.pista}
                       onBlur={e => { if ((e.target.value || "") !== (d?.[c.id] || "")) tocarCampo(f, c.id, e.target.value); }}
                       style={{ ...inputStyle, padding: "5px 9px", fontSize: 11.5 }} />
@@ -445,10 +450,74 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
         );
       })}
 
+      {/* CERRARLO, Y RECIÉN AHÍ MANDARLO.
+          El plan se arma durante días: se agrega una actividad, se corrige un
+          horario, se adjunta un plano. Sin un cierre no hay versión, y el que
+          recibió el correo del lunes no tiene cómo saber si lo que leyó es lo
+          que quedó. Cerrarlo es lo que convierte una lista en un documento.
+
+          Lo que se congela es el PLAN, no la obra: las tareas se siguen
+          marcando hechas después, que es justamente lo que pasa en la semana. */}
+      {puedeEscribir && (fechas.length > 0 || periodo) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12,
+          background: cerrado ? colors.brandSoft : colors.surface,
+          border: `1px solid ${cerrado ? colors.brand : colors.border}`,
+          borderRadius: colors.radiusMd, padding: "10px 13px" }}>
+          {cerrado ? (
+            <>
+              <Lock size={14} color={colors.brand} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: colors.ink, lineHeight: 1.5 }}>
+                <strong>Plan cerrado</strong>
+                <span style={{ color: colors.muted }}>
+                  {periodo.cerrado_nombre ? ` por ${periodo.cerrado_nombre}` : ""}
+                  {periodo.cerrado_at ? ` · ${new Date(periodo.cerrado_at).toLocaleDateString("es-EC",
+                    { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                </span>
+                <div style={{ fontSize: 11.5, color: colors.muted }}>
+                  Las tareas se siguen marcando: lo que se congeló es lo que se dijo que se iba a hacer.
+                </div>
+              </div>
+              <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
+                if (!window.confirm(
+                  "¿Reabrir el plan para corregirlo?\n\n"
+                  + "Si ya se mandó por correo, lo que recibieron no cambia: van a tener una versión "
+                  + "distinta de la que quede. Conviene volver a mandarlo después de cerrarlo.")) return;
+                setOcupado(true);
+                const err = await reabrirPlan(periodo.id);
+                setOcupado(false);
+                if (err) { setError(err); return; }
+                setError(""); await cargar();
+              }}><Unlock size={12} /> Reabrir</Button>
+            </>
+          ) : (
+            <>
+              <div style={{ flex: 1, minWidth: 180, fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+                El plan está abierto: se puede seguir armando.
+                <div style={{ fontSize: 11.5, color: colors.muted }}>
+                  Cerralo cuando esté listo y mandalo. Lo que se manda sin cerrar sale marcado como borrador.
+                </div>
+              </div>
+              <Button variant="primary" size="sm" disabled={ocupado || !fechas.length} onClick={async () => {
+                const sinNada = !items.filter(i => (i.tipo || "tarea") !== "material").length;
+                if (sinNada && !window.confirm(
+                  "El plan no tiene ninguna actividad. ¿Cerrarlo igual?")) return;
+                setOcupado(true); setError("");
+                const { periodo: p, error: e1 } = await asegurarPeriodo();
+                if (e1) { setOcupado(false); setError(e1); return; }
+                const r = await cerrarPlan(p.id, currentUser);
+                setOcupado(false);
+                if (r.error) { setError(r.error); return; }
+                setError(""); await cargar();
+              }}><Lock size={12} /> Cerrar el plan</Button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* MANDARLO. Un plan que vive en una pantalla que nadie abre no es un
           plan: es una lista. El gerente y el director no entran todos los
           lunes, y lo que necesitan de la semana entra en un correo. */}
-      {puedeEscribir && fechas.length > 0 && (
+      {puedeEscribir && (fechas.length > 0 || periodo) && (
         <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
           padding: "11px 13px", marginBottom: 12 }}>
           {!mandando ? (
@@ -475,6 +544,8 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                   const doc = await pdfPlanSemanal({
                     proyecto: lead.nombre, desde, hasta, dias, items, quedaron,
                     observaciones: periodo?.observaciones || "",
+                    borrador: !cerrado,
+                    cerradoPor: periodo?.cerrado_nombre || "", cerradoAt: periodo?.cerrado_at || null,
                     archivos: archivos.map(a => ({ ...a, url: frescos[a.id] || enlaces[a.id] })),
                   });
                   doc.save(`Plan ${lead.nombre} ${desde} a ${hasta}.pdf`);
@@ -558,7 +629,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
         borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
         <label style={lbl}>OBSERVACIONES</label>
         <textarea key={`obs-${periodo?.id || desde}`} defaultValue={periodo?.observaciones || ""}
-          disabled={!puedeEscribir} rows={3}
+          disabled={!puedeArmar} rows={3}
           placeholder="Consultas abiertas, lo que se acordó en obra, lo que hay que resolver antes del cierre…"
           onBlur={async e => {
             const txt = e.target.value;
@@ -574,7 +645,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
           <label style={{ ...lbl, marginBottom: 0 }}>PLANOS, FOTOS, PDFs</label>
-          {puedeEscribir && (
+          {puedeArmar && (
             <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: subiendo ? "wait" : "pointer",
               border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "4px 9px",
               fontSize: 11.5, color: colors.inkSoft, background: "#fff" }}>
@@ -629,7 +700,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                   <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>
                     {a.tamano ? `${Math.max(1, Math.round(a.tamano / 1024))} kB` : ""}
                   </span>
-                  {puedeEscribir && (
+                  {puedeArmar && (
                     <button title="Quitar"
                       onClick={async () => {
                         if (!window.confirm(`¿Quitar ${a.nombre} del plan?`)) return;
@@ -675,6 +746,12 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: colors.ink }}>
                     {comoSeLee(sem.desde)} al {comoSeLee(sem.hasta)}
                     <span style={{ color: colors.muted }}> · {sem.dias} {sem.dias === 1 ? "día" : "días"}</span>
+                    {/* Cuál quedó firme y cuál no. Una lista de semanas donde
+                        no se distingue el plan cerrado del que quedó a medio
+                        armar no sirve para mirar hacia atrás. */}
+                    {sem.cerrado_at
+                      ? <Lock size={10} color={colors.muted} style={{ marginLeft: 5, verticalAlign: "middle" }} />
+                      : <span style={{ marginLeft: 6, fontSize: 10, color: colors.warning }}>sin cerrar</span>}
                   </span>
                   {sem.total > 0 ? (
                     <>
