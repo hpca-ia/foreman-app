@@ -146,6 +146,10 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   const capituloDeRubro = new Map(rubros.map(r => [r.id, r.capitulo || SIN_CAPITULO]));
   const actividadDeRubro = new Map(rubros.map(r => [r.id, r.actividad_id ?? null]));
   const porCapitulo = {}, porActividad = {}, porRubro = {};
+  // De dónde sale cada peso. Sin esto, un comprometido que no cae en ninguna
+  // fila aparece solo en el total y no hay manera de averiguar de qué pedido
+  // vino: el número queda ahí, sin explicación y sin forma de bajarlo.
+  const detalle = [];
   let total = 0;
   solicitudes.forEach(s => {
     if (!VIVAS.includes(s.estado) || s.factura_id) return;
@@ -160,9 +164,17 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
     const claveAct = actId ? `a${actId}` : SIN_ACTIVIDAD;
     porActividad[claveAct] = (porActividad[claveAct] || 0) + monto;
     if (s.obra_rubro_id) porRubro[s.obra_rubro_id] = (porRubro[s.obra_rubro_id] || 0) + monto;
+    detalle.push({
+      id: s.id, monto, estado: s.estado,
+      descripcion: s.descripcion || "",
+      capitulo: capitulo || SIN_CAPITULO, claveAct,
+      // Un pedido que no apunta a ningún rubro ni a ninguna agrupación es el
+      // que después aparece en el total y en ninguna fila.
+      suelto: !s.obra_rubro_id && !s.obra_actividad_id,
+    });
     total += monto;
   });
-  return { porCapitulo, porActividad, porRubro, total };
+  return { porCapitulo, porActividad, porRubro, detalle, total };
 }
 
 /**

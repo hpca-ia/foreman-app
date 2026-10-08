@@ -17,6 +17,7 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
   // estaba y ya no está, sin ir a buscar la orden.
   const fuera = !!r.anulado_por_oc;
   const acc = porRubro[r.id] || { anterior: 0, periodo: 0, acumulado: 0, saldo: Number(r.total_base) || 0, pct: 0 };
+
   return (
     <div className="tabla-row"
       style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: `7px 14px 7px ${sangria}px`, borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center",
@@ -58,6 +59,25 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   if (!grupos.length) {
     return <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Esta obra no tiene rubros.</div>;
   }
+
+
+  // CUÁNTO DE LO COMPROMETIDO CAE EN UNA FILA Y CUÁNTO NO.
+  //
+  // Se mide contra lo que las filas REALMENTE muestran, no contra una regla:
+  // así aparece cualquiera sea el motivo por el que un pedido no encontró su
+  // grupo —no apunta a ningún rubro, apunta a un capítulo con un nombre que
+  // esta obra no tiene, o quedó colgado del proyecto y no de la obra—.
+  //
+  // Sin esto, el total decía "$1.830 comprometido" con cero facturas cargadas
+  // y ninguna fila en la que mirar: el número estaba ahí y no había de dónde
+  // agarrarse para averiguar de qué venía.
+  const ubicado = grupos.reduce((t, g) => t + ((modo === "actividad"
+    ? comprometido?.porActividad?.[g.clave]
+    : comprometido?.porCapitulo?.[g.capitulo]) || 0), 0);
+  const sinUbicar = (comprometido?.total || 0) - ubicado;
+  const detalle = comprometido?.detalle || [];
+  const claves = new Set(grupos.map(g => (modo === "actividad" ? g.clave : g.capitulo)));
+  const sueltos = detalle.filter(d => !claves.has(modo === "actividad" ? d.claveAct : d.capitulo));
 
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
@@ -133,6 +153,42 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
               </div>
             );
           })}
+
+          {/* LO COMPROMETIDO QUE NO CAE EN NINGUNA FILA.
+              Un pedido de compra que no apunta a un rubro ni a una agrupación
+              —o que apunta a un capítulo con un nombre que no existe en esta
+              obra— sumaba en el TOTAL y no aparecía en ningún renglón. El que
+              lo mira ve "$1.830 comprometido" sin una sola factura cargada y
+              no tiene de dónde agarrarse para averiguar de qué viene.
+
+              Se calcula contra lo que las filas REALMENTE mostraron, no contra
+              una regla: así aparece cualquiera sea el motivo por el que no
+              encontró su grupo. */}
+          {sinUbicar > 0.005 && (
+            <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "9px 14px",
+              background: colors.warningSoft, borderBottom: `1px solid ${colors.warningBorder}`,
+              fontSize: 11.5, color: colors.warning, alignItems: "center" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
+                COMPROMETIDO SIN UBICAR
+              </span>
+              <span /><span /><span /><span /><span /><span />
+              <span style={{ textAlign: "right", fontWeight: 700 }}>${fmt(sinUbicar)}</span>
+              <span /><span />
+            </div>
+          )}
+          {sinUbicar > 0.005 && (
+            <div style={{ padding: "7px 14px 9px", background: colors.warningSoft,
+              borderBottom: `1px solid ${colors.border}`, fontSize: 11, color: colors.warning, lineHeight: 1.55 }}>
+              {sueltos.length > 0
+                ? <>Sale de {sueltos.length === 1 ? "un pedido de compra que no apunta" : `${sueltos.length} pedidos de compra que no apuntan`} a
+                    ningún rubro ni agrupación de esta obra:{" "}
+                    {sueltos.slice(0, 4).map(d => `${d.descripcion || "sin detalle"} ($${fmt(d.monto)})`).join(" · ")}
+                    {sueltos.length > 4 ? ` y ${sueltos.length - 4} más` : ""}.
+                    {" "}Asignalos a un rubro desde Compras y van a caer en su capítulo.</>
+                : <>Son pedidos de compra vivos cuyo capítulo no coincide con ninguno de esta obra.
+                    Revisá en Compras a qué apuntan.</>}
+            </div>
+          )}
 
           {/* Total */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "11px 14px", background: colors.ink, fontSize: 12, fontWeight: 700, color: "#fff", alignItems: "center" }}>
