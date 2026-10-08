@@ -26,16 +26,80 @@ export async function leerPlazo(leadId) {
   return { inicio: data?.crono_inicio || null, meses: data?.crono_meses || null };
 }
 
-export async function guardarPlazo(leadId, { inicio, meses, topeMes }) {
+export async function guardarPlazo(leadId, { inicio, meses, topeMes, fin, laborables }) {
   const campos = {};
   if (inicio !== undefined) campos.crono_inicio = inicio || null;
   if (meses !== undefined) campos.crono_meses = meses ? Math.max(1, Math.round(meses)) : null;
   if (topeMes !== undefined) campos.crono_tope_mes = topeMes || null;
+  if (fin !== undefined) campos.crono_fin = fin || null;
+  if (laborables !== undefined) campos.crono_laborables = laborables?.length ? laborables : null;
   if (!Object.keys(campos).length) return null;
   const { error } = await supabase.from("leads").update(campos).eq("id", leadId);
   if (!error) return null;
   if (/crono_tope_mes/.test(error.message)) return "Falta correr la migración 084.";
+  if (/crono_fin|crono_laborables/.test(error.message)) return "Falta correr la migración 091.";
   return /column|schema cache/i.test(error.message) ? "Falta correr la migración 082." : error.message;
+}
+
+/**
+ * El mismo día, N meses después, RECORTADO al último día del mes.
+ *
+ * JavaScript desborda: el 31 de enero más un mes le da el 3 de marzo, y
+ * entonces "del 31 de enero al 28 de febrero" salía 0,9 meses. Un mes después
+ * del 31 de enero es el 28 de febrero —así lo cuenta cualquiera y así lo
+ * cuenta un contrato—, y si no se recorta el plazo queda corrido tres días.
+ */
+function sumarMeses(f, n) {
+  const dia = f.getDate();
+  const d = new Date(f.getFullYear(), f.getMonth() + n, 1, 12);
+  const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(dia, ultimo));
+  return d;
+}
+
+/**
+ * Cuántos meses hay entre dos fechas, para mostrar al lado de la fecha de fin.
+ *
+ * Con un decimal: "8,4 meses" dice algo que "8" esconde. Se cuenta por meses
+ * de calendario y el resto en días sobre el largo del último mes, no dividiendo
+ * por 30: entre el 31 de enero y el 28 de febrero hay un mes, no 0,93.
+ */
+export function mesesEntre(inicio, fin) {
+  const a = new Date(`${String(inicio).slice(0, 10)}T12:00:00`);
+  const b = new Date(`${String(fin).slice(0, 10)}T12:00:00`);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  let meses = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  if (sumarMeses(a, meses) > b) meses -= 1;
+  const desde = sumarMeses(a, meses);
+  const hasta = sumarMeses(a, meses + 1);
+  const resto = (b - desde) / (hasta - desde);
+  return Math.round((meses + resto) * 10) / 10;
+}
+
+/** La fecha de terminación que sale de un plazo en meses. */
+export function finDeMeses(inicio, meses) {
+  if (!meses) return null;
+  const f = new Date(`${String(inicio).slice(0, 10)}T12:00:00`);
+  if (isNaN(f)) return null;
+  const fin = sumarMeses(f, Math.round(meses));
+  // El día del fin no se cuenta: de marzo a marzo son los meses de por medio.
+  fin.setDate(fin.getDate() - 1);
+  return fin.toISOString().slice(0, 10);
+}
+
+/**
+ * Los días de trabajo del plazo, venga de una fecha o de unos meses.
+ *
+ * LA FECHA MANDA cuando está. Un contrato de obra casi nunca dice "ocho
+ * meses": dice "hasta el 15 de noviembre", y traducir esa fecha a meses a ojo
+ * mete días de diferencia justo en el número contra el que se mide todo.
+ */
+export function diasHastaFin(inicio, fin, cal) {
+  if (!fin || !cal) return 0;
+  const a = new Date(`${String(inicio || "").slice(0, 10)}T12:00:00`);
+  const b = new Date(`${String(fin).slice(0, 10)}T12:00:00`);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  return Math.max(1, cal.entre(a, b));
 }
 
 /**

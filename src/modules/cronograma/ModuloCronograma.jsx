@@ -12,7 +12,7 @@ import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
 const PanelValorado = lazy(() => import("./PanelValorado"));
 import PartirEnEtapas from "./PartirEnEtapas";
-import { guardarPlazo, desfase, diasDelPlazo } from "./plazo";
+import { guardarPlazo, desfase, diasDelPlazo, mesesEntre, finDeMeses, diasHastaFin } from "./plazo";
 import { plataDelPlan } from "./plataDelPlan";
 import { fmt } from "../controlObra/calculos";
 
@@ -35,6 +35,17 @@ import { fmt } from "../controlObra/calculos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const dia = f => (f ? aFecha(f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "—");
+
+/**
+ * Qué días se trabaja. Tres opciones y no siete casillas: nadie contrata una
+ * obra que trabaje martes y jueves, y siete casillas invitan a armar
+ * calendarios que después ningún subcontratista cumple.
+ */
+const JORNADAS = [
+  { id: "lv", label: "Lun a vie", dias: [1, 2, 3, 4, 5], pista: "Sin sábados: obra en edificio ocupado, oficina, interiores" },
+  { id: "ls", label: "Lun a sáb", dias: [1, 2, 3, 4, 5, 6], pista: "Lo normal en obra acá" },
+  { id: "todos", label: "Todos", dias: [0, 1, 2, 3, 4, 5, 6], pista: "Obra a tres turnos o con plazo contra reloj" },
+];
 
 export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) {
   const [proyectos, setProyectos] = useState([]);
@@ -86,9 +97,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     // vacía como si el usuario no tuviera proyectos. Eso es una mentira, y
     // manda a buscar el problema al lugar equivocado: lo que falta es una
     // migración, no los proyectos. Se pide, y si no está se sigue sin él.
+    // Mismo cuidado con la 091 —fecha de terminación y días de trabajo—: se
+    // piden, y si no están se sigue con lo que haya en vez de dejar la
+    // pantalla vacía. Tres escalones, del más completo al mínimo.
     const base = "id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead";
     (async () => {
-      let { data, error } = await supabase.from("leads").select(`${base},crono_meses`).order("nombre");
+      let { data, error } = await supabase.from("leads")
+        .select(`${base},crono_meses,crono_fin,crono_laborables`).order("nombre");
+      if (error && /crono_fin|crono_laborables/.test(error.message)) {
+        ({ data, error } = await supabase.from("leads").select(`${base},crono_meses`).order("nombre"));
+      }
       if (error) {
         setSinPlazo(/crono_meses/.test(error.message));
         ({ data } = await supabase.from("leads").select(base).order("nombre"));
@@ -283,7 +301,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // el Gantt, el valorado y la foto de referencia digan lo mismo.
   const platas = plataDelPlan(actividades, rubros);
 
-  const diasDeContrato = diasDelPlazo(lead.crono_inicio || hoy(), lead.crono_meses, cal);
+  // LA FECHA MANDA cuando está; si no, se deriva de los meses, para que el
+  // campo nunca se vea vacío habiendo plazo.
+  const finPuesto = lead.crono_fin || finDeMeses(lead.crono_inicio || hoy(), lead.crono_meses);
+  const laborablesHoy = lead.crono_laborables || [1, 2, 3, 4, 5, 6];
+  // Los días del plazo, contados en el calendario de la obra: con la fecha de
+  // terminación si está —que es exacta— y con los meses si no.
+  const diasDeContrato = finPuesto
+    ? diasHastaFin(lead.crono_inicio || hoy(), finPuesto, cal)
+    : diasDelPlazo(lead.crono_inicio || hoy(), lead.crono_meses, cal);
   const desvio = diasDeContrato && todas.length ? plan.duracion - diasDeContrato : 0;
 
   // En qué día de obra cae una fecha. Negativo antes del arranque: el anticipo
@@ -944,23 +970,81 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 setLead(l => ({ ...l, crono_inicio: e.target.value }));
               }} />
           </div>
+          {/* TERMINA, por fecha. Un contrato de obra casi nunca dice "ocho
+              meses": dice "hasta el 15 de noviembre". Traducir esa fecha a
+              meses a ojo mete días de diferencia justo en el número contra el
+              que se mide todo el cronograma.
+
+              Los dos campos escriben lo mismo y se siguen: poner la fecha
+              calcula los meses y poner los meses calcula la fecha. Manda la
+              fecha cuando está, porque es la que alguien escribió a mano. */}
           <div>
             <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
-              DURA (MESES)
+              TERMINA
+            </label>
+            <input type="date" value={finPuesto || ""}
+              style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }}
+              onChange={async e => {
+                const f = e.target.value || null;
+                const arranque = lead.crono_inicio || hoy();
+                if (f && f < arranque) { setError("La fecha de terminación no puede ser antes del arranque."); return; }
+                const m = f ? Math.max(1, Math.round(mesesEntre(arranque, f))) : null;
+                const err = await guardarPlazo(lead.id, { fin: f, meses: m });
+                if (err) { setError(err); return; }
+                setError("");
+                setLead(l => ({ ...l, crono_fin: f, crono_meses: m }));
+              }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+              O DURA (MESES)
             </label>
             <Numero value={lead.crono_meses ?? null} min={1} max={120} vacio={null} placeholder="—"
               style={{ width: 82, padding: "6px 9px", fontSize: 12 }}
               onCommit={async m => {
-                const err = await guardarPlazo(lead.id, { meses: m });
+                const f = m ? finDeMeses(lead.crono_inicio || hoy(), m) : null;
+                const err = await guardarPlazo(lead.id, { meses: m, fin: f });
                 if (err) { setError(err); return; }
                 setError("");
-                setLead(l => ({ ...l, crono_meses: m }));
+                setLead(l => ({ ...l, crono_meses: m, crono_fin: f }));
               }} />
+          </div>
+
+          {/* QUÉ DÍAS SE TRABAJA. El motor lo sabía desde siempre y no había
+              cómo decírselo: toda obra quedaba en lunes a sábado. No es un
+              detalle —entre seis días y cinco hay un 17% de calendario, y en
+              una obra de ocho meses eso son más de treinta días—. */}
+          <div>
+            <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+              SE TRABAJA
+            </label>
+            <div style={{ display: "flex", gap: 3 }}>
+              {JORNADAS.map(j => {
+                const puesta = JSON.stringify(laborablesHoy) === JSON.stringify(j.dias);
+                return (
+                  <button key={j.id} title={j.pista}
+                    onClick={async () => {
+                      const err = await guardarPlazo(lead.id, { laborables: j.dias });
+                      if (err) { setError(err); return; }
+                      setError("");
+                      setLead(l => ({ ...l, crono_laborables: j.dias }));
+                    }}
+                    style={{ border: `1px solid ${puesta ? colors.brand : colors.border}`,
+                      background: puesta ? colors.brandSoft : "#fff",
+                      color: puesta ? colors.brand : colors.inkSoft, borderRadius: colors.radiusSm,
+                      padding: "6px 9px", fontSize: 11.5, fontWeight: puesta ? 700 : 400,
+                      cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                    {j.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, flex: 1, minWidth: 220 }}>
             <strong style={{ color: colors.inkSoft }}>El plazo del proyecto.</strong> Se escribe una sola vez acá y lo
             usan este cronograma y el cronograma valorado del control de obra. Escribilo y apretá Enter.
-            {diasDeContrato > 0 && <> Son <strong style={{ color: colors.inkSoft }}>{diasDeContrato} días de trabajo</strong>.</>}
+            {diasDeContrato > 0 && <> Son <strong style={{ color: colors.inkSoft }}>{diasDeContrato} días de trabajo</strong>
+              {" "}con la jornada puesta.</>}
           </div>
 
           {/* EL PLAN CONTRA EL CONTRATO.
