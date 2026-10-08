@@ -12,6 +12,7 @@ import LibroFacturas from "./LibroFacturas";
 import PanelDuplicados from "./PanelDuplicados";
 import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
+import PanelCurar from "./PanelCurar";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
 import { comprometidoPorGrupo } from "./calculos";
@@ -185,6 +186,15 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
                 )}
               </div>
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} comprometido={comprometido} />
+
+              {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.
+                  Debajo de la tabla porque es mantenimiento, no lectura: uno
+                  viene a mirar los números y de vez en cuando a ordenar. */}
+              {/* Sin guardia propia, igual que Agrupaciones: en este módulo
+                  quien entra al control lo edita. `puede` es una función —no
+                  un booleano— así que ponerla acá habría sido una guardia que
+                  siempre deja pasar, que es peor que ninguna. */}
+              <PanelCurar obra={obra} rubros={rubros} porRubro={porRubro} onCambio={cargar} />
 
               {/* Lo que el Excel tenía en dos hojas y uno cruzaba a mano: arriba
                   en qué va cada rubro, abajo las facturas que lo movieron. */}

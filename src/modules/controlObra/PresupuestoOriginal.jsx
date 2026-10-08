@@ -10,11 +10,26 @@ const n = v => Number(v) || 0;
 // y precios del archivo, sus subtotales y el total. No cambia al agrupar ni al
 // cargar facturas: es la referencia contra la que se mide todo lo demás.
 export default function PresupuestoOriginal({ obra, rubros }) {
-  const orden = rubros.slice().sort((a, b) => (n(a.capitulo_orden) - n(b.capitulo_orden)) || (n(a.orden) - n(b.orden)));
+  // EL CAPÍTULO CON EL QUE SE APROBÓ, no el de trabajo.
+  //
+  // El control se puede acomodar —esconder renglones en $0, mover rubros de
+  // capítulo, crear capítulos nuevos— y nada de eso puede llegar hasta acá:
+  // este documento tiene que poder imprimirse igual que el día que se firmó,
+  // porque es la única defensa que tiene una obra en una discusión de
+  // planillas. De ahí que lea `capitulo_original` y no mire `oculto`.
+  //
+  // El `??` es para lo que se cargó antes de la 092, donde el original no se
+  // llenó: ahí el de trabajo ES el original, nadie movió nada todavía.
+  const cap = r => r.capitulo_original ?? r.capitulo;
+  const capOrden = r => n(r.capitulo_orden_original ?? r.capitulo_orden);
+  // Los renglones agregados en el control nunca estuvieron en lo aprobado.
+  const orden = rubros.slice()
+    .filter(r => r.origen !== "control")
+    .sort((a, b) => (capOrden(a) - capOrden(b)) || (n(a.orden) - n(b.orden)));
   const capitulos = [];
   orden.forEach(r => {
     let c = capitulos[capitulos.length - 1];
-    if (!c || c.nombre !== r.capitulo) { c = { nombre: r.capitulo, rubros: [] }; capitulos.push(c); }
+    if (!c || c.nombre !== cap(r)) { c = { nombre: cap(r), rubros: [] }; capitulos.push(c); }
     c.rubros.push(r);
   });
 

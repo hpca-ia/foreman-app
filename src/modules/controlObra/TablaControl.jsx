@@ -78,6 +78,16 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   const detalle = comprometido?.detalle || [];
   const claves = new Set(grupos.map(g => (modo === "actividad" ? g.clave : g.capitulo)));
   const sueltos = detalle.filter(d => !claves.has(modo === "actividad" ? d.claveAct : d.capitulo));
+  // De qué está hecho el comprometido. Un número solo no se puede discutir ni
+  // bajar; sabiendo que son tres aprobadas y una esperando visto, se sabe a
+  // quién ir a buscar. Al final de la obra tiene que quedar en cero.
+  const ETIQUETA = {
+    pendiente_aprobacion: "esperando visto", aprobada: "aprobadas", comprada: "compradas",
+  };
+  const desgloseComprometido = Object.entries(comprometido?.porEstado || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([e, v]) => `$${fmt(v)} ${ETIQUETA[e] || e}`)
+    .join(" · ") + "\n\nPedidos de compra vivos y sin factura. Cuando la factura entra al control, dejan de estar comprometidos: al final de la obra esto queda en cero.";
 
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
@@ -190,6 +200,20 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             </div>
           )}
 
+          {/* LO DEVUELTO, que no es comprometido pero tampoco es nada.
+              Nadie autorizó esa plata —el pedido se rebotó—, así que no entra
+              en el número de arriba. Pero hay alguien que tiene que corregirlo
+              o dejarlo morir, y eso es lo único que hay que saber de él. */}
+          {comprometido?.devueltas > 0 && (
+            <div style={{ padding: "8px 14px", background: colors.surface,
+              borderBottom: `1px solid ${colors.border}`, fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+              Hay <strong style={{ color: colors.danger }}>${fmt(comprometido.devuelto)}</strong> en{" "}
+              {comprometido.devueltas === 1 ? "un pedido devuelto" : `${comprometido.devueltas} pedidos devueltos`}{" "}
+              sin resolver. No cuenta como comprometido —nadie lo aprobó— pero alguien tiene que corregirlo
+              o anularlo: mientras siga ahí, no es plata hablada, es una tarea sin dueño.
+            </div>
+          )}
+
           {/* Total */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "11px 14px", background: colors.ink, fontSize: 12, fontWeight: 700, color: "#fff", alignItems: "center" }}>
             <span>TOTAL OBRA</span>
@@ -198,7 +222,9 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
             <span style={{ textAlign: "right" }}>${fmt(totales.anterior)}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.periodo)}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.acumulado)}</span>
-            <span style={{ textAlign: "right" }}>{comprometido?.total ? `$${fmt(comprometido.total)}` : "—"}</span>
+            <span style={{ textAlign: "right" }}
+              title={comprometido?.total ? desgloseComprometido : undefined}>
+              {comprometido?.total ? `$${fmt(comprometido.total)}` : "—"}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.saldo)}</span>
             <span style={{ textAlign: "right" }}>{(totales.pct * 100).toFixed(1)}%</span>
           </div>

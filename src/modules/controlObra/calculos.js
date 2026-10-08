@@ -140,7 +140,31 @@ const SIN_ACTIVIDAD = "SIN AGRUPAR";
  * la factura entra a Control de Obra, ese monto deja de estar comprometido
  * porque ya está invertido: contarlo dos veces inflaría el capítulo.
  */
-const VIVAS = ["pendiente_aprobacion", "requiere_info", "aprobada", "comprada"];
+// Las que comprometen plata de verdad.
+//
+// NO entra "requiere_info" —que en pantalla se llama DEVUELTA—: un pedido que
+// el gerente rebotó es justo lo contrario de plata comprometida. Nadie se
+// comprometió a nada; está esperando que lo corrijan o que muera. Contarlo
+// inflaba el comprometido con pedidos rechazados, que es como aparecían
+// $1.830 comprometidos en una obra sin una sola factura.
+//
+// Tampoco "borrador" (no se pidió todavía), "anulada" (se mató) ni "recibida"
+// (ya llegó: su plata entra por la factura, y contarla dos veces la duplica).
+const VIVAS = ["pendiente_aprobacion", "aprobada", "comprada"];
+
+// Lo pedido y todavía sin aprobar es más blando que lo aprobado: se muestra
+// aparte para que el número grande no mezcle dos cosas distintas.
+const BLANDAS = ["pendiente_aprobacion"];
+
+// LO DEVUELTO SE CUENTA APARTE, y no dentro del comprometido.
+//
+// Un pedido devuelto va para ATRÁS: alguien lo miró y lo rebotó. Lo que
+// importa de él no es la plata —nadie la autorizó— sino que hay una persona
+// que tiene que corregirlo o dejarlo morir. Mostrarlo como comprometido
+// mezcla una deuda con una tarea, y además deja un número que no baja solo:
+// una devuelta que nadie arregla se queda viva para siempre, y el comprometido
+// —que al final de la obra tiene que dar cero— nunca llega.
+const DEVUELTAS = ["requiere_info"];
 
 export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   const capituloDeRubro = new Map(rubros.map(r => [r.id, r.capitulo || SIN_CAPITULO]));
@@ -151,7 +175,12 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
   // vino: el número queda ahí, sin explicación y sin forma de bajarlo.
   const detalle = [];
   let total = 0;
+  let devuelto = 0, devueltas = 0;
   solicitudes.forEach(s => {
+    if (DEVUELTAS.includes(s.estado) && !s.factura_id) {
+      devuelto += n(s.monto ?? s.monto_estimado);
+      devueltas += 1;
+    }
     if (!VIVAS.includes(s.estado) || s.factura_id) return;
     const monto = n(s.monto ?? s.monto_estimado);
     if (!monto) return;
@@ -165,7 +194,7 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
     porActividad[claveAct] = (porActividad[claveAct] || 0) + monto;
     if (s.obra_rubro_id) porRubro[s.obra_rubro_id] = (porRubro[s.obra_rubro_id] || 0) + monto;
     detalle.push({
-      id: s.id, monto, estado: s.estado,
+      id: s.id, monto, estado: s.estado, firme: !BLANDAS.includes(s.estado),
       descripcion: s.descripcion || "",
       capitulo: capitulo || SIN_CAPITULO, claveAct,
       // Un pedido que no apunta a ningún rubro ni a ninguna agrupación es el
@@ -174,7 +203,13 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = []) {
     });
     total += monto;
   });
-  return { porCapitulo, porActividad, porRubro, detalle, total };
+  // El desglose por estado, para poder decir de qué está hecho el número.
+  // "Comprometido: $1.830" sin decir de qué es un número que no se puede
+  // discutir ni bajar.
+  const porEstado = {};
+  detalle.forEach(d => { porEstado[d.estado] = (porEstado[d.estado] || 0) + d.monto; });
+  const firme = detalle.filter(d => d.firme).reduce((t, d) => t + d.monto, 0);
+  return { porCapitulo, porActividad, porRubro, detalle, porEstado, firme, total, devuelto, devueltas };
 }
 
 /**
@@ -207,6 +242,10 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
   // presupuesto, pero su plata ya no es parte de lo que hay que hacer.
   const mapa = new Map();
   rubros.slice()
+    // Lo escondido no se dibuja. Solo se puede esconder lo que está en $0 y
+    // sin plata movida, así que esto no cambia ningún total: lo único que
+    // cambia es cuánto ruido hay que leer todos los días.
+    .filter(r => !r.oculto)
     .sort((a, b) => ((a.capitulo_orden ?? 9999) - (b.capitulo_orden ?? 9999)) || (a.orden - b.orden) || (a.numero - b.numero))
     .forEach(r => {
       const act = porActividad ? dic.get(r.actividad_id) : null;
