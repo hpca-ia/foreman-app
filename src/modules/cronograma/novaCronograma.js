@@ -186,13 +186,31 @@ Devuelves SOLO JSON, sin markdown. USA EL ID DE LA AGRUPACIÓN COMO REFERENCIA
 —no inventes otra numeración— y no mandes el nombre: ya lo tengo, es el del
 control de obra y es el que vale.
 
-{"actividades":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia"},
+{"actividades":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia",
+                 "incluye":["replanteo y nivelación","mampostería de bloque","mochetas y dinteles","curado"]},
                 {"id":13,"dias":40,"porque":"importada, 8 semanas de fabricacion",
                  "partes":[["anticipo",1,50],["fabricación",30,40],["instalación de grada",9,10]]}],
  "dependencias":[[12,13,0],[13,14,-5]]}
 
 "actividades": una por agrupación. "id" es el id de la agrupación, "dias" los
 días hábiles que lleva, "porque" la cuenta que te llevó a ese número.
+
+"incluye": QUÉ SE HACE ADENTRO DE ESA BARRA Y NO ES UN RUBRO. Cuatro a seis
+renglones, cortos, en castellano de obra y EN EL ORDEN EN QUE SE EJECUTAN.
+
+El presupuesto cobra "montaje de estructura"; adentro de ese montaje hay
+replanteo, nivelación de placas, izaje, torque de pernos, soldadura de
+rigidizadores y pruebas. Nada de eso es un rubro y es exactamente lo que se
+programa y se supervisa. Eso es lo que va acá.
+
+Sacalo de los rubros que te paso: si el capítulo trae "enlucido vertical" y
+"enlucido de fajas", lo que hay adentro es picado, maestreado, champeado,
+enlucido y curado. Lo que NO va: repetir el nombre del capítulo, repetir los
+rubros tal cual, ni poner "ejecución de los trabajos", que no dice nada.
+
+Si una agrupación no tiene trabajo de obra adentro —gastos generales,
+honorarios, pólizas, dirección de proyecto— mandá "incluye" vacío o no lo
+mandes. No inventes tareas para llenarlo.
 
 "partes" cuando el capítulo son VARIOS TRABAJOS que pasan en momentos
 distintos —[nombre, días, % de su plata]—. Si está, "dias" se ignora. El
@@ -210,8 +228,8 @@ detallado. Las partes van encadenadas en el orden en que las escribas.
 una espera real, NEGATIVO es un traslape. Si hace falta otro tipo de enlace,
 [de, a, retardo, "CC"] con "CC" o "FF".
 
-ESOS CUATRO CAMPOS Y NINGUNO MÁS: "id", "dias", "porque" y, si hace falta,
-"partes". No mandes el nombre de la agrupación —ya lo tengo—, no repitas la
+ESOS CINCO CAMPOS Y NINGUNO MÁS: "id", "dias", "porque", "incluye" y, si hace
+falta, "partes". No mandes el nombre de la agrupación —ya lo tengo—, no repitas la
 lista, no agregues campos que no te pedí y no expliques fuera de "porque", que
 va en diez palabras. Cada palabra de más es una chance de que la respuesta no
 entre entera y se corte a la mitad.
@@ -411,7 +429,10 @@ function expandir(p) {
       return { ...a, ref };
     }
     const id = Number(a.id);
-    const base = { agrupacion_id: id, nombre: "", porque: a.porque || "" };
+    const incluye = Array.isArray(a.incluye)
+      ? a.incluye.map(x => String(x || "").trim().slice(0, 80)).filter(Boolean).slice(0, 8)
+      : [];
+    const base = { agrupacion_id: id, nombre: "", porque: a.porque || "", incluye };
     const partes = Array.isArray(a.partes) ? a.partes : a.etapas;
 
     if (!Array.isArray(partes) || partes.length < 2) {
@@ -508,6 +529,9 @@ export function ordenar(entrada, agrupaciones, cal) {
         peso: n(a.peso),
         agrupacion_id: Number(a.agrupacion_id),
         porque: a.porque || "",
+        // Lo que se hace adentro y no es rubro. Se conserva tal cual: es lo
+        // que después arranca el plan semanal sin que nadie lo escriba.
+        incluye: Array.isArray(a.incluye) ? a.incluye : [],
         orden: i,
       };
     });
@@ -823,12 +847,19 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
     nombre: a.nombre, duracion: a.duracion,
     obra_actividad_id: a.agrupacion_id, nota: a.porque || null, orden: a.orden,
     etapa: a.etapa || "ejecucion", peso_pct: a.peso ?? null,
+    incluye: a.incluye?.length ? a.incluye : null,
   }));
   let { data: creadas, error } = await supabase.from("cronograma_actividades").insert(filas).select();
   // Sin la 083 no existen etapa ni peso: el cronograma entra igual, y lo que
   // se pierde es poder derivar el valorado de él.
+  // Sin la 093 no existe `incluye`; sin la 083, ni etapa ni peso. Se va
+  // soltando lo que la base no tenga antes que perder el cronograma entero.
+  if (error && /incluye/i.test(error.message)) {
+    const sinIncluye = filas.map(({ incluye, ...resto }) => resto);
+    ({ data: creadas, error } = await supabase.from("cronograma_actividades").insert(sinIncluye).select());
+  }
   if (error && /column|schema cache/i.test(error.message)) {
-    const limpias = filas.map(({ etapa, peso_pct, ...resto }) => resto);
+    const limpias = filas.map(({ etapa, peso_pct, incluye, ...resto }) => resto);
     ({ data: creadas, error } = await supabase.from("cronograma_actividades").insert(limpias).select());
   }
   if (error) return { error: /schema cache|does not exist/i.test(error.message) ? "Falta correr la migración 076." : error.message };

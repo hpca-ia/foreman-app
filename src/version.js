@@ -1,3 +1,3 @@
 // Generado por scripts/version.mjs antes de cada build. No se edita a mano.
-export const VERSION = "b5ccf3a";
-export const COMPILADO = "2026-10-08 13:53";
+export const VERSION = "df40ba7";
+export const COMPILADO = "2026-10-08 14:01";

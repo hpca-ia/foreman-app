@@ -577,6 +577,55 @@ export default function TablaGantt({
                         </div>
                       )}
 
+                      {/* QUÉ SE HACE ADENTRO DE ESTA BARRA, y no es un rubro.
+                          El presupuesto cobra "montaje de estructura"; adentro
+                          hay replanteo, izaje, torque de pernos y pruebas. Nada
+                          de eso es un rubro y es exactamente lo que se programa
+                          y se supervisa — hoy vive en la cabeza del residente, y
+                          por eso el plan semanal arranca en blanco todas las
+                          semanas. De acá sale. */}
+                      <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px solid ${colors.neutralSoft}` }}>
+                        <label style={titulito}>QUÉ SE HACE ADENTRO</label>
+                        {(a.incluye || []).length === 0 && !editable && (
+                          <div style={{ fontSize: 11, color: colors.muted }}>—</div>
+                        )}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 3 }}>
+                          {(a.incluye || []).map((t, k) => (
+                            <span key={`${t}-${k}`}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                                border: `1px solid ${colors.border}`, borderRadius: 20, padding: "2px 5px 2px 10px",
+                                fontSize: 11, color: colors.inkSoft, background: "#fff" }}>
+                              {t}
+                              {editable && (
+                                <button title="Quitar"
+                                  onClick={() => onCambiar(a, { incluye: (a.incluye || []).filter((_, i2) => i2 !== k) })}
+                                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                                    color: colors.border, display: "flex" }}>
+                                  <X size={11} />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {editable && (
+                            <input placeholder="+ agregar un trabajo y Enter"
+                              onKeyDown={e => {
+                                if (e.key !== "Enter") return;
+                                const t = e.target.value.trim();
+                                if (!t) return;
+                                onCambiar(a, { incluye: [...(a.incluye || []), t.slice(0, 80)] });
+                                e.target.value = "";
+                              }}
+                              style={{ ...inputStyle, width: 220, padding: "3px 9px", fontSize: 11 }} />
+                          )}
+                        </div>
+                        {editable && (
+                          <div style={{ fontSize: 10, color: colors.muted, marginTop: 4, lineHeight: 1.45 }}>
+                            Lo que se ejecuta adentro y no es rubro del presupuesto: replanteo, pruebas, curado.
+                            De acá arranca el plan semanal en vez de la hoja en blanco.
+                          </div>
+                        )}
+                      </div>
+
                       {editable && (
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                           {conEtapas && (

@@ -272,10 +272,35 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
           </div>
           {abierto?.actividad && (
             <div style={{ marginTop: 8, display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11.5, color: colors.ink }}>«{abierto.actividad.nombre}» ¿en qué día?</span>
+              <span style={{ fontSize: 11.5, color: colors.ink, flexBasis: "100%" }}>
+                «{abierto.actividad.nombre}» ¿en qué día?
+              </span>
+              {/* LO QUE HAY ADENTRO DE LA BARRA, que no son rubros: replanteo,
+                  pruebas, curado. Es lo que de verdad se escribe en un plan
+                  semanal, y hasta acá había que teclearlo de memoria todas las
+                  semanas aunque el cronograma ya lo supiera. */}
+              {(abierto.actividad.incluye || []).length > 0 && (
+                <div style={{ flexBasis: "100%", display: "flex", gap: 5, flexWrap: "wrap",
+                  alignItems: "center", marginBottom: 2 }}>
+                  <span style={{ fontSize: 10.5, color: colors.muted }}>o uno de sus trabajos:</span>
+                  {abierto.actividad.incluye.map((t, k) => (
+                    <button key={`${t}-${k}`}
+                      onClick={() => setAbierto(x => ({ ...x, texto: x.texto === t ? null : t }))}
+                      style={{ background: abierto.texto === t ? colors.brand : "#fff",
+                        color: abierto.texto === t ? "#fff" : colors.inkSoft,
+                        border: `1px solid ${abierto.texto === t ? colors.brand : colors.border}`,
+                        borderRadius: 14, padding: "2px 9px", fontSize: 11, cursor: "pointer",
+                        fontFamily: colors.font }}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
               {fechas.map(f => (
                 <button key={f} onClick={async () => {
-                  await sumar(f, "tarea", abierto.actividad.nombre, {
+                  // Si eligió un trabajo de adentro, ese es el texto; si no,
+                  // la actividad entera, como siempre.
+                  await sumar(f, "tarea", abierto.texto || abierto.actividad.nombre, {
                     cronograma_actividad_id: abierto.actividad.id,
                     obra_actividad_id: abierto.actividad.obra_actividad_id || null,
                   });
