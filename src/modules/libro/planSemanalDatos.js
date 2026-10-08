@@ -155,6 +155,68 @@ export function loQueTocaEstaSemana(actividades = [], desde, hasta) {
 }
 
 /**
+ * El lunes de la semana de una fecha.
+ *
+ * Es la clave con la que se agrupa el histórico. Se calcula con la fecha al
+ * mediodía para que ningún cambio de horario corra un día, y a mano en vez de
+ * con el número de semana ISO: la semana 1 de enero puede tener días de
+ * diciembre, y entonces un plan de fin de año aparecería partido en dos
+ * semanas que en la obra fueron una sola.
+ */
+export function lunesDeLaSemana(fecha) {
+  const d = new Date(`${String(fecha).slice(0, 10)}T12:00:00`);
+  if (isNaN(d)) return String(fecha).slice(0, 10);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Las semanas ya planificadas de esta obra, de la más nueva a la más vieja.
+ *
+ * El plan se guarda solo, día por día, pero sin un lugar donde verlas juntas
+ * cada semana era un papel que se escribía y se perdía. Acá está la historia:
+ * qué se planificó cada semana y cómo salió.
+ *
+ * Y CÓMO SALIÓ ES EL DATO. Una lista de semanas con "12 de 15" al lado es lo
+ * que permite ver que la obra viene cumpliendo el 80% y que hace tres semanas
+ * que lo que falla es lo mismo. Eso no se ve mirando una semana sola, y es la
+ * única razón por la que vale la pena guardar las viejas.
+ */
+export async function historialDePlanes(leadId) {
+  if (!leadId) return { semanas: [], sinTablas: false };
+  const { data: dias, error } = await supabase.from("obra_plan_dias")
+    .select("id,fecha").eq("lead_id", leadId).order("fecha", { ascending: false });
+  if (error) return { semanas: [], sinTablas: falta(error) };
+  if (!dias?.length) return { semanas: [], sinTablas: false };
+
+  const { data: items } = await supabase.from("obra_plan_items")
+    .select("plan_dia_id,tipo,hecha,motivo").in("plan_dia_id", dias.map(d => d.id));
+  const porDia = new Map();
+  (items || []).forEach(i => {
+    if (!porDia.has(i.plan_dia_id)) porDia.set(i.plan_dia_id, []);
+    porDia.get(i.plan_dia_id).push(i);
+  });
+
+  const semanas = new Map();
+  dias.forEach(d => {
+    const k = lunesDeLaSemana(d.fecha);
+    if (!semanas.has(k)) semanas.set(k, { lunes: k, desde: d.fecha, hasta: d.fecha, dias: 0, items: [] });
+    const s = semanas.get(k);
+    s.dias += 1;
+    if (d.fecha < s.desde) s.desde = d.fecha;
+    if (d.fecha > s.hasta) s.hasta = d.fecha;
+    s.items.push(...(porDia.get(d.id) || []));
+  });
+
+  return {
+    semanas: [...semanas.values()]
+      .map(s => ({ ...s, ...comoSalio(s.items) }))
+      .sort((a, b) => b.lunes.localeCompare(a.lunes)),
+    sinTablas: false,
+  };
+}
+
+/**
  * Cómo salió la semana: lo planificado contra lo hecho.
  *
  * El número que importa no es cuántas tareas se hicieron, es CUÁLES NO y por

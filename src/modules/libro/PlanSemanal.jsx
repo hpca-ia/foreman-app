@@ -4,7 +4,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHecha, guardarMotivo,
-  diasEntre, loQueTocaEstaSemana, comoSalio } from "./planSemanalDatos";
+  diasEntre, loQueTocaEstaSemana, comoSalio, historialDePlanes } from "./planSemanalDatos";
 import { cargarPlan as cargarGantt } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
 import { pdfPlanSemanal } from "./pdfPlanSemanal";
@@ -60,12 +60,24 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   // A quién se le manda. Por defecto el gerente y el director, que son los que
   // tienen que saber qué se va a hacer esta semana sin entrar a buscarlo.
   const [mandando, setMandando] = useState(null);
+  // Las semanas ya planificadas. Sin un lugar donde verlas juntas, cada
+  // semana era un papel que se escribía y se perdía.
+  const [historial, setHistorial] = useState([]);
 
   const cargar = useCallback(async () => {
     const r = await cargarPlan(lead?.id, desde, hasta);
     setDias(r.dias); setItems(r.items); setSinTablas(r.sinTablas);
   }, [lead?.id, desde, hasta]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // El histórico se vuelve a leer cuando cambia el plan: marcar una tarea
+  // cambia el "12 de 15" de su semana, y una lista que no se entera es una
+  // lista en la que uno deja de confiar.
+  useEffect(() => {
+    let vivo = true;
+    historialDePlanes(lead?.id).then(r => { if (vivo) setHistorial(r.semanas); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [lead?.id, items]);
 
   // Lo que el cronograma dice que toca. El plan no arranca en blanco: las
   // barras ya saben qué cae esta semana, y escribir a mano lo que la app ya
@@ -153,6 +165,16 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
             )}
           </div>
         )}
+      </div>
+
+      {/* Que se sepa que marcar escribe el libro. Estaba solo en el tooltip
+          de cada check, o sea en ningún lado: nadie pasa el mouse por encima
+          de un control que ya entiende. Y es la mitad de por qué el plan vive
+          acá adentro — si no se dice, el residente sigue escribiendo el libro
+          a mano además de marcar. */}
+      <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.55, marginBottom: 10 }}>
+        Cada actividad que marqués hecha <strong style={{ color: colors.inkSoft }}>se escribe sola en el libro de obra
+        de ese día</strong>. Lo que quede sin marcar necesita decir por qué: eso es lo que después explica un atraso.
       </div>
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 9 }}>{error}</div>}
@@ -445,6 +467,50 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* LAS SEMANAS ANTERIORES.
+          Una lista de semanas con su "12 de 15" al lado es lo que deja ver que
+          la obra viene cumpliendo el 80%, y que hace tres semanas lo que falla
+          es lo mismo. Eso no se ve mirando una semana sola, y es la única
+          razón por la que vale la pena guardar las viejas. */}
+      {historial.length > 1 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>
+            SEMANAS ANTERIORES
+          </div>
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+            {historial.map(sem => {
+              const puesta = sem.desde === desde && sem.hasta === hasta;
+              return (
+                <button key={sem.lunes} onClick={() => { setDesde(sem.desde); setHasta(sem.hasta); }}
+                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
+                    padding: "9px 12px", background: puesta ? colors.brandSoft : "none", border: "none",
+                    borderTop: `1px solid ${colors.neutralSoft}`, cursor: "pointer", fontFamily: colors.font }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: colors.ink }}>
+                    {comoSeLee(sem.desde)} al {comoSeLee(sem.hasta)}
+                    <span style={{ color: colors.muted }}> · {sem.dias} {sem.dias === 1 ? "día" : "días"}</span>
+                  </span>
+                  {sem.total > 0 ? (
+                    <>
+                      <span style={{ fontSize: 11.5, color: colors.inkSoft }}>{sem.hechas} de {sem.total}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, minWidth: 34, textAlign: "right",
+                        color: sem.pct >= 80 ? colors.success : sem.pct >= 50 ? colors.warning : colors.danger }}>
+                        {sem.pct}%
+                      </span>
+                    </>
+                  ) : <span style={{ fontSize: 11.5, color: colors.muted }}>sin actividades</span>}
+                  {sem.sinMotivo.length > 0 && (
+                    <span title={`${sem.sinMotivo.length} sin hacer y sin decir por qué`}
+                      style={{ fontSize: 10, fontWeight: 700, color: colors.warning }}>
+                      {sem.sinMotivo.length} sin motivo
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
