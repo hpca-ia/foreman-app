@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // El libro del día: lo que pasó en la obra, escrito el día que pasó.
 //
@@ -177,13 +178,8 @@ export async function borrarFoto(foto) {
 }
 
 /** Enlaces temporales para mirar las fotos, que el depósito es privado. */
-export async function enlacesDeFotos(fotos = []) {
-  if (!fotos.length) return {};
-  const { data } = await supabase.storage.from("task-files")
-    .createSignedUrls(fotos.map(f => f.storage_path), 3600);
-  const mapa = {};
-  (data || []).forEach((x, i) => { if (x?.signedUrl) mapa[fotos[i].id] = x.signedUrl; });
-  return mapa;
+export async function enlacesDeFotos(archivos = []) {
+  return enlacesFirmados(archivos);
 }
 
 /**

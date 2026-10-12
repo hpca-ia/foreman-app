@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { anotar, abrirDia } from "./libro";
+import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // La semana que viene, escrita antes. (Los datos; la pantalla es PlanSemanal.jsx.)
 //
@@ -240,12 +241,7 @@ export async function borrarArchivoDelPlan(a) {
 
 /** Enlaces temporales para mirarlos, que el depósito es privado. */
 export async function enlacesDeArchivos(archivos = []) {
-  if (!archivos.length) return {};
-  const { data } = await supabase.storage.from("task-files")
-    .createSignedUrls(archivos.map(a => a.storage_path), 3600);
-  const mapa = {};
-  (data || []).forEach((x, i) => { if (x?.signedUrl) mapa[archivos[i].id] = x.signedUrl; });
-  return mapa;
+  return enlacesFirmados(archivos);
 }
 
 /** El día, creándolo si hace falta: se escribe en él apenas se toca algo. */

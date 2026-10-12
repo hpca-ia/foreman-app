@@ -791,6 +791,22 @@ Rubros: ${listaRubros}`,
                 {capitulosDeRubros.map(c => <option key={c} value={c}>{c}</option>)}
               </optgroup>
             )}
+            {/* TODAS LAS AGRUPACIONES, no solo las que no vienen del
+                presupuesto. La obra está organizada por agrupaciones —son las
+                que mandan en el control, en el cronograma y en el valorado— así
+                que es lo primero que uno busca al asignar una factura. Tener
+                veintiuna en un desplegable distinto, más abajo, es esconderlas.
+                Las extras van aparte porque se gastan contra el margen y no
+                contra el contrato, y esa diferencia importa al elegir. */}
+            {actividades.filter(a => !a.extra).length > 0 && (
+              <optgroup label="Agrupaciones del control">
+                {actividades.filter(a => !a.extra).map(a => (
+                  <option key={a.id} value={`act:${a.id}`}>
+                    {a.codigo ? `${a.codigo} · ` : ""}{a.nombre}
+                  </option>
+                ))}
+              </optgroup>
+            )}
             {actividades.filter(a => a.extra).length > 0 && (
               <optgroup label="Fuera del presupuesto">
                 {actividades.filter(a => a.extra).map(a => (
@@ -816,7 +832,7 @@ Rubros: ${listaRubros}`,
 
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <select value="" onChange={e => agregar("actividad", Number(e.target.value))} style={{ ...mini, flex: 1 }}>
-            <option value="">…o a una agrupación entera (se reparte a prorrata)</option>
+            <option value="">…o a una agrupación entera, de un saque</option>
             {actividades.filter(a => !repartos.some(r => r.tipo === "actividad" && r.id === a.id))
               .map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
           </select>

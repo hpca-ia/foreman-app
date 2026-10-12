@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
 import { solicitudesDeLaObra } from "../controlObra/calculos";
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
+import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // El flujo de una compra, de punta a punta.
 //
@@ -347,13 +348,8 @@ export async function borrarAdjunto(adjunto) {
 }
 
 /** Enlaces temporales para abrirlos: el depósito es privado. */
-export async function enlacesDeAdjuntos(adjuntos = []) {
-  if (!adjuntos.length) return {};
-  const { data } = await supabase.storage.from("task-files")
-    .createSignedUrls(adjuntos.map(a => a.storage_path), 3600);
-  const mapa = {};
-  (data || []).forEach((x, i) => { if (x?.signedUrl) mapa[adjuntos[i].id] = x.signedUrl; });
-  return mapa;
+export async function enlacesDeAdjuntos(archivos = []) {
+  return enlacesFirmados(archivos);
 }
 
 /**
