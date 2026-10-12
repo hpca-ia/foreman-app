@@ -124,9 +124,19 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
                 {(() => {
                   const e = estadoDelDia(d, hoy);
                   const tinta = { aprobado: colors.success, cerrado: colors.inkSoft,
-                    abierto: colors.warning, sin_cerrar: colors.danger }[e.clave] || colors.muted;
+                    abierto: colors.warning, reabierto: colors.warning,
+                    sin_cerrar: colors.danger }[e.clave] || colors.muted;
                   return (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: tinta }}>{e.etiqueta}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: tinta }}
+                      title={d.reabierto_motivo
+                        ? `Reabierto${d.reabierto_nombre ? ` por ${d.reabierto_nombre}` : ""}: ${d.reabierto_motivo}`
+                        : undefined}>
+                      {e.etiqueta}
+                      {/* Cuántas veces se reabrió. Una es un olvido; cinco es
+                          que el libro no se está llevando, y eso tiene que
+                          verse sin abrir día por día. */}
+                      {Number(d.reaperturas) > 1 ? ` ×${d.reaperturas}` : ""}
+                    </span>
                   );
                 })()}
               </div>

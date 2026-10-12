@@ -55,7 +55,51 @@ export function estadoDelDia(dia, hoy = hoyEnObra()) {
   if (dia.estado === "aprobado") return { clave: "aprobado", etiqueta: "Aprobado", seEscribe: false };
   if (dia.estado === "cerrado") return { clave: "cerrado", etiqueta: "Cerrado", seEscribe: false };
   if (dia.fecha === hoy) return { clave: "abierto", etiqueta: "Abierto", seEscribe: true };
+  // REABIERTO: un día pasado que alguien volvió a abrir a propósito, con su
+  // motivo. Se puede escribir, y se ve que se escribió después —que es la
+  // mitad del asunto: un libro editable en silencio no vale como registro.
+  if (dia.reabierto_at) return { clave: "reabierto", etiqueta: "Reabierto", seEscribe: true };
   return { clave: "sin_cerrar", etiqueta: "Sin cerrar", seEscribe: false };
+}
+
+/**
+ * Volver a abrir un día para completarlo o corregirlo.
+ *
+ * El motivo NO es opcional. Sin él, una reapertura no se puede distinguir de
+ * una corrección conveniente, y ahí el libro deja de servir para lo único que
+ * sirve: ser la versión de los hechos que las dos partes aceptan.
+ *
+ * Se cuenta cuántas veces se reabrió. Una es un olvido —el residente se fue a
+ * las siete sin cargar la entrega de hormigón—; cinco es que el libro no se
+ * está llevando, y eso hay que poder verlo sin leer cada día.
+ */
+export async function reabrirDia(dia, quien, motivo) {
+  const porque = String(motivo || "").trim();
+  if (!porque) return "Escribí por qué se reabre: queda en el libro.";
+  const { data, error } = await supabase.from("libro_obra_dias").update({
+    estado: "abierto",
+    reabierto_at: new Date().toISOString(),
+    reabierto_por: quien?.id ?? null,
+    reabierto_nombre: quien?.name || null,
+    reabierto_motivo: porque.slice(0, 300),
+    reaperturas: (Number(dia.reaperturas) || 0) + 1,
+  }).eq("id", dia.id).select();
+  if (error) {
+    return falta(error) ? "Falta correr la migración 095 para poder reabrir un día." : error.message;
+  }
+  if (!data?.length) return "No se pudo reabrir: la base no dejó tocar ese día.";
+  // Y queda escrito EN EL LIBRO, no solo en una columna. Quien lo lea seis
+  // meses después tiene que encontrarlo leyendo, no auditando la base.
+  await anotar(dia, "observaciones",
+    `Se reabrió el día para completarlo o corregirlo: ${porque}`, quien);
+  return null;
+}
+
+/** Volver a cerrarlo después de completarlo. */
+export async function cerrarDia(dia) {
+  const { error } = await supabase.from("libro_obra_dias")
+    .update({ estado: "cerrado", cerrado_at: new Date().toISOString() }).eq("id", dia.id);
+  return error ? error.message : null;
 }
 
 export async function abrirDia(leadId, fecha, quien) {

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, Plus, X, Check, Lock } from "lucide-react";
+import { Camera, Plus, X, Check, Lock, Unlock } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
 import {
   CATEGORIAS, CLIMAS, abrirDia, contenidoDe, anotar, borrarEntrada,
-  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia } from "./libro";
+  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia, reabrirDia, cerrarDia } from "./libro";
 
 // El día de obra, pensado para el teléfono y para una mano sucia de cemento.
 //
@@ -109,6 +109,47 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: colors.inkSoft, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "3px 9px" }}>
               <Lock size={11} /> {estado.etiqueta.toUpperCase()}
             </span>
+          )}
+          {/* REABIERTO, dicho donde se lee. No es un detalle de auditoría: es
+              lo que distingue un día escrito cuando pasó de uno completado
+              después, y quien lee el libro tiene derecho a saberlo sin ir a
+              buscarlo. */}
+          {dia?.reabierto_at && (
+            <span title={`${dia.reabierto_motivo || ""}${dia.reabierto_nombre ? ` — ${dia.reabierto_nombre}` : ""}`}
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700,
+                color: colors.warning, background: colors.warningSoft, borderRadius: 14, padding: "3px 9px" }}>
+              <Unlock size={11} /> REABIERTO
+              {Number(dia.reaperturas) > 1 ? ` ×${dia.reaperturas}` : ""}
+            </span>
+          )}
+          {/* VOLVER A ABRIRLO. La obra no es prolija: el residente se va a las
+              siete sin cargar la entrega de hormigón, y si la única salida es
+              dejar el día incompleto para siempre, lo que se pierde es el
+              registro entero. Se reabre con motivo, y el motivo queda escrito
+              dentro del libro —no en una columna que nadie mira. */}
+          {!abierto && dia && puedeEscribir && (
+            <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
+              const motivo = window.prompt(
+                "¿Por qué se reabre este día?\n\n"
+                + "Queda escrito en el libro, con tu nombre. Sirve para explicar después por qué "
+                + "algo se completó más tarde — y para que una reapertura sospechosa también se vea.");
+              if (motivo === null) return;
+              setOcupado(true);
+              const err = await reabrirDia(dia, currentUser, motivo);
+              setOcupado(false);
+              if (err) { setError(err); return; }
+              setError(""); await cargar();
+            }}><Unlock size={12} /> Reabrir</Button>
+          )}
+          {/* Y volver a cerrarlo cuando se terminó de completar. */}
+          {abierto && dia && !esHoy && puedeEscribir && (
+            <Button variant="secondary" size="sm" disabled={ocupado} onClick={async () => {
+              setOcupado(true);
+              const err = await cerrarDia(dia);
+              setOcupado(false);
+              if (err) { setError(err); return; }
+              setError(""); await cargar();
+            }}><Lock size={12} /> Cerrar de nuevo</Button>
           )}
         </div>
 
