@@ -28,6 +28,7 @@ import ResultadosBase from "./presupuestos/ResultadosBase";
 import { puntaje } from "../lib/buscarRubros";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
 import { LECTURA, textoDeNova } from "../lib/modelos";
+import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA } from "./presupuestos/etapas";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
@@ -523,6 +524,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   // carpintería metidos en albañilería— y moverlos de a uno son cinco idas y
   // vueltas para un solo error del Excel.
   const [moviendo, setMoviendo] = useState([]);
+  // La etapa que se les va a poner a los rubros marcados. Se queda puesta
+  // entre asignaciones: casi siempre van varios grupos seguidos a la misma.
+  const [etapaNueva, setEtapaNueva] = useState("");
   const marcado = id => moviendo.some(x => x.id === id);
   const marcar = item => setMoviendo(ms =>
     ms.some(x => x.id === item.id) ? ms.filter(x => x.id !== item.id) : [...ms, item]);
@@ -689,6 +693,36 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     setItems(updated);
     await supabase.from("presupuesto_items").update({...campos,total:updated.find(i=>i.id===id)?.total}).eq("id",id);
     recalcTotales(updated);
+  }
+
+  /**
+   * Poner los rubros marcados en una etapa, o sacarles la que tenían.
+   *
+   * Aprovecha la misma selección que mover de capítulo: se marcan con ⇕ y se
+   * etiquetan de una. Etiquetar de a uno en un presupuesto de ciento sesenta
+   * renglones es lo que hace que una función así no se use nunca.
+   *
+   * No toca precios ni totales: una etapa es una etiqueta de COBRO, no un
+   * cambio al presupuesto. El total de la obra es el mismo con etapas o sin
+   * ellas, y lo único que cambia es cómo se lee.
+   */
+  async function ponerEnEtapa(valor) {
+    const etapa = valor === null ? null : etapaNueva.trim();
+    if (valor !== null && !etapa) return;
+    const ids = moviendo.map(x => x.id);
+    if (!ids.length) return;
+    const updated = itemsRef.current.map(i => (ids.includes(i.id) ? { ...i, etapa } : i));
+    itemsRef.current = updated;
+    setItems(updated);
+    setMoviendo([]);
+    const { error } = await supabase.from("presupuesto_items").update({ etapa }).in("id", ids).select();
+    if (error) {
+      alert(/column|schema cache/i.test(error.message)
+        ? "Falta correr la migración 096 para cobrar por etapas."
+        : "No se pudo guardar la etapa: " + error.message);
+      return;
+    }
+    if (valor !== null) setEtapaNueva(etapa);   // se queda puesta: casi siempre van varios seguidos
   }
 
   async function aplicarUtilidadCapitulo(capNombre, pct) {
@@ -1617,6 +1651,34 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                         cursor:"pointer",fontFamily:"inherit",fontSize:11}}>cancelar</button>
                     </div>
                   )}
+
+                  {/* PONER LOS MARCADOS EN UNA ETAPA.
+                      Aprovecha la misma selección que mover: se marcan los
+                      rubros con ⇕ y se les pone etapa de una. Etiquetarlos de a
+                      uno en un presupuesto de ciento sesenta renglones es lo
+                      que hace que nadie use la función. */}
+                  {moviendo.length > 0 && (
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+                      <span style={{fontSize:11.5,color:"var(--ink-soft)"}}>…o ponelos en una etapa:</span>
+                      <input list="etapas-del-presupuesto" value={etapaNueva}
+                        onChange={e=>setEtapaNueva(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==="Enter") ponerEnEtapa(); }}
+                        placeholder="Ej: Etapa 1 - obra gris"
+                        style={{...iS,width:230,padding:"5px 9px",fontSize:11.5}}/>
+                      <datalist id="etapas-del-presupuesto">
+                        {etapasUsadas(items).map(e=><option key={e} value={e}/>)}
+                      </datalist>
+                      <button onClick={ponerEnEtapa} disabled={!etapaNueva.trim()}
+                        style={{background:etapaNueva.trim()?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:7,
+                          padding:"5px 11px",color:etapaNueva.trim()?"#fff":"var(--muted)",fontSize:11.5,fontWeight:600,
+                          cursor:etapaNueva.trim()?"pointer":"default",fontFamily:"var(--font)"}}>
+                        Poner en etapa
+                      </button>
+                      <button onClick={()=>ponerEnEtapa(null)}
+                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",
+                          fontFamily:"inherit",fontSize:11}}>sacarles la etapa</button>
+                    </div>
+                  )}
                   <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
                     <colgroup>
                       {/* 70 no alcanzaba, y 112 tampoco: con un número de
@@ -1827,6 +1889,41 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 0",fontSize:16,fontWeight:700,color:"var(--ink)"}}>
                 <span>TOTAL</span><span style={{color:"var(--brand)"}}>${fmt(presupuestoActivo.total)}</span>
               </div>
+
+              {/* POR ETAPAS, si el presupuesto se cobra así.
+                  Una obra grande casi nunca se contrata entera: se cierra la
+                  etapa uno y la dos queda para cuando el cliente decida
+                  seguir. Hoy eso se resolvía haciendo DOS presupuestos, y ahí
+                  los rubros se duplican y los precios se desfasan entre los
+                  dos archivos. Con una etiqueta por rubro es uno solo, leído
+                  de las dos maneras.
+
+                  Solo aparece con dos o más etapas: con una, un desglose no
+                  dice nada que el total no diga. */}
+              {tieneEtapas(items)&&(
+                <div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed var(--border)"}}>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:0.4,color:"var(--muted)",marginBottom:6}}>
+                    POR ETAPAS · costo directo
+                  </div>
+                  {subtotalesPorEtapa(items).map(e=>(
+                    <div key={e.etapa} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",
+                      gap:10,padding:"3px 0",fontSize:12.5,
+                      color:e.sinEtapa?"var(--warning)":"var(--ink)"}}>
+                      <span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {e.etapa}
+                        <span style={{color:"var(--muted)",fontSize:11}}> · {e.rubros} {e.rubros===1?"rubro":"rubros"}</span>
+                      </span>
+                      <span style={{fontWeight:600,whiteSpace:"nowrap"}}>${fmt(e.total)}</span>
+                    </div>
+                  ))}
+                  {subtotalesPorEtapa(items).some(e=>e.sinEtapa)&&(
+                    <div style={{fontSize:10.5,color:"var(--muted)",marginTop:4,lineHeight:1.45}}>
+                      Lo que está <strong>{SIN_ETAPA.toLowerCase()}</strong> todavía no se asignó a ninguna.
+                      Marcá los rubros con ⇕ y ponelos en una.
+                    </div>
+                  )}
+                </div>
+              )}
               {/* Información general: el costo directo por m², para vender. */}
               <div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed var(--border)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:12,color:"var(--ink-soft)"}}>
                 <span style={{fontSize:10,fontWeight:700,letterSpacing:0.4,color:"var(--muted)"}}>INFORMACIÓN GENERAL</span>
