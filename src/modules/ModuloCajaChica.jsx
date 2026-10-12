@@ -54,6 +54,16 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [rubrosGasto, setRubrosGasto] = useState([]);   // [{obra_actividad_id, monto}]
   const fileRef = useRef(null);
   const admin = esAdmin(currentUser.role);
+  // ADMINISTRAR LA CAJA es otra cosa que usarla: corregir el proyecto de una
+  // mal creada, arreglar un anticipo mal cargado, borrarla entera. Estaba
+  // detrás de "borrar.definitivo", que es el permiso de borrar cualquier cosa
+  // en toda la app y está apagado para administración con razón —no se le da a
+  // alguien el poder de borrar un presupuesto para que pueda arreglar una caja.
+  const administra = puede?.("cajaChica.administrar") || admin;
+  // Corregir los datos de una caja ya creada: el proyecto que se eligió mal,
+  // el responsable, el límite de aviso.
+  const [editandoCaja, setEditandoCaja] = useState(null);
+  const [anticipoEditando, setAnticipoEditando] = useState(null);
   // Se vuelven a filtrar al pintar: los accesos llegan después que las cajas,
   // y si no la primera vuelta deja la pantalla vacía.
   const cajasVisibles = cajas.filter(c => c.responsable_id === currentUser.id || admin || entraATodo
@@ -166,6 +176,82 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       ({ data, error } = await supabase.from("cajas_chicas").insert(resto).select().single());
     }
     if (!error && data) { setCajaActiva(data); setGastos([]); setAnticipos([]); setCierres([]); setSubVista("detalle"); fetchCajas(); }
+  }
+
+  /**
+   * Corregir una caja ya creada.
+   *
+   * Se elige el proyecto de una lista larga y a veces se elige el de al lado;
+   * hasta ahora la única salida era borrarla y rehacerla, perdiendo los gastos
+   * ya cargados. No toca saldos: lo que cambia es a qué obra pertenece, quién
+   * responde y cuándo avisar — no cuánta plata tiene.
+   */
+  async function guardarCaja() {
+    if (!editandoCaja) return;
+    const obra = obras.find(o => o.id === Number(editandoCaja.obra_id));
+    const resp = users.find(u => u.id === Number(editandoCaja.responsable_id));
+    const campos = {
+      obra_id: Number(editandoCaja.obra_id) || null,
+      proyecto_nombre: editandoCaja.proyecto_nombre?.trim() || obra?.nombre || "",
+      responsable_id: Number(editandoCaja.responsable_id) || null,
+      responsable_nombre: resp?.name || editandoCaja.responsable_nombre || "",
+      limite_alerta: Number(editandoCaja.limite_alerta) || 0,
+    };
+    const { data, error } = await supabase.from("cajas_chicas")
+      .update(campos).eq("id", editandoCaja.id).select();
+    if (error) { alert("No se pudo guardar: " + error.message); return; }
+    if (!data?.length) { alert("No se pudo guardar: la base no dejó tocar esta caja."); return; }
+    setCajaActiva(c => (c && c.id === editandoCaja.id ? { ...c, ...campos } : c));
+    setEditandoCaja(null);
+    fetchCajas();
+  }
+
+  /**
+   * Corregir o borrar un anticipo.
+   *
+   * Un anticipo mal cargado —un cero de más, la fecha del mes pasado— deja la
+   * caja con un saldo que no existe, y el responsable rinde contra un número
+   * equivocado. EL SALDO SE RECALCULA desde los anticipos y los gastos, no se
+   * ajusta a mano: sumar o restar la diferencia funciona hasta que alguien
+   * edita dos veces seguidas y ahí el saldo se despega para siempre.
+   */
+  async function recalcularSaldos(cajaId) {
+    const [{ data: ants }, { data: gs }] = await Promise.all([
+      supabase.from("cajas_anticipos").select("monto").eq("caja_id", cajaId),
+      supabase.from("cajas_gastos").select("monto").eq("caja_id", cajaId),
+    ]);
+    const total = (ants || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    const gastado = (gs || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    const campos = {
+      saldo_total: Math.round(total * 100) / 100,
+      saldo_gastado: Math.round(gastado * 100) / 100,
+      saldo_disponible: Math.round((total - gastado) * 100) / 100,
+    };
+    await supabase.from("cajas_chicas").update(campos).eq("id", cajaId);
+    setCajaActiva(c => (c && c.id === cajaId ? { ...c, ...campos } : c));
+    fetchCajas();
+  }
+
+  async function guardarAnticipo() {
+    if (!anticipoEditando) return;
+    const monto = Number(anticipoEditando.monto);
+    if (!(monto > 0)) { alert("El anticipo tiene que ser un monto mayor que cero."); return; }
+    const { data, error } = await supabase.from("cajas_anticipos").update({
+      monto, descripcion: anticipoEditando.descripcion || null, fecha: anticipoEditando.fecha,
+    }).eq("id", anticipoEditando.id).select();
+    if (error) { alert("No se pudo guardar: " + error.message); return; }
+    if (!data?.length) { alert("No se pudo guardar: la base no dejó tocar ese anticipo."); return; }
+    setAnticipos(xs => xs.map(x => (x.id === anticipoEditando.id ? data[0] : x)));
+    setAnticipoEditando(null);
+    await recalcularSaldos(cajaActiva.id);
+  }
+
+  async function borrarAnticipo(a) {
+    if (!window.confirm(`¿Borrar el anticipo de $${fmt(a.monto)}?\n\nEl saldo de la caja se recalcula.`)) return;
+    const { error } = await supabase.from("cajas_anticipos").delete().eq("id", a.id);
+    if (error) { alert("No se pudo borrar: " + error.message); return; }
+    setAnticipos(xs => xs.filter(x => x.id !== a.id));
+    await recalcularSaldos(cajaActiva.id);
   }
 
   async function agregarAnticipo() {
@@ -422,7 +508,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {subVista!=="lista"&&<button onClick={()=>{setGastoEditando(null);setSubVista(subVista==="reporte"?"detalle":"lista");}} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer"}}>← Volver</button>}
           {subVista==="lista"&&admin&&<button onClick={()=>setSubVista("nueva")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nueva caja</button>}
-          {subVista==="detalle"&&puede?.("borrar.definitivo")&&cajaActiva&&(
+          {subVista==="detalle"&&administra&&cajaActiva&&(
+            <button onClick={()=>setEditandoCaja({...cajaActiva})} title="Corregir el proyecto, el responsable o el límite"
+              style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"7px 10px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+              ✎ Corregir caja
+            </button>
+          )}
+          {subVista==="detalle"&&administra&&cajaActiva&&(
             <button onClick={()=>setBorrarCaja(cajaActiva)} title="Borrar esta caja chica"
               style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"7px 10px",color:"var(--danger)",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
               <Trash2 size={13}/> Borrar caja
@@ -473,7 +565,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                     <div style={{fontWeight:700,fontSize:18,color:saldoColor(c.saldo_disponible)}}>${fmt(c.saldo_disponible)}</div>
                     <div style={{fontSize:10,color:"var(--muted)"}}>de ${fmt(c.saldo_total)}</div>
                   </div>
-                  {puede?.("borrar.definitivo")&&(
+                  {administra&&(
                     <button onClick={e=>{e.stopPropagation();setBorrarCaja(c);}} title="Borrar esta caja"
                       style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,padding:"6px 7px",color:"var(--muted)",cursor:"pointer",display:"flex"}}>
                       <Trash2 size={13}/>
@@ -751,15 +843,92 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
             ))}
           </div>}
 
+          {/* CORREGIR LA CAJA. El proyecto se elige de una lista larga y a
+              veces se elige el de al lado; hasta acá la única salida era
+              borrarla y rehacerla, perdiendo los gastos ya cargados. No toca
+              saldos: cambia a qué obra pertenece, quién responde y cuándo
+              avisar — no cuánta plata tiene. */}
+          {editandoCaja&&(
+            <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",marginBottom:14,display:"grid",gap:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--ink)"}}>Corregir esta caja</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8}}>
+                <div>
+                  <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>OBRA</label>
+                  <select value={editandoCaja.obra_id||""} style={iS}
+                    onChange={e=>{const o=obras.find(x=>x.id===Number(e.target.value));
+                      setEditandoCaja(p=>({...p,obra_id:e.target.value,proyecto_nombre:o?.nombre||p.proyecto_nombre}));}}>
+                    <option value="">Sin obra</option>
+                    {obras.map(o=><option key={o.id} value={o.id}>{o.nombre}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>NOMBRE</label>
+                  <input value={editandoCaja.proyecto_nombre||""} style={iS}
+                    onChange={e=>setEditandoCaja(p=>({...p,proyecto_nombre:e.target.value}))}/>
+                </div>
+                <div>
+                  <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>RESPONSABLE</label>
+                  <select value={editandoCaja.responsable_id||""} style={iS}
+                    onChange={e=>setEditandoCaja(p=>({...p,responsable_id:e.target.value}))}>
+                    <option value="">—</option>
+                    {users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>AVISAR BAJO</label>
+                  <input type="number" value={editandoCaja.limite_alerta??""} style={iS}
+                    onChange={e=>setEditandoCaja(p=>({...p,limite_alerta:e.target.value}))}/>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={guardarCaja} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 14px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>Guardar</button>
+                <button onClick={()=>setEditandoCaja(null)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 14px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer",fontFamily:"var(--font)"}}>Cancelar</button>
+              </div>
+            </div>
+          )}
+
           {anticipos.length>0&&<div style={{marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:600,color:"#7C3AED",marginBottom:6}}>Anticipos</div>
             {anticipos.map(a=>(
               <div key={a.id} style={{background:"#F5F3FF",border:"1px solid #DDD6FE",borderRadius:8,padding:"8px 12px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div><div style={{fontSize:12,color:"var(--ink)"}}>{a.descripcion||"Anticipo"}</div>
                   <div style={{fontSize:10,color:"var(--muted)"}}>{a.fecha} · {a.entregado_por_nombre}</div></div>
-                <div style={{fontWeight:700,color:"#7C3AED",fontSize:13}}>${fmt(a.monto)}</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{fontWeight:700,color:"#7C3AED",fontSize:13}}>${fmt(a.monto)}</div>
+                  {/* CORREGIRLO O BORRARLO. Un anticipo mal cargado —un cero
+                      de más, la fecha del mes pasado— deja la caja con un saldo
+                      que no existe, y el responsable rinde contra un número
+                      equivocado. El saldo se recalcula desde los anticipos y
+                      los gastos, no se ajusta sumando la diferencia: eso
+                      funciona hasta que alguien edita dos veces seguidas. */}
+                  {administra&&(
+                    <>
+                      <button onClick={()=>setAnticipoEditando({...a})} title="Corregir este anticipo"
+                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:12,padding:0}}>✎</button>
+                      <button onClick={()=>borrarAnticipo(a)} title="Borrar este anticipo"
+                        style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:12,padding:0}}>✕</button>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
+            {anticipoEditando&&(
+              <div style={{background:"#fff",border:"1px solid #DDD6FE",borderRadius:8,padding:"10px 12px",marginBottom:5,display:"grid",gap:7}}>
+                <div style={{fontSize:11.5,fontWeight:700,color:"#7C3AED"}}>Corregir el anticipo</div>
+                <div style={{display:"grid",gridTemplateColumns:"110px 140px 1fr",gap:7}}>
+                  <input type="number" step="0.01" value={anticipoEditando.monto} style={iS}
+                    onChange={e=>setAnticipoEditando(p=>({...p,monto:e.target.value}))}/>
+                  <input type="date" value={String(anticipoEditando.fecha||"").slice(0,10)} style={iS}
+                    onChange={e=>setAnticipoEditando(p=>({...p,fecha:e.target.value}))}/>
+                  <input value={anticipoEditando.descripcion||""} placeholder="Descripción" style={iS}
+                    onChange={e=>setAnticipoEditando(p=>({...p,descripcion:e.target.value}))}/>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={guardarAnticipo} style={{background:"#7C3AED",border:"none",borderRadius:8,padding:"6px 13px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>Guardar</button>
+                  <button onClick={()=>setAnticipoEditando(null)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"6px 13px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer",fontFamily:"var(--font)"}}>Cancelar</button>
+                </div>
+              </div>
+            )}
           </div>}
           <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8}}>📋 Gastos ({gastos.length})</div>
           {gastos.length>0 && (
