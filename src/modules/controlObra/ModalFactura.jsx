@@ -368,6 +368,20 @@ Rubros: ${listaRubros}`,
       .map(r => [r.capitulo, r.capitulo])
   ).keys()];
 
+  // EL DESTINO ELEGIDO ARRIBA puede ser un capítulo del contrato o una
+  // agrupación de las que no vienen del presupuesto. Las dos cosas pueden
+  // tener rubros adentro —a una agrupación extra se le pueden mover rubros
+  // desde la pestaña Agrupaciones— y en los dos casos hay que poder elegir a
+  // cuál de ellos va la factura. Tratarlas distinto era lo que hacía que los
+  // rubros de "Logística y transporte" no aparecieran para asignar.
+  const esAgrupacion = capElegido.startsWith("act:");
+  const actElegida = esAgrupacion ? actividades.find(a => a.id === Number(capElegido.slice(4))) : null;
+  const nombreDestino = esAgrupacion ? (actElegida?.nombre || "la agrupación") : capElegido;
+  const rubrosDelDestino = !capElegido ? []
+    : rubros.filter(r => !r.oculto && !r.anulado_por_oc
+        && (esAgrupacion ? Number(r.actividad_id) === Number(capElegido.slice(4))
+                         : r.capitulo === capElegido));
+
   const coincidencias = busqueda.trim()
     ? rubros.filter(r => r.descripcion.toLowerCase().includes(busqueda.toLowerCase()) || String(r.numero) === busqueda.trim()).slice(0, 8)
     : [];
@@ -677,7 +691,7 @@ Rubros: ${listaRubros}`,
         {capElegido && (
           <div style={{ marginTop: 6, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
             maxHeight: 190, overflowY: "auto", background: "#fff" }}>
-            {rubros.filter(r => r.capitulo === capElegido && !r.oculto && !r.anulado_por_oc).map(r => {
+            {rubrosDelDestino.map(r => {
               const puesto = repartos.some(x => x.tipo === "rubro" && x.id === r.id);
               return (
                 <div key={r.id}
@@ -739,12 +753,19 @@ Rubros: ${listaRubros}`,
             compara el avance de un rubro con su presupuesto y ese número no
             significa nada. Acá la plata suma al capítulo y los rubros quedan en
             cero, que es la verdad: no se sabe cuánto fue de cada uno. */}
-        {capElegido && !repartos.some(r => r.tipo === "capitulo" && r.id === capElegido) && (
-          <button onClick={() => agregar("capitulo", capElegido)}
+        {capElegido && !repartos.some(r =>
+            (esAgrupacion ? r.tipo === "actividad" && r.id === Number(capElegido.slice(4))
+                          : r.tipo === "capitulo" && r.id === capElegido)) && (
+          <button onClick={() => esAgrupacion
+              ? agregar("actividad", Number(capElegido.slice(4)))
+              : agregar("capitulo", capElegido)}
             style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
               padding: "5px 10px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
               fontFamily: colors.font, marginTop: 6, marginBottom: 2, display: "block" }}>
-            …o cargarlo a <strong>{capElegido}</strong> entero, sin repartir entre sus rubros
+            …o cargarlo a <strong>{nombreDestino}</strong> entero
+            {rubrosDelDestino.length
+              ? (esAgrupacion ? ", repartido a prorrata entre sus rubros" : ", sin repartir entre sus rubros")
+              : ""}
           </button>
         )}
 
@@ -762,15 +783,7 @@ Rubros: ${listaRubros}`,
               Al elegir una de ésas la plata va entera: no tienen rubros entre
               los cuales repartir, así que no hay nada que prorratear. */}
           <select value={capElegido}
-            onChange={e => {
-              const v = e.target.value;
-              if (v.startsWith("act:")) {
-                agregar("actividad", Number(v.slice(4)));
-                setCapElegido("");
-                return;
-              }
-              setCapElegido(v); setBusqueda("");
-            }}
+            onChange={e => { setCapElegido(e.target.value); setBusqueda(""); }}
             style={mini}>
             <option value="">Capítulo…</option>
             {capitulosDeRubros.length > 0 && (
@@ -792,8 +805,7 @@ Rubros: ${listaRubros}`,
             onChange={e => { if (e.target.value) agregar("rubro", Number(e.target.value)); }}
             style={mini}>
             <option value="">{capElegido ? "Rubro…" : "elegí el capítulo primero"}</option>
-            {rubros.filter(r => r.capitulo === capElegido && !r.oculto && !r.anulado_por_oc
-                && !repartos.some(x => x.tipo === "rubro" && x.id === r.id))
+            {rubrosDelDestino.filter(r => !repartos.some(x => x.tipo === "rubro" && x.id === r.id))
               .map(r => (
                 <option key={r.id} value={r.id}>
                   {r.numero} · {r.descripcion}
