@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, ChevronLeft, HardHat, Trash2, Check, X } from "lucide-react";
+import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { PARAMETROS, RECARGOS, calcularNomina } from "./nomina";
+import { rolAExcel, rolAPDF } from "./exportarRol";
 
 // Mano de obra: quién vino, cuántas horas, y cuánto se le paga.
 //
@@ -36,6 +37,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   const [nuevo, setNuevo] = useState(null);
   const [error, setError] = useState("");
   const [periodo, setPeriodo] = useState({ desde: "", hasta: hoy() });
+  const [exportando, setExportando] = useState(false);
 
   useEffect(() => {
     supabase.from("leads").select("id,nombre,resultado,obra_id").order("nombre")
@@ -228,6 +230,34 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
             <span style={{ fontSize: 12, color: colors.muted }}>al</span>
             <input type="date" value={periodo.hasta} onChange={e => setPeriodo(p => ({ ...p, hasta: e.target.value }))}
               style={{ ...inputStyle, width: 150, padding: "6px 9px", fontSize: 12.5 }} />
+
+            {/* SACARLO EN PAPEL Y EN PLANILLA.
+                Un rol que solo vive en una pantalla no sirve para pagar: hay
+                que imprimirlo para que cada uno firme al recibir, mandarlo al
+                contador, y archivarlo. Hasta acá eso se hacía copiándolo a mano
+                a un Excel, y copiar a mano una tabla de plata es de donde salen
+                las diferencias que después nadie encuentra.
+
+                El PDF lleva MENOS columnas a propósito —veintidós en una hoja
+                no se leen— y una columna de firma en blanco. El desglose
+                completo va en el Excel. Los dos salen del mismo cálculo que la
+                pantalla: si pudieran discrepar, no se podría usar ninguno. */}
+            {nomina.personas > 0 && (
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <Button variant="outline" size="sm" disabled={exportando} onClick={async () => {
+                  setExportando(true);
+                  try { await rolAPDF({ nomina, obra: lead?.nombre || "", periodo }); }
+                  catch (e) { setError("No se pudo armar el PDF: " + e.message); }
+                  setExportando(false);
+                }}><Printer size={13} /> PDF</Button>
+                <Button variant="outline" size="sm" disabled={exportando} onClick={async () => {
+                  setExportando(true);
+                  try { await rolAExcel({ nomina, obra: lead?.nombre || "", periodo }); }
+                  catch (e) { setError("No se pudo armar el Excel: " + e.message); }
+                  setExportando(false);
+                }}><FileSpreadsheet size={13} /> Excel</Button>
+              </div>
+            )}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 12 }}>
