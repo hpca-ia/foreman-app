@@ -20,7 +20,7 @@ const diaLargo = f => new Date(`${f}T12:00:00`).toLocaleDateString("es-EC", { we
 const hora = t => new Date(t).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
 const plata = n => (Number(n) || 0).toLocaleString("es-EC", { maximumFractionDigits: 0 });
 
-export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = true, onCambio }) {
+export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = true, puedeReabrir = false, onCambio }) {
   const [dia, setDia] = useState(null);
   const [entradas, setEntradas] = useState([]);
   const [fotos, setFotos] = useState([]);
@@ -127,7 +127,11 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
               dejar el día incompleto para siempre, lo que se pierde es el
               registro entero. Se reabre con motivo, y el motivo queda escrito
               dentro del libro —no en una columna que nadie mira. */}
-          {!abierto && dia && puedeEscribir && (
+          {/* Reabrir no es de quien escribe: es del gerente o de administración.
+              Quien lleva el libro lo completa el día; volver a abrir uno
+              cerrado es una decisión sobre el registro, y por eso tiene su
+              propio permiso. */}
+          {!abierto && dia && puedeReabrir && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
               const motivo = window.prompt(
                 "¿Por qué se reabre este día?\n\n"
@@ -142,7 +146,7 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
             }}><Unlock size={12} /> Reabrir</Button>
           )}
           {/* Y volver a cerrarlo cuando se terminó de completar. */}
-          {abierto && dia && !esHoy && puedeEscribir && (
+          {abierto && dia && !esHoy && puedeReabrir && (
             <Button variant="secondary" size="sm" disabled={ocupado} onClick={async () => {
               setOcupado(true);
               const err = await cerrarDia(dia);
@@ -189,7 +193,20 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
               <div key={e.id} style={{ display: "flex", gap: 8, padding: "5px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: colors.ink, lineHeight: 1.4, overflowWrap: "anywhere" }}>{e.contenido}</div>
-                  <div style={{ fontSize: 10, color: colors.muted }}>{e.autor_nombre || "—"} · {hora(e.created_at)}</div>
+                  {/* QUIÉN Y CUÁNDO, y si se escribió DESPUÉS del día.
+                      Un libro completado más tarde no es lo mismo que uno
+                      escrito el día que pasó, y quien lo lee tiene que poder
+                      distinguirlos renglón por renglón —no solo saber que el
+                      día entero se reabrió—. Se deduce de la fecha en que se
+                      guardó: no hace falta guardar nada nuevo. */}
+                  <div style={{ fontSize: 10, color: colors.muted }}>
+                    {e.autor_nombre || "—"} · {hora(e.created_at)}
+                    {String(e.created_at || "").slice(0, 10) > fecha && (
+                      <span style={{ color: colors.warning, fontWeight: 600 }}>
+                        {" "}· agregada el {String(e.created_at).slice(8, 10)}/{String(e.created_at).slice(5, 7)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {sePuede && (
                   <button onClick={() => quitar(e)} title="Quitar"

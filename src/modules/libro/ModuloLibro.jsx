@@ -70,6 +70,7 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
         </button>
         <DiaDeObra lead={lead} fecha={fecha} currentUser={currentUser}
           puedeEscribir={nivelProyecto(lead.id) === "editar"}
+          puedeReabrir={puede("libro.reabrir") && nivelProyecto(lead.id) === "editar"}
           onCambio={() => cargarDias(lead.id)} />
       </div>
     );

@@ -31,6 +31,8 @@ export const GRUPOS_PERMISOS = [
       { id: "cajaChica.ver", label: "Caja Chica" },
       { id: "compras.ver", label: "Compras", nota: "Pedir lo que hace falta en obra y seguir en qué va" },
       { id: "libro.ver", label: "Libro de Obra", nota: "El registro diario de la obra: quién estuvo, qué se hizo, qué llegó. Solo el de sus proyectos" },
+      { id: "libro.reabrir", sangria: true, label: "…y volver a abrir un día cerrado",
+        nota: "Para completar o corregir lo que faltó. Queda escrito en el libro quién lo reabrió y por qué, así que no es un permiso para repartir" },
       { id: "observaciones.ver", label: "Observaciones de obra", nota: "Lo que se ve en la recorrida y hay que arreglar. Se anota con una foto y se cierra con otra" },
       // Dos cosas que hasta hoy hacía un solo interruptor, y por eso no se
       // podía pedir una sin la otra: ver el embudo comercial, y entrar a todos
@@ -83,7 +85,7 @@ export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitect
 // no existan en la base.
 export const POR_DEFECTO = {
   assistant: {
-    "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
+    "tareas.ver": true, "libro.ver": true, "libro.reabrir": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": true,
     "compras.aprobar": false,
     "tareas.todas": true, "tareas.asignar": true, "tareas.fechas": true,
@@ -99,7 +101,7 @@ export const POR_DEFECTO = {
     "borrar.definitivo": false,
   },
   gerente: {
-    "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
+    "tareas.ver": true, "libro.ver": true, "libro.reabrir": true, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "compras.aprobar": true,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
@@ -118,7 +120,7 @@ export const POR_DEFECTO = {
   // presupuesto. Del pipeline ve solo los proyectos que le tocan, no todo lo
   // comercial. Todo esto se puede cambiar en Ajustes.
   arquitecto: {
-    "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
+    "tareas.ver": true, "libro.ver": true, "libro.reabrir": false, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": true, "tareas.fechas": true,
@@ -135,7 +137,7 @@ export const POR_DEFECTO = {
   },
   // El Jr. dibuja y ejecuta lo suyo: no asigna trabajo a otros.
   arquitecto_jr: {
-    "tareas.ver": true, "libro.ver": false, "observaciones.ver": true,
+    "tareas.ver": true, "libro.ver": false, "libro.reabrir": false, "observaciones.ver": true,
     "compras.ver": false, "compras.gestionar": false,
     "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
@@ -154,7 +156,7 @@ export const POR_DEFECTO = {
   // gastó, sube la factura y nada más. Todo lo demás en falso a propósito —es
   // más fácil prenderle algo después que descubrir que veía de más.
   conductor: {
-    "tareas.ver": false, "libro.ver": false, "observaciones.ver": false,
+    "tareas.ver": false, "libro.ver": false, "libro.reabrir": false, "observaciones.ver": false,
     "compras.ver": false, "compras.gestionar": false,
     "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
@@ -173,7 +175,7 @@ export const POR_DEFECTO = {
   // pide materiales. El presupuesto de su obra lo consulta y no lo mueve —eso
   // se le da proyecto por proyecto, en Ajustes → Proyectos.
   residente: {
-    "tareas.ver": true, "libro.ver": true, "observaciones.ver": true,
+    "tareas.ver": true, "libro.ver": true, "libro.reabrir": false, "observaciones.ver": true,
     "compras.ver": true, "compras.gestionar": false,
     "compras.aprobar": false,
     "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
