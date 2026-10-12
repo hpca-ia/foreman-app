@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra } from "../src/modules/controlObra/calculos.js";
+import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar }
+  from "../src/modules/controlObra/calculos.js";
 
 // Cuánta plata hay hablada contra la obra. Todo lo de acá salió de un número
 // que apareció mal en el control de una obra de verdad.
@@ -108,4 +109,25 @@ test("los ids se comparan como números, no como texto", () => {
   // PostgREST puede devolver un bigint como texto, y "7" === 7 es falso:
   // alcanzaba eso para que un pedido no se reconociera como de su obra.
   assert.equal(solicitudesDeLaObra([{ id: 1, obra_id: "7", lead_id: 42 }], { id: 7, lead_id: 42 }).length, 1);
+});
+
+test("una factura cargada al CAPÍTULO suma al capítulo y no se reparte", () => {
+  // La factura de $4.000 del maestro albañil no es "$180 de mampostería, $310
+  // de enlucido y $94 de mochetas": es $4.000 de albañilería. Prorratearla
+  // inventa una precisión que no existe.
+  const rubros = [
+    { id: 1, capitulo: "ALBAÑILERÍA", capitulo_orden: 1, orden: 1, numero: 1, total_base: 5000 },
+    { id: 2, capitulo: "ALBAÑILERÍA", capitulo_orden: 1, orden: 2, numero: 2, total_base: 3000 },
+  ];
+  const facturas = [{ id: 9, _planillaNumero: 1 }];
+  const asignaciones = [{ factura_id: 9, capitulo: "ALBAÑILERÍA", monto: 4000 }];
+  const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: 1 });
+
+  assert.equal(porRubro[1].acumulado, 0, "ningún rubro se lleva nada");
+  assert.equal(porRubro[2].acumulado, 0);
+
+  const grupos = agrupar(rubros, porRubro, "capitulo", []);
+  const alba = grupos.find(g => g.capitulo === "ALBAÑILERÍA");
+  assert.equal(alba.acumulado, 4000, "pero el capítulo sí lo suma");
+  assert.equal(alba.saldo, 4000, "8000 de presupuesto menos 4000 gastados");
 });

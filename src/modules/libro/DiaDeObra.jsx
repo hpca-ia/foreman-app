@@ -223,12 +223,27 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
                   onChange={ev => setBorradores(b => ({ ...b, [cat.id]: ev.target.value }))}
                   onKeyDown={ev => { if (ev.key === "Enter") { ev.preventDefault(); agregar(cat.id); } }}
                   style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "9px 10px", fontSize: 13 }} />
+                {/* UN BOTÓN QUE DICE "GUARDAR".
+                    Era un "+" sin texto al final del campo, y un icono solo no
+                    se lee como "esto graba": uno escribe, mira la pantalla y no
+                    sabe si quedó. Con la palabra se sabe antes de apretar, y se
+                    sabe que hay que apretar. Enter sigue funcionando. */}
                 <button onClick={() => agregar(cat.id)} disabled={ocupado || !(borradores[cat.id] || "").trim()}
-                  style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 8, padding: "0 11px",
-                    color: colors.inkSoft, cursor: "pointer", display: "flex", alignItems: "center",
-                    opacity: (borradores[cat.id] || "").trim() ? 1 : 0.5 }}>
-                  <Plus size={14} />
+                  style={{ border: "none", background: (borradores[cat.id] || "").trim() ? colors.brand : colors.neutralSoft,
+                    borderRadius: 8, padding: "0 13px", fontSize: 12.5, fontWeight: 600, fontFamily: colors.font,
+                    color: (borradores[cat.id] || "").trim() ? "#fff" : colors.muted,
+                    cursor: (borradores[cat.id] || "").trim() ? "pointer" : "default",
+                    display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+                  <Plus size={13} /> {ocupado ? "Guardando…" : "Guardar"}
                 </button>
+              </div>
+            )}
+            {/* Y EL ERROR AL LADO DEL CAMPO que falló, no arriba de todo.
+                Lo que se escribió sigue en el campo —no se pierde— y el aviso
+                está donde uno está mirando. */}
+            {sePuede && error && borradores[cat.id] && (
+              <div style={{ fontSize: 11.5, color: colors.danger, marginTop: 4, lineHeight: 1.45 }}>
+                {error}
               </div>
             )}
           </div>

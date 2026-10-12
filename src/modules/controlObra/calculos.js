@@ -72,6 +72,8 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   // donde vive ese gasto.
   let sinRepartir = 0;
   const porActividad = {};
+  // Lo cargado a un capítulo entero. No cuelga de ningún rubro a propósito.
+  const porCapitulo = {};
 
   // LA PLATA QUE NO ENTRA A NINGÚN TOTAL.
   //
@@ -97,6 +99,22 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     if (a.obra_rubro_id != null) {
       const acc = porRubro[a.obra_rubro_id];
       if (acc) acc[campo] += n(a.monto);
+      return;
+    }
+
+    // AL CAPÍTULO ENTERO, sin repartir.
+    //
+    // La factura de $4.000 del maestro albañil no es "$180 de mampostería,
+    // $310 de enlucido y $94 de mochetas": es $4.000 de albañilería.
+    // Prorratearla inventa una precisión que no existe, y después alguien mira
+    // el avance de un rubro y ese número no significa nada.
+    //
+    // Acá la plata suma al capítulo y los rubros quedan en cero, que es la
+    // verdad: no se sabe cuánto fue de cada uno. Un cero honesto vale más que
+    // un reparto inventado.
+    if (a.capitulo) {
+      if (!porCapitulo[a.capitulo]) porCapitulo[a.capitulo] = { anterior: 0, periodo: 0 };
+      porCapitulo[a.capitulo][campo] += n(a.monto);
       return;
     }
     const destino = rubrosDe.get(a.obra_actividad_id) || [];
@@ -126,6 +144,7 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     acc.pct = base > 0 ? acc.acumulado / base : 0;
   });
 
+  porRubro._porCapitulo = porCapitulo;
   porRubro._sinRepartir = sinRepartir;
   porRubro._porActividad = porActividad;
   porRubro._fueraDePlanilla = fueraDePlanilla;
@@ -383,6 +402,30 @@ export function agrupar(rubros = [], porRubro = {}, modo = "capitulo", actividad
         pct: 0, estimado: false, extra: true,
       });
     }
+  }
+
+  // LO CARGADO AL CAPÍTULO ENTERO entra acá, en la vista por capítulos: no
+  // cuelga de ningún rubro, así que ninguna fila de rubro lo muestra —y eso es
+  // correcto, no se sabe de cuál fue— pero el capítulo sí tiene que sumarlo.
+  //
+  // En la vista por agrupaciones no se puede ubicar: un capítulo del contrato
+  // puede tocar varias agrupaciones, y repartirlo entre ellas sería inventar
+  // otra vez la precisión que justamente se evitó. Se cuenta aparte y la tabla
+  // lo dice, igual que el resto de la plata que no cae en una fila.
+  const deCapitulo = porRubro._porCapitulo || {};
+  if (!porActividad) {
+    Object.entries(deCapitulo).forEach(([cap, acc]) => {
+      const g = mapa.get(cap);
+      if (!g) return;
+      const suma = n(acc.anterior) + n(acc.periodo);
+      g.anterior += n(acc.anterior);
+      g.periodo += n(acc.periodo);
+      // El acumulado y el saldo del grupo se arman sumando rubro por rubro, no
+      // se recalculan al final: esta plata no tiene rubro, así que hay que
+      // sumarla acá o no aparecería en ninguna columna.
+      g.acumulado += suma;
+      g.saldo -= suma;
+    });
   }
 
   const grupos = [...mapa.values()];

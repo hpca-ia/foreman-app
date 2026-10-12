@@ -245,6 +245,10 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       factura_id: facturaId,
       obra_actividad_id: r.tipo === "actividad" ? r.id : null,
       obra_rubro_id: r.tipo === "rubro" ? r.id : null,
+      // Al capítulo entero: ni rubro ni agrupación. La plata suma al capítulo y
+      // los rubros quedan en cero, que es la verdad cuando no se sabe cuánto
+      // fue de cada uno.
+      capitulo: r.tipo === "capitulo" ? r.id : null,
       monto: n(r.monto),
     }));
     if (filas.length) {
@@ -412,12 +416,30 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
               <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {act ? (
                   <><span style={{ color: colors.muted, marginRight: 5 }}>{act.codigo}</span>{act.nombre}</>
+                ) : r.tipo === "capitulo" ? (
+                  <><span style={{ color: colors.muted, marginRight: 5 }}>capítulo</span>{r.id}
+                    <span style={{ color: colors.muted, fontSize: 10.5 }}> · sin repartir</span></>
                 ) : (
                   <><span style={{ color: colors.muted, marginRight: 5 }}>rubro {rubro?.numero}</span>{rubro?.descripcion || "Rubro"}</>
                 )}
               </div>
+              {/* EL PORCENTAJE, al lado del monto. Una factura de mano de obra
+                  casi nunca se reparte en cifras redondas: se reparte "mitad y
+                  mitad" o "60 y 40". Escribir el % y que calcule el monto es
+                  como se piensa, y evita la cuenta a mano que después no cuadra
+                  con el total por un centavo. */}
+              <input type="number" step="0.01"
+                value={n(form.total) > 0 ? Math.round((n(r.monto) / n(form.total)) * 10000) / 100 : ""}
+                onChange={e => {
+                  const pct = Number(e.target.value) || 0;
+                  const monto = Math.round(n(form.total) * pct) / 100;
+                  setRepartos(rs => rs.map((x, j) => j === i ? { ...x, monto } : x));
+                }}
+                title="Qué porcentaje de la factura va acá"
+                style={{ ...mini, width: 64, textAlign: "right" }} />
+              <span style={{ fontSize: 11, color: colors.muted }}>%</span>
               <input type="number" value={r.monto} onChange={e => setRepartos(rs => rs.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
-                style={{ ...mini, width: 110, textAlign: "right" }} />
+                style={{ ...mini, width: 100, textAlign: "right" }} />
               <button onClick={() => setRepartos(rs => rs.filter((_, j) => j !== i))}
                 style={{ background: colors.dangerSoft, border: "none", borderRadius: 6, padding: "6px 8px", color: colors.danger, cursor: "pointer", display: "flex" }}>
                 <Trash2 size={12} />
@@ -433,6 +455,49 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
             monto entre todos sus rubros —la factura de cemento suma un poco a
             cada renglón y nada al que corresponde—. Lo exacto tiene que ser lo
             cómodo. */}
+        {/* EN PARTES IGUALES. Una factura de mano de obra que cubre cuatro
+            rubros se reparte en cuatro, y hacer esa división a mano termina en
+            un total que no cuadra por un centavo. El último se queda con el
+            resto, para que la suma dé exacta. */}
+        {repartos.length > 1 && n(form.total) > 0 && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, marginBottom: 6, flexWrap: "wrap" }}>
+            <button onClick={() => {
+                const cuantos = repartos.length;
+                const parte = Math.floor((n(form.total) / cuantos) * 100) / 100;
+                setRepartos(rs => rs.map((x, j) => ({
+                  ...x,
+                  monto: j === cuantos - 1
+                    ? Math.round((n(form.total) - parte * (cuantos - 1)) * 100) / 100
+                    : parte,
+                })));
+              }}
+              style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+                padding: "4px 10px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
+                fontFamily: colors.font }}>
+              Repartir en partes iguales
+            </button>
+            <span style={{ fontSize: 10.5, color: colors.muted }}>
+              …o escribí el % de cada uno y el monto se calcula solo
+            </span>
+          </div>
+        )}
+
+        {/* AL CAPÍTULO ENTERO, sin repartir.
+            La factura de $4.000 del maestro albañil no es "$180 de mampostería,
+            $310 de enlucido y $94 de mochetas": es $4.000 de albañilería.
+            Prorratearla inventa una precisión que no existe, y después alguien
+            compara el avance de un rubro con su presupuesto y ese número no
+            significa nada. Acá la plata suma al capítulo y los rubros quedan en
+            cero, que es la verdad: no se sabe cuánto fue de cada uno. */}
+        {capElegido && !repartos.some(r => r.tipo === "capitulo" && r.id === capElegido) && (
+          <button onClick={() => agregar("capitulo", capElegido)}
+            style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+              padding: "5px 10px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
+              fontFamily: colors.font, marginTop: 6, marginBottom: 2, display: "block" }}>
+            …o cargarlo a <strong>{capElegido}</strong> entero, sin repartir entre sus rubros
+          </button>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 6, marginTop: 6 }}>
           <select value={capElegido} onChange={e => { setCapElegido(e.target.value); setBusqueda(""); }}
             style={mini}>
