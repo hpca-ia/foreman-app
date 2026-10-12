@@ -943,9 +943,35 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                   monto: viva?.pagado_monto || null,
                   nota: "Comprobante de pago",
                 });
+                if (r.error) { setSubiendoPago(false); setError(r.error); return; }
+
+                // Y EL ABONO AL PROVEEDOR, SOLO.
+                //
+                // Subir el comprobante ES el acto de pagar: nadie sube una
+                // transferencia que no hizo. Pedirle además que vaya a marcar
+                // "se pagó" es pedirle que diga dos veces lo mismo, y lo que
+                // pasa cuando se pide eso es que una de las dos se olvida —y
+                // entonces Proveedores muestra una deuda que ya no existe.
+                //
+                // Solo si todavía no está marcada como pagada: subir un segundo
+                // comprobante (el saldo de una factura pagada en dos veces) no
+                // vuelve a registrar el total.
+                if (!viva?.pagado_at) {
+                  const err = await registrarPago(viva, {
+                    monto: viva?.monto ?? viva?.monto_estimado ?? null,
+                    quien: currentUser,
+                    comentario: "Registrado al subir el comprobante",
+                  });
+                  if (err) { setSubiendoPago(false); setError("Se subió el comprobante, pero el pago no se registró: " + err); return; }
+                  setViva(v => ({ ...v, pagado_at: new Date().toISOString(),
+                    pagado_nombre: currentUser.name,
+                    pagado_monto: v.monto ?? v.monto_estimado ?? null }));
+                  historialDe(viva.id).then(setHistorial);
+                }
+
                 setSubiendoPago(false);
-                if (r.error) { setError(r.error); return; }
                 await cargarPapeles();
+                onCambio?.();
               }} />
           </div>
         )}

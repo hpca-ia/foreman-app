@@ -298,9 +298,22 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
 
   // Los capítulos que de verdad tienen rubros vivos: los escondidos y los que
   // una orden de cambio anuló no son destinos posibles.
-  const capitulosDeRubros = [...new Set(
-    rubros.filter(r => !r.oculto && !r.anulado_por_oc).map(r => r.capitulo).filter(Boolean)
-  )];
+  // TODOS los capítulos de la obra, en su orden.
+  //
+  // Sin filtrar por rubros visibles: un capítulo cuyos rubros están todos
+  // escondidos —los que se sacaron del control por estar en $0— desaparecía de
+  // la lista y no se le podía asignar nada, ni siquiera al capítulo entero. Lo
+  // que se esconde son RENGLONES que estorban, no el capítulo.
+  //
+  // En el orden del control, que es el del contrato: una lista de diecinueve
+  // capítulos en orden alfabético obliga a buscar el que uno ya sabe dónde
+  // está.
+  const capitulosDeRubros = [...new Map(
+    rubros.slice()
+      .sort((a, b) => (n(a.capitulo_orden) - n(b.capitulo_orden)) || (n(a.orden) - n(b.orden)))
+      .filter(r => r.capitulo)
+      .map(r => [r.capitulo, r.capitulo])
+  ).keys()];
 
   const coincidencias = busqueda.trim()
     ? rubros.filter(r => r.descripcion.toLowerCase().includes(busqueda.toLowerCase()) || String(r.numero) === busqueda.trim()).slice(0, 8)

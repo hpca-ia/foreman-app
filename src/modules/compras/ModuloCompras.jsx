@@ -266,9 +266,27 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                     {s.solicitante_nombre || "—"}{s.necesita_para ? ` · para el ${s.necesita_para}` : ""}
                   </div>
                 </div>
+                {/* CONTRA QUÉ VA, dicho en la lista.
+                    Una aprobada sin asignar y una ya asignada se veían
+                    exactamente igual —las dos dicen "Aprobada"— y son cosas
+                    distintas: la primera todavía no descuenta de ningún
+                    capítulo y el control queda corto sin que nadie lo note.
+                    Y la que ya tiene factura en el control es una tercera cosa:
+                    ésa ya no es plata por gastar, es gasto hecho. */}
                 <div style={{ fontSize: 12, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {!s.lead_id && <span style={{ color: colors.muted, fontSize: 10.5 }}>SIN OBRA · </span>}
                   {dondeVa(s)}
+                  <div style={{ fontSize: 10.5, lineHeight: 1.4 }}>
+                    {s.factura_id ? (
+                      <span style={{ color: colors.success }}>en el control de obra</span>
+                    ) : s.obra_rubro_id || s.obra_actividad_id || s.capitulo ? (
+                      <span style={{ color: colors.muted }}>
+                        asignada{s.capitulo ? ` · ${s.capitulo}` : ""}
+                      </span>
+                    ) : (
+                      <span style={{ color: colors.warning }}>sin asignar</span>
+                    )}
+                  </div>
                 </div>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: e.color }}>
                   {e.label}
