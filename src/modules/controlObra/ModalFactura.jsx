@@ -749,10 +749,44 @@ Rubros: ${listaRubros}`,
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 6, marginTop: 6 }}>
-          <select value={capElegido} onChange={e => { setCapElegido(e.target.value); setBusqueda(""); }}
+          {/* LOS CAPÍTULOS DEL CONTRATO Y LAS AGRUPACIONES QUE NO LO SON,
+              en la misma lista.
+              Vivienda, logística y gastos de oficina no son capítulos del
+              presupuesto —no están contratados, no tienen rubros— y por eso no
+              salían acá: vivían solo en el desplegable de agrupaciones de más
+              abajo. Pero quien carga una factura de flete no está pensando "esto
+              es una agrupación extra", está buscando dónde va. Van juntas y
+              separadas por su título, que es lo que las distingue sin
+              esconderlas.
+
+              Al elegir una de ésas la plata va entera: no tienen rubros entre
+              los cuales repartir, así que no hay nada que prorratear. */}
+          <select value={capElegido}
+            onChange={e => {
+              const v = e.target.value;
+              if (v.startsWith("act:")) {
+                agregar("actividad", Number(v.slice(4)));
+                setCapElegido("");
+                return;
+              }
+              setCapElegido(v); setBusqueda("");
+            }}
             style={mini}>
             <option value="">Capítulo…</option>
-            {capitulosDeRubros.map(c => <option key={c} value={c}>{c}</option>)}
+            {capitulosDeRubros.length > 0 && (
+              <optgroup label="Del presupuesto">
+                {capitulosDeRubros.map(c => <option key={c} value={c}>{c}</option>)}
+              </optgroup>
+            )}
+            {actividades.filter(a => a.extra).length > 0 && (
+              <optgroup label="Fuera del presupuesto">
+                {actividades.filter(a => a.extra).map(a => (
+                  <option key={a.id} value={`act:${a.id}`}>
+                    {a.codigo ? `${a.codigo} · ` : ""}{a.nombre}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <select value="" disabled={!capElegido}
             onChange={e => { if (e.target.value) agregar("rubro", Number(e.target.value)); }}
