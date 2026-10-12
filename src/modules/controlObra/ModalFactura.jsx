@@ -42,6 +42,9 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // Lo que ya se pagó de esta factura, en el momento de cargarla: es cuando se
   // sabe, porque quien la carga tiene el comprobante en la mano.
   const [pagado, setPagado] = useState({ monto: "", forma: "transferencia" });
+  // Los renglones de la factura, leídos por NOVA. Cada uno puede ir a un rubro
+  // distinto: una factura de ferretería sirve a tres capítulos.
+  const [items, setItems] = useState([]);
   const [repartos, setRepartos] = useState(
     asignacionesFactura.map(a => a.obra_actividad_id != null
       ? { tipo: "actividad", id: a.obra_actividad_id, monto: a.monto }
@@ -110,11 +113,37 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: LECTURA, max_tokens: 1200,
+          model: LECTURA, max_tokens: 4000,
           system: `Eres NOVA. Lees facturas de construcción de Ecuador y devuelves SOLO JSON, sin markdown:
-{"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null}
+{"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
+ "items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"rubro_id":null}]}
+
 subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.
-rubro_id: el id del rubro más probable de esta lista, o null si no estás seguro. Rubros: ${listaRubros}`,
+
+"items" ES LO MÁS IMPORTANTE: UNA LÍNEA POR CADA RENGLÓN DE LA FACTURA.
+
+Una factura de ferretería trae cemento, varilla y alambre, y cada cosa va a un
+capítulo distinto de la obra. Repartir el total a ojo entre capítulos es
+inventar; la factura ya dice qué trae y cuánto cuesta cada cosa. Copiá eso.
+
+  "descripcion" el renglón como está impreso, corto.
+  "cantidad" y "unidad" si están; si no, 0 y "".
+  "monto" lo que suma ESE renglón, sin IVA —la base, igual que los subtotales—.
+  "rubro_id" el rubro de la lista al que corresponde ESE renglón, o null si no
+  estás seguro. Null es una respuesta válida y es mejor que adivinar: quien
+  carga la factura lo elige en dos segundos, y un rubro equivocado se
+  descubre tres meses después.
+
+La suma de los "monto" tiene que dar los subtotales. Si la factura trae
+descuentos o un renglón de transporte, ponelos como un ítem más, con su signo.
+
+Si no podés leer los renglones —una foto borrosa, un recibo escrito a mano—
+mandá "items" vacío. Un ítem inventado es peor que ninguno.
+
+"rubro_id" de arriba, el de la factura entera, es el más probable de todos: se
+usa cuando no hay renglones.
+
+Rubros: ${listaRubros}`,
           messages: [{
             role: "user",
             content: [
@@ -141,6 +170,30 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         iva: n(p.iva), total: n(p.total),
         tipo: p.tipo || f.tipo,
       }));
+      // LOS RENGLONES DE LA FACTURA.
+      //
+      // Una factura de ferretería trae cemento, varilla y alambre, y cada cosa
+      // va a un capítulo distinto. Repartir el total a ojo entre capítulos es
+      // inventar; la factura ya dice qué trae y cuánto cuesta cada cosa.
+      //
+      // Se guardan aparte y NO se asignan solos: NOVA propone el rubro de cada
+      // renglón y quien carga la factura confirma. Un rubro equivocado puesto
+      // automáticamente se descubre tres meses después.
+      if (Array.isArray(p.items) && p.items.length) {
+        setItems(p.items
+          .filter(x => x && (x.descripcion || n(x.monto)))
+          .map((x, k) => ({
+            k,
+            descripcion: String(x.descripcion || "").trim().slice(0, 90),
+            cantidad: n(x.cantidad),
+            unidad: String(x.unidad || "").trim().slice(0, 10),
+            monto: Math.round(n(x.monto) * 100) / 100,
+            // Solo si el rubro existe de verdad: un id inventado asignaría
+            // plata a un renglón que nadie puede encontrar.
+            rubro_id: rubros.some(r => r.id === Number(x.rubro_id)) ? Number(x.rubro_id) : null,
+          })));
+      }
+
       // SI NOVA ENCONTRÓ EL RUBRO EXACTO, SE USA EL RUBRO.
       //
       // Antes se lo cambiaba por su agrupación, y eso tiraba a la basura el
@@ -473,6 +526,85 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
                     : "En blanco: a crédito, se paga después."}
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOS RENGLONES DE LA FACTURA, cada uno a su rubro.
+          UNA FACTURA SIRVE A VARIOS CAPÍTULOS: la de ferretería trae cemento,
+          varilla y alambre, y eso es albañilería, estructura e instalaciones.
+          Repartir el total a ojo entre capítulos es inventar un dato; la
+          factura ya dice qué trae y cuánto cuesta cada cosa.
+
+          NOVA propone el rubro de cada renglón y acá se confirma. Lo que deja
+          en blanco se elige a mano, que son dos segundos; lo que pone mal se
+          corrige antes de guardar, que es cuando todavía se puede. */}
+      {items.length > 0 && (
+        <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <Sparkles size={14} color={colors.brand} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>
+              NOVA leyó {items.length} {items.length === 1 ? "renglón" : "renglones"} en la factura
+            </div>
+            <button onClick={() => setItems([])}
+              style={{ marginLeft: "auto", background: "none", border: "none", color: colors.muted,
+                fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>descartar</button>
+          </div>
+
+          {items.map((it, i) => (
+            <div key={it.k} style={{ display: "grid", gridTemplateColumns: "1fr 80px 1.1fr", gap: 7,
+              alignItems: "center", marginBottom: 5 }}>
+              <div style={{ minWidth: 0, fontSize: 11.5, color: colors.ink, overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.descripcion}>
+                {it.descripcion}
+                {it.cantidad ? <span style={{ color: colors.muted }}> · {it.cantidad} {it.unidad}</span> : null}
+              </div>
+              <input type="number" step="0.01" value={it.monto}
+                onChange={e => setItems(xs => xs.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
+                style={{ ...mini, padding: "5px 7px", fontSize: 11.5, textAlign: "right" }} />
+              <select value={it.rubro_id ?? ""}
+                onChange={e => setItems(xs => xs.map((x, j) => j === i
+                  ? { ...x, rubro_id: e.target.value ? Number(e.target.value) : null } : x))}
+                style={{ ...mini, padding: "5px 7px", fontSize: 11,
+                  color: it.rubro_id ? colors.ink : colors.warning }}>
+                <option value="">¿a qué rubro va?</option>
+                {rubros.filter(r => !r.oculto && !r.anulado_por_oc).map(r => (
+                  <option key={r.id} value={r.id}>{r.capitulo} · {r.numero} {r.descripcion.slice(0, 40)}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+            <Button variant="primary" size="sm"
+              disabled={!items.some(x => x.rubro_id)}
+              onClick={() => {
+                // Un reparto por rubro, sumando los renglones que van al mismo.
+                const porRubro = new Map();
+                items.forEach(x => {
+                  if (!x.rubro_id) return;
+                  porRubro.set(x.rubro_id, Math.round(((porRubro.get(x.rubro_id) || 0) + n(x.monto)) * 100) / 100);
+                });
+                setRepartos([...porRubro.entries()].map(([id, monto]) => ({ tipo: "rubro", id, monto })));
+              }}>
+              Asignar {items.filter(x => x.rubro_id).length} de {items.length}
+            </Button>
+            {/* QUE LA SUMA CUADRE. Si los renglones no dan el total de la
+                factura, falta uno o sobra: el descuento, el transporte, o una
+                línea que la foto cortó. Decirlo acá evita descubrirlo cuando ya
+                no se puede comparar con el papel. */}
+            {(() => {
+              const suma = items.reduce((t, x) => t + n(x.monto), 0);
+              const base = n(form.subtotal_0) + n(form.subtotal_5) + n(form.subtotal_15);
+              const dif = Math.round((suma - base) * 100) / 100;
+              return (
+                <span style={{ fontSize: 11, color: Math.abs(dif) < 0.02 ? colors.success : colors.warning }}>
+                  {Math.abs(dif) < 0.02
+                    ? `Los renglones suman los $${fmt(suma)} de la base.`
+                    : `Los renglones suman $${fmt(suma)} y la base es $${fmt(base)} — ${dif > 0 ? "sobran" : "faltan"} $${fmt(Math.abs(dif))}.`}
+                </span>
+              );
+            })()}
           </div>
         </div>
       )}
