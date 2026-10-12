@@ -226,7 +226,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
                 )}
               </div>
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor}
-                comprometido={comprometido} fuera={solicitudesFuera} obra={obra} />
+                comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
+                facturas={facturas} asignaciones={asignaciones} rubros={rubros} />
 
               {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.
                   Debajo de la tabla porque es mantenimiento, no lectura: uno

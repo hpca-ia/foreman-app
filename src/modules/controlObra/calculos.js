@@ -609,3 +609,78 @@ export function montoDeSolicitud(s = {}, adjuntos = []) {
   // cuánto cuesta", que para un control son cosas opuestas.
   return { monto: 0, de: "sin monto" };
 }
+
+/**
+ * Qué gastos cayeron en un rubro, en un capítulo o en una agrupación.
+ *
+ * El control dice CUÁNTO lleva gastado cada renglón; esto dice DE QUÉ está
+ * hecho ese número. Es la pregunta que uno se hace apenas ve algo raro —"¿qué
+ * es este $4.200 en mampostería?"— y hasta ahora había que ir al libro de
+ * facturas y buscar a mano cuál apuntaba ahí.
+ *
+ * Incluye lo que llegó por prorrateo desde una agrupación, diciendo que es
+ * prorrateado: un monto repartido no es lo mismo que uno que la factura dice,
+ * y quien revisa tiene que poder distinguirlos sin abrir la factura.
+ */
+export function gastosDe({ rubroId = null, capitulo = null, actividadId = null },
+  { facturas = [], asignaciones = [], rubros = [] } = {}) {
+  const porFactura = new Map(facturas.map(f => [f.id, f]));
+  const rubroDe = new Map(rubros.map(r => [Number(r.id), r]));
+
+  // Los rubros de una agrupación, para poder repartir lo que se le asignó a
+  // ella: es la misma cuenta que hace el control, dicha acá para poder
+  // mostrarla renglón por renglón.
+  const hermanos = id => rubros.filter(r => Number(r.actividad_id) === Number(id) && !r.anulado_por_oc);
+
+  const salida = [];
+  asignaciones.forEach(a => {
+    const f = porFactura.get(a.factura_id);
+    if (!f) return;
+    const base = {
+      factura: f, fecha: f.fecha, proveedor: f.razon_social || "—",
+      numero: f.numero_factura || "", detalle: f.detalle || "",
+      planilla: f._planillaNumero ?? null,
+    };
+
+    if (a.obra_rubro_id != null) {
+      if (rubroId != null && Number(a.obra_rubro_id) === Number(rubroId)) {
+        salida.push({ ...base, monto: n(a.monto), exacto: true });
+      } else if (capitulo && rubroDe.get(Number(a.obra_rubro_id))?.capitulo === capitulo) {
+        salida.push({ ...base, monto: n(a.monto), exacto: true,
+          rubro: rubroDe.get(Number(a.obra_rubro_id)) });
+      } else if (actividadId != null
+          && Number(rubroDe.get(Number(a.obra_rubro_id))?.actividad_id) === Number(actividadId)) {
+        salida.push({ ...base, monto: n(a.monto), exacto: true,
+          rubro: rubroDe.get(Number(a.obra_rubro_id)) });
+      }
+      return;
+    }
+
+    if (a.capitulo) {
+      if (capitulo && a.capitulo === capitulo) {
+        salida.push({ ...base, monto: n(a.monto), exacto: true, alCapitulo: true });
+      }
+      return;
+    }
+
+    if (a.obra_actividad_id != null) {
+      if (actividadId != null && Number(a.obra_actividad_id) === Number(actividadId)) {
+        salida.push({ ...base, monto: n(a.monto), exacto: true });
+        return;
+      }
+      // Lo que le tocó a UN rubro por el prorrateo de su agrupación.
+      const destino = hermanos(a.obra_actividad_id);
+      if (!destino.length) return;
+      const partes = repartirProporcional(a.monto, destino);
+      destino.forEach((r, i) => {
+        const cae = rubroId != null ? Number(r.id) === Number(rubroId)
+          : capitulo ? r.capitulo === capitulo : false;
+        if (cae && partes[i]) {
+          salida.push({ ...base, monto: partes[i], exacto: false, rubro: r });
+        }
+      });
+    }
+  });
+
+  return salida.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+}

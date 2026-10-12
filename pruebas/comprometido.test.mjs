@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar }
+import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar, gastosDe }
   from "../src/modules/controlObra/calculos.js";
 
 // Cuánta plata hay hablada contra la obra. Todo lo de acá salió de un número
@@ -130,4 +130,50 @@ test("una factura cargada al CAPÍTULO suma al capítulo y no se reparte", () =>
   const alba = grupos.find(g => g.capitulo === "ALBAÑILERÍA");
   assert.equal(alba.acumulado, 4000, "pero el capítulo sí lo suma");
   assert.equal(alba.saldo, 4000, "8000 de presupuesto menos 4000 gastados");
+});
+
+test("se puede ver de qué gastos está hecho el número de un rubro", () => {
+  const rubros = [
+    { id: 1, capitulo: "ALBAÑILERÍA", actividad_id: 7, total_base: 1000 },
+    { id: 2, capitulo: "ALBAÑILERÍA", actividad_id: 7, total_base: 3000 },
+  ];
+  const facturas = [
+    { id: 9, fecha: "2026-03-02", razon_social: "Kywi", numero_factura: "001-1", _planillaNumero: 1 },
+    { id: 10, fecha: "2026-03-05", razon_social: "Disensa", numero_factura: "001-2", _planillaNumero: 1 },
+  ];
+  const asignaciones = [
+    { factura_id: 9, obra_rubro_id: 1, monto: 400 },
+    { factura_id: 10, obra_actividad_id: 7, monto: 800 },   // se prorratea 1:3
+  ];
+  const g = gastosDe({ rubroId: 1 }, { facturas, asignaciones, rubros });
+  assert.equal(g.length, 2, "la suya y la parte que le tocó del prorrateo");
+  assert.equal(g.find(x => x.exacto).monto, 400);
+  assert.equal(g.find(x => !x.exacto).monto, 200, "un cuarto de 800");
+});
+
+test("lo prorrateado se marca como tal: no es lo que dice la factura", () => {
+  const rubros = [{ id: 1, actividad_id: 7, total_base: 1000 }];
+  const g = gastosDe({ rubroId: 1 }, {
+    facturas: [{ id: 9, fecha: "2026-03-05" }],
+    asignaciones: [{ factura_id: 9, obra_actividad_id: 7, monto: 500 }],
+    rubros,
+  });
+  assert.equal(g[0].exacto, false);
+});
+
+test("lo cargado al capítulo entero aparece en el capítulo", () => {
+  const g = gastosDe({ capitulo: "ALBAÑILERÍA" }, {
+    facturas: [{ id: 9, fecha: "2026-03-05" }],
+    asignaciones: [{ factura_id: 9, capitulo: "ALBAÑILERÍA", monto: 4000 }],
+    rubros: [],
+  });
+  assert.equal(g.length, 1);
+  assert.equal(g[0].alCapitulo, true);
+});
+
+test("una asignación sin su factura no revienta ni inventa una fila", () => {
+  const g = gastosDe({ rubroId: 1 }, {
+    facturas: [], asignaciones: [{ factura_id: 99, obra_rubro_id: 1, monto: 100 }], rubros: [],
+  });
+  assert.deepEqual(g, []);
 });

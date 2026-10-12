@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { fmt } from "./calculos";
+import { fmt, gastosDe } from "./calculos";
 
 const COLS = "minmax(200px,3fr) 60px 70px repeat(6, minmax(90px,1fr)) 64px";
 
@@ -43,8 +43,62 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
   );
 }
 
+/**
+ * De qué está hecho el gasto de un renglón.
+ *
+ * El control dice CUÁNTO lleva gastado cada rubro; esto dice DE QUÉ. Es la
+ * pregunta que uno se hace apenas ve algo raro —"¿qué es este $4.200 en
+ * mampostería?"— y hasta ahora había que ir al libro de facturas y buscar a
+ * mano cuál apuntaba ahí.
+ *
+ * Lo PRORRATEADO se marca. Un monto repartido desde una agrupación no es lo
+ * que dice la factura, y quien revisa tiene que poder distinguirlo sin abrirla:
+ * contra un número prorrateado no se reclama nada.
+ */
+function Gastos({ gastos, sangria }) {
+  if (!gastos.length) {
+    return (
+      <div style={{ padding: `6px 14px 8px ${sangria + 14}px`, fontSize: 11, color: colors.muted,
+        borderBottom: `1px solid ${colors.neutralSoft}`, background: colors.bg }}>
+        Todavía no hay gastos cargados contra este renglón.
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: colors.bg, borderBottom: `1px solid ${colors.neutralSoft}` }}>
+      {gastos.map((g, i) => (
+        <div key={`${g.factura.id}-${i}`}
+          style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
+            padding: `5px 14px 5px ${sangria + 14}px`, fontSize: 11.5, color: colors.inkSoft }}>
+          <span style={{ color: colors.muted, minWidth: 64 }}>{String(g.fecha || "").slice(0, 10)}</span>
+          <span style={{ color: colors.ink, fontWeight: 500 }}>{g.proveedor}</span>
+          {g.numero && <span style={{ color: colors.muted }}>{g.numero}</span>}
+          {g.detalle && (
+            <span style={{ color: colors.muted, flex: 1, minWidth: 100, overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.detalle}</span>
+          )}
+          {g.planilla != null && <span style={{ color: colors.muted, fontSize: 10.5 }}>planilla {g.planilla}</span>}
+          {!g.exacto && (
+            <span title="Repartido a prorrata desde una agrupación: no es un monto que diga la factura"
+              style={{ color: colors.warning, fontSize: 10 }}>prorrateado</span>
+          )}
+          {g.alCapitulo && (
+            <span title="Cargado al capítulo entero, sin repartir entre sus rubros"
+              style={{ color: colors.muted, fontSize: 10 }}>al capítulo</span>
+          )}
+          <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.ink }}>${fmt(g.monto)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null,
-  fuera = [], obra = null }) {
+  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [] }) {
+  // Qué renglón está abierto mostrando sus gastos. Uno a la vez: abrir varios
+  // llena la pantalla de listas y se pierde la tabla, que es lo que se vino a
+  // mirar.
+  const [verGastos, setVerGastos] = useState(null);
   const [verDetalle, setVerDetalle] = useState(false);
   // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
   // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
@@ -159,8 +213,17 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <span style={{ textAlign: "right" }}>{g.base > 0 ? `${(g.pct * 100).toFixed(0)}%` : "—"}</span>
                 </div>
 
-                {abierto && g.rubros.map(r => <FilaRubro key={r.id} rubro={r} porRubro={porRubro} sangria={14}
-                  comprometido={comprometido?.porRubro?.[r.id] || 0} />)}
+                {abierto && g.rubros.map(r => (
+                  <div key={r.id} onClick={() => setVerGastos(v => (v === `r${r.id}` ? null : `r${r.id}`))}
+                    style={{ cursor: "pointer" }} title="Ver de qué gastos está hecho este número">
+                    <FilaRubro rubro={r} porRubro={porRubro} sangria={14}
+                      comprometido={comprometido?.porRubro?.[r.id] || 0} />
+                    {verGastos === `r${r.id}` && (
+                      <Gastos sangria={14}
+                        gastos={gastosDe({ rubroId: r.id }, { facturas, asignaciones, rubros })} />
+                    )}
+                  </div>
+                ))}
               </div>
             );
           })}
