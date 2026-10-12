@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Upload, Trash2, Plus, Sparkles } from "lucide-react";
+import { Upload, Trash2, Plus, Sparkles, Check, Banknote } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { subirArchivo } from "../../lib/archivos";
 import { colors } from "../../theme/colors";
@@ -14,6 +14,7 @@ import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
 import { comprasSinFacturar, engancharFactura } from "../compras/compras";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
+import { FORMAS_PAGO, registrarPago } from "./pagos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -38,6 +39,9 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // El capítulo elegido, para después elegir su rubro. Dos pasos, como se
   // piensa una factura: "esto es de albañilería… del bloque de 15".
   const [capElegido, setCapElegido] = useState("");
+  // Lo que ya se pagó de esta factura, en el momento de cargarla: es cuando se
+  // sabe, porque quien la carga tiene el comprobante en la mano.
+  const [pagado, setPagado] = useState({ monto: "", forma: "transferencia" });
   const [repartos, setRepartos] = useState(
     asignacionesFactura.map(a => a.obra_actividad_id != null
       ? { tipo: "actividad", id: a.obra_actividad_id, monto: a.monto }
@@ -256,6 +260,21 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
       if (e2) { setError("La factura se guardó pero la asignación falló: " + e2.message); setGuardando(false); return; }
     }
 
+    // Y EL PAGO, si se pagó algo al cargarla. Va después de la factura
+    // porque necesita su id, y si falla no se pierde la factura: se avisa y el
+    // pago se registra desde Proveedores.
+    if (!editando && n(pagado.monto) > 0) {
+      const r = await registrarPago(
+        { id: facturaId, obra_id: obra.id },
+        { monto: n(pagado.monto), fecha: payload.fecha, forma: pagado.forma },
+        currentUser);
+      if (r?.error) {
+        setGuardando(false);
+        setError("La factura se guardó, pero el pago no: " + r.error);
+        return;
+      }
+    }
+
     // ENGANCHAR EL PEDIDO. Es lo que hace que el comprometido baje: sin esto
     // el pedido sigue pesando como plata por gastar aunque la factura ya esté
     // cargada, y la misma plata cuenta dos veces sobre el mismo rubro.
@@ -399,6 +418,52 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
         </div>
       </div>
 
+      {/* CUÁNTO SE PAGÓ YA, al cargar la factura.
+          Una factura cargada sin esto entra al control como gasto y queda
+          debiéndose entera, aunque se haya pagado en el acto. Así la pantalla
+          de Proveedores muestra una deuda que no existe, y alguien paga dos
+          veces o discute con un proveedor que ya cobró.
+
+          Va acá y no en otra pantalla porque es el momento en que se sabe: el
+          que carga la factura tiene el comprobante en la mano. Dejarlo para
+          después es dejarlo para nunca.
+
+          En blanco significa que no se pagó nada todavía, que es lo correcto
+          para una factura a crédito. */}
+      {!editando && (
+        <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7, flexWrap: "wrap" }}>
+            <Banknote size={14} color={colors.muted} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>¿Cuánto de esta factura ya se pagó?</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "140px 150px 1fr", gap: 8, alignItems: "center" }}>
+            <input type="number" step="0.01" value={pagado.monto}
+              onChange={e => setPagado(p => ({ ...p, monto: e.target.value }))}
+              placeholder="0,00" style={{ ...mini, textAlign: "right" }} />
+            <select value={pagado.forma} onChange={e => setPagado(p => ({ ...p, forma: e.target.value }))} style={mini}>
+              {FORMAS_PAGO.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {n(form.total) > 0 && (
+                <button onClick={() => setPagado(p => ({ ...p, monto: n(form.total) }))}
+                  style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+                    padding: "4px 9px", fontSize: 11, color: colors.inkSoft, cursor: "pointer",
+                    fontFamily: colors.font }}>
+                  se pagó todo
+                </button>
+              )}
+              <span style={{ fontSize: 11, color: n(pagado.monto) > n(form.total) ? colors.danger : colors.muted }}>
+                {n(pagado.monto) > n(form.total)
+                  ? "Es más que el total de la factura."
+                  : n(form.total) > 0
+                    ? `Queda debiendo $${fmt(Math.max(0, n(form.total) - n(pagado.monto)))}`
+                    : "En blanco: a crédito, se paga después."}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reparto. Por actividad es el camino normal; el rubro es la excepción. */}
       <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
@@ -455,6 +520,46 @@ rubro_id: el id del rubro más probable de esta lista, o null si no estás segur
             monto entre todos sus rubros —la factura de cemento suma un poco a
             cada renglón y nada al que corresponde—. Lo exacto tiene que ser lo
             cómodo. */}
+        {/* LA LISTA DEL CAPÍTULO, PARA MARCAR VARIOS.
+            Una factura de mano de obra cubre cuatro o cinco rubros del mismo
+            capítulo, y elegirlos de a uno en un desplegable es abrirlo cinco
+            veces. Acá se marcan los que entran y después se decide cuánto va a
+            cada uno: en partes iguales, por porcentaje, o escribiendo el monto.
+
+            Marcar NO reparte solo: el monto de cada uno arranca en cero y lo
+            pone quien sabe. Repartir automáticamente al marcar sería volver al
+            prorrateo por otra puerta. */}
+        {capElegido && (
+          <div style={{ marginTop: 6, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
+            maxHeight: 190, overflowY: "auto", background: "#fff" }}>
+            {rubros.filter(r => r.capitulo === capElegido && !r.oculto && !r.anulado_por_oc).map(r => {
+              const puesto = repartos.some(x => x.tipo === "rubro" && x.id === r.id);
+              return (
+                <div key={r.id}
+                  onClick={() => puesto
+                    ? setRepartos(rs => rs.filter(x => !(x.tipo === "rubro" && x.id === r.id)))
+                    : setRepartos(rs => [...rs, { tipo: "rubro", id: r.id, monto: 0 }])}
+                  style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 10px",
+                    borderBottom: `1px solid ${colors.neutralSoft}`, cursor: "pointer",
+                    background: puesto ? colors.brandSoft : "transparent" }}>
+                  <div style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+                    border: `1.5px solid ${puesto ? colors.brand : colors.border}`,
+                    background: puesto ? colors.brand : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {puesto && <Check size={9} color="#fff" />}
+                  </div>
+                  <span style={{ color: colors.muted, fontSize: 10.5, width: 26, flexShrink: 0 }}>{r.numero}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: colors.ink,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.descripcion}</span>
+                  <span style={{ fontSize: 10.5, color: colors.muted, flexShrink: 0 }}>
+                    ${fmt(r.total_base)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* EN PARTES IGUALES. Una factura de mano de obra que cubre cuatro
             rubros se reparte en cuatro, y hacer esa división a mano termina en
             un total que no cuadra por un centavo. El último se queda con el
