@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
-import { Plus, Trash2, ChevronLeft, ChevronDown, GanttChartSquare, AlertTriangle, Sparkles } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, GanttChartSquare, AlertTriangle, Sparkles, CalendarClock } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -8,6 +8,8 @@ import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios,
   revisarCronograma, ordenarConPalabras } from "./novaCronograma";
+import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./versiones";
+import { comparar } from "./compararVersion";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
@@ -91,6 +93,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [revision, setRevision] = useState(null);
   // Lo que se le dicta a NOVA sobre cómo va esta obra.
   const [dictado, setDictado] = useState("");
+  // Las fotos guardadas del cronograma, por fecha. Comparar contra una es la
+  // única forma de contestar "cuánto nos corrimos" con un número en vez de con
+  // una impresión.
+  const [versiones, setVersiones] = useState([]);
+  const [comparando, setComparando] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    if (lead?.id) versionesDe(lead.id).then(v => { if (vivo) setVersiones(v); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [lead?.id]);
   // El menú de lo que se hace de vez en cuando: bajarlo para Project,
   // reordenarlo, borrarlo. Afuera queda lo que uno viene a hacer.
   const [menu, setMenu] = useState(false);
@@ -1270,6 +1283,165 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* LAS VERSIONES.
+          Un cronograma vive: se corrige, se traslapa, se acomoda cuando entra
+          una orden de cambio. Eso está bien —uno que no cambia es uno que nadie
+          usa— pero deja sin respuesta la pregunta que importa: ¿cuánto nos
+          corrimos? Hoy "vamos quince días atrasados" es una impresión, y para
+          justificar un atraso o pedir una ampliación de plazo una impresión no
+          sirve.
+
+          Se guarda una foto y se COMPARA. No se restaura: volver atrás borraría
+          el avance ya cargado, y lo que hace falta no es deshacer sino medir. */}
+      {todas.length > 0 && editable && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+            <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+              const motivo = window.prompt(
+                "¿Por qué guardás esta versión?\n\n"
+                + "El motivo importa más que la fecha: \"antes de la orden de cambio 3\" o \"lo que se "
+                + "firmó con el cliente\" convierte una lista de fechas en una historia. Sin él, dentro de "
+                + "tres meses son seis versiones indistinguibles.");
+              if (motivo === null) return;
+              const base = !versiones.some(v => v.es_linea_base)
+                && window.confirm("¿Es la LÍNEA BASE?\n\nEs la que se firmó, contra la que se mide todo lo demás. Hay una sola por obra.");
+              setPensando(true); setError("");
+              const r = await guardarVersion({
+                lead, obra: { id: lead.obra_id }, actividades: todas, dependencias,
+                plan, motivo, lineaBase: base, quien: currentUser,
+              });
+              setPensando(false);
+              if (r.error) { setError(r.error); return; }
+              setVersiones(await versionesDe(lead.id));
+            }}><CalendarClock size={13} /> Guardar esta versión</Button>
+
+            {versiones.length === 0 ? (
+              <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+                Todavía no hay ninguna guardada. La primera conviene guardarla ahora, antes de que la obra
+                empiece a moverla: es contra lo que después se mide el atraso.
+              </span>
+            ) : (
+              <span style={{ fontSize: 11, color: colors.muted }}>
+                {versiones.length} {versiones.length === 1 ? "versión guardada" : "versiones guardadas"}
+              </span>
+            )}
+          </div>
+
+          {versiones.length > 0 && (
+            <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+              {versiones.map(v => (
+                <div key={v.id} style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap",
+                  padding: "6px 9px", borderRadius: colors.radiusSm,
+                  background: comparando?.id === v.id ? colors.brandSoft : colors.bg }}>
+                  <span style={{ fontSize: 11.5, color: colors.ink, minWidth: 92 }}>
+                    {new Date(v.created_at).toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "2-digit" })}
+                  </span>
+                  {v.es_linea_base && (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.brand,
+                      background: colors.brandSoft, borderRadius: 10, padding: "1px 7px" }}>LÍNEA BASE</span>
+                  )}
+                  <span style={{ flex: 1, minWidth: 140, fontSize: 11.5, color: colors.inkSoft,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {v.motivo || "sin motivo"}
+                  </span>
+                  {v.dias != null && <span style={{ fontSize: 10.5, color: colors.muted }}>{v.dias} días</span>}
+                  <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+                    if (comparando?.id === v.id) { setComparando(null); return; }
+                    setPensando(true);
+                    const foto = await fotoDeVersion(v.id);
+                    setPensando(false);
+                    if (!foto) { setError("No se pudo leer esa versión."); return; }
+                    setComparando({ id: v.id, version: v, r: comparar(foto, todas, dependencias) });
+                  }}>{comparando?.id === v.id ? "Cerrar" : "Comparar"}</Button>
+                  {!v.es_linea_base && (
+                    <button onClick={async () => {
+                      if (!window.confirm("¿Borrar esta versión guardada?")) return;
+                      const err = await borrarVersion(v.id);
+                      if (err) { setError(err); return; }
+                      if (comparando?.id === v.id) setComparando(null);
+                      setVersiones(await versionesDe(lead.id));
+                    }} style={{ background: "none", border: "none", color: colors.border,
+                      cursor: "pointer", display: "flex" }}><Trash2 size={12} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* QUÉ CAMBIÓ desde esa foto.
+          El número de arriba es el que se dice en una reunión; abajo, las que
+          explican ese número. Y se separan las CRÍTICAS de las demás: una barra
+          con colchón que se corrió tres días no atrasó la obra, y meterla en la
+          misma lista que las que sí la atrasaron hace que la lista no se lea. */}
+      {comparando && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`,
+          borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 9 }}>
+            <strong style={{ fontSize: 13, color: colors.ink }}>
+              Contra {comparando.version.es_linea_base ? "la línea base" : "esa versión"}
+            </strong>
+            <span style={{ fontSize: 11.5, color: colors.muted }}>{comparando.version.motivo || ""}</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700,
+              color: !comparando.r.corrimientoObra ? colors.success
+                : comparando.r.corrimientoObra > 0 ? colors.danger : colors.success }}>
+              {comparando.r.corrimientoObra == null ? "—"
+                : comparando.r.corrimientoObra === 0 ? "La obra termina el mismo día"
+                : comparando.r.corrimientoObra > 0
+                  ? `La obra se corrió ${comparando.r.corrimientoObra} días`
+                  : `La obra se adelantó ${Math.abs(comparando.r.corrimientoObra)} días`}
+            </span>
+          </div>
+
+          <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 8, lineHeight: 1.5 }}>
+            {comparando.r.finAntes && comparando.r.finAhora
+              && <>Terminaba el {comparando.r.finAntes} y ahora el {comparando.r.finAhora}. </>}
+            {comparando.r.movidas.length} {comparando.r.movidas.length === 1 ? "barra se movió" : "barras se movieron"}
+            {comparando.r.nuevas.length > 0 && `, ${comparando.r.nuevas.length} nuevas`}
+            {comparando.r.borradas.length > 0 && `, ${comparando.r.borradas.length} ya no están`}.
+          </div>
+
+          {comparando.r.criticasMovidas.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.danger, letterSpacing: 0.3, marginBottom: 3 }}>
+                EN LA RUTA CRÍTICA — ESTAS SON LAS QUE ATRASAN LA OBRA
+              </div>
+              {comparando.r.criticasMovidas.map(l => (
+                <div key={l.id} style={{ display: "flex", gap: 9, fontSize: 11.5, padding: "2px 0" }}>
+                  <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden",
+                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nombre}</span>
+                  <span style={{ color: colors.muted }}>{l.fin.antes} → {l.fin.ahora}</span>
+                  <span style={{ color: colors.danger, fontWeight: 700, minWidth: 48, textAlign: "right" }}>
+                    +{l.corrimientoFin}d
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {comparando.r.peores.filter(l => !comparando.r.criticasMovidas.includes(l)).length > 0 && (
+            <div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, marginBottom: 3 }}>
+                LAS QUE MÁS SE MOVIERON, dentro de su colchón
+              </div>
+              {comparando.r.peores.filter(l => !comparando.r.criticasMovidas.includes(l)).map(l => (
+                <div key={l.id} style={{ display: "flex", gap: 9, fontSize: 11.5, padding: "2px 0" }}>
+                  <span style={{ flex: 1, minWidth: 0, color: colors.inkSoft, overflow: "hidden",
+                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nombre}</span>
+                  <span style={{ color: colors.muted }}>{l.fin.antes} → {l.fin.ahora}</span>
+                  <span style={{ minWidth: 48, textAlign: "right", fontWeight: 600,
+                    color: l.corrimientoFin > 0 ? colors.warning : colors.success }}>
+                    {l.corrimientoFin > 0 ? "+" : ""}{l.corrimientoFin}d
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
