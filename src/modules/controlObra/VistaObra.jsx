@@ -13,6 +13,7 @@ import PanelDuplicados from "./PanelDuplicados";
 import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import PanelCurar from "./PanelCurar";
+import PanelBeneficios from "./PanelBeneficios";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
 import { comprometidoPorGrupo } from "./calculos";
@@ -195,6 +196,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
             anticipó el cliente ni cuánto se le debe a cada proveedor. */}
         {vePlata && <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>}
         {veCaja && <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>}
+        <button onClick={() => setTab("beneficios")} style={tabS(tab === "beneficios")}>Beneficios</button>
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
@@ -281,6 +283,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
             </Suspense>
           )}
 
+          {tab === "beneficios" && <PanelBeneficios rubros={rubros} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
