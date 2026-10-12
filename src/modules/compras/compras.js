@@ -514,13 +514,36 @@ export async function facturarCompra(solicitud, datos, quien) {
   }
   if (error) return { error: "No se pudo cargar el documento: " + error.message };
 
-  // Contra qué del presupuesto. Lo eligió quien pidió, hace semanas: volver a
-  // preguntarlo acá es pedirle a Johanna que adivine de qué era la compra.
-  const destino = solicitud.obra_rubro_id
-    ? { obra_rubro_id: solicitud.obra_rubro_id }
-    : solicitud.obra_actividad_id ? { obra_actividad_id: solicitud.obra_actividad_id } : null;
-  if (destino) {
-    await supabase.from("obra_asignaciones").insert({ factura_id: factura.id, ...destino, monto: total });
+  // Contra qué del presupuesto.
+  //
+  // UNA FACTURA PUEDE SERVIR A VARIOS RUBROS: la de ferretería trae cemento,
+  // varilla y alambre, y eso es albañilería, estructura e instalaciones. Si
+  // vienen renglones repartidos —NOVA los leyó y alguien los emparejó— se
+  // guarda uno por cada rubro, que es el dato exacto.
+  //
+  // Si no vienen, el destino es el del pedido: lo eligió quien pidió, hace
+  // semanas, y volver a preguntarlo acá es pedirle a Johanna que adivine de qué
+  // era la compra.
+  // Si quedó sin asignar hay que decirlo: una factura sin destino entra al
+  // control y no descuenta de ningún lado.
+  let asignado = false;
+  const repartos = (datos.repartos || []).filter(x => Number(x.monto) > 0 && (x.obra_rubro_id || x.obra_actividad_id));
+  if (repartos.length) {
+    await supabase.from("obra_asignaciones").insert(repartos.map(x => ({
+      factura_id: factura.id,
+      obra_rubro_id: x.obra_rubro_id ?? null,
+      obra_actividad_id: x.obra_actividad_id ?? null,
+      monto: Number(x.monto),
+    })));
+    asignado = true;
+  } else {
+    const destino = solicitud.obra_rubro_id
+      ? { obra_rubro_id: solicitud.obra_rubro_id }
+      : solicitud.obra_actividad_id ? { obra_actividad_id: solicitud.obra_actividad_id } : null;
+    if (destino) {
+      await supabase.from("obra_asignaciones").insert({ factura_id: factura.id, ...destino, monto: total });
+      asignado = true;
+    }
   }
 
   // Enganchada al pedido: con esto deja de contarse como comprometido —si no,
@@ -528,9 +551,9 @@ export async function facturarCompra(solicitud, datos, quien) {
   await supabase.from("compras_solicitudes").update({ factura_id: factura.id, obra_id: obra.id }).eq("id", solicitud.id);
 
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
-    `${(datos.clase || "factura") === "proforma" ? "Proforma" : "Factura"}${fila.numero_factura ? ` ${fila.numero_factura}` : ""} por $${total.toFixed(2)} cargada al control de obra${destino ? "" : " — falta asignarle el rubro"}`);
+    `${(datos.clase || "factura") === "proforma" ? "Proforma" : "Factura"}${fila.numero_factura ? ` ${fila.numero_factura}` : ""} por $${total.toFixed(2)} cargada al control de obra${asignado ? "" : " — falta asignarle el rubro"}`);
 
-  return { factura, sinDestino: !destino, sinPlanilla: !abierta };
+  return { factura, sinDestino: !asignado, sinPlanilla: !abierta };
 }
 
 /**

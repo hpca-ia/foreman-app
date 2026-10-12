@@ -186,6 +186,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const docRef = useRef(null);
   const [leyendoDoc, setLeyendoDoc] = useState(false);
   const [avisoDoc, setAvisoDoc] = useState("");
+  // Los renglones que NOVA leyó del documento, cada uno con el rubro al que va.
+  const [itemsFactura, setItemsFactura] = useState([]);
   // Guardar contra qué va la compra, por su cuenta: lo corrige quien no la
   // pidió, y tiene que poder hacerlo sin tocar el resto del pedido.
   // El documento de la compra y el comprobante del pago. Los mira cualquiera
@@ -388,7 +390,13 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     // Acá la plata deja de estar hablada: el documento entra al control y
     // descuenta el rubro. Antes había que acordarse de ir a cargarlo a mano.
     const con = { ...viva, proveedor: compra.proveedor.trim() };
-    const f = await facturarCompra(con, { ...compra, total }, currentUser);
+    // Los renglones emparejados viajan como repartos: cada uno a su rubro.
+    // Lo que quedó sin rubro no va —se cae al destino del pedido, que es lo
+    // que se hacía siempre.
+    const repartos = itemsFactura
+      .filter(x => x.obra_rubro_id && Number(x.monto) > 0)
+      .map(x => ({ obra_rubro_id: x.obra_rubro_id, monto: Number(x.monto) }));
+    const f = await facturarCompra(con, { ...compra, total, repartos }, currentUser);
     if (f.error) return { error: "La compra quedó marcada, pero el documento no entró al control: " + f.error };
 
     const paga = Number(compra.pagaAhora) || 0;
@@ -831,6 +839,10 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                   // KIWY" y "kywi" son el mismo, y si entran como tres la
                   // cuenta por proveedor deja de servir.
                   const canon = leido.proveedor ? await proveedorCanonico(leido).catch(() => ({})) : {};
+                  // Los renglones, para poder repartir la factura entre
+                  // varios rubros. Una de ferretería trae cemento, varilla y
+                  // alambre, y eso es albañilería, estructura e instalaciones.
+                  setItemsFactura((leido.items || []).map((x, k) => ({ ...x, k, obra_rubro_id: null })));
                   setCompra(c => ({
                     ...c,
                     clase: leido.clase || c.clase,
@@ -869,6 +881,48 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               <input type="number" step="0.01" value={compra.monto} onChange={ev => setCompra(c => ({ ...c, monto: ev.target.value }))}
                 placeholder="Total" style={mini} />
             </div>
+
+            {/* LOS RENGLONES, CADA UNO A SU RUBRO.
+                Una factura sirve a varios capítulos: la de ferretería trae
+                cemento, varilla y alambre, y eso es albañilería, estructura e
+                instalaciones. Hasta acá toda la factura iba al destino único
+                del pedido, y lo que no entraba ahí se repartía a ojo después.
+                Lo que no se empareja va al destino del pedido, como siempre. */}
+            {itemsFactura.length > 0 && rubros.length > 0 && (
+              <div style={{ background: colors.bg, borderRadius: 8, padding: "9px 10px", display: "grid", gap: 5 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                  <Sparkles size={13} color={colors.brand} />
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>
+                    NOVA leyó {itemsFactura.length} {itemsFactura.length === 1 ? "renglón" : "renglones"}
+                  </span>
+                  <button onClick={() => setItemsFactura([])}
+                    style={{ marginLeft: "auto", background: "none", border: "none", color: colors.muted,
+                      fontSize: 10.5, cursor: "pointer", fontFamily: colors.font }}>descartar</button>
+                </div>
+                {itemsFactura.map((it, i) => (
+                  <div key={it.k} style={{ display: "grid", gridTemplateColumns: "1fr 76px 1.1fr", gap: 6, alignItems: "center" }}>
+                    <span style={{ minWidth: 0, fontSize: 11, color: colors.ink, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.descripcion}>{it.descripcion}</span>
+                    <input type="number" step="0.01" value={it.monto}
+                      onChange={ev => setItemsFactura(xs => xs.map((x, j) => j === i ? { ...x, monto: ev.target.value } : x))}
+                      style={{ ...mini, padding: "4px 6px", fontSize: 11, textAlign: "right" }} />
+                    <select value={it.obra_rubro_id ?? ""}
+                      onChange={ev => setItemsFactura(xs => xs.map((x, j) => j === i
+                        ? { ...x, obra_rubro_id: ev.target.value ? Number(ev.target.value) : null } : x))}
+                      style={{ ...mini, padding: "4px 6px", fontSize: 10.5,
+                        color: it.obra_rubro_id ? colors.ink : colors.warning }}>
+                      <option value="">¿a qué rubro va?</option>
+                      {rubros.map(r => (
+                        <option key={r.id} value={r.id}>{r.capitulo} · {r.numero} {String(r.descripcion).slice(0, 38)}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+                <div style={{ fontSize: 10, color: colors.muted, lineHeight: 1.45 }}>
+                  Lo que quede sin rubro va al destino del pedido, como siempre.
+                </div>
+              </div>
+            )}
 
             {/* El total descuenta el rubro; lo que se paga ahora es otra cosa.
                 Una factura con 40% de anticipo ya se debe entera —el material

@@ -159,6 +159,17 @@ uno en blanco: el blanco se ve y se completa, el inventado se guarda y nadie lo 
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(p.fecha || "") ? p.fecha : "",
       monto: Number(p.monto) || null,
       detalle: (p.detalle || "").trim(),
+      // Los renglones, para poder repartir la factura entre varios rubros:
+      // una de ferretería trae cemento, varilla y alambre, y eso es
+      // albañilería, estructura e instalaciones.
+      items: (Array.isArray(p.items) ? p.items : [])
+        .filter(x => x && (x.descripcion || Number(x.monto)))
+        .map(x => ({
+          descripcion: String(x.descripcion || "").trim().slice(0, 90),
+          cantidad: Number(x.cantidad) || 0,
+          unidad: String(x.unidad || "").trim().slice(0, 10),
+          monto: Math.round((Number(x.monto) || 0) * 100) / 100,
+        })),
     };
   } catch {
     return { error: "NOVA devolvió algo que no se entiende. Cargalo a mano." };
