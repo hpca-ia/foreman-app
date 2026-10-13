@@ -199,7 +199,13 @@ export function desfase(actividades = [], agrupaciones = [], plata = {}, cubre =
   //
   // Se compara contra el nombre pelado: las etapas llevan sufijo —"VENTANERÍA
   // · anticipo"— y eso no es un desfase, es cómo se escriben.
-  const renombradas = filas.filter(a => {
+  // EN UN CRONOGRAMA LIBRE LOS NOMBRES SON OTROS A PROPÓSITO. NOVA les pone
+  // el nombre con que se habla en obra —"Desmontaje de instalaciones" en vez
+  // de "DESMONTAJE Y RETIRO DE INSTALACIONES ELÉCTRICAS EXISTENTES"— y el
+  // aviso lo leía como que los dos documentos se separaron. Peor: ofrecía
+  // devolverles el nombre largo del presupuesto, deshaciendo justamente lo
+  // que hace legible el cronograma.
+  const renombradas = !cubre ? [] : filas.filter(a => {
     const g = hoy.get(Number(a.obra_actividad_id));
     if (!g || !a.nombre) return false;
     return String(a.nombre).split(" · ")[0].trim() !== String(g.nombre).trim();
@@ -254,7 +260,9 @@ export function desfase(actividades = [], agrupaciones = [], plata = {}, cubre =
     visto.add(id); enCrono.push(id);
   });
   const delControl = [...enCrono].sort((a, b) => pos.get(a) - pos.get(b));
-  const reordenadas = enCrono.some((id, i) => id !== delControl[i]);
+  // Y el orden tampoco: en un cronograma libre el orden es el de la obra, que
+  // es el dato. Compararlo contra el del presupuesto no dice nada.
+  const reordenadas = cubre && enCrono.some((id, i) => id !== delControl[i]);
 
   return {
     // Se borró la agrupación y quedaron actividades o líneas colgando.

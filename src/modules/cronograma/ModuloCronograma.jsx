@@ -104,9 +104,6 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // Lo último que pasó, dicho en una línea verde. No es un error: es la
   // diferencia entre "guardó" y "no sé si guardó".
   const [aviso, setAviso] = useState("");
-  // Lo que sabe quien dirige la obra y no está en ningún dato. Se escribe
-  // mientras se arma el cronograma, no antes.
-  const [contexto, setContexto] = useState("");
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
   // Los rubros de la obra, para poder señalar cuál es el que está trabando a
@@ -2342,6 +2339,32 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 Ponerlo al día con el control
               </Button>
             )}
+            {/* DECIR QUE ESTE CRONOGRAMA NO SIGUE EL PRESUPUESTO.
+                El criterio se guarda solo cuando NOVA lo arma, pero un
+                cronograma armado antes de que eso existiera —o escrito a
+                mano— no lo tiene, y entonces FOREMAN lo trata como si se
+                hubiera comprometido a cubrir el presupuesto: deja este aviso
+                prendido para siempre por agrupaciones que nunca van a estar.
+                Se dice una vez y se termina. */}
+            {editable && cubrePresupuesto && (d.nuevas.length > 0 || d.renombradas.length > 0) && (
+              <button onClick={async () => {
+                if (!window.confirm(
+                  "¿Este cronograma NO sigue el presupuesto?\n\n"
+                  + "Decí que sí cuando lo armaste leyendo la obra: los trabajos tienen nombres de obra, "
+                  + "alguno junta varias agrupaciones y otros no están en ninguna.\n\n"
+                  + "FOREMAN deja de avisarte que faltan agrupaciones y que los nombres no coinciden —eso "
+                  + "es a propósito— y sigue avisándote lo que sí importa: las órdenes de cambio y las "
+                  + "barras que apuntan a una agrupación borrada.")) return;
+                const { error: e } = await supabase.from("leads").update({ crono_cubre: false }).eq("id", lead.id);
+                if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 103." : e.message); return; }
+                setLead(l => ({ ...l, crono_cubre: false }));
+                setError("");
+              }}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11, color: colors.muted, textDecoration: "underline" }}>
+                Este cronograma no sigue el presupuesto — no me avises de esto
+              </button>
+            )}
           </div>
         );
       })()}
@@ -2594,10 +2617,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     la escribe —"el aire llega en diciembre", "la planta alta
                     se entrega antes"— y es justo lo que hay que tener a mano
                     cuando se le pide la línea de tiempo. */}
-                <textarea value={contexto} rows={2}
-                  onChange={e => setContexto(e.target.value)}
-                  placeholder="Contale a NOVA lo que sabe solo quien dirige esta obra. Ej: el aire acondicionado llega recién en diciembre · la planta alta se entrega antes que la baja · no se puede picar hasta que pase la inspección"
-                  style={{ ...inputStyle, width: "100%", fontSize: 12, lineHeight: 1.5, resize: "vertical", padding: "7px 9px" }} />
+                {dictado.trim() && (
+                  <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.4 }}>
+                    Va a leer también lo que escribiste arriba en «Decile a NOVA cómo va esta obra».
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
                   setError("");
@@ -2605,7 +2629,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   const mp = obra?.id ? await materiaPrima(obra.id) : [];
                   const r = await ponerTiemposYOrden({
                     actividades, fases, agrupaciones: mp, dias: diasDeContrato,
-                    nombreObra: lead.nombre, comoVa: contexto, cal,
+                    nombreObra: lead.nombre, comoVa: dictado, cal,
                   });
                   if (r.error) { setPensando(false); setError(r.error); return; }
                   if (!r.duraciones.length && !r.dependencias.length) {
