@@ -5,6 +5,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import DiaDeObra from "./DiaDeObra";
 import { diasDe, hoyEnObra, estadoDelDia } from "./libro";
+import { listaDeDias, sinEscribir } from "./diasDelLibro";
 
 // Libro de Obra: el registro diario de cada obra.
 //
@@ -33,7 +34,7 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
   const proyectos = todos.filter(l => !!nivelProyecto(l.id));
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id").order("nombre").then(({ data }) => {
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,crono_laborables").order("nombre").then(({ data }) => {
       // El libro es de las obras: los leads que todavía se persiguen no tienen
       // días que registrar.
       setTodos((data || []).filter(l => l.resultado !== "perdido" && (l.tunel || "lead") !== "lead"));
@@ -80,6 +81,15 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
   if (lead) {
     const hoy = hoyEnObra();
     const hayHoy = dias.some(d => d.fecha === hoy);
+    // Todos los días del período, con su libro si lo tienen. No se va más
+    // atrás del arranque de la obra, y los días en que no se trabaja no
+    // cuentan como faltas —salvo que alguien haya escrito, porque entonces
+    // pasó algo ese día—.
+    const lista = listaDeDias({
+      dias, hoy, cuantos: 30,
+      desde: lead.crono_inicio || null,
+      laborables: Array.isArray(lead.crono_laborables) ? lead.crono_laborables : null,
+    });
     return (
       <div style={{ fontFamily: colors.font }}>
         <button onClick={() => { setLead(null); setDias([]); }}
@@ -110,15 +120,32 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
         </button>
 
         <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>DÍAS ANTERIORES</div>
-        {dias.filter(d => d.fecha !== hoy).length === 0 ? (
+        {/* TODOS LOS DÍAS, NO SOLO LOS QUE ALGUIEN ABRIÓ.
+            Un día nace en la base recién cuando alguien entra, así que el día
+            en que no entró nadie no existía en ninguna parte: no se veía, no
+            se podía completar y no se podía explicar. El libro quedaba con un
+            agujero que ni siquiera se veía como agujero, que es lo peor que le
+            puede pasar a un registro. Un día vacío y dicho —"nadie escribió"—
+            es un registro; un día ausente es una duda, y es la fecha que
+            después busca el que reclama. */}
+        {(() => {
+          const faltan = sinEscribir(lista);
+          return faltan > 0 ? (
+            <div style={{ fontSize: 11.5, color: colors.warning, marginTop: -2, marginBottom: 6, lineHeight: 1.45 }}>
+              {faltan} {faltan === 1 ? "día sin una sola línea" : "días sin una sola línea"} en este período.
+              Se pueden completar: entrá al día y abrilo.
+            </div>
+          ) : null;
+        })()}
+        {lista.filter(d => !d.hoy).length === 0 ? (
           <div style={{ fontSize: 12.5, color: colors.muted, padding: "10px 0" }}>Todavía no hay días registrados.</div>
         ) : (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-            {dias.filter(d => d.fecha !== hoy).map(d => (
-              <div key={d.id} onClick={() => setFecha(d.fecha)}
+            {lista.filter(x => !x.hoy).map(({ fecha: f, dia: d }) => (
+              <div key={f} onClick={() => setFecha(f)}
                 style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderTop: `1px solid ${colors.neutralSoft}`, cursor: "pointer" }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: colors.ink, textTransform: "capitalize" }}>{diaLargo(d.fecha)}</span>
-                {d.sin_novedades && <span style={{ fontSize: 11, color: colors.muted }}>sin novedades</span>}
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: d ? colors.ink : colors.muted, textTransform: "capitalize" }}>{diaLargo(f)}</span>
+                {d?.sin_novedades && <span style={{ fontSize: 11, color: colors.muted }}>sin novedades</span>}
                 {/* El mismo estado que se ve adentro. Antes la lista miraba
                     solo `estado` y decía "Abierto" de un día pasado que no se
                     puede escribir; al abrirlo salía con candado. */}
@@ -129,14 +156,14 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
                     sin_cerrar: colors.danger }[e.clave] || colors.muted;
                   return (
                     <span style={{ fontSize: 11, fontWeight: 700, color: tinta }}
-                      title={d.reabierto_motivo
+                      title={d?.reabierto_motivo
                         ? `Reabierto${d.reabierto_nombre ? ` por ${d.reabierto_nombre}` : ""}: ${d.reabierto_motivo}`
-                        : undefined}>
+                        : !d ? "Nadie escribió este día. Se puede abrir y completar." : undefined}>
                       {e.etiqueta}
                       {/* Cuántas veces se reabrió. Una es un olvido; cinco es
                           que el libro no se está llevando, y eso tiene que
                           verse sin abrir día por día. */}
-                      {Number(d.reaperturas) > 1 ? ` ×${d.reaperturas}` : ""}
+                      {Number(d?.reaperturas) > 1 ? ` ×${d.reaperturas}` : ""}
                     </span>
                   );
                 })()}

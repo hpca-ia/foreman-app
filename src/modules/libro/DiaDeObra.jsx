@@ -5,7 +5,8 @@ import { inputStyle } from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
 import {
   CATEGORIAS, CLIMAS, abrirDia, contenidoDe, anotar, borrarEntrada,
-  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia, reabrirDia, cerrarDia } from "./libro";
+  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia, reabrirDia, cerrarDia,
+  abrirDiaPasado } from "./libro";
 
 // El día de obra, pensado para el teléfono y para una mano sucia de cemento.
 //
@@ -29,6 +30,11 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
   const [borradores, setBorradores] = useState({});
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // Por qué se abre o se reabre un día que ya pasó. Se escribe en la pantalla
+  // y no en el cuadrito del navegador: muchos navegadores lo bloquean sin
+  // avisar, y entonces el botón se aprieta y no pasa nada.
+  const [motivoAbrir, setMotivoAbrir] = useState("");
+  const [reabriendo, setReabriendo] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
   const camRef = useRef(null);
 
@@ -52,6 +58,15 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => { avanceDeLaObra(lead.id).then(setAvance); }, [lead.id]);
+
+  async function abrirPasado() {
+    if (!motivoAbrir.trim()) return;
+    setOcupado(true); setError("");
+    const r = await abrirDiaPasado(lead.id, fecha, currentUser, motivoAbrir);
+    setOcupado(false);
+    if (r.error) { setError(r.error); return; }
+    setMotivoAbrir(""); await cargar(); onCambio?.();
+  }
 
   async function agregar(categoria) {
     const texto = borradores[categoria];
@@ -89,10 +104,37 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
   if (error && !dia) {
     return <div style={{ fontSize: 12.5, color: colors.danger, padding: 12 }}>{error}</div>;
   }
+  // UN DÍA QUE NADIE ABRIÓ. No es un error ni un día perdido: es un día en que
+  // nadie entró, y pasa. Lo que no puede pasar es que no haya manera de
+  // completarlo —ahí el libro se queda con un agujero que después nadie puede
+  // explicar—. Se abre con motivo, y nace diciendo que se escribió después.
   if (!dia) {
     return (
-      <div style={{ fontSize: 13, color: colors.muted, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 20, textAlign: "center" }}>
-        Ese día no tiene libro. Solo se puede escribir el del día en curso.
+      <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+        borderRadius: colors.radiusMd, padding: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, textTransform: "capitalize", marginBottom: 4 }}>
+          {diaLargo(fecha)}
+        </div>
+        <div style={{ fontSize: 12.5, color: colors.muted, lineHeight: 1.5, marginBottom: 10 }}>
+          Nadie escribió este día. Se puede completar ahora: el libro va a decir que se escribió después,
+          con tu nombre y con el motivo — que es lo que lo mantiene válido.
+        </div>
+        {!puedeReabrir ? (
+          <div style={{ fontSize: 12, color: colors.muted }}>
+            Abrir un día que ya pasó es del gerente o de administración.
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <input value={motivoAbrir} onChange={e => setMotivoAbrir(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && motivoAbrir.trim()) abrirPasado(); }}
+              placeholder="¿Por qué se escribe hoy? Ej: el residente no tuvo señal en obra"
+              style={{ ...inputStyle, flex: 1, minWidth: 220, fontSize: 12.5, padding: "8px 10px" }} />
+            <Button variant="primary" size="sm" disabled={ocupado || !motivoAbrir.trim()} onClick={abrirPasado}>
+              <Unlock size={12} /> {ocupado ? "Abriendo…" : "Abrir y completar"}
+            </Button>
+          </div>
+        )}
+        {error && <div style={{ fontSize: 12, color: colors.danger, marginTop: 8 }}>{error}</div>}
       </div>
     );
   }
@@ -131,19 +173,11 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
               Quien lleva el libro lo completa el día; volver a abrir uno
               cerrado es una decisión sobre el registro, y por eso tiene su
               propio permiso. */}
-          {!abierto && dia && puedeReabrir && (
-            <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
-              const motivo = window.prompt(
-                "¿Por qué se reabre este día?\n\n"
-                + "Queda escrito en el libro, con tu nombre. Sirve para explicar después por qué "
-                + "algo se completó más tarde — y para que una reapertura sospechosa también se vea.");
-              if (motivo === null) return;
-              setOcupado(true);
-              const err = await reabrirDia(dia, currentUser, motivo);
-              setOcupado(false);
-              if (err) { setError(err); return; }
-              setError(""); await cargar();
-            }}><Unlock size={12} /> Reabrir</Button>
+          {!abierto && dia && puedeReabrir && !reabriendo && (
+            <Button variant="outline" size="sm" disabled={ocupado}
+              onClick={() => { setReabriendo(true); setMotivoAbrir(""); }}>
+              <Unlock size={12} /> Reabrir
+            </Button>
           )}
           {/* Y volver a cerrarlo cuando se terminó de completar. */}
           {abierto && dia && !esHoy && puedeReabrir && (
@@ -156,6 +190,32 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
             }}><Lock size={12} /> Cerrar de nuevo</Button>
           )}
         </div>
+
+        {reabriendo && (
+          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
+            <input autoFocus value={motivoAbrir} onChange={e => setMotivoAbrir(e.target.value)}
+              onKeyDown={async e => {
+                if (e.key === "Escape") { setReabriendo(false); return; }
+                if (e.key === "Enter" && motivoAbrir.trim()) {
+                  setOcupado(true);
+                  const err = await reabrirDia(dia, currentUser, motivoAbrir);
+                  setOcupado(false);
+                  if (err) { setError(err); return; }
+                  setError(""); setReabriendo(false); setMotivoAbrir(""); await cargar();
+                }
+              }}
+              placeholder="¿Por qué se reabre? Queda escrito en el libro, con tu nombre"
+              style={{ ...inputStyle, flex: 1, minWidth: 240, fontSize: 12.5, padding: "7px 9px" }} />
+            <Button variant="primary" size="sm" disabled={ocupado || !motivoAbrir.trim()} onClick={async () => {
+              setOcupado(true);
+              const err = await reabrirDia(dia, currentUser, motivoAbrir);
+              setOcupado(false);
+              if (err) { setError(err); return; }
+              setError(""); setReabriendo(false); setMotivoAbrir(""); await cargar();
+            }}>{ocupado ? "Reabriendo…" : "Reabrir"}</Button>
+            <Button variant="secondary" size="sm" onClick={() => setReabriendo(false)}>Cancelar</Button>
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
           {CLIMAS.map(c => {
