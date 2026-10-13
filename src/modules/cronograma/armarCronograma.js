@@ -184,7 +184,7 @@ NO DEVUELVAS DEPENDENCIAS. El orden se pide aparte.`;
  * dónde volver a sacarlo; borrarlo al rearmar es perder trabajo que nadie
  * puede recuperar.
  */
-export async function guardarPlan({ lead, obra, plan, quien }) {
+export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = null }) {
   // PRIMERO SE GUARDA LO NUEVO, DESPUÉS SE BORRA LO VIEJO.
   //
   // Al revés estaba, y es un error caro: borraba las barras y las etapas, y
@@ -250,6 +250,16 @@ export async function guardarPlan({ lead, obra, plan, quien }) {
   // Y las nuevas quedan numeradas desde cero, ahora que no compiten con nada.
   await Promise.all(creadas.map((a, k) =>
     supabase.from("cronograma_actividades").update({ orden: k }).eq("id", a.id)));
+
+  // CON QUÉ CRITERIO SE ARMÓ, GUARDADO EN EL PROYECTO.
+  //
+  // Sin esto, FOREMAN mira un cronograma libre —donde a propósito no hay una
+  // barra por agrupación— y concluye que se separó del control: deja el aviso
+  // prendido para siempre y ofrece "ponerlo al día", que agregaría una barra
+  // por cada agrupación faltante y desarmaría lo que alguien acaba de pensar.
+  if (cubrePresupuesto !== null) {
+    await supabase.from("leads").update({ crono_cubre: cubrePresupuesto }).eq("id", lead.id);
+  }
 
   return { creadas, etapas: plan.etapas.length, sinEtapas };
 }

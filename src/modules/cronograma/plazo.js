@@ -176,7 +176,14 @@ export async function cargarPlan(leadId) {
  * @param conAgrupacion ids de agrupación que el cronograma ya usa
  * @param agrupaciones  las que existen hoy en la obra
  */
-export function desfase(actividades = [], agrupaciones = [], plata = {}) {
+/**
+ * @param cubre  si este cronograma tiene que tener una barra por agrupación.
+ *   Cuando es `false` el cronograma se armó leyendo la obra y no el
+ *   presupuesto: que falten agrupaciones NO es un desfase, es la decisión que
+ *   se tomó, y avisarlo deja un cartel prendido para siempre al lado de un
+ *   botón que desarmaría el cronograma.
+ */
+export function desfase(actividades = [], agrupaciones = [], plata = {}, cubre = true) {
   const hoy = new Map(agrupaciones.map(a => [Number(a.id), a]));
   // Acepta tanto una lista de ids como las actividades enteras: la primera
   // forma la usaba la pantalla antes de que hiciera falta mirar los nombres.
@@ -253,7 +260,9 @@ export function desfase(actividades = [], agrupaciones = [], plata = {}) {
     // Se borró la agrupación y quedaron actividades o líneas colgando.
     perdidas: [...usadas].filter(id => !hoy.has(id)),
     // Se agregó una agrupación y nadie la puso en el cronograma.
-    nuevas: agrupaciones.filter(a => !a.extra && !usadas.has(Number(a.id))),
+    // Las agrupaciones sin barra solo son una falta cuando el cronograma se
+    // comprometió a cubrir el presupuesto. En el otro modo son lo normal.
+    nuevas: cubre ? agrupaciones.filter(a => !a.extra && !usadas.has(Number(a.id))) : [],
     renombradas,
     dePlata,
     reordenadas,

@@ -243,6 +243,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }, []);
   useEffect(() => { cargarMemoria(); }, [cargarMemoria]);
 
+  // CON QUÉ CRITERIO SE ARMÓ ESTE CRONOGRAMA. Nulo son los de antes de que
+  // existieran los dos modos: se armaron cubriendo el presupuesto.
+  const cubrePresupuesto = lead?.crono_cubre !== false;
   const editable = !lead || nivelProyecto?.(lead.id) === "editar";
   // El cronograma vive en el proyecto; la obra es de dónde salen el
   // presupuesto y sus agrupaciones. Un proyecto para cotizar todavía no tiene
@@ -886,7 +889,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     // mejor una barra fea y presente que un rubro desaparecido del plan.
     const puestas = new Set(actividades.filter(a => vivas.has(Number(a.obra_actividad_id)))
       .map(a => Number(a.obra_actividad_id)));
-    const faltan = [...vivas.values()].filter(g => !puestas.has(Number(g.id)));
+    // AGREGAR LAS QUE FALTAN, SOLO SI ESTE CRONOGRAMA SE COMPROMETIÓ A ESO.
+    //
+    // En un cronograma armado leyendo la obra, que falte una agrupación no es
+    // un olvido: es la decisión que se tomó. Un trabajo puede juntar tres
+    // agrupaciones, o no corresponder a ninguna. Agregarle acá una barra por
+    // cada agrupación que no esté sería meterle veinte filas que nadie pidió y
+    // desarmar lo que alguien acaba de pensar — y encima el aviso que lleva a
+    // este botón estaría prendido para siempre, porque siempre van a faltar.
+    const faltan = cubrePresupuesto
+      ? [...vivas.values()].filter(g => !puestas.has(Number(g.id)))
+      : [];
     if (faltan.length) {
       const filas = faltan.map((g, i) => ({
         lead_id: lead.id, obra_id: lead.obra_id || null,
@@ -901,13 +914,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
 
     setPensando(false);
     await cargar();
-    await ordenarComoElControl();
+    // El orden del control manda solo cuando el cronograma es el presupuesto.
+    // En uno libre el orden lo puso quien lo escribió, y es información.
+    if (cubrePresupuesto) await ordenarComoElControl();
     await refrescarMontoRef();
     window.alert([
       "Cronograma al día con el control de obra.",
       fuera && `· ${fuera} ${fuera === 1 ? "actividad apuntaba" : "actividades apuntaban"} a agrupaciones que ya no existen: se fueron.`,
       renombradas && `· ${renombradas} ${renombradas === 1 ? "tomó" : "tomaron"} el nombre de su agrupación.`,
       sumadas && `· ${sumadas} ${sumadas === 1 ? "agrupación entró" : "agrupaciones entraron"} con duración a revisar.`,
+      !cubrePresupuesto && "· No se agregó ninguna agrupación: este cronograma se armó leyendo la obra, no el presupuesto.",
       !fuera && !renombradas && !sumadas && "No hacía falta cambiar nada: ya coincidían.",
       "",
       "Las duraciones, las dependencias y las etapas no se tocaron.",
@@ -1824,7 +1840,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   }
                   if (r.cortado) paso("La respuesta vino cortada: guardé lo que llegó entero.", true);
 
-                  const g = await guardarPlan({ lead, obra, plan: r.plan, quien: currentUser });
+                  const g = await guardarPlan({
+                    lead, obra, plan: r.plan, quien: currentUser,
+                    cubrePresupuesto: !!armando.cubrir,
+                  });
                   if (g.error) { setPensando(false); setError(g.error); return; }
                   paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la migración 101)" : ` en ${g.etapas} etapas`}.`);
 
@@ -1882,7 +1901,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         if (r.error) { setPensando(false); setError(r.error); return; }
                         paso(`Leído: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
                         if (r.cortado) paso("Vino cortado: entró lo que llegó entero.", true);
-                        const g = await guardarPlan({ lead, obra, plan: r.plan, quien: currentUser });
+                        const g = await guardarPlan({
+                          lead, obra, plan: r.plan, quien: currentUser, cubrePresupuesto: false,
+                        });
                         if (g.error) { setPensando(false); setError(g.error); return; }
                         paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la 101)" : ` en ${g.etapas} etapas`}.`);
                         const o = await guardarOrden({ actividades: g.creadas, dias: diasDeContrato, nombreObra: lead.nombre, cal });
@@ -2140,7 +2161,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           hace es rehacerlo solo —un cronograma con avance cargado y fechas
           comprometidas no se reescribe porque alguien tocó una agrupación. */}
       {todas.length > 0 && agrupaciones.length > 0 && (() => {
-        const d = desfase(actividades, agrupaciones, plata);
+        const d = desfase(actividades, agrupaciones, plata, cubrePresupuesto);
         if (!d.perdidas.length && !d.nuevas.length && !d.renombradas.length
             && !d.dePlata.length && !d.reordenadas) return null;
         return (
@@ -2259,7 +2280,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 "Ponerlo al día" hace las tres y dice qué hizo. */}
             {(d.renombradas.length > 0 || d.nuevas.length > 0 || d.perdidas.length > 0) && editable && (
               <Button variant={d.dePlata.length ? "outline" : "primary"} size="sm" disabled={pensando}
-                style={{ marginRight: 6 }} onClick={sincronizarConElControl}>
+                style={{ marginRight: 6 }}
+                title={cubrePresupuesto
+                  ? "Trae los nombres nuevos, suma las agrupaciones que falten y saca las barras de agrupaciones borradas. No toca duraciones, cadenas ni etapas."
+                  : "Trae los nombres nuevos y saca las barras de agrupaciones borradas. NO agrega agrupaciones: este cronograma se armó leyendo la obra."}
+                onClick={async () => {
+                  if (!window.confirm(
+                    "¿Poner el cronograma al día con el control?\n\n"
+                    + "· Las barras que salen del control toman su nombre nuevo.\n"
+                    + "· Las que apuntan a una agrupación borrada se van.\n"
+                    + (cubrePresupuesto
+                      ? "· Las agrupaciones que falten entran como barras nuevas, con duración a revisar.\n"
+                      : "· NO se agrega ninguna agrupación: este cronograma se armó leyendo la obra, no el presupuesto.\n")
+                    + "\nNo se tocan las duraciones, las cadenas ni las etapas.")) return;
+                  await sincronizarConElControl();
+                }}>
                 Ponerlo al día con el control
               </Button>
             )}
