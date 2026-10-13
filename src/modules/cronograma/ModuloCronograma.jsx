@@ -94,6 +94,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // No mandan sobre las fechas —eso lo dicen las dependencias— sino sobre cómo
   // se lee el cronograma, que con cuarenta barras es la mitad del problema.
   const [fases, setFases] = useState([]);
+  const [etapaNueva, setEtapaNueva] = useState("");
+  const [motivoVersion, setMotivoVersion] = useState("");
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
   // Los rubros de la obra, para poder señalar cuál es el que está trabando a
@@ -952,8 +954,19 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
 
   // ── Las etapas de la obra ────────────────────────────────────────────────
 
-  async function agregarEtapa() {
-    const nombre = window.prompt("¿Cómo se llama la etapa?\n\nEj: Demoliciones · Obra gris · Instalaciones · Acabados · Entrega");
+  /**
+   * SIN `window.prompt`, y esta es la razón.
+   *
+   * El nombre de la etapa se pedía con el cuadrito del navegador. Muchos
+   * navegadores lo bloquean —y no avisan: lo ignoran—. El botón se apretaba,
+   * la función salía por el `if` de arriba creyendo que la persona había
+   * cancelado, y no pasaba absolutamente nada. Ni una etapa ni un error: la
+   * pantalla igual que antes. Desde afuera es idéntico a un botón roto, y es
+   * exactamente lo que se veía.
+   *
+   * Un campo de texto en la pantalla no depende de que el navegador quiera.
+   */
+  async function agregarEtapa(nombre) {
     if (!nombre?.trim()) return;
     // Al final de la lista: una etapa nueva es la que sigue. Si va antes se
     // sube con las flechas, que es un movimiento y no una decisión.
@@ -1474,12 +1487,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
           <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
             <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
-              const motivo = window.prompt(
-                "¿Por qué guardás esta versión?\n\n"
+              // El motivo se escribe en el campo de al lado y no en un cuadrito
+              // del navegador: muchos navegadores los bloquean sin avisar, y
+              // entonces el botón se aprieta y no pasa nada.
+              const motivo = motivoVersion.trim();
+              if (!motivo && !window.confirm(
+                "¿Guardar esta versión sin motivo?\n\n"
                 + "El motivo importa más que la fecha: \"antes de la orden de cambio 3\" o \"lo que se "
                 + "firmó con el cliente\" convierte una lista de fechas en una historia. Sin él, dentro de "
-                + "tres meses son seis versiones indistinguibles.");
-              if (motivo === null) return;
+                + "tres meses son seis versiones indistinguibles.")) return;
               const base = !versiones.some(v => v.es_linea_base)
                 && window.confirm("¿Es la LÍNEA BASE?\n\nEs la que se firmó, contra la que se mide todo lo demás. Hay una sola por obra.");
               setPensando(true); setError("");
@@ -1489,8 +1505,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               });
               setPensando(false);
               if (r.error) { setError(r.error); return; }
+              setMotivoVersion("");
               setVersiones(await versionesDe(lead.id));
             }}><CalendarClock size={13} /> Guardar esta versión</Button>
+            <input value={motivoVersion} onChange={e => setMotivoVersion(e.target.value)}
+              placeholder="¿Por qué? Ej: antes de la orden de cambio 3"
+              title="El motivo es lo que después deja distinguir seis versiones entre sí"
+              style={{ ...inputStyle, flex: 1, minWidth: 190, fontSize: 12, padding: "5px 8px", height: 30 }} />
 
             {versiones.length === 0 ? (
               <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
@@ -2225,7 +2246,20 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   {" "}· {fases.length ? `${fases.length} ${fases.length === 1 ? "etapa" : "etapas"}` : "todavía ninguna"}
                 </span>
               </div>
-              <Button variant="outline" size="sm" onClick={agregarEtapa}><Plus size={13} /> Agregar etapa</Button>
+              <input value={etapaNueva}
+                onChange={e => setEtapaNueva(e.target.value)}
+                onKeyDown={async e => {
+                  if (e.key !== "Enter") return;
+                  const n = etapaNueva;
+                  setEtapaNueva("");
+                  await agregarEtapa(n);
+                }}
+                placeholder="Nueva etapa. Ej: Demoliciones"
+                style={{ ...inputStyle, width: 210, fontSize: 12, padding: "5px 8px", height: 30 }} />
+              <Button variant="outline" size="sm" disabled={!etapaNueva.trim()}
+                onClick={async () => { const n = etapaNueva; setEtapaNueva(""); await agregarEtapa(n); }}>
+                <Plus size={13} /> Agregar etapa
+              </Button>
               {actividades.length > 0 && (
                 <Button variant="outline" size="sm" disabled={pensando} onClick={etapasConNova}>
                   <Sparkles size={13} /> {pensando ? "NOVA está mirando…" : "Que NOVA las arme"}
