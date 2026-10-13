@@ -98,6 +98,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   const [planillas, setPlanillas] = useState([]);
   const [facturas, setFacturas] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
+  const [pagos, setPagos] = useState([]);
   const [planillaSel, setPlanillaSel] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [actividades, setActividades] = useState([]);
@@ -116,6 +117,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
       supabase.from("obra_facturas").select("*").eq("obra_id", obra.id).order("fecha", { ascending: false }),
       supabase.from("obra_actividades").select("*").eq("obra_id", obra.id).order("orden"),
     ]);
+    // Lo pagado de cada factura: hace falta para poder preguntar en voz alta
+    // cuánto de lo "invertido" es en realidad plata adelantada por algo que
+    // todavía no llegó.
+    const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto").eq("obra_id", obra.id);
+    setPagos(pg || []);
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
     const facturasConNumero = (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null }));
@@ -175,6 +181,14 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   }
 
   const totales = totalesObra(grupos);
+  // De lo que figura como invertido, cuánto todavía no se pagó.
+  const sinPagarInvertido = (() => {
+    const pagadoDe = new Map();
+    pagos.forEach(p => pagadoDe.set(Number(p.factura_id), (pagadoDe.get(Number(p.factura_id)) || 0) + (Number(p.monto) || 0)));
+    return Math.round(facturas
+      .filter(f => f.clase !== "proforma" && f.clase !== "anticipo")
+      .reduce((t, f) => t + Math.max(0, (Number(f.total) || 0) - (pagadoDe.get(Number(f.id)) || 0)), 0) * 100) / 100;
+  })();
   // EL AVANCE DE OBRA: lo que cada rubro dice que tiene ejecutado, pesado por
   // lo que vale. Un rubro de cien mil al 50% pesa cincuenta veces más que uno
   // de mil al 100%, y un promedio simple diría cualquier cosa.
@@ -238,6 +252,27 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
         <Tarjeta label="Avance económico" valor={totales.pct * 100} sufijo="%" moneda={false}
           color={colors.inkSoft} />
       </div>
+
+      {/* CUÁNTO DE LO "INVERTIDO" TODAVÍA NO SE PAGÓ.
+          Invertido quiere decir obra que la empresa ya tiene: material puesto,
+          trabajo hecho. Cuando buena parte de eso está sin pagar hay dos
+          historias posibles y son muy distintas: o el proveedor entregó y hay
+          que pagarle —y entonces invertido está bien—, o se adelantó plata por
+          algo que no llegó, y entonces no es obra, es un anticipo. FOREMAN no
+          puede saber cuál es; quien dirige la obra sí, y en dos clicks. */}
+      {sinPagarInvertido > totales.acumulado * 0.25 && totales.acumulado > 0 && (
+        <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+          padding: "9px 12px", marginBottom: 14, lineHeight: 1.5 }}>
+          De los <strong>${fmt(totales.acumulado)}</strong> invertidos, <strong>${fmt(sinPagarInvertido)}</strong> todavía
+          no se pagaron. Si alguna de esas facturas es un <strong>anticipo por algo que no llegó</strong> —una
+          fabricación, una importación— abrila en Facturas y poné «Anticipo a proveedor» en QUÉ ES ESTE
+          DOCUMENTO: deja de contar como obra hecha hasta que llegue.
+          <Button variant="outline" size="sm" style={{ marginTop: 7 }} onClick={() => setTab("facturas")}>
+            Ver las facturas
+          </Button>
+        </div>
+      )}
 
       {avanceObra > 0 && Math.abs(totales.pct - avanceObra) > 0.08 && (
         <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
