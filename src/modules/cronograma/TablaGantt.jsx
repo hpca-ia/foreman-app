@@ -154,6 +154,12 @@ export default function TablaGantt({
   // barras: "demoliciones, obra gris, instalaciones, acabados". Mientras no
   // haya ninguna no se dibuja ninguna banda — una obra chica no las necesita.
   const bandas = porFases(grupos, fases);
+  // CUÁNTAS ETAPAS DE VERDAD HAY. La banda de "todavía sin etapa" también es
+  // una banda y no es una etapa: contar sobre las bandas dejaba a la última
+  // etapa sin saber que era la última, con la flecha de bajar habilitada
+  // apuntando a la nada. Se podía apretar y no pasaba nada, que es la peor
+  // manera de fallar: parece que el botón está roto.
+  const cuantasEtapas = fases.length;
 
   // Los rubros de cada grupo, para poder abrirlos y señalar el que traba.
   const rubrosDe = new Map();
@@ -210,7 +216,7 @@ export default function TablaGantt({
         <div key={fase?.id || "sin-etapa"}>
           {fases.length > 0 && (
             <BandaEtapa ui={ui} fase={fase} grupos={suyos} editable={editable} cal={cal}
-              primera={iBanda === 0} ultima={iBanda === bandas.length - 1 && !!fase}
+              primera={iBanda === 0} ultima={iBanda === cuantasEtapas - 1}
               diasTotales={diasTotales}
               onMover={onMoverFase} onRenombrar={onRenombrarFase} onBorrar={onBorrarFase} />
           )}
@@ -359,11 +365,11 @@ export default function TablaGantt({
                         {editable && !g.simple && onMoverEtapa && (
                           <div style={{ display: "flex", flexDirection: "column", flexShrink: 0, marginRight: 1 }}>
                             <button onClick={e => { e.stopPropagation(); onMoverEtapa(a, -1); }}
-                              disabled={j === 0} title="Subir esta etapa"
+                              disabled={j === 0} title="Subir esta parte dentro de su rubro"
                               style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 8,
                                 cursor: j === 0 ? "default" : "pointer", color: j === 0 ? colors.border : colors.muted }}>▲</button>
                             <button onClick={e => { e.stopPropagation(); onMoverEtapa(a, 1); }}
-                              disabled={j === g.hijas.length - 1} title="Bajar esta etapa"
+                              disabled={j === g.hijas.length - 1} title="Bajar esta parte dentro de su rubro"
                               style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 8,
                                 cursor: j === g.hijas.length - 1 ? "default" : "pointer",
                                 color: j === g.hijas.length - 1 ? colors.border : colors.muted }}>▼</button>
@@ -532,7 +538,7 @@ export default function TablaGantt({
                       )}
                       {conEtapas && (
                         <button onClick={() => onPartir(a)}
-                          title="Partirla: entra varias veces a la obra, o se compra y se instala"
+                          title="Partirla en partes: entra varias veces a la obra, o se compra y se instala"
                           style={{ background: "none", border: "none", color: colors.muted, borderRadius: 4,
                             cursor: "pointer", display: "flex", padding: 2 }}>
                           <Scissors size={12} />
@@ -543,6 +549,16 @@ export default function TablaGantt({
                         style={{ background: uniendo === a.id ? colors.brand : "none", border: "none",
                           color: uniendo === a.id ? "#fff" : colors.muted, borderRadius: 4, cursor: "pointer", display: "flex", padding: 2 }}>
                         <Link2 size={12} />
+                      </button>
+                      {/* BORRAR, ACÁ. Vivía solo adentro de la ficha: para
+                          sacar una actividad recién escrita había que saber
+                          que tocando el nombre se abre algo y que ahí abajo
+                          hay un botón. Lo que se usa al equivocarse tiene que
+                          estar donde uno se equivoca. */}
+                      <button onClick={() => onQuitar(a)} title={`Borrar «${a.nombre}»`}
+                        style={{ background: "none", border: "none", color: colors.muted,
+                          borderRadius: 4, cursor: "pointer", display: "flex", padding: 2 }}>
+                        <Trash2 size={12} />
                       </button>
                       </div>
                     ) : <span />}
@@ -727,7 +743,7 @@ export default function TablaGantt({
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                           {conEtapas && (
                             <Button variant="outline" size="sm" onClick={() => onPartir(a)}>
-                              <Scissors size={12} /> Partir en etapas
+                              <Scissors size={12} /> Partir en partes
                             </Button>
                           )}
                           <Button variant="secondary" size="sm" onClick={() => { setAbierta(null); onQuitar(a); }}>
@@ -735,7 +751,7 @@ export default function TablaGantt({
                           </Button>
                           <span style={{ fontSize: 10.5, color: colors.muted, flex: 1, minWidth: 180 }}>
                             Lo que se importa o se fabrica se parte: el anticipo ahora, la fabricación después, la
-                            instalación al final. Cada etapa con su parte de la plata.
+                            instalación al final. Cada parte con su plata.
                           </span>
                         </div>
                       )}
@@ -823,6 +839,18 @@ export default function TablaGantt({
 
 // ── Las piezas de la tabla ──────────────────────────────────────────────────
 
+/** Una flecha que se puede apretar sin apuntar: 22 píxeles y su recuadro. */
+const BotonEtapa = ({ onClick, apagado, titulo, children }) => (
+  <button onClick={onClick} disabled={apagado} title={titulo}
+    style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+      background: apagado ? "transparent" : colors.surface,
+      border: `1px solid ${apagado ? "transparent" : colors.border}`, borderRadius: 5,
+      fontSize: 10, lineHeight: 1, padding: 0,
+      cursor: apagado ? "default" : "pointer", color: apagado ? colors.border : colors.brand }}>
+    {children}
+  </button>
+);
+
 /**
  * LA BANDA DE UNA ETAPA DE LA OBRA.
  *
@@ -847,13 +875,17 @@ const BandaEtapa = ({ ui, fase, grupos, editable, primera, ultima, diasTotales, 
       <div style={{ position: "sticky", left: 0, display: "flex", alignItems: "center", gap: 6,
         padding: "0 0 0 12px", background: sinEtapa ? colors.bg : colors.brandSoft, zIndex: 2 }}>
         {editable && !sinEtapa && (
-          <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
-            <button onClick={() => onMover?.(fase, -1)} disabled={primera} title="Subir esta etapa"
-              style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 9,
-                cursor: primera ? "default" : "pointer", color: primera ? colors.border : colors.brand }}>▲</button>
-            <button onClick={() => onMover?.(fase, 1)} disabled={ultima} title="Bajar esta etapa"
-              style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 9,
-                cursor: ultima ? "default" : "pointer", color: ultima ? colors.border : colors.brand }}>▼</button>
+          /* DEL TAMAÑO DE UN DEDO.
+             Eran dos triángulos de nueve píxeles, uno encima del otro: para
+             moverlos había que apuntarle a un blanco de diez por diez. Un
+             botón que hay que acertar no es un botón, y desde afuera no se
+             distingue de uno que no anda. Van a lo ancho y con su recuadro,
+             y el que no se puede usar dice por qué. */
+          <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+            <BotonEtapa onClick={() => onMover?.(fase, -1)} apagado={primera}
+              titulo={primera ? "Ya es la primera etapa de la obra" : `Subir «${fase.nombre}»: pasa antes de la etapa de arriba`}>▲</BotonEtapa>
+            <BotonEtapa onClick={() => onMover?.(fase, 1)} apagado={ultima}
+              titulo={ultima ? "Ya es la última etapa de la obra" : `Bajar «${fase.nombre}»: pasa después de la etapa de abajo`}>▼</BotonEtapa>
           </div>
         )}
         {sinEtapa ? (

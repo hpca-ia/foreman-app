@@ -2245,6 +2245,31 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         </div>
       )}
 
+      {/* QUÉ ES UNA ETAPA Y QUÉ NO, ahí donde se las crea.
+          Hace falta decirlo porque la palabra ya estaba ocupada: adentro de un
+          rubro partido, sus momentos —anticipo, fabricación, instalación— se
+          llamaban etapas también. Escribir "Instalación de aire acondicionado"
+          en el campo de actividades y esperar que salga un título es el
+          malentendido obvio, y el que de verdad pasa. */}
+      {editable && (
+        <div style={{ fontSize: 11, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
+          {fases.length === 0 ? (
+            <>
+              <strong style={{ color: colors.inkSoft }}>Este cronograma todavía no tiene etapas.</strong>{" "}
+              Una etapa es un TÍTULO que agrupa barras —Demoliciones, Obra gris, Instalaciones, Acabados— y
+              aparece como una banda verde ancha. No tiene duración ni fechas propias: las toma de lo que
+              tiene adentro. El campo de la izquierda es para ACTIVIDADES, que son las barras.
+            </>
+          ) : (
+            <>
+              <strong style={{ color: colors.inkSoft }}>{fases.length} {fases.length === 1 ? "etapa" : "etapas"}.</strong>{" "}
+              Se suben y se bajan con las flechas de cada banda, y se renombran escribiendo encima del
+              título. Para meter una barra en una etapa, tocá su nombre y elegila arriba de la ficha.
+            </>
+          )}
+        </div>
+      )}
+
       {/* CÓMO SE USA, en una línea. Lo de encadenar y traslapar no se adivina
           mirando la pantalla, y sin saberlo el cronograma queda como una lista
           de barras sueltas que arrancan todas el día uno. */}
