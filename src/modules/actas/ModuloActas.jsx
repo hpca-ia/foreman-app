@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -7,6 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, borrarFila,
   convocadosDe, guardarConvocado, borrarConvocado, subirFoto, enlacesDeFotos,
   correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106 } from "./actas";
+import { pdfActa } from "./pdfActa";
 
 // Las actas de reunión de obra.
 //
@@ -35,7 +36,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
-  const [nuevo, setNuevo] = useState({ tema: "", compromiso: "", convocado: { nombre: "", email: "", empresa: "", cargo: "" } });
+  const [nuevo, setNuevo] = useState({
+    tema: "", compromiso: "", responsable: "", limite: "",
+    convocado: { nombre: "", email: "", empresa: "", cargo: "" },
+  });
 
   useEffect(() => {
     supabase.from("leads").select("id,nombre,tunel,resultado,obra_id").order("nombre").then(({ data }) => {
@@ -140,6 +144,16 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Acta N° {abierta.numero}</div>
           <Chip estado={abierta.estado} />
           <div style={{ flex: 1 }} />
+          {/* VERLO ANTES DE MANDARLO. Una falta de ortografía en un acta
+              enviada no se corrige nunca, y un acta es un documento que ocho
+              personas van a leer con atención. Y el papel sirve para otra cosa
+              que el correo: se firma en la reunión y se archiva. */}
+          <Button variant="secondary" size="sm" onClick={() => verPdf("abrir")}>
+            <FileText size={13} /> Ver el PDF
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => verPdf("imprimir")}>
+            <Printer size={13} /> Imprimir
+          </Button>
           {sePuede && puedeEnviar && abierta.estado === "borrador" && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
               await tocarActa({ estado: "revisada", revisada_at: new Date().toISOString(),
@@ -240,8 +254,17 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               )}
             </div>
           ))}
+          {/* DÓNDE SE AGREGAN, DICHO. Con la lista vacía lo único que había
+              era un botón gris al pie, y no se ve: lo que se ve es un bloque
+              que dice "Asistentes · 0 de 0" y parece que no se puede tocar. */}
+          {!cont.asistentes.length && (
+            <div style={{ fontSize: 12, color: colors.muted, lineHeight: 1.5, marginBottom: 9 }}>
+              Todavía no hay nadie. Agregalos uno por uno acá abajo, o cargá <strong>Los de siempre</strong> —
+              la gente que va a todas las reuniones de esta obra— y entran solos en cada acta nueva.
+            </div>
+          )}
           {sePuede && (
-            <Button variant="secondary" size="sm" style={{ marginTop: 5 }}
+            <Button variant={cont.asistentes.length ? "secondary" : "primary"} size="sm" style={{ marginTop: 5 }}
               onClick={() => agregar("acta_asistentes", { nombre: "", asistio: true, recibe: true }, "asistentes")}>
               <Plus size={12} /> Agregar asistente
             </Button>
@@ -351,20 +374,33 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           {nuevos.map(c => <Compromiso key={c.id} c={c} sePuede={sePuede}
             onTocar={campos => tocarFila("acta_compromisos", "compromisos", c.id, campos)}
             onQuitar={() => quitarFila("acta_compromisos", "compromisos", c.id)} quien={currentUser} />)}
+          {/* LOS TRES CAMPOS AL AGREGAR, no uno solo.
+              Un compromiso sin responsable y sin fecha es una buena intención,
+              y una buena intención no se puede revisar en la reunión que viene.
+              Si los tres no se piden en el momento de escribirlo, se escribe
+              el texto y los otros dos quedan vacíos para siempre: nadie vuelve
+              a completar una fila. */}
           {sePuede && (
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <input value={nuevo.compromiso} placeholder="Qué se compromete a hacer, y quién. Enter para agregar"
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <input value={nuevo.compromiso} placeholder="Qué hay que hacer"
                 onChange={e => setNuevo(v => ({ ...v, compromiso: e.target.value }))}
-                onKeyDown={async e => {
-                  if (e.key !== "Enter" || !nuevo.compromiso.trim()) return;
-                  const t = nuevo.compromiso; setNuevo(v => ({ ...v, compromiso: "" }));
-                  await agregar("acta_compromisos", { texto: t.trim(), estado: "pendiente" }, "compromisos");
-                }}
-                style={{ ...inputStyle, flex: 1, fontSize: 12.5, padding: "6px 9px" }} />
-              <Button variant="primary" size="sm" disabled={!nuevo.compromiso.trim()} onClick={async () => {
-                const t = nuevo.compromiso; setNuevo(v => ({ ...v, compromiso: "" }));
-                await agregar("acta_compromisos", { texto: t.trim(), estado: "pendiente" }, "compromisos");
-              }}><Plus size={12} /> Agregar</Button>
+                onKeyDown={e => { if (e.key === "Enter") ponerCompromiso(); }}
+                style={{ ...inputStyle, flex: "2 1 200px", minWidth: 150, fontSize: 12.5, padding: "6px 9px" }} />
+              <input value={nuevo.responsable} placeholder="¿Quién?" list="convocados-acta"
+                onChange={e => setNuevo(v => ({ ...v, responsable: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") ponerCompromiso(); }}
+                style={{ ...inputStyle, flex: "1 1 120px", minWidth: 100, fontSize: 12.5, padding: "6px 9px" }} />
+              {/* Los nombres que ya están en la reunión: el responsable casi
+                  siempre es alguien que está sentado en la mesa. */}
+              <datalist id="convocados-acta">
+                {cont.asistentes.map(a => <option key={a.id} value={a.nombre} />)}
+              </datalist>
+              <input type="date" value={nuevo.limite} title="¿Para cuándo?"
+                onChange={e => setNuevo(v => ({ ...v, limite: e.target.value }))}
+                style={{ ...inputStyle, width: 148, fontSize: 12, padding: "5px 8px" }} />
+              <Button variant="primary" size="sm" disabled={!nuevo.compromiso.trim()} onClick={ponerCompromiso}>
+                <Plus size={12} /> Agregar
+              </Button>
             </div>
           )}
         </div>
@@ -457,6 +493,29 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
         )}
       </div>
     );
+
+    async function ponerCompromiso() {
+      if (!nuevo.compromiso.trim()) return;
+      const { compromiso, responsable, limite } = nuevo;
+      setNuevo(v => ({ ...v, compromiso: "", responsable: "", limite: "" }));
+      const quienEs = cont.asistentes.find(a => a.nombre === responsable.trim());
+      await agregar("acta_compromisos", {
+        texto: compromiso.trim(), estado: "pendiente",
+        responsable_nombre: responsable.trim() || null,
+        responsable_email: quienEs?.email || null,
+        fecha_limite: limite || null,
+      }, "compromisos");
+    }
+
+    async function verPdf(modo) {
+      setOcupado(true); setError("");
+      try {
+        await pdfActa({ acta: abierta, obra: lead.nombre, ...cont, enlaces }, modo);
+      } catch (e) {
+        setError("No se pudo armar el PDF: " + e.message);
+      }
+      setOcupado(false);
+    }
 
     async function enviar() {
       if (!correos.length) { setError("Nadie tiene correo para recibirla."); return; }
