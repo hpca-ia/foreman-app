@@ -407,6 +407,8 @@ export default function TablaGantt({
                                 rubro es, y repetirlo en cada fila lo empuja
                                 fuera de la columna —"Instalaciones elé…" en
                                 las tres, sin poder distinguirlas—. */}
+                            {a.es_hito && <span title="Hito: un momento de la obra, no un trabajo"
+                              style={{ color: colors.brand, marginRight: 3 }}>◆</span>}
                             {g.simple ? a.nombre : (etapa || sufijo(a.nombre))}
                           </span>
                           {/* El capítulo, legible. Estaba en 9px y en gris
@@ -490,11 +492,19 @@ export default function TablaGantt({
                           —"450 m2 ÷ 18 m2/día"— y se guardaba en la nota sin
                           que nadie la viera: para saber si creerle al número
                           había que abrir la ficha. Acá se lee encima. */}
+                      {a.es_hito ? (
+                        /* UN HITO NO DURA. Preguntarle cuántos días lleva un
+                           anticipo es pedir un dato que no existe, y una
+                           casilla vacía invita a llenarla con cualquier cosa. */
+                        <span title="Es un hito: pasa en un día. Para clavarlo a una fecha, tocá el nombre."
+                          style={{ textAlign: "center", fontSize: 11, color: colors.muted }}>◆</span>
+                      ) : (
                       <Numero value={a.duracion} min={1} max={2000} disabled={!editable}
                         onCommit={v => onCambiar(a, { duracion: v })}
                         title={[a.nota, apunte && apunteEnUnaLinea(apunte), "Días hábiles. Enter para guardar."]
                           .filter(Boolean).join("\n")}
                         style={{ padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
+                      )}
                       {/* LAS TRES SE ESCRIBEN, y las tres dicen lo mismo.
                           Una duración en días es lo que uno sabe cuando
                           estima; una fecha de fin es lo que uno sabe cuando la
@@ -563,7 +573,7 @@ export default function TablaGantt({
                           {deps[0].tipo === "CC" ? <ArrowRight size={12} /> : <ArrowDown size={12} />}
                         </button>
                       )}
-                      {conEtapas && (
+                      {conEtapas && !a.es_hito && (
                         <button onClick={() => onPartir(a)}
                           title="Partirla en partes: entra varias veces a la obra, o se compra y se instala"
                           style={{ background: "none", border: "none", color: colors.muted, borderRadius: 4,
@@ -769,7 +779,7 @@ export default function TablaGantt({
 
                       {editable && (
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                          {conEtapas && (
+                          {conEtapas && !a.es_hito && (
                             <Button variant="outline" size="sm" onClick={() => onPartir(a)}>
                               <Scissors size={12} /> Partir en partes
                             </Button>

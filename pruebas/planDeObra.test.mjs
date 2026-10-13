@@ -103,3 +103,19 @@ test("una respuesta vacía no revienta y se nota que está vacía", () => {
   assert.equal(r.barras, 0);
   assert.equal(r.faltantes.length, 3);
 });
+
+test("UN HITO NO DURA: pase lo que pase viene con un día", () => {
+  const r = normalizarPlan({
+    etapas: [{ nombre: "Preliminares", actividades: [
+      { nombre: "Anticipo del 50%", hito: true },
+      { nombre: "Llegada del contenedor", hito: true, dias: 40 },
+      { nombre: "Obra civil", dias: 13, agrupacion: 1 },
+    ] }],
+  }, ags);
+  const [h1, h2, t] = r.etapas[0].actividades;
+  assert.equal(h1.hito, true);
+  assert.equal(h1.dias, 1);
+  assert.equal(h2.dias, 1, "ni aunque mande cuarenta");
+  assert.equal(t.hito, false);
+  assert.equal(t.dias, 13);
+});

@@ -46,7 +46,9 @@ export function normalizarPlan(datos, agrupaciones = []) {
       const agrupacion = id != null && validas.has(id) && !usadas.has(id) ? id : null;
       if (agrupacion != null) usadas.add(agrupacion);
       actividades.push({
-        nombre: suNombre, dias, agrupacion,
+        nombre: suNombre,
+        // Un hito pasa un día: no se le cree la duración que venga.
+        dias: a?.hito ? 1 : dias, hito: !!a?.hito, agrupacion,
         porque: limpio(a?.porque, 160) || null,
         // Lo que se hace adentro y no es rubro: replanteo, pruebas, curado.
         incluye: Array.isArray(a?.incluye) ? a.incluye.map(x => limpio(x, 60)).filter(Boolean).slice(0, 8) : null,
@@ -77,7 +79,7 @@ export function conLasFaltantes(plan, diasPlazo = 0) {
     // A prorrata de lo que pesa, y nunca menos de un día ni más que el plazo.
     dias: Math.max(1, Math.min(diasPlazo || 30,
       Math.round(((plata ? n(a.monto) / plata : 1 / plan.faltantes.length)) * (diasPlazo || 30)))),
-    agrupacion: Number(a.id),
+    agrupacion: Number(a.id), hito: false,
     porque: "no la ubicó NOVA: duración repartida por lo que pesa, hay que revisarla",
     incluye: null,
   }));

@@ -99,7 +99,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [etapaNueva, setEtapaNueva] = useState("");
   const [motivoVersion, setMotivoVersion] = useState("");
   // En qué etapa se está agregando una actividad, y cómo se llama.
-  const [enEtapa, setEnEtapa] = useState(null);
+  const [enEtapa, setEnEtapa] = useState(null);   // { id, hito }
   const [actNueva, setActNueva] = useState("");
   // Lo último que pasó, dicho en una línea verde. No es un error: es la
   // diferencia entre "guardó" y "no sé si guardó".
@@ -399,22 +399,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     return out;
   })();
 
-  async function agregar(nombre, faseId = null, dias = null) {
+  async function agregar(nombre, faseId = null, dias = null, hito = false) {
     const texto = (nombre ?? nueva?.nombre ?? "").trim();
     if (!texto) return;
     setError("");
     const fila = {
       lead_id: lead.id, obra_id: lead.obra_id || null,
-      nombre: texto, duracion: Math.max(1, Number(dias ?? nueva?.duracion) || 1),
+      // Un hito pasa un día: no se le pregunta cuánto dura.
+      nombre: texto, duracion: hito ? 1 : Math.max(1, Number(dias ?? nueva?.duracion) || 1),
       orden: actividades.length,
     };
     if (faseId) fila.fase_id = faseId;
+    if (hito) fila.es_hito = true;
     let { data, error: e } = await supabase.from("cronograma_actividades").insert(fila).select("id");
     // Sin la 101 no existe `fase_id`: entra igual, sin etapa, antes que no
     // dejar agregar la actividad.
-    if (e && /fase_id|column|schema cache/i.test(e.message)) {
-      const { fase_id: _f, ...sinFase } = fila;
-      ({ data, error: e } = await supabase.from("cronograma_actividades").insert(sinFase).select("id"));
+    if (e && /fase_id|es_hito|column|schema cache/i.test(e.message)) {
+      const { fase_id: _f, es_hito: _h, ...pelada } = fila;
+      ({ data, error: e } = await supabase.from("cronograma_actividades").insert(pelada).select("id"));
     }
     if (e) { setError(e.message); return; }
     if (!data?.length) { setError("La base no dejó agregar la actividad y no dijo por qué."); return; }
@@ -2452,24 +2454,32 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                           había cómo: había que agregarla abajo, en la lista
                           general, y después abrir su ficha para decirle a qué
                           etapa pertenece. Tres pasos para lo que es uno. */}
+                      {/* CON SU NOMBRE. Un "+" solo no dice qué agrega, y
+                          acá se pueden agregar dos cosas distintas: un trabajo
+                          que dura, o un momento que no. */}
                       <Button variant="outline" size="sm"
-                        onClick={() => { setEnEtapa(enEtapa === f.id ? null : f.id); setActNueva(""); }}
-                        title={`Agregar una actividad adentro de «${f.nombre}»`}><Plus size={13} /></Button>
+                        onClick={() => { setEnEtapa(enEtapa === f.id ? { id: f.id, hito: false } : null); setActNueva(""); }}
+                        title={`Agregar un trabajo adentro de «${f.nombre}»`}><Plus size={13} /> actividad</Button>
+                      <Button variant="outline" size="sm"
+                        onClick={() => { setEnEtapa(enEtapa?.id === f.id && enEtapa?.hito ? null : { id: f.id, hito: true }); setActNueva(""); }}
+                        title={`Agregar un hito adentro de «${f.nombre}»: un anticipo, una medición, una entrega`}>◆ hito</Button>
                     </div>
-                    {enEtapa === f.id && (
+                    {enEtapa?.id === f.id && (
                       <div style={{ display: "flex", gap: 7, padding: "0 6px 6px 28px" }}>
                         <input autoFocus value={actNueva} onChange={e => setActNueva(e.target.value)}
                           onKeyDown={async e => {
                             if (e.key === "Escape") { setEnEtapa(null); return; }
                             if (e.key !== "Enter") return;
                             const n = actNueva; setActNueva("");
-                            await agregar(n, f.id);
+                            await agregar(n, f.id, null, enEtapa.hito);
                           }}
-                          placeholder={`Actividad adentro de «${f.nombre}». Enter para agregar`}
+                          placeholder={enEtapa.hito
+                            ? `Hito adentro de «${f.nombre}». Ej: anticipo del 50% · medición de noviembre · entrega de planta baja`
+                            : `Trabajo adentro de «${f.nombre}». Enter para agregar`}
                           style={{ ...inputStyle, flex: 1, minWidth: 120, fontSize: 12, padding: "5px 8px", height: 30 }} />
                         <Button variant="primary" size="sm" disabled={!actNueva.trim()}
-                          onClick={async () => { const n = actNueva; setActNueva(""); await agregar(n, f.id); }}>
-                          <Plus size={13} /> Agregar
+                          onClick={async () => { const n = actNueva; setActNueva(""); await agregar(n, f.id, null, enEtapa.hito); }}>
+                          {enEtapa.hito ? "◆ Agregar hito" : <><Plus size={13} /> Agregar</>}
                         </Button>
                         <Button variant="secondary" size="sm" onClick={() => setEnEtapa(null)}>Listo</Button>
                       </div>

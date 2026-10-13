@@ -77,7 +77,18 @@ Devolvés SOLO JSON, sin markdown:
       "porque":"420 m2 / 1 cuadrilla x 32 m2 dia"}]},
   {"nombre":"Instalaciones","actividades":[
      {"nombre":"Eléctricas","dias":20,"agrupacion":5,"porque":"180 puntos / 9 por dia",
-      "incluye":["canalización","cableado","pruebas"]}]}]}
+      "incluye":["canalización","cableado","pruebas"]},
+     {"nombre":"Anticipo de equipos de climatización","hito":true,
+      "porque":"se paga para que empiece la fabricación"}]}]}
+
+PONÉ LOS HITOS. Un hito es un MOMENTO de la obra, no un trabajo: no dura. El
+anticipo que hay que pagar para que arranque una fabricación, la llegada del
+contenedor, la medición de fin de mes, la entrega de un piso, la inspección de
+bomberos, el cambio de etapa del proyecto. Van con "hito": true y sin "dias".
+
+Son lo que uno busca cuando abre un cronograma —cuándo cobro, cuándo entrego,
+cuándo me miden— y un cronograma sin ellos obliga a deducirlos. Poné los que
+esta obra tenga de verdad: dos o tres por etapa como mucho, y ninguno inventado.
 
 ASÍ SE PIENSA UNA OBRA: POR ETAPAS.
 
@@ -207,12 +218,13 @@ export async function guardarPlan({ lead, obra, plan, quien }) {
       nombre: a.nombre, duracion: a.dias,
       obra_actividad_id: a.agrupacion, nota: a.porque, orden: orden++,
       etapa: "ejecucion", incluye: a.incluye?.length ? a.incluye : null,
+      es_hito: !!a.hito,
       ...(hecha.fase ? { fase_id: hecha.fase.id } : {}),
     }));
     let { data, error } = await supabase.from("cronograma_actividades").insert(filas).select();
     // Se va soltando lo que la base no tenga antes que perder el cronograma.
     if (error) {
-      const limpias = filas.map(({ incluye, fase_id: _f, etapa, ...resto }) => resto);
+      const limpias = filas.map(({ incluye, fase_id: _f, etapa, es_hito: _h, ...resto }) => resto);
       ({ data, error } = await supabase.from("cronograma_actividades").insert(limpias).select());
     }
     if (error) {
@@ -313,6 +325,9 @@ LAS REGLAS DE LEER, que son distintas de las de opinar:
 · LA AGRUPACIÓN solo cuando el trabajo es claramente uno del presupuesto de
   arriba. Ante la duda, null: una barra colgada de la agrupación equivocada
   ensucia el control, y una suelta no le hace daño a nadie.
+· LOS HITOS, si los hay. "Anticipo", "entrega", "medición", "inspección",
+  "llegada de", cualquier cosa escrita sin días que sea un momento y no un
+  trabajo: va con "hito": true y sin "dias".
 · NO DEVUELVAS DEPENDENCIAS. El orden se arma aparte.`;
 
     const { res, data } = await pedirANova({
@@ -365,6 +380,7 @@ export async function ponerTiemposYOrden({ actividades = [], fases = [], agrupac
     const et = a.fase_id != null ? porFase.get(Number(a.fase_id)) : null;
     const ag = a.obra_actividad_id != null ? tamano.get(Number(a.obra_actividad_id)) : null;
     const mag = ag?.magnitud?.[0] ? ` · ${miles(ag.magnitud[0].cantidad)} ${ag.magnitud[0].unidad}` : "";
+    if (a.es_hito) return `${a.id} · ${et ? `[${et}] ` : ""}◆ ${a.nombre} · es un hito, no dura`;
     return `${a.id} · ${et ? `[${et}] ` : ""}${a.nombre}${mag} · hoy dice ${a.duracion}d`;
   }).join("\n");
 
@@ -387,6 +403,9 @@ Devolvés SOLO JSON, sin markdown, con los ids de arriba:
 
 {"dias":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia"}],
  "dependencias":[[12,13,0],[13,14,-5]]}
+
+LOS HITOS —van marcados con ◆— NO LLEVAN DÍAS: son momentos, pasan en un día.
+Encadenalos como a cualquier otro, pero no les mandes "dias".
 
 NO AGREGUES TRABAJOS, NO SAQUES NINGUNO Y NO LOS REORDENES. Lo que está escrito
 lo escribió alguien que vio la obra; vos no la viste. Tu trabajo son los dos
@@ -420,7 +439,8 @@ del hormigón ni el secado: esos tardan lo que tardan.`;
     const ahora = new Map(vivas.map(a => [Number(a.id), a]));
     const duraciones = (datos.dias || [])
       .map(d => ({ id: Number(d.id), dias: Math.max(1, Math.round(Number(d.dias) || 0)), porque: d.porque || null }))
-      .filter(d => validos.has(d.id) && d.dias && d.dias !== ahora.get(d.id)?.duracion);
+      // A un hito no se le cambia la duración aunque NOVA mande una.
+      .filter(d => validos.has(d.id) && d.dias && !ahora.get(d.id)?.es_hito && d.dias !== ahora.get(d.id)?.duracion);
     const dependencias = (datos.dependencias || [])
       .map(d => (Array.isArray(d)
         ? { de: Number(d[0]), a: Number(d[1]), retardo: Number(d[2]) || 0, tipo: typeof d[3] === "string" ? d[3] : "FC" }
