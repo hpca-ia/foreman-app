@@ -500,6 +500,27 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         }).select().single();
         if (facturaObra) {
           await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
+          // UN GASTO DE CAJA CHICA YA ESTÁ PAGADO, Y HAY QUE DECIRLO.
+          //
+          // Esto es lo que es una caja chica: alguien compró y pagó en el
+          // momento, de su plata o de la plata de la caja. El proveedor cobró
+          // y se fue. Pero al control entraba como una factura más —sin ningún
+          // pago registrado— y entonces Proveedores la mostraba "Sin pagar" y
+          // la sumaba a lo que le debemos a ese proveedor. Una deuda que no
+          // existe, que se arrastra hasta que alguien la ve, y que en el peor
+          // caso se paga dos veces.
+          //
+          // El pago se registra acá y no al aprobar: la plata salió cuando se
+          // compró, no cuando administración lo revisó. Aprobar es controlar
+          // que el gasto corresponda, no pagarlo.
+          const {error:errPago} = await supabase.from("obra_pagos").insert({
+            obra_id:cajaActiva.obra_id, factura_id:facturaObra.id,
+            monto, fecha:gastoForm.fecha,
+            nota:`Pagado de caja chica${cajaActiva.nombre?` «${cajaActiva.nombre}»`:""}`,
+            referencia:`CAJA-${cajaActiva.id}`,
+            registrado_por:currentUser.id, registrado_nombre:currentUser.name,
+          });
+          if (errPago) setNovaError("El gasto entró al control, pero no quedó marcado como pagado: " + errPago.message);
           // Lo que eligió quien cargó el gasto entra como asignación real.
           const filas = conRubros
             .map(r=>aAsignacion(facturaObra.id, r))

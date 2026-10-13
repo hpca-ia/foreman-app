@@ -28,6 +28,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
   const [sinTablas, setSinTablas] = useState(false);
   const [abierto, setAbierto] = useState(null);      // clave del proveedor
   const [pagando, setPagando] = useState(null);      // factura a la que se le carga un pago
+  const [guardando, setGuardando] = useState(false);
   const [form, setForm] = useState(PAGO_VACIO);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
@@ -46,12 +47,43 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
   const totales = totalesPorPagar(cuentas);
   const proformasPendientes = facturas.filter(f => f.clase === "proforma" && !f.facturada_con_id);
 
+  // LAS DE CAJA CHICA QUE FIGURAN COMO DEUDA, Y NO LO SON.
+  //
+  // Una caja chica es plata que ya salió: alguien compró, pagó en el momento y
+  // el proveedor se fue cobrado. Pero el gasto entraba al control como una
+  // factura más, sin ningún pago registrado, y entonces acá aparecía "Sin
+  // pagar" y sumaba a lo que le debemos. Una deuda que no existe, que se
+  // arrastra, y que en el peor caso se paga dos veces.
+  //
+  // Desde ahora entran pagadas. Esto es para las que ya estaban.
+  const cajaSinPago = facturas.filter(f =>
+    f.origen === "caja_chica" && f.clase !== "proforma" && (pagado[f.id] || 0) <= 0.005);
+
   if (sinTablas) {
     return (
       <div style={{ fontSize: 12.5, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 14 }}>
         Falta correr la migración 060 en Supabase para llevar los pagos a proveedores.
       </div>
     );
+  }
+
+  async function marcarCajaPagada() {
+    if (!window.confirm(
+      `¿Marcar como pagadas las ${cajaSinPago.length} ${cajaSinPago.length === 1 ? "factura" : "facturas"} que vinieron de caja chica?\n\n`
+      + "Una caja chica es plata que ya salió: se compró y se pagó en el momento. Figuran como deuda "
+      + "porque entraron al control sin su pago registrado.\n\n"
+      + `Suma $${fmt(cajaSinPago.reduce((t, f) => t + (Number(f.total) || 0), 0))}.`)) return;
+    setGuardando(true);
+    const filas = cajaSinPago.map(f => ({
+      obra_id: obra.id, factura_id: f.id, monto: Number(f.total) || 0,
+      fecha: f.fecha || new Date().toISOString().slice(0, 10),
+      nota: "Pagado de caja chica", referencia: "CAJA",
+      registrado_por: currentUser?.id ?? null, registrado_nombre: currentUser?.name || null,
+    })).filter(x => x.monto > 0);
+    const { error: e } = await supabase.from("obra_pagos").insert(filas);
+    setGuardando(false);
+    if (e) { window.alert("No se pudo: " + e.message); return; }
+    await cargar(); onCambio?.();
   }
 
   const chip = estado => {
@@ -85,6 +117,25 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
 
       {/* Lo que hay que reclamar: una proforma sin factura es plata gastada sin
           respaldo tributario, y se olvida sola. */}
+      {cajaSinPago.length > 0 && puede && (
+        <div style={{ fontSize: 12.5, color: colors.ink, background: colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+          padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, lineHeight: 1.5 }}>
+            <AlertTriangle size={14} color={colors.warning} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1 }}>
+              <strong>{cajaSinPago.length}</strong> {cajaSinPago.length === 1 ? "factura de caja chica figura" : "facturas de caja chica figuran"} como
+              deuda por <strong>${fmt(cajaSinPago.reduce((t, f) => t + (Number(f.total) || 0), 0))}</strong>, y no lo son:
+              una caja chica es plata que ya salió. Se compró y se pagó en el momento; el proveedor ya cobró.
+              Entraron sin su pago registrado.
+            </div>
+          </div>
+          <Button variant="primary" size="sm" style={{ marginTop: 8 }} disabled={guardando} onClick={marcarCajaPagada}>
+            {guardando ? "Marcando…" : "Marcarlas como pagadas"}
+          </Button>
+        </div>
+      )}
+
       {proformasPendientes.length > 0 && (
         <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: colors.warning, marginBottom: 5 }}>
