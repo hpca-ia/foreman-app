@@ -103,6 +103,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [motivoVersion, setMotivoVersion] = useState("");
   // En qué etapa se está agregando una actividad, y cómo se llama.
   const [enEtapa, setEnEtapa] = useState(null);   // { id, hito }
+  // Qué etapas están desplegadas en el panel. Varias a la vez: uno compara.
+  const [abiertas, setAbiertas] = useState(() => new Set());
   const [actNueva, setActNueva] = useState("");
   // Lo último que pasó, dicho en una línea verde. No es un error: es la
   // diferencia entre "guardó" y "no sé si guardó".
@@ -1120,6 +1122,41 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
    * parte sola dejaría al rubro apareciendo en dos etapas, y nadie podría
    * decir en cuál de las dos está.
    */
+  /**
+   * Mover una actividad dentro de su etapa.
+   *
+   * Se renumera la lista entera, igual que con las etapas y por la misma
+   * razón: intercambiar dos números falla sin ruido en cuanto dos filas
+   * quedaron con el mismo `orden`, y eso pasa solo —se agrega, NOVA rearma, se
+   * borra una del medio—. Diez escrituras en vez de dos, y a cambio el orden
+   * que se ve es siempre el que está guardado.
+   */
+  async function moverActividad(a, direccion) {
+    const hermanas = actividades
+      .filter(x => String(x.fase_id ?? "") === String(a.fase_id ?? ""))
+      .sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0));
+    const i = hermanas.findIndex(x => x.id === a.id);
+    const j = i + direccion;
+    if (i < 0 || j < 0 || j >= hermanas.length) return;
+    const [movida] = hermanas.splice(i, 1);
+    hermanas.splice(j, 0, movida);
+    setError("");
+    // El bloque entero se renumera contra el lugar que ya ocupaba la primera:
+    // así la etapa no se adelanta ni se atrasa respecto de las demás.
+    const base = Math.min(...hermanas.map((x, k) => x.orden ?? k));
+    const errores = await Promise.all(hermanas.map((x, k) =>
+      supabase.from("cronograma_actividades").update({ orden: base + k }).eq("id", x.id).select("id")));
+    const e = errores.find(r => r.error);
+    if (e) { setError(e.error.message); return; }
+    await cargar();
+  }
+
+  async function renombrarActividad(a, nombre) {
+    const limpio = String(nombre || "").trim();
+    if (!limpio || limpio === a.nombre) return;
+    await cambiar(a, { nombre: limpio.slice(0, 120) });
+  }
+
   async function ponerEnEtapa(a, faseId) {
     const ids = a.obra_actividad_id
       ? actividades.filter(x => x.obra_actividad_id === a.obra_actividad_id).map(x => x.id)
@@ -2625,7 +2662,23 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   return (
                     <div key={f.id} style={{ borderRadius: 7, background: colors.bg }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 6px" }}>
-                      <span style={{ fontSize: 11, color: colors.muted, width: 16, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
+                      {/* DESPLEGAR LA ETAPA. Acá es donde uno quiere estar:
+                          las etapas con lo que tienen adentro, y todo —el
+                          nombre, el orden, los días, agregar, borrar— en el
+                          mismo lugar. Tener que bajar a la tabla, buscar la
+                          fila y tocar el nombre para abrir una ficha es un
+                          viaje por cada cambio. */}
+                      <button onClick={() => setAbiertas(v => {
+                        const n = new Set(v);
+                        if (n.has(f.id)) n.delete(f.id); else n.add(f.id);
+                        return n;
+                      })}
+                        title={abiertas.has(f.id) ? "Plegar" : "Ver lo que tiene adentro"}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px",
+                          display: "flex", alignItems: "center", gap: 3, color: colors.muted, flexShrink: 0 }}>
+                        <ChevronDown size={12} style={{ transform: abiertas.has(f.id) ? "none" : "rotate(-90deg)", transition: "transform .12s" }} />
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>{i + 1}</span>
+                      </button>
                       <input defaultValue={f.nombre} key={`n${f.id}-${f.nombre}`}
                         onBlur={e => { if ((e.target.value || "").trim() && e.target.value !== f.nombre) renombrarEtapaDeObra(f, e.target.value); }}
                         onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
@@ -2655,12 +2708,53 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                           acá se pueden agregar dos cosas distintas: un trabajo
                           que dura, o un momento que no. */}
                       <Button variant="outline" size="sm"
-                        onClick={() => { setEnEtapa(enEtapa === f.id ? { id: f.id, hito: false } : null); setActNueva(""); }}
+                        onClick={() => { setEnEtapa(enEtapa?.id === f.id && !enEtapa?.hito ? null : { id: f.id, hito: false }); setActNueva(""); setAbiertas(v => new Set(v).add(f.id)); }}
                         title={`Agregar un trabajo adentro de «${f.nombre}»`}><Plus size={13} /> actividad</Button>
                       <Button variant="outline" size="sm"
-                        onClick={() => { setEnEtapa(enEtapa?.id === f.id && enEtapa?.hito ? null : { id: f.id, hito: true }); setActNueva(""); }}
+                        onClick={() => { setEnEtapa(enEtapa?.id === f.id && enEtapa?.hito ? null : { id: f.id, hito: true }); setActNueva(""); setAbiertas(v => new Set(v).add(f.id)); }}
                         title={`Agregar un hito adentro de «${f.nombre}»: un anticipo, una medición, una entrega`}>◆ hito</Button>
                     </div>
+                    {abiertas.has(f.id) && (() => {
+                      const suyas = actividades
+                        .filter(x => Number(x.fase_id) === Number(f.id))
+                        .sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0));
+                      if (!suyas.length) return (
+                        <div style={{ fontSize: 11.5, color: colors.muted, padding: "0 6px 7px 32px" }}>
+                          Vacía. Agregale un trabajo con «+ actividad» o un momento con «◆ hito».
+                        </div>
+                      );
+                      return (
+                        <div style={{ padding: "0 6px 6px 32px", display: "grid", gap: 2 }}>
+                          {suyas.map((a, k) => (
+                            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 10.5, color: colors.muted, width: 30, flexShrink: 0 }}>
+                                {i + 1}.{k + 1}
+                              </span>
+                              {a.es_hito && <span title="Hito: un momento, no un trabajo" style={{ color: colors.brand, fontSize: 11, flexShrink: 0 }}>◆</span>}
+                              <input defaultValue={a.nombre} key={`n${a.id}-${a.nombre}`}
+                                onBlur={e => renombrarActividad(a, e.target.value)}
+                                onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                title="Escribí para cambiarle el nombre"
+                                style={{ ...inputStyle, flex: 1, minWidth: 90, fontSize: 12, padding: "4px 7px", height: 26 }} />
+                              {a.es_hito ? (
+                                <span style={{ width: 52, textAlign: "center", fontSize: 10.5, color: colors.muted, flexShrink: 0 }}>un día</span>
+                              ) : (
+                                <Numero value={a.duracion} min={1} max={2000}
+                                  onCommit={v => cambiar(a, { duracion: v })}
+                                  title="Días hábiles. Enter para guardar."
+                                  style={{ width: 52, padding: "3px 5px", fontSize: 11, height: 26, textAlign: "center" }} />
+                              )}
+                              <Button variant="secondary" size="sm" disabled={k === 0}
+                                onClick={() => moverActividad(a, -1)} title="Subir">▲</Button>
+                              <Button variant="secondary" size="sm" disabled={k === suyas.length - 1}
+                                onClick={() => moverActividad(a, 1)} title="Bajar">▼</Button>
+                              <Button variant="secondary" size="sm" onClick={() => quitar(a)}
+                                title={`Borrar «${a.nombre}»`}><Trash2 size={12} /></Button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {enEtapa?.id === f.id && (
                       <div style={{ display: "flex", gap: 7, padding: "0 6px 6px 28px" }}>
                         <input autoFocus value={actNueva} onChange={e => setActNueva(e.target.value)}
