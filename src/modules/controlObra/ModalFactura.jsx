@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, Trash2, Plus, Sparkles, Check, Banknote } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { subirArchivo } from "../../lib/archivos";
+import { subirArchivo, enlaceArchivo } from "../../lib/archivos";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
@@ -95,12 +95,53 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   }
 
   async function leerConNova(e) {
-    let file = e.target.files[0];
+    const file = e.target.files[0];
     if (!file) return;
+    await leerArchivo(file, true);
+    // Vaciar el input: sin esto, volver a elegir el MISMO archivo no dispara
+    // el evento y parece que el botón dejó de andar.
+    e.target.value = "";
+  }
+
+  /**
+   * LA FACTURA QUE YA ESTÁ CARGADA SE PUEDE LEER SIN VOLVER A SUBIRLA.
+   *
+   * Alguien la subió hace una semana: el papel está en el depósito y nadie
+   * tiene por qué tenerlo otra vez en su computadora. Obligar a volver a
+   * subirlo para que NOVA le saque los renglones es pedirle a la persona
+   * equivocada un archivo que el sistema ya tiene — y en la mayoría de los
+   * casos, el que asigna no es el que cargó.
+   */
+  async function leerLaQueYaEstá() {
+    if (!form.archivo_url) return;
     setLeyendo(true); setError("");
-    const h = await hashArchivo(file); setArchivoHash(h);
-    file = await comprimirImagen(file);
-    setArchivo(file);
+    try {
+      const url = await enlaceArchivo(form.archivo_url, 600);
+      if (!url) { setError("No se pudo abrir el archivo guardado de esta factura."); setLeyendo(false); return; }
+      const r = await fetch(url);
+      if (!r.ok) { setError("No se pudo bajar el archivo guardado de esta factura."); setLeyendo(false); return; }
+      const blob = await r.blob();
+      const nombre = form.archivo_nombre || "factura";
+      await leerArchivo(new File([blob], nombre, { type: blob.type }), false);
+    } catch (err) {
+      setError("No se pudo leer el archivo guardado: " + err.message);
+      setLeyendo(false);
+    }
+  }
+
+  /**
+   * @param esNuevo  si el archivo viene de la máquina —y entonces reemplaza al
+   *   adjunto y se le calcula el hash para detectar duplicados— o si es el que
+   *   ya estaba guardado, que no hay que volver a subir ni volver a revisar.
+   */
+  async function leerArchivo(entrada, esNuevo) {
+    let file = entrada;
+    setLeyendo(true); setError("");
+    if (esNuevo) {
+      const h = await hashArchivo(file); setArchivoHash(h);
+      file = await comprimirImagen(file);
+      setArchivo(file);
+    }
     try {
       const b64 = await new Promise(res => {
         const r = new FileReader();
@@ -218,7 +259,6 @@ Rubros: ${listaRubros}`,
       setError("NOVA no pudo leer el archivo. Llena los datos a mano.");
     }
     setLeyendo(false);
-    e.target.value = "";
   }
 
   function agregar(tipo, id) {
@@ -483,11 +523,23 @@ Rubros: ${listaRubros}`,
           <div style={{ fontSize: 12, color: colors.brand, flex: 1, minWidth: 180 }}>
             {leyendo ? "NOVA está leyendo la factura..."
               : editando
-                ? "Subí la foto o el PDF y NOVA saca los renglones, para repartirla entre varios rubros."
+                ? (form.archivo_url
+                    ? "Esta factura ya tiene su papel cargado: NOVA puede leerlo y sacar los renglones para repartirla entre varios rubros."
+                    : "Subí la foto o el PDF y NOVA saca los renglones, para repartirla entre varios rubros.")
                 : "Sube una foto o PDF y NOVA llena los datos."}
           </div>
-          <Button variant="primary" size="sm" onClick={() => fileRef.current?.click()} disabled={leyendo}>
-            <Upload size={12} /> {leyendo ? "Leyendo..." : "Leer con NOVA"}
+          {/* LEER LA QUE YA ESTÁ. El papel está en el depósito desde que
+              alguien la cargó; quien viene a asignarla casi nunca lo tiene en
+              su computadora. Pedirle que lo suba otra vez es pedirle a la
+              persona equivocada un archivo que el sistema ya tiene. */}
+          {form.archivo_url && (
+            <Button variant="primary" size="sm" onClick={leerLaQueYaEstá} disabled={leyendo}>
+              <Sparkles size={12} /> {leyendo ? "Leyendo…" : "Que NOVA lea la que ya está"}
+            </Button>
+          )}
+          <Button variant={form.archivo_url ? "outline" : "primary"} size="sm"
+            onClick={() => fileRef.current?.click()} disabled={leyendo}>
+            <Upload size={12} /> {leyendo ? "Leyendo..." : form.archivo_url ? "Subir otra" : "Leer con NOVA"}
           </Button>
           <input ref={fileRef} type="file" accept="image/*,.pdf" onChange={leerConNova} style={{ display: "none" }} />
       </div>
