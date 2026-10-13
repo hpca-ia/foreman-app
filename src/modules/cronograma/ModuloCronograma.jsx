@@ -6,8 +6,9 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
-import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios,
+import { materiaPrima, aprenderDelCronograma, acomodarCambios,
   revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion, proponerEtapas } from "./novaCronograma";
+import { proponerPlan, guardarPlan, guardarOrden } from "./armarCronograma";
 import { leerMemoria, olvidar } from "./memoriaNova";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { magnitudDe } from "./magnitudes";
@@ -1703,93 +1704,101 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           dato: sale de haber hecho obras. */}
       {editable && obra?.id && (
         armando ? (
-          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "grid", gap: 9 }}>
-            {/* No se vuelve a preguntar cuánto dura. Ya está arriba, en el
-                plazo del proyecto: preguntarlo otra vez es pedir el mismo dato
-                dos veces y quedarse con dos respuestas que pueden no coincidir
-                — que es exactamente lo que se acaba de arreglar. */}
-            <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
-              {lead.crono_meses ? (
-                <>
-                  NOVA parte las agrupaciones del presupuesto en actividades, les pone duración y las encadena en el
-                  orden real de una obra, para que entre en el plazo del proyecto:{" "}
-                  <strong style={{ color: colors.ink }}>{lead.crono_meses} meses</strong>
-                  {diasDeContrato > 0 && <> · {diasDeContrato} días de trabajo</>}.
-                </>
-              ) : (
-                <span style={{ color: colors.warning }}>
-                  Primero poné cuántos meses dura la obra, arriba en el plazo del proyecto: es contra ese número que
-                  NOVA arma el cronograma.
-                </span>
-              )}
+          /* ARMARLO ES UNA SOLA COSA Y SE HACE DE CORRIDO.
+             Antes eran dos botones y un paso intermedio: NOVA proponía, uno
+             miraba una lista de catorce nombres que no decía nada, y recién
+             ahí se guardaba. Esa revisión no servía —no se puede juzgar un
+             cronograma sin ver las barras— y a cambio dejaba la propuesta
+             colgando de la pantalla: si se cerraba, se perdía.
+
+             Ahora se arma y se guarda, y se revisa en la tabla, que es donde
+             de verdad se revisa. Si algo sale mal a mitad de camino, lo
+             anterior ya está guardado y se ve qué paso falló. */
+          <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 12, display: "grid", gap: 9 }}>
+            <div style={{ fontSize: 12.5, color: colors.ink, fontWeight: 600 }}>
+              Que NOVA arme el cronograma
+            </div>
+            {!lead.crono_meses ? (
+              <div style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.5 }}>
+                Primero poné cuántos meses dura la obra, arriba en el plazo del proyecto: es contra ese número
+                que se arma.
+              </div>
+            ) : (
+              <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
+                NOVA parte la obra en <strong style={{ color: colors.ink }}>etapas</strong> —preliminares, obra
+                gris, instalaciones, acabados— y adentro de cada una pone los trabajos, con su duración sacada
+                de las cantidades del presupuesto. También los que no son rubros de nadie: el desmontaje, el
+                replanteo, las pruebas, la limpieza. Entra en el plazo de{" "}
+                <strong style={{ color: colors.ink }}>{lead.crono_meses} meses</strong>
+                {diasDeContrato > 0 && <> · {diasDeContrato} días de trabajo</>}.
+              </div>
+            )}
+
+            {/* LO QUE SOLO SABE QUIEN DIRIGE LA OBRA.
+                "Hay que desmontar todo lo que hay", "el aire acondicionado
+                llega en diciembre", "la planta alta se entrega primero". Nada
+                de eso está en el presupuesto ni en ningún dato, y es lo que
+                separa un cronograma genérico de este cronograma. */}
+            <div>
+              <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+                CONTALE CÓMO VA ESTA OBRA — OPCIONAL, PERO ES LO QUE MÁS CAMBIA EL RESULTADO
+              </label>
+              <textarea value={armando.comoVa || ""} rows={3}
+                onChange={e => setArmando(v => ({ ...v, comoVa: e.target.value }))}
+                placeholder="Ej: primero hay que desmontar todo lo que hay adentro. El aire acondicionado llega recién en diciembre. La planta alta se entrega antes que la baja."
+                style={{ ...inputStyle, width: "100%", fontSize: 12, lineHeight: 1.5, resize: "vertical", padding: "7px 9px" }} />
             </div>
 
-            {armando.propuesta && (
-              <div style={{ background: colors.bg, borderRadius: 8, padding: 11 }}>
-                <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55, marginBottom: 6 }}>
-                  <strong>{armando.propuesta.actividades.length}</strong> actividades,{" "}
-                  <strong>{armando.propuesta.dependencias.length}</strong> dependencias.
-                  La obra sale en <strong>{armando.propuesta.dias} días de trabajo</strong>,
-                  con {armando.propuesta.criticas} en la ruta crítica.
-                  {diasDeContrato > 0 && (
-                    Math.abs(armando.propuesta.dias - diasDeContrato) <= Math.max(3, diasDeContrato * 0.05)
-                      ? <span style={{ color: colors.brand }}> Entra en el plazo de {diasDeContrato} días.</span>
-                      : <span style={{ color: colors.warning }}>
-                          {" "}El plazo son {diasDeContrato}: le{armando.propuesta.dias > diasDeContrato ? "" : " falta"}n{" "}
-                          {Math.abs(armando.propuesta.dias - diasDeContrato)} días. Guardalo y ajustalo arriba, o pedile que lo piense de nuevo.
-                        </span>
-                  )}
-                  {armando.propuesta.cortado && (
-                    <span style={{ color: colors.warning }}>
-                      {" "}La respuesta vino cortada: guardé lo que llegó entero y completé el resto con las
-                      agrupaciones del control, con duración a revisar.
-                    </span>
-                  )}
-                  {armando.propuesta.quitadas > 0 && (
-                    <span style={{ color: colors.warning }}> Le quité {armando.propuesta.quitadas} dependencias que se mordían la cola.</span>
-                  )}
-                </div>
-                <div style={{ maxHeight: 150, overflowY: "auto", fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.6 }}>
-                  {armando.propuesta.actividades.slice(0, 14).map(a => (
-                    <div key={a.ref}>· {a.nombre} <span style={{ color: colors.muted }}>— {a.duracion} días</span></div>
-                  ))}
-                  {armando.propuesta.actividades.length > 14 && <div style={{ color: colors.muted }}>…y {armando.propuesta.actividades.length - 14} más</div>}
-                </div>
+            {armando.pasos?.length > 0 && (
+              <div style={{ background: colors.bg, borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+                {armando.pasos.map((p, i) => (
+                  <div key={i} style={{ fontSize: 12, color: p.mal ? colors.danger : colors.ink }}>
+                    {p.mal ? "·" : "✓"} {p.texto}
+                  </div>
+                ))}
               </div>
             )}
 
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {!armando.propuesta ? (
-                <Button variant="primary" size="sm" disabled={pensando || !lead.crono_meses} onClick={async () => {
+              <Button variant="primary" size="sm" disabled={pensando || !lead.crono_meses}
+                onClick={async () => {
+                  const paso = (texto, mal) => setArmando(v => ({ ...v, pasos: [...(v.pasos || []), { texto, mal }] }));
                   setError(""); setPensando(true);
-                  const agrupaciones = await materiaPrima(obra.id);
-                  const r = await proponerCronograma({
-                    agrupaciones, meses: lead.crono_meses, dias: diasDeContrato,
-                    nombreObra: lead.nombre, cal,
+                  setArmando(v => ({ ...v, pasos: [] }));
+                  const mp = await materiaPrima(obra.id);
+                  const r = await proponerPlan({
+                    agrupaciones: mp, meses: lead.crono_meses, dias: diasDeContrato,
+                    nombreObra: lead.nombre, comoVa: armando.comoVa || "", cal,
                   });
+                  if (r.error) { setPensando(false); setError(r.error); return; }
+                  paso(`El plan: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
+                  if (r.plan.faltantes.length) {
+                    paso(`${r.plan.faltantes.length} agrupaciones quedaron en "Sin ubicar": hay que mirarlas.`, true);
+                  }
+                  if (r.cortado) paso("La respuesta vino cortada: guardé lo que llegó entero.", true);
+
+                  const g = await guardarPlan({ lead, obra, plan: r.plan, quien: currentUser });
+                  if (g.error) { setPensando(false); setError(g.error); return; }
+                  paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la migración 101)" : ` en ${g.etapas} etapas`}.`);
+
+                  const o = await guardarOrden({
+                    actividades: g.creadas, dias: diasDeContrato, nombreObra: lead.nombre, cal,
+                  });
+                  if (o.error) paso(`El orden no se pudo: ${o.error} — las barras ya están, encadenalas vos o volvé a pedirlo.`, true);
+                  else paso(`El orden: ${o.creadas} dependencias.`);
+
                   setPensando(false);
-                  if (r.error) { setError(r.error); return; }
-                  setArmando(v => ({ ...v, propuesta: r }));
-                }}>{pensando ? "NOVA está leyendo el presupuesto…" : "Que lo arme NOVA"}</Button>
-              ) : (
-                <>
-                  <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
-                    setPensando(true);
-                    const r = await guardarPropuesta({ lead, obra, propuesta: armando.propuesta, quien: currentUser });
-                    setPensando(false);
-                    if (r.error) { setError(r.error); return; }
-                    setArmando(null); await cargar();
-                  }}>
-                    {todas.length ? "Reemplazar el cronograma" : "Guardarlo"}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setArmando(v => ({ ...v, propuesta: null }))}>Que lo piense de nuevo</Button>
-                </>
-              )}
-              <Button variant="secondary" size="sm" onClick={() => setArmando(null)}>Cancelar</Button>
+                  await Promise.all([cargar(), cargarFases()]);
+                  setAviso("Cronograma armado. Revisalo abajo: lo que esté mal se corrige escribiendo encima.");
+                }}>
+                {pensando ? "NOVA está armando la obra…" : todas.length ? "Armarlo de nuevo" : "Armarlo"}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setArmando(null)}>Cerrar</Button>
             </div>
-            {todas.length > 0 && !armando.propuesta && (
+            {todas.length > 0 && (
               <div style={{ fontSize: 10.5, color: colors.warning }}>
-                Ya hay un cronograma: si guardás uno nuevo, reemplaza al de ahora con todo lo que le hayas corregido.
+                Ya hay un cronograma: armarlo de nuevo reemplaza las barras que salen del control —con lo que
+                les hayas corregido— y las etapas. Lo que agregaste a mano no se toca.
               </div>
             )}
           </div>
