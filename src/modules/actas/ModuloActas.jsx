@@ -504,7 +504,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               ? <>Al enviarla la reciben <strong style={{ color: colors.ink }}>{correos.length}</strong>{" "}
                  {correos.length === 1 ? "persona" : "personas"}: {correos.join(", ")}. Sale desde{" "}
                  <strong style={{ color: colors.ink }}>notificaciones@hcastudio.com</strong> y las respuestas
-                 llegan a quien dio el visto. Después de enviada no se toca — un acta que cambia después de
+                 llegan a quien la escribió y a quien le dio el visto. Después de enviada no se toca — un acta que cambia después de
                  salir no sirve como prueba de nada.</>
               : "Todavía no hay ningún asistente con correo marcado para recibirla."}
           </div>

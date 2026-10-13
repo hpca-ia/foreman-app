@@ -118,7 +118,8 @@ export default async function handler(req, res) {
     // que no estuvo de acuerdo. Las dos frases juntas se contradicen, y la que
     // vale es ésta.
     pie: "Si algo de esta acta no refleja lo acordado, respondé este correo dentro de las próximas 48 horas: "
-      + "la respuesta le llega a quien la emitió y queda como constancia. Pasado ese plazo se da por aceptada. "
+      + "la respuesta les llega a quien la escribió y a quien la aprobó, y queda como constancia. "
+      + "Pasado ese plazo se da por aceptada. "
       + "Correo automático de FOREMAN · HCA Studio.",
   });
 
@@ -130,16 +131,23 @@ export default async function handler(req, res) {
   // observación de alguien que no estuvo de acuerdo, que es justo lo que un
   // acta tiene que poder recoger.
   //
-  // Responde a quien le dio el visto; si no se sabe, a quien la escribió.
-  let responderA = null;
-  for (const id of [acta.revisada_por, acta.creado_por]) {
-    if (!id || responderA) continue;
+  // A LOS DOS: a quien la escribió y a quien le dio el visto.
+  //
+  // No es redundancia, son dos roles distintos. El residente escribió el acta
+  // y es quien sabe si lo que objetan es un error de transcripción o un
+  // desacuerdo de fondo; el director la aprobó y es quien decide qué se hace
+  // con la objeción. Mandarla a uno solo obliga a reenviarla, y un reenvío que
+  // depende de que alguien se acuerde es un reenvío que a veces no pasa.
+  const ids = [...new Set([acta.creado_por, acta.revisada_por].filter(Boolean))];
+  const responderA = [];
+  for (const id of ids) {
     const { data: u } = await db.from("users").select("email").eq("id", id).maybeSingle();
-    if (u?.email) responderA = u.email;
+    const e = String(u?.email || "").trim().toLowerCase();
+    if (e && !responderA.includes(e)) responderA.push(e);
   }
 
   const r = await enviarCorreo({
-    to: para, responderA,
+    to: para, responderA: responderA.length ? responderA : null,
     subject: `Acta de reunión N° ${acta.numero} · ${lead?.nombre || "Obra"} · ${dia(acta.fecha)}`,
     html,
   });
