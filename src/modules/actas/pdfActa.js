@@ -101,26 +101,46 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     y += 2;
   }
 
-  // ── Compromisos: la tabla que se mira en la próxima reunión ──
-  const abiertos = compromisos.filter(c => c.estado !== "anulado");
-  if (abiertos.length) {
-    if (y > ALTO - 50) { doc.addPage(); y = 18; }
-    titulo("COMPROMISOS");
+  // ── Compromisos ──
+  //
+  // EN DOS TABLAS Y NO EN UNA. El repaso de lo que venía de la reunión
+  // anterior y los compromisos nuevos son dos cosas distintas para quien lee
+  // el acta: la primera dice si la obra cumple lo que promete, la segunda dice
+  // qué prometió ahora. Mezcladas, ninguna de las dos se puede leer.
+  const tabla = (filas, cabeza) => {
     autoTable(doc, {
-      startY: y,
-      head: [["QUÉ", "QUIÉN", "PARA CUÁNDO", "ESTADO"]],
-      body: abiertos.map(c => [
-        c.texto,
-        c.responsable_nombre || "—",
-        c.fecha_limite ? dia(c.fecha_limite) : "—",
-        { pendiente: "Pendiente", cumplido: "Cumplido", reprogramado: "Reprogramado" }[c.estado] || c.estado,
-      ]),
+      startY: y, head: [cabeza], body: filas,
       margin: { left: M, right: M },
       styles: { fontSize: 8.5, cellPadding: 2.2, textColor: NEGRO, lineColor: [225, 222, 216], lineWidth: 0.1 },
       headStyles: { fillColor: TINTA, textColor: 255, fontSize: 7.5, fontStyle: "bold" },
-      columnStyles: { 0: { cellWidth: "auto" }, 1: { cellWidth: 32 }, 2: { cellWidth: 30 }, 3: { cellWidth: 24 } },
+      columnStyles: { 0: { cellWidth: "auto" }, 1: { cellWidth: 30 }, 2: { cellWidth: 28 }, 3: { cellWidth: 26 } },
     });
     y = doc.lastAutoTable.finalY + 7;
+  };
+
+  const vivos = compromisos.filter(c => c.estado !== "anulado");
+  const repaso = vivos.filter(c => c.viene_de);
+  const nuevos = vivos.filter(c => !c.viene_de);
+
+  if (repaso.length) {
+    if (y > ALTO - 50) { doc.addPage(); y = 18; }
+    titulo("REPASO DE LA REUNIÓN ANTERIOR");
+    tabla(repaso.map(c => [
+      c.texto + (c.estado !== "cumplido" && c.nota ? `\n(${c.nota})` : ""),
+      c.responsable_nombre || "—",
+      c.fecha_limite ? dia(c.fecha_limite) : "—",
+      c.estado === "cumplido" ? "CUMPLIDO" : c.estado === "reprogramado" ? "Reprogramado" : "PENDIENTE",
+    ]), ["QUÉ SE HABÍA COMPROMETIDO", "QUIÉN", "PARA CUÁNDO", "¿SE HIZO?"]);
+  }
+
+  if (nuevos.length) {
+    if (y > ALTO - 50) { doc.addPage(); y = 18; }
+    titulo("COMPROMISOS DE ESTA REUNIÓN");
+    tabla(nuevos.map(c => [
+      c.texto, c.responsable_nombre || "—",
+      c.fecha_limite ? dia(c.fecha_limite) : "—",
+      { pendiente: "Pendiente", cumplido: "Cumplido", reprogramado: "Reprogramado" }[c.estado] || c.estado,
+    ]), ["QUÉ", "QUIÉN", "PARA CUÁNDO", "ESTADO"]);
   }
 
   if (acta.avance_nota) { titulo("AVANCE DE LA OBRA"); parrafo(acta.avance_nota); y += 5; }

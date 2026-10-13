@@ -207,9 +207,13 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             <div style={{ fontSize: 11, color: colors.muted, marginBottom: 9, lineHeight: 1.45 }}>
               Lo primero de la reunión: compromiso por compromiso, qué se cumplió y qué sigue pendiente.
             </div>
-            {arrastrados.map(c => <Compromiso key={c.id} c={c} sePuede={sePuede}
+            {arrastrados.map(c => <Repaso key={c.id} c={c} sePuede={sePuede}
               onTocar={campos => tocarFila("acta_compromisos", "compromisos", c.id, campos)}
-              onQuitar={() => quitarFila("acta_compromisos", "compromisos", c.id)} quien={currentUser} />)}
+              quien={currentUser} />)}
+            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.45 }}>
+              Lo que quede sin tildar sigue pendiente y vuelve a aparecer en la próxima reunión. Si cambió la
+              fecha, cambiala acá: eso es reprogramarlo, y queda dicho que se reprogramó.
+            </div>
           </div>
         )}
 
@@ -611,6 +615,81 @@ const Chip = ({ estado }) => {
   return (
     <span title={e.pista} style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: c,
       borderRadius: 10, padding: "2px 8px", whiteSpace: "nowrap" }}>{e.label.toUpperCase()}</span>
+  );
+};
+
+/**
+ * EL REPASO DE LO QUE QUEDÓ PENDIENTE: una casilla y nada más.
+ *
+ * Es lo primero que pasa en una reunión de obra y pasa rápido: se lee el
+ * compromiso en voz alta y alguien dice sí o no. Un desplegable de cuatro
+ * estados para eso es pedir una decisión que nadie está tomando —entre
+ * "pendiente" y "reprogramado" no hay diferencia práctica mientras se habla— y
+ * lo que se consigue es que no se marque nada.
+ *
+ * Una casilla: se hizo o no se hizo. Lo que queda sin tildar sigue pendiente y
+ * vuelve a aparecer en la próxima acta, que es exactamente lo que tiene que
+ * pasar. Y si no se hizo, el campo que aparece es el que importa: por qué —eso
+ * es lo que después explica un atraso— y para cuándo queda ahora.
+ */
+const Repaso = ({ c, sePuede, onTocar, quien }) => {
+  const hecho = c.estado === "cumplido";
+  const anulado = c.estado === "anulado";
+  const vencido = !hecho && !anulado && c.fecha_limite && c.fecha_limite < hoy();
+  return (
+    <div style={{ borderBottom: `1px solid ${colors.neutralSoft}`, paddingBottom: 6, marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
+        <input type="checkbox" checked={hecho} disabled={!sePuede} title="¿Se hizo?"
+          style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }}
+          onChange={e => onTocar({
+            estado: e.target.checked ? "cumplido" : "pendiente",
+            cerrado_at: e.target.checked ? new Date().toISOString() : null,
+            cerrado_por: quien?.id ?? null, cerrado_nombre: quien?.name || null,
+          })} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, lineHeight: 1.4,
+            color: hecho || anulado ? colors.muted : colors.ink,
+            textDecoration: hecho || anulado ? "line-through" : "none" }}>
+            {c.texto}
+          </div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
+            {c.responsable_nombre || "sin responsable"}
+            {c.fecha_limite && <span style={{ color: vencido ? colors.danger : colors.muted, fontWeight: vencido ? 600 : 400 }}>
+              {" · "}era para el {dia(c.fecha_limite)}{vencido ? " · vencido" : ""}
+            </span>}
+            {hecho && c.cerrado_nombre && ` · lo dio por hecho ${c.cerrado_nombre}`}
+          </div>
+        </div>
+        {sePuede && !hecho && (
+          <button onClick={() => onTocar({ estado: anulado ? "pendiente" : "anulado" })}
+            title={anulado ? "Volver a ponerlo pendiente" : "Ya no aplica: sacarlo de la cadena"}
+            style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+              fontSize: 10.5, fontFamily: colors.font, flexShrink: 0 }}>
+            {anulado ? "volver a abrirlo" : "ya no aplica"}
+          </button>
+        )}
+      </div>
+      {/* SI NO SE HIZO, LO QUE HACE FALTA ES POR QUÉ Y PARA CUÁNDO.
+          "Sigue pendiente" repetido cuatro actas seguidas no explica nada; "no
+          se hizo porque el proveedor no entregó" sí, y es lo que después
+          sostiene un reclamo o una ampliación de plazo. */}
+      {!hecho && !anulado && sePuede && (
+        <div style={{ display: "flex", gap: 6, marginTop: 5, marginLeft: 23, flexWrap: "wrap" }}>
+          <input defaultValue={c.nota || ""} placeholder="¿Por qué no se hizo?"
+            onBlur={e => onTocar({ nota: e.target.value || null })}
+            style={{ ...inputStyle, flex: "1 1 200px", minWidth: 150, fontSize: 11.5, padding: "4px 7px", height: 26 }} />
+          <input type="date" value={c.fecha_limite || ""} title="¿Para cuándo queda ahora?"
+            onChange={e => onTocar({
+              fecha_limite: e.target.value || null,
+              estado: e.target.value && e.target.value !== c.fecha_limite ? "reprogramado" : c.estado,
+            })}
+            style={{ ...inputStyle, width: 142, fontSize: 11.5, padding: "4px 6px", height: 26 }} />
+        </div>
+      )}
+      {!hecho && !anulado && !sePuede && c.nota && (
+        <div style={{ fontSize: 11, color: colors.inkSoft, marginLeft: 23, marginTop: 3 }}>{c.nota}</div>
+      )}
+    </div>
   );
 };
 

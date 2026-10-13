@@ -37,8 +37,15 @@ export default async function handler(req, res) {
 
   const vinieron = (asistentes || []).filter(a => a.asistio);
   const faltaron = (asistentes || []).filter(a => !a.asistio);
-  const abiertos = (compromisos || []).filter(c => c.estado === "pendiente" || c.estado === "reprogramado");
-  const cerrados = (compromisos || []).filter(c => c.estado === "cumplido");
+  // El repaso de la anterior y lo nuevo, separados: la primera lista dice si
+  // la obra cumple lo que promete, la segunda qué prometió ahora. Mezcladas,
+  // ninguna de las dos se lee.
+  const vivos = (compromisos || []).filter(c => c.estado !== "anulado");
+  const repaso = vivos.filter(c => c.viene_de);
+  const nuevos = vivos.filter(c => !c.viene_de);
+  const abiertos = nuevos;
+  const cerrados = [];
+  void cerrados;
 
   const fila = c => `<tr>
       <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:#1A1A1A">${esc(c.texto)}</td>
@@ -65,7 +72,22 @@ export default async function handler(req, res) {
         ${t.resuelto ? `<div style="font-size:13px;color:#1A1A1A;line-height:1.55;margin-top:4px;padding-left:9px;border-left:3px solid #2D5F55"><strong>Se resuelve:</strong> ${esc(t.resuelto)}</div>` : ""}
       </div>`).join("")}` : ""}
 
-    ${abiertos.length ? `<h3 style="margin:20px 0 6px;font-size:13px;color:#555;letter-spacing:.3px">COMPROMISOS</h3>
+    ${repaso.length ? `<h3 style="margin:20px 0 6px;font-size:13px;color:#555;letter-spacing:.3px">REPASO DE LA REUNIÓN ANTERIOR</h3>
+      <table style="width:100%;border-collapse:collapse">
+        <tr><th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">QUÉ SE HABÍA COMPROMETIDO</th>
+            <th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">QUIÉN</th>
+            <th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">¿SE HIZO?</th></tr>
+        ${repaso.map(c => `<tr>
+          <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:${c.estado === "cumplido" ? "#777" : "#1A1A1A"}">
+            ${esc(c.texto)}${c.estado !== "cumplido" && c.nota ? `<br><span style="color:#777;font-size:12px">${esc(c.nota)}</span>` : ""}
+          </td>
+          <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:#555;white-space:nowrap">${esc(c.responsable_nombre || "—")}</td>
+          <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;white-space:nowrap;font-weight:600;color:${c.estado === "cumplido" ? "#2D7A4F" : "#92400E"}">
+            ${c.estado === "cumplido" ? "Sí" : c.fecha_limite ? `No · para el ${dia(c.fecha_limite)}` : "No"}
+          </td></tr>`).join("")}
+      </table>` : ""}
+
+    ${abiertos.length ? `<h3 style="margin:20px 0 6px;font-size:13px;color:#555;letter-spacing:.3px">COMPROMISOS DE ESTA REUNIÓN</h3>
       <table style="width:100%;border-collapse:collapse">
         <tr><th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">QUÉ</th>
             <th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">QUIÉN</th>
@@ -73,8 +95,7 @@ export default async function handler(req, res) {
         ${abiertos.map(fila).join("")}
       </table>` : ""}
 
-    ${cerrados.length ? `<p style="margin:14px 0 0;font-size:12.5px;color:#777">
-      Se dieron por cumplidos: ${cerrados.map(c => esc(c.texto)).join(" · ")}</p>` : ""}
+
 
     ${acta.avance_nota ? `<h3 style="margin:20px 0 6px;font-size:13px;color:#555;letter-spacing:.3px">AVANCE</h3>
       <p style="margin:0;font-size:13px;color:#1A1A1A;line-height:1.55">${esc(acta.avance_nota)}</p>` : ""}
