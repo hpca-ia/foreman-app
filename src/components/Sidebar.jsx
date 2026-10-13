@@ -218,6 +218,18 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
             {usuario.name}
           </div>
           <div style={{ fontSize: 10, color: colors.muted }}>{rolInfo(usuario.role).label}</div>
+          {/* QUÉ VERSIÓN ESTÁS VIENDO.
+              "Sigue igual" y "ya está cargada la actualización" son la misma
+              pregunta, y sin esto no se puede contestar: desde adentro del
+              navegador no hay forma de saber si lo que se está mirando es el
+              código de hoy o el del martes que quedó en la memoria. Acá está
+              el commit y la hora del despliegue. Si no coincide con lo que
+              acaba de salir, es la pantalla vieja y hay que recargar fuerte,
+              y eso se ve en un segundo en vez de perderse una tarde. */}
+          <div title="Versión que está corriendo en esta pantalla. Si no es la última, recargá con Cmd+Shift+R."
+            style={{ fontSize: 9, color: colors.border, fontFamily: "ui-monospace, monospace", marginTop: 1 }}>
+            {process.env.REACT_APP_BUILD || "dev"}
+          </div>
         </div>
       </div>
     </div>

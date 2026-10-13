@@ -15,7 +15,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "REACT_APP_BUILD=\"$(node -e \"const d=new Date();console.log((process.env.VERCEL_GIT_COMMIT_SHA||'local').slice(0,7)+' '+d.toISOString().slice(5,16).replace('T',' '))\")\" react-scripts build",
     "nombres": "eslint --no-eslintrc -c .eslintrc.nombres.js --ext .js,.jsx src/",
     "hooks": "node scripts/hooks-despues-del-return.mjs",
     "revisar": "npm run nombres && npm run hooks && npm run sombra && npm run pruebas",
