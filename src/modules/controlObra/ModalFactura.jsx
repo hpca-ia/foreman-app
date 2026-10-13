@@ -723,7 +723,12 @@ Rubros: ${listaRubros}`,
             rubros se reparte en cuatro, y hacer esa división a mano termina en
             un total que no cuadra por un centavo. El último se queda con el
             resto, para que la suma dé exacta. */}
-        {repartos.length > 1 && n(form.total) > 0 && (
+        {/* QUE SE VEA QUE ES UN BOTÓN Y QUE DIGA QUÉ VA A HACER.
+            Era un rectángulo con borde gris y sin color, que es exactamente
+            como se dibuja un botón apagado: se lee "no se puede", no "tocá
+            acá". Y decía "repartir en partes iguales" sin decir entre cuántos
+            ni cuánta plata, así que apretarlo era una apuesta. */}
+        {repartos.length > 0 && n(form.total) > 0 && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, marginBottom: 6, flexWrap: "wrap" }}>
             <button onClick={() => {
                 const cuantos = repartos.length;
@@ -735,10 +740,10 @@ Rubros: ${listaRubros}`,
                     : parte,
                 })));
               }}
-              style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
-                padding: "4px 10px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
+              style={{ background: colors.brand, border: "none", borderRadius: 6,
+                padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#fff", cursor: "pointer",
                 fontFamily: colors.font }}>
-              Repartir en partes iguales
+              Repartir ${fmt(n(form.total))} entre {repartos.length}
             </button>
             <span style={{ fontSize: 10.5, color: colors.muted }}>
               …o escribí el % de cada uno y el monto se calcula solo
