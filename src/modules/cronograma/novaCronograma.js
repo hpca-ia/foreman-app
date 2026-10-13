@@ -106,7 +106,7 @@ export async function materiaPrima(obraId) {
     });
 }
 
-const ORDEN_DE_UNA_OBRA = `DEPENDENCIAS: "de" termina antes de que empiece "a". Usá el orden real de una
+export const ORDEN_DE_UNA_OBRA = `DEPENDENCIAS: "de" termina antes de que empiece "a". Usá el orden real de una
 obra, no el orden de la lista:
 · movimiento de tierra y cimentación primero
 · estructura después, piso por piso si la obra tiene varios

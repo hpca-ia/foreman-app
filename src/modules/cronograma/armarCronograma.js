@@ -6,7 +6,7 @@ import { memoriaEnPalabras } from "./apuntes";
 import { jsonTolerante } from "../../lib/jsonTolerante";
 import { JUICIO, pedirANova, textoDeNova, porQueFallo } from "../../lib/modelos";
 import { crearFase } from "./fases";
-import { proponerDependencias } from "./novaCronograma";
+import { proponerDependencias, ORDEN_DE_UNA_OBRA } from "./novaCronograma";
 
 // ARMAR EL CRONOGRAMA: etapas, y adentro lo que hay que hacer.
 //
@@ -174,22 +174,27 @@ NO DEVUELVAS DEPENDENCIAS. El orden se pide aparte.`;
  * puede recuperar.
  */
 export async function guardarPlan({ lead, obra, plan, quien }) {
+  // PRIMERO SE GUARDA LO NUEVO, DESPUÉS SE BORRA LO VIEJO.
+  //
+  // Al revés estaba, y es un error caro: borraba las barras y las etapas, y
+  // recién entonces insertaba. Si la inserción fallaba a mitad de camino —un
+  // permiso, una columna que falta, la conexión— el cronograma anterior ya no
+  // existía y el nuevo tampoco. La pantalla quedaba vacía y no había de dónde
+  // recuperarlo. Pasó.
+  //
+  // Guardando primero, lo peor que pasa es que queden las dos listas juntas y
+  // haya que borrar una a mano. Eso es un rato de trabajo; lo otro era perder
+  // el cronograma entero.
   const { data: previas } = await supabase.from("cronograma_actividades")
     .select("id,obra_actividad_id").eq("lead_id", lead.id);
+  // LO PROPIO DEL CRONOGRAMA SOBREVIVE: lo que alguien agregó a mano —el
+  // permiso municipal, la inspección de bomberos— no está en ningún
+  // presupuesto y no hay de dónde volver a sacarlo.
   const aBorrar = (previas || []).filter(x => x.obra_actividad_id != null).map(x => x.id);
-  if (aBorrar.length) {
-    await supabase.from("cronograma_dependencias").delete().in("actividad_id", aBorrar);
-    await supabase.from("cronograma_dependencias").delete().in("depende_de_id", aBorrar);
-    await supabase.from("cronograma_actividades").delete().in("id", aBorrar);
-  }
-  // Las etapas de antes también: las nuevas las reemplazan. Borrarlas no borra
-  // ninguna actividad —quedan sin etapa— así que lo propio del cronograma
-  // sigue estando.
   const { data: fasesViejas } = await supabase.from("cronograma_fases").select("id").eq("lead_id", lead.id);
-  if (fasesViejas?.length) await supabase.from("cronograma_fases").delete().in("id", fasesViejas.map(f => f.id));
 
   const creadas = [];
-  let orden = 0;
+  let orden = 1000;   // atrás de lo que haya, hasta que lo viejo se vaya
   let sinEtapas = false;
   for (let i = 0; i < plan.etapas.length; i++) {
     const e = plan.etapas[i];
@@ -210,9 +215,30 @@ export async function guardarPlan({ lead, obra, plan, quien }) {
       const limpias = filas.map(({ incluye, fase_id: _f, etapa, ...resto }) => resto);
       ({ data, error } = await supabase.from("cronograma_actividades").insert(limpias).select());
     }
-    if (error) return { error: /schema cache|does not exist/i.test(error.message) ? "Falta correr la migración 076." : error.message };
+    if (error) {
+      // No se borró nada todavía: el cronograma de antes sigue entero y lo que
+      // alcanzó a entrar se saca, para no dejar media lista nueva encima.
+      if (creadas.length) await supabase.from("cronograma_actividades").delete().in("id", creadas.map(x => x.id));
+      return { error: /schema cache|does not exist/i.test(error.message) ? "Falta correr la migración 076." : error.message };
+    }
     creadas.push(...(data || []));
   }
+  if (!creadas.length) return { error: "No se guardó ninguna actividad." };
+
+  // Recién ahora, con lo nuevo adentro y contado, se va lo de antes.
+  if (aBorrar.length) {
+    await supabase.from("cronograma_dependencias").delete().in("actividad_id", aBorrar);
+    await supabase.from("cronograma_dependencias").delete().in("depende_de_id", aBorrar);
+    await supabase.from("cronograma_actividades").delete().in("id", aBorrar);
+  }
+  // Las etapas viejas también. Borrarlas no borra ninguna actividad —quedan
+  // sin etapa— así que lo propio del cronograma sigue estando.
+  if (fasesViejas?.length) await supabase.from("cronograma_fases").delete().in("id", fasesViejas.map(f => f.id));
+
+  // Y las nuevas quedan numeradas desde cero, ahora que no compiten con nada.
+  await Promise.all(creadas.map((a, k) =>
+    supabase.from("cronograma_actividades").update({ orden: k }).eq("id", a.id)));
+
   return { creadas, etapas: plan.etapas.length, sinEtapas };
 }
 
@@ -308,4 +334,123 @@ LAS REGLAS DE LEER, que son distintas de las de opinar:
   } catch (e) {
     return { error: "NOVA devolvió algo que no se entiende: " + e.message };
   }
+}
+
+/**
+ * LEER EL CRONOGRAMA QUE HAY Y PONERLE TIEMPOS Y ORDEN.
+ *
+ * Es el otro camino, y es el que de verdad se usa: alguien escribe las etapas
+ * y los trabajos —que es lo que sabe, porque conoce la obra— y lo que no
+ * quiere hacer es sentarse a calcular cuántos días lleva cada uno y qué traba
+ * a qué. Eso sí es trabajo de NOVA: rendimientos y orden de obra.
+ *
+ * Se lee lo que HAY, en el orden en que está, respetando las etapas. No se
+ * agregan trabajos ni se reordena: lo que está escrito lo escribió alguien que
+ * vio la obra, y NOVA no vio nada.
+ */
+export async function ponerTiemposYOrden({ actividades = [], fases = [], agrupaciones = [],
+  dias = 0, nombreObra = "", comoVa = "", cal = calendario() }) {
+  const vivas = actividades.filter(a => a.nombre);
+  if (!vivas.length) return { error: "Todavía no hay actividades que leer." };
+
+  const { memoria } = await leerMemoria("cronograma");
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  const jornada = L.length === 7 ? "los siete días" : L.includes(6) ? "de lunes a sábado" : "de lunes a viernes, sin sábados";
+  const porFase = new Map(fases.map(f => [Number(f.id), f.nombre]));
+  const tamano = new Map(agrupaciones.map(a => [Number(a.id), a]));
+
+  // Dicho por etapas, en el orden en que están: el orden es información y es
+  // de quien lo escribió.
+  const lista = vivas.map(a => {
+    const et = a.fase_id != null ? porFase.get(Number(a.fase_id)) : null;
+    const ag = a.obra_actividad_id != null ? tamano.get(Number(a.obra_actividad_id)) : null;
+    const mag = ag?.magnitud?.[0] ? ` · ${miles(ag.magnitud[0].cantidad)} ${ag.magnitud[0].unidad}` : "";
+    return `${a.id} · ${et ? `[${et}] ` : ""}${a.nombre}${mag} · hoy dice ${a.duracion}d`;
+  }).join("\n");
+
+  try {
+    const sistema = `Sos NOVA. El cronograma de la obra "${nombreObra}" ya está escrito por quien la
+dirige: están las etapas y los trabajos, en el orden en que van. Falta lo tuyo,
+que es cuánto lleva cada uno y qué traba a qué.
+${memoriaEnPalabras(memoria, "cronograma")}
+LO QUE HAY, en orden. Entre corchetes la etapa, y donde se sabe, el tamaño:
+${lista}
+
+El plazo son ${dias || "los que hagan falta"} días hábiles y se trabaja ${jornada}.
+${comoVa ? `
+LO QUE CUENTA QUIEN DIRIGE LA OBRA, y manda sobre tu criterio:
+"""
+${String(comoVa).slice(0, 2000)}
+"""
+` : ""}
+Devolvés SOLO JSON, sin markdown, con los ids de arriba:
+
+{"dias":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia"}],
+ "dependencias":[[12,13,0],[13,14,-5]]}
+
+NO AGREGUES TRABAJOS, NO SAQUES NINGUNO Y NO LOS REORDENES. Lo que está escrito
+lo escribió alguien que vio la obra; vos no la viste. Tu trabajo son los dos
+números.
+
+LOS DÍAS SALEN DE LA CANTIDAD cuando hay cantidad: días = cantidad ÷ (lo que
+rinde una cuadrilla por día × cuántas cuadrillas). Usá rendimientos de obra en
+Ecuador y poné esa cuenta en "porque", en diez palabras. Cuando no hay
+cantidad, estimá por lo que es el trabajo y escribí "estimado". Si el número
+que ya tiene te parece bien, devolvelo igual.
+
+LAS DEPENDENCIAS son [de, a, retardo]: "de" termina antes de que empiece "a".
+El cuarto elemento es opcional: "CC" si arrancan juntas, "FF" si terminan
+juntas.
+${ORDEN_DE_UNA_OBRA}
+EL PLAZO MANDA${dias ? `: ${dias} días hábiles` : ""}. Las etapas se traslapan —los acabados de una
+zona arrancan mientras en otra todavía hay obra gris— y ahí es donde se gana
+el tiempo: usá retardos negativos. Lo que no se puede comprimir es el fragüe
+del hormigón ni el secado: esos tardan lo que tardan.`;
+
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 8000,
+      system: sistema,
+      messages: [{ role: "user", content: "Poné los días y el orden. Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "ponerle tiempos y orden") };
+    const { datos, cortado } = jsonTolerante(textoDeNova(data));
+    if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
+
+    const validos = new Set(vivas.map(a => Number(a.id)));
+    const ahora = new Map(vivas.map(a => [Number(a.id), a]));
+    const duraciones = (datos.dias || [])
+      .map(d => ({ id: Number(d.id), dias: Math.max(1, Math.round(Number(d.dias) || 0)), porque: d.porque || null }))
+      .filter(d => validos.has(d.id) && d.dias && d.dias !== ahora.get(d.id)?.duracion);
+    const dependencias = (datos.dependencias || [])
+      .map(d => (Array.isArray(d)
+        ? { de: Number(d[0]), a: Number(d[1]), retardo: Number(d[2]) || 0, tipo: typeof d[3] === "string" ? d[3] : "FC" }
+        : { de: Number(d.de), a: Number(d.a), retardo: Number(d.retardo) || 0, tipo: d.tipo || "FC" }))
+      .filter(d => validos.has(d.de) && validos.has(d.a) && d.de !== d.a);
+    return { duraciones, dependencias, cortado };
+  } catch (e) {
+    return { error: "NOVA devolvió algo que no se entiende: " + e.message };
+  }
+}
+
+/** Aplicar lo que propuso: los días uno por uno, y el orden reemplazando el que haya. */
+export async function aplicarTiemposYOrden({ duraciones = [], dependencias = [], actividades = [] }) {
+  for (const d of duraciones) {
+    await supabase.from("cronograma_actividades").update({ duracion: d.dias, nota: d.porque }).eq("id", d.id);
+  }
+  let puestas = 0;
+  if (dependencias.length) {
+    const ids = actividades.map(a => a.id);
+    // Se reemplazan, no se suman: pedirle el orden dos veces dejaría dos
+    // cadenas encima de la misma obra y el cálculo tomaría la más larga.
+    if (ids.length) {
+      await supabase.from("cronograma_dependencias").delete().in("actividad_id", ids);
+      await supabase.from("cronograma_dependencias").delete().in("depende_de_id", ids);
+    }
+    const filas = dependencias.map(d => ({
+      actividad_id: d.a, depende_de_id: d.de, tipo: d.tipo || "FC", retardo: d.retardo || 0,
+    }));
+    const { data } = await supabase.from("cronograma_dependencias").insert(filas).select("id");
+    puestas = data?.length || 0;
+  }
+  return { dias: duraciones.length, dependencias: puestas };
 }

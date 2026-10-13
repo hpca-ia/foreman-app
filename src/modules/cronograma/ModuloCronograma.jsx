@@ -8,7 +8,8 @@ import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, aprenderDelCronograma, acomodarCambios,
   revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion, proponerEtapas } from "./novaCronograma";
-import { proponerPlan, guardarPlan, guardarOrden, leerCronogramaEscrito } from "./armarCronograma";
+import { proponerPlan, guardarPlan, guardarOrden, leerCronogramaEscrito,
+  ponerTiemposYOrden, aplicarTiemposYOrden } from "./armarCronograma";
 import { leerMemoria, olvidar } from "./memoriaNova";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { magnitudDe } from "./magnitudes";
@@ -1679,11 +1680,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       {editable && obra?.id && (
         <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", marginBottom: 10, fontSize: 11 }}>
           {[
-            ["1", "Armarlo del control", todas.length > 0],
-            ["2", "Decirle cómo va la obra", dependencias.length > 0],
-            ["3", "Duraciones con NOVA", todas.some(a => a.nota)],
-            ["4", "Revisarlo", false],
-            ["5", "Guardar la versión", versiones.length > 0],
+            // LOS PASOS QUE SON, no los que eran. Describían un camino de
+            // cinco escalones que ya no existe —armar del control, después
+            // pedirle las duraciones, después revisar la propuesta— y quien
+            // lo leía buscaba botones que no están. Un mapa viejo es peor que
+            // ninguno: manda a caminar para el lado equivocado.
+            ["1", "Que NOVA lo arme", todas.length > 0],
+            ["2", "Acomodar etapas y duraciones", todas.some(a => a.nota)],
+            ["3", "Encadenar lo que falte", dependencias.length > 0],
+            ["4", "Guardar la versión", versiones.length > 0],
           ].map(([n, t, hecho], i) => (
             <span key={n} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               {i > 0 && <span style={{ color: colors.border, marginRight: 2 }}>›</span>}
@@ -1914,7 +1919,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 existe. Lo que queda es lo que uno hace a propósito. */}
             {!todas.length ? (
               <>
-                <Button variant="primary" size="sm" disabled={pensando || !obra?.id} onClick={async () => {
+                {/* EL BOTÓN QUE ARMA LA OBRA, PRIMERO Y CON SU NOMBRE.
+                    Se llamaba "Que NOVA le ponga las duraciones", que es lo
+                    que hacía hace tres versiones. Quien tenía el cronograma
+                    vacío leía eso y no lo apretaba —con razón: no quería
+                    duraciones, quería un cronograma— y entonces la única
+                    puerta a todo lo nuevo quedaba sin abrir. */}
+                <Button variant="primary" size="sm" disabled={pensando}
+                  onClick={() => { setArmando({ cubrir: false }); setError(""); }}>
+                  <Sparkles size={13} /> Que NOVA lo arme
+                </Button>
+                <Button variant="secondary" size="sm" disabled={pensando || !obra?.id} onClick={async () => {
                   if (!window.confirm(
                     "¿Armar el cronograma con las agrupaciones del control de obra?\n\n" +
                     "Una barra por agrupación, en el orden del control, encadenadas una detrás de otra. " +
@@ -1922,16 +1937,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     "partida para corregir, no una estimación.")) return;
                   await armarDelControl();
                 }}>Armarlo del control de obra</Button>
-                <Button variant="outline" size="sm" disabled={pensando}
-                  onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
-                  Que NOVA le ponga las duraciones
-                </Button>
               </>
             ) : (
               <>
                 <Button variant="outline" size="sm" disabled={pensando}
-                  onClick={() => { setArmando({ propuesta: null }); setError(""); }}>
-                  Rearmarlo con NOVA
+                  onClick={() => { setArmando({ cubrir: false }); setError(""); }}>
+                  <Sparkles size={13} /> Que NOVA lo arme de nuevo
                 </Button>
                 <div style={{ position: "relative" }}>
                   <Button variant="outline" size="sm" disabled={pensando} onClick={() => setMenu(m => !m)}>
@@ -2345,13 +2356,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           onPartir={etapas => partir(partiendo, etapas)} />
       )}
 
-      {!todas.length ? (
-        <Centro>
-          Todavía no hay actividades. Empezá por las grandes —movimiento de tierra, estructura, mampostería— y
-          después las partís.
-        </Centro>
-      ) : (
-        <>
+      <>
         {/* LAS ETAPAS SE MANEJAN ACÁ, FUERA DE LA TABLA.
             Estaban adentro del Gantt, en una banda: para mover una había que
             encontrar dos flechitas metidas en una tabla que se desplaza para
@@ -2479,6 +2484,51 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 )}
               </div>
             )}
+
+            {/* ESCRIBÍS VOS, LOS NÚMEROS LOS PONE NOVA.
+                Es el camino que de verdad se usa: quien dirige la obra sabe
+                qué hay que hacer y en qué orden —lo escribe en dos minutos— y
+                lo que no quiere es sentarse a calcular cuántos días lleva cada
+                cosa y qué traba a qué. Eso sí es trabajo de NOVA: rendimientos
+                y orden de obra. No agrega trabajos ni reordena: lo escrito lo
+                escribió alguien que vio la obra. */}
+            {actividades.length > 0 && (
+              <div style={{ borderTop: `1px solid ${colors.neutralSoft}`, marginTop: 9, paddingTop: 9,
+                display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                  setError("");
+                  setPensando(true);
+                  const mp = obra?.id ? await materiaPrima(obra.id) : [];
+                  const r = await ponerTiemposYOrden({
+                    actividades, fases, agrupaciones: mp, dias: diasDeContrato,
+                    nombreObra: lead.nombre, comoVa: armando?.comoVa || "", cal,
+                  });
+                  if (r.error) { setPensando(false); setError(r.error); return; }
+                  if (!r.duraciones.length && !r.dependencias.length) {
+                    setPensando(false);
+                    setAviso("NOVA no le cambió nada: los días y el orden que hay le parecen bien.");
+                    return;
+                  }
+                  const ok = window.confirm(
+                    `NOVA leyó las ${actividades.length} actividades y propone:\n\n` +
+                    `· ${r.duraciones.length} duraciones distintas de las de ahora\n` +
+                    `· ${r.dependencias.length} dependencias — reemplazan las que haya\n\n` +
+                    "No agrega ni saca actividades ni cambia el orden en que las escribiste. " +
+                    "Lo que no te guste se corrige después escribiendo encima.");
+                  if (!ok) { setPensando(false); return; }
+                  const hecho = await aplicarTiemposYOrden({ ...r, actividades });
+                  setPensando(false);
+                  await cargar();
+                  setAviso(`NOVA puso ${hecho.dias} duraciones y ${hecho.dependencias} dependencias. Revisalas abajo.`);
+                }}>
+                  <Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA le ponga tiempos y orden"}
+                </Button>
+                <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+                  Lee las etapas y las actividades como están —en tu orden— y les pone cuántos días lleva cada
+                  una y qué traba a qué. No agrega trabajos ni los reordena.
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -2493,8 +2543,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
           platas={platas} memoria={memoria}
           fases={fases} onFase={ponerEnEtapa} />
-        </>
-      )}
+      </>
 
       {editable && (
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
