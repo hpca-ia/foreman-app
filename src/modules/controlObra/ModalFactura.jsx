@@ -158,17 +158,26 @@ Rubros: ${listaRubros}`,
       const data = await res.json();
       const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
       const p = JSON.parse(txt);
+      // Al editar, lo que ya está escrito manda: alguien pudo haberlo
+      // corregido a mano y volver a pisarlo con la lectura sería deshacer su
+      // corrección. Lo que se vino a buscar son los renglones.
+      const conservar = (viejo, nuevo) => (editando && String(viejo || "").trim() ? viejo : (nuevo || viejo));
       setForm(f => ({
         ...f,
-        fecha: p.fecha || f.fecha,
-        ruc: p.ruc || f.ruc,
-        razon_social: p.razon_social || f.razon_social,
-        numero_factura: p.numero_factura || f.numero_factura,
-        numero_cheque: p.numero_cheque || f.numero_cheque,
-        detalle: p.detalle || f.detalle,
-        subtotal_0: n(p.subtotal_0), subtotal_5: n(p.subtotal_5), subtotal_15: n(p.subtotal_15),
-        iva: n(p.iva), total: n(p.total),
-        tipo: p.tipo || f.tipo,
+        fecha: conservar(f.fecha, p.fecha),
+        ruc: conservar(f.ruc, p.ruc),
+        razon_social: conservar(f.razon_social, p.razon_social),
+        numero_factura: conservar(f.numero_factura, p.numero_factura),
+        numero_cheque: conservar(f.numero_cheque, p.numero_cheque),
+        detalle: conservar(f.detalle, p.detalle),
+        // Los montos solo si la factura todavía no tiene total: cambiarle el
+        // total a una factura ya guardada descuadraría sus asignaciones.
+        subtotal_0: editando && n(f.total) ? f.subtotal_0 : n(p.subtotal_0),
+        subtotal_5: editando && n(f.total) ? f.subtotal_5 : n(p.subtotal_5),
+        subtotal_15: editando && n(f.total) ? f.subtotal_15 : n(p.subtotal_15),
+        iva: editando && n(f.total) ? f.iva : n(p.iva),
+        total: editando && n(f.total) ? f.total : n(p.total),
+        tipo: conservar(f.tipo, p.tipo),
       }));
       // LOS RENGLONES DE LA FACTURA.
       //
@@ -434,18 +443,29 @@ Rubros: ${listaRubros}`,
         </div>
       )}
 
-      {!editando && (
-        <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+      {/* LEER CON NOVA TAMBIÉN AL EDITAR.
+          Estaba solo al crear una factura, y eso deja afuera el caso normal:
+          Johanna las carga a medida que llegan y quien conoce la obra las abre
+          después para asignarlas. Al abrir una ya cargada no había forma de
+          pedirle los renglones, que es justamente lo que hace falta para
+          repartirla entre varios capítulos.
+
+          Al editar NO pisa lo que ya está escrito salvo que esté vacío: lo que
+          se busca en ese momento son los renglones, no volver a llenar el
+          número de factura que alguien ya corrigió a mano. */}
+      <div style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Sparkles size={16} color={colors.brand} />
-          <div style={{ fontSize: 12, color: colors.brand, flex: 1 }}>
-            {leyendo ? "NOVA está leyendo la factura..." : "Sube una foto o PDF y NOVA llena los datos."}
+          <div style={{ fontSize: 12, color: colors.brand, flex: 1, minWidth: 180 }}>
+            {leyendo ? "NOVA está leyendo la factura..."
+              : editando
+                ? "Subí la foto o el PDF y NOVA saca los renglones, para repartirla entre varios rubros."
+                : "Sube una foto o PDF y NOVA llena los datos."}
           </div>
           <Button variant="primary" size="sm" onClick={() => fileRef.current?.click()} disabled={leyendo}>
             <Upload size={12} /> {leyendo ? "Leyendo..." : "Leer con NOVA"}
           </Button>
           <input ref={fileRef} type="file" accept="image/*,.pdf" onChange={leerConNova} style={{ display: "none" }} />
-        </div>
-      )}
+      </div>
 
       <AlertaDuplicado exactos={dups.exactos} posibles={dups.posibles} justificacion={justificacion} setJustificacion={setJustificacion} />
       {revisandoDups && <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>Revisando si ya está cargada...</div>}
