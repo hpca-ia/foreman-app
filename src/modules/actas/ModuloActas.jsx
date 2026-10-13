@@ -486,12 +486,26 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           </div>
         </div>
 
+        {cerrada && (
+          /* LO QUE CONTESTEN, ADONDE VA.
+             El acta enviada no se toca —si cambia después de salir no sirve
+             como prueba— así que una observación que llega por correo no se
+             mete acá: se anota en la próxima, que es donde se discute. Decirlo
+             evita la pregunta obvia y evita la tentación de editarla. */
+          <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginBottom: 20 }}>
+            Si alguien responde con una observación, la respuesta le llega a quien dio el visto. Esa
+            observación va en la <strong>próxima acta</strong>, en el repaso: así queda la constancia de que
+            se recibió y de qué se resolvió. Esta no se modifica.
+          </div>
+        )}
         {sePuede && puedeEnviar && (
           <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginBottom: 20 }}>
             {correos.length
               ? <>Al enviarla la reciben <strong style={{ color: colors.ink }}>{correos.length}</strong>{" "}
-                 {correos.length === 1 ? "persona" : "personas"}: {correos.join(", ")}. Después de enviada no se
-                 toca — un acta que cambia después de salir no sirve como prueba de nada.</>
+                 {correos.length === 1 ? "persona" : "personas"}: {correos.join(", ")}. Sale desde{" "}
+                 <strong style={{ color: colors.ink }}>notificaciones@hcastudio.com</strong> y las respuestas
+                 llegan a quien dio el visto. Después de enviada no se toca — un acta que cambia después de
+                 salir no sirve como prueba de nada.</>
               : "Todavía no hay ningún asistente con correo marcado para recibirla."}
           </div>
         )}

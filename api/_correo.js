@@ -1,7 +1,12 @@
 // Enviar correo desde el servidor. Lo comparten el informe del pipeline y el
 // resumen diario; el módulo de caja chica tiene el suyo de antes.
 
-export async function enviarCorreo({ to, subject, html, adjuntos }) {
+/**
+ * @param responderA  a quién le llega la respuesta. Hace falta cuando el
+ *   correo pide una: el remitente es una casilla de avisos que nadie lee, así
+ *   que sin esto "respondé si algo no está bien" es una invitación al vacío.
+ */
+export async function enviarCorreo({ to, subject, html, adjuntos, responderA }) {
   const destinatarios = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!destinatarios.length) return { ok: false, error: "sin destinatarios" };
   if (!process.env.RESEND_API_KEY) return { ok: false, error: "falta RESEND_API_KEY" };
@@ -10,7 +15,11 @@ export async function enviarCorreo({ to, subject, html, adjuntos }) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.RESEND_API_KEY },
     // adjuntos: [{ filename, content }] con el contenido en base64.
-    body: JSON.stringify({ from: "FOREMAN <notificaciones@hcastudio.com>", to: destinatarios, subject, html, ...(adjuntos?.length ? { attachments: adjuntos } : {}) }),
+    body: JSON.stringify({
+      from: "FOREMAN <notificaciones@hcastudio.com>", to: destinatarios, subject, html,
+      ...(responderA ? { reply_to: responderA } : {}),
+      ...(adjuntos?.length ? { attachments: adjuntos } : {}),
+    }),
   });
   const datos = await r.json().catch(() => ({}));
   return r.ok ? { ok: true, enviadoA: destinatarios, id: datos.id } : { ok: false, error: datos.message || "Resend rechazó el envío" };

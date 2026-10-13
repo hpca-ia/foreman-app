@@ -10,7 +10,7 @@
 // seis meses cuando haya que demostrar que algo se dijo.
 
 import { createClient } from "@supabase/supabase-js";
-import { enviarCorreo, plantilla, PIE } from "./_correo.js";
+import { enviarCorreo, plantilla } from "./_correo.js";
 
 const URL = process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_KEY;
@@ -113,12 +113,33 @@ export default async function handler(req, res) {
     cuerpo,
     // El pie de siempre no sirve acá: esto va a gente de afuera, y lo que
     // necesitan saber es que si algo quedó mal escrito hay que decirlo ahora.
-    pie: "Si algo de esta acta no refleja lo acordado, respondé este correo dentro de las próximas 48 horas. "
-      + "Pasado ese plazo se da por aceptada. " + PIE,
+    // El pie de siempre dice "no respondas, nadie lo lee", y acá es al revés:
+    // la respuesta es la única manera que tiene alguien de dejar constancia de
+    // que no estuvo de acuerdo. Las dos frases juntas se contradicen, y la que
+    // vale es ésta.
+    pie: "Si algo de esta acta no refleja lo acordado, respondé este correo dentro de las próximas 48 horas: "
+      + "la respuesta le llega a quien la emitió y queda como constancia. Pasado ese plazo se da por aceptada. "
+      + "Correo automático de FOREMAN · HCA Studio.",
   });
 
+  // A QUIÉN LE LLEGA LA RESPUESTA.
+  //
+  // El acta pide que digan si algo no refleja lo acordado, y el remitente es
+  // una casilla de avisos que nadie lee. Sin esto, "respondé este correo" es
+  // una invitación al vacío — y lo que se pierde no es un correo: es la
+  // observación de alguien que no estuvo de acuerdo, que es justo lo que un
+  // acta tiene que poder recoger.
+  //
+  // Responde a quien le dio el visto; si no se sabe, a quien la escribió.
+  let responderA = null;
+  for (const id of [acta.revisada_por, acta.creado_por]) {
+    if (!id || responderA) continue;
+    const { data: u } = await db.from("users").select("email").eq("id", id).maybeSingle();
+    if (u?.email) responderA = u.email;
+  }
+
   const r = await enviarCorreo({
-    to: para,
+    to: para, responderA,
     subject: `Acta de reunión N° ${acta.numero} · ${lead?.nombre || "Obra"} · ${dia(acta.fecha)}`,
     html,
   });
