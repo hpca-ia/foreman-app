@@ -419,6 +419,54 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     return { cerrar: false };
   });
 
+  /**
+   * En qué paso está la compra, y a quién le toca.
+   *
+   * Es lo que la pantalla no decía. Cada persona abría el mismo formulario
+   * largo y tenía que deducir cuál de los veinticinco campos era el suyo —y la
+   * respuesta depende del paso Y de quién sea, dos cosas que nadie debería
+   * tener que cruzar mentalmente.
+   *
+   * El pago no es un paso: se paga por adelantado, contra entrega o a treinta
+   * días, así que una compra pagada puede estar en cualquier momento del
+   * camino. Por eso no entra acá.
+   */
+  const paso = !editando ? "pedido"
+    : estado === "borrador" ? "pedido"
+    : estado === "requiere_info" ? "pedido"
+    : estado === "pendiente_aprobacion" ? "visto"
+    : estado === "aprobada" ? "compra"
+    : viva?.factura_id ? "control" : "compra";
+
+  const queToca = (() => {
+    if (!editando) return null;
+    if (estado === "borrador") {
+      return { mio: esMia, titulo: esMia ? "Terminá el pedido y mandalo a aprobar" : "Todavía es un borrador de quien lo pidió" };
+    }
+    if (estado === "requiere_info") {
+      return { mio: esMia, titulo: esMia ? "Te lo devolvieron: corregilo y volvé a mandarlo" : "Devuelto a quien lo pidió",
+        detalle: viva?.comentario_devolucion || null };
+    }
+    if (estado === "pendiente_aprobacion") {
+      return { mio: apruebo && (!esMia || currentUser?.role === "owner"),
+        titulo: apruebo ? "Te toca el visto: aprobalo o devolvelo" : "Esperando el visto del gerente",
+        detalle: "Mirá las proformas y contra qué va. Si el rubro está mal, corregilo acá: al aprobar se guarda." };
+    }
+    if (estado === "aprobada") {
+      return { mio: gestionaCompras, titulo: gestionaCompras ? "Te toca comprar y cargar el documento" : "Aprobada — compras la está gestionando",
+        detalle: gestionaCompras ? "Subí la factura y NOVA saca los renglones para repartirla entre rubros." : null };
+    }
+    if (!viva?.factura_id) {
+      return { mio: gestionaCompras, titulo: "Comprada, falta cargarla al control de obra",
+        detalle: "Mientras no tenga factura acá, esa plata no descuenta de ningún rubro." };
+    }
+    if (!viva?.pagado_at) {
+      return { mio: gestionaCompras, titulo: "En el control. Falta registrar el pago",
+        detalle: "Subí el comprobante y el abono al proveedor se registra solo." };
+    }
+    return null;
+  })();
+
   const lbl = { fontSize: 10.5, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "8px 10px", fontSize: 12.5 };
 
@@ -436,6 +484,28 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       </div>
 
       {editando && <LineaDePasos s={viva} />}
+
+      {/* QUÉ TE TOCA AHORA.
+          La línea de pasos dice dónde está la compra; esto dice qué hay que
+          hacer y quién. Sin eso, cada persona abre la misma pantalla larga y
+          tiene que deducir cuál de los veinticinco campos es el suyo —y la
+          respuesta cambia según el paso y según quién sea, que son dos cosas
+          que nadie debería tener que cruzar en la cabeza.
+
+          Dice lo que falta aunque no le toque a quien mira: saber que la
+          compra está esperando a otro es información, no ruido. Lo que no
+          hace es inventar urgencia: si no hay nada que hacer, no dice nada. */}
+      {editando && queToca && (
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", marginBottom: 12,
+          background: queToca.mio ? colors.brandSoft : colors.bg,
+          border: `1px solid ${queToca.mio ? colors.brand : colors.border}`,
+          borderRadius: colors.radiusMd, padding: "10px 12px" }}>
+          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: colors.ink, flex: 1, minWidth: 0 }}>
+            <strong>{queToca.titulo}</strong>
+            {queToca.detalle && <div style={{ color: colors.inkSoft, fontSize: 11.5 }}>{queToca.detalle}</div>}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gap: 10 }}>
         {soloMiro && (
@@ -506,7 +576,19 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             pedido suelto: no se puede saber cuánto más quieren gastar de algo
             que ya va por la mitad. Apuntar acá no gasta nada todavía —queda
             como comprometido— y al comprarse, la factura hace el gasto. */}
-        {obra && (
+        {/* CONTRA QUÉ VA: se edita mientras se decide, se lee después.
+            En el visto y en la compra es lo que hay que mirar y corregir. Una
+            vez facturada ya no se cambia desde acá —se cambia en el control,
+            sobre la factura— así que mostrarla editable sería ofrecer algo que
+            no va a tener efecto. */}
+        {obra && (paso === "control" || paso === "pago") && imputado && (
+          <div style={{ fontSize: 11.5, color: colors.inkSoft, background: colors.bg,
+            borderRadius: 8, padding: "8px 10px" }}>
+            Va contra <strong style={{ color: colors.ink }}>{imputado}</strong>.
+            <span style={{ color: colors.muted }}> Para repartirla entre varios rubros, hacelo en el control de obra.</span>
+          </div>
+        )}
+        {obra && paso !== "control" && paso !== "pago" && (
           <div style={{ display: "grid", gap: 8, background: colors.bg, borderRadius: 8, padding: "9px 10px" }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
               CONTRA QUÉ DEL PRESUPUESTO
