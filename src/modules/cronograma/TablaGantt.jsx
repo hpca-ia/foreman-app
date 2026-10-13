@@ -231,13 +231,15 @@ export default function TablaGantt({
                       {/* De qué capítulo sale, debajo. El nombre de una
                           agrupación dice qué es; el capítulo, de dónde viene
                           en el presupuesto, que es como se la busca. */}
-                      <span title={[g.capitulo, g.hijas.length > 1 ? `${g.hijas.length} partes` : "",
-                        g.monto > 0 ? fmt(g.monto) : ""].filter(Boolean).join(" · ")}
+                      {/* Sin el monto: en el Gantt se decide CUÁNDO, no
+                          cuánto. La plata del capítulo es la otra lectura del
+                          mismo plan y se mira en el valorado. */}
+                      <span title={[g.capitulo, g.hijas.length > 1 ? `${g.hijas.length} partes` : ""]
+                        .filter(Boolean).join(" · ")}
                         style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400, letterSpacing: 0.2 }}>
                         {g.capitulo || <span style={{ color: colors.muted }}>sin capítulo</span>}
                         {g.hijas.length > 1 ? ` · ${g.hijas.length} partes` : ""}
-                        {g.monto > 0 ? ` · ${fmt(g.monto)}` : ""}
                         {/* Lo que falta, en la segunda línea: arriba competía
                             por el ancho con el nombre del rubro y lo dejaba en
                             "Instalacione…", que es peor que no decirlo. */}
@@ -559,25 +561,26 @@ export default function TablaGantt({
 
                       {editable && (
                         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
-                          {/* Etapa y plata */}
+                          {/* EN EL GANTT NO SE HABLA DE PLATA.
+                              Acá se decide CUÁNDO pasa cada cosa y en qué
+                              orden; la plata es la otra lectura del mismo plan
+                              y vive en el valorado. Mezclarlas obliga a pensar
+                              dos cosas a la vez en la misma fila, y la pregunta
+                              "¿qué % de la plata de este rubro va en esta
+                              etapa?" no se puede contestar mirando un
+                              cronograma: se contesta mirando el presupuesto.
+
+                              El peso se sigue guardando —el valorado lo
+                              necesita, y NOVA lo propone al partir en etapas—
+                              pero se corrige allá, que es donde se ve el
+                              efecto. */}
                           {conEtapas && (
                             <div>
                               <label style={titulito}>QUÉ MOMENTO ES</label>
-                              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                                <select value={a.etapa || "ejecucion"} onChange={e => onCambiar(a, { etapa: e.target.value })}
-                                  style={{ ...inputStyle, width: "auto", padding: "4px 6px", fontSize: 11.5, height: 27 }}>
-                                  {Object.entries(ETAPAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                                </select>
-                                {a.obra_actividad_id && (
-                                  <>
-                                    <Numero value={a.peso_pct ?? 100} min={0} max={100} entero={false}
-                                      onCommit={v => onCambiar(a, { peso_pct: v })}
-                                      title="Qué parte de la plata del rubro se paga en este momento"
-                                      style={{ width: 54, padding: "4px 6px", fontSize: 11.5, height: 27, textAlign: "center" }} />
-                                    <span style={{ fontSize: 11, color: colors.muted }}>% de la plata del rubro</span>
-                                  </>
-                                )}
-                              </div>
+                              <select value={a.etapa || "ejecucion"} onChange={e => onCambiar(a, { etapa: e.target.value })}
+                                style={{ ...inputStyle, width: "auto", padding: "4px 6px", fontSize: 11.5, height: 27 }}>
+                                {Object.entries(ETAPAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                              </select>
                             </div>
                           )}
 

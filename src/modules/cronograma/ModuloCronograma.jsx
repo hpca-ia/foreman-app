@@ -1454,108 +1454,38 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         </div>
       )}
 
-      {/* DECIRLE CÓMO VA LA OBRA, con palabras.
-          El modo que faltaba, y el único donde el conocimiento entra de verdad.
-          "Armalo" supone que NOVA sabe de esta obra lo que sabe quien la
-          dirige, y no lo sabe: no vio el terreno, no conoce a las cuadrillas,
-          no sabe que la grúa entra recién en marzo. "Revisalo" solo mira lo que
-          ya está escrito.
+      {/* LOS PASOS, EN ORDEN.
+          Había tres acciones de NOVA compitiendo —"armalo", "ordenalo",
+          "revisalo"— una al lado de la otra y sin decir cuál va primero. Quien
+          abre el módulo no tiene por qué deducir la secuencia: la pantalla
+          tiene que decirla.
 
-          Acá se dicta el orden como se piensa —"la mampostería va detrás de la
-          estructura pero puede entrar por planta baja; la ventanería pedila ya
-          que tarda ocho semanas"— y NOVA lo traduce a cadenas, traslapes y
-          duraciones. SIN TIEMPOS si uno quiere: el orden lo sabe quien dirige
-          mucho mejor que las duraciones, y las duraciones salen de las
-          cantidades.
+          Y el orden invierte quién arma el cronograma, que es lo que de verdad
+          cambia. "Que lo arme NOVA" como primera opción promete algo que no se
+          puede cumplir: ella no vio el terreno, no conoce las cuadrillas, no
+          sabe que la grúa entra en marzo. Lo que sí sabe son los rendimientos y
+          el orden de los oficios.
 
-          Devuelve operaciones sueltas que se aceptan de a una, igual que la
-          revisión: lo que entendió mal se descarta en un clic en vez de quedar
-          metido adentro del plan. */}
-      {todas.length > 0 && editable && (
-        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
-          borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
-          <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3,
-            display: "block", marginBottom: 4 }}>
-            DECILE A NOVA CÓMO VA ESTA OBRA
-          </label>
-          <textarea value={dictado} onChange={e => setDictado(e.target.value)} rows={3}
-            placeholder={"La mampostería va detrás de la estructura, pero puede entrar por planta baja cuando arriba todavía se funde.\n"
-              + "La ventanería hay que pedirla ya: tarda ocho semanas en llegar.\n"
-              + "Los acabados recién con el edificio cerrado."}
-            style={{ ...inputStyle, fontSize: 12.5, padding: "8px 10px", resize: "vertical",
-              lineHeight: 1.55, fontFamily: colors.font }} />
-          <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginTop: 7 }}>
-            <Button variant="primary" size="sm" disabled={pensando || !dictado.trim()}
-              onClick={async () => {
-                setPensando(true); setError("");
-                const r = await ordenarConPalabras({
-                  plan: todas, dependencias, texto: dictado,
-                  nombreObra: lead.nombre, dias: diasDeContrato, cal,
-                });
-                setPensando(false);
-                if (r.error) { setError(r.error); return; }
-                const ops = [
-                  ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
-                  ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
-                  ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
-                  ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
-                  ...(r.partir || []).map(x => ({ ...x, tipo: "partir" })),
-                ];
-                if (!ops.length) {
-                  window.alert(r.nota || "NOVA no encontró nada que traducir. Probá nombrando las actividades como están en el cronograma.");
-                  return;
-                }
-                setRevision({ ops, nota: r.nota });
-              }}>
-              <Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA lo ordene"}
-            </Button>
-            {dictado.trim() && (
-              <Button variant="secondary" size="sm" onClick={() => setDictado("")}>Borrar</Button>
-            )}
-            <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
-              Escribilo como lo pensás, sin formato. Podés no decir ningún tiempo: el orden lo sabés vos,
-              las duraciones salen de las cantidades. Lo que proponga se acepta de a una.
+          Entonces: la lista sale del control, el orden lo pone quien dirige, y
+          NOVA hace la aritmética. */}
+      {editable && obra?.id && (
+        <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", marginBottom: 10, fontSize: 11 }}>
+          {[
+            ["1", "Armarlo del control", todas.length > 0],
+            ["2", "Decirle cómo va la obra", dependencias.length > 0],
+            ["3", "Duraciones con NOVA", todas.some(a => a.nota)],
+            ["4", "Revisarlo", false],
+            ["5", "Guardar la versión", versiones.length > 0],
+          ].map(([n, t, hecho], i) => (
+            <span key={n} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              {i > 0 && <span style={{ color: colors.border, marginRight: 2 }}>›</span>}
+              <span style={{ width: 16, height: 16, borderRadius: 8, fontSize: 9.5, fontWeight: 700,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: hecho ? colors.brand : colors.neutralSoft,
+                color: hecho ? "#fff" : colors.muted }}>{hecho ? "✓" : n}</span>
+              <span style={{ color: hecho ? colors.inkSoft : colors.muted }}>{t}</span>
             </span>
-          </div>
-        </div>
-      )}
-
-      {/* QUE NOVA REVISE LO QUE YA HAY.
-          Distinto de armarlo: esto no borra nada. Hasta acá, si uno trabajaba
-          el cronograma y quería una segunda opinión, el único botón era
-          "armarlo", que lo tira entero y empieza de cero — o sea que el trabajo
-          de corregir duraciones, encadenar y partir en etapas castigaba a quien
-          lo hacía. Acá NOVA lee lo que hay, propone operaciones sueltas con su
-          porqué, y cada una se acepta o no. */}
-      {todas.length > 0 && editable && (
-        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-          <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
-            setPensando(true); setError("");
-            const r = await revisarCronograma({
-              plan: todas, dependencias, nombreObra: lead.nombre, dias: diasDeContrato, cal,
-            });
-            setPensando(false);
-            if (r.error) { setError(r.error); return; }
-            const ops = [
-              ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
-              // `enlace` y no `tipo`: la etiqueta de la operación pisaría el
-              // tipo del enlace que mandó NOVA, y un CC o un FF se guardaría
-              // como fin→comienzo sin que nadie lo note.
-              ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
-              ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
-              ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
-                  ...(r.partir || []).map(x => ({ ...x, tipo: "partir" })),
-            ];
-            if (!ops.length) {
-              window.alert(r.nota || "NOVA no le encontró nada para mejorar.");
-              return;
-            }
-            setRevision({ ops, nota: r.nota });
-          }}><Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA lo revise"}</Button>
-          <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
-            Lee el cronograma como está —con tus duraciones, cadenas y etapas— y propone mejoras sueltas.
-            No borra nada: vos aceptás una por una.
-          </span>
+          ))}
         </div>
       )}
 
@@ -1755,6 +1685,111 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             )}
           </div>
         )
+      )}
+
+      {/* DECIRLE CÓMO VA LA OBRA, con palabras.
+          El modo que faltaba, y el único donde el conocimiento entra de verdad.
+          "Armalo" supone que NOVA sabe de esta obra lo que sabe quien la
+          dirige, y no lo sabe: no vio el terreno, no conoce a las cuadrillas,
+          no sabe que la grúa entra recién en marzo. "Revisalo" solo mira lo que
+          ya está escrito.
+
+          Acá se dicta el orden como se piensa —"la mampostería va detrás de la
+          estructura pero puede entrar por planta baja; la ventanería pedila ya
+          que tarda ocho semanas"— y NOVA lo traduce a cadenas, traslapes y
+          duraciones. SIN TIEMPOS si uno quiere: el orden lo sabe quien dirige
+          mucho mejor que las duraciones, y las duraciones salen de las
+          cantidades.
+
+          Devuelve operaciones sueltas que se aceptan de a una, igual que la
+          revisión: lo que entendió mal se descarta en un clic en vez de quedar
+          metido adentro del plan. */}
+      {todas.length > 0 && editable && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+          <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3,
+            display: "block", marginBottom: 4 }}>
+            DECILE A NOVA CÓMO VA ESTA OBRA
+          </label>
+          <textarea value={dictado} onChange={e => setDictado(e.target.value)} rows={3}
+            placeholder={"La mampostería va detrás de la estructura, pero puede entrar por planta baja cuando arriba todavía se funde.\n"
+              + "La ventanería hay que pedirla ya: tarda ocho semanas en llegar.\n"
+              + "Los acabados recién con el edificio cerrado."}
+            style={{ ...inputStyle, fontSize: 12.5, padding: "8px 10px", resize: "vertical",
+              lineHeight: 1.55, fontFamily: colors.font }} />
+          <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginTop: 7 }}>
+            <Button variant="primary" size="sm" disabled={pensando || !dictado.trim()}
+              onClick={async () => {
+                setPensando(true); setError("");
+                const r = await ordenarConPalabras({
+                  plan: todas, dependencias, texto: dictado,
+                  nombreObra: lead.nombre, dias: diasDeContrato, cal,
+                });
+                setPensando(false);
+                if (r.error) { setError(r.error); return; }
+                const ops = [
+                  ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
+                  ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
+                  ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
+                  ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
+                  ...(r.partir || []).map(x => ({ ...x, tipo: "partir" })),
+                ];
+                if (!ops.length) {
+                  window.alert(r.nota || "NOVA no encontró nada que traducir. Probá nombrando las actividades como están en el cronograma.");
+                  return;
+                }
+                setRevision({ ops, nota: r.nota });
+              }}>
+              <Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA lo ordene"}
+            </Button>
+            {dictado.trim() && (
+              <Button variant="secondary" size="sm" onClick={() => setDictado("")}>Borrar</Button>
+            )}
+            <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+              Escribilo como lo pensás, sin formato. Podés no decir ningún tiempo: el orden lo sabés vos,
+              las duraciones salen de las cantidades. Lo que proponga se acepta de a una.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* QUE NOVA REVISE LO QUE YA HAY.
+          Distinto de armarlo: esto no borra nada. Hasta acá, si uno trabajaba
+          el cronograma y quería una segunda opinión, el único botón era
+          "armarlo", que lo tira entero y empieza de cero — o sea que el trabajo
+          de corregir duraciones, encadenar y partir en etapas castigaba a quien
+          lo hacía. Acá NOVA lee lo que hay, propone operaciones sueltas con su
+          porqué, y cada una se acepta o no. */}
+      {todas.length > 0 && editable && (
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+            setPensando(true); setError("");
+            const r = await revisarCronograma({
+              plan: todas, dependencias, nombreObra: lead.nombre, dias: diasDeContrato, cal,
+            });
+            setPensando(false);
+            if (r.error) { setError(r.error); return; }
+            const ops = [
+              ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
+              // `enlace` y no `tipo`: la etiqueta de la operación pisaría el
+              // tipo del enlace que mandó NOVA, y un CC o un FF se guardaría
+              // como fin→comienzo sin que nadie lo note.
+              ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
+              ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
+              ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),
+                  ...(r.partir || []).map(x => ({ ...x, tipo: "partir" })),
+            ];
+            if (!ops.length) {
+              window.alert(r.nota || "NOVA no le encontró nada para mejorar.");
+              return;
+            }
+            setRevision({ ops, nota: r.nota });
+          }}><Sparkles size={13} /> {pensando ? "NOVA está leyendo…" : "Que NOVA lo revise"}</Button>
+          <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+            Lee el cronograma como está —con tus duraciones, cadenas y etapas— y propone mejoras sueltas.
+            No borra nada: vos aceptás una por una.
+          </span>
+        </div>
       )}
 
       {/* Lo que cambió en las agrupaciones desde que se armó esto. No hay que
