@@ -484,3 +484,106 @@ export async function aplicarTiemposYOrden({ duraciones = [], dependencias = [],
   }
   return { dias: duraciones.length, dependencias: puestas };
 }
+
+/**
+ * CUÁNTO MÁS TIEMPO PIDE UNA ORDEN DE CAMBIO.
+ *
+ * Una orden de cambio casi nunca agrega rubros: modifica los que ya están. La
+ * ventanería pasa de 90 mil a 130 —cuarenta mil de trabajo más que alguien
+ * tiene que hacer— y la barra sigue midiendo lo mismo. El cronograma promete
+ * una fecha que ya no es cierta, y nadie se entera hasta que no se cumple.
+ *
+ * Esto lo convierte en lo que de verdad hace falta cuando entra una orden: una
+ * AMPLIACIÓN DE PLAZO que se pueda sostener. No "vamos a demorar un poco más",
+ * sino "la ventanería pasó de 420 a 610 m2, son 8 días más al rendimiento con
+ * el que se presupuestó, y la obra termina el 2 de febrero en vez del 20 de
+ * enero". Eso es lo que un cliente puede aprobar y lo que un contrato pide.
+ *
+ * NO SE TOCA NADA MÁS. Solo las barras de las agrupaciones que cambiaron de
+ * monto: el resto del cronograma lo acomodó alguien y no tiene por qué
+ * moverse porque entró una orden en otra parte.
+ */
+export async function recalcularPorOrdenes({ cambios = [], actividades = [], fases = [],
+  dias = 0, nombreObra = "", cal = calendario() }) {
+  if (!cambios.length) return { error: "No hay órdenes de cambio que recalcular." };
+  const afectadas = new Set(cambios.map(c => Number(c.id)));
+  const suyas = actividades.filter(a => afectadas.has(Number(a.obra_actividad_id)) && !a.es_hito);
+  if (!suyas.length) return { error: "Las agrupaciones que cambiaron no tienen barra en este cronograma." };
+
+  const { memoria } = await leerMemoria("cronograma");
+  const porFase = new Map(fases.map(f => [Number(f.id), f.nombre]));
+  const porAgrup = new Map();
+  suyas.forEach(a => {
+    const k = Number(a.obra_actividad_id);
+    if (!porAgrup.has(k)) porAgrup.set(k, []);
+    porAgrup.get(k).push(a);
+  });
+
+  const lista = cambios.map(c => {
+    const barras = porAgrup.get(Number(c.id)) || [];
+    if (!barras.length) return null;
+    const detalle = barras.map(a => {
+      const et = a.fase_id != null ? porFase.get(Number(a.fase_id)) : null;
+      return `      ${a.id} · ${et ? `[${et}] ` : ""}${a.nombre} · ${a.duracion}d`;
+    }).join("\n");
+    return `${c.nombre}: $${miles(c.antes)} → $${miles(c.ahora)} (${c.pct > 0 ? "+" : ""}${c.pct}%)\n${detalle}`;
+  }).filter(Boolean).join("\n");
+
+  try {
+    const sistema = `Sos NOVA. En la obra "${nombreObra}" entraron ÓRDENES DE CAMBIO: hay
+agrupaciones que cambiaron de monto y sus barras del cronograma siguen
+midiendo lo mismo. Hay que decir cuánto tiempo más —o menos— lleva eso.
+${memoriaEnPalabras(memoria, "cronograma")}
+LO QUE CAMBIÓ, con las barras que le corresponden:
+${lista}
+
+${dias ? `El plazo de contrato son ${dias} días hábiles.` : ""}
+
+Devolvés SOLO JSON, sin markdown:
+
+{"dias":[{"id":12,"dias":26,"porque":"+45% de metros al mismo rendimiento: 18 a 26 dias"}],
+ "dictamen":"La ventaneria paso de 420 a 610 m2. Son 8 dias mas de instalacion al rendimiento con el que se presupuesto."}
+
+CÓMO SE PIENSA ESTO:
+
+La plata no es tiempo, pero cuando una agrupación crece un 45% y es el MISMO
+trabajo —más metros de lo mismo— el tiempo crece parecido, porque el
+rendimiento no cambia. Cuando crece porque entró algo DISTINTO —un material
+importado, un sistema que antes no estaba— el tiempo puede crecer mucho más
+que la plata, o casi nada si se hace en paralelo. Decí cuál de los dos casos
+es en "porque".
+
+LO QUE NO ESCALA CON LA PLATA: el anticipo de un rubro que creció sigue siendo
+un día, es un pago. La fabricación de algo importado tarda lo que tarda aunque
+se pida más cantidad —llega todo en el mismo embarque—. Lo que sí escala es la
+instalación y todo lo que se hace con cuadrillas en obra.
+
+SI UNA AGRUPACIÓN BAJÓ DE MONTO, su barra puede acortarse. Pero no la acortes
+por debajo de lo razonable para lo que quedó.
+
+NO TOQUES NINGUNA BARRA QUE NO ESTÉ EN LA LISTA DE ARRIBA. El resto del
+cronograma lo acomodó una persona y no tiene por qué moverse porque entró una
+orden de cambio en otra parte.
+
+"dictamen" es UNA FRASE para que quien dirige la obra pueda pedir la ampliación
+de plazo: qué cambió, en cuánto, y por qué eso es más tiempo. En castellano de
+obra, sin adjetivos.`;
+
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 4000,
+      system: sistema,
+      messages: [{ role: "user", content: "¿Cuánto tiempo más piden estas órdenes de cambio? Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "recalcular el tiempo") };
+    const { datos } = jsonTolerante(textoDeNova(data));
+    if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
+
+    const validos = new Map(suyas.map(a => [Number(a.id), a]));
+    const duraciones = (datos.dias || [])
+      .map(d => ({ id: Number(d.id), dias: Math.max(1, Math.round(Number(d.dias) || 0)), porque: d.porque || null }))
+      .filter(d => validos.has(d.id) && d.dias !== validos.get(d.id).duracion);
+    return { duraciones, dictamen: String(datos.dictamen || "").slice(0, 400) };
+  } catch (e) {
+    return { error: "NOVA devolvió algo que no se entiende: " + e.message };
+  }
+}

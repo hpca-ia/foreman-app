@@ -9,7 +9,7 @@ import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from
 import { materiaPrima, aprenderDelCronograma, acomodarCambios,
   revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion, proponerEtapas } from "./novaCronograma";
 import { proponerPlan, guardarPlan, guardarOrden, leerCronogramaEscrito,
-  ponerTiemposYOrden, aplicarTiemposYOrden } from "./armarCronograma";
+  ponerTiemposYOrden, aplicarTiemposYOrden, recalcularPorOrdenes } from "./armarCronograma";
 import { leerMemoria, olvidar } from "./memoriaNova";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { magnitudDe } from "./magnitudes";
@@ -2216,8 +2216,52 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 y le puso los traslapes. Eso es el trabajo, y rearmarlo de cero
                 lo borra. Acá NOVA recibe el plan que ya existe y SOLO lo que
                 cambió, y devuelve un parche. */}
-            {(d.nuevas.length > 0 || d.dePlata.length > 0 || d.perdidas.length > 0) && editable && (
+            {/* CUÁNTO TIEMPO MÁS PIDE LA ORDEN DE CAMBIO.
+                Es la pregunta que de verdad aparece cuando entra una: no "qué
+                cambió" —eso ya lo dice el aviso— sino cuántos días más lleva y
+                cómo se justifica, que es lo que un cliente aprueba y lo que un
+                contrato pide. Solo toca las barras de lo que cambió de monto:
+                el resto del cronograma lo acomodó alguien. */}
+            {d.dePlata.length > 0 && editable && (
               <Button variant="primary" size="sm" disabled={pensando} style={{ marginRight: 6 }} onClick={async () => {
+                setPensando(true); setError("");
+                const r = await recalcularPorOrdenes({
+                  cambios: d.dePlata, actividades, fases,
+                  dias: diasDeContrato, nombreObra: lead.nombre, cal,
+                });
+                if (r.error) { setPensando(false); setError(r.error); return; }
+                if (!r.duraciones.length) {
+                  setPensando(false);
+                  window.alert(`NOVA no le cambia el tiempo a ninguna barra.\n\n${r.dictamen || "Lo que cambió de monto no cambia cuánto se tarda."}`);
+                  await refrescarMontoRef();
+                  return;
+                }
+                const antes = plan.duracion;
+                const detalle = r.duraciones.map(x => {
+                  const a = actividades.find(y => y.id === x.id);
+                  return `  · ${a?.nombre}: de ${a?.duracion} a ${x.dias} días${x.porque ? ` — ${x.porque}` : ""}`;
+                }).join("\n");
+                if (!window.confirm(
+                  `${r.dictamen}\n\n${detalle}\n\n` +
+                  "Solo se tocan esas barras. El resto del cronograma no se mueve.")) {
+                  setPensando(false); return;
+                }
+                for (const x of r.duraciones) {
+                  await supabase.from("cronograma_actividades")
+                    .update({ duracion: x.dias, nota: x.porque }).eq("id", x.id);
+                }
+                // La plata de referencia se actualiza: el aviso ya cumplió su
+                // trabajo y dejarlo prendido lo vuelve ruido.
+                await refrescarMontoRef();
+                setPensando(false);
+                await cargar();
+                setAviso(`${r.dictamen} · ${r.duraciones.length} ${r.duraciones.length === 1 ? "barra creció" : "barras cambiaron"}. Antes la obra salía en ${antes} días; mirá arriba en cuántos sale ahora.`);
+              }}>
+                <Sparkles size={13} /> {pensando ? "NOVA está recalculando…" : "¿Cuánto tiempo más piden estas órdenes?"}
+              </Button>
+            )}
+            {(d.nuevas.length > 0 || d.dePlata.length > 0 || d.perdidas.length > 0) && editable && (
+              <Button variant="outline" size="sm" disabled={pensando} style={{ marginRight: 6 }} onClick={async () => {
                 setPensando(true); setError("");
                 const r = await acomodarCambios({
                   plan: todas, dependencias, cambios: d, nombreObra: lead.nombre, dias: diasDeContrato,
