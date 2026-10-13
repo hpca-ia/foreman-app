@@ -9,6 +9,7 @@ import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, 
   correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106 } from "./actas";
 import { pdfActa } from "./pdfActa";
 import { armarActa } from "./novaActa";
+import { revisarActa } from "./revisarActa";
 
 // Las actas de reunión de obra.
 //
@@ -39,6 +40,9 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const [ocupado, setOcupado] = useState(false);
   // Lo que se anota al vuelo durante la reunión, antes de que NOVA lo ordene.
   const [dictado, setDictado] = useState("");
+  // Lo que NOVA encontró al revisar: las correcciones se aceptan, los avisos
+  // se van a preguntar.
+  const [revision, setRevision] = useState(null);
   const [nuevo, setNuevo] = useState({
     tema: "", compromiso: "", responsable: "", limite: "",
     convocado: { nombre: "", email: "", empresa: "", cargo: "" },
@@ -157,6 +161,16 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           <Button variant="secondary" size="sm" onClick={() => verPdf("imprimir")}>
             <Printer size={13} /> Imprimir
           </Button>
+          {/* REVISARLA ANTES DE QUE SALGA. La van a leer ocho personas con
+              atención, buscando qué objetar, y la escribió alguien apurado al
+              final de una reunión de dos horas. Esa distancia es el problema:
+              lo que se le escapa al que escribe no se le escapa a los que la
+              reciben. */}
+          {sePuede && (
+            <Button variant="outline" size="sm" disabled={ocupado} onClick={revisar}>
+              <Sparkles size={13} /> {ocupado ? "NOVA está leyendo…" : "Que NOVA la revise"}
+            </Button>
+          )}
           {sePuede && puedeEnviar && abierta.estado === "borrador" && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
               await tocarActa({ estado: "revisada", revisada_at: new Date().toISOString(),
@@ -171,7 +185,71 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           )}
         </div>
 
-        {aviso && <div style={{ fontSize: 12, color: colors.brand, marginBottom: 10 }}>{aviso}</div>}
+        {aviso && <div style={{ fontSize: 12, color: colors.brand, marginBottom: 10, whiteSpace: "pre-line" }}>{aviso}</div>}
+
+        {revision && (
+          <div style={{ ...caja, borderColor: colors.brand }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+              <Sparkles size={14} color={colors.brand} />
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>Lo que vio NOVA</div>
+              <button onClick={() => setRevision(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, fontSize: 11, fontFamily: colors.font }}>cerrar</button>
+            </div>
+
+            {!revision.correcciones.length && !revision.avisos.length && (
+              <div style={{ fontSize: 12.5, color: colors.success }}>
+                No le encontró nada. El acta puede salir así.
+              </div>
+            )}
+
+            {/* LOS AGUJEROS PRIMERO: no se arreglan escribiendo mejor, se
+                arreglan preguntando, y hay que preguntarlos antes de enviar el
+                acta, no después. */}
+            {revision.avisos.length > 0 && (
+              <div style={{ marginBottom: revision.correcciones.length ? 12 : 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: colors.warning, letterSpacing: 0.3, marginBottom: 5 }}>
+                  HAY QUE PREGUNTARLO · {revision.avisos.length}
+                </div>
+                {revision.avisos.map((a, i) => (
+                  <div key={i} style={{ fontSize: 12, color: colors.ink, lineHeight: 1.45, marginBottom: 6 }}>
+                    · <strong>{a.que}</strong>
+                    {a.donde && <span style={{ color: colors.muted }}> — {a.donde}</span>}
+                    {a.hacer && <div style={{ fontSize: 11, color: colors.muted, marginLeft: 9 }}>{a.hacer}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* LA REDACCIÓN SE ACEPTA DE UN CLICK. Son mecánicas, no hay nada
+                que decidir, y pedir una decisión por cada tilde es garantizar
+                que no se corrija ninguna. Igual se pueden ver una por una. */}
+            {revision.correcciones.length > 0 && (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: colors.brand, letterSpacing: 0.3, flex: 1 }}>
+                    ORTOGRAFÍA Y REDACCIÓN · {revision.correcciones.length}
+                  </div>
+                  <Button variant="primary" size="sm" disabled={ocupado} onClick={() => aplicarCorrecciones(revision.correcciones)}>
+                    Aceptar {revision.correcciones.length === 1 ? "la corrección" : "las " + revision.correcciones.length}
+                  </Button>
+                </div>
+                {revision.correcciones.map((c, i) => (
+                  <div key={i} style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 7,
+                    borderLeft: `2px solid ${colors.neutralSoft}`, paddingLeft: 8 }}>
+                    <div style={{ color: colors.muted, textDecoration: "line-through" }}>{c.antes || "(vacío)"}</div>
+                    <div style={{ color: colors.ink }}>{c.texto}</div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
+                      {c.porque && <span style={{ fontSize: 10, color: colors.muted }}>{c.porque}</span>}
+                      <button onClick={() => aplicarCorrecciones([c])}
+                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
+                          fontFamily: colors.font, fontSize: 10.5, color: colors.brand }}>aceptar solo ésta</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}
         {cerrada && (
           <div style={{ fontSize: 12, color: colors.inkSoft, background: colors.bg, borderRadius: colors.radiusMd,
@@ -559,6 +637,32 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
      * persona, y una de las maneras más rápidas de que alguien deje de usar
      * una herramienta es que le borre lo que escribió.
      */
+    async function revisar() {
+      setOcupado(true); setError(""); setRevision(null);
+      const r = await revisarActa({ acta: abierta, obra: lead.nombre, ...cont });
+      setOcupado(false);
+      if (r.error) { setError(r.error); return; }
+      setRevision(r);
+    }
+
+    /**
+     * Aplicar lo que NOVA corrigió.
+     *
+     * Solo toca el campo que corrigió, con el texto entero ya corregido: no se
+     * reemplaza la fila, porque la fila tiene otras cosas que alguien escribió.
+     */
+    async function aplicarCorrecciones(lista) {
+      setOcupado(true); setError("");
+      for (const c of lista) {
+        if (c.tipo === "acta") await tocarActa({ [c.campo]: c.texto });
+        else await guardarFila(c.tipo === "tema" ? "acta_temas" : "acta_compromisos", { id: c.id, [c.campo]: c.texto });
+      }
+      setOcupado(false);
+      await cargarActa(abierta.id);
+      setRevision(v => (v ? { ...v, correcciones: v.correcciones.filter(x => !lista.includes(x)) } : v));
+      setAviso(`${lista.length} ${lista.length === 1 ? "corrección aplicada" : "correcciones aplicadas"}.`);
+    }
+
     async function ordenarConNova() {
       setOcupado(true); setError("");
       const r = await armarActa({
