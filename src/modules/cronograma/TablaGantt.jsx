@@ -136,7 +136,22 @@ export default function TablaGantt({
   const grupos = [];
   const porAg = new Map();
   todas.forEach(a => {
-    const k = a.obra_actividad_id || 0;
+    // LO QUE NO SALE DEL PRESUPUESTO ES UNA FILA, NO UN MONTÓN.
+    //
+    // Todas las actividades sin agrupación caían en el mismo cajón, que se
+    // dibujaba con el título "Propias del cronograma". Eso nunca fue un grupo:
+    // era "las demás". Y con las etapas se volvió un error de verdad —el que
+    // rompió la etapa de aire acondicionado—: como el cajón es UNA cosa para
+    // la tabla, entra entero en UNA etapa, la de su primera barra. Entonces
+    // alguien escribe una etapa nueva con sus cuatro trabajos y esos cuatro
+    // aparecen mezclados con el permiso municipal y la limpieza final, en
+    // cualquier otra etapa. No se podía separar porque no estaban juntos por
+    // ninguna razón: solo por no venir del presupuesto.
+    //
+    // Agrupar sirve para una cosa sola: un rubro partido en anticipo,
+    // fabricación e instalación es UNA cosa que se mira junta. Lo demás es una
+    // barra, y cada barra va en la etapa donde la pusieron.
+    const k = a.obra_actividad_id || `sola-${a.id}`;
     if (!porAg.has(k)) porAg.set(k, []);
     porAg.get(k).push(a);
   });
@@ -144,20 +159,23 @@ export default function TablaGantt({
     const ordenadas = [...hijas].sort((x, y) => String(x.inicio || "").localeCompare(String(y.inicio || "")));
     const inicios = ordenadas.map(a => a.inicio).filter(Boolean);
     const fines = ordenadas.map(a => a.fin).filter(Boolean);
-    const g = k ? datosAg.get(k) : null;
+    const sola = typeof k === "string";
+    const g = sola ? null : datosAg.get(k);
     grupos.push({
       id: k,
-      nombre: k ? (g?.nombre || "Agrupación borrada") : "Propias del cronograma",
+      // Una barra suelta se llama como se llama. "Propias del cronograma" no
+      // era un nombre: era la explicación de por qué no tenía uno.
+      nombre: sola ? ordenadas[0].nombre : (g?.nombre || "Agrupación borrada"),
       codigo: g?.codigo || "",
       // De qué capítulo del presupuesto sale. Cuando cruza varios se dice así
       // y no se elige uno: una agrupación que cruza capítulos lo hace a
       // propósito, y nombrar uno solo sería decir algo falso.
-      capitulo: g?.capitulo || (g?.capitulos > 1 ? `${g.capitulos} capítulos` : ""),
+      capitulo: sola ? "" : (g?.capitulo || (g?.capitulos > 1 ? `${g.capitulos} capítulos` : "")),
       // Lo más bajo que tenga alguna de sus barras: es el orden del
       // cronograma, no el del presupuesto.
       posicion: Math.min(...hijas.map(a => a.orden ?? 0)),
       hijas: ordenadas,
-      monto: k ? (plata[k] || 0) : 0,
+      monto: sola ? 0 : (plata[k] || 0),
       inicio: inicios.length ? inicios.sort()[0] : null,
       fin: fines.length ? fines.sort()[fines.length - 1] : null,
       critica: ordenadas.some(a => a.critica),
@@ -173,11 +191,11 @@ export default function TablaGantt({
   // después el que alguien acomodó según cómo se trabaja— y reordenarlo solo
   // cada vez que cambia una duración hace que las filas salten de lugar
   // mientras uno las está editando.
-  grupos.sort((a, b) => {
-    // Las sueltas al final: no son de ningún rubro y arriba estorban.
-    if (!a.id !== !b.id) return a.id ? -1 : 1;
-    return a.posicion - b.posicion;
-  });
+  // EN EL ORDEN EN QUE ESTÁN, y nada más. Antes las sueltas se mandaban al
+  // final —"no son de ningún rubro y arriba estorban"— y eso era cierto
+  // cuando el cronograma era el presupuesto. Ahora una barra suelta puede ser
+  // el desmontaje que va primero, y mandarla al fondo es desarmar la etapa.
+  grupos.sort((a, b) => a.posicion - b.posicion);
 
   // LAS ETAPAS DE LA OBRA, que es como se lee un cronograma de cuarenta
   // barras: "demoliciones, obra gris, instalaciones, acabados". Mientras no
@@ -187,7 +205,8 @@ export default function TablaGantt({
   // Los rubros de cada grupo, para poder abrirlos y señalar el que traba.
   const rubrosDe = new Map();
   rubros.forEach(r => {
-    const k = r.actividad_id || 0;
+    const k = r.actividad_id;
+    if (k == null) return;
     if (!rubrosDe.has(k)) rubrosDe.set(k, []);
     rubrosDe.get(k).push(r);
   });
@@ -280,7 +299,7 @@ export default function TablaGantt({
                         .filter(Boolean).join(" · ")}
                         style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400, letterSpacing: 0.2 }}>
-                        {g.capitulo || (!g.id
+                        {g.capitulo || (typeof g.id === "string"
                           /* PROPIA DEL CRONOGRAMA, no "sin capítulo". Lo que
                              alguien agregó a mano —el permiso municipal, la
                              aprobación de planos, la inspección de bomberos— no
@@ -289,7 +308,7 @@ export default function TablaGantt({
                              Llamarlo "sin capítulo" lo hace ver como un dato
                              incompleto, y entonces alguien lo "arregla"
                              borrándolo. */
-                          ? <span style={{ color: colors.brand }}>propia del cronograma</span>
+                          ? null
                           : <span style={{ color: colors.muted }}>sin capítulo</span>)}
                         {g.hijas.length > 1 ? ` · ${g.hijas.length} partes` : ""}
                         {/* Lo que falta, en la segunda línea: arriba competía
@@ -419,7 +438,7 @@ export default function TablaGantt({
                           {g.simple && (
                             <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                               textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}>
-                              {g.capitulo || (!g.id
+                              {g.capitulo || (typeof g.id === "string"
                           /* PROPIA DEL CRONOGRAMA, no "sin capítulo". Lo que
                              alguien agregó a mano —el permiso municipal, la
                              aprobación de planos, la inspección de bomberos— no
@@ -428,7 +447,7 @@ export default function TablaGantt({
                              Llamarlo "sin capítulo" lo hace ver como un dato
                              incompleto, y entonces alguien lo "arregla"
                              borrándolo. */
-                          ? <span style={{ color: colors.brand }}>propia del cronograma</span>
+                          ? null
                           : <span style={{ color: colors.muted }}>sin capítulo</span>)}
                               {!deps.length && (
                                 <span title="No depende de nada, así que arranca el día uno. Si tiene que ir después de algo, encadenala."
