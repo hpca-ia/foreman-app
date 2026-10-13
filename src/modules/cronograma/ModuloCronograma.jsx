@@ -99,6 +99,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // En qué etapa se está agregando una actividad, y cómo se llama.
   const [enEtapa, setEnEtapa] = useState(null);
   const [actNueva, setActNueva] = useState("");
+  // Lo último que pasó, dicho en una línea verde. No es un error: es la
+  // diferencia entre "guardó" y "no sé si guardó".
+  const [aviso, setAviso] = useState("");
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
   // Los rubros de la obra, para poder señalar cuál es el que está trabando a
@@ -989,7 +992,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       quien: currentUser,
     });
     if (r.error) { setError(r.error); return; }
-    setError(""); await cargarFases();
+    setError("");
+    // LO QUE PASÓ, DICHO. Sin esto, crear una etapa y no crearla se ven igual
+    // si uno no está mirando la lista: aparece una fila más, y nada la señala.
+    setAviso(`Etapa «${r.fase.nombre}» creada.`);
+    await cargarFases();
   }
 
   /**
@@ -1032,7 +1039,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   async function moverEtapaDeObra(fase, direccion) {
     const e = await moverFase(fases, fase.id, direccion);
     if (e) { setError(e); return; }
-    setError(""); await cargarFases();
+    setError(""); setAviso(`«${fase.nombre}» se movió ${direccion < 0 ? "arriba" : "abajo"}.`);
+    await cargarFases();
   }
 
   async function renombrarEtapaDeObra(fase, nombre) {
@@ -1057,7 +1065,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         : "No tiene nada adentro."))) return;
     const e = await borrarFase(fase.id);
     if (e) { setError(e); return; }
-    setError(""); await Promise.all([cargarFases(), cargar()]);
+    setError(""); setAviso(`Etapa «${fase.nombre}» borrada. Sus actividades quedaron sin etapa.`);
+    await Promise.all([cargarFases(), cargar()]);
   }
 
   /**
@@ -2250,8 +2259,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             lugar fijo que no se va de la pantalla. La banda de adentro del
             Gantt sigue, pero ya no es donde se trabaja: es donde se mira. */}
         {editable && (
-          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`,
             borderRadius: colors.radiusMd, padding: 11, marginBottom: 10 }}>
+            {aviso && (
+              <div style={{ fontSize: 11.5, color: colors.brand, fontWeight: 600, marginBottom: 7 }}>{aviso}</div>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, flex: 1, minWidth: 150 }}>
                 Etapas de la obra
