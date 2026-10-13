@@ -771,8 +771,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     setPensando(true); setError("");
     let fuera = 0, renombradas = 0, sumadas = 0;
 
-    // Las que apuntan a una agrupación borrada, o a ninguna.
-    const colgadas = actividades.filter(a => !vivas.has(Number(a.obra_actividad_id)));
+    // Las que apuntan a una agrupación BORRADA. Lo que no apunta a ninguna no
+    // está colgado: es PROPIO DEL CRONOGRAMA.
+    //
+    // Un cronograma necesita cosas que no son rubros del presupuesto —el
+    // permiso municipal, la aprobación de planos del cliente, la inspección
+    // de bomberos, el traslado de la grúa— y a veces se planifica antes de
+    // que el control exista. Tratar eso como huérfano y borrarlo hacía que
+    // agregar una actividad propia fuera imposible: se agregaba, y el primer
+    // "ponerlo al día" se la llevaba sin avisar.
+    const colgadas = actividades.filter(a =>
+      a.obra_actividad_id != null && !vivas.has(Number(a.obra_actividad_id)));
     if (colgadas.length) {
       await supabase.from("cronograma_dependencias").delete().in("actividad_id", colgadas.map(a => a.id));
       await supabase.from("cronograma_dependencias").delete().in("depende_de_id", colgadas.map(a => a.id));

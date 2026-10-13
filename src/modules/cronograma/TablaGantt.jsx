@@ -115,7 +115,7 @@ export default function TablaGantt({
     const g = k ? datosAg.get(k) : null;
     grupos.push({
       id: k,
-      nombre: k ? (g?.nombre || "Agrupación borrada") : "Sin agrupación",
+      nombre: k ? (g?.nombre || "Agrupación borrada") : "Propias del cronograma",
       codigo: g?.codigo || "",
       // De qué capítulo del presupuesto sale. Cuando cruza varios se dice así
       // y no se elige uno: una agrupación que cruza capítulos lo hace a
@@ -238,7 +238,17 @@ export default function TablaGantt({
                         .filter(Boolean).join(" · ")}
                         style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400, letterSpacing: 0.2 }}>
-                        {g.capitulo || <span style={{ color: colors.muted }}>sin capítulo</span>}
+                        {g.capitulo || (!g.id
+                          /* PROPIA DEL CRONOGRAMA, no "sin capítulo". Lo que
+                             alguien agregó a mano —el permiso municipal, la
+                             aprobación de planos, la inspección de bomberos— no
+                             está en ningún presupuesto, y eso no es una falta:
+                             es lo que el cronograma tiene y el presupuesto no.
+                             Llamarlo "sin capítulo" lo hace ver como un dato
+                             incompleto, y entonces alguien lo "arregla"
+                             borrándolo. */
+                          ? <span style={{ color: colors.brand }}>propia del cronograma</span>
+                          : <span style={{ color: colors.muted }}>sin capítulo</span>)}
                         {g.hijas.length > 1 ? ` · ${g.hijas.length} partes` : ""}
                         {/* Lo que falta, en la segunda línea: arriba competía
                             por el ancho con el nombre del rubro y lo dejaba en
@@ -363,7 +373,17 @@ export default function TablaGantt({
                           {g.simple && (
                             <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                               textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}>
-                              {g.capitulo || <span style={{ color: colors.muted }}>sin capítulo</span>}
+                              {g.capitulo || (!g.id
+                          /* PROPIA DEL CRONOGRAMA, no "sin capítulo". Lo que
+                             alguien agregó a mano —el permiso municipal, la
+                             aprobación de planos, la inspección de bomberos— no
+                             está en ningún presupuesto, y eso no es una falta:
+                             es lo que el cronograma tiene y el presupuesto no.
+                             Llamarlo "sin capítulo" lo hace ver como un dato
+                             incompleto, y entonces alguien lo "arregla"
+                             borrándolo. */
+                          ? <span style={{ color: colors.brand }}>propia del cronograma</span>
+                          : <span style={{ color: colors.muted }}>sin capítulo</span>)}
                               {!deps.length && (
                                 <span title="No depende de nada, así que arranca el día uno. Si tiene que ir después de algo, encadenala."
                                   style={{ color: colors.warning, fontWeight: 600 }}> · arranca el día 1</span>

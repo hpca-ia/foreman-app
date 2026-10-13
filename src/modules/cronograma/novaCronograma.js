@@ -502,10 +502,20 @@ export function limpiarParche(p, { plan = [], nuevas = [], perdidas = [], dePlat
 
 /** Guardarlo. Reemplaza lo que hubiera: es un borrador que se vuelve a armar. */
 export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
-  const { data: previas } = await supabase.from("cronograma_actividades").select("id").eq("lead_id", lead.id);
-  if (previas?.length) {
-    await supabase.from("cronograma_dependencias").delete().in("actividad_id", previas.map(x => x.id));
-    await supabase.from("cronograma_actividades").delete().eq("lead_id", lead.id);
+  // LO PROPIO DEL CRONOGRAMA SOBREVIVE.
+  //
+  // Rearmar reemplaza lo que salió del control —esa lista la vuelve a traer el
+  // control— pero NO lo que alguien agregó a mano: el permiso municipal, la
+  // aprobación de planos, la inspección de bomberos. Eso no está en ningún
+  // presupuesto y no hay de dónde volver a sacarlo. Borrarlo al rearmar era
+  // perder trabajo que nadie podía recuperar.
+  const { data: previas } = await supabase.from("cronograma_actividades")
+    .select("id,obra_actividad_id").eq("lead_id", lead.id);
+  const aBorrar = (previas || []).filter(x => x.obra_actividad_id != null).map(x => x.id);
+  if (aBorrar.length) {
+    await supabase.from("cronograma_dependencias").delete().in("actividad_id", aBorrar);
+    await supabase.from("cronograma_dependencias").delete().in("depende_de_id", aBorrar);
+    await supabase.from("cronograma_actividades").delete().in("id", aBorrar);
   }
 
   const filas = propuesta.actividades.map(a => ({
