@@ -6,6 +6,7 @@ import { memoriaEnPalabras } from "./apuntes";
 import { jsonTolerante } from "../../lib/jsonTolerante";
 import { JUICIO, pedirANova, textoDeNova, porQueFallo } from "../../lib/modelos";
 import { crearFase } from "./fases";
+import { sinCiclos } from "./sinCiclos";
 import { proponerDependencias, ORDEN_DE_UNA_OBRA } from "./novaCronograma";
 
 // ARMAR EL CRONOGRAMA: etapas, y adentro lo que hay que hacer.
@@ -273,12 +274,20 @@ export async function guardarOrden({ actividades = [], dias = 0, nombreObra = ""
   const r = await proponerDependencias({ actividades, dias, nombreObra, cal });
   if (r.error) return { error: r.error };
   if (!r.dependencias.length) return { creadas: 0 };
-  const filas = r.dependencias.map(d => ({
+  // NINGÚN CÍRCULO LLEGA A LA BASE. Una obra real se los saca a NOVA sin
+  // querer —la mampostería espera al enlucido en una etapa y el enlucido a la
+  // mampostería en otra, y las dos frases son ciertas por separado— y el
+  // resultado es una actividad sin fecha de inicio, sin fecha de fin y con un
+  // guión en el colchón. Parece que la aritmética está rota; lo que está roto
+  // es el dato.
+  const { dependencias, cortadas } = sinCiclos(r.dependencias);
+  if (!dependencias.length) return { creadas: 0, cortadas: cortadas.length };
+  const filas = dependencias.map(d => ({
     actividad_id: d.a, depende_de_id: d.de, tipo: d.tipo || "FC", retardo: d.retardo || 0,
   }));
   const { data, error } = await supabase.from("cronograma_dependencias").insert(filas).select("id");
   if (error) return { error: error.message };
-  return { creadas: data?.length || 0 };
+  return { creadas: data?.length || 0, cortadas: cortadas.length };
 }
 
 
@@ -468,6 +477,7 @@ export async function aplicarTiemposYOrden({ duraciones = [], dependencias = [],
     await supabase.from("cronograma_actividades").update({ duracion: d.dias, nota: d.porque }).eq("id", d.id);
   }
   let puestas = 0;
+  let enRedondo = 0;
   if (dependencias.length) {
     const ids = actividades.map(a => a.id);
     // Se reemplazan, no se suman: pedirle el orden dos veces dejaría dos
@@ -476,13 +486,17 @@ export async function aplicarTiemposYOrden({ duraciones = [], dependencias = [],
       await supabase.from("cronograma_dependencias").delete().in("actividad_id", ids);
       await supabase.from("cronograma_dependencias").delete().in("depende_de_id", ids);
     }
-    const filas = dependencias.map(d => ({
+    const { dependencias: limpias, cortadas } = sinCiclos(dependencias);
+    enRedondo = cortadas.length;
+    const filas = limpias.map(d => ({
       actividad_id: d.a, depende_de_id: d.de, tipo: d.tipo || "FC", retardo: d.retardo || 0,
     }));
-    const { data } = await supabase.from("cronograma_dependencias").insert(filas).select("id");
-    puestas = data?.length || 0;
+    if (filas.length) {
+      const { data } = await supabase.from("cronograma_dependencias").insert(filas).select("id");
+      puestas = data?.length || 0;
+    }
   }
-  return { dias: duraciones.length, dependencias: puestas };
+  return { dias: duraciones.length, dependencias: puestas, cortadas: enRedondo };
 }
 
 /**

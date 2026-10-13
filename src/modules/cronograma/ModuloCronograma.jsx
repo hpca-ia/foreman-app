@@ -17,6 +17,7 @@ import { fasesDe, crearFase, renombrarFase, borrarFase, moverFase, asignarFase, 
 import { ordenesPendientes, lineasDe, marcarAplicada } from "./ordenesEnCronograma";
 import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./versiones";
 import { comparar } from "./compararVersion";
+import { sinCiclos } from "./sinCiclos";
 import { bajarProject } from "./exportarProject";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
@@ -1172,11 +1173,24 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     await cargar();
   }
 
-  async function unir(desde, hasta) {
+  async function unir(desde, hasta, como = null) {
     if (desde === hasta) return;
+    // NO SE DEJA CERRAR UN CÍRCULO. Si desde "hasta" ya se puede llegar a
+    // "desde", esta unión apaga el cálculo de las dos: se quedan sin fecha de
+    // inicio, sin fecha de fin y con un guión en el colchón. Es más fácil no
+    // dejar hacerla que explicar después por qué el cronograma dejó de tener
+    // fechas.
+    const prueba = [...dependencias.map(d => ({ de: d.depende_de_id, a: d.actividad_id })), { de: desde, a: hasta }];
+    if (sinCiclos(prueba).cortadas.length) {
+      const n = id => actividades.find(a => a.id === id)?.nombre || "esa actividad";
+      setError(`No se puede: «${n(hasta)}» ya viene después de «${n(desde)}», así que encadenarlas al revés las deja a las dos sin fecha.`);
+      setUniendo(null);
+      return;
+    }
     const { error: e } = await supabase.from("cronograma_dependencias")
-      .insert({ actividad_id: hasta, depende_de_id: desde, tipo: "FC" });
+      .insert({ actividad_id: hasta, depende_de_id: desde, tipo: como?.tipo || "FC", retardo: como?.retardo || 0 });
     if (e && !/duplicate/i.test(e.message)) setError(e.message);
+    else setError("");
     setUniendo(null);
     await cargar();
   }
@@ -2518,11 +2532,47 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         </div>
       )}
 
+      {/* EL CÍRCULO, CON SU ARREGLO AL LADO.
+          Decía "quitá una de esas dependencias" y no decía cuál: son veinte
+          enlaces y el que cierra el círculo no se ve mirando una fila. Mientras
+          tanto esas actividades se muestran con los días puestos, las dos
+          fechas vacías y un guión en el colchón, que desde afuera parece que
+          la aritmética está rota —y lo que está roto es el dato—. */}
       {plan.ciclos.length > 0 && (
-        <Aviso>
-          Hay {plan.ciclos.length} actividades esperándose entre sí —A espera a B que espera a A—, así que no
-          se les puede calcular fecha. Quitá una de esas dependencias.
-        </Aviso>
+        <div style={{ fontSize: 12.5, color: colors.ink, background: colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+          padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, lineHeight: 1.5 }}>
+            <AlertTriangle size={15} color={colors.warning} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1 }}>
+              Hay <strong>{plan.ciclos.length}</strong> actividades esperándose entre sí —A espera a B que
+              espera a A—. No se les puede calcular fecha: por eso salen con los días puestos y las fechas
+              en blanco.
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, marginTop: 3 }}>
+                {plan.ciclos.slice(0, 6).map(id => todas.find(a => a.id === id)?.nombre).filter(Boolean).join(" · ")}
+                {plan.ciclos.length > 6 ? "…" : ""}
+              </div>
+            </div>
+          </div>
+          {editable && (
+            <Button variant="primary" size="sm" style={{ marginTop: 8 }} disabled={pensando} onClick={async () => {
+              // Se corta la que CIERRA el círculo, no una al azar: las que ya
+              // estaban forman un orden que se venía sosteniendo.
+              const { cortadas } = sinCiclos(dependencias.map(d => ({ ...d, de: d.depende_de_id, a: d.actividad_id })));
+              if (!cortadas.length) { setAviso("No encontré ninguna dependencia que cierre un círculo."); return; }
+              const nombre = id => todas.find(a => a.id === id)?.nombre || "?";
+              if (!window.confirm(
+                `¿Cortar ${cortadas.length} ${cortadas.length === 1 ? "dependencia" : "dependencias"} que cierran círculos?\n\n`
+                + cortadas.slice(0, 8).map(d => `  · «${nombre(d.de)}» → «${nombre(d.a)}»`).join("\n")
+                + "\n\nNo se toca ninguna otra, ni las duraciones. Si alguna hacía falta, se vuelve a encadenar a mano.")) return;
+              setPensando(true); setError("");
+              for (const d of cortadas) await supabase.from("cronograma_dependencias").delete().eq("id", d.id);
+              setPensando(false);
+              await cargar();
+              setAviso(`${cortadas.length} ${cortadas.length === 1 ? "dependencia cortada" : "dependencias cortadas"}. Las fechas se calculan de nuevo.`);
+            }}>Cortar las que cierran el círculo</Button>
+          )}
+        </div>
       )}
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>{error}</div>}

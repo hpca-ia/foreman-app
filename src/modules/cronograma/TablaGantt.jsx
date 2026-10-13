@@ -745,6 +745,40 @@ export default function TablaGantt({
                             </div>
                           );
                         })}
+                        {/* AGREGAR UNA, SIN ADIVINAR.
+                            La única manera de encadenar era el eslabón de la
+                            fila: marcar una, buscar la otra entre cuarenta,
+                            marcarla. Para eso hay que saber que ese icono
+                            encadena, acordarse del orden —primero la que va
+                            antes— y tener las dos a la vista. Acá se elige de
+                            una lista y se dice cómo, en la misma frase.
+                            Y están las dos formas de arrancar en paralelo, que
+                            es de donde sale el tiempo en una obra apretada: a
+                            la vez que otra, o entrando antes de que termine. */}
+                        {editable && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 3 }}>
+                            <span style={{ fontSize: 11.5, color: colors.muted }}>Agregar: empieza</span>
+                            <select value="" onChange={e => {
+                              if (!e.target.value) return;
+                              const [forma, otra] = e.target.value.split("|");
+                              const f = FORMAS.find(x => x.id === forma);
+                              onUnir(Number(otra), a.id, { tipo: f.tipo, retardo: f.numero ? 1 * f.signo : 0 });
+                              e.target.value = "";
+                            }}
+                              style={{ ...inputStyle, width: "auto", maxWidth: 420, padding: "3px 5px", fontSize: 11, height: 24 }}>
+                              <option value="">elegí de qué depende…</option>
+                              {FORMAS.map(f => (
+                                <optgroup key={f.id} label={f.frase}>
+                                  {todas
+                                    .filter(x => x.id !== a.id && !deps.some(d => d.depende_de_id === x.id))
+                                    .map(x => <option key={`${f.id}-${x.id}`} value={`${f.id}|${x.id}`}>
+                                      {numeroDe.get(x.id)} {x.nombre}
+                                    </option>)}
+                                </optgroup>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
 
                       {editable && (
