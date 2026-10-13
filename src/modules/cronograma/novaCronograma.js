@@ -3,7 +3,9 @@ import { calcular, calendario } from "./cpm";
 import { expandir, ordenar, n, etapaDe, SIN_TILDE, ETAPA_CORTA } from "./armarPropuesta";
 
 export { ordenar };
-import { leerMemoria, memoriaEnPalabras, recordar } from "./memoriaNova";
+import { leerMemoria, recordar } from "./memoriaNova";
+import { memoriaEnPalabras } from "./apuntes";
+import { UNIDAD, magnitudes, rendimiento } from "./magnitudes";
 import { jsonTolerante } from "../../lib/jsonTolerante";
 import { JUICIO, pedirANova, textoDeNova } from "../../lib/modelos";
 
@@ -28,20 +30,6 @@ import { JUICIO, pedirANova, textoDeNova } from "../../lib/modelos";
 // mismas cosas. Sin eso, el Gantt dice "mampostería en marzo" y el valorado
 // dice otra cosa, y no hay forma de saber cuál de los dos está viejo.
 
-
-// Las unidades escritas de veinte maneras son la misma unidad. Sin esto, los
-// 800 m2 de una obra salen como "600 M2 · 150 m² · 50 mt2" y dejan de sumar.
-const UNIDAD = u => {
-  const t = String(u || "").trim().toLowerCase()
-    .replace(/[.\s]/g, "").replace(/²/g, "2").replace(/³/g, "3");
-  if (/^(m2|mt2|metro2|metroscuadrados?)$/.test(t)) return "m2";
-  if (/^(m3|mt3|metro3|metroscubicos?)$/.test(t)) return "m3";
-  if (/^(ml|m|mt|metro|metros|metrolineal)$/.test(t)) return "ml";
-  if (/^(u|un|und|unid|unidad|unidades|c\/u|pto|ptos?|punto|puntos)$/.test(t)) return "u";
-  if (/^(kg|kilo|kilos|kgs)$/.test(t)) return "kg";
-  if (/^(glb|global|gbl)$/.test(t)) return "glb";
-  return t.slice(0, 6) || "u";
-};
 
 const miles = v => Math.round(v).toLocaleString("es-EC");
 
@@ -95,25 +83,16 @@ export async function materiaPrima(obraId) {
     .filter(a => !a.extra)
     .map(a => {
       const suyos = porAgrup.get(a.id) || [];
-      const porUnidad = new Map();
-      suyos.forEach(r => {
-        const c = n(r.cantidad);
-        if (!c) return;
-        const u = UNIDAD(r.unidad);
-        // Lo global no es una magnitud: "1 glb" no dice nada del tamaño y
-        // sumado con los metros ensucia el único dato que sirve.
-        if (u === "glb") return;
-        porUnidad.set(u, (porUnidad.get(u) || 0) + c);
-      });
       return {
         ...a,
         monto: Math.round((plata.get(a.id) || 0) * 100) / 100,
         rubros: suyos.length,
         // Ordenadas de mayor a menor: la primera unidad es la que define el
-        // tamaño de esa agrupación.
-        magnitud: [...porUnidad.entries()]
-          .map(([unidad, cantidad]) => ({ unidad, cantidad: Math.round(cantidad * 100) / 100 }))
-          .sort((x, y) => y.cantidad - x.cantidad),
+        // tamaño de esa agrupación. La cuenta la hace `magnitudes`, el mismo
+        // que usa el apunte cuando alguien corrige una duración: así el
+        // rendimiento que se aprende está medido sobre la misma cantidad con
+        // la que NOVA propuso.
+        magnitud: magnitudes(suyos),
         // Los rubros gruesos, que son los que se tardan. Los chicos no mueven
         // la duración y solo gastarían espacio en la consulta.
         principales: [...suyos].sort((x, y) => n(y.total_base) - n(x.total_base)).slice(0, 4)
@@ -159,7 +138,7 @@ export async function proponerCronograma({ agrupaciones = [], meses = 6, dias: d
     : `se trabaja ${L.length} días por semana`;
 
   const sistema = `Eres NOVA y armas el cronograma de obra de una constructora en Ecuador.
-${memoriaEnPalabras(memoria)}
+${memoriaEnPalabras(memoria, "cronograma")}
 
 La obra "${nombreObra}" dura ${meses} meses, que son ${dias} días de trabajo
 contados en el calendario de ESTA obra: ${jornada}.
@@ -552,11 +531,63 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
 }
 
 /**
+ * UNA duración corregida a mano, apuntada en el momento.
+ *
+ * Esto es el corazón de que el cronograma deje de costar horas, y es por donde
+ * se estaba perdiendo entero.
+ *
+ * Aprender estaba atado a un botón del menú —"Que NOVA lo aprenda"— que había
+ * que ir a buscar después de corregir veinte duraciones. Nadie lo aprieta: uno
+ * corrige, mira que el plazo cierre y cierra la pantalla. Y lo que es peor, ese
+ * botón apunta TODO lo que hay en la pantalla, que en su mayoría es lo que NOVA
+ * propuso: la memoria se llenaba de los propios números de NOVA y la segunda
+ * obra arrancaba igual de floja que la primera, con la apariencia de haber
+ * aprendido.
+ *
+ * Acá se apunta una sola cosa, en el único momento en que se sabe con certeza
+ * que es juicio de una persona: cuando alguien escribió un número distinto en
+ * la casilla de días. Sin botón, sin aviso y sin preguntar.
+ *
+ * Y se apunta el RENDIMIENTO, no los días: 450 m2 en 25 días son 18 m2 por
+ * día, y eso es lo que sirve cuando la obra que viene tiene 1.200.
+ *
+ * Solo cuando la agrupación es UNA sola actividad: si está partida en
+ * anticipo, fabricación e instalación, los días de una etapa no se dividen por
+ * la cantidad entera — daría un rendimiento inventado. Ahí se apuntan los días
+ * pelados, que es poco pero es verdad.
+ */
+export async function aprenderDeUnaDuracion({ nombre, dias, magnitud = null, partida = false, quien }) {
+  if (!nombre || !dias) return null;
+  const d = Math.round(dias);
+  const r = partida ? null : rendimiento(magnitud, d);
+  return recordar({
+    tema: "cronograma",
+    descripcion: nombre,
+    perfil: "duracion",
+    pagos: null,
+    anticipacion: d,
+    // Sin cantidades queda el dato flojo —los días— y marcado como flojo:
+    // `rinde` vacío es lo que hace que la consulta diga "sin cantidades: no
+    // se sabe de qué tamaño era" en vez de dictarlo como un rendimiento.
+    rendimiento: r || { dias: d },
+    nota: r
+      ? `${miles(r.cantidad)} ${r.unidad} en ${d} días hábiles → ${r.rinde} ${r.unidad}/día`
+      : `${d} días hábiles`,
+    quien,
+  });
+}
+
+/**
  * Lo que quedó después de que una persona lo corrigió, para la obra siguiente.
+ *
+ * El repaso de todo el cronograma, para cuando se corrigió antes de que esto
+ * aprendiera solo. Sigue valiendo para una obra vieja que ya está bien
+ * acomodada: se apunta de una vez lo que esa obra demostró.
  *
  * Se aprende de lo que hay AHORA en la pantalla, no de lo que NOVA propuso: si
  * alguien le cambió la duración a la mampostería de 20 a 35 días, eso es lo
- * que vale. Aprender de la propuesta sería que NOVA se dé la razón sola.
+ * que vale. Aprender de la propuesta sería que NOVA se dé la razón sola —y es
+ * el riesgo de este camino, por el que el de arriba es mejor.
  */
 export async function aprenderDelCronograma(actividades = [], quien, agrupaciones = []) {
   // El tamaño de cada agrupación, para poder anotar el rendimiento.
@@ -569,30 +600,11 @@ export async function aprenderDelCronograma(actividades = [], quien, agrupacione
 
   for (const a of actividades) {
     if (!a.nombre || !a.duracion) continue;
-    const dias = Math.round(a.duracion);
-
-    // EL RENDIMIENTO ES LO QUE SIRVE PARA LA PRÓXIMA OBRA, no los días.
-    //
-    // "El enlucido lleva 70 días" no se puede usar en otro proyecto: la obra
-    // que viene tiene otros metros. "El enlucido rinde 18 m2 por día" sí, y
-    // es lo que de verdad quedó demostrado cuando alguien corrigió el número.
-    //
-    // Solo cuando la agrupación es UNA sola actividad: si está partida en
-    // anticipo, fabricación e instalación, los días de una etapa no se
-    // dividen por la cantidad entera — daría un rendimiento inventado.
-    const m = a.obra_actividad_id && cuantas.get(a.obra_actividad_id) === 1
-      ? tam.get(a.obra_actividad_id) : null;
-    const rinde = m && dias ? Math.round((m.cantidad / dias) * 10) / 10 : 0;
-
-    await recordar({
-      tema: "cronograma",
-      descripcion: a.nombre,
-      perfil: "duracion",
-      pagos: null,
-      anticipacion: dias,
-      nota: rinde
-        ? `${miles(m.cantidad)} ${m.unidad} en ${dias} días hábiles → ${rinde} ${m.unidad}/día`
-        : `${dias} días hábiles`,
+    await aprenderDeUnaDuracion({
+      nombre: a.nombre,
+      dias: a.duracion,
+      magnitud: a.obra_actividad_id ? tam.get(a.obra_actividad_id) : null,
+      partida: !!(a.obra_actividad_id && cuantas.get(a.obra_actividad_id) > 1),
       quien,
     });
   }
@@ -707,7 +719,7 @@ export async function revisarCronograma({ plan = [], dependencias = [], nombreOb
     : L.includes(6) ? "de lunes a sábado" : "de lunes a viernes, sin sábados";
 
   const sistema = `Sos NOVA y REVISÁS el cronograma de una obra en Ecuador que YA ESTÁ TRABAJADO.
-${memoriaEnPalabras(memoria)}
+${memoriaEnPalabras(memoria, "cronograma")}
 
 La obra "${nombreObra}"${dias ? ` tiene un plazo de ${dias} días hábiles` : ""} y se trabaja ${jornada}.
 

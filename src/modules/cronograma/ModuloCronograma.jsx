@@ -7,7 +7,10 @@ import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios,
-  revisarCronograma, ordenarConPalabras } from "./novaCronograma";
+  revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion } from "./novaCronograma";
+import { leerMemoria, olvidar } from "./memoriaNova";
+import { apunteDe, apunteEnUnaLinea } from "./apuntes";
+import { magnitudDe } from "./magnitudes";
 import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./versiones";
 import { comparar } from "./compararVersion";
 import { bajarProject } from "./exportarProject";
@@ -80,6 +83,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [zoom, setZoom] = useState(14);
   // Las agrupaciones de hoy, para saber si el cronograma quedó viejo.
   const [agrupaciones, setAgrupaciones] = useState([]);
+  // LO QUE LA OFICINA YA MIDIÓ. Se trae para dos cosas: marcar en la tabla
+  // cuáles duraciones ya están respaldadas por una obra real —y entonces no
+  // hay que volver a pensarlas— y poder mirar y borrar los apuntes, que es lo
+  // único que vuelve confiable a una memoria.
+  const [memoria, setMemoria] = useState([]);
+  const [verMemoria, setVerMemoria] = useState(false);
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
   // Los rubros de la obra, para poder señalar cuál es el que está trabando a
@@ -157,13 +166,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       // presupuesto, y hace falta para leerlo: "VENTANERÍA" dice poco si no se
       // ve que es de CARPINTERÍA METÁLICA.
       let { data: rub, error: eRub } = await supabase.from("obra_rubros")
-        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,anulado_por_oc,crono_senalado,crono_nota,crono_actividad_id")
+        .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,cantidad,unidad,anulado_por_oc,crono_senalado,crono_nota,crono_actividad_id")
         .eq("obra_id", lead.obra_id).order("orden");
       // Sin la 085 no existen esas dos columnas: se lee sin ellas y todo sigue
       // andando, solo que no se puede señalar qué rubro está trabando.
       if (eRub) {
         ({ data: rub } = await supabase.from("obra_rubros")
-          .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,anulado_por_oc")
+          .select("id,descripcion,numero,codigo,actividad_id,total_base,capitulo,cantidad,unidad,anulado_por_oc")
           .eq("obra_id", lead.obra_id).order("orden"));
       }
       setSinSenalar(!!eRub);
@@ -202,6 +211,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     } else setDependencias([]);
   }, [lead?.id]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  const cargarMemoria = useCallback(async () => {
+    const { memoria: m } = await leerMemoria("cronograma");
+    setMemoria(m || []);
+  }, []);
+  useEffect(() => { cargarMemoria(); }, [cargarMemoria]);
 
   const editable = !lead || nivelProyecto?.(lead.id) === "editar";
   // El cronograma vive en el proyecto; la obra es de dónde salen el
@@ -394,6 +409,33 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     }
     if (!data?.length) { setError("No se pudo guardar el cambio: la base no dejó tocar esa actividad."); return; }
     setError("");
+    // CORREGIR UN NÚMERO ES ENSEÑARLE.
+    //
+    // Es el único momento en que se sabe que el número lo puso una persona y
+    // no NOVA, y es exactamente el momento que antes se perdía: aprender
+    // estaba atado a un botón del menú que hay que ir a buscar después de
+    // corregir veinte duraciones, y nadie lo aprieta.
+    //
+    // No se apuntan los días —la obra que viene tiene otros metros— sino el
+    // rendimiento que este número demuestra: 450 m2 en 25 días son 18 m2 por
+    // día. Eso es lo que hace que la próxima obra arranque con duraciones que
+    // ya se parecen a la verdad, que es lo que de verdad ahorra las horas.
+    //
+    // Sin aviso y sin preguntar: si cada corrección abriera un cartel, se
+    // volvería más molesto que útil. Y si falla no se dice nada tampoco —que
+    // el apunte no se guarde no es razón para ensuciar una corrección que sí
+    // se guardó—.
+    if (campos.duracion && Number(campos.duracion) !== Number(a.duracion)) {
+      const hermanas = actividades.filter(x => a.obra_actividad_id && x.obra_actividad_id === a.obra_actividad_id).length;
+      aprenderDeUnaDuracion({
+        nombre: a.nombre, dias: campos.duracion,
+        magnitud: magnitudDe(rubros, a.obra_actividad_id),
+        // Partida en anticipo / fabricación / instalación: los días de una
+        // etapa no se dividen por la cantidad entera.
+        partida: hermanas > 1,
+        quien: currentUser,
+      }).then(() => cargarMemoria()).catch(() => {});
+    }
     await cargar();
   }
 
@@ -1658,15 +1700,32 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                             nombre: `Cronograma ${lead.nombre}`, actividades: todas, dependencias,
                             inicio: plan.inicio, fin: plan.fin, cal,
                           })],
-                          ["Que NOVA lo aprenda", "Los rendimientos de esta obra, para la próxima", async () => {
+                          // APRENDER DE TODA LA OBRA DE UNA VEZ.
+                          //
+                          // Ya no hace falta para el día a día: cada duración
+                          // que alguien corrige se apunta sola, en el momento.
+                          // Esto queda para una obra vieja que ya está bien
+                          // acomodada y nunca enseñó nada —toda la primera
+                          // tanda de obras—, y por eso avisa lo que antes no
+                          // avisaba: apunta TODO lo que hay en la pantalla,
+                          // incluido lo que propuso NOVA y nadie revisó.
+                          ["Aprender de toda esta obra", "Para una obra ya terminada y acomodada", async () => {
+                            if (!window.confirm(
+                              "¿Apuntar los rendimientos de TODAS las actividades de esta obra?\n\n" +
+                              "Cada duración que alguien corrige a mano ya se apunta sola, así que esto " +
+                              "sirve para una obra vieja que quedó bien y nunca enseñó nada.\n\n" +
+                              "Ojo: apunta todo lo que está en la pantalla, también lo que propuso NOVA y " +
+                              "nadie revisó. En una obra que todavía se está armando, eso le enseña sus " +
+                              "propios números.")) return;
                             setPensando(true);
-                            // Lo que vale para la obra siguiente no son los días
-                            // —esa obra tiene otros metros— sino cuánto rinde por día.
                             const mp = obra?.id ? await materiaPrima(obra.id) : [];
                             const n = await aprenderDelCronograma(todas, currentUser, mp);
+                            await cargarMemoria();
                             setPensando(false); setError("");
                             window.alert(`NOVA anotó ${n} actividades para la próxima obra: los días, y dónde hay cantidades, el rendimiento por día.`);
                           }],
+                          ["Ver lo que NOVA aprendió", `${memoria.length} ${memoria.length === 1 ? "apunte" : "apuntes"} de obras anteriores`,
+                            () => setVerMemoria(true)],
                         ].map(([label, pista, accion]) => (
                           <button key={label} onClick={async () => { setMenu(false); await accion(); }}
                             style={{ display: "block", width: "100%", textAlign: "left", background: "none",
@@ -1962,6 +2021,66 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>{error}</div>}
 
+      {/* LA MEMORIA, A LA VISTA Y BORRABLE.
+          Una memoria que no se puede mirar es una herramienta que falla sin
+          que nadie sepa por qué: NOVA propone 25 días, nadie entiende de dónde
+          salieron, y la próxima vez se desconfía del cronograma entero. Acá
+          están los apuntes, de dónde salió cada uno y quién lo dejó, y se
+          pueden borrar: un rendimiento medido en una obra rara —una casa en el
+          campo con una cuadrilla prestada— arrastra a las que vienen. */}
+      {verMemoria && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: 12, marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, flex: 1 }}>
+              Lo que NOVA aprendió de las obras de esta oficina
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setVerMemoria(false)}>Cerrar</Button>
+          </div>
+          <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginBottom: 9 }}>
+            Cada vez que alguien corrige una duración a mano, acá queda cuánto rindió por día. Es lo que NOVA
+            lee antes de proponer el cronograma de la obra siguiente —los días no sirven, porque la otra obra
+            tiene otros metros; el rendimiento sí—.
+          </div>
+          {!memoria.length ? (
+            <div style={{ fontSize: 12, color: colors.inkSoft }}>
+              Todavía no hay apuntes. Se llena solo: corregí una duración en la tabla y queda anotada.
+            </div>
+          ) : (
+            <div style={{ maxHeight: 260, overflowY: "auto", display: "grid", gap: 1 }}>
+              {memoria.map(m => (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0",
+                  borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {m.ejemplo || m.patron}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: colors.muted }}>
+                      {m.rendimiento?.rinde
+                        ? `${m.rendimiento.rinde} ${m.rendimiento.unidad} por día · ${fmt(m.rendimiento.cantidad)} ${m.rendimiento.unidad} en ${m.rendimiento.dias} días`
+                        : `${m.rendimiento?.dias || m.anticipacion || "?"} días hábiles, sin cantidades`}
+                      {m.veces > 1 && ` · corregido ${m.veces} veces`}
+                      {m.creado_nombre && ` · ${m.creado_nombre}`}
+                    </div>
+                  </div>
+                  <button title="Que NOVA se olvide de este apunte"
+                    onClick={async () => {
+                      if (!window.confirm(`¿Que NOVA se olvide de "${m.patron}"?\n\nDeja de usarlo para proponer duraciones. No cambia ningún cronograma ya hecho.`)) return;
+                      const e = await olvidar(m.id);
+                      if (e) { setError(e); return; }
+                      await cargarMemoria();
+                    }}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+                      display: "flex", flexShrink: 0, padding: 3 }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {partiendo && (
         <PartirEnEtapas actividad={partiendo} onCancelar={() => setPartiendo(null)}
           onPartir={etapas => partir(partiendo, etapas)} />
@@ -1982,7 +2101,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
           onMoverEtapa={moverEtapa}
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
-          platas={platas} />
+          platas={platas} memoria={memoria} />
       )}
 
       {editable && (

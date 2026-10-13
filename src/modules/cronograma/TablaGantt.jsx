@@ -6,6 +6,7 @@ import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { ETAPAS } from "./cpm";
 import { fmt } from "../controlObra/calculos";
+import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 
 // La tabla del cronograma: cómo se lee.
 //
@@ -71,7 +72,7 @@ export default function TablaGantt({
   porId, cal, plan, escala, zoom, marcas = [], editable, conEtapas,
   uniendo, setUniendo, hoyISO, dia,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
-  rubros = [], sinSenalar, onSenalar, platas = null,
+  rubros = [], sinSenalar, onSenalar, platas = null, memoria = [],
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -318,6 +319,8 @@ export default function TablaGantt({
             {(!plegado || g.simple) && g.hijas.map((a, j) => {
               const deps = dependencias.filter(d => d.actividad_id === a.id);
               const esta = abierta === a.id;
+              // Si la oficina ya midió un trabajo con este nombre, en otra obra.
+              const apunte = apunteDe(memoria, a.nombre);
               const etapa = a.etapa && a.etapa !== "ejecucion" ? ETAPAS[a.etapa] : null;
               return (
                 <div key={a.id}>
@@ -417,11 +420,32 @@ export default function TablaGantt({
                             <CalendarClock size={10} />
                           </span>
                         )}
+                        {/* LO QUE LA OFICINA YA MIDIÓ.
+                            Revisar veinte duraciones una por una es lo que
+                            cuesta horas, y la mitad de esas veinte ya se
+                            revisaron en una obra anterior. Esta marca dice
+                            cuáles: donde está, el número tiene atrás una obra
+                            de verdad y no un rendimiento de tabla. Las que no
+                            la tienen son las que hay que mirar. */}
+                        {apunte && (
+                          <span title={apunteEnUnaLinea(apunte)}
+                            style={{ fontSize: 9, color: colors.brand, background: colors.brandSoft,
+                              borderRadius: 4, padding: "1px 4px", flexShrink: 0, fontWeight: 600 }}>
+                            {apunte.rendimiento?.rinde
+                              ? `${apunte.rendimiento.rinde} ${apunte.rendimiento.unidad}/d`
+                              : "medido"}
+                          </span>
+                        )}
                         {g.simple && <Senal ui={ui} g={g} senalados={senalados} misRubros={misRubros} />}
                       </div>
+                      {/* LA CUENTA, AL ALCANCE DEL MOUSE. NOVA la escribe
+                          —"450 m2 ÷ 18 m2/día"— y se guardaba en la nota sin
+                          que nadie la viera: para saber si creerle al número
+                          había que abrir la ficha. Acá se lee encima. */}
                       <Numero value={a.duracion} min={1} max={2000} disabled={!editable}
                         onCommit={v => onCambiar(a, { duracion: v })}
-                        title="Días hábiles. Enter para guardar."
+                        title={[a.nota, apunte && apunteEnUnaLinea(apunte), "Días hábiles. Enter para guardar."]
+                          .filter(Boolean).join("\n")}
                         style={{ padding: "4px 6px", fontSize: 11.5, textAlign: "center" }} />
                       {/* LAS TRES SE ESCRIBEN, y las tres dicen lo mismo.
                           Una duración en días es lo que uno sabe cuando

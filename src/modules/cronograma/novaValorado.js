@@ -1,5 +1,6 @@
 import { repartirEntre } from "./valorado";
-import { leerMemoria, memoriaEnPalabras, recordar, patronDe } from "./memoriaNova";
+import { leerMemoria, recordar } from "./memoriaNova";
+import { memoriaEnPalabras, patronDe } from "./apuntes";
 import { JUICIO, pedirANova, textoDeNova } from "../../lib/modelos";
 
 // NOVA arma el cronograma valorado del presupuesto.
@@ -66,7 +67,7 @@ export async function proponerValorado({ rubros = [], meses = 6, mesInicio, nomb
   const { memoria } = await leerMemoria("valorado");
 
   const sistema = `Eres NOVA y armas el cronograma valorado de una obra en Ecuador.
-${memoriaEnPalabras(memoria)}
+${memoriaEnPalabras(memoria, "valorado")}
 
 La obra "${nombreObra}" dura ${meses} meses, del mes 1 al mes ${meses}. El presupuesto total es ${Math.round(total)} dólares.
 
