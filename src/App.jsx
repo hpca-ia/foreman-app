@@ -40,6 +40,7 @@ const ModuloCajaChica = lazy(() => import("./modules/ModuloCajaChica"));
 const ModuloCompras = lazy(() => import("./modules/compras/ModuloCompras"));
 const ModuloLibro = lazy(() => import("./modules/libro/ModuloLibro"));
 const ModuloObservaciones = lazy(() => import("./modules/observaciones/ModuloObservaciones"));
+const ModuloActas = lazy(() => import("./modules/actas/ModuloActas"));
 const ModuloCronograma = lazy(() => import("./modules/cronograma/ModuloCronograma"));
 const ModuloManoDeObra = lazy(() => import("./modules/manoDeObra/ModuloManoDeObra"));
 const PanelAjustes = lazy(() => import("./components/PanelAjustes"));
@@ -404,6 +405,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     const puertas = [
       ["tareas", "tareas.ver"], ["leads", null], ["presupuestos", "presupuestos.ver"],
       ["controlObra", "controlObra.ver"], ["libro", "libro.ver"], ["observaciones", "observaciones.ver"],
+      ["actas", "actas.ver"],
       ["compras", "compras.ver"], ["cajaChica", "cajaChica.ver"],
     ];
     for (const [v, permiso] of puertas) {
@@ -815,6 +817,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
             )}
             {puede("observaciones.ver") && vista === "observaciones" && (
               <ModuloObservaciones currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelObra} />
+            )}
+            {puede("actas.ver") && vista === "actas" && (
+              <ModuloActas currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto} />
             )}
             {puede("cronograma.ver") && vista === "cronograma" && (
               <ModuloCronograma currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto} />

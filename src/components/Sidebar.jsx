@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ListTodo, Wallet, HardHat, PiggyBank, Target, ShoppingCart, BookOpen, ClipboardList,
-  GanttChartSquare, MoreHorizontal, X } from "lucide-react";
+  GanttChartSquare, MoreHorizontal, X, FileSignature } from "lucide-react";
 import { rolInfo } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
@@ -101,6 +101,7 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
       puede("cronograma.ver") && item("cronograma", "Cronograma", GanttChartSquare, "Crono."),
       puede("manoObra.ver") && item("manoObra", "Mano de obra", HardHat, "Personal"),
       puede("observaciones.ver") && item("observaciones", "Observaciones", ClipboardList, "Observ."),
+      puede("actas.ver") && item("actas", "Actas de reunión", FileSignature, "Actas"),
       puede("compras.ver") && item("compras", "Compras", ShoppingCart),
       puede("cajaChica.ver") && item("cajaChica", "Caja Chica", PiggyBank, "Caja"),
     ]],
