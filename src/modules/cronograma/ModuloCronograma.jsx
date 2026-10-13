@@ -1246,8 +1246,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         if (e1) err = e1.message;
                         else {
                           if (madre.obra_actividad_id) {
+                            // Lo que le queda a la barra original. Se recalcula
+                            // sobre lo que tiene AHORA, no sobre lo que tenía
+                            // al abrir el panel: partir en tres etapas son tres
+                            // operaciones seguidas sobre la misma barra, y
+                            // tomando siempre el valor viejo la segunda y la
+                            // tercera le restarían a un número ya gastado.
+                            const { data: hoy } = await supabase.from("cronograma_actividades")
+                              .select("peso_pct").eq("id", madre.id).maybeSingle();
+                            const tiene = Number(hoy?.peso_pct ?? quedaba);
                             await supabase.from("cronograma_actividades")
-                              .update({ peso_pct: Math.max(0, Math.round((quedaba - x.peso) * 100) / 100) })
+                              .update({ peso_pct: Math.max(0, Math.round((tiene - x.peso) * 100) / 100) })
                               .eq("id", madre.id);
                           }
                           // En fila: un desmontaje va ANTES de lo que estaba;

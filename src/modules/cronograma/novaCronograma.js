@@ -882,8 +882,26 @@ sus días y qué porcentaje de la plata del capítulo se lleva.
   "primero": true si va ANTES de lo que ya estaba (un desmontaje va antes),
   false si va después.
 
-No inventes trabajos que no nombró. Partir es para darle lugar a algo que él
-dijo y el cronograma no tiene.
+SI PIDE PARTIR ALGO SIN DECIR EN QUÉ, PONÉ VOS LAS ETAPAS.
+
+"Partí la ventanería en etapas", "esto hay que anticiparlo", "la estructura va
+por fases" son pedidos completos: lo que falta no lo sabe él, lo sabés vos.
+Mandá UNA operación "partir" POR CADA ETAPA, sobre la misma barra, con las de
+compra que correspondan:
+
+  anticipo — uno o dos días, es un pago, y va meses antes
+  fabricación — larga, no ocupa gente en obra
+  entrega — corta, cuando llega el material
+  instalación — al final, encadenada a lo que la permita
+
+Los pesos tienen que sumar menos de 100 entre todas: lo que quede se lo lleva
+la barra original. Para una ventanería importada: anticipo 50, fabricación 40,
+instalación 10 — tres operaciones, la original queda en 0 y desaparece de hecho.
+
+Lo que NO inventes son trabajos que nadie pidió. Si está hablando de la
+mampostería y vos agregás "curado" porque te parece, eso es ruido. La
+diferencia es simple: partir algo que él señaló, sí; agregar algo que no
+nombró, no.
 
 Las listas son opcionales: mandá solo las que tengan algo.`;
 

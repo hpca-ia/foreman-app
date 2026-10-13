@@ -87,6 +87,9 @@ input, select, textarea { outline: none; font-family: var(--font); }
 .app-nav-item:hover { background: var(--neutral-soft); }
 .app-nav-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .app-nav-corto { display: none; }
+/* El botón "Más" es solo del teléfono: en la computadora están todos a la
+   vista y un cajón con lo mismo sería un rodeo. */
+.nav-mas { display: none; }
 .app-sidebar-profile {
   display: flex; align-items: center; gap: 9px;
   padding: 9px 6px 0; border-top: 1px solid var(--neutral-soft);
@@ -109,6 +112,7 @@ input, select, textarea { outline: none; font-family: var(--font); }
     padding: 5px 2px 4px; gap: 0;
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
   }
+  .nav-mas { display: flex; }
   .app-sidebar .app-sidebar-profile,
   .app-sidebar .app-sidebar-logo,
   .app-sidebar .app-nav-titulo,
@@ -117,13 +121,24 @@ input, select, textarea { outline: none; font-family: var(--font); }
      botón se lleva el mismo ancho que el que tiene cuatro y la barra queda
      coja. Así los siete son hermanos y se reparten parejo. */
   .app-nav-grupo { display: contents; }
+  /* CUATRO Y "MÁS", no diez.
+     La barra reparte el ancho parejo entre lo que haya: con diez botones, en
+     una pantalla de 375 píxeles cada uno mide 37, y el mínimo para acertarle
+     con el dedo son 44. Errarle no era mala suerte, era lo que tenía que
+     pasar. Con cinco cada uno mide 75.
+     Los demás no se van: viven en el cajón que abre "Más", con renglones
+     altos y el nombre completo. */
+  .app-sidebar .nav-escondido { display: none; }
   .app-nav-item {
-    flex-direction: column; gap: 3px; padding: 5px 2px; flex: 1;
+    flex-direction: column; gap: 3px; padding: 7px 2px; flex: 1;
     justify-content: center; text-align: center; font-size: 9px; font-weight: 600;
+    /* Alto cómodo para el pulgar: la barra de abajo es la que más se toca y
+       con el teléfono en una mano. */
+    min-height: 46px;
   }
   .app-nav-item:hover { background: transparent; }
   .app-nav-item .app-nav-label { display: none; }
-  .app-nav-corto { display: block; font-size: 9.5px; line-height: 1.1; max-width: 100%; white-space: nowrap; }
+  .app-nav-corto { display: block; font-size: 10.5px; line-height: 1.1; max-width: 100%; white-space: nowrap; }
   .app-content { padding: 16px 16px 84px; }
   .app-header-inner { padding: 0 16px; }
 }
