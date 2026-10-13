@@ -96,6 +96,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   const [fases, setFases] = useState([]);
   const [etapaNueva, setEtapaNueva] = useState("");
   const [motivoVersion, setMotivoVersion] = useState("");
+  // En qué etapa se está agregando una actividad, y cómo se llama.
+  const [enEtapa, setEnEtapa] = useState(null);
+  const [actNueva, setActNueva] = useState("");
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
   // Los rubros de la obra, para poder señalar cuál es el que está trabando a
@@ -391,16 +394,26 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     return out;
   })();
 
-  async function agregar() {
-    if (!nueva?.nombre?.trim()) return;
+  async function agregar(nombre, faseId = null, dias = null) {
+    const texto = (nombre ?? nueva?.nombre ?? "").trim();
+    if (!texto) return;
     setError("");
-    const { error: e } = await supabase.from("cronograma_actividades").insert({
+    const fila = {
       lead_id: lead.id, obra_id: lead.obra_id || null,
-      nombre: nueva.nombre.trim(), duracion: Math.max(1, Number(nueva.duracion) || 1),
+      nombre: texto, duracion: Math.max(1, Number(dias ?? nueva?.duracion) || 1),
       orden: actividades.length,
-    });
+    };
+    if (faseId) fila.fase_id = faseId;
+    let { data, error: e } = await supabase.from("cronograma_actividades").insert(fila).select("id");
+    // Sin la 101 no existe `fase_id`: entra igual, sin etapa, antes que no
+    // dejar agregar la actividad.
+    if (e && /fase_id|column|schema cache/i.test(e.message)) {
+      const { fase_id: _f, ...sinFase } = fila;
+      ({ data, error: e } = await supabase.from("cronograma_actividades").insert(sinFase).select("id"));
+    }
     if (e) { setError(e.message); return; }
-    setNueva({ nombre: "", duracion: nueva.duracion });
+    if (!data?.length) { setError("La base no dejó agregar la actividad y no dijo por qué."); return; }
+    if (nombre == null) setNueva({ nombre: "", duracion: nueva.duracion });
     await cargar();
   }
 
@@ -2239,13 +2252,26 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
         {editable && (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
             borderRadius: colors.radiusMd, padding: 11, marginBottom: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: fases.length ? 8 : 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, flex: 1, minWidth: 150 }}>
                 Etapas de la obra
                 <span style={{ fontWeight: 400, color: colors.muted }}>
                   {" "}· {fases.length ? `${fases.length} ${fases.length === 1 ? "etapa" : "etapas"}` : "todavía ninguna"}
                 </span>
               </div>
+              {actividades.length > 0 && (
+                <Button variant="outline" size="sm" disabled={pensando} onClick={etapasConNova}>
+                  <Sparkles size={13} /> {pensando ? "NOVA está mirando…" : "Que NOVA las arme"}
+                </Button>
+              )}
+            </div>
+
+            {/* EL CAMPO, EN SU PROPIO RENGLÓN Y ANCHO.
+                Estaba apretado entre el título y dos botones, en una fila que
+                se parte cuando no entra: en una pantalla angosta terminaba
+                abajo de todo o sin lugar, y lo que se ve es un botón que pide
+                un nombre que no hay dónde escribir. */}
+            <div style={{ display: "flex", gap: 7, marginBottom: fases.length ? 9 : 0 }}>
               <input value={etapaNueva}
                 onChange={e => setEtapaNueva(e.target.value)}
                 onKeyDown={async e => {
@@ -2254,17 +2280,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   setEtapaNueva("");
                   await agregarEtapa(n);
                 }}
-                placeholder="Nueva etapa. Ej: Demoliciones"
-                style={{ ...inputStyle, width: 210, fontSize: 12, padding: "5px 8px", height: 30 }} />
-              <Button variant="outline" size="sm" disabled={!etapaNueva.trim()}
+                placeholder="Escribí una etapa y dale Enter. Ej: Demoliciones"
+                style={{ ...inputStyle, flex: 1, minWidth: 120, fontSize: 12.5, padding: "6px 9px", height: 32 }} />
+              <Button variant="primary" size="sm" disabled={!etapaNueva.trim()}
                 onClick={async () => { const n = etapaNueva; setEtapaNueva(""); await agregarEtapa(n); }}>
                 <Plus size={13} /> Agregar etapa
               </Button>
-              {actividades.length > 0 && (
-                <Button variant="outline" size="sm" disabled={pensando} onClick={etapasConNova}>
-                  <Sparkles size={13} /> {pensando ? "NOVA está mirando…" : "Que NOVA las arme"}
-                </Button>
-              )}
             </div>
 
             {!fases.length ? (
@@ -2283,8 +2304,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   const inicios = suyas.map(a => a.inicio).filter(Boolean).sort();
                   const fines = suyas.map(a => a.fin).filter(Boolean).sort();
                   return (
-                    <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 7,
-                      padding: "5px 6px", borderRadius: 7, background: colors.bg }}>
+                    <div key={f.id} style={{ borderRadius: 7, background: colors.bg }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 6px" }}>
                       <span style={{ fontSize: 11, color: colors.muted, width: 16, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
                       <input defaultValue={f.nombre} key={`n${f.id}-${f.nombre}`}
                         onBlur={e => { if ((e.target.value || "").trim() && e.target.value !== f.nombre) renombrarEtapaDeObra(f, e.target.value); }}
@@ -2306,6 +2327,33 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         title={i === lista.length - 1 ? "Ya es la última" : `Bajar «${f.nombre}»`}>▼</Button>
                       <Button variant="secondary" size="sm" onClick={() => borrarEtapaDeObra(f)}
                         title={`Borrar «${f.nombre}». Lo que tiene adentro no se borra.`}><Trash2 size={13} /></Button>
+                      {/* AGREGAR UNA ACTIVIDAD ADENTRO DE ESTA ETAPA.
+                          Es lo que uno quiere hacer apenas creó la etapa, y no
+                          había cómo: había que agregarla abajo, en la lista
+                          general, y después abrir su ficha para decirle a qué
+                          etapa pertenece. Tres pasos para lo que es uno. */}
+                      <Button variant="outline" size="sm"
+                        onClick={() => { setEnEtapa(enEtapa === f.id ? null : f.id); setActNueva(""); }}
+                        title={`Agregar una actividad adentro de «${f.nombre}»`}><Plus size={13} /></Button>
+                    </div>
+                    {enEtapa === f.id && (
+                      <div style={{ display: "flex", gap: 7, padding: "0 6px 6px 28px" }}>
+                        <input autoFocus value={actNueva} onChange={e => setActNueva(e.target.value)}
+                          onKeyDown={async e => {
+                            if (e.key === "Escape") { setEnEtapa(null); return; }
+                            if (e.key !== "Enter") return;
+                            const n = actNueva; setActNueva("");
+                            await agregar(n, f.id);
+                          }}
+                          placeholder={`Actividad adentro de «${f.nombre}». Enter para agregar`}
+                          style={{ ...inputStyle, flex: 1, minWidth: 120, fontSize: 12, padding: "5px 8px", height: 30 }} />
+                        <Button variant="primary" size="sm" disabled={!actNueva.trim()}
+                          onClick={async () => { const n = actNueva; setActNueva(""); await agregar(n, f.id); }}>
+                          <Plus size={13} /> Agregar
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => setEnEtapa(null)}>Listo</Button>
+                      </div>
+                    )}
                     </div>
                   );
                 })}
@@ -2343,7 +2391,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           <Numero value={nueva?.duracion ?? 5} min={1} max={2000} title="Cuántos días hábiles dura"
             onCommit={v => setNueva(x => ({ ...(x || { nombre: "" }), duracion: v }))}
             style={{ width: 80 }} />
-          <Button variant="primary" size="sm" onClick={agregar}><Plus size={13} /> Agregar</Button>
+          <Button variant="primary" size="sm" onClick={() => agregar()}><Plus size={13} /> Agregar</Button>
         </div>
       )}
 

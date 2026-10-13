@@ -53,27 +53,38 @@ export async function borrarFase(id) {
   return error ? error.message : null;
 }
 
-/** Mover una etapa entera: es cambiar un número, no renumerar sus actividades. */
+/**
+ * Mover una etapa: SE RENUMERA LA LISTA ENTERA, no se intercambian dos números.
+ *
+ * Intercambiar el `orden` de dos filas parece lo más barato y es lo que venía
+ * fallando a veces sí y a veces no. Alcanza con que dos etapas hayan quedado
+ * con el mismo número —y quedan: se crean de a una, NOVA las rehace, se borra
+ * una del medio— para que intercambiarlos no cambie nada. La fila se movía o
+ * no se movía según un estado que nadie podía ver, que es la peor clase de
+ * error: el botón anda a veces.
+ *
+ * Renumerar las diez de arriba a abajo no deja lugar a empates. Son diez
+ * escrituras en vez de dos, y a cambio el orden que se ve es siempre el que
+ * está guardado.
+ */
 export async function moverFase(fases, id, direccion) {
   const lista = [...(fases || [])].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
   const i = lista.findIndex(f => String(f.id) === String(id));
-  const j = i + direccion;
-  // SE DICE QUE NO SE PUDO. Devolver nulo —que acá quiere decir "salió bien"—
-  // cuando la etapa ya está en la punta deja una flecha que se aprieta y no
-  // hace nada, que desde afuera es idéntico a un botón roto.
   if (i < 0) return "No encontré esa etapa. Recargá la pantalla.";
+  const j = i + direccion;
   if (j < 0 || j >= lista.length) return null;
-  const mia = lista[i], otra = lista[j];
-  // Si quedaron con el mismo orden —o sin ninguno— intercambiar no movería
-  // nada: se les da el lugar que ocupan en la lista antes de cambiarlas.
-  const [o1, o2] = (mia.orden ?? i) === (otra.orden ?? j) ? [j, i] : [otra.orden ?? j, mia.orden ?? i];
-  const [e1, e2] = await Promise.all([
-    supabase.from("cronograma_fases").update({ orden: o1 }).eq("id", mia.id).select("id"),
-    supabase.from("cronograma_fases").update({ orden: o2 }).eq("id", otra.id).select("id"),
-  ]);
-  const e = e1.error || e2.error;
-  if (e) return e.message;
-  if (!e1.data?.length || !e2.data?.length) return "La base no dejó mover la etapa.";
+  const [movida] = lista.splice(i, 1);
+  lista.splice(j, 0, movida);
+  return renumerar(lista);
+}
+
+/** Dejar los `orden` en 0,1,2… tal como se ven. Sin empates posibles. */
+export async function renumerar(lista = []) {
+  const errores = await Promise.all(lista.map((f, k) =>
+    supabase.from("cronograma_fases").update({ orden: k }).eq("id", f.id).select("id")));
+  const e = errores.find(r => r.error);
+  if (e) return e.error.message;
+  if (errores.some(r => !r.data?.length)) return "La base no dejó mover la etapa.";
   return null;
 }
 
