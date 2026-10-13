@@ -7,7 +7,7 @@ import { leerMemoria, recordar } from "./memoriaNova";
 import { memoriaEnPalabras } from "./apuntes";
 import { UNIDAD, magnitudes, rendimiento } from "./magnitudes";
 import { jsonTolerante } from "../../lib/jsonTolerante";
-import { JUICIO, pedirANova, textoDeNova, porQueFallo } from "../../lib/modelos";
+import { JUICIO, LECTURA, pedirANova, textoDeNova, porQueFallo } from "../../lib/modelos";
 
 // NOVA arma el cronograma de la obra desde las agrupaciones del presupuesto.
 //
@@ -575,6 +575,85 @@ export async function aprenderDeUnaDuracion({ nombre, dias, magnitud = null, par
       : `${d} días hábiles`,
     quien,
   });
+}
+
+
+/**
+ * EN QUÉ ETAPAS SE PARTE ESTA OBRA, y qué va en cada una.
+ *
+ * Agrupar cuarenta barras en cinco títulos es lo que convierte un cronograma
+ * en algo que se puede mirar en una reunión. Y es trabajo que NOVA hace bien y
+ * rápido: los nombres de las actividades ya dicen a qué etapa pertenecen
+ * —"demolición de mampostería" no va en acabados— y el orden de las etapas es
+ * el orden de una obra, que es lo que sabe.
+ *
+ * Con el modelo rápido a propósito. No es el criterio difícil del cronograma
+ * —ahí hay que sacar rendimientos y decidir traslapes—: acá los trabajos ya
+ * están, con sus fechas calculadas, y lo único que falta es ponerles un
+ * techo. Pedirle el modelo grande sería pagar de más y arriesgar que la
+ * consulta se pase del minuto que tiene el servidor.
+ *
+ * LAS FECHAS NO SE TOCAN. Una etapa no manda sobre cuándo pasa nada: agrupa.
+ * Por eso NOVA no devuelve ni duraciones ni dependencias acá, y por eso puede
+ * hacerse sobre un cronograma ya armado sin riesgo de arruinarlo.
+ */
+export async function proponerEtapas(actividades = []) {
+  const vivas = actividades.filter(a => a.nombre);
+  if (!vivas.length) return { error: "Todavía no hay actividades que agrupar." };
+  try {
+    const sistema = `Eres NOVA y agrupas en ETAPAS el cronograma de una obra en Ecuador.
+
+ACTIVIDADES, con el día en que arrancan:
+${vivas.map(a => `${a.id} · ${a.nombre}${a.inicio ? ` · arranca ${a.inicio}` : ""}`).join("\n")}
+
+Devuelves SOLO JSON, sin markdown:
+
+{"etapas":[{"nombre":"Demoliciones","ids":[12,13]},
+           {"nombre":"Obra gris","ids":[14,15,16]}]}
+
+Las etapas van EN EL ORDEN EN QUE OCURREN: la primera arriba. Usá los nombres
+con que se habla en obra —preliminares, demoliciones, obra gris, instalaciones,
+acabados, equipamiento, entrega— y no inventes una etapa por actividad: entre
+tres y seis etapas para toda la obra. Si una obra es chica, tres.
+
+CADA ACTIVIDAD VA EN UNA SOLA ETAPA, y todas tienen que ir en alguna. Si una no
+encaja en ninguna —la dirección de obra, los gastos generales, que duran toda
+la obra— ponela en una etapa que se llame "Transversales" al final.
+
+No cambies duraciones ni dependencias: no te las estoy pidiendo y las fechas ya
+están calculadas. Esto es solo cómo se lee el cronograma.`;
+
+    const { res, data } = await pedirANova({
+      model: LECTURA, max_tokens: 3000,
+      system: sistema,
+      messages: [{ role: "user", content: "Agrupá estas actividades en etapas. Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "agruparlas en etapas") };
+    const { datos } = jsonTolerante(textoDeNova(data));
+    if (!datos?.etapas?.length) return { error: "NOVA no devolvió etapas que se entiendan. Probá de nuevo." };
+
+    const validos = new Set(vivas.map(a => Number(a.id)));
+    const usados = new Set();
+    const etapas = datos.etapas
+      .map(e => {
+        // Una actividad en dos etapas no existe: se queda en la primera que la
+        // nombró. Y un id inventado se tira, como todo lo que vuelve de NOVA
+        // apuntando a algo que no existe.
+        const ids = [];
+        (e.ids || []).map(Number).forEach(id => {
+          if (!validos.has(id) || usados.has(id)) return;
+          usados.add(id);
+          ids.push(id);
+        });
+        return { nombre: String(e.nombre || "Etapa").trim().slice(0, 80), ids };
+      })
+      .filter(e => e.ids.length);
+    if (!etapas.length) return { error: "NOVA devolvió etapas vacías. Probá de nuevo." };
+    const sueltas = vivas.filter(a => !usados.has(Number(a.id))).length;
+    return { etapas, sueltas };
+  } catch (e) {
+    return { error: "NOVA devolvió algo que no se entiende: " + e.message };
+  }
 }
 
 /**

@@ -7,10 +7,11 @@ import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, proponerCronograma, guardarPropuesta, aprenderDelCronograma, acomodarCambios,
-  revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion } from "./novaCronograma";
+  revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion, proponerEtapas } from "./novaCronograma";
 import { leerMemoria, olvidar } from "./memoriaNova";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { magnitudDe } from "./magnitudes";
+import { fasesDe, crearFase, renombrarFase, borrarFase, moverFase, asignarFase, SIN_101 } from "./fases";
 import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./versiones";
 import { comparar } from "./compararVersion";
 import { bajarProject } from "./exportarProject";
@@ -89,6 +90,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // único que vuelve confiable a una memoria.
   const [memoria, setMemoria] = useState([]);
   const [verMemoria, setVerMemoria] = useState(false);
+  // LAS ETAPAS DE LA OBRA: demoliciones, obra gris, instalaciones, acabados.
+  // No mandan sobre las fechas —eso lo dicen las dependencias— sino sobre cómo
+  // se lee el cronograma, que con cuarenta barras es la mitad del problema.
+  const [fases, setFases] = useState([]);
   // Cuánta plata tiene cada agrupación, para decir cuánto sale cada mes.
   const [plata, setPlata] = useState({});
   // Los rubros de la obra, para poder señalar cuál es el que está trabando a
@@ -211,6 +216,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     } else setDependencias([]);
   }, [lead?.id]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  const cargarFases = useCallback(async () => {
+    if (!lead?.id) { setFases([]); return; }
+    const { fases: f } = await fasesDe(lead.id);
+    setFases(f);
+  }, [lead?.id]);
+  useEffect(() => { cargarFases(); }, [cargarFases]);
 
   const cargarMemoria = useCallback(async () => {
     const { memoria: m } = await leerMemoria("cronograma");
@@ -936,6 +948,107 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     ]);
     if (e1.error || e2.error) { setError("No se pudo mover: " + (e1.error || e2.error).message); return; }
     await cargar();
+  }
+
+  // ── Las etapas de la obra ────────────────────────────────────────────────
+
+  async function agregarEtapa() {
+    const nombre = window.prompt("¿Cómo se llama la etapa?\n\nEj: Demoliciones · Obra gris · Instalaciones · Acabados · Entrega");
+    if (!nombre?.trim()) return;
+    // Al final de la lista: una etapa nueva es la que sigue. Si va antes se
+    // sube con las flechas, que es un movimiento y no una decisión.
+    const r = await crearFase({
+      leadId: lead.id, nombre,
+      orden: fases.length ? Math.max(...fases.map(f => f.orden ?? 0)) + 1 : 0,
+      quien: currentUser,
+    });
+    if (r.error) { setError(r.error); return; }
+    setError(""); await cargarFases();
+  }
+
+  /**
+   * Que NOVA las arme y las ordene.
+   *
+   * Los nombres de las actividades ya dicen a qué etapa pertenecen y el orden
+   * de las etapas es el orden de una obra: es trabajo que hace bien y en
+   * segundos. Lo que se ve antes de aceptar es la lista entera —cada etapa con
+   * cuántas barras lleva— porque reemplaza las etapas que haya, y eso no se
+   * hace a ciegas.
+   */
+  async function etapasConNova() {
+    if (!actividades.length) { setError("Todavía no hay actividades que agrupar en etapas."); return; }
+    setPensando(true);
+    const r = await proponerEtapas(todas);
+    setPensando(false);
+    if (r.error) { setError(r.error); return; }
+    const resumen = r.etapas.map((e, i) => `  ${i + 1}. ${e.nombre} — ${e.ids.length} ${e.ids.length === 1 ? "barra" : "barras"}`).join("\n");
+    if (!window.confirm(
+      `NOVA propone ${r.etapas.length} etapas:\n\n${resumen}\n\n` +
+      (r.sueltas ? `${r.sueltas} ${r.sueltas === 1 ? "actividad queda" : "actividades quedan"} sin etapa.\n\n` : "") +
+      (fases.length ? `Reemplaza las ${fases.length} etapas de ahora. ` : "") +
+      "No cambia ninguna fecha ni ninguna duración: solo cómo se lee el cronograma.")) return;
+
+    setPensando(true);
+    setError("");
+    // Las de antes se van primero: `on delete set null` deja las actividades
+    // donde están, así que no se pierde nada en el camino.
+    for (const f of fases) await borrarFase(f.id);
+    for (let i = 0; i < r.etapas.length; i++) {
+      const hecha = await crearFase({ leadId: lead.id, nombre: r.etapas[i].nombre, orden: i, quien: currentUser });
+      if (hecha.error) { setPensando(false); setError(hecha.error); return; }
+      const e = await asignarFase(r.etapas[i].ids, hecha.fase.id);
+      if (e) { setPensando(false); setError(e === SIN_101 ? SIN_101 : e); return; }
+    }
+    setPensando(false);
+    await Promise.all([cargarFases(), cargar()]);
+  }
+
+  async function moverEtapaDeObra(fase, direccion) {
+    const e = await moverFase(fases, fase.id, direccion);
+    if (e) { setError(e); return; }
+    setError(""); await cargarFases();
+  }
+
+  async function renombrarEtapaDeObra(fase, nombre) {
+    const e = await renombrarFase(fase.id, nombre);
+    if (e) { setError(e); return; }
+    setError(""); await cargarFases();
+  }
+
+  /**
+   * Borrar una etapa no borra la obra que tiene adentro.
+   *
+   * Es la equivocación más fácil de cometer —uno borra "Etapa 2" creyendo que
+   * borra un título— así que el aviso dice qué pasa con las actividades antes
+   * de que uno apriete, y no después.
+   */
+  async function borrarEtapaDeObra(fase) {
+    const adentro = actividades.filter(a => Number(a.fase_id) === Number(fase.id)).length;
+    if (!window.confirm(
+      `¿Borrar la etapa "${fase.nombre}"?\n\n` +
+      (adentro
+        ? `Sus ${adentro} ${adentro === 1 ? "actividad queda" : "actividades quedan"} sin etapa, al final de la tabla. No se borra ninguna.`
+        : "No tiene nada adentro."))) return;
+    const e = await borrarFase(fase.id);
+    if (e) { setError(e); return; }
+    setError(""); await Promise.all([cargarFases(), cargar()]);
+  }
+
+  /**
+   * Meter una barra en una etapa.
+   *
+   * Un rubro partido en anticipo, fabricación e instalación se mueve ENTERO:
+   * en la tabla es una sola cosa y tiene que salir en un solo lugar. Mover una
+   * parte sola dejaría al rubro apareciendo en dos etapas, y nadie podría
+   * decir en cuál de las dos está.
+   */
+  async function ponerEnEtapa(a, faseId) {
+    const ids = a.obra_actividad_id
+      ? actividades.filter(x => x.obra_actividad_id === a.obra_actividad_id).map(x => x.id)
+      : [a.id];
+    const e = await asignarFase(ids, faseId);
+    if (e) { setError(e); return; }
+    setError(""); await cargar();
   }
 
   async function quitar(a) {
@@ -2101,7 +2214,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
           onMoverEtapa={moverEtapa}
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
-          platas={platas} memoria={memoria} />
+          platas={platas} memoria={memoria}
+          fases={fases} onFase={ponerEnEtapa} onMoverFase={moverEtapaDeObra}
+          onRenombrarFase={renombrarEtapaDeObra} onBorrarFase={borrarEtapaDeObra} />
       )}
 
       {editable && (
@@ -2114,6 +2229,19 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             onCommit={v => setNueva(x => ({ ...(x || { nombre: "" }), duracion: v }))}
             style={{ width: 80 }} />
           <Button variant="primary" size="sm" onClick={agregar}><Plus size={13} /> Agregar</Button>
+          {/* LAS ETAPAS, al lado de las actividades y no escondidas en un
+              menú: son dos maneras de agregar al cronograma —una barra, o el
+              título que agrupa barras— y se usan en el mismo momento. */}
+          <Button variant="outline" size="sm" onClick={agregarEtapa}
+            title="Una etapa de la obra: demoliciones, obra gris, acabados. Agrupa barras para poder leer el cronograma; no cambia ninguna fecha.">
+            <Plus size={13} /> Etapa de la obra
+          </Button>
+          {actividades.length > 0 && (
+            <Button variant="outline" size="sm" disabled={pensando} onClick={etapasConNova}
+              title="NOVA agrupa las barras en etapas y las ordena como ocurren. No toca ninguna fecha.">
+              <Sparkles size={13} /> {pensando ? "NOVA está mirando…" : "Que NOVA las arme"}
+            </Button>
+          )}
         </div>
       )}
 

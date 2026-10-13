@@ -7,6 +7,7 @@ import Numero from "../../components/ui/Numero";
 import { ETAPAS } from "./cpm";
 import { fmt } from "../controlObra/calculos";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
+import { porFases, tramoDe } from "./agruparPorFase";
 
 // La tabla del cronograma: cómo se lee.
 //
@@ -73,6 +74,7 @@ export default function TablaGantt({
   uniendo, setUniendo, hoyISO, dia,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
   rubros = [], sinSenalar, onSenalar, platas = null, memoria = [],
+  fases = [], onFase, onMoverFase, onRenombrarFase, onBorrarFase,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -148,6 +150,11 @@ export default function TablaGantt({
     return a.posicion - b.posicion;
   });
 
+  // LAS ETAPAS DE LA OBRA, que es como se lee un cronograma de cuarenta
+  // barras: "demoliciones, obra gris, instalaciones, acabados". Mientras no
+  // haya ninguna no se dibuja ninguna banda — una obra chica no las necesita.
+  const bandas = porFases(grupos, fases);
+
   // Los rubros de cada grupo, para poder abrirlos y señalar el que traba.
   const rubrosDe = new Map();
   rubros.forEach(r => {
@@ -199,7 +206,15 @@ export default function TablaGantt({
         <span />
       </div>
 
-      {grupos.map(g => {
+      {bandas.map(({ fase, grupos: suyos }, iBanda) => (
+        <div key={fase?.id || "sin-etapa"}>
+          {fases.length > 0 && (
+            <BandaEtapa ui={ui} fase={fase} grupos={suyos} editable={editable} cal={cal}
+              primera={iBanda === 0} ultima={iBanda === bandas.length - 1 && !!fase}
+              diasTotales={diasTotales}
+              onMover={onMoverFase} onRenombrar={onRenombrarFase} onBorrar={onBorrarFase} />
+          )}
+      {suyos.map(g => {
         const plegado = plegados.has(g.id);
         const misRubros = rubrosDe.get(g.id) || [];
         const senalados = misRubros.filter(r => r.crono_senalado);
@@ -548,6 +563,21 @@ export default function TablaGantt({
                       padding: "11px 13px", display: "grid", gap: 10 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <strong style={{ fontSize: 13, color: colors.ink, flex: 1 }}>{a.nombre}</strong>
+                        {/* EN QUÉ ETAPA DE LA OBRA VA.
+                            Acá y no en la fila: es algo que se decide una vez
+                            y después no se toca, y la fila ya tiene todo lo
+                            que se mira seguido. Mover un rubro partido mueve
+                            sus partes juntas — en la tabla es una sola cosa y
+                            tiene que salir en un solo lugar. */}
+                        {fases.length > 0 && editable && (
+                          <select value={a.fase_id || ""} onChange={e => onFase?.(a, e.target.value ? Number(e.target.value) : null)}
+                            title="En qué etapa de la obra va"
+                            style={{ ...inputStyle, width: "auto", maxWidth: 190, fontSize: 11.5, padding: "3px 6px", height: 26 }}>
+                            <option value="">Sin etapa</option>
+                            {[...fases].sort((x, y) => (x.orden ?? 0) - (y.orden ?? 0))
+                              .map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                          </select>
+                        )}
                         <button onClick={() => setAbierta(null)} style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
                           <X size={14} />
                         </button>
@@ -785,11 +815,90 @@ export default function TablaGantt({
           </div>
         );
       })}
+        </div>
+      ))}
     </div>
   );
 }
 
 // ── Las piezas de la tabla ──────────────────────────────────────────────────
+
+/**
+ * LA BANDA DE UNA ETAPA DE LA OBRA.
+ *
+ * Es un título con una barra: de cuándo arranca lo primero de la etapa a
+ * cuándo termina lo último. Esas fechas no se guardan en ningún lado —se leen
+ * de lo que tiene adentro— porque una etapa con fechas propias podría decir
+ * algo distinto de sus actividades, y entonces habría dos verdades.
+ *
+ * Las flechas mueven la etapa ENTERA y no tocan ninguna fecha: el orden de las
+ * etapas es cómo se lee el cronograma, no cómo se calcula. Una etapa puede
+ * traslaparse con la que sigue —los acabados de abajo mientras arriba hay obra
+ * gris— y eso lo dicen las dependencias.
+ */
+const BandaEtapa = ({ ui, fase, grupos, editable, primera, ultima, diasTotales, cal, onMover, onRenombrar, onBorrar }) => {
+  const t = tramoDe(grupos);
+  const sinEtapa = !fase;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: `${ui.IZQ}px ${ui.anchoLienzo}px`, gap: 7,
+      padding: "8px 12px 8px 0", borderTop: `2px solid ${sinEtapa ? colors.border : colors.brand}`,
+      alignItems: "center", width: "max-content", minWidth: "100%",
+      background: sinEtapa ? colors.bg : colors.brandSoft }}>
+      <div style={{ position: "sticky", left: 0, display: "flex", alignItems: "center", gap: 6,
+        padding: "0 0 0 12px", background: sinEtapa ? colors.bg : colors.brandSoft, zIndex: 2 }}>
+        {editable && !sinEtapa && (
+          <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+            <button onClick={() => onMover?.(fase, -1)} disabled={primera} title="Subir esta etapa"
+              style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 9,
+                cursor: primera ? "default" : "pointer", color: primera ? colors.border : colors.brand }}>▲</button>
+            <button onClick={() => onMover?.(fase, 1)} disabled={ultima} title="Bajar esta etapa"
+              style={{ background: "none", border: "none", padding: "0 2px", lineHeight: 1, fontSize: 9,
+                cursor: ultima ? "default" : "pointer", color: ultima ? colors.border : colors.brand }}>▼</button>
+          </div>
+        )}
+        {sinEtapa ? (
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: colors.muted, letterSpacing: 0.3 }}>
+            TODAVÍA SIN ETAPA
+          </span>
+        ) : editable ? (
+          // Se renombra escribiendo encima. Una etapa nace como "Etapa 1" y
+          // termina llamándose "Demoliciones": abrir un diálogo para eso sería
+          // tres clicks para cambiar una palabra.
+          <input defaultValue={fase.nombre}
+            onBlur={e => { if ((e.target.value || "").trim() && e.target.value !== fase.nombre) onRenombrar?.(fase, e.target.value); }}
+            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+            title="Escribí para renombrar la etapa"
+            style={{ background: "transparent", border: "1px solid transparent", borderRadius: 5,
+              fontSize: 12.5, fontWeight: 700, color: colors.brand, fontFamily: colors.font,
+              letterSpacing: 0.2, padding: "2px 5px", minWidth: 60, flex: "1 1 auto", maxWidth: 230 }} />
+        ) : (
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: colors.brand, letterSpacing: 0.2 }}>{fase.nombre}</span>
+        )}
+        <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>
+          {t.barras || "sin"} {t.barras === 1 ? "barra" : "barras"}
+          {t.inicio && ` · ${ui.dia(t.inicio)} a ${ui.dia(t.fin)}`}
+        </span>
+        {editable && !sinEtapa && (
+          <button onClick={() => onBorrar?.(fase)} title="Borrar la etapa. Lo que tiene adentro no se borra."
+            style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+              display: "flex", flexShrink: 0, padding: 2 }}>
+            <X size={12} />
+          </button>
+        )}
+      </div>
+      <div style={{ position: "relative", height: 16 }}>
+        {t.inicio && (
+          <div title={`${fase?.nombre || "Sin etapa"}: del ${ui.dia(t.inicio)} al ${ui.dia(t.fin)}`}
+            style={{ position: "absolute", top: 5, bottom: 5,
+              left: `${ui.posicion(t.inicio) * 100}%`,
+              width: `${Math.max((cal.entre(t.inicio, t.fin) / diasTotales) * 100, 0.6)}%`,
+              background: sinEtapa ? colors.neutralSoft : colors.brand, opacity: sinEtapa ? 1 : 0.35,
+              borderRadius: 3 }} />
+        )}
+      </div>
+    </div>
+  );
+};
 
 const Fila = ({ ui, children, fondo }) => (
   <div style={{ display: "grid", gridTemplateColumns: `${ui.IZQ}px ${ui.anchoLienzo}px`, gap: 7,
