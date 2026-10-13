@@ -504,11 +504,15 @@ export async function aplicarTiemposYOrden({ duraciones = [], dependencias = [],
  * moverse porque entró una orden en otra parte.
  */
 export async function recalcularPorOrdenes({ cambios = [], actividades = [], fases = [],
-  dias = 0, nombreObra = "", cal = calendario() }) {
-  if (!cambios.length) return { error: "No hay órdenes de cambio que recalcular." };
+  ordenes = [], lineas = [], dias = 0, nombreObra = "", cal = calendario() }) {
+  if (!cambios.length && !ordenes.length) return { error: "No hay órdenes de cambio que recalcular." };
   const afectadas = new Set(cambios.map(c => Number(c.id)));
-  const suyas = actividades.filter(a => afectadas.has(Number(a.obra_actividad_id)) && !a.es_hito);
-  if (!suyas.length) return { error: "Las agrupaciones que cambiaron no tienen barra en este cronograma." };
+  const suyas = cambios.length
+    ? actividades.filter(a => afectadas.has(Number(a.obra_actividad_id)) && !a.es_hito)
+    // Cuando la señal son las órdenes y no la variación de monto, NOVA puede
+    // necesitar mover cualquier barra: es ella la que sabe a cuál le pega.
+    : actividades.filter(a => !a.es_hito);
+  if (!suyas.length) return { error: "No hay barras que puedan cambiar." };
 
   const { memoria } = await leerMemoria("cronograma");
   const porFase = new Map(fases.map(f => [Number(f.id), f.nombre]));
@@ -519,7 +523,7 @@ export async function recalcularPorOrdenes({ cambios = [], actividades = [], fas
     porAgrup.get(k).push(a);
   });
 
-  const lista = cambios.map(c => {
+  const lista = (cambios.length ? cambios : []).map(c => {
     const barras = porAgrup.get(Number(c.id)) || [];
     if (!barras.length) return null;
     const detalle = barras.map(a => {
@@ -534,10 +538,31 @@ export async function recalcularPorOrdenes({ cambios = [], actividades = [], fas
 agrupaciones que cambiaron de monto y sus barras del cronograma siguen
 midiendo lo mismo. Hay que decir cuánto tiempo más —o menos— lleva eso.
 ${memoriaEnPalabras(memoria, "cronograma")}
-LO QUE CAMBIÓ, con las barras que le corresponden:
+${lista ? `LO QUE CAMBIÓ DE MONTO, con las barras que le corresponden:
 ${lista}
+` : ""}LAS BARRAS DEL CRONOGRAMA:
+${suyas.map(a => {
+  const et = a.fase_id != null ? porFase.get(Number(a.fase_id)) : null;
+  return `${a.id} · ${et ? `[${et}] ` : ""}${a.nombre} · ${a.duracion}d`;
+}).join("\n")}
 
-${dias ? `El plazo de contrato son ${dias} días hábiles.` : ""}
+${ordenes.length ? `
+LAS ÓRDENES DE CAMBIO, como las emitió la obra:
+${ordenes.map(o => {
+  const suyas = lineas.filter(l => Number(l.orden_id) === Number(o.id));
+  const detalle = suyas.slice(0, 12).map(l =>
+    `      ${l.tipo === "quita" ? "−" : "+"} ${l.descripcion}${l.cantidad ? ` · ${l.cantidad} ${l.unidad || ""}` : ""}`).join("\n");
+  return `${o.codigo || `OC-${o.numero}`} · ${o.titulo}${o.fecha ? ` · ${o.fecha}` : ""}`
+    + (o.justificacion ? `\n      por qué: ${String(o.justificacion).slice(0, 220)}` : "")
+    + (o.dias_impacto ? `\n      la obra declaró ${o.dias_impacto} días de impacto` : "")
+    + (o.impacto_cronograma ? `\n      y dijo: ${String(o.impacto_cronograma).slice(0, 220)}` : "")
+    + (detalle ? `\n${detalle}` : "");
+}).join("\n")}
+
+LO QUE LA OBRA YA DECLARÓ AL EMITIR LA ORDEN VALE MÁS QUE TU CUENTA. Si dice
+"8 días de impacto", empezá por ahí: lo escribió alguien que estaba parado en
+la obra. Apartate solo si las barras muestran que no puede ser, y decí por qué.
+` : ""}${dias ? `El plazo de contrato son ${dias} días hábiles.` : ""}
 
 Devolvés SOLO JSON, sin markdown:
 

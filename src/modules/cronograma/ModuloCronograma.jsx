@@ -14,6 +14,7 @@ import { leerMemoria, olvidar } from "./memoriaNova";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { magnitudDe } from "./magnitudes";
 import { fasesDe, crearFase, renombrarFase, borrarFase, moverFase, asignarFase, SIN_101 } from "./fases";
+import { ordenesPendientes, lineasDe, marcarAplicada } from "./ordenesEnCronograma";
 import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./versiones";
 import { comparar } from "./compararVersion";
 import { bajarProject } from "./exportarProject";
@@ -96,6 +97,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // No mandan sobre las fechas —eso lo dicen las dependencias— sino sobre cómo
   // se lee el cronograma, que con cuarenta barras es la mitad del problema.
   const [fases, setFases] = useState([]);
+  // Las órdenes de cambio aprobadas que el cronograma todavía no tomó.
+  const [ordenes, setOrdenes] = useState([]);
   const [etapaNueva, setEtapaNueva] = useState("");
   const [motivoVersion, setMotivoVersion] = useState("");
   // En qué etapa se está agregando una actividad, y cómo se llama.
@@ -226,6 +229,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     } else setDependencias([]);
   }, [lead?.id]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  const cargarOrdenes = useCallback(async () => {
+    if (!lead?.obra_id) { setOrdenes([]); return; }
+    const { ordenes: o } = await ordenesPendientes(lead.obra_id);
+    setOrdenes(o);
+  }, [lead?.obra_id]);
+  useEffect(() => { cargarOrdenes(); }, [cargarOrdenes]);
 
   const cargarFases = useCallback(async () => {
     if (!lead?.id) { setFases([]); return; }
@@ -2150,6 +2160,81 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             Lee el cronograma como está —con tus duraciones, cadenas y etapas— y propone mejoras sueltas.
             No borra nada: vos aceptás una por una.
           </span>
+        </div>
+      )}
+
+      {/* LAS ÓRDENES DE CAMBIO, AVISADAS EN EL CRONOGRAMA.
+          Una orden aprobada es trabajo nuevo con fecha, monto y muchas veces
+          un impacto de plazo que alguien ya escribió al emitirla. Todo eso
+          vive en Control de Obra y el cronograma no lo miraba: la obra seguía
+          prometiendo la fecha del contrato mientras acumulaba trabajo que
+          nadie puso en el tiempo, y el atraso aparecía cuando ya no se podía
+          justificar. Una ampliación de plazo se pide con la orden en la mano
+          y en el momento. */}
+      {ordenes.length > 0 && todas.length > 0 && (
+        <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+          padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <AlertTriangle size={15} color={colors.warning} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, lineHeight: 1.5 }}>
+              <strong>{ordenes.length}</strong> {ordenes.length === 1 ? "orden de cambio aprobada que el cronograma todavía no tomó" : "órdenes de cambio aprobadas que el cronograma todavía no tomó"}:
+              <div style={{ marginTop: 4 }}>
+                {ordenes.slice(0, 6).map(o => (
+                  <div key={o.id} style={{ fontSize: 11.5, color: colors.inkSoft }}>
+                    · <strong style={{ color: colors.ink }}>{o.codigo || `OC-${o.numero}`}</strong> {o.titulo}
+                    {o.dias_impacto ? <span style={{ color: colors.warning, fontWeight: 600 }}> · la obra declaró {o.dias_impacto} días</span> : null}
+                  </div>
+                ))}
+                {ordenes.length > 6 && <div style={{ fontSize: 11.5, color: colors.muted }}>…y {ordenes.length - 6} más</div>}
+              </div>
+            </div>
+          </div>
+          {editable && (
+            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
+                setPensando(true); setError("");
+                const d = desfase(actividades, agrupaciones, plata, cubrePresupuesto);
+                const lineas = await lineasDe(ordenes.map(o => o.id));
+                const r = await recalcularPorOrdenes({
+                  cambios: d.dePlata, ordenes, lineas, actividades, fases,
+                  dias: diasDeContrato, nombreObra: lead.nombre, cal,
+                });
+                if (r.error) { setPensando(false); setError(r.error); return; }
+                const detalle = r.duraciones.map(x => {
+                  const a = actividades.find(y => y.id === x.id);
+                  return `  · ${a?.nombre}: de ${a?.duracion} a ${x.dias} días${x.porque ? ` — ${x.porque}` : ""}`;
+                }).join("\n");
+                if (!window.confirm(
+                  `${r.dictamen || "NOVA leyó las órdenes."}\n\n`
+                  + (detalle ? `${detalle}\n\n` : "Ninguna barra cambia de duración.\n\n")
+                  + "Se aplica y las órdenes quedan marcadas como tomadas por el cronograma.")) {
+                  setPensando(false); return;
+                }
+                for (const x of r.duraciones) {
+                  await supabase.from("cronograma_actividades")
+                    .update({ duracion: x.dias, nota: x.porque }).eq("id", x.id);
+                }
+                const e = await marcarAplicada(ordenes.map(o => o.id));
+                await refrescarMontoRef();
+                setPensando(false);
+                if (e) { setError(e); return; }
+                await Promise.all([cargar(), cargarOrdenes()]);
+                setAviso(`${r.dictamen || ""} · ${r.duraciones.length} ${r.duraciones.length === 1 ? "barra cambió" : "barras cambiaron"}.`);
+              }}>
+                <Sparkles size={13} /> {pensando ? "NOVA está leyéndolas…" : "¿Cuántos días piden estas órdenes?"}
+              </Button>
+              <Button variant="secondary" size="sm" disabled={pensando} onClick={async () => {
+                if (!window.confirm(
+                  `¿Marcar ${ordenes.length === 1 ? "esta orden" : `estas ${ordenes.length} órdenes`} como ya contempladas?\n\n`
+                  + "Usalo cuando el cronograma ya las tiene adentro, o cuando no mueven el plazo. "
+                  + "Deja de avisarte por ellas; no cambia ninguna fecha.")) return;
+                const e = await marcarAplicada(ordenes.map(o => o.id));
+                if (e) { setError(e); return; }
+                setError(""); await cargarOrdenes();
+              }}>Ya están contempladas</Button>
+            </div>
+          )}
         </div>
       )}
 
