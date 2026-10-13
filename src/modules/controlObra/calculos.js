@@ -50,7 +50,7 @@ export function repartirProporcional(monto, rubros) {
  *                      (monto exacto) o a una actividad (se reparte)
  * @param planillaNumero número de la planilla en curso; null = acumulado total
  */
-export function calcularControl({ rubros = [], facturas = [], asignaciones = [], planillaNumero = null }) {
+export function calcularControl({ rubros = [], facturas = [], asignaciones = [], pagos = [], planillaNumero = null }) {
   const planillaDeFactura = {};
   facturas.forEach(f => { planillaDeFactura[f.id] = f._planillaNumero ?? null; });
 
@@ -72,6 +72,37 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
     .map(f => f.id));
   let anticipado = 0;
+
+  // INVERTIDO ES LA PLATA QUE SE PUSO, NO EL PAPEL QUE SE EMITIÓ.
+  //
+  // Una factura de diez mil de la que se anticiparon dos mil puso DOS MIL en
+  // la obra. Los ocho mil que faltan son un saldo por pagar: son deuda con el
+  // proveedor, y van a ser obra cuando se paguen, pero hoy no lo son.
+  // Contarlos como invertido infla el acumulado de la planilla, achica el
+  // saldo contra el presupuesto y sube el avance económico, los tres en el
+  // mismo sentido y los tres de más.
+  //
+  // Cada asignación se cuenta en la MISMA proporción en que su factura está
+  // pagada: si de los diez mil se pagaron dos, cada rubro de esa factura entra
+  // al 20%. Es la única forma que reparte bien cuando una factura se repartió
+  // entre varios rubros.
+  //
+  // SI LA OBRA NO LLEVA PAGOS —ninguno cargado— se cuenta por facturas, como
+  // antes. Decir que no se invirtió nada sería mentir al revés y dejaría el
+  // control en cero el día que más se lo mira.
+  const pagadoDe = new Map();
+  pagos.forEach(p => pagadoDe.set(Number(p.factura_id), (pagadoDe.get(Number(p.factura_id)) || 0) + n(p.monto)));
+  const seLlevanPagos = pagos.length > 0;
+  const proporcion = new Map();
+  facturas.forEach(f => {
+    const total = n(f.total);
+    if (!seLlevanPagos || !total) { proporcion.set(f.id, 1); return; }
+    proporcion.set(f.id, Math.min(1, (pagadoDe.get(Number(f.id)) || 0) / total));
+  });
+  const puesto = a => n(a.monto) * (proporcion.has(a.factura_id) ? proporcion.get(a.factura_id) : 1);
+  // Lo asignado que todavía no se pagó: deuda con proveedores repartida por
+  // rubro. Es lo que va a entrar al control cuando se pague.
+  let porPagar = 0;
 
   const porRubro = {};
   rubros.forEach(r => {
@@ -116,9 +147,13 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
       : null;                                      // planillas posteriores no cuentan
     if (!campo) return;
 
+    // Lo que esta asignación puso de verdad en la obra, y lo que todavía debe.
+    const monto = puesto(a);
+    porPagar += n(a.monto) - monto;
+
     if (a.obra_rubro_id != null) {
       const acc = porRubro[a.obra_rubro_id];
-      if (acc) acc[campo] += n(a.monto);
+      if (acc) acc[campo] += monto;
       return;
     }
 
@@ -134,7 +169,7 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     // un reparto inventado.
     if (a.capitulo) {
       if (!porCapitulo[a.capitulo]) porCapitulo[a.capitulo] = { anterior: 0, periodo: 0 };
-      porCapitulo[a.capitulo][campo] += n(a.monto);
+      porCapitulo[a.capitulo][campo] += monto;
       return;
     }
     const destino = rubrosDe.get(a.obra_actividad_id) || [];
@@ -142,14 +177,14 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
       const id = a.obra_actividad_id;
       if (id != null) {
         if (!porActividad[id]) porActividad[id] = { anterior: 0, periodo: 0 };
-        porActividad[id][campo] += n(a.monto);
+        porActividad[id][campo] += monto;
       }
-      sinRepartir += n(a.monto);
+      sinRepartir += monto;
       return;
     }
     // Con un solo rubro no hay nada que repartir: el monto es exacto.
     const reparte = destino.length > 1;
-    repartirProporcional(a.monto, destino).forEach((parte, i) => {
+    repartirProporcional(monto, destino).forEach((parte, i) => {
       const acc = porRubro[destino[i].id];
       acc[campo] += parte;
       if (reparte) acc.estimado = true;
@@ -172,6 +207,10 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   // Lo anticipado a proveedores y todavía no recibido. No es invertido y no
   // es saldo: es plata que ya salió y obra que todavía no está.
   porRubro._anticipado = Math.round(anticipado * 100) / 100;
+  // Lo asignado a rubros que todavía no se pagó: deuda con proveedores que va
+  // a entrar al control cuando se pague. No es saldo de presupuesto.
+  porRubro._porPagar = Math.round(porPagar * 100) / 100;
+  porRubro._seLlevanPagos = seLlevanPagos;
   return porRubro;
 }
 

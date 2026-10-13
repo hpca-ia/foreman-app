@@ -221,3 +221,82 @@ test("sin anticipos, el control cuenta igual que siempre", () => {
   assert.equal(r[1].acumulado, 400);
   assert.equal(r._anticipado, 0);
 });
+
+// ── Invertido es la plata que se puso, no el papel que se emitió ──
+
+test("UNA FACTURA DE 10.000 CON 2.000 ANTICIPADOS PUSO 2.000 EN LA OBRA", () => {
+  const rubros = [{ id: 1, total_base: 30000, actividad_id: null }];
+  const facturas = [{ id: 10, _planillaNumero: 1, total: 10000, clase: "factura" }];
+  const asignaciones = [{ factura_id: 10, obra_rubro_id: 1, monto: 10000 }];
+  const pagos = [{ factura_id: 10, monto: 2000 }];
+  const r = calcularControl({ rubros, facturas, asignaciones, pagos, planillaNumero: 1 });
+  assert.equal(r[1].periodo, 2000);
+  assert.equal(r[1].saldo, 28000, "los 8.000 que faltan siguen siendo presupuesto por gastar");
+  assert.equal(r._porPagar, 8000, "y son deuda con el proveedor");
+});
+
+test("una factura repartida entre rubros entra en la misma proporción", () => {
+  const rubros = [
+    { id: 1, total_base: 10000, actividad_id: null },
+    { id: 2, total_base: 10000, actividad_id: null },
+  ];
+  const facturas = [{ id: 10, _planillaNumero: 1, total: 10000, clase: "factura" }];
+  const asignaciones = [
+    { factura_id: 10, obra_rubro_id: 1, monto: 6000 },
+    { factura_id: 10, obra_rubro_id: 2, monto: 4000 },
+  ];
+  const pagos = [{ factura_id: 10, monto: 5000 }];   // la mitad
+  const r = calcularControl({ rubros, facturas, asignaciones, pagos, planillaNumero: 1 });
+  assert.equal(r[1].periodo, 3000);
+  assert.equal(r[2].periodo, 2000);
+});
+
+test("una factura pagada entera entra entera", () => {
+  const rubros = [{ id: 1, total_base: 5000, actividad_id: null }];
+  const r = calcularControl({
+    rubros,
+    facturas: [{ id: 10, _planillaNumero: 1, total: 1200, clase: "factura" }],
+    asignaciones: [{ factura_id: 10, obra_rubro_id: 1, monto: 1200 }],
+    pagos: [{ factura_id: 10, monto: 1200 }],
+    planillaNumero: 1,
+  });
+  assert.equal(r[1].acumulado, 1200);
+  assert.equal(r._porPagar, 0);
+});
+
+test("pagar de más no hace que entre de más", () => {
+  const rubros = [{ id: 1, total_base: 5000, actividad_id: null }];
+  const r = calcularControl({
+    rubros,
+    facturas: [{ id: 10, _planillaNumero: 1, total: 1000, clase: "factura" }],
+    asignaciones: [{ factura_id: 10, obra_rubro_id: 1, monto: 1000 }],
+    pagos: [{ factura_id: 10, monto: 1500 }],
+    planillaNumero: 1,
+  });
+  assert.equal(r[1].acumulado, 1000);
+});
+
+test("SIN NINGÚN PAGO CARGADO el control cuenta por facturas, como antes", () => {
+  const rubros = [{ id: 1, total_base: 5000, actividad_id: null }];
+  const r = calcularControl({
+    rubros,
+    facturas: [{ id: 10, _planillaNumero: 1, total: 1200, clase: "factura" }],
+    asignaciones: [{ factura_id: 10, obra_rubro_id: 1, monto: 1200 }],
+    pagos: [],
+    planillaNumero: 1,
+  });
+  assert.equal(r[1].acumulado, 1200);
+  assert.equal(r._seLlevanPagos, false);
+});
+
+test("lo cargado a un capítulo entero también entra por lo pagado", () => {
+  const rubros = [{ id: 1, total_base: 9000, capitulo: "ALBAÑILERÍA", actividad_id: null }];
+  const r = calcularControl({
+    rubros,
+    facturas: [{ id: 10, _planillaNumero: 1, total: 4000, clase: "factura" }],
+    asignaciones: [{ factura_id: 10, capitulo: "ALBAÑILERÍA", monto: 4000 }],
+    pagos: [{ factura_id: 10, monto: 1000 }],
+    planillaNumero: 1,
+  });
+  assert.equal(r._porCapitulo["ALBAÑILERÍA"].periodo, 1000);
+});

@@ -148,7 +148,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
-  const porRubro = calcularControl({ rubros, facturas, asignaciones, planillaNumero: planillaActual?.numero ?? null });
+  const porRubro = calcularControl({ rubros, facturas, asignaciones, pagos, planillaNumero: planillaActual?.numero ?? null });
   // El comprometido PRIMERO: los grupos lo necesitan para poder dibujar el
   // bloque de gasto fuera del presupuesto cuando lo único que hay ahí todavía
   // es una compra aprobada sin factura.
@@ -181,14 +181,6 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   }
 
   const totales = totalesObra(grupos);
-  // De lo que figura como invertido, cuánto todavía no se pagó.
-  const sinPagarInvertido = (() => {
-    const pagadoDe = new Map();
-    pagos.forEach(p => pagadoDe.set(Number(p.factura_id), (pagadoDe.get(Number(p.factura_id)) || 0) + (Number(p.monto) || 0)));
-    return Math.round(facturas
-      .filter(f => f.clase !== "proforma" && f.clase !== "anticipo")
-      .reduce((t, f) => t + Math.max(0, (Number(f.total) || 0) - (pagadoDe.get(Number(f.id)) || 0)), 0) * 100) / 100;
-  })();
   // EL AVANCE DE OBRA: lo que cada rubro dice que tiene ejecutado, pesado por
   // lo que vale. Un rubro de cien mil al 50% pesa cincuenta veces más que uno
   // de mil al 100%, y un promedio simple diría cualquier cosa.
@@ -253,23 +245,21 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
           color={colors.inkSoft} />
       </div>
 
-      {/* CUÁNTO DE LO "INVERTIDO" TODAVÍA NO SE PAGÓ.
-          Invertido quiere decir obra que la empresa ya tiene: material puesto,
-          trabajo hecho. Cuando buena parte de eso está sin pagar hay dos
-          historias posibles y son muy distintas: o el proveedor entregó y hay
-          que pagarle —y entonces invertido está bien—, o se adelantó plata por
-          algo que no llegó, y entonces no es obra, es un anticipo. FOREMAN no
-          puede saber cuál es; quien dirige la obra sí, y en dos clicks. */}
-      {sinPagarInvertido > totales.acumulado * 0.25 && totales.acumulado > 0 && (
+      {/* LO ASIGNADO QUE TODAVÍA NO SE PAGÓ.
+          Invertido es la plata que se puso en la obra. Una factura de diez mil
+          de la que se anticiparon dos puso dos mil; los ocho que faltan son
+          deuda con el proveedor y van a ser obra cuando se paguen. Ese número
+          tiene que verse —es lo que va a entrar al control— pero aparte, para
+          que no infle el acumulado de la planilla ni achique el saldo. */}
+      {porRubro._porPagar > 0 && (
         <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
           border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
           padding: "9px 12px", marginBottom: 14, lineHeight: 1.5 }}>
-          De los <strong>${fmt(totales.acumulado)}</strong> invertidos, <strong>${fmt(sinPagarInvertido)}</strong> todavía
-          no se pagaron. Si alguna de esas facturas es un <strong>anticipo por algo que no llegó</strong> —una
-          fabricación, una importación— abrila en Facturas y poné «Anticipo a proveedor» en QUÉ ES ESTE
-          DOCUMENTO: deja de contar como obra hecha hasta que llegue.
-          <Button variant="outline" size="sm" style={{ marginTop: 7 }} onClick={() => setTab("facturas")}>
-            Ver las facturas
+          Hay <strong>${fmt(porRubro._porPagar)}</strong> asignados a rubros que todavía no se pagaron: van a
+          entrar al control cuando se paguen. <strong>Invertido cuenta la plata puesta</strong>, no lo
+          facturado — una factura de la que se anticipó una parte entra por esa parte.
+          <Button variant="outline" size="sm" style={{ marginTop: 7 }} onClick={() => setTab("proveedores")}>
+            Ver a quién se le debe
           </Button>
         </div>
       )}
