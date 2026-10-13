@@ -250,9 +250,22 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   }, []);
   useEffect(() => { cargarMemoria(); }, [cargarMemoria]);
 
-  // CON QUÉ CRITERIO SE ARMÓ ESTE CRONOGRAMA. Nulo son los de antes de que
-  // existieran los dos modos: se armaron cubriendo el presupuesto.
-  const cubrePresupuesto = lead?.crono_cubre !== false;
+  // LA ÚNICA RELACIÓN CON EL CONTROL SON LAS ÓRDENES DE CAMBIO.
+  //
+  // Esto estaba al revés y era una pelea diaria. El cronograma se trataba como
+  // si se hubiera comprometido a tener una barra por cada agrupación del
+  // presupuesto, salvo que alguien dijera lo contrario. Entonces un cronograma
+  // armado leyendo la obra —que es el que se usa— vivía con un aviso prendido
+  // que le reclamaba agrupaciones que nunca van a estar, nombres que son
+  // distintos a propósito, y un orden que es el de la obra y no el del
+  // presupuesto. Y al lado, un botón que arregla todo eso rompiéndolo.
+  //
+  // Ahora hay que PEDIR esa vigilancia, y se pide una sola vez: sirve cuando
+  // el cronograma va a sostener el valorado, porque ahí una agrupación sin
+  // tiempo es plata que no se puede repartir en los meses. En todos los demás
+  // casos el control avisa de lo único que de verdad cambia la obra: las
+  // órdenes de cambio.
+  const cubrePresupuesto = lead?.crono_cubre === true;
   const editable = !lead || nivelProyecto?.(lead.id) === "editar";
   // El cronograma vive en el proyecto; la obra es de dónde salen el
   // presupuesto y sus agrupaciones. Un proyecto para cotizar todavía no tiene
@@ -2029,6 +2042,26 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                           }],
                           ["Ver lo que NOVA aprendió", `${memoria.length} ${memoria.length === 1 ? "apunte" : "apuntes"} de obras anteriores`,
                             () => setVerMemoria(true)],
+                          // PEDIR QUE VIGILE EL PRESUPUESTO. Hace falta en la
+                          // obra cuyo cronograma va a sostener el valorado:
+                          // ahí una agrupación sin tiempo es plata que no se
+                          // puede repartir en los meses. En las demás, lo
+                          // único que importa del control son las órdenes.
+                          [cubrePresupuesto ? "Dejar de vigilar el presupuesto" : "Vigilar que estén todas las agrupaciones",
+                            cubrePresupuesto
+                              ? "Vuelve a avisar solo de las órdenes de cambio"
+                              : "Avisa si falta alguna agrupación del control. Para cuando el cronograma sostiene el valorado",
+                            async () => {
+                              const quiero = !cubrePresupuesto;
+                              const { error: e } = await supabase.from("leads")
+                                .update({ crono_cubre: quiero }).eq("id", lead.id);
+                              if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 103." : e.message); return; }
+                              setLead(l => ({ ...l, crono_cubre: quiero }));
+                              setError("");
+                              setAviso(quiero
+                                ? "Ahora avisa si falta alguna agrupación del presupuesto en el cronograma."
+                                : "Del control solo se avisan las órdenes de cambio.");
+                            }],
                         ].map(([label, pista, accion]) => (
                           <button key={label} onClick={async () => { setMenu(false); await accion(); }}
                             style={{ display: "block", width: "100%", textAlign: "left", background: "none",
@@ -2423,32 +2456,6 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 }}>
                 Ponerlo al día con el control
               </Button>
-            )}
-            {/* DECIR QUE ESTE CRONOGRAMA NO SIGUE EL PRESUPUESTO.
-                El criterio se guarda solo cuando NOVA lo arma, pero un
-                cronograma armado antes de que eso existiera —o escrito a
-                mano— no lo tiene, y entonces FOREMAN lo trata como si se
-                hubiera comprometido a cubrir el presupuesto: deja este aviso
-                prendido para siempre por agrupaciones que nunca van a estar.
-                Se dice una vez y se termina. */}
-            {editable && cubrePresupuesto && (d.nuevas.length > 0 || d.renombradas.length > 0) && (
-              <button onClick={async () => {
-                if (!window.confirm(
-                  "¿Este cronograma NO sigue el presupuesto?\n\n"
-                  + "Decí que sí cuando lo armaste leyendo la obra: los trabajos tienen nombres de obra, "
-                  + "alguno junta varias agrupaciones y otros no están en ninguna.\n\n"
-                  + "FOREMAN deja de avisarte que faltan agrupaciones y que los nombres no coinciden —eso "
-                  + "es a propósito— y sigue avisándote lo que sí importa: las órdenes de cambio y las "
-                  + "barras que apuntan a una agrupación borrada.")) return;
-                const { error: e } = await supabase.from("leads").update({ crono_cubre: false }).eq("id", lead.id);
-                if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 103." : e.message); return; }
-                setLead(l => ({ ...l, crono_cubre: false }));
-                setError("");
-              }}
-                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
-                  fontSize: 11, color: colors.muted, textDecoration: "underline" }}>
-                Este cronograma no sigue el presupuesto — no me avises de esto
-              </button>
             )}
           </div>
         );

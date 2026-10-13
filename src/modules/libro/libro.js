@@ -108,7 +108,7 @@ export async function abrirDia(leadId, fecha, quien) {
     .select("*").eq("lead_id", leadId).eq("fecha", fecha).maybeSingle();
   if (error) return { error: falta(error) ? "sin_tablas" : error.message };
   if (data) return { dia: data };
-  if (fecha !== hoyEnObra()) return { dia: null };   // un día pasado sin libro: no se inventa
+  if (fecha !== hoyEnObra()) return { dia: null };   // se abre aparte, con motivo
 
   const { data: creado, error: e2 } = await supabase.from("libro_obra_dias")
     .insert({ lead_id: leadId, fecha, created_by: quien?.id ?? null }).select().single();
@@ -120,6 +120,44 @@ export async function abrirDia(leadId, fecha, quien) {
     return yaEsta ? { dia: yaEsta } : { error: e2.message };
   }
   return { dia: creado };
+}
+
+/**
+ * ABRIR UN DÍA QUE NADIE ABRIÓ, después.
+ *
+ * Pasa y va a seguir pasando: el residente no entró, se cortó el internet, el
+ * día se fue. Hasta ahora ese día no existía en ningún lado —no se podía ver,
+ * ni completar, ni explicar— y el libro quedaba con un agujero que ni
+ * siquiera se veía como agujero. Es lo peor que le puede pasar a un registro:
+ * un día vacío y dicho es un registro, un día ausente es una duda.
+ *
+ * Nace ya marcado como escrito después, con el motivo y con el nombre de quien
+ * lo abrió. No es lo mismo que un día llevado en el momento y el libro no
+ * puede decir que sí: ahí está la mitad del valor de todo esto.
+ */
+export async function abrirDiaPasado(leadId, fecha, quien, motivo) {
+  const porque = String(motivo || "").trim();
+  if (!porque) return { error: "Escribí por qué se abre hoy un día que ya pasó: queda en el libro." };
+  const ahora = new Date().toISOString();
+  const { data, error } = await supabase.from("libro_obra_dias").insert({
+    lead_id: leadId, fecha, created_by: quien?.id ?? null,
+    estado: "abierto",
+    reabierto_at: ahora, reabierto_por: quien?.id ?? null, reabierto_nombre: quien?.name || null,
+    reabierto_motivo: porque, reaperturas: 1,
+  }).select().single();
+  if (error) {
+    // Sin la 095 no existen las columnas de reapertura: el día se abre igual
+    // —que es lo que hace falta— y el motivo se deja como primera anotación.
+    if (/column|schema cache/i.test(error.message)) {
+      const { data: simple, error: e2 } = await supabase.from("libro_obra_dias")
+        .insert({ lead_id: leadId, fecha, created_by: quien?.id ?? null, estado: "abierto" }).select().single();
+      if (e2) return { error: e2.message };
+      await anotar(simple, "nota", `Día abierto el ${hoyEnObra()} por ${quien?.name || "alguien"}: ${porque}`, quien);
+      return { dia: simple };
+    }
+    return { error: error.message };
+  }
+  return { dia: data };
 }
 
 export async function diasDe(leadId, cuantos = 30) {
