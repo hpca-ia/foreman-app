@@ -60,6 +60,35 @@ const MODOS = [
   { id: "FF", label: "termina con", pista: "Las dos terminan a la vez." },
 ];
 
+// CÓMO SE DICE UNA DEPENDENCIA SIN PEDIR UN NÚMERO NEGATIVO.
+//
+// Antes eran tres controles sueltos —un tipo ("va después de"), un número, y
+// una etiqueta que cambiaba sola— y la única manera de decir "entra seis días
+// antes de que la otra termine" era escribir MENOS SEIS. Nadie piensa en
+// retardos negativos: en obra se piensa "esto se traslapa con aquello". Un
+// signo que hay que deducir es un campo que se llena mal.
+//
+// Acá cada forma es una frase entera y el número que se escribe es siempre
+// positivo. El menos vive adentro y no sale a la pantalla nunca.
+const FORMAS = [
+  { id: "despues",  frase: "cuando termina",                  tipo: "FC", signo: 0 },
+  { id: "espera",   frase: "días después de que termine",     tipo: "FC", signo: 1,  numero: true },
+  { id: "traslape", frase: "días antes de que termine",       tipo: "FC", signo: -1, numero: true },
+  { id: "juntas",   frase: "a la vez que empieza",            tipo: "CC", signo: 0 },
+  { id: "terminan", frase: "y termina junto con",             tipo: "FF", signo: 0 },
+];
+
+/** De lo guardado a la forma que se muestra. */
+const formaDe = d => {
+  const r = Number(d?.retardo) || 0;
+  const t = d?.tipo || "FC";
+  if (t === "CC") return FORMAS[3];
+  if (t === "FF") return FORMAS[4];
+  if (r < 0) return FORMAS[2];
+  if (r > 0) return FORMAS[1];
+  return FORMAS[0];
+};
+
 // Lo que queda del nombre después del rubro: "Eléctricas · cableado" → "cableado".
 const sufijo = nombre => {
   const p = String(nombre || "").split(" · ");
@@ -431,9 +460,16 @@ export default function TablaGantt({
                           </span>
                         )}
                         {deps.length > 0 && (
+                          /* "↳ 2" SE LEÍA COMO "va después de la 02".
+                             Y era de lo más razonable leerlo así: las barras
+                             de al lado se llaman 02, 03, 04, que son sus
+                             códigos. El número era otra cosa —CUÁNTAS cosas la
+                             traban— y dos lecturas posibles en el mismo lugar
+                             es una sola cosa: un dato que no se puede usar.
+                             Con "de 2" solo queda la buena. */
                           <span title={deps.map(d => fraseDep(d, porId.get(d.depende_de_id)?.nombre)).join(" · ")}
                             style={{ fontSize: 9.5, color: colors.muted, flexShrink: 0 }}>
-                            ↳{deps.length > 1 ? ` ${deps.length}` : ""}
+                            ↳{deps.length > 1 ? ` de ${deps.length}` : ""}
                           </span>
                         )}
                         {a.inicio_fijo && (
@@ -599,38 +635,46 @@ export default function TablaGantt({
                         </button>
                       </div>
 
-                      {/* De qué depende */}
+                      {/* CUÁNDO EMPIEZA, dicho como se dice en obra. */}
                       <div>
-                        <label style={titulito}>DE QUÉ DEPENDE</label>
+                        <label style={titulito}>CUÁNDO EMPIEZA</label>
                         {!deps.length && (
                           <div style={{ fontSize: 11.5, color: colors.muted }}>
-                            De nada: arranca el día uno. Para encadenarla, tocá el eslabón de la que va antes y después el de ésta.
+                            El día uno: no espera a nada. Para que espere a otra, tocá el eslabón ⛓ de la
+                            que va antes y después el de ésta.
                           </div>
                         )}
                         {deps.map(d => {
-                          const r = Number(d.retardo) || 0;
+                          const forma = formaDe(d);
+                          const cuantos = Math.abs(Number(d.retardo) || 0);
                           return (
                             <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 5 }}>
                               {editable ? (
                                 <>
-                                  <select value={d.tipo || "FC"} onChange={e => onCambiarDep(d, { tipo: e.target.value })}
-                                    title={MODOS.find(m => m.id === (d.tipo || "FC"))?.pista}
+                                  <span style={{ fontSize: 11.5, color: colors.inkSoft }}>Empieza</span>
+                                  {forma.numero && (
+                                    <Numero value={cuantos || 1} min={1} max={365}
+                                      onCommit={v => onCambiarDep(d, { retardo: Math.abs(v) * forma.signo })}
+                                      title="Cuántos días. Siempre en positivo: lo que decide si es espera o traslape es la frase de al lado."
+                                      style={{ width: 46, padding: "3px 5px", fontSize: 11, height: 24, textAlign: "center" }} />
+                                  )}
+                                  <select value={forma.id}
+                                    onChange={e => {
+                                      const f = FORMAS.find(x => x.id === e.target.value);
+                                      onCambiarDep(d, { tipo: f.tipo, retardo: f.numero ? (cuantos || 1) * f.signo : 0 });
+                                    }}
                                     style={{ ...inputStyle, width: "auto", padding: "3px 5px", fontSize: 11, height: 24 }}>
-                                    {MODOS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                    {FORMAS.map(f => <option key={f.id} value={f.id}>{f.frase}</option>)}
                                   </select>
-                                  <span style={{ fontSize: 11.5, color: colors.ink, maxWidth: 190, overflow: "hidden",
-                                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                    {porId.get(d.depende_de_id)?.nombre || "?"}
+                                  <span style={{ fontSize: 11.5, color: colors.ink, fontWeight: 600, maxWidth: 210,
+                                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    «{porId.get(d.depende_de_id)?.nombre || "?"}»
                                   </span>
-                                  <Numero value={r} min={-365} max={365}
-                                    onCommit={v => onCambiarDep(d, { retardo: v })}
-                                    title="En negativo se traslapan: ésta arranca antes de que la otra termine."
-                                    style={{ width: 52, padding: "3px 5px", fontSize: 11, height: 24, textAlign: "center" }} />
-                                  <span style={{ fontSize: 11, color: r < 0 ? colors.brand : colors.muted, fontWeight: r < 0 ? 700 : 400 }}>
-                                    {r < 0 ? "días de traslape" : r > 0 ? "días de espera" : "días"}
-                                  </span>
-                                  <button onClick={() => onDesunir(d)} title="Quitar"
-                                    style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: "0 3px" }}>×</button>
+                                  {forma.id === "traslape" && (
+                                    <span style={{ fontSize: 10.5, color: colors.brand, fontWeight: 600 }}>traslapadas</span>
+                                  )}
+                                  <button onClick={() => onDesunir(d)} title="Que no espere a ésta"
+                                    style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", padding: "0 4px", fontSize: 13 }}>×</button>
                                 </>
                               ) : (
                                 <span style={{ fontSize: 11.5, color: colors.inkSoft }}>
@@ -640,13 +684,6 @@ export default function TablaGantt({
                             </div>
                           );
                         })}
-                        {deps.length > 0 && (
-                          <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5, marginTop: 2 }}>
-                            {/* Dicho en palabras abajo del control: es la
-                                comprobación de que uno puso lo que quería. */}
-                            {deps.map(d => fraseDep(d, porId.get(d.depende_de_id)?.nombre)).join(" · ")}
-                          </div>
-                        )}
                       </div>
 
                       {editable && (
@@ -664,7 +701,7 @@ export default function TablaGantt({
                               necesita, y NOVA lo propone al partir en etapas—
                               pero se corrige allá, que es donde se ve el
                               efecto. */}
-                          {conEtapas && (
+                          {conEtapas && g.hijas.length > 1 && (
                             <div>
                               <label style={titulito}>QUÉ MOMENTO ES</label>
                               <select value={a.etapa || "ejecucion"} onChange={e => onCambiar(a, { etapa: e.target.value })}
