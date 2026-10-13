@@ -28,6 +28,11 @@ export const CLASES_DOC = {
   nota_venta:    { label: "Nota de venta",  pista: "Régimen simplificado: es gasto válido y NO da crédito tributario" },
   recibo:        { label: "Recibo",         pista: "Un respaldo simple: honorarios, un servicio suelto" },
   proforma:      { label: "Proforma",       pista: "Todavía hay que pedir el documento definitivo" },
+  // UN ANTICIPO NO ES OBRA HECHA. Sale plata para que el proveedor arranque
+  // una fabricación o una importación, y el material todavía no llegó. Cuenta
+  // en la caja —salió— y no cuenta como invertido: se liquida cuando llega lo
+  // que se anticipó, y ahí vale la factura.
+  anticipo:      { label: "Anticipo a proveedor", pista: "Plata adelantada por algo que todavía no llegó: no cuenta como obra hecha hasta que se liquide" },
 };
 
 export const FORMAS_PAGO = ["transferencia", "cheque", "efectivo", "otro"];

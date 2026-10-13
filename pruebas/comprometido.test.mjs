@@ -177,3 +177,47 @@ test("una asignación sin su factura no revienta ni inventa una fila", () => {
   });
   assert.deepEqual(g, []);
 });
+
+// ── Anticipos a proveedor: plata que salió, obra que todavía no está ──
+
+test("UN ANTICIPO NO ES OBRA HECHA: no suma a invertido", () => {
+  const rubros = [{ id: 1, total_base: 20000, actividad_id: null }];
+  const facturas = [
+    { id: 10, _planillaNumero: 1, clase: "anticipo" },
+    { id: 11, _planillaNumero: 1, clase: "factura" },
+  ];
+  const asignaciones = [
+    { factura_id: 10, obra_rubro_id: 1, monto: 6000 },
+    { factura_id: 11, obra_rubro_id: 1, monto: 2000 },
+  ];
+  const r = calcularControl({ rubros, facturas, asignaciones, planillaNumero: 1 });
+  assert.equal(r[1].periodo, 2000, "solo la factura de lo que llegó");
+  assert.equal(r[1].acumulado, 2000);
+  assert.equal(r[1].saldo, 18000);
+  assert.equal(r._anticipado, 6000, "y el anticipo se cuenta aparte");
+});
+
+test("un anticipo LIQUIDADO deja de ser anticipo: lo que vale es la factura", () => {
+  const rubros = [{ id: 1, total_base: 20000, actividad_id: null }];
+  const facturas = [
+    { id: 10, _planillaNumero: 1, clase: "anticipo", facturada_con_id: 11 },
+    { id: 11, _planillaNumero: 1, clase: "factura" },
+  ];
+  // Al liquidar, la asignación del anticipo se borra y queda la de la factura.
+  const asignaciones = [{ factura_id: 11, obra_rubro_id: 1, monto: 20000 }];
+  const r = calcularControl({ rubros, facturas, asignaciones, planillaNumero: 1 });
+  assert.equal(r[1].acumulado, 20000);
+  assert.equal(r._anticipado, 0);
+});
+
+test("sin anticipos, el control cuenta igual que siempre", () => {
+  const rubros = [{ id: 1, total_base: 1000, actividad_id: null }];
+  const facturas = [{ id: 10, _planillaNumero: 1, clase: "factura" }];
+  const r = calcularControl({
+    rubros, facturas,
+    asignaciones: [{ factura_id: 10, obra_rubro_id: 1, monto: 400 }],
+    planillaNumero: 1,
+  });
+  assert.equal(r[1].acumulado, 400);
+  assert.equal(r._anticipado, 0);
+});

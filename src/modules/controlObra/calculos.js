@@ -54,6 +54,25 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   const planillaDeFactura = {};
   facturas.forEach(f => { planillaDeFactura[f.id] = f._planillaNumero ?? null; });
 
+  // UN ANTICIPO A PROVEEDOR NO ES OBRA HECHA.
+  //
+  // Cuando se le paga a un proveedor para que arranque una fabricación o una
+  // importación, esa plata sale de la caja —y la caja lo cuenta bien— pero el
+  // material no llegó y nadie lo instaló. Contarlo como invertido deja la obra
+  // más adelantada de lo que está y el saldo contra el presupuesto más chico
+  // de lo que es: en una obra con ventanería o equipos importados, decenas de
+  // miles de diferencia, justo en el renglón que uno mira para decidir si
+  // puede comprometer algo más.
+  //
+  // El anticipo se cuenta aparte y aparece como tal. Cuando llega lo que se
+  // anticipó se liquida —`facturada_con_id` apuntando a la factura final, el
+  // mismo camino que ya usa una proforma— y a partir de ahí lo que cuenta es
+  // la factura, una sola vez.
+  const esAnticipo = new Set(facturas
+    .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
+    .map(f => f.id));
+  let anticipado = 0;
+
   const porRubro = {};
   rubros.forEach(r => {
     porRubro[r.id] = { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base), pct: 0, estimado: false };
@@ -85,6 +104,7 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   let fueraDePlanilla = 0, facturasFueraDePlanilla = new Set();
 
   asignaciones.forEach(a => {
+    if (esAnticipo.has(a.factura_id)) { anticipado += n(a.monto); return; }
     const num = planillaDeFactura[a.factura_id];
     if (num == null) {
       fueraDePlanilla += n(a.monto);
@@ -149,6 +169,9 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   porRubro._porActividad = porActividad;
   porRubro._fueraDePlanilla = fueraDePlanilla;
   porRubro._facturasFueraDePlanilla = facturasFueraDePlanilla.size;
+  // Lo anticipado a proveedores y todavía no recibido. No es invertido y no
+  // es saldo: es plata que ya salió y obra que todavía no está.
+  porRubro._anticipado = Math.round(anticipado * 100) / 100;
   return porRubro;
 }
 

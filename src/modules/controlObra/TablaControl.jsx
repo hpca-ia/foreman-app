@@ -3,7 +3,10 @@ import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { fmt, gastosDe } from "./calculos";
 
-const COLS = "minmax(200px,3fr) 60px 70px repeat(6, minmax(90px,1fr)) 64px";
+// Una columna más que antes: el avance de OBRA al lado del económico. Son dos
+// preguntas distintas —cuánta obra hay hecha y cuánta plata se consumió— y la
+// respuesta casi nunca es la misma.
+const COLS = "minmax(200px,3fr) 60px 70px repeat(6, minmax(90px,1fr)) 58px 64px";
 
 function pctColor(pct, saldo) {
   if (saldo < 0) return colors.danger;
@@ -11,7 +14,7 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
-function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
+function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null }) {
   // Sacado del contrato por una orden de cambio: se lee tachado y en gris. Que
   // siga a la vista es el punto — alguien tiene que poder ver que ese trabajo
   // estaba y ya no está, sin ir a buscar la orden.
@@ -38,6 +41,33 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0 }) {
         {comprometido ? `$${fmt(comprometido)}` : ""}
       </span>
       <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
+      {/* EL AVANCE DE OBRA, ESCRITO ACÁ.
+          El % que ya había es el económico —plata invertida sobre
+          presupuesto— y sube cuando se paga un anticipo aunque no se haya
+          movido un ladrillo. Este dice cuánto de ESTE rubro está hecho, y lo
+          sabe quien está en la obra. Se escribe donde se mira el rubro: una
+          pantalla aparte para cargar avances es una pantalla que nadie abre. */}
+      <span style={{ textAlign: "right" }}>
+        {onAvance ? (
+          <input type="number" min={0} max={100} step={5}
+            defaultValue={Number(r.avance_pct) || 0}
+            key={`av${r.id}-${r.avance_pct}`}
+            onBlur={e => {
+              const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+              if (v !== (Number(r.avance_pct) || 0)) onAvance(r, v);
+            }}
+            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+            title={`Cuánto de este rubro está ejecutado en obra. El ${(acc.pct * 100).toFixed(0)}% de al lado es la plata invertida.`}
+            style={{ width: 52, textAlign: "right", fontSize: 11.5, padding: "2px 4px",
+              border: `1px solid ${colors.border}`, borderRadius: 5, fontFamily: colors.font,
+              color: Number(r.avance_pct) > 0 ? colors.brand : colors.muted, fontWeight: 600,
+              background: colors.surface }} />
+        ) : (
+          <span style={{ fontSize: 11.5, color: Number(r.avance_pct) > 0 ? colors.brand : colors.muted, fontWeight: 600 }}>
+            {Number(r.avance_pct) || 0}%
+          </span>
+        )}
+      </span>
       <span style={{ textAlign: "right", fontWeight: 600, color: pctColor(acc.pct, acc.saldo) }}>{(acc.pct * 100).toFixed(0)}%</span>
     </div>
   );
@@ -94,7 +124,7 @@ function Gastos({ gastos, sangria }) {
 }
 
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null,
-  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [] }) {
+  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [], onAvance = null }) {
   // Qué renglón está abierto mostrando sus gastos. Uno a la vez: abrir varios
   // llena la pantalla de listas y se pierde la tabla, que es lo que se vino a
   // mirar.
@@ -162,7 +192,8 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                 20% comprometido ya está gastado, aunque el papel no llegue. */}
             <span style={{ textAlign: "right" }} title="Solicitudes de compra vivas y sin factura: plata ya comprometida contra este grupo">COMPROMETIDO</span>
             <span style={{ textAlign: "right" }}>SALDO</span>
-            <span style={{ textAlign: "right" }}>AVANCE</span>
+            <span style={{ textAlign: "right" }} title="Cuánto de cada rubro está ejecutado en obra">OBRA</span>
+            <span style={{ textAlign: "right" }} title="Plata invertida sobre presupuesto">AVANCE</span>
           </div>
 
           {grupos.map(g => {
@@ -210,13 +241,25 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     ${fmt(g.saldo)}
                   </span>
                   {/* El avance es contra algo: sin presupuesto no hay contra qué. */}
+                  <span style={{ textAlign: "right", fontSize: 10.5, color: colors.muted }}>
+                    {(() => {
+                      // El avance de obra del grupo, pesado por lo que vale
+                      // cada rubro: uno de cien mil al 50% no pesa lo mismo
+                      // que uno de mil al 100%.
+                      const vivos = (g.rubros || []).filter(r => Number(r.total_base) > 0);
+                      const base = vivos.reduce((t, r) => t + Number(r.total_base), 0);
+                      if (!base) return "—";
+                      const hecho = vivos.reduce((t, r) => t + Number(r.total_base) * (Number(r.avance_pct) || 0) / 100, 0);
+                      return `${Math.round((hecho / base) * 100)}%`;
+                    })()}
+                  </span>
                   <span style={{ textAlign: "right" }}>{g.base > 0 ? `${(g.pct * 100).toFixed(0)}%` : "—"}</span>
                 </div>
 
                 {abierto && g.rubros.map(r => (
                   <div key={r.id} onClick={() => setVerGastos(v => (v === `r${r.id}` ? null : `r${r.id}`))}
                     style={{ cursor: "pointer" }} title="Ver de qué gastos está hecho este número">
-                    <FilaRubro rubro={r} porRubro={porRubro} sangria={14}
+                    <FilaRubro rubro={r} porRubro={porRubro} sangria={14} onAvance={onAvance}
                       comprometido={comprometido?.porRubro?.[r.id] || 0} />
                     {verGastos === `r${r.id}` && (
                       <Gastos sangria={14}
@@ -388,6 +431,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
               title={comprometido?.total ? desgloseComprometido : undefined}>
               {comprometido?.total ? `$${fmt(comprometido.total)}` : "—"}</span>
             <span style={{ textAlign: "right" }}>${fmt(totales.saldo)}</span>
+            <span />
             <span style={{ textAlign: "right" }}>{(totales.pct * 100).toFixed(1)}%</span>
           </div>
 

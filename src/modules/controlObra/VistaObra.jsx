@@ -148,7 +148,43 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
   // es una compra aprobada sin factura.
   const comprometido = comprometidoPorGrupo(solicitudes, rubros, adjuntos);
   const grupos = agrupar(rubros, porRubro, agruparPor, actividades, comprometido);
+  /**
+   * Cuánto de un rubro está ejecutado en obra.
+   *
+   * Lo dice quien está parado en la obra, y no tiene nada que ver con lo
+   * pagado: un rubro puede estar al 80% sin una sola factura —el proveedor
+   * factura al final— o al 0% con el anticipo ya pagado.
+   *
+   * Queda con nombre y fecha: un avance es una afirmación sobre la obra, y
+   * "dijeron que estaba al 80" sin dueño no sirve para discutir una planilla.
+   */
+  async function guardarAvance(rubro, pct) {
+    const fila = {
+      avance_pct: pct,
+      avance_at: new Date().toISOString(),
+      avance_por: currentUser?.id ?? null,
+      avance_nombre: currentUser?.name || null,
+    };
+    let { data, error } = await supabase.from("obra_rubros").update(fila).eq("id", rubro.id).select("id");
+    if (error && /column|schema cache/i.test(error.message)) {
+      ({ data, error } = await supabase.from("obra_rubros").update({ avance_pct: pct }).eq("id", rubro.id).select("id"));
+    }
+    if (error) { window.alert(/column|schema cache/i.test(error.message) ? "Falta correr la migración 105." : error.message); return; }
+    if (!data?.length) { window.alert("La base no dejó guardar el avance de este rubro."); return; }
+    setRubros(rs => rs.map(r => (r.id === rubro.id ? { ...r, ...fila } : r)));
+  }
+
   const totales = totalesObra(grupos);
+  // EL AVANCE DE OBRA: lo que cada rubro dice que tiene ejecutado, pesado por
+  // lo que vale. Un rubro de cien mil al 50% pesa cincuenta veces más que uno
+  // de mil al 100%, y un promedio simple diría cualquier cosa.
+  const avanceObra = (() => {
+    const vivos = rubros.filter(r => !r.anulado_por_oc && !r.oculto && Number(r.total_base) > 0);
+    const base = vivos.reduce((t, r) => t + Number(r.total_base), 0);
+    if (!base) return 0;
+    const hecho = vivos.reduce((t, r) => t + Number(r.total_base) * (Number(r.avance_pct) || 0) / 100, 0);
+    return hecho / base;
+  })();
 
   // Las dos pantallas de plata. El Director siempre; los demás, si se lo
   // prendieron. `puede` ya devuelve true para el Director por código.
@@ -182,9 +218,42 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
         <Tarjeta label="Acum. anterior" valor={totales.anterior} />
         <Tarjeta label="Este período" valor={totales.periodo} color={colors.brand} />
         <Tarjeta label="Invertido" valor={totales.acumulado} color={colors.ink} />
+        {/* ANTICIPADO: plata que ya salió y obra que todavía no está.
+            No es invertido —el material no llegó— y no es saldo. Esconderlo
+            haría que la obra parezca que tiene más plata disponible de la que
+            tiene; sumarlo a invertido, que parezca más adelantada. */}
+        {porRubro._anticipado > 0 && (
+          <Tarjeta label="Anticipado a proveedores" valor={porRubro._anticipado} color={colors.warning} />
+        )}
         <Tarjeta label="Saldo" valor={totales.saldo} color={totales.saldo < 0 ? colors.danger : colors.success} />
-        <Tarjeta label="Avance" valor={totales.pct * 100} sufijo="%" moneda={false} color={colors.brand} />
+        {/* LOS DOS AVANCES, SEPARADOS.
+            El económico es invertido sobre presupuesto: dice cuánta plata se
+            consumió. El de obra sale de lo que cada rubro dice que tiene
+            ejecutado, pesado por lo que vale: dice cuánta obra hay hecha. Son
+            dos preguntas distintas y la respuesta casi nunca es la misma.
+            Cuando se despegan, esa distancia ES el dato: o se está gastando
+            más rápido de lo que se construye, o al revés. */}
+        <Tarjeta label="Avance de obra" valor={avanceObra * 100} sufijo="%" moneda={false}
+          color={colors.brand} />
+        <Tarjeta label="Avance económico" valor={totales.pct * 100} sufijo="%" moneda={false}
+          color={colors.inkSoft} />
       </div>
+
+      {avanceObra > 0 && Math.abs(totales.pct - avanceObra) > 0.08 && (
+        <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
+          border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+          padding: "9px 12px", marginBottom: 14, lineHeight: 1.5 }}>
+          {totales.pct > avanceObra ? (
+            <>La obra consumió <strong>{(totales.pct * 100).toFixed(1)}%</strong> del presupuesto y tiene{" "}
+            <strong>{(avanceObra * 100).toFixed(1)}%</strong> ejecutado: se está gastando más rápido de lo que
+            se construye.</>
+          ) : (
+            <>La obra tiene <strong>{(avanceObra * 100).toFixed(1)}%</strong> ejecutado y consumió{" "}
+            <strong>{(totales.pct * 100).toFixed(1)}%</strong> del presupuesto: va mejor que el gasto, o falta
+            cargar facturas.</>
+          )}
+        </div>
+      )}
 
       <div className="obra-tabs">
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
@@ -227,7 +296,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
               </div>
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor}
                 comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
-                facturas={facturas} asignaciones={asignaciones} rubros={rubros} />
+                facturas={facturas} asignaciones={asignaciones} rubros={rubros}
+                onAvance={puede && !puede("facturas.registrar") ? null : guardarAvance} />
 
               {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.
                   Debajo de la tabla porque es mantenimiento, no lectura: uno
