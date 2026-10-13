@@ -8,7 +8,7 @@ import Numero from "../../components/ui/Numero";
 import { calendario, calcular, aFecha, claveFecha, ETAPAS, ajustarAlPlazo } from "./cpm";
 import { materiaPrima, aprenderDelCronograma, acomodarCambios,
   revisarCronograma, ordenarConPalabras, aprenderDeUnaDuracion, proponerEtapas } from "./novaCronograma";
-import { proponerPlan, guardarPlan, guardarOrden } from "./armarCronograma";
+import { proponerPlan, guardarPlan, guardarOrden, leerCronogramaEscrito } from "./armarCronograma";
 import { leerMemoria, olvidar } from "./memoriaNova";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { magnitudDe } from "./magnitudes";
@@ -1734,6 +1734,42 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               </div>
             )}
 
+            {/* DE DÓNDE SALE EL CRONOGRAMA.
+                Venía forzado: cada agrupación del presupuesto tenía que
+                aparecer una vez, así que el cronograma terminaba siendo el
+                presupuesto puesto de costado por más etapas que le pusiera
+                encima. Es una regla buena cuando lo que se quiere es que el
+                control y el valorado cierren, y es una jaula cuando lo que se
+                quiere es un cronograma que se parezca a la obra. No es una
+                decisión que pueda tomar yo: cambia según para qué es. */}
+            {obra?.id && (
+              <div>
+                <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 4 }}>
+                  DE DÓNDE SALE
+                </label>
+                <div style={{ display: "grid", gap: 4 }}>
+                  {[
+                    [false, "Como se construye la obra",
+                      "NOVA escribe los trabajos que de verdad hay que hacer, con nombres de obra. Mira el presupuesto para saber el tamaño y el alcance, pero no lo copia: puede juntar tres agrupaciones en un trabajo, partir una en cuatro, o poner trabajos que no están en ninguna."],
+                    [true, "Cubriendo el presupuesto",
+                      "Cada agrupación del control aparece una vez y ninguna se pierde. Es lo que hace falta para que el valorado reparta toda la plata en el tiempo, y el cronograma se parece más al presupuesto que a la obra."],
+                  ].map(([valor, titulo, pista]) => (
+                    <label key={titulo} style={{ display: "flex", gap: 7, alignItems: "flex-start", cursor: "pointer",
+                      background: !!armando.cubrir === valor ? colors.brandSoft : colors.bg,
+                      border: `1px solid ${!!armando.cubrir === valor ? colors.brand : "transparent"}`,
+                      borderRadius: 7, padding: "7px 9px" }}>
+                      <input type="radio" checked={!!armando.cubrir === valor} style={{ marginTop: 2 }}
+                        onChange={() => setArmando(v => ({ ...v, cubrir: valor }))} />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 12, fontWeight: 600, color: colors.ink }}>{titulo}</span>
+                        <span style={{ display: "block", fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>{pista}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* LO QUE SOLO SABE QUIEN DIRIGE LA OBRA.
                 "Hay que desmontar todo lo que hay", "el aire acondicionado
                 llega en diciembre", "la planta alta se entrega primero". Nada
@@ -1769,6 +1805,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   const r = await proponerPlan({
                     agrupaciones: mp, meses: lead.crono_meses, dias: diasDeContrato,
                     nombreObra: lead.nombre, comoVa: armando.comoVa || "", cal,
+                    cubrirPresupuesto: !!armando.cubrir,
                   });
                   if (r.error) { setPensando(false); setError(r.error); return; }
                   paso(`El plan: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
@@ -1794,6 +1831,63 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 {pensando ? "NOVA está armando la obra…" : todas.length ? "Armarlo de nuevo" : "Armarlo"}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setArmando(null)}>Cerrar</Button>
+            </div>
+
+            {/* SI YA LO TENÉS ESCRITO, PEGALO.
+                Hay una manera de armar un cronograma que funciona y que no es
+                esta app: pensarlo en palabras. Queda una lista de etapas con
+                sus trabajos y sus días, que ya es el trabajo difícil hecho, y
+                hasta ahora no había forma de meterla acá sin volver a
+                escribirla barra por barra. NOVA no opina sobre esto: lee. Los
+                días que estén escritos quedan tal cual. */}
+            <div style={{ borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 9 }}>
+              {!armando.pegando ? (
+                <button onClick={() => setArmando(v => ({ ...v, pegando: true }))}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
+                    fontFamily: colors.font, fontSize: 11.5, color: colors.brand, textDecoration: "underline" }}>
+                  ¿Ya tenés el cronograma escrito en otro lado? Pegalo acá
+                </button>
+              ) : (
+                <div style={{ display: "grid", gap: 7 }}>
+                  <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
+                    Pegá las etapas con sus trabajos y sus días, como los tengas escritos. NOVA no lo cambia:
+                    lo lee y lo convierte en barras. <strong style={{ color: colors.ink }}>Los días que estén
+                    escritos quedan tal cual</strong>, y si alguno no tiene, le pone uno y te lo dice.
+                  </div>
+                  <textarea value={armando.texto || ""} rows={7}
+                    onChange={e => setArmando(v => ({ ...v, texto: e.target.value }))}
+                    placeholder={"ETAPA 1 — PRELIMINARES\n  Desmontaje de instalaciones existentes — 5 días\n  Replanteo y trazado — 2 días\n\nETAPA 2 — OBRA GRIS\n  Mampostería — 15 días\n  ..."}
+                    style={{ ...inputStyle, width: "100%", fontSize: 12, lineHeight: 1.5, resize: "vertical",
+                      padding: "7px 9px", fontFamily: "ui-monospace, monospace" }} />
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <Button variant="primary" size="sm" disabled={pensando || (armando.texto || "").trim().length < 20}
+                      onClick={async () => {
+                        const paso = (texto, mal) => setArmando(v => ({ ...v, pasos: [...(v.pasos || []), { texto, mal }] }));
+                        setError(""); setPensando(true);
+                        setArmando(v => ({ ...v, pasos: [] }));
+                        const mp = obra?.id ? await materiaPrima(obra.id) : [];
+                        const r = await leerCronogramaEscrito({
+                          texto: armando.texto, agrupaciones: mp, dias: diasDeContrato, cal,
+                        });
+                        if (r.error) { setPensando(false); setError(r.error); return; }
+                        paso(`Leído: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
+                        if (r.cortado) paso("Vino cortado: entró lo que llegó entero.", true);
+                        const g = await guardarPlan({ lead, obra, plan: r.plan, quien: currentUser });
+                        if (g.error) { setPensando(false); setError(g.error); return; }
+                        paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la 101)" : ` en ${g.etapas} etapas`}.`);
+                        const o = await guardarOrden({ actividades: g.creadas, dias: diasDeContrato, nombreObra: lead.nombre, cal });
+                        if (o.error) paso(`El orden no se pudo: ${o.error}`, true);
+                        else paso(`El orden: ${o.creadas} dependencias.`);
+                        setPensando(false);
+                        await Promise.all([cargar(), cargarFases()]);
+                        setAviso("Cronograma cargado desde el texto. Revisalo abajo.");
+                      }}>
+                      {pensando ? "NOVA está leyéndolo…" : "Leerlo y armarlo"}
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setArmando(v => ({ ...v, pegando: false }))}>Cancelar</Button>
+                  </div>
+                </div>
+              )}
             </div>
             {todas.length > 0 && (
               <div style={{ fontSize: 10.5, color: colors.warning }}>
@@ -2398,8 +2492,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           onMoverEtapa={moverEtapa}
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
           platas={platas} memoria={memoria}
-          fases={fases} onFase={ponerEnEtapa} onMoverFase={moverEtapaDeObra}
-          onRenombrarFase={renombrarEtapaDeObra} onBorrarFase={borrarEtapaDeObra} />
+          fases={fases} onFase={ponerEnEtapa} />
         </>
       )}
 

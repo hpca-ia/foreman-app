@@ -103,7 +103,7 @@ export default function TablaGantt({
   uniendo, setUniendo, hoyISO, dia,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
   rubros = [], sinSenalar, onSenalar, platas = null, memoria = [],
-  fases = [], onFase, onMoverFase, onRenombrarFase, onBorrarFase,
+  fases = [], onFase,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -183,12 +183,6 @@ export default function TablaGantt({
   // barras: "demoliciones, obra gris, instalaciones, acabados". Mientras no
   // haya ninguna no se dibuja ninguna banda — una obra chica no las necesita.
   const bandas = porFases(grupos, fases);
-  // CUÁNTAS ETAPAS DE VERDAD HAY. La banda de "todavía sin etapa" también es
-  // una banda y no es una etapa: contar sobre las bandas dejaba a la última
-  // etapa sin saber que era la última, con la flecha de bajar habilitada
-  // apuntando a la nada. Se podía apretar y no pasaba nada, que es la peor
-  // manera de fallar: parece que el botón está roto.
-  const cuantasEtapas = fases.length;
 
   // Los rubros de cada grupo, para poder abrirlos y señalar el que traba.
   const rubrosDe = new Map();
@@ -241,13 +235,10 @@ export default function TablaGantt({
         <span />
       </div>
 
-      {bandas.map(({ fase, grupos: suyos }, iBanda) => (
+      {bandas.map(({ fase, grupos: suyos }) => (
         <div key={fase?.id || "sin-etapa"}>
           {fases.length > 0 && (
-            <BandaEtapa ui={ui} fase={fase} grupos={suyos} editable={editable} cal={cal}
-              primera={iBanda === 0} ultima={iBanda === cuantasEtapas - 1}
-              diasTotales={diasTotales}
-              onMover={onMoverFase} onRenombrar={onRenombrarFase} onBorrar={onBorrarFase} />
+            <BandaEtapa ui={ui} fase={fase} grupos={suyos} cal={cal} diasTotales={diasTotales} />
           )}
       {suyos.map(g => {
         const plegado = plegados.has(g.id);
@@ -876,32 +867,19 @@ export default function TablaGantt({
 
 // ── Las piezas de la tabla ──────────────────────────────────────────────────
 
-/** Una flecha que se puede apretar sin apuntar: 22 píxeles y su recuadro. */
-const BotonEtapa = ({ onClick, apagado, titulo, children }) => (
-  <button onClick={onClick} disabled={apagado} title={titulo}
-    style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-      background: apagado ? "transparent" : colors.surface,
-      border: `1px solid ${apagado ? "transparent" : colors.border}`, borderRadius: 5,
-      fontSize: 10, lineHeight: 1, padding: 0,
-      cursor: apagado ? "default" : "pointer", color: apagado ? colors.border : colors.brand }}>
-    {children}
-  </button>
-);
-
 /**
- * LA BANDA DE UNA ETAPA DE LA OBRA.
+ * LA BANDA DE UNA ETAPA, SOLO PARA MIRAR.
  *
- * Es un título con una barra: de cuándo arranca lo primero de la etapa a
- * cuándo termina lo último. Esas fechas no se guardan en ningún lado —se leen
- * de lo que tiene adentro— porque una etapa con fechas propias podría decir
- * algo distinto de sus actividades, y entonces habría dos verdades.
+ * Tenía sus propias flechas para mover la etapa, su tacho y su nombre
+ * editable: exactamente lo mismo que el panel de arriba del cronograma. Dos
+ * lugares para hacer la misma cosa no es el doble de cómodo —es no saber cuál
+ * de los dos anda— y acá abajo, adentro de una tabla que se desplaza para el
+ * costado, era el peor de los dos.
  *
- * Las flechas mueven la etapa ENTERA y no tocan ninguna fecha: el orden de las
- * etapas es cómo se lee el cronograma, no cómo se calcula. Una etapa puede
- * traslaparse con la que sigue —los acabados de abajo mientras arriba hay obra
- * gris— y eso lo dicen las dependencias.
+ * Las etapas se manejan arriba. Esto dice dónde empieza cada una y hasta dónde
+ * llega, que es para lo que sirve una banda.
  */
-const BandaEtapa = ({ ui, fase, grupos, editable, primera, ultima, diasTotales, cal, onMover, onRenombrar, onBorrar }) => {
+const BandaEtapa = ({ ui, fase, grupos, diasTotales, cal }) => {
   const t = tramoDe(grupos);
   const sinEtapa = !fase;
   return (
@@ -909,51 +887,17 @@ const BandaEtapa = ({ ui, fase, grupos, editable, primera, ultima, diasTotales, 
       padding: "8px 12px 8px 0", borderTop: `2px solid ${sinEtapa ? colors.border : colors.brand}`,
       alignItems: "center", width: "max-content", minWidth: "100%",
       background: sinEtapa ? colors.bg : colors.brandSoft }}>
-      <div style={{ position: "sticky", left: 0, display: "flex", alignItems: "center", gap: 6,
+      <div style={{ position: "sticky", left: 0, display: "flex", alignItems: "center", gap: 7,
         padding: "0 0 0 12px", background: sinEtapa ? colors.bg : colors.brandSoft, zIndex: 2 }}>
-        {editable && !sinEtapa && (
-          /* DEL TAMAÑO DE UN DEDO.
-             Eran dos triángulos de nueve píxeles, uno encima del otro: para
-             moverlos había que apuntarle a un blanco de diez por diez. Un
-             botón que hay que acertar no es un botón, y desde afuera no se
-             distingue de uno que no anda. Van a lo ancho y con su recuadro,
-             y el que no se puede usar dice por qué. */
-          <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
-            <BotonEtapa onClick={() => onMover?.(fase, -1)} apagado={primera}
-              titulo={primera ? "Ya es la primera etapa de la obra" : `Subir «${fase.nombre}»: pasa antes de la etapa de arriba`}>▲</BotonEtapa>
-            <BotonEtapa onClick={() => onMover?.(fase, 1)} apagado={ultima}
-              titulo={ultima ? "Ya es la última etapa de la obra" : `Bajar «${fase.nombre}»: pasa después de la etapa de abajo`}>▼</BotonEtapa>
-          </div>
-        )}
-        {sinEtapa ? (
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: colors.muted, letterSpacing: 0.3 }}>
-            TODAVÍA SIN ETAPA
-          </span>
-        ) : editable ? (
-          // Se renombra escribiendo encima. Una etapa nace como "Etapa 1" y
-          // termina llamándose "Demoliciones": abrir un diálogo para eso sería
-          // tres clicks para cambiar una palabra.
-          <input defaultValue={fase.nombre}
-            onBlur={e => { if ((e.target.value || "").trim() && e.target.value !== fase.nombre) onRenombrar?.(fase, e.target.value); }}
-            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
-            title="Escribí para renombrar la etapa"
-            style={{ background: "transparent", border: "1px solid transparent", borderRadius: 5,
-              fontSize: 12.5, fontWeight: 700, color: colors.brand, fontFamily: colors.font,
-              letterSpacing: 0.2, padding: "2px 5px", minWidth: 60, flex: "1 1 auto", maxWidth: 230 }} />
-        ) : (
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: colors.brand, letterSpacing: 0.2 }}>{fase.nombre}</span>
-        )}
+        <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 0.2,
+          color: sinEtapa ? colors.muted : colors.brand, overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {sinEtapa ? "TODAVÍA SIN ETAPA" : fase.nombre}
+        </span>
         <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>
           {t.barras || "sin"} {t.barras === 1 ? "barra" : "barras"}
           {t.inicio && ` · ${ui.dia(t.inicio)} a ${ui.dia(t.fin)}`}
         </span>
-        {editable && !sinEtapa && (
-          <button onClick={() => onBorrar?.(fase)} title="Borrar la etapa. Lo que tiene adentro no se borra."
-            style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
-              display: "flex", flexShrink: 0, padding: 2 }}>
-            <X size={12} />
-          </button>
-        )}
       </div>
       <div style={{ position: "relative", height: 16 }}>
         {t.inicio && (
@@ -968,6 +912,7 @@ const BandaEtapa = ({ ui, fase, grupos, editable, primera, ultima, diasTotales, 
     </div>
   );
 };
+
 
 const Fila = ({ ui, children, fondo }) => (
   <div style={{ display: "grid", gridTemplateColumns: `${ui.IZQ}px ${ui.anchoLienzo}px`, gap: 7,

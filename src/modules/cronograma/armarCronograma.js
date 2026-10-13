@@ -47,7 +47,7 @@ function enPalabras(a) {
  * que no está en ningún dato.
  */
 export async function proponerPlan({ agrupaciones = [], meses = 0, dias: diasPlazo = 0,
-  nombreObra = "", comoVa = "", cal = calendario() }) {
+  nombreObra = "", comoVa = "", cal = calendario(), cubrirPresupuesto = true }) {
   const dias = diasPlazo || Math.max(20, Math.round((meses || 6) * 26));
   const { memoria } = await leerMemoria("cronograma");
   const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
@@ -95,13 +95,25 @@ limpieza final, la recepción. Si hace falta hacerlo, va como actividad con
 "agrupacion": null. Ponelas: un cronograma sin eso es un cronograma que no se
 puede cumplir.
 
-${agrupaciones.length ? `CADA AGRUPACIÓN DEL PRESUPUESTO TIENE QUE APARECER UNA VEZ, en la etapa que le
+${!agrupaciones.length ? "" : cubrirPresupuesto ? `CADA AGRUPACIÓN DEL PRESUPUESTO TIENE QUE APARECER UNA VEZ, en la etapa que le
 toque, con su id en "agrupacion". Ni dos veces —se contaría la plata dos
 veces— ni ninguna: la que falte queda sin tiempo y la obra sin esa plata.
 Podés darle el nombre que se usa en obra en vez del nombre largo del
 presupuesto.
 
-` : ""}CÓMO SALE LA DURACIÓN: DE LA CANTIDAD, NO DE LA PLATA.
+` : `EL PRESUPUESTO ES UNA REFERENCIA, NO EL ÍNDICE.
+
+Está arriba para que sepas de qué tamaño es la obra y qué alcance tiene, no
+para que lo copies. Armá el cronograma como SE CONSTRUYE esta obra: con los
+trabajos que de verdad hay que hacer, en el orden en que se hacen, con los
+nombres de obra. Podés juntar tres agrupaciones en un solo trabajo, partir una
+en cuatro, o poner trabajos que no están en ninguna.
+
+Cuando un trabajo tuyo sea claramente una agrupación del presupuesto, ponele
+su id en "agrupacion" —así el control y el valorado hablan de lo mismo—. Y
+cuando no, dejalo en null. No fuerces la correspondencia.
+
+`}CÓMO SALE LA DURACIÓN: DE LA CANTIDAD, NO DE LA PLATA.
 
 Diez metros de pintura y mil pueden costar parecido —si en un caso el material
 es importado y en el otro no— y no son ni de lejos el mismo tiempo de obra.
@@ -140,7 +152,12 @@ NO DEVUELVAS DEPENDENCIAS. El orden se pide aparte.`;
       const muestra = String(textoDeNova(data) || "").trim().slice(0, 220);
       return { error: `NOVA devolvió algo que no se entiende. Empezaba así:\n\n${muestra || "(vacío)"}` };
     }
-    const plan = conLasFaltantes(normalizarPlan(datos, agrupaciones), dias);
+    const crudo = normalizarPlan(datos, agrupaciones);
+    // Si el presupuesto no manda, lo que NOVA no nombró no es un olvido: es
+    // una decisión suya. Agregarlo al final sería desarmar lo que acaba de
+    // armar. Se dice cuántas quedaron afuera y se deja que se vea en el
+    // control, que es donde se nota si falta plata.
+    const plan = cubrirPresupuesto ? conLasFaltantes(crudo, dias) : crudo;
     if (!plan.barras) return { error: "NOVA no devolvió ninguna actividad. Probá de nuevo." };
     return { plan, cortado };
   } catch (e) {
@@ -214,4 +231,81 @@ export async function guardarOrden({ actividades = [], dias = 0, nombreObra = ""
   const { data, error } = await supabase.from("cronograma_dependencias").insert(filas).select("id");
   if (error) return { error: error.message };
   return { creadas: data?.length || 0 };
+}
+
+
+/**
+ * UN CRONOGRAMA QUE YA ESTÁ ESCRITO, EN TEXTO.
+ *
+ * Hay una manera de armar un cronograma que funciona y que no es esta app:
+ * hablarlo. Alguien se sienta, lo piensa en palabras —a veces con otro
+ * asistente, a veces en una servilleta— y queda una lista de etapas con sus
+ * trabajos y sus días. Eso ya es el trabajo difícil hecho, y hasta ahora no
+ * había manera de meterlo acá sin volver a escribirlo barra por barra.
+ *
+ * No se le pide a NOVA que opine: se le pide que LEA. Los días que estén
+ * escritos se respetan tal cual, aunque le parezcan pocos. Lo único que pone
+ * de su cosecha es un día cuando no hay número, y dice cuáles fueron.
+ */
+export async function leerCronogramaEscrito({ texto = "", agrupaciones = [], dias = 0, cal = calendario() }) {
+  const dicho = String(texto || "").trim();
+  if (dicho.length < 20) return { error: "Pegá el cronograma: las etapas con sus trabajos y sus días." };
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  const jornada = L.length === 7 ? "los siete días" : L.includes(6) ? "de lunes a sábado" : "de lunes a viernes";
+  try {
+    const sistema = `Sos NOVA y tu trabajo acá es LEER un cronograma que ya está escrito y
+pasarlo a la forma que usa FOREMAN. No es tu cronograma: es el de quien dirige
+la obra, y ya está decidido.
+
+LO QUE ESTÁ ESCRITO:
+"""
+${dicho.slice(0, 12000)}
+"""
+${agrupaciones.length ? `
+EL PRESUPUESTO DE ESTA OBRA, por si algún trabajo es claramente uno de estos:
+${agrupaciones.map(a => `${a.id} · ${a.nombre}`).join("\n")}
+` : ""}
+Se trabaja ${jornada}${dias ? ` y el plazo son ${dias} días hábiles` : ""}.
+
+Devolvés SOLO JSON, sin markdown:
+
+{"etapas":[{"nombre":"Preliminares","actividades":[
+  {"nombre":"Desmontaje de instalaciones","dias":5,"agrupacion":null},
+  {"nombre":"Obra civil","dias":13,"agrupacion":2}]}]}
+
+LAS REGLAS DE LEER, que son distintas de las de opinar:
+
+· LOS DÍAS QUE ESTÁN ESCRITOS SE RESPETAN. Aunque te parezcan pocos o muchos.
+  Si dice "3 semanas" son 15 días hábiles si se trabaja de lunes a viernes, 18
+  si se trabaja sábados. Si dice una fecha de inicio y una de fin, contá los
+  días hábiles entre las dos.
+· SI NO HAY DÍAS para un trabajo, poné los que te parezcan y nada más: no
+  inventes trabajos, no agregues etapas, no reordenes. Lo que no está escrito
+  no estaba.
+· SI NO HAY ETAPAS y es una lista plana de trabajos, devolvé UNA sola etapa
+  que se llame "Obra".
+· LA AGRUPACIÓN solo cuando el trabajo es claramente uno del presupuesto de
+  arriba. Ante la duda, null: una barra colgada de la agrupación equivocada
+  ensucia el control, y una suelta no le hace daño a nadie.
+· NO DEVUELVAS DEPENDENCIAS. El orden se arma aparte.`;
+
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 8000,
+      system: sistema,
+      messages: [{ role: "user", content: "Pasalo a JSON. Respetá lo que está escrito." }],
+    });
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "leerlo") };
+    const { datos, cortado } = jsonTolerante(textoDeNova(data));
+    if (!datos?.etapas?.length) {
+      const muestra = String(textoDeNova(data) || "").trim().slice(0, 220);
+      return { error: `NOVA no pudo leerlo. Devolvió:\n\n${muestra || "(vacío)"}` };
+    }
+    // Acá NO se agregan las agrupaciones que falten: el cronograma es el que
+    // está escrito, y completarlo sería corregir a quien lo escribió.
+    const plan = normalizarPlan(datos, agrupaciones);
+    if (!plan.barras) return { error: "No encontré actividades en lo que pegaste." };
+    return { plan, cortado };
+  } catch (e) {
+    return { error: "NOVA devolvió algo que no se entiende: " + e.message };
+  }
 }
