@@ -292,12 +292,23 @@ Rubros: ${listaRubros}`,
     const sinClase = ({ clase, ...resto }) => resto;
     let facturaId = factura?.id;
     if (editando) {
-      let { error: e1 } = await supabase.from("obra_facturas").update(payload).eq("id", factura.id);
+      // CON `select()`: un UPDATE que no tocó ninguna fila —porque el permiso
+      // no deja, porque la factura ya no está— vuelve SIN error y con cero
+      // filas. Sin mirarlo, la pantalla cerraba como si hubiera guardado y lo
+      // escrito volvía al valor viejo en la siguiente carga.
+      let { data: tocadas, error: e1 } = await supabase.from("obra_facturas")
+        .update(payload).eq("id", factura.id).select("id");
       if (e1 && /column|schema cache/i.test(e1.message)) {
-        ({ error: e1 } = await supabase.from("obra_facturas").update(sinClase(payload)).eq("id", factura.id));
+        ({ data: tocadas, error: e1 } = await supabase.from("obra_facturas")
+          .update(sinClase(payload)).eq("id", factura.id).select("id"));
       }
       if (e1) { setError(e1.message); setGuardando(false); return; }
-      await supabase.from("obra_asignaciones").delete().eq("factura_id", factura.id);
+      if (!tocadas?.length) {
+        setError("La base no dejó guardar esta factura y no dijo por qué. Puede ser el permiso, o que la factura ya no exista.");
+        setGuardando(false); return;
+      }
+      const { error: eDel } = await supabase.from("obra_asignaciones").delete().eq("factura_id", factura.id);
+      if (eDel) { setError("No se pudieron reemplazar las asignaciones: " + eDel.message); setGuardando(false); return; }
     } else {
       let { data, error: e1 } = await supabase.from("obra_facturas").insert(payload).select().single();
       if (e1 && /column|schema cache/i.test(e1.message)) {
@@ -318,8 +329,22 @@ Rubros: ${listaRubros}`,
       monto: n(r.monto),
     }));
     if (filas.length) {
-      const { error: e2 } = await supabase.from("obra_asignaciones").insert(filas);
+      const { data: puestas, error: e2 } = await supabase.from("obra_asignaciones").insert(filas).select("id");
       if (e2) { setError("La factura se guardó pero la asignación falló: " + e2.message); setGuardando(false); return; }
+      // Lo mismo que arriba: un insert que la base no deja pasar vuelve sin
+      // error y sin filas, y la factura queda "sin asignar" sin que nada lo
+      // diga. Es el caso que se veía como "asigno y no se graba".
+      if (!puestas?.length) {
+        setError("La factura se guardó, pero la base no dejó grabar la asignación a los rubros.");
+        setGuardando(false); return;
+      }
+    } else if (repartos.some(r => r.id)) {
+      // ELEGISTE RUBROS PERO NINGUNO LLEVA PLATA. Pasa al prorratear sobre una
+      // base en cero, o al elegir un rubro y dejar el monto vacío: no hay nada
+      // que guardar y la factura quedaba sin asignar, callada. Desde afuera es
+      // idéntico a que no haya guardado.
+      setError("Elegiste rubros pero ninguno quedó con monto. Revisá los importes: una asignación en cero no se guarda.");
+      setGuardando(false); return;
     }
 
     // Y EL PAGO, si se pagó algo al cargarla. Va después de la factura
