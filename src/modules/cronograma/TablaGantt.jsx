@@ -202,6 +202,33 @@ export default function TablaGantt({
   // haya ninguna no se dibuja ninguna banda — una obra chica no las necesita.
   const bandas = porFases(grupos, fases);
 
+  // EL NÚMERO DE CADA BARRA: DÓNDE ESTÁ EN EL PLAN.
+  //
+  // Hace falta para poder nombrarlas entre sí —"la 2.3 va después de la 1.4"—
+  // que es como se habla de un cronograma cuando hay cuarenta barras y varios
+  // nombres parecidos.
+  //
+  // SE CALCULA, NO SE GUARDA, y por eso se reacomoda solo cuando se agrega,
+  // se borra o se mueve algo. Es a propósito: el número dice EL LUGAR, y un
+  // lugar que no cambia cuando la cosa se mueve deja de ser un lugar. La
+  // alternativa —un número fijo por barra— da listas que empiezan en 7, saltan
+  // al 12 y terminan en 3, y entonces hay que leer el nombre igual.
+  //
+  // Lo que NO depende del número es la cadena: las dependencias guardan la
+  // barra, no su lugar. Reordenar no desarma nada.
+  const numeroDe = new Map();
+  {
+    let etapaN = 0;
+    bandas.forEach(({ fase, grupos: suyos }) => {
+      if (fase) etapaN++;
+      let barra = 0;
+      suyos.forEach(g => g.hijas.forEach(a => {
+        barra++;
+        numeroDe.set(a.id, fases.length ? `${fase ? etapaN : "—"}.${barra}` : String(barra));
+      }));
+    });
+  }
+
   // Los rubros de cada grupo, para poder abrirlos y señalar el que traba.
   const rubrosDe = new Map();
   rubros.forEach(r => {
@@ -257,7 +284,8 @@ export default function TablaGantt({
       {bandas.map(({ fase, grupos: suyos }) => (
         <div key={fase?.id || "sin-etapa"}>
           {fases.length > 0 && (
-            <BandaEtapa ui={ui} fase={fase} grupos={suyos} cal={cal} diasTotales={diasTotales} />
+            <BandaEtapa ui={ui} fase={fase} grupos={suyos} cal={cal} diasTotales={diasTotales}
+              numero={fase ? (bandas.filter(b => b.fase).findIndex(b => b.fase.id === fase.id) + 1) : null} />
           )}
       {suyos.map(g => {
         const plegado = plegados.has(g.id);
@@ -286,7 +314,11 @@ export default function TablaGantt({
                     <span style={{ minWidth: 84, flex: "1 1 auto", overflow: "hidden" }}>
                       <span style={{ display: "block", fontWeight: 700, color: colors.ink, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.25 }}>
-                        {g.codigo && <span style={{ color: colors.muted, fontWeight: 600 }}>{g.codigo} </span>}
+                        {numeroDe.get(g.hijas[0]?.id) && (
+                          <span title="Su lugar en el plan" style={{ color: colors.muted, fontWeight: 600 }}>
+                            {numeroDe.get(g.hijas[0].id)}{" "}
+                          </span>
+                        )}
                         {g.nombre}
                       </span>
                       {/* De qué capítulo sale, debajo. El nombre de una
@@ -420,7 +452,13 @@ export default function TablaGantt({
                             textAlign: "left", flex: "1 1 auto", minWidth: 40, overflow: "hidden" }}>
                           <span style={{ display: "block", fontSize: 12, color: colors.ink, fontWeight: g.simple ? 600 : 400,
                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.25 }}>
-                            {g.simple && g.codigo && <span style={{ color: colors.muted, fontWeight: 600 }}>{g.codigo} </span>}
+                            {/* EL NÚMERO, SIEMPRE. Antes salía el código de
+                                la agrupación del control —02, 03, 04— que es
+                                de otra lista: se leía como el lugar en el
+                                cronograma y no lo era. */}
+                            <span title="Su lugar en el plan: etapa.barra" style={{ color: colors.muted, fontWeight: 600 }}>
+                              {numeroDe.get(a.id)}{" "}
+                            </span>
                             {/* Adentro de un rubro alcanza con el nombre de la
                                 parte: el encabezado de arriba ya dijo de qué
                                 rubro es, y repetirlo en cada fila lo empuja
@@ -686,8 +724,11 @@ export default function TablaGantt({
                                     style={{ ...inputStyle, width: "auto", padding: "3px 5px", fontSize: 11, height: 24 }}>
                                     {FORMAS.map(f => <option key={f.id} value={f.id}>{f.frase}</option>)}
                                   </select>
-                                  <span style={{ fontSize: 11.5, color: colors.ink, fontWeight: 600, maxWidth: 210,
+                                  <span style={{ fontSize: 11.5, color: colors.ink, fontWeight: 600, maxWidth: 230,
                                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {numeroDe.get(d.depende_de_id) && (
+                                      <span style={{ color: colors.muted }}>{numeroDe.get(d.depende_de_id)} </span>
+                                    )}
                                     «{porId.get(d.depende_de_id)?.nombre || "?"}»
                                   </span>
                                   {forma.id === "traslape" && (
@@ -908,7 +949,7 @@ export default function TablaGantt({
  * Las etapas se manejan arriba. Esto dice dónde empieza cada una y hasta dónde
  * llega, que es para lo que sirve una banda.
  */
-const BandaEtapa = ({ ui, fase, grupos, diasTotales, cal }) => {
+const BandaEtapa = ({ ui, fase, grupos, diasTotales, cal, numero }) => {
   const t = tramoDe(grupos);
   const sinEtapa = !fase;
   return (
@@ -921,7 +962,7 @@ const BandaEtapa = ({ ui, fase, grupos, diasTotales, cal }) => {
         <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 0.2,
           color: sinEtapa ? colors.muted : colors.brand, overflow: "hidden",
           textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {sinEtapa ? "TODAVÍA SIN ETAPA" : fase.nombre}
+          {sinEtapa ? "TODAVÍA SIN ETAPA" : `${numero}. ${fase.nombre}`}
         </span>
         <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>
           {t.barras || "sin"} {t.barras === 1 ? "barra" : "barras"}
