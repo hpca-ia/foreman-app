@@ -28,8 +28,9 @@ const hora = h => (h ? String(h).slice(0, 5) : "");
 
 /**
  * @param modo  "abrir" para verlo antes de mandarlo, "imprimir" para la
- *   ventana de impresión, "bajar" para guardarlo. Previsualizar es lo que
- *   hace que alguien corrija una falta antes de que la lean ocho personas.
+ *   ventana de impresión, "bajar" para guardarlo, "base64" para adjuntarlo al
+ *   correo. Previsualizar es lo que hace que alguien corrija una falta antes
+ *   de que la lean ocho personas.
  */
 export async function pdfActa({ acta, obra, asistentes = [], temas = [], compromisos = [], fotos = [], enlaces = {} }, modo = "abrir") {
   const { jsPDF, autoTable } = await cargarPDF();
@@ -213,6 +214,10 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   }
 
   const nombre = `Acta ${acta.numero} - ${String(obra || "obra").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim().slice(0, 40)}.pdf`;
+  // Para adjuntarlo al correo: el PDF se arma acá, en el navegador, porque es
+  // donde están las fotos firmadas y la librería. Sale en base64 y viaja con
+  // el pedido de envío.
+  if (modo === "base64") return { nombre, contenido: doc.output("datauristring").split(",")[1] };
   if (modo === "bajar") { doc.save(nombre); return; }
   if (modo === "imprimir") { doc.autoPrint(); }
   // Previsualizar: se abre en una pestaña y se mira antes de que lo lean ocho

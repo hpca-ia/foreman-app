@@ -540,11 +540,28 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
       if (!window.confirm(
         `¿Enviar el acta N° ${abierta.numero} a ${correos.length} ${correos.length === 1 ? "persona" : "personas"}?\n\n`
         + correos.join("\n")
+        + "\n\nVa el acta en el cuerpo del correo y el PDF adjunto, para imprimir y firmar."
         + "\n\nDespués de enviada no se puede modificar.")) return;
       setOcupado(true); setError("");
+      // EL ACTA VA EN EL CUERPO Y TAMBIÉN ADJUNTA.
+      //
+      // En el cuerpo porque se lee sin abrir nada —la mitad la va a leer en el
+      // teléfono, caminando— y un correo que obliga a bajar un archivo para
+      // saber qué dice no se lee. Adjunta porque es el documento: el que se
+      // imprime, se firma, se archiva en la carpeta de la obra y se lleva a
+      // una mesa cuando hay que discutir algo. Son dos usos distintos del
+      // mismo contenido y hacen falta los dos.
+      let adjunto = null;
+      try {
+        adjunto = await pdfActa({ acta: abierta, obra: lead.nombre, ...cont, enlaces }, "base64");
+      } catch (e) {
+        // Si el PDF no se puede armar, el acta sale igual en el cuerpo: lo que
+        // no puede pasar es que un problema con el adjunto frene el envío.
+        void e;
+      }
       const r = await fetch("/api/aviso?de=acta", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acta_id: abierta.id, para: correos }),
+        body: JSON.stringify({ acta_id: abierta.id, para: correos, adjunto }),
       });
       const data = await r.json().catch(() => ({}));
       setOcupado(false);

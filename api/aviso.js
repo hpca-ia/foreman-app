@@ -22,6 +22,11 @@ import acta from "./_aviso-acta.js";
 
 const AVISOS = { tarea, reunion, comentario, cuenta, resumen, orden, plan, acta };
 
+// El acta viaja con su PDF adjunto en base64, y un acta con fotos pesa más
+// que el megabyte que viene por defecto. Sin esto el envío falla con un error
+// de tamaño que no dice nada de lo que pasó.
+export const config = { api: { bodyParser: { sizeLimit: "15mb" } } };
+
 export default async function handler(req, res) {
   const de = String(req.query?.de || "");
   const aviso = AVISOS[de];

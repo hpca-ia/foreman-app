@@ -20,7 +20,7 @@ const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const { acta_id: actaId, para } = req.body || {};
+  const { acta_id: actaId, para, adjunto } = req.body || {};
   if (!actaId) return res.status(400).json({ error: "Falta el acta." });
   if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
 
@@ -148,6 +148,12 @@ export default async function handler(req, res) {
 
   const r = await enviarCorreo({
     to: para, responderA: responderA.length ? responderA : null,
+    // El PDF lo arma el navegador y viaja en el pedido: acá no hay librería de
+    // PDF ni las fotos firmadas, y poner una sería mantener dos veces el mismo
+    // documento.
+    adjuntos: adjunto?.contenido
+      ? [{ filename: adjunto.nombre || `Acta ${acta.numero}.pdf`, content: adjunto.contenido }]
+      : undefined,
     subject: `Acta de reunión N° ${acta.numero} · ${lead?.nombre || "Obra"} · ${dia(acta.fecha)}`,
     html,
   });
