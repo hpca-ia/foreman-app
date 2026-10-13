@@ -708,6 +708,22 @@ Rubros: ${listaRubros}`,
             Marcar NO reparte solo: el monto de cada uno arranca en cero y lo
             pone quien sabe. Repartir automáticamente al marcar sería volver al
             prorrateo por otra puerta. */}
+        {/* MARCAR TODO EL CAPÍTULO de un saque: con quince rubros, tocarlos
+            de a uno para después prorratear es trabajo que la pantalla puede
+            hacer sola. */}
+        {capElegido && rubrosDelDestino.length > 1 && (
+          <button onClick={() => setRepartos(rs => [
+            ...rs,
+            ...rubrosDelDestino
+              .filter(r => !rs.some(x => x.tipo === "rubro" && x.id === r.id))
+              .map(r => ({ tipo: "rubro", id: r.id, monto: 0 })),
+          ])}
+            style={{ background: "none", border: "none", color: colors.brand, fontSize: 11.5,
+              cursor: "pointer", fontFamily: colors.font, padding: "6px 0 2px" }}>
+            Marcar los {rubrosDelDestino.length} rubros de {nombreDestino}
+          </button>
+        )}
+
         {capElegido && (
           <div style={{ marginTop: 6, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
             maxHeight: 190, overflowY: "auto", background: "#fff" }}>
@@ -765,7 +781,39 @@ Rubros: ${listaRubros}`,
                 fontFamily: colors.font }}>
               Repartir ${fmt(n(form.total))} entre {repartos.length}
             </button>
-            <span style={{ fontSize: 10.5, color: colors.muted }}>
+            {/* A PRORRATA DE LO QUE PESA CADA UNO, que es distinto de en
+                partes iguales. Si el capítulo tiene un rubro de $10.000 y otro
+                de $500, repartir una factura mitad y mitad entre los dos hace
+                que el chico aparezca al 300% y el grande al 5%. A prorrata cada
+                uno se lleva lo que le toca por tamaño: es la única repartición
+                que no exige inventar un dato que nadie tiene. */}
+            <button onClick={() => {
+                const base = repartos.reduce((t, x) => {
+                  const r = rubros.find(y => y.id === x.id);
+                  return t + (x.tipo === "rubro" ? n(r?.total_base) : 0);
+                }, 0);
+                if (!base) return;
+                let dado = 0;
+                setRepartos(rs => rs.map((x, j) => {
+                  if (x.tipo !== "rubro") return x;
+                  const r = rubros.find(y => y.id === x.id);
+                  const ultimo = j === rs.length - 1;
+                  // El resto que no divide exacto va al último: si se tira, el
+                  // total de la factura deja de coincidir con lo asignado y ese
+                  // centavo aparece después como un descuadre inexplicable.
+                  const monto = ultimo
+                    ? Math.round((n(form.total) - dado) * 100) / 100
+                    : Math.round((n(form.total) * (n(r?.total_base) / base)) * 100) / 100;
+                  dado = Math.round((dado + monto) * 100) / 100;
+                  return { ...x, monto };
+                }));
+              }}
+              style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+                padding: "6px 11px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
+                fontFamily: colors.font }}>
+              …o a prorrata de lo que pesa cada uno
+            </button>
+            <span style={{ fontSize: 10.5, color: colors.muted, flexBasis: "100%" }}>
               …o escribí el % de cada uno y el monto se calcula solo
             </span>
           </div>
