@@ -106,6 +106,34 @@ export async function materiaPrima(obraId) {
     });
 }
 
+const ORDEN_DE_UNA_OBRA = `DEPENDENCIAS: "de" termina antes de que empiece "a". Usá el orden real de una
+obra, no el orden de la lista:
+· movimiento de tierra y cimentación primero
+· estructura después, piso por piso si la obra tiene varios
+· mampostería detrás de la estructura, y puede ir solapada con los pisos de arriba
+· instalaciones ANTES de enlucidos: si van después hay que picar
+· enlucidos, contrapisos y cielos rasos después de instalaciones
+· carpintería y acabados al final, con el edificio cerrado
+· limpieza y entrega al último
+
+EL RETARDO, que es el tercer número de cada dependencia:
+
+  POSITIVO es una espera real —el fragüe del hormigón antes de desencofrar, el
+  secado del empaste antes de pintar—.
+
+  NEGATIVO es un TRASLAPE: la actividad arranca antes de que termine la otra,
+  que es lo que pasa todo el tiempo en obra. La mampostería de planta baja
+  entra cuando arriba todavía se está fundiendo; el enlucido empieza por donde
+  ya se cerró. USALO: un cronograma sin traslapes da una obra mucho más larga
+  de lo que es.
+
+El cuarto elemento, opcional, es el tipo: "CC" cuando arrancan juntas, "FF"
+cuando terminan juntas. Sin él es fin→comienzo, que es la normal.
+
+Lo que puede ir en paralelo, ponelo en paralelo. Pero no inventes dependencias
+para rellenar: si dos cosas no se traban, no las trabes.
+`;
+
 /** Una agrupación dicha en una línea, para la consulta. */
 function enPalabras(a) {
   const mag = a.magnitud?.length
@@ -117,7 +145,7 @@ function enPalabras(a) {
   return `${a.id} · ${a.nombre} · $${miles(a.monto)} · ${a.rubros || 0} rubros\n     TAMAÑO: ${mag}${princ}`;
 }
 
-export async function proponerCronograma({ agrupaciones = [], meses = 6, dias: diasPlazo = 0, nombreObra = "", cal = calendario() }) {
+export async function proponerCronograma({ agrupaciones = [], meses = 6, dias: diasPlazo = 0, nombreObra = "", cal = calendario(), conDependencias = true }) {
   if (!agrupaciones.length) {
     return { error: "Esta obra todavía no tiene agrupaciones. Se arman en Control de Obra → Agrupaciones." };
   }
@@ -152,8 +180,7 @@ control de obra y es el que vale.
 
 {"actividades":[{"id":12,"dias":18,"porque":"420 m2 / 1 cuadrilla x 24 m2 dia"},
                 {"id":13,"dias":40,"porque":"importada, 8 semanas de fabricacion",
-                 "partes":[["anticipo",1,50],["fabricación",30,40],["instalación de grada",9,10]]}],
- "dependencias":[[12,13,0],[13,14,-5]]}
+                 "partes":[["anticipo",1,50],["fabricación",30,40],["instalación de grada",9,10]]}]${conDependencias ? ',\n "dependencias":[[12,13,0],[13,14,-5]]' : ""}}
 
 "actividades": una por agrupación. "id" es el id de la agrupación, "dias" los
 días hábiles que lleva, "porque" la cuenta que te llevó a ese número.
@@ -207,33 +234,7 @@ con una duración igual al plazo entero.
 Y lo que se ejecuta de corrido tampoco se parte: es una actividad y punto. No
 inventes etapas para que se vea más detallado.
 
-DEPENDENCIAS: "de" termina antes de que empiece "a". Usá el orden real de una
-obra, no el orden de la lista:
-· movimiento de tierra y cimentación primero
-· estructura después, piso por piso si la obra tiene varios
-· mampostería detrás de la estructura, y puede ir solapada con los pisos de arriba
-· instalaciones ANTES de enlucidos: si van después hay que picar
-· enlucidos, contrapisos y cielos rasos después de instalaciones
-· carpintería y acabados al final, con el edificio cerrado
-· limpieza y entrega al último
-
-EL RETARDO, que es el tercer número de cada dependencia:
-
-  POSITIVO es una espera real —el fragüe del hormigón antes de desencofrar, el
-  secado del empaste antes de pintar—.
-
-  NEGATIVO es un TRASLAPE: la actividad arranca antes de que termine la otra,
-  que es lo que pasa todo el tiempo en obra. La mampostería de planta baja
-  entra cuando arriba todavía se está fundiendo; el enlucido empieza por donde
-  ya se cerró. USALO: un cronograma sin traslapes da una obra mucho más larga
-  de lo que es.
-
-El cuarto elemento, opcional, es el tipo: "CC" cuando arrancan juntas, "FF"
-cuando terminan juntas. Sin él es fin→comienzo, que es la normal.
-
-Lo que puede ir en paralelo, ponelo en paralelo. Pero no inventes dependencias
-para rellenar: si dos cosas no se traban, no las trabes.
-
+${conDependencias ? ORDEN_DE_UNA_OBRA : ""}
 EL PLAZO MANDA. La obra tiene que salir en ${dias} días hábiles, que es lo que
 dice el contrato. No es una sugerencia: si tus duraciones dan mucho más, no
 alargues la obra — acortá, traslapá lo que se traslapa en la realidad, y poné
@@ -577,6 +578,75 @@ export async function aprenderDeUnaDuracion({ nombre, dias, magnitud = null, par
   });
 }
 
+
+
+/**
+ * EL ORDEN, EN UNA CONSULTA APARTE DE LAS DURACIONES.
+ *
+ * Esto es el arreglo de fondo de por qué el cronograma venía fallando, y vale
+ * la pena dejarlo escrito.
+ *
+ * Se le pedía TODO en una sola respuesta: las actividades, sus duraciones, sus
+ * partes con los porcentajes de plata, y encima las dependencias entre todas.
+ * Es la forma más frágil posible de pedir algo. Un solo campo mal puesto —una
+ * dependencia que apunta a un id que no existe, una respuesta que se corta a
+ * la mitad, un minuto de más— y no llegaba NADA. El resultado desde afuera era
+ * un cartel rojo y una pantalla vacía, con veinte minutos perdidos.
+ *
+ * Partido en dos, lo peor que puede pasar es quedarse sin las cadenas: las
+ * barras ya están, con sus duraciones pensadas y guardadas, y encadenar es lo
+ * más fácil de hacer a mano o de reintentar. Un cronograma a medias se termina;
+ * uno que no llegó hay que volver a empezarlo.
+ *
+ * Y cada consulta es más chica, así que las dos entran holgadas en el minuto
+ * que da el servidor.
+ */
+export async function proponerDependencias({ actividades = [], dias = 0, nombreObra = "", cal = calendario() }) {
+  const vivas = actividades.filter(a => a.nombre);
+  if (vivas.length < 2) return { dependencias: [] };
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  const jornada = L.length === 7 ? "los siete días" : L.includes(6) ? "de lunes a sábado" : "de lunes a viernes";
+  try {
+    const sistema = `Sos NOVA y encadenás el cronograma de la obra "${nombreObra}" en Ecuador.
+
+LAS BARRAS QUE HAY, con sus días:
+${vivas.map(a => `${a.id} · ${a.nombre} · ${a.duracion}d`).join("\n")}
+
+${dias ? `El plazo son ${dias} días hábiles y se trabaja ${jornada}.` : `Se trabaja ${jornada}.`}
+
+Devolvés SOLO JSON, sin markdown, usando los ids de arriba:
+
+{"dependencias":[[12,13,0],[13,14,-5]]}
+
+Cada una es [de, a, retardo] — "de" termina antes de que empiece "a"— y el
+cuarto elemento es opcional: "CC" si arrancan juntas, "FF" si terminan juntas.
+
+${ORDEN_DE_UNA_OBRA}
+
+NO DEVUELVAS NI DURACIONES NI NOMBRES. Las barras ya están puestas y sus días
+ya los pensó alguien: tocarlos acá sería pisar un trabajo hecho.`;
+
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 4000,
+      system: sistema,
+      messages: [{ role: "user", content: "Encadenalas en el orden real de la obra. Solo JSON." }],
+    });
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "encadenarlas") };
+    const { datos } = jsonTolerante(textoDeNova(data));
+    if (!datos?.dependencias?.length) return { error: "NOVA no devolvió dependencias que se entiendan." };
+    const validos = new Set(vivas.map(a => Number(a.id)));
+    const dependencias = datos.dependencias
+      .map(d => (Array.isArray(d)
+        ? { de: Number(d[0]), a: Number(d[1]), retardo: Number(d[2]) || 0, tipo: typeof d[3] === "string" ? d[3] : "FC" }
+        : { de: Number(d.de), a: Number(d.a), retardo: Number(d.retardo) || 0, tipo: d.tipo || "FC" }))
+      // Una dependencia a una barra que no existe se tira: la alternativa es
+      // que el CPM no pueda calcular nada y el cronograma no dibuje fechas.
+      .filter(d => validos.has(d.de) && validos.has(d.a) && d.de !== d.a);
+    return { dependencias };
+  } catch (e) {
+    return { error: "NOVA devolvió algo que no se entiende: " + e.message };
+  }
+}
 
 /**
  * EN QUÉ ETAPAS SE PARTE ESTA OBRA, y qué va en cada una.

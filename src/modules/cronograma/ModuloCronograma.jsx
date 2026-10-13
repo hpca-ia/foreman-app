@@ -2205,6 +2205,86 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           después las partís.
         </Centro>
       ) : (
+        <>
+        {/* LAS ETAPAS SE MANEJAN ACÁ, FUERA DE LA TABLA.
+            Estaban adentro del Gantt, en una banda: para mover una había que
+            encontrar dos flechitas metidas en una tabla que se desplaza para
+            el costado, apretadas contra el nombre y contra el resto de la
+            fila. No se podía, y desde afuera no se distingue de un botón roto.
+            Acá arriba hay lugar: la lista entera de un vistazo, con botones
+            que se pueden apretar, y lo que se crea aparece al instante en un
+            lugar fijo que no se va de la pantalla. La banda de adentro del
+            Gantt sigue, pero ya no es donde se trabaja: es donde se mira. */}
+        {editable && (
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+            borderRadius: colors.radiusMd, padding: 11, marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: fases.length ? 8 : 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, flex: 1, minWidth: 150 }}>
+                Etapas de la obra
+                <span style={{ fontWeight: 400, color: colors.muted }}>
+                  {" "}· {fases.length ? `${fases.length} ${fases.length === 1 ? "etapa" : "etapas"}` : "todavía ninguna"}
+                </span>
+              </div>
+              <Button variant="outline" size="sm" onClick={agregarEtapa}><Plus size={13} /> Agregar etapa</Button>
+              {actividades.length > 0 && (
+                <Button variant="outline" size="sm" disabled={pensando} onClick={etapasConNova}>
+                  <Sparkles size={13} /> {pensando ? "NOVA está mirando…" : "Que NOVA las arme"}
+                </Button>
+              )}
+            </div>
+
+            {!fases.length ? (
+              <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginTop: 7 }}>
+                Una etapa es un TÍTULO que agrupa barras —Demoliciones, Obra gris, Instalaciones, Acabados—.
+                No tiene duración ni fechas propias: las toma de lo que tiene adentro, y no cambia ninguna
+                fecha del cronograma. Para meter una barra en una etapa, tocá su nombre en la tabla y elegila
+                arriba de la ficha.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 3 }}>
+                {[...fases].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0)).map((f, i, lista) => {
+                  const adentro = actividades.filter(a => Number(a.fase_id) === Number(f.id));
+                  const barras = adentro.length;
+                  const suyas = todas.filter(a => Number(a.fase_id) === Number(f.id));
+                  const inicios = suyas.map(a => a.inicio).filter(Boolean).sort();
+                  const fines = suyas.map(a => a.fin).filter(Boolean).sort();
+                  return (
+                    <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 7,
+                      padding: "5px 6px", borderRadius: 7, background: colors.bg }}>
+                      <span style={{ fontSize: 11, color: colors.muted, width: 16, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
+                      <input defaultValue={f.nombre} key={`n${f.id}-${f.nombre}`}
+                        onBlur={e => { if ((e.target.value || "").trim() && e.target.value !== f.nombre) renombrarEtapaDeObra(f, e.target.value); }}
+                        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                        title="Escribí para renombrar la etapa"
+                        style={{ ...inputStyle, flex: 1, minWidth: 110, fontSize: 12.5, fontWeight: 600,
+                          color: colors.ink, padding: "4px 7px", height: 28 }} />
+                      <span style={{ fontSize: 10.5, color: colors.muted, flexShrink: 0, minWidth: 108, textAlign: "right" }}>
+                        {barras ? `${barras} ${barras === 1 ? "barra" : "barras"}` : "vacía"}
+                        {inicios.length ? ` · ${dia(inicios[0])} a ${dia(fines[fines.length - 1])}` : ""}
+                      </span>
+                      {/* BOTONES QUE SE PUEDEN APRETAR. Los de adentro de la
+                          tabla eran de nueve píxeles. */}
+                      <Button variant="secondary" size="sm" disabled={i === 0}
+                        onClick={() => moverEtapaDeObra(f, -1)}
+                        title={i === 0 ? "Ya es la primera" : `Subir «${f.nombre}»`}>▲</Button>
+                      <Button variant="secondary" size="sm" disabled={i === lista.length - 1}
+                        onClick={() => moverEtapaDeObra(f, 1)}
+                        title={i === lista.length - 1 ? "Ya es la última" : `Bajar «${f.nombre}»`}>▼</Button>
+                      <Button variant="secondary" size="sm" onClick={() => borrarEtapaDeObra(f)}
+                        title={`Borrar «${f.nombre}». Lo que tiene adentro no se borra.`}><Trash2 size={13} /></Button>
+                    </div>
+                  );
+                })}
+                {actividades.some(a => a.fase_id == null) && (
+                  <div style={{ fontSize: 10.5, color: colors.muted, padding: "3px 6px" }}>
+                    {actividades.filter(a => a.fase_id == null).length} barras todavía sin etapa, al final de la tabla.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <TablaGantt
           todas={todas} dependencias={dependencias} agrupaciones={agrupaciones} plata={plata}
           porId={porId} cal={cal} plan={plan} escala={escala} zoom={zoom} marcas={marcas}
@@ -2217,6 +2297,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
           platas={platas} memoria={memoria}
           fases={fases} onFase={ponerEnEtapa} onMoverFase={moverEtapaDeObra}
           onRenombrarFase={renombrarEtapaDeObra} onBorrarFase={borrarEtapaDeObra} />
+        </>
       )}
 
       {editable && (
@@ -2229,44 +2310,6 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             onCommit={v => setNueva(x => ({ ...(x || { nombre: "" }), duracion: v }))}
             style={{ width: 80 }} />
           <Button variant="primary" size="sm" onClick={agregar}><Plus size={13} /> Agregar</Button>
-          {/* LAS ETAPAS, al lado de las actividades y no escondidas en un
-              menú: son dos maneras de agregar al cronograma —una barra, o el
-              título que agrupa barras— y se usan en el mismo momento. */}
-          <Button variant="outline" size="sm" onClick={agregarEtapa}
-            title="Una etapa de la obra: demoliciones, obra gris, acabados. Agrupa barras para poder leer el cronograma; no cambia ninguna fecha.">
-            <Plus size={13} /> Etapa de la obra
-          </Button>
-          {actividades.length > 0 && (
-            <Button variant="outline" size="sm" disabled={pensando} onClick={etapasConNova}
-              title="NOVA agrupa las barras en etapas y las ordena como ocurren. No toca ninguna fecha.">
-              <Sparkles size={13} /> {pensando ? "NOVA está mirando…" : "Que NOVA las arme"}
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* QUÉ ES UNA ETAPA Y QUÉ NO, ahí donde se las crea.
-          Hace falta decirlo porque la palabra ya estaba ocupada: adentro de un
-          rubro partido, sus momentos —anticipo, fabricación, instalación— se
-          llamaban etapas también. Escribir "Instalación de aire acondicionado"
-          en el campo de actividades y esperar que salga un título es el
-          malentendido obvio, y el que de verdad pasa. */}
-      {editable && (
-        <div style={{ fontSize: 11, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
-          {fases.length === 0 ? (
-            <>
-              <strong style={{ color: colors.inkSoft }}>Este cronograma todavía no tiene etapas.</strong>{" "}
-              Una etapa es un TÍTULO que agrupa barras —Demoliciones, Obra gris, Instalaciones, Acabados— y
-              aparece como una banda verde ancha. No tiene duración ni fechas propias: las toma de lo que
-              tiene adentro. El campo de la izquierda es para ACTIVIDADES, que son las barras.
-            </>
-          ) : (
-            <>
-              <strong style={{ color: colors.inkSoft }}>{fases.length} {fases.length === 1 ? "etapa" : "etapas"}.</strong>{" "}
-              Se suben y se bajan con las flechas de cada banda, y se renombran escribiendo encima del
-              título. Para meter una barra en una etapa, tocá su nombre y elegila arriba de la ficha.
-            </>
-          )}
         </div>
       )}
 
