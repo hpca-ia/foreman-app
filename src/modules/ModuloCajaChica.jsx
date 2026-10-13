@@ -313,6 +313,17 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     } catch (e) { console.error("aviso de reposición:", e); }
   }
 
+  // Los rubros de la obra, para que NOVA pueda proponer contra cuál va.
+  const [rubrosObra, setRubrosObra] = useState([]);
+  useEffect(() => {
+    const id = cajaActiva?.obra_id;
+    if (!id) { setRubrosObra([]); return; }
+    let vivo = true;
+    supabase.from("obra_rubros").select("id,descripcion,oculto,anulado_por_oc").eq("obra_id", id)
+      .then(({ data }) => { if (vivo) setRubrosObra((data || []).filter(r => !r.oculto && !r.anulado_por_oc)); });
+    return () => { vivo = false; };
+  }, [cajaActiva?.obra_id]);
+
   async function leerFacturaNOVA(file, hash=null) {
     setNovaLeyendo(true); setNovaError("");
     try {
@@ -326,7 +337,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       const adjunto = esPDF
         ? {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}}
         : {type:"image",source:{type:"base64",media_type:file.type,data:base64}};
-      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|recibo|otro"}. "numero_factura" es el número impreso de la factura (formato 001-001-000000123). "monto" es el TOTAL a pagar.'}];
+      // Y QUE PROPONGA EL RUBRO. Un gasto de caja chica es una compra ya
+      // aprobada que descuenta del control igual que una factura, y el papel
+      // dice qué se compró: pedirle a quien lo carga que además busque el rubro
+      // en una lista de ciento sesenta es trabajo que el modelo puede hacer.
+      // Propone; quien carga confirma.
+      const paraNova = rubrosObra.slice(0, 220).map(r => `${r.id}:${r.descripcion.slice(0, 60)}`).join(" | ");
+      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|recibo|otro","rubro_id":null}. "numero_factura" es el número impreso de la factura (formato 001-001-000000123). "monto" es el TOTAL a pagar. "rubro_id" es el id del rubro de esta lista al que corresponde el gasto, o null si no estás seguro: null es una respuesta válida y es mejor que adivinar, porque un gasto cargado al rubro equivocado se descubre meses después. Rubros: ' + paraNova}];
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:LECTURA,max_tokens:700,messages:[{role:"user",content}]})});
       if (!res.ok) { setNovaError(`NOVA no respondió (error ${res.status}). Llena los datos a mano.`); setNovaLeyendo(false); return; }
       const d=await res.json();
@@ -339,6 +356,14 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         descripcion:parsed.descripcion||prev.descripcion, proveedor:parsed.proveedor||prev.proveedor,
         ruc:parsed.ruc||prev.ruc, numero_factura:parsed.numero_factura||prev.numero_factura,
         monto:parsed.monto||prev.monto, fecha:parsed.fecha||prev.fecha, tipo:parsed.tipo||prev.tipo}));
+      // EL RUBRO QUE PROPUSO, si existe de verdad y todavía no se eligió nada.
+      // No pisa una elección hecha a mano: quien cargó el gasto sabe más que
+      // el papel sobre para qué era.
+      if (parsed.rubro_id && rubrosObra.some(r => r.id === Number(parsed.rubro_id))) {
+        setRubrosGasto(prev => (prev.length ? prev : [{
+          obra_rubro_id: Number(parsed.rubro_id), monto: Number(parsed.monto) || 0,
+        }]));
+      }
       await revisarDuplicadosGasto({ruc:parsed.ruc,numero_factura:parsed.numero_factura,proveedor:parsed.proveedor,monto:parsed.monto,fecha:parsed.fecha}, hash);
     } catch(e) { setNovaError("Error leyendo el archivo: "+e.message); }
     setNovaLeyendo(false);
@@ -385,7 +410,16 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       else setNovaError("No se pudo subir la foto (el gasto igual se guarda): "+error.message);
     }
     const monto=Number(gastoForm.monto);
-    const conRubros = rubrosGasto.filter(r=>r.obra_actividad_id);
+    // Lo que apunta a algo: un rubro exacto o una agrupación entera. Antes
+    // solo se miraba la agrupación, así que elegir el rubro exacto no servía
+    // de nada —se guardaba en la pantalla y se perdía al grabar.
+    const conRubros = rubrosGasto.filter(r=>r.obra_actividad_id||r.obra_rubro_id);
+    const aAsignacion = (facturaId, r) => ({
+      factura_id: facturaId,
+      obra_rubro_id: r.obra_rubro_id ?? null,
+      obra_actividad_id: r.obra_rubro_id ? null : (r.obra_actividad_id ?? null),
+      monto: Number(r.monto) || 0,
+    });
 
     // ── Corregir uno que ya estaba ───────────────────────────────────────
     if (gastoEditando) {
@@ -410,7 +444,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         if (conRubros.length) {
           await supabase.from("obra_asignaciones").delete().eq("factura_id",gastoEditando.obra_factura_id);
           await supabase.from("obra_asignaciones").insert(conRubros
-            .map(r=>({factura_id:gastoEditando.obra_factura_id, obra_actividad_id:r.obra_actividad_id, monto:Number(r.monto)||0}))
+            .map(r=>aAsignacion(gastoEditando.obra_factura_id, r))
             .filter(f=>f.monto!==0));
         }
       }
@@ -468,7 +502,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
           // Lo que eligió quien cargó el gasto entra como asignación real.
           const filas = conRubros
-            .map(r=>({factura_id:facturaObra.id, obra_actividad_id:r.obra_actividad_id, monto:Number(r.monto)||0}))
+            .map(r=>aAsignacion(facturaObra.id, r))
             .filter(f=>f.monto!==0);
           if (filas.length) await supabase.from("obra_asignaciones").insert(filas);
         }
