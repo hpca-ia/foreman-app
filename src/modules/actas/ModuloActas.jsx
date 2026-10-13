@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -8,6 +8,7 @@ import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, 
   convocadosDe, guardarConvocado, borrarConvocado, subirFoto, enlacesDeFotos,
   correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106 } from "./actas";
 import { pdfActa } from "./pdfActa";
+import { armarActa } from "./novaActa";
 
 // Las actas de reunión de obra.
 //
@@ -36,6 +37,8 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // Lo que se anota al vuelo durante la reunión, antes de que NOVA lo ordene.
+  const [dictado, setDictado] = useState("");
   const [nuevo, setNuevo] = useState({
     tema: "", compromiso: "", responsable: "", limite: "",
     convocado: { nombre: "", email: "", empresa: "", cargo: "" },
@@ -177,6 +180,43 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             {(abierta.enviada_a || []).length} {(abierta.enviada_a || []).length === 1 ? "correo" : "correos"} y
             ya no se toca. Lo que haya que corregir va en la próxima: un acta que cambia después de enviada no
             sirve como prueba de nada.
+          </div>
+        )}
+
+        {/* ANOTÁ AL VUELO Y QUE NOVA LO ORDENE.
+            Escribir un acta después de la reunión lleva cuarenta minutos y se
+            hace mal: de memoria, dos días después, y lo primero que se pierde
+            son los compromisos —quién queda en hacer qué y para cuándo—, que
+            son lo único del acta que sirve para reclamar algo.
+            Lo que sí se puede hacer es anotar mientras se habla, en desorden y
+            con las palabras que salgan. Eso NOVA lo separa en temas y
+            compromisos, le pone fecha a "el viernes", y dice qué quedó al
+            aire. */}
+        {sePuede && (
+          <div style={{ ...caja, borderColor: colors.brand }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+              <Sparkles size={14} color={colors.brand} />
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>Anotá la reunión y que NOVA la ordene</div>
+            </div>
+            <div style={{ fontSize: 11, color: colors.muted, marginBottom: 7, lineHeight: 1.45 }}>
+              Escribí mientras se habla, en desorden, como salga. NOVA separa los temas de los compromisos,
+              le pone responsable y fecha a cada uno —"el viernes" lo resuelve contra el calendario— y te dice
+              qué quedó al aire. No inventa: lo que no se dijo, no lo pone.
+            </div>
+            <textarea value={dictado} rows={4} onChange={e => setDictado(e.target.value)}
+              placeholder={"Ej: la ventanería se atrasa dos semanas, el proveedor avisó ayer. Lizeth queda en pedir la proforma nueva para el viernes. El cliente aprueba el cambio de piso pero quiere ver una muestra antes. Hay humedad en el muro norte del segundo piso, el contratista lo revisa."}
+              style={{ ...inputStyle, width: "100%", fontSize: 12.5, lineHeight: 1.55, resize: "vertical", padding: "8px 10px" }} />
+            <div style={{ display: "flex", gap: 7, alignItems: "center", marginTop: 7, flexWrap: "wrap" }}>
+              <Button variant="primary" size="sm" disabled={ocupado || dictado.trim().length < 20} onClick={ordenarConNova}>
+                <Sparkles size={13} /> {ocupado ? "NOVA está ordenando…" : "Que NOVA la ordene"}
+              </Button>
+              {dictado.trim() && (
+                <Button variant="secondary" size="sm" onClick={() => setDictado("")}>Borrar</Button>
+              )}
+              <span style={{ fontSize: 10.5, color: colors.muted, flex: 1, minWidth: 180 }}>
+                Agrega a lo que ya haya escrito; no borra nada.
+              </span>
+            </div>
           </div>
         )}
 
@@ -511,6 +551,54 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
         )}
       </div>
     );
+
+    /**
+     * Lo que NOVA ordenó, puesto en el acta.
+     *
+     * SE AGREGA, NO SE REEMPLAZA. Lo que ya está escrito lo escribió una
+     * persona, y una de las maneras más rápidas de que alguien deje de usar
+     * una herramienta es que le borre lo que escribió.
+     */
+    async function ordenarConNova() {
+      setOcupado(true); setError("");
+      const r = await armarActa({
+        texto: dictado, asistentes: cont.asistentes, fecha: abierta.fecha, obra: lead.nombre,
+        pendientes: arrastrados.filter(c => c.estado === "pendiente" || c.estado === "reprogramado"),
+      });
+      if (r.error) { setOcupado(false); setError(r.error); return; }
+
+      for (const t of r.temas) {
+        await guardarFila("acta_temas", { acta_id: abierta.id, titulo: t.titulo, detalle: t.detalle, resuelto: t.resuelto, orden: 900 });
+      }
+      for (const c of r.compromisos) {
+        const quienEs = cont.asistentes.find(a => a.nombre === c.responsable);
+        await guardarFila("acta_compromisos", {
+          acta_id: abierta.id, texto: c.texto, estado: "pendiente",
+          responsable_nombre: c.responsable, responsable_email: quienEs?.email || null,
+          fecha_limite: c.fecha, orden: 900,
+        });
+      }
+      for (const p of r.repaso) {
+        await guardarFila("acta_compromisos", {
+          id: p.id,
+          estado: p.hecho ? "cumplido" : "pendiente",
+          nota: p.nota || null,
+          cerrado_at: p.hecho ? new Date().toISOString() : null,
+          cerrado_nombre: p.hecho ? currentUser?.name || null : null,
+        });
+      }
+      if (r.avance && !abierta.avance_nota) await tocarActa({ avance_nota: r.avance });
+
+      setOcupado(false);
+      setDictado("");
+      await cargarActa(abierta.id);
+      setAviso([
+        `${r.temas.length} ${r.temas.length === 1 ? "tema" : "temas"}`,
+        `${r.compromisos.length} ${r.compromisos.length === 1 ? "compromiso" : "compromisos"}`,
+        r.repaso.length ? `${r.repaso.length} del repaso` : "",
+      ].filter(Boolean).join(" · ") + ". Revisalo: lo que NOVA no supo quedó vacío."
+        + (r.falta.length ? `\n\nQuedó al aire: ${r.falta.join(" · ")}` : ""));
+    }
 
     async function ponerCompromiso() {
       if (!nuevo.compromiso.trim()) return;
