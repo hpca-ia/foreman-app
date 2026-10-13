@@ -19,7 +19,7 @@ import { FORMAS_PAGO, registrarPago } from "./pagos";
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
 
-export default function ModalFactura({ obra, rubros, actividades = [], planilla, factura, asignacionesFactura = [], currentUser, onCerrar, onGuardado }) {
+export default function ModalFactura({ obra, rubros, actividades = [], planilla, factura, asignacionesFactura = [], control = {}, currentUser, onCerrar, onGuardado }) {
   const editando = !!factura;
   // Los pedidos de compra que todavía no tienen factura. Son los que están
   // pesando como "comprometido" en el control: engancharle uno a esta factura
@@ -199,7 +199,7 @@ Rubros: ${listaRubros}`,
             monto: Math.round(n(x.monto) * 100) / 100,
             // Solo si el rubro existe de verdad: un id inventado asignaría
             // plata a un renglón que nadie puede encontrar.
-            rubro_id: rubros.some(r => r.id === Number(x.rubro_id)) ? Number(x.rubro_id) : null,
+            destino: rubros.some(r => r.id === Number(x.rubro_id)) ? `rubro:${Number(x.rubro_id)}` : null,
           })));
       }
 
@@ -621,32 +621,87 @@ Rubros: ${listaRubros}`,
               <input type="number" step="0.01" value={it.monto}
                 onChange={e => setItems(xs => xs.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
                 style={{ ...mini, padding: "5px 7px", fontSize: 11.5, textAlign: "right" }} />
-              <select value={it.rubro_id ?? ""}
+              {/* TODOS LOS DESTINOS, no solo los rubros del presupuesto.
+                  Media factura no va a un rubro: va a una agrupación del
+                  control, a una de las de afuera —logística, vivienda, gastos
+                  de oficina— o a un capítulo entero cuando no se sabe cuánto
+                  fue de cada rubro. Ofrecer solo los rubros obliga a elegir
+                  mal o a no asignar, y las dos cosas terminan en el mismo
+                  lugar: plata que no está donde pasó.
+
+                  Y CADA RUBRO DICE CUÁNTO LE QUEDA. Asignar sin ver eso es
+                  cómo un rubro se pasa de su presupuesto sin que nadie lo note
+                  hasta el cierre del mes. */}
+              <select value={it.destino ?? ""}
                 onChange={e => setItems(xs => xs.map((x, j) => j === i
-                  ? { ...x, rubro_id: e.target.value ? Number(e.target.value) : null } : x))}
+                  ? { ...x, destino: e.target.value || null } : x))}
                 style={{ ...mini, padding: "5px 7px", fontSize: 11,
-                  color: it.rubro_id ? colors.ink : colors.warning }}>
-                <option value="">¿a qué rubro va?</option>
-                {rubros.filter(r => !r.oculto && !r.anulado_por_oc).map(r => (
-                  <option key={r.id} value={r.id}>{r.capitulo} · {r.numero} {r.descripcion.slice(0, 40)}</option>
+                  color: it.destino ? colors.ink : colors.warning }}>
+                <option value="">¿a dónde va?</option>
+                {capitulosDeRubros.map(c => (
+                  <optgroup key={c} label={c}>
+                    <option value={`cap:${c}`}>Todo el capítulo {c}</option>
+                    {rubros.filter(r => r.capitulo === c && !r.oculto && !r.anulado_por_oc).map(r => {
+                      const acc = control[r.id];
+                      const queda = acc ? acc.saldo : n(r.total_base);
+                      return (
+                        <option key={r.id} value={`rubro:${r.id}`}>
+                          {r.numero} {String(r.descripcion).slice(0, 38)} · queda ${fmt(queda)}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
                 ))}
+                {actividades.filter(a => !a.extra).length > 0 && (
+                  <optgroup label="Agrupaciones del control">
+                    {actividades.filter(a => !a.extra).map(a => (
+                      <option key={a.id} value={`act:${a.id}`}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {actividades.filter(a => a.extra).length > 0 && (
+                  <optgroup label="Fuera del presupuesto">
+                    {actividades.filter(a => a.extra).map(a => (
+                      <option key={a.id} value={`act:${a.id}`}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           ))}
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
             <Button variant="primary" size="sm"
-              disabled={!items.some(x => x.rubro_id)}
+              disabled={!items.some(x => x.destino)}
               onClick={() => {
-                // Un reparto por rubro, sumando los renglones que van al mismo.
-                const porRubro = new Map();
+                // EL IVA SE REPARTE, NO QUEDA COLGANDO.
+                //
+                // NOVA lee los renglones como están en el papel: sin IVA. El
+                // total de la factura lo lleva. Así que alguien asignaba los
+                // doce renglones, veía que no cerraba, y se quedaba con un
+                // saldo sin asignar que no entendía — porque no era un renglón
+                // que faltara: era el impuesto.
+                //
+                // Y el IVA es costo de la obra: el rubro costó lo que costó
+                // con impuesto. Se reparte entre los destinos en la misma
+                // proporción en que se repartió la base.
+                const suma = items.filter(x => x.destino).reduce((t, x) => t + n(x.monto), 0);
+                const escala = suma > 0 ? n(form.total) / suma : 1;
+                const porDestino = new Map();
                 items.forEach(x => {
-                  if (!x.rubro_id) return;
-                  porRubro.set(x.rubro_id, Math.round(((porRubro.get(x.rubro_id) || 0) + n(x.monto)) * 100) / 100);
+                  if (!x.destino) return;
+                  porDestino.set(x.destino, (porDestino.get(x.destino) || 0) + n(x.monto) * escala);
                 });
-                setRepartos([...porRubro.entries()].map(([id, monto]) => ({ tipo: "rubro", id, monto })));
+                setRepartos([...porDestino.entries()].map(([clave, monto]) => {
+                  const [tipo, id] = [clave.slice(0, clave.indexOf(":")), clave.slice(clave.indexOf(":") + 1)];
+                  return {
+                    tipo: tipo === "cap" ? "capitulo" : tipo === "act" ? "actividad" : "rubro",
+                    id: tipo === "cap" ? id : Number(id),
+                    monto: Math.round(monto * 100) / 100,
+                  };
+                }));
               }}>
-              Asignar {items.filter(x => x.rubro_id).length} de {items.length}
+              Asignar {items.filter(x => x.destino).length} de {items.length}
             </Button>
             {/* QUE LA SUMA CUADRE. Si los renglones no dan el total de la
                 factura, falta uno o sobra: el descuento, el transporte, o una
@@ -659,7 +714,7 @@ Rubros: ${listaRubros}`,
               return (
                 <span style={{ fontSize: 11, color: Math.abs(dif) < 0.02 ? colors.success : colors.warning }}>
                   {Math.abs(dif) < 0.02
-                    ? `Los renglones suman los $${fmt(suma)} de la base.`
+                    ? `Los renglones suman los $${fmt(suma)} de la base. Al asignar se les reparte el IVA hasta los $${fmt(n(form.total))} de la factura.`
                     : `Los renglones suman $${fmt(suma)} y la base es $${fmt(base)} — ${dif > 0 ? "sobran" : "faltan"} $${fmt(Math.abs(dif))}.`}
                 </span>
               );

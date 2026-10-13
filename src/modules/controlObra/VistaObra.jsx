@@ -338,7 +338,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
               <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
                 <PanelFacturas puede={puede}
                   obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
-                  facturas={facturas} asignaciones={asignaciones}
+                  facturas={facturas} asignaciones={asignaciones} porRubro={porRubro}
                   currentUser={currentUser} onCambio={cargar}
                 />
               </div>
@@ -353,7 +353,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
               <PanelFacturas puede={puede}
                 obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
                 planillaActual={planillas.find(p => p.id === abierta) || null}
-                facturas={facturas} asignaciones={asignaciones}
+                facturas={facturas} asignaciones={asignaciones} porRubro={porRubro}
                 currentUser={currentUser} onCambio={cargar} mostrarTitulo={false}
               />
             </PanelPlanillas>

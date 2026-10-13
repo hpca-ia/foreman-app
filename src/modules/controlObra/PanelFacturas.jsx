@@ -8,7 +8,7 @@ import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
 import RespaldosPlanilla from "./RespaldosPlanilla";
 
-export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, puede, onCambio, mostrarTitulo = true }) {
+export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, puede, onCambio, mostrarTitulo = true, porRubro = {} }) {
   const [modal, setModal] = useState(null); // null | {factura?}
   const [verRespaldos, setVerRespaldos] = useState(false);
 
@@ -92,7 +92,7 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
       </div>
 
       {modal && (
-        <ModalFactura actividades={actividades}
+        <ModalFactura actividades={actividades} control={porRubro}
           obra={obra} rubros={rubros} planilla={planillaActual}
           factura={modal.factura}
           asignacionesFactura={modal.factura ? asignaciones.filter(a => a.factura_id === modal.factura.id) : []}

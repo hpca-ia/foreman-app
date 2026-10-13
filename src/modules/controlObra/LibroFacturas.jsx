@@ -19,7 +19,7 @@ import { Mini } from "./PanelFacturas";
 const pelado = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
-export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, currentUser, onCambio }) {
+export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, currentUser, onCambio, porRubro = {} }) {
   const [alcance, setAlcance] = useState("todo");        // todo | sin | id de planilla
   const [proveedor, setProveedor] = useState("");
   const [tipo, setTipo] = useState("");
@@ -199,7 +199,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
 
       {modal && (
         // Se edita dentro de su propia planilla: pasarle otra la movería de período.
-        <ModalFactura actividades={actividades}
+        <ModalFactura actividades={actividades} control={porRubro}
           obra={obra} rubros={rubros} planilla={planillas.find(p => p.id === modal.factura?.planilla_id) || null}
           factura={modal.factura}
           asignacionesFactura={modal.factura ? asignaciones.filter(a => a.factura_id === modal.factura.id) : []}
