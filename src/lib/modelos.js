@@ -70,6 +70,36 @@ export async function pedirANova(cuerpo, respaldo = CONOCIDO) {
   return { ...segundo, modelo: respaldo, cayoAlRespaldo: true };
 }
 
+
+/**
+ * POR QUÉ FALLÓ, en una frase que sirva.
+ *
+ * "NOVA no pudo armarlo" es lo que se mostraba cuando la respuesta venía mal y
+ * no traía un mensaje adentro, que es justo el caso en que uno más necesita
+ * saber: un 504 de Vercel —la función tardó más de lo que la deja tardar— no
+ * devuelve JSON sino una página, y entonces no hay `error.message` que leer.
+ * El resultado era un cartel rojo sin ninguna información y nada que probar.
+ *
+ * Con el estado en la mano se distingue en dos segundos: 401 es la sesión,
+ * 504 o 502 es que tardó demasiado, 429 es el límite de la cuenta, 500 es la
+ * puerta. Son arreglos distintos.
+ */
+export function porQueFallo(res, data, quehacer = "armarlo") {
+  const dentro = data?.error?.message || (typeof data?.error === "string" ? data.error : "");
+  if (dentro) return dentro;
+  const e = res?.status;
+  if (e === 401) return "Tu sesión venció. Volvé a entrar a FOREMAN.";
+  if (e === 429) return "NOVA está en el límite de pedidos de la cuenta. Esperá un minuto y probá de nuevo.";
+  if (e === 504 || e === 502 || e === 408) {
+    return "NOVA tardó más de lo que el servidor la deja tardar y la cortaron a mitad de camino. "
+      + "Pasa en obras con muchas agrupaciones. Probá de nuevo; si vuelve a pasar, armalo del control "
+      + "y pedile las duraciones después.";
+  }
+  if (e >= 500) return `La puerta de NOVA falló (error ${e}). Probá de nuevo en un minuto.`;
+  const crudo = JSON.stringify(data ?? "").slice(0, 160);
+  return `NOVA no pudo ${quehacer} (${e || "sin respuesta"}).${crudo && crudo !== '""' ? ` Devolvió: ${crudo}` : ""}`;
+}
+
 /**
  * LECTURA. Sacar datos de un documento que ya los tiene.
  *

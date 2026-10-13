@@ -7,7 +7,7 @@ import { leerMemoria, recordar } from "./memoriaNova";
 import { memoriaEnPalabras } from "./apuntes";
 import { UNIDAD, magnitudes, rendimiento } from "./magnitudes";
 import { jsonTolerante } from "../../lib/jsonTolerante";
-import { JUICIO, pedirANova, textoDeNova } from "../../lib/modelos";
+import { JUICIO, pedirANova, textoDeNova, porQueFallo } from "../../lib/modelos";
 
 // NOVA arma el cronograma de la obra desde las agrupaciones del presupuesto.
 //
@@ -265,7 +265,7 @@ holgura.`;
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma de ${meses} meses. Solo JSON.` }],
     });
-    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo armarlo." };
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "armarlo") };
     // Tolerante al corte: si la respuesta no entró entera, se salva lo que
     // llegó completo en vez de perder todo por el último renglón. Las
     // agrupaciones que falten las agrega `ordenar` igual, con duración a
@@ -402,7 +402,7 @@ hacerlo.`;
         system: sistema,
         messages: [{ role: "user", content: "Acomodá el cronograma a esos cambios. Solo JSON." }],
     });
-    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo acomodarlo." };
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "acomodarlo") };
     const { datos } = jsonTolerante(textoDeNova(data));
     if (!datos) return { error: "NOVA devolvió algo que no se entiende. Probá de nuevo." };
     return limpiarParche(datos, { plan, nuevas, perdidas, dePlata });
@@ -669,7 +669,7 @@ ${lista}`;
       system: sistema,
       messages: [{ role: "user", content: "Qué se hace adentro de cada una. Solo JSON." }],
     });
-    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo proponerlos." };
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "proponerlos") };
     const { datos } = jsonTolerante(textoDeNova(data));
     if (!datos) return { error: "NOVA devolvió algo que no se entiende." };
     const limpio = {};
@@ -771,7 +771,7 @@ cronograma está bien, mandá {"nota":"..."} y nada más.`;
       system: sistema,
       messages: [{ role: "user", content: "Revisá este cronograma. Solo JSON." }],
     });
-    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo revisarlo." };
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "revisarlo") };
     const texto = textoDeNova(data);
     const { datos } = jsonTolerante(texto);
     if (!datos) {
@@ -933,7 +933,7 @@ Las listas son opcionales: mandá solo las que tengan algo.`;
       system: sistema,
       messages: [{ role: "user", content: "Traducí lo que te dictó. Solo JSON." }],
     });
-    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo entenderlo." };
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "entenderlo") };
     const salida = textoDeNova(data);
     const { datos } = jsonTolerante(salida);
     if (!datos) {

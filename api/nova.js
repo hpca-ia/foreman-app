@@ -15,6 +15,18 @@ export const config = {
       sizeLimit: "20mb",
     },
   },
+  // CUÁNTO LA DEJAMOS PENSAR.
+  //
+  // Sin esto la puerta de NOVA se corta a los diez segundos, que es el default.
+  // Diez segundos alcanzan para leer una factura y no alcanzan ni de lejos
+  // para armar un cronograma: el modelo razona, escribe veinte actividades con
+  // sus dependencias y su porqué, y eso lleva un minuto largo. Lo que se veía
+  // del otro lado era "NOVA no pudo armarlo" sin ninguna explicación, porque
+  // un corte del servidor no devuelve JSON: devuelve una página de error que
+  // no tiene adentro ningún mensaje que mostrar.
+  //
+  // Sesenta es el techo del plan, y es lo que ya usan el respaldo y los crons.
+  maxDuration: 60,
 };
 
 async function claude(body) {

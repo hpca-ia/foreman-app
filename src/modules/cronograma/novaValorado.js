@@ -1,7 +1,7 @@
 import { repartirEntre } from "./valorado";
 import { leerMemoria, recordar } from "./memoriaNova";
 import { memoriaEnPalabras, patronDe } from "./apuntes";
-import { JUICIO, pedirANova, textoDeNova } from "../../lib/modelos";
+import { JUICIO, pedirANova, textoDeNova, porQueFallo } from "../../lib/modelos";
 
 // NOVA arma el cronograma valorado del presupuesto.
 //
@@ -115,7 +115,7 @@ mampostería, mano de obra, enlucidos—: eso sigue a su capítulo.`;
         system: sistema,
         messages: [{ role: "user", content: `Armá el cronograma valorado de ${meses} meses. Solo JSON.` }],
     });
-    if (!res.ok || data?.error) return { error: data?.error?.message || "NOVA no pudo armarlo." };
+    if (!res.ok || data?.error) return { error: porQueFallo(res, data, "armarlo") };
     const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
     const p = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
     return armar(p, rubros, meses, mesInicio);
