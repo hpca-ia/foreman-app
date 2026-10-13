@@ -37,10 +37,20 @@ export default function PanelFondos({ obra, planillas = [], facturas = [], curre
     setCargando(true);
     const { fondos: f, sinTabla: falta } = await cargarFondos(obra.lead_id);
     setFondos(f); setSinTabla(falta);
-    const { data: ps } = await supabase.from("obra_pagos").select("factura_id,monto,fecha").eq("obra_id", obra.id);
-    setPagos(ps || []);
+    // LOS PAGOS SE PIDEN POR LAS FACTURAS DE ESTA PANTALLA, no por obra_id.
+    //
+    // Es el mismo conjunto, pero atado a lo que la pantalla de verdad está
+    // sumando. Un pago cargado por un camino que no le puso `obra_id` —y los
+    // hay— existía en Proveedores y no acá, y entonces las dos pantallas
+    // decían cosas distintas sobre la misma plata sin ninguna manera de saber
+    // cuál tenía razón.
+    const ids = facturas.map(f => f.id).filter(Boolean);
+    if (ids.length) {
+      const { data: ps } = await supabase.from("obra_pagos").select("factura_id,monto,fecha").in("factura_id", ids);
+      setPagos(ps || []);
+    } else setPagos([]);
     setCargando(false);
-  }, [obra.lead_id, obra.id]);
+  }, [obra.lead_id, facturas]);
   useEffect(() => { cargar(); }, [cargar]);
 
   const caja = estadoDeCaja({ fondos, facturas, pagos });
