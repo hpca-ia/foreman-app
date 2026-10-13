@@ -5,6 +5,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { CLASES_FONDO, FORMAS, cargarFondos, guardarFondo, borrarFondo, estadoDeCaja, porPlanilla } from "./fondos";
+import { supabase } from "../../lib/supabase";
 
 // La caja del proyecto: con qué plata se está haciendo la obra.
 //
@@ -19,6 +20,10 @@ const VACIO = { clase: "anticipo", concepto: "", monto: "", fecha: "", forma_pag
 
 export default function PanelFondos({ obra, planillas = [], facturas = [], currentUser, puede }) {
   const [fondos, setFondos] = useState([]);
+  // Los pagos a proveedores: son la plata que de verdad salió. Sin esto la
+  // caja contaba las facturas, y una factura de veinte mil con un anticipo de
+  // cinco pagado no sacó veinte mil de ningún lado.
+  const [pagos, setPagos] = useState([]);
   const [sinTabla, setSinTabla] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [form, setForm] = useState(null);
@@ -31,12 +36,15 @@ export default function PanelFondos({ obra, planillas = [], facturas = [], curre
   const cargar = useCallback(async () => {
     setCargando(true);
     const { fondos: f, sinTabla: falta } = await cargarFondos(obra.lead_id);
-    setFondos(f); setSinTabla(falta); setCargando(false);
-  }, [obra.lead_id]);
+    setFondos(f); setSinTabla(falta);
+    const { data: ps } = await supabase.from("obra_pagos").select("factura_id,monto,fecha").eq("obra_id", obra.id);
+    setPagos(ps || []);
+    setCargando(false);
+  }, [obra.lead_id, obra.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const caja = estadoDeCaja({ fondos, facturas });
-  const cortes = porPlanilla({ planillas, facturas, fondos });
+  const caja = estadoDeCaja({ fondos, facturas, pagos });
+  const cortes = porPlanilla({ planillas, facturas, fondos, pagos });
 
   async function guardar() {
     if (!form.concepto?.trim() && !form.monto) { setError("Falta el monto."); return; }
@@ -76,17 +84,33 @@ export default function PanelFondos({ obra, planillas = [], facturas = [], curre
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
-        <Tarjeta label="Recibido" valor={caja.entrado} />
-        <Tarjeta label="Gastado en obra" valor={caja.gastado} color={colors.ink} />
+        <Tarjeta label="Recibido del cliente" valor={caja.entrado} />
+        <Tarjeta label={caja.seLlevanPagos ? "Pagado" : "Gastado en obra"} valor={caja.gastado} color={colors.ink} />
         {caja.salido > 0 && <Tarjeta label="Devuelto o traspasado" valor={caja.salido} color={colors.ink} />}
         <Tarjeta label="Queda en caja" valor={caja.saldo} color={caja.saldo < 0 ? colors.danger : colors.success} />
+        {/* LA DEUDA, APARTE Y A LA VISTA.
+            Lo facturado que todavía no se pagó no salió de la caja —por eso no
+            mueve el saldo— pero existe y hay que verlo: es lo que va a salir.
+            Mezclarlo con el saldo daba un número que no es el de ninguna
+            cuenta, ni la del banco ni la de los proveedores. */}
+        {caja.porPagar > 0 && (
+          <Tarjeta label="Por pagar a proveedores" valor={caja.porPagar} color={colors.warning} />
+        )}
       </div>
+
+      {caja.seLlevanPagos && (
+        <div style={{ fontSize: 11, color: colors.muted, marginTop: -8, marginBottom: 12, lineHeight: 1.45 }}>
+          La caja cuenta <strong>lo que salió</strong>, no lo facturado: una factura de la que se pagó un
+          anticipo sacó el anticipo, y el resto es deuda. Lo facturado en total va en Control de Obra como
+          costo: <strong>${fmt(caja.facturado)}</strong>.
+        </div>
+      )}
 
       {caja.saldo < 0 && (
         <div style={{ fontSize: 12, color: colors.danger, background: colors.dangerSoft || colors.warningSoft,
           border: `1px solid ${colors.danger}`, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 14 }}>
-          La obra gastó ${fmt(-caja.saldo)} más de lo que entró. O falta registrar un anticipo, o el proyecto
-          está financiando con plata de otro lado.
+          Salieron ${fmt(-caja.saldo)} más de lo que entró del cliente. O falta registrar un anticipo recibido,
+          o el proyecto está financiando con plata de otro lado.
         </div>
       )}
 
