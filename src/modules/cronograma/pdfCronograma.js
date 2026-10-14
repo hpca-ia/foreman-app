@@ -43,7 +43,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
   const ALTO = doc.internal.pageSize.getHeight();
   const M = 10;
   const IZQ = 86;                      // nombre + días + las dos fechas
-  const ARRIBA = 30;                   // encabezado y escala
+  const ARRIBA = 34;                   // encabezado, resumen y escala
   const ABAJO = 12;
   const FILA = 5.6;
   // Cada día mide lo mismo en todas las hojas: una barra de dos días se tiene
@@ -63,54 +63,64 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
   try { logo = await logoParaPDF(logoEmpresa()); } catch { /* sin logo se sigue */ }
 
   const dibujarEncabezado = (desdeDia, hojaAncho) => {
-    let y = M;
+    const y = M;
     if (logo) doc.addImage(logo.dataUrl, "PNG", M, y, 22, (22 * logo.height) / logo.width);
     doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...TINTA);
     doc.text(nombre || "Cronograma", M + 26, y + 5);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...GRIS);
-    const resumen = [
-      `${larga(plan.inicio)} a ${larga(plan.fin)}`,
-      `${plan.duracion} días de trabajo`,
-      diasDeContrato ? `plazo de contrato: ${diasDeContrato}` : "",
+    // EL RESUMEN EN DOS RENGLONES Y PEGADO A LA IZQUIERDA.
+    // En uno solo se metía debajo de la escala de días y las dos cosas se
+    // leían encima: el dato y el calendario peleando por el mismo espacio.
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+    doc.text(`${larga(plan.inicio)} a ${larga(plan.fin)}  ·  ${plan.duracion} días de trabajo`, M + 26, y + 9.2);
+    const segunda = [
+      diasDeContrato ? `plazo de contrato: ${diasDeContrato} días` : "",
       hojasAncho > 1 ? `tiempo ${hojaAncho + 1} de ${hojasAncho}` : "",
     ].filter(Boolean).join("  ·  ");
-    doc.text(resumen, M + 26, y + 9.5);
+    if (segunda) doc.text(segunda, M + 26, y + 12.6);
 
-    // ── La escala: meses arriba, días abajo ──
-    const yMes = ARRIBA - 13, yDia = ARRIBA - 7;
-    let mesActual = null, mesDesde = null;
+    // ── La escala: una banda de mes arriba, los días abajo ──
+    const yMes = ARRIBA - 12, yDia = ARRIBA - 5.5;
+    // UN RÓTULO POR MES, no uno por día.
+    //
+    // La comparación se hacía contra una variable que dejaba de ser la clave
+    // del mes en la primera vuelta, así que cada día entraba como "mes nuevo"
+    // y escribía OCTUBRE encima de OCTUBRE treinta y un veces. El resultado
+    // era una mancha negra donde tenía que ir el calendario.
+    const tramos = [];
     for (let i = 0; i < diasPorHoja; i++) {
       const n = desdeDia + i;
       if (n >= totalDias) break;
       const d = new Date(inicio.getTime() + n * DIA_MS);
-      const x = M + IZQ + i * MM_DIA;
       const clave = `${d.getFullYear()}-${d.getMonth()}`;
-      if (clave !== mesActual) {
-        if (mesActual !== null) {
-          doc.setFontSize(7.5); doc.setTextColor(...TINTA); doc.setFont("helvetica", "bold");
-          doc.text(mesActual.etiqueta, mesDesde + 1, yMes + 3.2);
-        }
-        mesActual = clave;
-        mesActual = { clave, etiqueta: `${MESES[d.getMonth()].toUpperCase()} ${d.getFullYear()}` };
-        mesDesde = x;
-        doc.setDrawColor(...LINEA); doc.setLineWidth(0.2);
-        doc.line(x, yMes, x, ARRIBA - 2);
-      }
-      mesActual.clave = clave;
-      // El día: número chico, y el domingo marcado para poder contar semanas.
+      const ultimo = tramos[tramos.length - 1];
+      if (!ultimo || ultimo.clave !== clave) {
+        tramos.push({ clave, etiqueta: `${MESES[d.getMonth()].toUpperCase()} ${d.getFullYear()}`, desde: i, hasta: i });
+      } else ultimo.hasta = i;
+
+      const x = M + IZQ + i * MM_DIA;
       const trabaja = cal?.trabaja ? cal.trabaja(d) : d.getDay() !== 0;
       if (!trabaja) {
         doc.setFillColor(248, 247, 245);
-        doc.rect(x, ARRIBA - 4, MM_DIA, ALTO - ARRIBA - ABAJO + 4, "F");
+        doc.rect(x, ARRIBA - 3, MM_DIA, ALTO - ARRIBA - ABAJO + 3, "F");
       }
       doc.setFont("helvetica", d.getDay() === 1 ? "bold" : "normal");
-      doc.setFontSize(5.4); doc.setTextColor(...(trabaja ? NEGRO : GRIS));
+      doc.setFontSize(5.2); doc.setTextColor(...(trabaja ? NEGRO : GRIS));
       doc.text(String(d.getDate()), x + MM_DIA / 2, yDia, { align: "center" });
     }
-    if (mesActual) {
-      doc.setFontSize(7.5); doc.setTextColor(...TINTA); doc.setFont("helvetica", "bold");
-      doc.text(mesActual.etiqueta, mesDesde + 1, yMes + 3.2);
-    }
+    tramos.forEach(t => {
+      const x = M + IZQ + t.desde * MM_DIA;
+      const ancho = (t.hasta - t.desde + 1) * MM_DIA;
+      doc.setFillColor(...SUAVE);
+      doc.rect(x, yMes, ancho, 4.4, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(6.4); doc.setTextColor(...TINTA);
+      // Si el tramo es angosto —el mes entra cortado al final de la hoja— se
+      // escribe solo el mes, y si ni eso entra, nada: un rótulo que se sale de
+      // su banda y pisa al de al lado es peor que ninguno.
+      const etiqueta = ancho > 26 ? t.etiqueta : ancho > 13 ? t.etiqueta.split(" ")[0] : "";
+      if (etiqueta) doc.text(etiqueta, x + 1.2, yMes + 3.2);
+      doc.setDrawColor(...LINEA); doc.setLineWidth(0.25);
+      doc.line(x, yMes, x, ALTO - ABAJO);
+    });
 
     // Encabezado de las columnas de la izquierda.
     doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...GRIS);
@@ -149,7 +159,9 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
           doc.setFillColor(...SUAVE);
           doc.rect(M, y, ANCHO - M * 2, FILA, "F");
           doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...TINTA);
-          doc.text(String(f.nombre).slice(0, 58), M + 1.5, y + FILA - 1.7);
+          let et = String(f.nombre);
+          while (doc.getTextWidth(et) > 46 && et.length > 4) et = et.slice(0, -2);
+          doc.text(et === String(f.nombre) ? et : `${et.trim()}…`, M + 1.5, y + FILA - 1.7);
           if (f.inicio && f.fin) {
             doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
             doc.text(`${corta(f.inicio)} a ${corta(f.fin)}`, M + 51, y + FILA - 1.7);
@@ -164,7 +176,15 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
         doc.setFont("helvetica", "normal"); doc.setFontSize(6.8);
         doc.setTextColor(...(f.critica ? ROJO : NEGRO));
         const sangria = f.sangria ? 4 : 0;
-        doc.text(`${f.numero ? `${f.numero}  ` : ""}${String(f.nombre).slice(0, 44)}`, M + 1.5 + sangria, y + FILA - 1.7);
+        // CORTADO POR LO QUE ENTRA, no por una cantidad de letras: "10.1
+        // Porcelanato en bodegas y paredes de baño" tiene menos caracteres que
+        // el límite y aun así se metía arriba de la columna de los días.
+        const etiqueta = `${f.numero ? `${f.numero}  ` : ""}${f.nombre}`;
+        const cabe = 44 - sangria;
+        let texto = etiqueta;
+        while (doc.getTextWidth(texto) > cabe && texto.length > 4) texto = texto.slice(0, -2);
+        if (texto !== etiqueta) texto = `${texto.trim()}…`;
+        doc.text(texto, M + 1.5 + sangria, y + FILA - 1.7);
         doc.setTextColor(...GRIS); doc.setFontSize(6.3);
         doc.text(f.hito ? "—" : String(f.duracion), M + 48, y + FILA - 1.7, { align: "right" });
         if (f.inicio) doc.text(corta(f.inicio), M + 51, y + FILA - 1.7);
