@@ -29,6 +29,7 @@ async function cargarPDF() {
 }
 import { money } from "../../lib/exportar";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
+import { subtotalesPorEtapa, tieneEtapas, SIN_ETAPA } from "./etapas";
 import { etiquetaUnidad } from "../../lib/unidades";
 
 export const FORMATOS = {
@@ -127,19 +128,42 @@ const lugarYFecha = e => `${e?.ciudad ? e.ciudad.split(",")[0] + ", " : ""}${fec
 // advertencia sobre ese rubro y tiene que leerse pegada a él.
 const conNota = (r, incluir) => (incluir && String(r.nota || "").trim() ? `${r.descripcion}\n⚠ ${String(r.nota).trim()}` : r.descripcion);
 
-function tabla(caps, formato, notasRubro = true) {
+function tabla(caps, formato, notasRubro = true, conEtapas = false) {
   if (formato === "capitulos") {
-    return { columnas: ["N°", "Capítulo", "Total"], filas: caps.map(c => [c.numero, c.nombre, money(c.subtotal)]), deCapitulo: [] };
+    // Un capítulo repartido entre etapas no se puede rotular con una sola: se
+    // dice que está repartido, que es la verdad y además es el aviso de que
+    // hay que mirarlo rubro por rubro.
+    const etapaDe = c => {
+      const e = [...new Set(c.rubros.map(r => String(r.etapa || "").trim() || SIN_ETAPA))];
+      return e.length === 1 ? (e[0] === SIN_ETAPA ? "" : e[0]) : "varias";
+    };
+    return conEtapas
+      ? { columnas: ["N°", "Capítulo", "Etapa", "Total"],
+          filas: caps.map(c => [c.numero, c.nombre, etapaDe(c), money(c.subtotal)]), deCapitulo: [] }
+      : { columnas: ["N°", "Capítulo", "Total"], filas: caps.map(c => [c.numero, c.nombre, money(c.subtotal)]), deCapitulo: [] };
   }
   const conPrecio = formato !== "cotizar";
   const filas = [], deCapitulo = [];
+  // LA ETAPA, PEGADA AL RUBRO. Un presupuesto por etapas que no dice cuál es
+  // la de cada renglón obliga a quien lo lee a creerle al subtotal sin poder
+  // comprobarlo — y lo primero que hace un cliente con una cotización por
+  // partes es justamente comprobar qué le están cobrando en la primera.
+  const fila = (num, desc, unidad, cant, pu, total, etapa) => (conEtapas
+    ? [num, desc, etapa, unidad, cant, pu, total]
+    : [num, desc, unidad, cant, pu, total]);
   caps.forEach(c => {
     deCapitulo.push(filas.length);
-    filas.push([c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.subtotal) : ""]);
-    c.rubros.forEach(r => filas.push([r.numero, conNota(r, notasRubro), r.unidad, cantidad(r.cantidad),
-      conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : ""]));
+    filas.push(fila(c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.subtotal) : "", ""));
+    c.rubros.forEach(r => filas.push(fila(r.numero, conNota(r, notasRubro), r.unidad, cantidad(r.cantidad),
+      conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : "",
+      String(r.etapa || "").trim())));
   });
-  return { columnas: ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"], filas, deCapitulo };
+  return {
+    columnas: conEtapas
+      ? ["N°", "Descripción", "Etapa", "Unidad", "Cantidad", "P. unitario", "Total"]
+      : ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"],
+    filas, deCapitulo,
+  };
 }
 
 /**
@@ -247,11 +271,23 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   if (t.encabezado === "limpio") { doc.setDrawColor(...t.linea); doc.setLineWidth(0.6); doc.line(M, y - 8, W - M, y - 8); y += 6; }
 
   // ── Los rubros ──
-  const tb = tabla(caps, formato, notasRubro);
+  // ¿Este presupuesto se cobra por etapas? Lo dicen los rubros, no una opción:
+  // si hay dos etapas puestas, el documento tiene que decirlo.
+  const conEtapas = tieneEtapas(items);
+  const tb = tabla(caps, formato, notasRubro, conEtapas);
   const soloCaps = formato === "capitulos";
+  // CON LA COLUMNA DE ETAPA, TODO SE CORRE UNO. La descripción es la única que
+  // se estira; las demás tienen su ancho porque son números y una columna de
+  // números que baila se lee mal.
   const anchos = soloCaps
-    ? { 0: { cellWidth: 36 }, 2: { cellWidth: 100, halign: "right" } }
-    : { 0: { cellWidth: 36 }, 2: { cellWidth: 44, halign: "center" }, 3: { cellWidth: 56, halign: "right" }, 4: { cellWidth: 66, halign: "right" }, 5: { cellWidth: 76, halign: "right" } };
+    ? (conEtapas
+      ? { 0: { cellWidth: 36 }, 2: { cellWidth: 58, halign: "center" }, 3: { cellWidth: 100, halign: "right" } }
+      : { 0: { cellWidth: 36 }, 2: { cellWidth: 100, halign: "right" } })
+    : (conEtapas
+      ? { 0: { cellWidth: 36 }, 2: { cellWidth: 52, halign: "center" }, 3: { cellWidth: 44, halign: "center" },
+          4: { cellWidth: 56, halign: "right" }, 5: { cellWidth: 62, halign: "right" }, 6: { cellWidth: 72, halign: "right" } }
+      : { 0: { cellWidth: 36 }, 2: { cellWidth: 44, halign: "center" }, 3: { cellWidth: 56, halign: "right" },
+          4: { cellWidth: 66, halign: "right" }, 5: { cellWidth: 76, halign: "right" } });
   autoTable(doc, {
     startY: y, head: [tb.columnas], body: tb.filas, margin: { left: M, right: M, bottom: 56 },
     styles: { font: "helvetica", fontSize: 8, cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 }, textColor: t.texto,
@@ -262,7 +298,8 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
     columnStyles: anchos,
     didParseCell: d => {
       if (d.section === "head") {
-        if (d.column.index >= (soloCaps ? 2 : 3)) d.cell.styles.halign = "right";
+        const desde = soloCaps ? (conEtapas ? 3 : 2) : (conEtapas ? 4 : 3);
+        if (d.column.index >= desde) d.cell.styles.halign = "right";
         if (!soloCaps && d.column.index === 2) d.cell.styles.halign = "center";
       }
       if (d.section === "body" && tb.deCapitulo.includes(d.row.index)) {
@@ -275,6 +312,35 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
     },
   });
   y = doc.lastAutoTable.finalY + 12;
+
+  // ── Lo que cuesta cada etapa ──
+  //
+  // Es la pregunta que trae un presupuesto por etapas: "¿cuánto es la primera?".
+  // Va ANTES del total de la obra y no mezclado con él: son dos números que se
+  // leen en momentos distintos —uno para decidir qué se contrata ahora, el otro
+  // para saber a cuánto se va la obra entera— y juntos en la misma columna se
+  // confunden.
+  const porEtapa = conEtapas ? subtotalesPorEtapa(items) : [];
+  if (!cotizar && porEtapa.length > 1) {
+    if (y > H - 150) { doc.addPage(); y = 56; }
+    autoTable(doc, {
+      startY: y, margin: { left: M, right: M },
+      head: [["POR ETAPAS", "Rubros", "Costo directo"]],
+      body: porEtapa.map(e => [e.etapa, String(e.rubros), money(e.total)]),
+      theme: "plain",
+      styles: { fontSize: 9, cellPadding: { top: 4, bottom: 4, left: 8, right: 8 }, textColor: t.texto },
+      headStyles: { fontSize: 7.5, fontStyle: "bold", textColor: t.gris },
+      columnStyles: { 1: { halign: "right", cellWidth: 70 }, 2: { halign: "right", cellWidth: 120 } },
+      didParseCell: d => {
+        if (d.section !== "body") return;
+        // Lo que todavía no tiene etapa, dicho: es plata cotizada que no está
+        // en ninguna, y callarla haría que las etapas no sumen el total sin
+        // que nadie sepa por qué.
+        if (porEtapa[d.row.index]?.sinEtapa) d.cell.styles.textColor = t.gris;
+      },
+    });
+    y = doc.lastAutoTable.finalY + 12;
+  }
 
   // ── Totales, a la derecha ──
   if (!cotizar) {
