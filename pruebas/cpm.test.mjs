@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calendario, calcular } from "../src/modules/cronograma/cpm.js";
+import { calendario, calcular, cualTraba } from "../src/modules/cronograma/cpm.js";
 
 // El motor de fechas. Lo que calcula acá es lo que la obra promete cumplir.
 
@@ -90,4 +90,44 @@ test("un feriado corre la fecha de fin", () => {
   const con = calcular({ actividades: [{ id: 1, duracion: 5 }], dependencias: [], inicio, cal: conFeriado })
     .actividades[0].fin;
   assert.ok(con > sin, "con un feriado en el medio tiene que terminar más tarde");
+});
+
+// ── Varias dependencias: cuál es la que de verdad traba ──
+
+test("con varias dependencias manda la que termina más tarde", () => {
+  const cal = calendario({ laborables: [1, 2, 3, 4, 5] });
+  const plan = calcular({
+    actividades: [
+      { id: 1, nombre: "Estructura", duracion: 5 },
+      { id: 2, nombre: "Eléctricas", duracion: 12 },
+      { id: 3, nombre: "Enlucido", duracion: 4 },
+    ],
+    dependencias: [
+      { id: 10, actividad_id: 3, depende_de_id: 1, tipo: "FC", retardo: 0 },
+      { id: 11, actividad_id: 3, depende_de_id: 2, tipo: "FC", retardo: 0 },
+    ],
+    inicio: "2026-03-02", cal,
+  });
+  const enlucido = plan.actividades.find(a => a.id === 3);
+  const electricas = plan.actividades.find(a => a.id === 2);
+  // Arranca después de la más larga de las dos, no después de la primera.
+  assert.ok(enlucido.inicio > electricas.fin);
+  const porId = new Map(plan.actividades.map(a => [a.id, a]));
+  const traba = cualTraba(enlucido, [
+    { id: 10, actividad_id: 3, depende_de_id: 1, tipo: "FC", retardo: 0 },
+    { id: 11, actividad_id: 3, depende_de_id: 2, tipo: "FC", retardo: 0 },
+  ], porId, cal);
+  assert.equal(traba, 11, "la que traba es la eléctrica, no la estructura");
+});
+
+test("con una sola dependencia no hay nada que señalar", () => {
+  const cal = calendario({ laborables: [1, 2, 3, 4, 5] });
+  const plan = calcular({
+    actividades: [{ id: 1, duracion: 3 }, { id: 2, duracion: 3 }],
+    dependencias: [{ id: 10, actividad_id: 2, depende_de_id: 1, tipo: "FC", retardo: 0 }],
+    inicio: "2026-03-02", cal,
+  });
+  const porId = new Map(plan.actividades.map(a => [a.id, a]));
+  const b = plan.actividades.find(a => a.id === 2);
+  assert.equal(cualTraba(b, [{ id: 10, actividad_id: 2, depende_de_id: 1, tipo: "FC", retardo: 0 }], porId, cal), null);
 });

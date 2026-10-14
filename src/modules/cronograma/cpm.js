@@ -261,7 +261,7 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
  * arranque cinco días antes de que termine la estructura"— y el cronograma
  * devolvía la obra entera en fila, más larga de lo que es.
  */
-function desplazar(cal, d, n) {
+export function desplazar(cal, d, n) {
   const k = Math.round(Number(n) || 0);
   return k >= 0 ? cal.sumar(d, k + 1) : retroceder(cal, d, -k + 1);
 }
@@ -409,7 +409,7 @@ export function ajustarAlPlazo({ actividades = [], dependencias = [], objetivo, 
 }
 
 /** Restar días hábiles: el espejo de sumar. */
-function retroceder(cal, d, dias) {
+export function retroceder(cal, d, dias) {
   let f = aFecha(d);
   let faltan = Math.max(1, Math.round(dias)) - 1;
   let vueltas = 0;
@@ -482,4 +482,39 @@ export function desvio(actividades = [], hoy = new Date(), cal = calendario()) {
     diferencia: Math.round((real - planificado) * 100) / 100,
     criticasTarde,
   };
+}
+
+/**
+ * CUÁL DE LAS DEPENDENCIAS ES LA QUE DE VERDAD LA TRABA.
+ *
+ * Una actividad puede esperar a tres cosas y solo una la está deteniendo: las
+ * otras dos terminaron antes y no cambian nada. Esa distinción es media
+ * conversación de obra —"¿por qué no arranca el enlucido?" "porque falta la
+ * instalación eléctrica, lo demás ya está"— y mirando una lista de tres
+ * nombres no se puede contestar.
+ *
+ * Se calcula con la misma aritmética del cálculo hacia adelante, no con una
+ * aproximación: la que da el arranque más tarde es la que manda.
+ *
+ * @returns el id de la dependencia que manda, o null si ninguna la traba
+ *   —arranca por su fecha fija o por el día uno de la obra—.
+ */
+export function cualTraba(a, deps = [], porId, cal) {
+  if (!a?.inicio || deps.length < 2) return null;
+  let mejor = null, cuando = null;
+  deps.forEach(d => {
+    const otra = porId.get(d.depende_de_id);
+    if (!otra?.fin || !otra?.inicio) return;
+    const f = new Date(`${otra.fin}T12:00:00`), i = new Date(`${otra.inicio}T12:00:00`);
+    let candidato;
+    if (d.tipo === "CC") candidato = desplazar(cal, i, d.retardo);
+    else if (d.tipo === "FF") candidato = retroceder(cal, desplazar(cal, f, d.retardo), a.duracion);
+    else candidato = desplazar(cal, cal.siguienteHabil(new Date(f.getTime() + 86400000)), d.retardo);
+    if (!candidato) return;
+    if (!cuando || candidato > cuando) { cuando = candidato; mejor = d.id; }
+  });
+  // Si lo que manda no es ninguna dependencia sino su fecha fija, no se señala
+  // ninguna: decir que la traba una que ya terminó sería mentir.
+  if (!cuando) return null;
+  return claveFecha(cuando) <= a.inicio ? mejor : null;
 }

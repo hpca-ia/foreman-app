@@ -4,7 +4,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { ETAPAS } from "./cpm";
+import { ETAPAS, cualTraba } from "./cpm";
 import { fmt } from "../controlObra/calculos";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { porFases, tramoDe } from "./agruparPorFase";
@@ -200,6 +200,10 @@ export default function TablaGantt({
   // LAS ETAPAS DE LA OBRA, que es como se lee un cronograma de cuarenta
   // barras: "demoliciones, obra gris, instalaciones, acabados". Mientras no
   // haya ninguna no se dibuja ninguna banda — una obra chica no las necesita.
+  // Cuál dependencia manda en cada actividad. Se calcula con la misma
+  // aritmética del cronograma, no con una aproximación.
+  const trabaDe = a => cualTraba(a, dependencias.filter(d => d.actividad_id === a.id), porId, cal);
+
   const bandas = porFases(grupos, fases);
 
   // EL NÚMERO DE CADA BARRA: DÓNDE ESTÁ EN EL PLAN.
@@ -729,6 +733,7 @@ export default function TablaGantt({
                         )}
                         {deps.map(d => {
                           const forma = formaDe(d);
+                          const manda = d.id === trabaDe(a);
                           const cuantos = Math.abs(Number(d.retardo) || 0);
                           return (
                             <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 5 }}>
@@ -758,6 +763,19 @@ export default function TablaGantt({
                                   </span>
                                   {forma.id === "traslape" && (
                                     <span style={{ fontSize: 10.5, color: colors.brand, fontWeight: 600 }}>traslapadas</span>
+                                  )}
+                                  {/* CUÁL DE TODAS LA ESTÁ DETENIENDO.
+                                      Una actividad puede esperar a tres cosas
+                                      y solo una la traba: las otras terminaron
+                                      antes y no cambian nada. Esa distinción
+                                      es media conversación de obra —"¿por qué
+                                      no arranca el enlucido?" "porque falta la
+                                      eléctrica, lo demás ya está"— y mirando
+                                      tres nombres no se puede contestar. */}
+                                  {manda && (
+                                    <span title="De todas las que espera, ésta es la que le está marcando la fecha de arranque. Adelantarla adelanta esta actividad; las otras no."
+                                      style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: colors.warning,
+                                        borderRadius: 9, padding: "1px 7px", whiteSpace: "nowrap" }}>ES LA QUE TRABA</span>
                                   )}
                                   <button onClick={() => onDesunir(d)} title="Que no espere a ésta"
                                     style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", padding: "0 4px", fontSize: 13 }}>×</button>
