@@ -444,6 +444,18 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                             : String(a.envio_estado || "").toLowerCase() === "delivered" ? "Le llegó y todavía no la abrió"
                               : "Todavía no la abrió"}
                     </div>
+                    {/* LO QUE HIZO CON EL CORREO, QUE NO ES LO MISMO QUE
+                        LO QUE HIZO CON EL ACTA. La mitad de la gente lee el
+                        acta en el cuerpo del correo y nunca entra por su
+                        enlace: para FOREMAN eso es "no la abrió", y es falso.
+                        Esto lo separa — una cosa es que el correo se haya
+                        abierto, otra que haya dado conformidad. */}
+                    {["opened", "clicked"].includes(String(a.envio_estado || "").toLowerCase()) && !a.conforme_at && (
+                      <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.45 }}>
+                        {a.envio_estado === "clicked" ? "Entró por su enlace desde el correo" : "Abrió el correo con el acta"}
+                        {!a.visto_at && " · todavía no dio conformidad"}
+                      </div>
+                    )}
                     {/* SI NO LE LLEGÓ, ACÁ Y EN ROJO.
                         Es lo primero que hay que saber de una persona en esta
                         lista: todo lo demás —que no contestó, que no la abrió—

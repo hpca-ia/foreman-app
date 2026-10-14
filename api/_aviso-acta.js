@@ -183,7 +183,10 @@ async function mandarActa(req, res) {
         Si algo no está bien, escribilo ahí mismo: queda como constancia y se trata en la próxima reunión.
       </div>
       <a href="${url}" style="display:inline-block;background:#0F3D3E;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 20px;border-radius:7px">Ver el acta y dar conformidad</a>
-      <div style="font-size:11px;color:#777;margin-top:8px">Este enlace es tuyo: registra tu conformidad con tu nombre y la fecha. No lo reenvíes.</div>
+      <div style="font-size:11px;color:#777;margin-top:8px">
+        Leer el acta en este correo no deja constancia de nada: la deja este botón, con tu nombre y la fecha.
+        El enlace es tuyo, no lo reenvíes.
+      </div>
     </div>`;
   };
 
@@ -411,10 +414,17 @@ async function mandarActa(req, res) {
 async function revisarEntregas(req, res) {
   const id = Number((req.body || {}).acta_id);
   if (!id) return res.status(400).json({ error: "El acta no es válida." });
-  const FINALES = ["delivered", "bounced", "complained", "canceled"];
+  // "delivered" NO ES EL FINAL. Si el dominio tiene prendido el seguimiento de
+  // aperturas, el estado sigue moviéndose: delivered → opened → clicked. Eso es
+  // lo que contesta "¿lo leyó?" cuando alguien lee el acta en el cuerpo del
+  // correo y nunca entra por su enlace, que es lo que hace la mitad de la
+  // gente. Se deja de preguntar solo por los que ya no pueden cambiar.
+  const FINALES = ["bounced", "complained", "canceled"];
   const gente = await filas("acta_asistentes",
-    `acta_id=eq.${id}&envio_id=not.is.null&select=id,nombre,envio_id,envio_estado`);
-  const pendientes = gente.filter(a => !FINALES.includes(String(a.envio_estado || "").toLowerCase()));
+    `acta_id=eq.${id}&envio_id=not.is.null&select=id,nombre,envio_id,envio_estado,conforme_at,observacion`);
+  const pendientes = gente.filter(a => !FINALES.includes(String(a.envio_estado || "").toLowerCase())
+    // Y no por los que ya contestaron: de ésos ya sabemos todo lo que importa.
+    && !a.conforme_at && !a.observacion);
 
   let cambiaron = 0;
   for (const a of pendientes) {
