@@ -23,6 +23,7 @@ import { congelado, anotarPresencia, soltarPresencia, quienTrabaja, tomarControl
 import { guardarOriginal } from "../lib/archivosPresupuesto";
 import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
+import PanelEtapas from "./presupuestos/PanelEtapas";
 import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRubro";
 import ResultadosBase from "./presupuestos/ResultadosBase";
 import { puntaje } from "../lib/buscarRubros";
@@ -1417,7 +1418,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       {subVista==="detalle"&&presupuestoActivo&&(
         <div>
           <div style={{display:"inline-flex",gap:3,background:"var(--neutral-soft)",borderRadius:8,padding:3,marginBottom:12}}>
-            {[["armar","Armar"],["revisar","Revisar"]].map(([m,l])=>(
+            {[["armar","Armar"],["etapas","Etapas"],["revisar","Revisar"]].map(([m,l])=>(
               <button key={m} onClick={()=>setModoDetalle(m)}
                 style={{padding:"6px 16px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"var(--font)",fontSize:12,fontWeight:600,
                   background:modoDetalle===m?"#fff":"transparent",color:modoDetalle===m?"var(--ink)":"var(--ink-soft)"}}>{l}</button>
@@ -1456,6 +1457,17 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               <button onClick={()=>archivarPresupuesto(presupuestoActivo,false)}
                 style={{background:"#fff",border:"1px solid var(--border)",borderRadius:6,padding:"5px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:"var(--ink)",fontFamily:"var(--font)"}}>Reactivar</button>
             </div>
+          )}
+
+          {/* EL PRESUPUESTO POR ETAPAS. Una obra grande casi nunca se contrata
+              entera: se cierra la etapa uno y la dos queda para cuando el
+              cliente consiga la plata. Eso se venía resolviendo con DOS
+              presupuestos —rubros duplicados, precios que se desfasan entre
+              archivos, y nadie puede ver el total de la obra sin sumar a
+              mano—. Acá el presupuesto es uno y se lee de las dos maneras. */}
+          {modoDetalle==="etapas"&&(
+            <PanelEtapas items={items} capitulos={capitulosActivos} soloLectura={bloqueado}
+              onActualizar={(id,campos)=>bloqueado?alert(motivoBloqueo):actualizarItemMulti(id,campos)}/>
           )}
 
           {modoDetalle==="revisar"&&(
