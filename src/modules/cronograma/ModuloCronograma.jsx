@@ -19,6 +19,8 @@ import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./ver
 import { comparar } from "./compararVersion";
 import { sinCiclos } from "./sinCiclos";
 import { bajarProject } from "./exportarProject";
+import { pdfCronograma } from "./pdfCronograma";
+import { porFases } from "./agruparPorFase";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
 const PanelValorado = lazy(() => import("./PanelValorado"));
@@ -2062,6 +2064,52 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                               "Dentro de cada rubro quedan por el momento en que ocurren: anticipo, fabricación, " +
                               "entrega, instalación. No se tocan ni las fechas ni las dependencias.")) return;
                             await ordenarComoElControl();
+                          }],
+                          ["Bajar el PDF", "El cronograma para imprimir: todos los días con sus fechas", async () => {
+                            // Las filas tal como se ven: las etapas en su
+                            // orden y adentro sus barras. El PDF tiene que
+                            // decir lo mismo que la pantalla; si se armara por
+                            // su cuenta, a la tercera versión dirían cosas
+                            // distintas.
+                            const porAg = new Map();
+                            todas.forEach(a => {
+                              const k = a.obra_actividad_id || `sola-${a.id}`;
+                              if (!porAg.has(k)) porAg.set(k, []);
+                              porAg.get(k).push(a);
+                            });
+                            const grupos = [...porAg.values()].map(hijas => {
+                              const ord = [...hijas].sort((x, y) => String(x.inicio || "").localeCompare(String(y.inicio || "")));
+                              const ini = ord.map(a => a.inicio).filter(Boolean).sort();
+                              const fin = ord.map(a => a.fin).filter(Boolean).sort();
+                              return { hijas: ord, posicion: Math.min(...hijas.map(a => a.orden ?? 0)),
+                                inicio: ini[0] || null, fin: fin[fin.length - 1] || null };
+                            }).sort((a, b) => a.posicion - b.posicion);
+
+                            const filasPdf = [];
+                            let nEtapa = 0;
+                            porFases(grupos, fases).forEach(({ fase, grupos: suyos }) => {
+                              if (fases.length) {
+                                if (fase) nEtapa++;
+                                const ini = suyos.map(g => g.inicio).filter(Boolean).sort();
+                                const fin = suyos.map(g => g.fin).filter(Boolean).sort();
+                                filasPdf.push({ tipo: "etapa",
+                                  nombre: fase ? `${nEtapa}. ${fase.nombre}` : "Todavía sin etapa",
+                                  inicio: ini[0] || null, fin: fin[fin.length - 1] || null });
+                              }
+                              let n = 0;
+                              suyos.forEach(g => g.hijas.forEach(a => {
+                                n++;
+                                filasPdf.push({ tipo: "barra",
+                                  numero: fases.length ? `${fase ? nEtapa : "—"}.${n}` : String(n),
+                                  nombre: a.nombre, duracion: a.duracion, inicio: a.inicio, fin: a.fin,
+                                  critica: a.critica, hito: a.es_hito, externo: a.externo || null,
+                                  avance: Number(a.avance_pct) || 0, sangria: g.hijas.length > 1 });
+                              }));
+                            });
+                            await pdfCronograma({
+                              nombre: lead.nombre, plan, filas: filasPdf, cal, hoyISO,
+                              diasDeContrato,
+                            });
                           }],
                           ["Bajar para Project", "Para una fiscalización que lo pide en su formato", () => bajarProject({
                             nombre: `Cronograma ${lead.nombre}`, actividades: todas, dependencias,

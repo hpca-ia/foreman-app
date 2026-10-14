@@ -532,6 +532,17 @@ export default function TablaGantt({
                             no arranca cuando se pidió — y es justo lo que uno
                             viene a entender cuando ve una fecha que no
                             esperaba. En ámbar, no en verde: no se cumplió. */}
+                        {/* DE QUIÉN ES, en la fila. Una barra que traba la
+                            obra y no la hace la obra tiene que poder
+                            distinguirse sin abrir nada. */}
+                        {a.externo && (
+                          <span title={`La ejecuta ${a.externo}, no la obra`}
+                            style={{ fontSize: 9, color: colors.inkSoft, background: colors.neutralSoft,
+                              borderRadius: 4, padding: "1px 4px", flexShrink: 0, maxWidth: 110,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {a.externo}
+                          </span>
+                        )}
                         {a.inicio_fijo && (
                           <span title={a.inicio && a.inicio !== a.inicio_fijo
                             ? `Se pidió que no empiece antes del ${dia(a.inicio_fijo)}, pero arranca el ${dia(a.inicio)} porque espera a lo que tiene antes.`
@@ -849,6 +860,28 @@ export default function TablaGantt({
                             </div>
                           )}
 
+                          {/* QUIÉN LA HACE, CUANDO NO ES LA OBRA.
+                              Casi toda obra tiene trabajos que ejecuta otro:
+                              el proveedor de ascensores, la empresa de aire
+                              contratada directo por el cliente, el municipio
+                              cuando inspecciona. Ocupan tiempo —y muchas veces
+                              son las que traban— pero no son trabajo de la
+                              obra: no se les asigna cuadrilla y cuando se
+                              atrasan la responsabilidad es de otro.
+                              Se escribe el nombre y no un sí o un no:
+                              "externo" no dice nada en una reunión,
+                              "Ascensores Otis" sí, y es a quien hay que
+                              llamar. */}
+                          <div>
+                            <label style={titulito}>LA HACE UN EXTERNO</label>
+                            <input defaultValue={a.externo || ""} key={`e${a.id}-${a.externo}`}
+                              placeholder="¿Quién? Ej: Ascensores Otis"
+                              onBlur={e => { if ((e.target.value || "") !== (a.externo || "")) onCambiar(a, { externo: e.target.value || null }); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                              title="Dejalo vacío si la hace la obra. Si la hace otro, su barra se dibuja en otro color."
+                              style={{ ...inputStyle, width: 182, padding: "4px 6px", fontSize: 11.5, height: 27 }} />
+                          </div>
+
                           <div>
                             <label style={titulito}>EMPIEZA FIJO EL</label>
                             <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
@@ -1093,11 +1126,22 @@ const Lienzo = ({ ui, children }) => (
   </div>
 );
 
+/**
+ * El color de una barra dice de quién es el tiempo.
+ *
+ * Verde, lo que hace la obra. Rojo, lo que la traba —la ruta crítica—. Gris,
+ * lo que ejecuta otro: el proveedor de ascensores, la empresa contratada
+ * directo por el cliente, el municipio cuando inspecciona. Esa última
+ * distinción importa porque cuando una de ésas se atrasa la responsabilidad
+ * es de otro, y mezcladas el cronograma se lee como si todo fuera de la obra.
+ */
+const colorDe = a => (a.externo ? colors.inkSoft : a.critica ? colors.danger : colors.brand);
+
 const Barra = ({ ui, a, tenue }) => a.inicio && (
-  <div title={`${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`}
+  <div title={`${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`}
     style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : 0,
       left: `${ui.posicion(a.inicio) * 100}%`, width: `${Math.max(ui.largo(a) * 100, 0.6)}%`,
-      background: a.critica ? colors.danger : colors.brand, borderRadius: 4,
+      background: colorDe(a), borderRadius: 4,
       opacity: tenue ? 0.3 : 1, display: "flex", alignItems: "center", overflow: "hidden" }}>
     {!tenue && a.avance_pct > 0 && (
       <div style={{ width: `${Math.min(100, a.avance_pct)}%`, height: "100%", background: "rgba(255,255,255,.45)" }} />

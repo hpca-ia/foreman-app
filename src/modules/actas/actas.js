@@ -62,7 +62,13 @@ export async function convocadosDe(leadId) {
 }
 
 export async function guardarConvocado(fila) {
-  const { data, error } = await supabase.from("obra_convocados").upsert(fila).select().single();
+  // Lo mismo que arriba: `lead_id` es obligatorio y un upsert sin él no llega
+  // a actualizar nada.
+  const { id, ...campos } = fila;
+  const q = id
+    ? supabase.from("obra_convocados").update(campos).eq("id", id)
+    : supabase.from("obra_convocados").insert(campos);
+  const { data, error } = await q.select().single();
   if (error) return { error: falta(error) ? SIN_106 : error.message };
   return { convocado: data };
 }
@@ -137,9 +143,31 @@ export async function borrarActa(id) {
   return error ? error.message : null;
 }
 
-/** Una fila de cualquiera de las listas del acta. */
+/**
+ * Una fila de cualquiera de las listas del acta.
+ *
+ * CON ID SE ACTUALIZA; SIN ID SE INSERTA. Antes era `upsert` para los dos
+ * casos, y ahí estaba el error que hacía que los correos no se guardaran.
+ *
+ * Un upsert es un INSERT que, si choca con la clave, actualiza. Pero la fila
+ * que se intenta insertar se arma ENTERA antes de descubrir el choque, y se le
+ * revisan las reglas de la tabla en ese momento: `acta_id` es obligatorio, y
+ * al mandar solo el id y el correo, la fila provisoria no lo tiene. La base la
+ * rechaza antes de llegar a actualizar nada. El resultado desde afuera es que
+ * se escribe un correo, se guarda, y no queda.
+ *
+ * Un UPDATE no arma ninguna fila nueva: toca las columnas que se le dan y deja
+ * el resto como está, que es exactamente lo que hace falta acá.
+ */
 export async function guardarFila(tabla, fila) {
-  const { data, error } = await supabase.from(tabla).upsert(fila).select().single();
+  const { id, ...campos } = fila;
+  if (id) {
+    const { data, error } = await supabase.from(tabla).update(campos).eq("id", id).select().single();
+    if (error) return { error: falta(error) ? SIN_106 : error.message };
+    if (!data) return { error: "La base no dejó guardar ese renglón." };
+    return { fila: data };
+  }
+  const { data, error } = await supabase.from(tabla).insert(campos).select().single();
   if (error) return { error: falta(error) ? SIN_106 : error.message };
   return { fila: data };
 }
