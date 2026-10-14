@@ -11,7 +11,7 @@ test("separa temas de compromisos, que es lo que hace útil un acta", () => {
   }, pendientes);
   assert.equal(r.temas.length, 1);
   assert.equal(r.temas[0].resuelto, "Se acepta la nueva fecha");
-  assert.deepEqual(r.compromisos[0], { texto: "Pedir proforma actualizada", responsable: "Lizeth", fecha: "2026-10-17" });
+  assert.deepEqual(r.compromisos[0], { texto: "Pedir proforma actualizada", responsable: "Lizeth", fecha: "2026-10-17", urgente: false });
 });
 
 test("UN COMPROMISO SIN RESPONSABLE ENTRA IGUAL, con el casillero vacío", () => {
@@ -21,6 +21,11 @@ test("UN COMPROMISO SIN RESPONSABLE ENTRA IGUAL, con el casillero vacío", () =>
   assert.equal(r.compromisos.length, 1);
   assert.equal(r.compromisos[0].responsable, null);
   assert.equal(r.compromisos[0].fecha, null);
+});
+
+test("URGENTE VIAJA: es lo que detiene a los demás y tiene que verse", () => {
+  const r = normalizar({ compromisos: [{ texto: "Pagar el anticipo", urgente: true }] }, []);
+  assert.equal(r.compromisos[0].urgente, true);
 });
 
 test("una fecha que no es una fecha no entra", () => {

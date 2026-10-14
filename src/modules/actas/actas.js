@@ -123,6 +123,9 @@ export async function abrirActa({ leadId, obraId, fecha, quien }) {
         acta_id: acta.id, texto: c.texto,
         responsable_nombre: c.responsable_nombre, responsable_email: c.responsable_email,
         fecha_limite: c.fecha_limite, estado: "pendiente",
+        // Lo urgente sigue siendo urgente en la reunión siguiente: si no se
+        // hizo y paraba la obra, ahora para más.
+        urgente: !!c.urgente,
         viene_de: c.viene_de || c.id, orden: i,
       })));
       arrastrados = abiertos.length;

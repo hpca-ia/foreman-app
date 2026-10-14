@@ -50,7 +50,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const solo = useRef(null);
   useEffect(() => () => clearTimeout(solo.current), []);
   const [nuevo, setNuevo] = useState({
-    tema: "", compromiso: "", responsable: "", limite: "",
+    tema: "", compromiso: "", responsable: "", limite: "", urgente: false,
     convocado: { nombre: "", email: "", empresa: "", cargo: "" },
   });
 
@@ -152,6 +152,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
     const cerrada = abierta.estado === "enviada";
     const sePuede = editable && !cerrada;
     const correos = correosDe(cont.asistentes);
+    // Las filas que alguien agregó y no llenó. Existen en la base y no son
+    // asistentes: ni se cuentan, ni salen en el PDF, ni reciben nada.
+    const conNombre = cont.asistentes.filter(a => String(a.nombre || "").trim());
+    const vacias = cont.asistentes.filter(a => !String(a.nombre || "").trim());
     const arrastrados = cont.compromisos.filter(c => c.viene_de);
     const nuevos = cont.compromisos.filter(c => !c.viene_de);
 
@@ -383,8 +387,12 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
         <div style={caja}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
             <Users size={14} color={colors.muted} />
+            {/* EL CONTEO CUENTA GENTE, NO FILAS.
+                Decía "7 de 7" con las siete filas en blanco: contaba renglones
+                de formulario, no personas. Alguien lee ese número, ve que los
+                campos están vacíos y no sabe cuál de las dos cosas creer. */}
             <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
-              Asistentes · {cont.asistentes.filter(a => a.asistio).length} de {cont.asistentes.length}
+              Asistentes · {conNombre.filter(a => a.asistio).length} de {conNombre.length}
             </div>
             {editable && (
               <Button variant="secondary" size="sm" onClick={() => setVerConvocados(v => !v)}>
@@ -452,7 +460,19 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               )}
             </div>
           )}
-          {!cont.asistentes.some(a => !a.asistio) && cont.asistentes.length > 0 && (
+          {vacias.length > 0 && sePuede && (
+            <div style={{ fontSize: 11, color: colors.warning, marginTop: 7, lineHeight: 1.45 }}>
+              Hay {vacias.length} {vacias.length === 1 ? "fila sin llenar" : "filas sin llenar"}: no cuentan como
+              asistentes, no salen en el PDF y no reciben el acta.{" "}
+              <button onClick={async () => {
+                for (const a of vacias) await quitarFila("acta_asistentes", "asistentes", a.id);
+                setAviso(`${vacias.length} ${vacias.length === 1 ? "fila vacía quitada" : "filas vacías quitadas"}.`);
+              }}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11, color: colors.brand, textDecoration: "underline" }}>quitarlas</button>
+            </div>
+          )}
+          {!cont.asistentes.some(a => !a.asistio) && conNombre.length > 0 && (
             <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6 }}>
               Destildá a los que no vinieron: un convocado que falta tres reuniones seguidas es un dato, y es
               el que después explica por qué algo no se decidió.
@@ -565,10 +585,11 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               a completar una fila. */}
           {sePuede && (
             <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-              <input value={nuevo.compromiso} placeholder="Qué hay que hacer"
+              <textarea value={nuevo.compromiso} placeholder="Qué hay que hacer" rows={2}
                 onChange={e => setNuevo(v => ({ ...v, compromiso: e.target.value }))}
-                onKeyDown={e => { if (e.key === "Enter") ponerCompromiso(); }}
-                style={{ ...inputStyle, flex: "2 1 200px", minWidth: 150, fontSize: 12.5, padding: "6px 9px" }} />
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ponerCompromiso(); } }}
+                style={{ ...inputStyle, flex: "2 1 240px", minWidth: 160, fontSize: 12.5, padding: "6px 9px",
+                  lineHeight: 1.4, resize: "vertical", fontFamily: colors.font }} />
               <input value={nuevo.responsable} placeholder="¿Quién?" list="convocados-acta"
                 onChange={e => setNuevo(v => ({ ...v, responsable: e.target.value }))}
                 onKeyDown={e => { if (e.key === "Enter") ponerCompromiso(); }}
@@ -581,6 +602,19 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               <input type="date" value={nuevo.limite} title="¿Para cuándo?"
                 onChange={e => setNuevo(v => ({ ...v, limite: e.target.value }))}
                 style={{ ...inputStyle, width: 148, fontSize: 12, padding: "5px 8px" }} />
+              {/* URGENTE: SI NO SE HACE, PARA LA OBRA.
+                  En un acta todos los compromisos se ven iguales —una línea
+                  con un nombre y una fecha— y no lo son. Quien estuvo en la
+                  reunión sabe cuál destraba todo; quien lee el acta tres días
+                  después, no. Una lista de doce renglones iguales se atiende
+                  de arriba hacia abajo, o no se atiende. */}
+              <label title="Si no se hace, para la obra"
+                style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5,
+                  color: nuevo.urgente ? colors.danger : colors.muted, fontWeight: nuevo.urgente ? 700 : 400, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!nuevo.urgente}
+                  onChange={e => setNuevo(v => ({ ...v, urgente: e.target.checked }))} />
+                urgente
+              </label>
               <Button variant="primary" size="sm" disabled={!nuevo.compromiso.trim()} onClick={ponerCompromiso}>
                 <Plus size={12} /> Agregar
               </Button>
@@ -779,7 +813,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
       for (const c of r.compromisos) {
         const quienEs = cont.asistentes.find(a => a.nombre === c.responsable);
         await guardarFila("acta_compromisos", {
-          acta_id: abierta.id, texto: c.texto, estado: "pendiente",
+          acta_id: abierta.id, texto: c.texto, estado: "pendiente", urgente: !!c.urgente,
           responsable_nombre: c.responsable, responsable_email: quienEs?.email || null,
           fecha_limite: c.fecha, orden: 900,
         });
@@ -808,11 +842,11 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
 
     async function ponerCompromiso() {
       if (!nuevo.compromiso.trim()) return;
-      const { compromiso, responsable, limite } = nuevo;
-      setNuevo(v => ({ ...v, compromiso: "", responsable: "", limite: "" }));
+      const { compromiso, responsable, limite, urgente } = nuevo;
+      setNuevo(v => ({ ...v, compromiso: "", responsable: "", limite: "", urgente: false }));
       const quienEs = cont.asistentes.find(a => a.nombre === responsable.trim());
       await agregar("acta_compromisos", {
-        texto: compromiso.trim(), estado: "pendiente",
+        texto: compromiso.trim(), estado: "pendiente", urgente: !!urgente,
         responsable_nombre: responsable.trim() || null,
         responsable_email: quienEs?.email || null,
         fecha_limite: limite || null,
@@ -973,8 +1007,13 @@ const Repaso = ({ c, sePuede, onTocar, quien }) => {
           })} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12.5, lineHeight: 1.4,
-            color: hecho || anulado ? colors.muted : colors.ink,
+            color: hecho || anulado ? colors.muted : c.urgente ? colors.danger : colors.ink,
+            fontWeight: c.urgente && !hecho && !anulado ? 600 : 400,
             textDecoration: hecho || anulado ? "line-through" : "none" }}>
+            {c.urgente && !hecho && !anulado && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", background: colors.danger,
+                borderRadius: 9, padding: "1px 6px", marginRight: 5 }}>URGENTE</span>
+            )}
             {c.texto}
           </div>
           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
@@ -1027,12 +1066,25 @@ const Repaso = ({ c, sePuede, onTocar, quien }) => {
 const Compromiso = ({ c, sePuede, onTocar, onQuitar, quien }) => {
   const vencido = c.estado === "pendiente" && c.fecha_limite && c.fecha_limite < hoy();
   return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 5 }}>
-      <input defaultValue={c.texto} disabled={!sePuede} placeholder="Qué hay que hacer"
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 7 }}>
+      <label title={c.urgente ? "Si no se hace, para la obra" : "Marcarlo urgente: si no se hace, para la obra"}
+        style={{ display: "flex", alignItems: "center", flexShrink: 0, cursor: sePuede ? "pointer" : "default" }}>
+        <input type="checkbox" checked={!!c.urgente} disabled={!sePuede}
+          onChange={e => onTocar({ urgente: e.target.checked })} />
+      </label>
+      {/* UN COMPROMISO NO ENTRA EN UN RENGLÓN.
+          "Remitir con urgencia el diseño final del cielo raso ajustado a las
+          alturas existentes (2,90 m en tubo…)" es lo que de verdad se escribe
+          en una reunión, y en un campo de una línea se lee la mitad. Lo que no
+          se puede leer no se puede revisar, y un compromiso que no se revisa
+          es un compromiso que no se reclama. */}
+      <textarea defaultValue={c.texto} disabled={!sePuede} placeholder="Qué hay que hacer" rows={2}
         onBlur={e => onTocar({ texto: e.target.value })}
-        style={{ ...inputStyle, flex: "2 1 200px", minWidth: 140, fontSize: 12, padding: "5px 8px", height: 28,
+        style={{ ...inputStyle, flex: "2 1 240px", minWidth: 160, fontSize: 12, padding: "5px 8px",
+          lineHeight: 1.4, resize: "vertical", fontFamily: colors.font,
           textDecoration: c.estado === "cumplido" ? "line-through" : "none",
-          color: c.estado === "cumplido" ? colors.muted : colors.ink }} />
+          fontWeight: c.urgente && c.estado !== "cumplido" ? 600 : 400,
+          color: c.estado === "cumplido" ? colors.muted : c.urgente ? colors.danger : colors.ink }} />
       <input defaultValue={c.responsable_nombre || ""} disabled={!sePuede} placeholder="¿Quién?"
         onBlur={e => onTocar({ responsable_nombre: e.target.value || null })}
         style={{ ...inputStyle, flex: "1 1 110px", minWidth: 90, fontSize: 12, padding: "5px 8px", height: 28 }} />

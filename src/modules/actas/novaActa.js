@@ -55,7 +55,7 @@ ${dicho.slice(0, 8000)}
 Devolvés SOLO JSON, sin markdown:
 
 {"temas":[{"titulo":"Ventanería","detalle":"El proveedor avisó que la fabricación se atrasa dos semanas","resuelto":"Se acepta la nueva fecha y se revisa el cronograma"}],
- "compromisos":[{"texto":"Pedir la proforma actualizada de ventanería","responsable":"Lizeth","fecha":"2026-10-17"}],
+ "compromisos":[{"texto":"Pedir la proforma actualizada de ventanería","responsable":"Lizeth","fecha":"2026-10-17","urgente":true}],
  "repaso":[{"id":12,"hecho":true,"nota":""}],
  "avance":"La obra gris va al día; acabados arranca la próxima semana",
  "falta":["Nadie quedó a cargo de conseguir el permiso municipal"]}
@@ -74,6 +74,11 @@ entrega el plano el jueves", "hay que llamar al proveedor". Si el texto dice
 una acción sin decir quién, ponela igual con "responsable" vacío: el casillero
 vacío se llena en la reunión; un responsable adivinado se descubre cuando ya
 nadie hizo nada.
+
+"urgente" es true cuando del texto se entiende que SI NO SE HACE, PARA LA OBRA:
+"sin eso no podemos seguir", "hay que pagarlo ya o no arrancan la fabricación",
+"es lo que nos está trabando". No lo pongas porque algo suene importante: lo
+urgente es lo que detiene a los demás, y si todo es urgente nada lo es.
 
 NO INVENTES NADA. Ni temas que no se nombraron, ni fechas que no se dijeron,
 ni responsables. Si algo quedó al aire —una decisión sin dueño, un plazo sin

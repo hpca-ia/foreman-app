@@ -80,11 +80,19 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   };
 
   // ── Asistentes ──
-  const vinieron = asistentes.filter(a => a.asistio);
-  const faltaron = asistentes.filter(a => !a.asistio);
+  // Las filas sin nombre no se imprimen: un renglón en blanco en la lista de
+  // asistentes se lee como un asistente anónimo, y lo que es en realidad es
+  // una fila que alguien agregó y no llenó.
+  const vinieron = asistentes.filter(a => a.asistio && String(a.nombre || "").trim());
+  const faltaron = asistentes.filter(a => !a.asistio && String(a.nombre || "").trim());
+  const vacias = asistentes.filter(a => !String(a.nombre || "").trim()).length;
   titulo("ASISTENTES");
   vinieron.forEach(a => parrafo(`${a.nombre}${a.empresa ? `  ·  ${a.empresa}` : ""}${a.cargo ? `  ·  ${a.cargo}` : ""}`));
-  if (!vinieron.length) parrafo("—", { color: GRIS });
+  if (!vinieron.length) {
+    parrafo(vacias
+      ? `${vacias} ${vacias === 1 ? "fila de asistente sin llenar" : "filas de asistentes sin llenar"}: falta escribir los nombres.`
+      : "—", { color: GRIS });
+  }
   if (faltaron.length) {
     y += 1;
     parrafo(`No asistieron: ${faltaron.map(a => a.nombre).join(", ")}`, { color: GRIS });
@@ -128,7 +136,8 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     if (y > ALTO - 50) { doc.addPage(); y = 18; }
     titulo("REPASO DE LA REUNIÓN ANTERIOR");
     tabla(repaso.map(c => [
-      c.texto + (c.estado !== "cumplido" && c.nota ? `\n(${c.nota})` : ""),
+      (c.urgente && c.estado !== "cumplido" ? "URGENTE · " : "")
+        + c.texto + (c.estado !== "cumplido" && c.nota ? `\n(${c.nota})` : ""),
       c.responsable_nombre || "—",
       c.fecha_limite ? dia(c.fecha_limite) : "—",
       c.estado === "cumplido" ? "CUMPLIDO" : c.estado === "reprogramado" ? "Reprogramado" : "PENDIENTE",
@@ -139,7 +148,7 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     if (y > ALTO - 50) { doc.addPage(); y = 18; }
     titulo("COMPROMISOS DE ESTA REUNIÓN");
     tabla(nuevos.map(c => [
-      c.texto, c.responsable_nombre || "—",
+      (c.urgente ? "URGENTE · " : "") + c.texto, c.responsable_nombre || "—",
       c.fecha_limite ? dia(c.fecha_limite) : "—",
       { pendiente: "Pendiente", cumplido: "Cumplido", reprogramado: "Reprogramado" }[c.estado] || c.estado,
     ]), ["QUÉ", "QUIÉN", "PARA CUÁNDO", "ESTADO"]);
@@ -203,6 +212,25 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
       if (col === 1) y += 28;
     });
     if (vinieron.length % 2 === 1) y += 28;
+  }
+
+  // ── A QUIÉN SE LE MANDA ──
+  //
+  // El papel tiene que decir a quién le llegó. Es la mitad de para qué sirve
+  // un acta: no alcanza con que algo esté escrito, hay que poder mostrar que
+  // se le comunicó a quien correspondía. "Se lo dijimos en la reunión" no se
+  // puede probar; "se envió el 14 de octubre a estas siete direcciones" sí.
+  const conCorreo = asistentes.filter(a => a.recibe && a.email);
+  if (conCorreo.length) {
+    if (y > ALTO - 40) { doc.addPage(); y = 18; }
+    y += 4;
+    titulo(acta.enviada_at ? "ENVIADA A" : "SE ENVÍA A");
+    conCorreo.forEach(a => parrafo(`${a.nombre || "(sin nombre)"}${a.empresa ? `  ·  ${a.empresa}` : ""}  —  ${a.email}`, { color: GRIS }));
+    if (acta.enviada_at) {
+      y += 1;
+      parrafo(`Enviada el ${dia(String(acta.enviada_at).slice(0, 10))}.`, { color: GRIS });
+    }
+    y += 4;
   }
 
   // Pie en todas las hojas: un acta suelta sin obra ni número no se archiva.

@@ -19,6 +19,7 @@ export function normalizar(datos, pendientes = []) {
         texto: limpio(c?.texto, 300),
         responsable: limpio(c?.responsable, 80) || null,
         fecha: esFecha(c?.fecha) ? c.fecha : null,
+        urgente: !!c?.urgente,
       }))
       .filter(c => c.texto),
     // El repaso solo sobre compromisos que de verdad están abiertos en esta

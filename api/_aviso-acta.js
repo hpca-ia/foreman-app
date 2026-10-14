@@ -48,7 +48,9 @@ export default async function handler(req, res) {
   void cerrados;
 
   const fila = c => `<tr>
-      <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:#1A1A1A">${esc(c.texto)}</td>
+      <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:${c.urgente ? "#B91C1C" : "#1A1A1A"}">
+        ${c.urgente ? '<span style="font-size:10px;font-weight:700;color:#fff;background:#B91C1C;border-radius:9px;padding:1px 6px;margin-right:5px">URGENTE</span>' : ""}${esc(c.texto)}
+      </td>
       <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:#555;white-space:nowrap">${esc(c.responsable_nombre || "—")}</td>
       <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:#555;white-space:nowrap">${c.fecha_limite ? dia(c.fecha_limite) : "—"}</td>
     </tr>`;
@@ -78,8 +80,8 @@ export default async function handler(req, res) {
             <th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">QUIÉN</th>
             <th style="text-align:left;padding:0 10px 5px;font-size:11px;color:#777">¿SE HIZO?</th></tr>
         ${repaso.map(c => `<tr>
-          <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:${c.estado === "cumplido" ? "#777" : "#1A1A1A"}">
-            ${esc(c.texto)}${c.estado !== "cumplido" && c.nota ? `<br><span style="color:#777;font-size:12px">${esc(c.nota)}</span>` : ""}
+          <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:${c.estado === "cumplido" ? "#777" : c.urgente ? "#B91C1C" : "#1A1A1A"}">
+            ${c.urgente && c.estado !== "cumplido" ? '<span style="font-size:10px;font-weight:700;color:#fff;background:#B91C1C;border-radius:9px;padding:1px 6px;margin-right:5px">URGENTE</span>' : ""}${esc(c.texto)}${c.estado !== "cumplido" && c.nota ? `<br><span style="color:#777;font-size:12px">${esc(c.nota)}</span>` : ""}
           </td>
           <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;color:#555;white-space:nowrap">${esc(c.responsable_nombre || "—")}</td>
           <td style="padding:7px 10px;border-top:1px solid #E8E6E1;font-size:13px;white-space:nowrap;font-weight:600;color:${c.estado === "cumplido" ? "#2D7A4F" : "#92400E"}">
