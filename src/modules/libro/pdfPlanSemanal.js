@@ -1,7 +1,7 @@
 import { cargarPDF } from "../../lib/exportar";
 // `logoParaPDF` carga y rasteriza cualquier imagen por URL, no solo logos:
 // sirve igual para meter un plano o la foto de una consulta en una hoja.
-import { logoParaPDF } from "../../lib/logos";
+import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 
 // El plan de la semana en PDF: el que se imprime y se pega en la obra.
@@ -190,7 +190,10 @@ export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items 
   // miniatura no sirve para nada, y el que lo recibe no va a abrir la app.
   for (const a of conArchivos) {
     if (!/^image\//.test(a.tipo || "") || !a.url) continue;
-    const img = await logoParaPDF(a.url);   // carga y rasteriza cualquier imagen
+    // JPEG y no PNG, por lo mismo que en el acta: un plano de 1600px pesa
+    // cuatro megas en PNG y trescientos kilos en JPEG, se ve igual, y el plan
+    // de la semana viaja por correo.
+    const img = await fotoParaPDF(a.url, { lado: 1600, calidad: 0.8 });
     if (!img) continue;
     doc.addPage();
     doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...TINTA);
