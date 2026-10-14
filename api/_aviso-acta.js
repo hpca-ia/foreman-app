@@ -10,7 +10,7 @@
 // seis meses cuando haya que demostrar que algo se dijo.
 
 import { createClient } from "@supabase/supabase-js";
-import { enviarCorreo, plantilla } from "./_correo.js";
+import { enviarCorreo, plantilla, estadoDeCorreo } from "./_correo.js";
 
 const URL = process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_KEY;
@@ -196,5 +196,27 @@ export default async function handler(req, res) {
     html,
   });
   if (r?.error) return res.status(502).json({ error: r.error });
-  return res.status(200).json({ enviados: para.length });
+
+  // QUÉ PASÓ DE VERDAD CON EL CORREO.
+  //
+  // Resend devuelve un identificador y un 200 aunque el correo NO vaya a
+  // salir: si la dirección está en su lista de suprimidos —porque rebotó
+  // alguna vez, o porque alguien marcó un aviso como spam— acepta el pedido y
+  // después lo descarta. Visto desde acá, un envío que nunca ocurre se ve
+  // idéntico a uno entregado, y el acta queda marcada como enviada a gente que
+  // nunca la recibió.
+  //
+  // Se espera un momento y se pregunta. Si volvió "bounced" o "complained",
+  // eso se dice: es la diferencia entre "no me llegó" y "no te llegó porque tu
+  // casilla rechazó el correo en marzo y Resend no lo intenta más".
+  let estado = null;
+  if (r?.id) {
+    await new Promise(ok => setTimeout(ok, 1200));
+    estado = await estadoDeCorreo(r.id);
+  }
+  const malo = ["bounced", "complained", "failed", "delivery_delayed"].includes(String(estado || "").toLowerCase());
+  return res.status(malo ? 502 : 200).json({
+    enviados: para.length, estado, id: r?.id || null,
+    ...(malo ? { error: `El servidor de correo lo rechazó: "${estado}". Esa dirección está en la lista de suprimidos de Resend —rebotó antes o alguien marcó un correo como spam— y hay que sacarla desde su panel.` } : {}),
+  });
 }

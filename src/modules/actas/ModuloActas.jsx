@@ -1102,7 +1102,9 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       if (prueba) {
         // Una prueba no cambia nada: el acta sigue donde estaba y se puede
         // probar otra vez. Si la marcara enviada, el primer ensayo la trabaría.
-        setAviso(`Prueba enviada a ${destino[0]}. El acta sigue como está: revisala y después mandala a todos.`);
+        setAviso(`Prueba enviada a ${destino[0]}${data?.estado ? ` · el servidor de correo dice "${data.estado}"` : ""}.`
+          + " Si no llega en un par de minutos, mirá el spam: un correo nuevo de un remitente que nunca te escribió suele caer ahí la primera vez."
+          + " El acta sigue como está.");
         return;
       }
       await tocarActa({ estado: "enviada", enviada_at: new Date().toISOString(), enviada_a: correos });
