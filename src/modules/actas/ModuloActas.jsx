@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -45,6 +45,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const [revision, setRevision] = useState(null);
   // Qué filas de asistentes se tocaron y todavía no se guardaron.
   const [sinGuardar, setSinGuardar] = useState(() => new Set());
+  // El reloj del guardado solo: se reinicia con cada tecla y dispara cuando
+  // alguien deja de escribir.
+  const solo = useRef(null);
+  useEffect(() => () => clearTimeout(solo.current), []);
   const [nuevo, setNuevo] = useState({
     tema: "", compromiso: "", responsable: "", limite: "",
     convocado: { nombre: "", email: "", empresa: "", cargo: "" },
@@ -443,7 +447,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               </Button>
               {sinGuardar.size > 0 && (
                 <span style={{ fontSize: 10.5, color: colors.warning, fontWeight: 600 }}>
-                  Sin guardar — si salís ahora se pierde
+                  Guardando…
                 </span>
               )}
             </div>
@@ -694,14 +698,31 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
      * persona, y una de las maneras más rápidas de que alguien deje de usar
      * una herramienta es que le borre lo que escribió.
      */
-    /** Lo escrito queda en memoria y se marca para guardar. */
+    /**
+     * Lo escrito queda en memoria, se marca, y se guarda solo al rato.
+     *
+     * EL BOTÓN NO ALCANZA. Alguien escribe ocho nombres y ocho correos, lo
+     * llaman de la obra, cierra la pestaña y no apretó nada. Lo que se pierde
+     * no es un campo: es el trabajo de llenar la lista entera, y la próxima
+     * vez esa persona no la llena.
+     *
+     * Se guarda un segundo y medio después de la última tecla —no en cada
+     * letra, que serían treinta escrituras por nombre— y el botón se queda
+     * igual, para quien quiere asegurarse y para ver que no quedó nada
+     * pendiente.
+     */
     function cambiarAsistente(id, campos) {
       setCont(c => ({ ...c, asistentes: c.asistentes.map(x => (x.id === id ? { ...x, ...campos } : x)) }));
       setSinGuardar(v => new Set(v).add(id));
+      clearTimeout(solo.current);
+      solo.current = setTimeout(() => { guardarAsistentes(true); }, 1500);
     }
 
-    async function guardarAsistentes() {
-      setOcupado(true); setError("");
+    async function guardarAsistentes(solito = false) {
+      clearTimeout(solo.current);
+      if (!sinGuardar.size) return;
+      if (!solito) setOcupado(true);
+      setError("");
       const fallaron = [];
       for (const id of sinGuardar) {
         const a = cont.asistentes.find(x => x.id === id);
@@ -712,10 +733,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
         });
         if (e) fallaron.push(e);
       }
-      setOcupado(false);
+      if (!solito) setOcupado(false);
       if (fallaron.length) { setError(fallaron[0]); return; }
       setSinGuardar(new Set());
-      setAviso("Asistentes guardados.");
+      if (!solito) setAviso("Asistentes guardados.");
     }
 
     async function revisar() {

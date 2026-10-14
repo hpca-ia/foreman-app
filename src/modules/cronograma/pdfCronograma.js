@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 
@@ -257,7 +258,5 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
   }
 
   const archivo = `Cronograma - ${String(nombre || "obra").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim().slice(0, 40)}.pdf`;
-  const url = doc.output("bloburl");
-  window.open(url, "_blank", "noopener");
-  void archivo;
+  return mostrarPdf(doc, archivo);
 }

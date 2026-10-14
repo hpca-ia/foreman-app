@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 
@@ -218,10 +219,9 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   // donde están las fotos firmadas y la librería. Sale en base64 y viaja con
   // el pedido de envío.
   if (modo === "base64") return { nombre, contenido: doc.output("datauristring").split(",")[1] };
-  if (modo === "bajar") { doc.save(nombre); return; }
-  if (modo === "imprimir") { doc.autoPrint(); }
   // Previsualizar: se abre en una pestaña y se mira antes de que lo lean ocho
   // personas. Una falta de ortografía en un acta enviada no se corrige nunca.
-  const url = doc.output("bloburl");
-  window.open(url, "_blank", "noopener");
+  // En el teléfono la pestaña no se puede abrir y se baja el archivo, que es
+  // lo que uno quiere igual para mandarlo por WhatsApp.
+  return mostrarPdf(doc, nombre, modo);
 }
