@@ -211,15 +211,15 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
               )}
             </div>
 
+            {/* `minmax(0,1fr)` y no el ancho automático.
+                Una columna de grilla crece con su contenido salvo que se le
+                diga que no, así que una descripción como "CERRAMIENTO
+                DEFINITIVO FRONTAL CON GARITA DE SEGURIDAD (L=14.16 ml...)"
+                estiraba la fila más allá de la pantalla y empujaba el precio y
+                el selector fuera de la vista. Se veían los capítulos con sus
+                rubros y sin con qué marcarlos — y el que mira concluye, con
+                razón, que a esos rubros les falta el selector. */}
             {(modo === "rubro" || abierto === c.nombre) && (
-              {/* `minmax(0,1fr)` y no el ancho automático.
-                  Una columna de grilla crece con su contenido salvo que se le
-                  diga que no, así que una descripción como "CERRAMIENTO
-                  DEFINITIVO FRONTAL CON GARITA DE SEGURIDAD (L=14.16 ml...)"
-                  estiraba la fila más allá de la pantalla y empujaba el precio
-                  y el selector fuera de la vista. Se veían los capítulos con
-                  sus rubros y sin con qué marcarlos — y el que mira concluye,
-                  con razón, que a esos rubros les falta el selector. */}
               <div style={{ padding: "0 12px 10px 26px", display: "grid",
                 gridTemplateColumns: "minmax(0,1fr)", gap: 3 }}>
                 {c.items.map(i => (
