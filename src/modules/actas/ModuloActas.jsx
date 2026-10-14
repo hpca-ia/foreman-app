@@ -394,9 +394,34 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
               Asistentes · {conNombre.filter(a => a.asistio).length} de {conNombre.length}
             </div>
+            {editable && convocados.length > 0 && (
+              /* TRAERLOS A ESTA ACTA, no solo a las que vengan.
+                 Los convocados entran solos cuando se abre una reunión nueva,
+                 pero si se cargaron después —o si el acta se abrió antes de
+                 que existieran— no hay forma de meterlos sin escribirlos de
+                 nuevo uno por uno. Y son siempre los mismos: ese es el punto. */
+              <Button variant="primary" size="sm" disabled={ocupado} onClick={async () => {
+                const ya = new Set(cont.asistentes.map(a => String(a.email || a.nombre || "").toLowerCase()).filter(Boolean));
+                const faltan = convocados.filter(c => !ya.has(String(c.email || c.nombre || "").toLowerCase()));
+                if (!faltan.length) { setAviso("Ya están todos los de siempre en esta acta."); return; }
+                setOcupado(true);
+                for (let i = 0; i < faltan.length; i++) {
+                  const c = faltan[i];
+                  await guardarFila("acta_asistentes", {
+                    acta_id: abierta.id, nombre: c.nombre, empresa: c.empresa, cargo: c.cargo,
+                    email: c.email, asistio: true, recibe: !!c.email, orden: cont.asistentes.length + i,
+                  });
+                }
+                setOcupado(false);
+                await cargarActa(abierta.id);
+                setAviso(`${faltan.length} ${faltan.length === 1 ? "convocado agregado" : "convocados agregados"}.`);
+              }}>
+                <Users size={12} /> Traer los de siempre
+              </Button>
+            )}
             {editable && (
               <Button variant="secondary" size="sm" onClick={() => setVerConvocados(v => !v)}>
-                Los de siempre
+                {convocados.length ? "Editar los de siempre" : "Cargar los de siempre"}
               </Button>
             )}
           </div>
@@ -419,6 +444,17 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               <input value={a.empresa || ""} disabled={!sePuede} placeholder="Empresa"
                 onChange={e => cambiarAsistente(a.id, { empresa: e.target.value })}
                 style={{ ...inputStyle, flex: "1 1 110px", minWidth: 90, fontSize: 12, padding: "5px 8px", height: 28 }} />
+              {/* DE QUÉ ES RESPONSABLE. La columna existía en la base desde el
+                  principio y nunca estuvo en la pantalla. Hace falta porque en
+                  una reunión de obra el responsable de un compromiso casi
+                  nunca se nombra por su empresa sino por su frente: "lo ve
+                  eléctrica", "eso es del área mecánica". Sin esto, el acta
+                  dice un nombre propio y quien la lee tres días después no
+                  sabe a qué frente pertenece. */}
+              <input value={a.cargo || ""} disabled={!sePuede} placeholder="Responsable de…"
+                onChange={e => cambiarAsistente(a.id, { cargo: e.target.value })}
+                title="De qué es responsable, o su cargo. Ej: Eléctrica · Área mecánica · Fiscalización"
+                style={{ ...inputStyle, flex: "1 1 120px", minWidth: 95, fontSize: 12, padding: "5px 8px", height: 28 }} />
               <input value={a.email || ""} disabled={!sePuede} placeholder="correo@…" type="email"
                 onChange={e => cambiarAsistente(a.id, { email: e.target.value })}
                 style={{ ...inputStyle, flex: "1 1 150px", minWidth: 120, fontSize: 12, padding: "5px 8px", height: 28 }} />
@@ -490,6 +526,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
                 <div key={c.id} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 12 }}>
                   <span style={{ flex: 1, color: colors.ink }}>{c.nombre}</span>
                   <span style={{ color: colors.muted, fontSize: 11 }}>{c.empresa}</span>
+                  <span style={{ color: colors.inkSoft, fontSize: 11 }}>{c.cargo}</span>
                   <span style={{ color: colors.muted, fontSize: 11 }}>{c.email}</span>
                   <button onClick={async () => { await borrarConvocado(c.id); setConvocados(await convocadosDe(lead.id)); }}
                     style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
@@ -504,6 +541,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
                 <input value={nuevo.convocado.empresa} placeholder="Empresa"
                   onChange={e => setNuevo(v => ({ ...v, convocado: { ...v.convocado, empresa: e.target.value } }))}
                   style={{ ...inputStyle, flex: "1 1 100px", fontSize: 12, padding: "5px 8px", height: 28 }} />
+                <input value={nuevo.convocado.cargo} placeholder="Responsable de…"
+                  onChange={e => setNuevo(v => ({ ...v, convocado: { ...v.convocado, cargo: e.target.value } }))}
+                  title="De qué es responsable, o su cargo. Ej: Eléctrica · Área mecánica · Fiscalización"
+                  style={{ ...inputStyle, flex: "1 1 110px", fontSize: 12, padding: "5px 8px", height: 28 }} />
                 <input value={nuevo.convocado.email} placeholder="correo@…" type="email"
                   onChange={e => setNuevo(v => ({ ...v, convocado: { ...v.convocado, email: e.target.value } }))}
                   style={{ ...inputStyle, flex: "1 1 150px", fontSize: 12, padding: "5px 8px", height: 28 }} />
