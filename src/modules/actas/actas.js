@@ -19,6 +19,10 @@ export const SIN_106 = "Falta correr la migración 106 para usar las actas de re
 
 export const ESTADOS = {
   borrador: { label: "Borrador", pista: "Se está escribiendo. Nadie la vio todavía." },
+  // PEDIR EL VISTO. Quien escribe el acta no la aprueba, pero tiene que poder
+  // decir que terminó: sin eso el acta queda en borrador para siempre y el
+  // director se entera porque alguien se acuerda de avisarle por teléfono.
+  lista: { label: "Lista para revisar", pista: "El que la escribió terminó y pidió el visto." },
   revisada: { label: "Revisada", pista: "El director le dio el visto. Lista para enviar." },
   enviada:  { label: "Enviada",  pista: "Salió a los correos. No se toca más." },
 };

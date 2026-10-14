@@ -43,6 +43,8 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   // Lo que NOVA encontró al revisar: las correcciones se aceptan, los avisos
   // se van a preguntar.
   const [revision, setRevision] = useState(null);
+  // Qué filas de asistentes se tocaron y todavía no se guardaron.
+  const [sinGuardar, setSinGuardar] = useState(() => new Set());
   const [nuevo, setNuevo] = useState({
     tema: "", compromiso: "", responsable: "", limite: "",
     convocado: { nombre: "", email: "", empresa: "", cargo: "" },
@@ -64,6 +66,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const cargarActa = useCallback(async id => {
     const c = await contenidoDe(id);
     setCont(c);
+    setSinGuardar(new Set());
     setEnlaces(await enlacesDeFotos(c.fotos));
   }, []);
   useEffect(() => { if (abierta?.id) cargarActa(abierta.id); }, [abierta?.id, cargarActa]);
@@ -150,7 +153,13 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
 
     return (
       <div style={{ fontFamily: colors.font }}>
-        <Volver onClick={() => { setAbierta(null); cargarActas(lead.id); }} texto={`Actas · ${lead.nombre}`} />
+        <Volver onClick={() => {
+          // SALIR CON ALGO SIN GUARDAR AVISA. Es el caso que de verdad pierde
+          // lo escrito: se llena la fila y se toca "Volver".
+          if (sinGuardar.size && !window.confirm(
+            `Hay ${sinGuardar.size} ${sinGuardar.size === 1 ? "asistente sin guardar" : "asistentes sin guardar"}.\n\n¿Salir igual y perder lo escrito?`)) return;
+          setAbierta(null); cargarActas(lead.id);
+        }} texto={`Actas · ${lead.nombre}`} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Acta N° {abierta.numero}</div>
@@ -176,7 +185,22 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
               <Sparkles size={13} /> {ocupado ? "NOVA está leyendo…" : "Que NOVA la revise"}
             </Button>
           )}
-          {sePuede && puedeEnviar && abierta.estado === "borrador" && (
+          {/* PEDIR EL VISTO: de quien la escribe, no de quien la aprueba.
+              Sin esto el acta se queda en borrador y el director se entera
+              porque alguien se acuerda de avisarle por teléfono. */}
+          {sePuede && !puedeEnviar && abierta.estado === "borrador" && (
+            <Button variant="primary" size="sm" disabled={ocupado} onClick={async () => {
+              await tocarActa({ estado: "lista" });
+              setAviso("Pedido el visto. El director la revisa y la envía.");
+            }}><Check size={13} /> Pedir el visto</Button>
+          )}
+          {sePuede && !puedeEnviar && abierta.estado === "lista" && (
+            <Button variant="secondary" size="sm" disabled={ocupado} onClick={async () => {
+              await tocarActa({ estado: "borrador" });
+              setAviso("Volvió a borrador: se puede seguir escribiendo.");
+            }}>Seguir escribiéndola</Button>
+          )}
+          {sePuede && puedeEnviar && (abierta.estado === "borrador" || abierta.estado === "lista") && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
               await tocarActa({ estado: "revisada", revisada_at: new Date().toISOString(),
                 revisada_por: currentUser?.id ?? null, revisada_nombre: currentUser?.name || null });
@@ -365,23 +389,30 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             )}
           </div>
           {/* El correo vive en el asistente: es a quien se le manda el acta. */}
+          {/* SE ESCRIBE EN MEMORIA Y SE GUARDA CON UN BOTÓN.
+              Se guardaba al salir de cada campo, y eso pierde lo escrito en el
+              caso que de verdad pasa: se llena la fila, se toca "Volver" o se
+              cierra la pestaña sin salir del último campo, y no se guardó
+              nada. Peor, no avisa — la pantalla se va como si todo estuviera
+              bien. Un formulario que se llena tiene que tener un botón que
+              diga "Guardar", y el botón tiene que decir si falta algo. */}
           {cont.asistentes.map(a => (
             <div key={a.id} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
               <input type="checkbox" checked={!!a.asistio} disabled={!sePuede} title="¿Vino?"
-                onChange={e => tocarFila("acta_asistentes", "asistentes", a.id, { asistio: e.target.checked })} />
-              <input defaultValue={a.nombre} disabled={!sePuede} placeholder="Nombre"
-                onBlur={e => tocarFila("acta_asistentes", "asistentes", a.id, { nombre: e.target.value })}
+                onChange={e => cambiarAsistente(a.id, { asistio: e.target.checked })} />
+              <input value={a.nombre || ""} disabled={!sePuede} placeholder="Nombre"
+                onChange={e => cambiarAsistente(a.id, { nombre: e.target.value })}
                 style={{ ...inputStyle, flex: "1 1 130px", minWidth: 100, fontSize: 12, padding: "5px 8px", height: 28,
                   color: a.asistio ? colors.ink : colors.muted }} />
-              <input defaultValue={a.empresa || ""} disabled={!sePuede} placeholder="Empresa"
-                onBlur={e => tocarFila("acta_asistentes", "asistentes", a.id, { empresa: e.target.value || null })}
+              <input value={a.empresa || ""} disabled={!sePuede} placeholder="Empresa"
+                onChange={e => cambiarAsistente(a.id, { empresa: e.target.value })}
                 style={{ ...inputStyle, flex: "1 1 110px", minWidth: 90, fontSize: 12, padding: "5px 8px", height: 28 }} />
-              <input defaultValue={a.email || ""} disabled={!sePuede} placeholder="correo@…" type="email"
-                onBlur={e => tocarFila("acta_asistentes", "asistentes", a.id, { email: e.target.value || null })}
+              <input value={a.email || ""} disabled={!sePuede} placeholder="correo@…" type="email"
+                onChange={e => cambiarAsistente(a.id, { email: e.target.value })}
                 style={{ ...inputStyle, flex: "1 1 150px", minWidth: 120, fontSize: 12, padding: "5px 8px", height: 28 }} />
               <label title="Recibe el acta por correo" style={{ fontSize: 10.5, color: colors.muted, display: "flex", gap: 3, alignItems: "center" }}>
                 <input type="checkbox" checked={!!a.recibe} disabled={!sePuede}
-                  onChange={e => tocarFila("acta_asistentes", "asistentes", a.id, { recibe: e.target.checked })} />
+                  onChange={e => cambiarAsistente(a.id, { recibe: e.target.checked })} />
                 recibe
               </label>
               {sePuede && (
@@ -402,10 +433,20 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             </div>
           )}
           {sePuede && (
-            <Button variant={cont.asistentes.length ? "secondary" : "primary"} size="sm" style={{ marginTop: 5 }}
-              onClick={() => agregar("acta_asistentes", { nombre: "", asistio: true, recibe: true }, "asistentes")}>
-              <Plus size={12} /> Agregar asistente
-            </Button>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, flexWrap: "wrap" }}>
+              <Button variant={cont.asistentes.length ? "secondary" : "primary"} size="sm"
+                onClick={() => agregar("acta_asistentes", { nombre: "", asistio: true, recibe: true }, "asistentes")}>
+                <Plus size={12} /> Agregar asistente
+              </Button>
+              <Button variant="primary" size="sm" disabled={ocupado || !sinGuardar.size} onClick={guardarAsistentes}>
+                {ocupado ? "Guardando…" : sinGuardar.size ? `Guardar ${sinGuardar.size === 1 ? "el cambio" : `los ${sinGuardar.size} cambios`}` : "Guardado"}
+              </Button>
+              {sinGuardar.size > 0 && (
+                <span style={{ fontSize: 10.5, color: colors.warning, fontWeight: 600 }}>
+                  Sin guardar — si salís ahora se pierde
+                </span>
+              )}
+            </div>
           )}
           {!cont.asistentes.some(a => !a.asistio) && cont.asistentes.length > 0 && (
             <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6 }}>
@@ -653,6 +694,30 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
      * persona, y una de las maneras más rápidas de que alguien deje de usar
      * una herramienta es que le borre lo que escribió.
      */
+    /** Lo escrito queda en memoria y se marca para guardar. */
+    function cambiarAsistente(id, campos) {
+      setCont(c => ({ ...c, asistentes: c.asistentes.map(x => (x.id === id ? { ...x, ...campos } : x)) }));
+      setSinGuardar(v => new Set(v).add(id));
+    }
+
+    async function guardarAsistentes() {
+      setOcupado(true); setError("");
+      const fallaron = [];
+      for (const id of sinGuardar) {
+        const a = cont.asistentes.find(x => x.id === id);
+        if (!a) continue;
+        const { error: e } = await guardarFila("acta_asistentes", {
+          id, nombre: a.nombre || "", empresa: a.empresa || null, cargo: a.cargo || null,
+          email: a.email || null, asistio: !!a.asistio, recibe: !!a.recibe,
+        });
+        if (e) fallaron.push(e);
+      }
+      setOcupado(false);
+      if (fallaron.length) { setError(fallaron[0]); return; }
+      setSinGuardar(new Set());
+      setAviso("Asistentes guardados.");
+    }
+
     async function revisar() {
       setOcupado(true); setError(""); setRevision(null);
       const r = await revisarActa({ acta: abierta, obra: lead.nombre, ...cont });
@@ -850,7 +915,7 @@ const Campo = ({ label, children }) => (
 
 const Chip = ({ estado }) => {
   const e = ESTADOS[estado] || ESTADOS.borrador;
-  const c = { borrador: colors.muted, revisada: colors.warning, enviada: colors.success }[estado] || colors.muted;
+  const c = { borrador: colors.muted, lista: colors.brand, revisada: colors.warning, enviada: colors.success }[estado] || colors.muted;
   return (
     <span title={e.pista} style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: c,
       borderRadius: 10, padding: "2px 8px", whiteSpace: "nowrap" }}>{e.label.toUpperCase()}</span>

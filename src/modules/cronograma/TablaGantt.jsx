@@ -522,8 +522,18 @@ export default function TablaGantt({
                             ↳{deps.length > 1 ? ` de ${deps.length}` : ""}
                           </span>
                         )}
+                        {/* EL PISO, CUANDO NO ES EL ARRANQUE.
+                            Un "no antes del 8" en una barra que arranca el 11
+                            porque espera a otra es la explicación de por qué
+                            no arranca cuando se pidió — y es justo lo que uno
+                            viene a entender cuando ve una fecha que no
+                            esperaba. En ámbar, no en verde: no se cumplió. */}
                         {a.inicio_fijo && (
-                          <span title={`Empieza fijo el ${dia(a.inicio_fijo)}`} style={{ color: colors.brand, display: "flex", flexShrink: 0 }}>
+                          <span title={a.inicio && a.inicio !== a.inicio_fijo
+                            ? `Se pidió que no empiece antes del ${dia(a.inicio_fijo)}, pero arranca el ${dia(a.inicio)} porque espera a lo que tiene antes.`
+                            : `No empieza antes del ${dia(a.inicio_fijo)}`}
+                            style={{ color: a.inicio && a.inicio !== a.inicio_fijo ? colors.warning : colors.brand,
+                              display: "flex", flexShrink: 0 }}>
                             <CalendarClock size={10} />
                           </span>
                         )}
@@ -570,11 +580,26 @@ export default function TablaGantt({
                           pedir una cuenta de días hábiles, con feriados, que
                           nadie quiere hacer y que es justo lo que esta pantalla
                           ya sabe hacer. */}
+                      {/* EMPIEZA MUESTRA CUÁNDO EMPIEZA, no cuándo se pidió
+                          que empiece.
+                          Mostraba `inicio_fijo` —que no es la fecha de
+                          arranque: es un "no antes de"— y entonces una barra
+                          que espera a otra se veía con la fecha vieja
+                          adelante. El resultado era una fila que decía "1 día,
+                          del 8 al 11": las dos fechas eran ciertas por
+                          separado —el 8 era el pedido y el 11 el arranque
+                          real— y juntas no tenían ningún sentido, así que
+                          parecía que poner los días no ajustaba nada.
+                          Ahora dice el arranque de verdad, y cuando hay un
+                          piso distinto se avisa abajo: eso es información, y
+                          es la que explica por qué no arranca cuando se pidió. */}
                       {editable ? (
-                        <input type="date" value={a.inicio_fijo || a.inicio || ""}
-                          title={a.inicio_fijo
-                            ? "Arranca fijo este día. Vaciá el campo para que lo calcule el cronograma."
-                            : "Lo calcula el cronograma por sus dependencias. Si escribís una fecha, no arranca antes de ese día."}
+                        <input type="date" value={a.inicio || a.inicio_fijo || ""}
+                          title={a.inicio_fijo && a.inicio && a.inicio_fijo !== a.inicio
+                            ? `Arranca el ${dia(a.inicio)} porque espera a lo que tiene antes. Se pidió que no empiece antes del ${dia(a.inicio_fijo)}.`
+                            : a.inicio_fijo
+                              ? "No arranca antes de este día. Vaciá el campo para que lo calcule el cronograma."
+                              : "Lo calcula el cronograma por sus dependencias. Si escribís una fecha, no arranca antes de ese día."}
                           onChange={e => onCambiar(a, { inicio_fijo: e.target.value || null })}
                           style={{ ...inputStyle, padding: "3px 5px", fontSize: 11, height: 25,
                             color: a.inicio_fijo ? colors.brand : colors.inkSoft,
