@@ -469,8 +469,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     const { data, error: e } = await supabase.from("cronograma_actividades")
       .update(campos).eq("id", a.id).select();
     if (e) {
-      setError(/column|schema cache/i.test(e.message)
-        ? "Falta correr la migración 083 para guardar la etapa y su peso."
+      // QUÉ MIGRACIÓN FALTA, LA DE VERDAD.
+      //
+      // Decía siempre "falta la 083", que era la única que podía faltar
+      // cuando se escribió. Desde entonces esta misma función guarda etapas,
+      // hitos y quién ejecuta una actividad, y cada una vive en su migración.
+      // Un mensaje que nombra la migración equivocada es peor que uno genérico:
+      // manda a correr algo que ya está corrido y a concluir que el problema
+      // es otro.
+      const falta = /column|schema cache/i.test(e.message);
+      const cual = Object.keys(campos).find(k => new RegExp(k, "i").test(e.message)) || "";
+      const DONDE = { externo: "107", es_hito: "102", fase_id: "101", etapa: "083", peso_pct: "083", incluye: "093" };
+      setError(falta
+        ? `Falta correr la migración ${DONDE[cual] || "correspondiente"} para guardar ${
+            { externo: "quién ejecuta la actividad", es_hito: "los hitos", fase_id: "las etapas de la obra" }[cual]
+            || "este campo"}.`
         : e.message);
       return;
     }
