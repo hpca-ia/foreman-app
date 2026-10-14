@@ -31,6 +31,13 @@ import { money } from "../../lib/exportar";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
 import { subtotalesPorEtapa, tieneEtapas, SIN_ETAPA } from "./etapas";
 import { etiquetaUnidad } from "../../lib/unidades";
+// La estructura vive aparte porque es lo único de este archivo que se puede
+// probar sin un navegador: acá adentro hay jsPDF y ExcelJS, que no corren en
+// una prueba. Y había que poder probarla —se le escaparon la etapa y la nota
+// de cada rubro, y el PDF salió con la columna ETAPA en blanco sin que nada
+// avisara—.
+import { estructura } from "./estructura.js";
+export { estructura };
 
 export const FORMATOS = {
   detallado: { label: "Detallado", titulo: "Presupuesto", ayuda: "Cada rubro con cantidad, precio unitario y total, agrupado por capítulo." },
@@ -84,29 +91,6 @@ export function versionDe(nombre) {
   return m ? { base: m[1].trim(), version: Number(m[2]) } : { base: String(nombre || "").trim(), version: 1 };
 }
 
-/** Capítulos con sus rubros, numerados como en pantalla (1, 1.1, 1.2…) y sin capítulos vacíos. */
-export function estructura({ capitulos = [], items = [] }) {
-  const orden = [...capitulos].sort((a, b) => a.orden - b.orden).map(c => c.nombre);
-  // Un rubro cuyo capítulo no está en la lista no se pierde: va al final.
-  items.forEach(i => { if (i.capitulo && !orden.includes(i.capitulo)) orden.push(i.capitulo); });
-  if (items.some(i => !i.capitulo)) orden.push("");
-  const salida = [];
-  orden.forEach(nombre => {
-    const suyos = items.filter(i => (i.capitulo || "") === nombre).sort((a, b) => n(a.orden) - n(b.orden));
-    if (!suyos.length) return;
-    const num = salida.length + 1;
-    salida.push({
-      numero: String(num),
-      nombre: nombre || "OTROS",
-      subtotal: r2(suyos.reduce((s, i) => s + n(i.total), 0)),
-      rubros: suyos.map((i, k) => ({
-        numero: `${num}.${k + 1}`, descripcion: i.descripcion || "", unidad: etiquetaUnidad(i.unidad),
-        cantidad: n(i.cantidad), precio_unitario: n(i.precio_unitario), total: n(i.total),
-      })),
-    });
-  });
-  return salida;
-}
 
 /**
  * Misma cuenta que la pantalla: honorarios sobre el subtotal, IVA sobre
