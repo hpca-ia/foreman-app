@@ -32,7 +32,12 @@ async function filas(tabla, consulta) {
   if (!r.ok) return [];
   return (await r.json().catch(() => [])) || [];
 }
-const fila = async (tabla, consulta) => (await filas(tabla, consulta))[0] || null;
+// `uno` y no `fila`: adentro del handler ya hay una `fila`, la que dibuja un
+// renglón de la tabla de compromisos. Dos cosas con el mismo nombre en el
+// mismo archivo y la de adentro tapa a la de afuera en toda la función: el
+// acta se rompía con "Cannot access 'fila' before initialization" cuarenta
+// líneas antes de donde estaba escrita la otra.
+const uno = async (tabla, consulta) => (await filas(tabla, consulta))[0] || null;
 
 // Donde vive FOREMAN para quien no tiene cuenta. El enlace de conformidad
 // tiene que abrirse desde el correo, en el teléfono, sin iniciar sesión.
@@ -68,11 +73,11 @@ async function mandarActa(req, res) {
 
   const id = Number(actaId);
   if (!id) return res.status(400).json({ error: "El acta no es válida." });
-  const acta = await fila("obra_actas", `id=eq.${id}&select=*`);
+  const acta = await uno("obra_actas", `id=eq.${id}&select=*`);
   if (!acta) return res.status(404).json({ error: "No encontré el acta." });
 
   const [lead, asistentes, temas, compromisos] = await Promise.all([
-    fila("leads", `id=eq.${acta.lead_id}&select=nombre`),
+    uno("leads", `id=eq.${acta.lead_id}&select=nombre`),
     filas("acta_asistentes", `acta_id=eq.${id}&select=*&order=orden`),
     filas("acta_temas", `acta_id=eq.${id}&select=*&order=orden`),
     filas("acta_compromisos", `acta_id=eq.${id}&select=*&order=orden`),
@@ -268,7 +273,7 @@ async function mandarActa(req, res) {
     // silencio, así que el acta salía sin responderA y "respondé este correo"
     // era una invitación al vacío. Lo que se perdía no era un correo: era la
     // objeción de alguien que no estuvo de acuerdo.
-    const u = await fila("usuarios", `id=eq.${quienId}&select=email`);
+    const u = await uno("usuarios", `id=eq.${quienId}&select=email`);
     const e = String(u?.email || "").trim().toLowerCase();
     if (e && !responderA.includes(e)) responderA.push(e);
   }
