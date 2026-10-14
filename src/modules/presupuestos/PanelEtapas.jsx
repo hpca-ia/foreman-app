@@ -26,6 +26,7 @@ const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigit
 
 export default function PanelEtapas({ items = [], capitulos = [], soloLectura = false, onActualizar }) {
   const [abierto, setAbierto] = useState(null);
+  const [modo, setModo] = useState("capitulo");
   const [nueva, setNueva] = useState("");
   const [ocupado, setOcupado] = useState(false);
 
@@ -130,23 +131,47 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
         )}
       </div>
 
-      {/* CAPÍTULO POR CAPÍTULO. Casi siempre entero a una etapa; y el que se
-          reparte se abre y se marca rubro por rubro. */}
+      {/* CÓMO SE ASIGNA, A LA VISTA Y NO DETRÁS DE UN TRIANGULITO.
+          Marcar rubro por rubro estaba, pero había que descubrir que tocando
+          el nombre del capítulo se abría. Un modo que hay que descubrir es un
+          modo que no existe: lo que se vio fue "me muestra los capítulos" y
+          punto. Las dos maneras hacen falta y las dos tienen que verse. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9, flexWrap: "wrap" }}>
+        <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 8, padding: 3 }}>
+          {[["capitulo", "Por capítulo"], ["rubro", "Rubro por rubro"]].map(([id, label]) => (
+            <button key={id} onClick={() => setModo(id)}
+              style={{ padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer",
+                fontFamily: colors.font, fontSize: 12, fontWeight: 600,
+                background: modo === id ? "#fff" : "transparent",
+                color: modo === id ? colors.ink : colors.inkSoft }}>{label}</button>
+          ))}
+        </div>
+        <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 200, lineHeight: 1.45 }}>
+          {modo === "capitulo"
+            ? "Todo el capítulo a una etapa, de un saque. Es el caso normal."
+            : "Cada rubro a la suya. Para cuando un capítulo se reparte: puntos en la uno, aparatos en la dos."}
+        </span>
+      </div>
+
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
         borderRadius: colors.radiusMd, overflow: "hidden" }}>
         {caps.map(c => (
           <div key={c.nombre} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", flexWrap: "wrap" }}>
-              <button onClick={() => setAbierto(abierto === c.nombre ? null : c.nombre)}
-                title="Ver sus rubros y marcarlos uno por uno"
+              <button onClick={() => modo === "capitulo" && setAbierto(abierto === c.nombre ? null : c.nombre)}
+                title={modo === "capitulo" ? "Abrirlo para marcar sus rubros uno por uno" : undefined}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
                   fontFamily: colors.font, fontSize: 12.5, fontWeight: 600, color: colors.ink,
                   flex: "1 1 180px", minWidth: 120, textAlign: "left" }}>
-                {abierto === c.nombre ? "▾ " : "▸ "}{c.nombre}
+                {modo === "capitulo" ? (abierto === c.nombre ? "▾ " : "▸ ") : ""}{c.nombre}
               </button>
               <span style={{ fontSize: 11, color: colors.muted }}>{c.rubros} rubros</span>
               <span style={{ fontSize: 12.5, color: colors.inkSoft, width: 110, textAlign: "right" }}>${fmt(c.monto)}</span>
-              {c.repartido ? (
+              {modo === "rubro" ? (
+                <span style={{ fontSize: 10.5, color: colors.muted, width: 150, textAlign: "right" }}>
+                  {c.repartido ? "repartido entre etapas" : c.etapa === SIN_ETAPA ? "sin etapa" : c.etapa}
+                </span>
+              ) : c.repartido ? (
                 <span title="Sus rubros están en etapas distintas. Abrilo para verlos."
                   style={{ fontSize: 10.5, color: colors.warning, fontWeight: 600, width: 150, textAlign: "right" }}>
                   repartido entre etapas
@@ -158,7 +183,7 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
               )}
             </div>
 
-            {abierto === c.nombre && (
+            {(modo === "rubro" || abierto === c.nombre) && (
               <div style={{ padding: "0 12px 10px 26px", display: "grid", gap: 3 }}>
                 {c.items.map(i => (
                   <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
