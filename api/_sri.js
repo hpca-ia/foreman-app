@@ -119,3 +119,140 @@ export async function autorizacionDe(clave) {
     return { error: `No se pudo validar la autorización: ${e.message}` };
   }
 }
+
+// ── LAS REGLAS ─────────────────────────────────────────────────────────────
+//
+// Lo que la contadora revisa factura por factura, y que nadie alcanza a hacer
+// con cuarenta al mes. No es una opinión: cada una sale de comparar lo que el
+// SRI tiene registrado del proveedor contra lo que el SRI autorizó del
+// comprobante.
+//
+// Dos niveles, porque no todo es lo mismo:
+//
+//   GRAVE   esa factura no sirve. Pagarla es perder la plata del IVA y del
+//           gasto: el SRI no la va a aceptar y no hay cómo arreglarla después.
+//           Se avisa por correo.
+//   AVISO   la factura vale, pero tiene algo que hay que reclamarle al
+//           proveedor —una leyenda que falta, una fecha que no cuadra—. Se ve
+//           en la factura y no molesta a nadie por correo.
+
+const si = v => String(v || "").trim().toUpperCase() === "SI";
+const limpiarTexto = t => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+
+/** Las palabras con las que vale la pena comparar dos textos. */
+function palabras(t) {
+  const VACIAS = new Set(["PARA", "CON", "LOS", "LAS", "DEL", "QUE", "POR", "COMO", "INCLUYE", "OTROS", "DEMAS",
+    "TIPO", "CLASE", "GENERAL", "VENTA", "VENTAS", "COMPRA", "SERVICIO", "SERVICIOS", "ACTIVIDADES", "PRODUCTOS"]);
+  return new Set(limpiarTexto(t).split(/[^A-ZÑ0-9]+/).filter(p => p.length > 3 && !VACIAS.has(p)));
+}
+
+const mismoDia = (emision, autorizacion) => {
+  // La emisión viene dd/mm/aaaa y la autorización en ISO con zona horaria.
+  const m = String(emision || "").match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  const a = String(autorizacion || "").slice(0, 10);
+  if (!m || !/^\d{4}-\d{2}-\d{2}$/.test(a)) return null;
+  return `${m[3]}-${m[2]}-${m[1]}` === a;
+};
+
+/**
+ * @param ruc          lo que el catastro del SRI dice del proveedor
+ * @param comprobante  los campos del XML autorizado
+ * @param autorizacion { estado, ambiente, fechaAutorizacion }
+ * @param rucPropio    el RUC de la empresa, para ver si la factura es nuestra
+ */
+export function hallazgosDe({ ruc, comprobante, autorizacion, rucPropio }) {
+  const h = [];
+  const grave = (regla, dice, hacer) => h.push({ nivel: "grave", regla, dice, hacer });
+  const aviso = (regla, dice, hacer) => h.push({ nivel: "aviso", regla, dice, hacer });
+
+  // 1. ¿Existe y está autorizado? Todo lo demás se apoya en esto.
+  if (!autorizacion?.autorizado) {
+    grave("autorizacion", `El SRI no tiene autorizado este comprobante (${autorizacion?.estado || "no contestó"}).`,
+      "Pedile al proveedor el comprobante electrónico autorizado. Sin autorización no es una factura.");
+    return h;
+  }
+  if (limpiarTexto(autorizacion.ambiente).startsWith("PRUEBA")) {
+    grave("ambiente", "Está emitida en el ambiente de PRUEBAS del SRI, no en producción.",
+      "No tiene ningún valor tributario. Que la emitan de nuevo en producción.");
+  }
+
+  // 2. ¿Es nuestra? Una factura a nombre de otro no da crédito tributario ni
+  //    sustenta el gasto, y es el error que más veces llega: alguien compra
+  //    con su cédula y después la pasa a la obra.
+  const comprador = String(comprobante?.identificacionComprador || "").replace(/\D/g, "");
+  const propio = String(rucPropio || "").replace(/\D/g, "");
+  if (propio && comprador && comprador !== propio) {
+    grave("comprador", `Está a nombre de ${comprobante.razonSocialComprador || comprador}, no de la empresa.`,
+      "No sustenta el gasto ni da crédito tributario. Que la emitan a nombre de la empresa.");
+  }
+
+  // 3. El proveedor, en el catastro del SRI.
+  if (ruc) {
+    const estado = limpiarTexto(ruc.estadoContribuyenteRuc);
+    if (estado && estado !== "ACTIVO") {
+      grave("ruc", `El RUC del proveedor está ${ruc.estadoContribuyenteRuc}.`,
+        "Un comprobante de un RUC que no está activo no sustenta el gasto.");
+    }
+    if (si(ruc.contribuyenteFantasma)) {
+      grave("fantasma", "El SRI tiene a este proveedor marcado como CONTRIBUYENTE FANTASMA.",
+        "No pagues sin consultarlo con contabilidad: el SRI desconoce estos gastos y además deja a la empresa en la mira.");
+    }
+    if (si(ruc.transaccionesInexistente)) {
+      grave("inexistentes", "El SRI tiene a este proveedor marcado por TRANSACCIONES INEXISTENTES.",
+        "Mismo caso: consultalo con contabilidad antes de pagar.");
+    }
+
+    // 4. Las leyendas que el reglamento obliga a imprimir. Faltan seguido y es
+    //    lo que el SRI observa en una revisión, factura por factura.
+    const regimen = limpiarTexto(ruc.regimen);
+    if (regimen.includes("RIMPE") && !comprobante?.contribuyenteRimpe) {
+      aviso("rimpe", `El proveedor es de régimen ${ruc.regimen} y la factura no trae la leyenda.`,
+        "Es obligatoria. Pedile que la corrija: la próxima tiene que salir con la leyenda impresa.");
+    }
+    if (si(ruc.agenteRetencion) && !comprobante?.agenteRetencion) {
+      aviso("agente", "El proveedor es AGENTE DE RETENCIÓN y la factura no trae la leyenda.",
+        "Es obligatoria cuando el SRI lo tiene registrado como agente de retención.");
+    }
+    const especial = String(ruc.contribuyenteEspecial || "").trim();
+    if (especial && !/^NO$/i.test(especial) && !comprobante?.contribuyenteEspecial) {
+      aviso("especial", `El proveedor es CONTRIBUYENTE ESPECIAL (${especial}) y la factura no trae la leyenda ni el número de resolución.`,
+        "Es obligatoria, con el número de resolución.");
+    }
+    const contab = String(comprobante?.obligadoContabilidad || "").trim();
+    if (!contab) {
+      aviso("contabilidad", "La factura no dice si el proveedor está obligado a llevar contabilidad.",
+        "Esa leyenda es obligatoria, diga SI o diga NO.");
+    } else if (limpiarTexto(contab) !== limpiarTexto(ruc.obligadoLlevarContabilidad)) {
+      aviso("contabilidad", `La factura dice "obligado a llevar contabilidad: ${contab}" y en el RUC está como ${ruc.obligadoLlevarContabilidad}.`,
+        "Uno de los dos está desactualizado. Avisale al proveedor.");
+    }
+
+    // 5. ¿Vende lo que dice que vende? No es un error de forma: una actividad
+    //    que no tiene nada que ver con lo facturado es lo primero que mira el
+    //    SRI cuando revisa gastos, y lo primero que aparece en una factura de
+    //    favor.
+    const suyas = palabras(ruc.actividadEconomicaPrincipal);
+    const lo = palabras((comprobante?.detalles || []).join(" "));
+    if (suyas.size && lo.size && ![...lo].some(p => suyas.has(p))) {
+      aviso("actividad", `La actividad registrada del proveedor no se parece a lo facturado.`
+        + ` Él: ${String(ruc.actividadEconomicaPrincipal).toLowerCase().slice(0, 90)}. La factura: ${(comprobante.detalles || []).join(", ").slice(0, 90)}.`,
+        "Miralo antes de pagar. Si el proveedor de verdad vende esto, no pasa nada; si no, el SRI puede desconocer el gasto.");
+    }
+  }
+
+  // 6. Emisión y autorización, el mismo día.
+  const igual = mismoDia(comprobante?.fechaEmision, autorizacion?.fechaAutorizacion);
+  if (igual === false) {
+    aviso("fechas", `La factura se emitió el ${comprobante.fechaEmision} y el SRI la autorizó el ${String(autorizacion.fechaAutorizacion).slice(0, 10).split("-").reverse().join("/")}.`,
+      "Las dos fechas tienen que ser la misma. Una factura autorizada otro día suele ser una factura cargada tarde.");
+  }
+
+  return h;
+}
+
+/** El resumen de los hallazgos, que es lo que se guarda y lo que se mira. */
+export function veredicto(hallazgos = []) {
+  if (hallazgos.some(x => x.nivel === "grave")) return "grave";
+  if (hallazgos.length) return "aviso";
+  return "ok";
+}

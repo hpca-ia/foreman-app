@@ -39,6 +39,11 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // El capítulo elegido, para después elegir su rubro. Dos pasos, como se
   // piensa una factura: "esto es de albañilería… del bloque de 15".
   const [capElegido, setCapElegido] = useState("");
+  // La revisión en el SRI: qué contestó y si está corriendo.
+  const [sri, setSri] = useState(factura?.sri_hallazgos
+    ? { estado: factura.sri_estado, hallazgos: factura.sri_hallazgos, revisado_at: factura.sri_revisado_at }
+    : null);
+  const [revisandoSri, setRevisandoSri] = useState(false);
   // Lo que ya se pagó de esta factura, en el momento de cargarla: es cuando se
   // sabe, porque quien la carga tiene el comprobante en la mano.
   const [pagado, setPagado] = useState({ monto: "", forma: "transferencia" });
@@ -156,10 +161,17 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
         body: JSON.stringify({
           model: LECTURA, max_tokens: 4000,
           system: `Eres NOVA. Lees facturas de construcción de Ecuador y devuelves SOLO JSON, sin markdown:
-{"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
+{"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","clave_acceso":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
  "items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"rubro_id":null}]}
 
 subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.
+
+"clave_acceso" son los 49 dígitos seguidos que aparecen como NÚMERO DE
+AUTORIZACIÓN o CLAVE DE ACCESO, normalmente debajo del código de barras.
+Cópialos tal cual, sin espacios ni guiones. Con eso se le pregunta al SRI si la
+factura está autorizada de verdad, así que un dígito mal copiado hace fallar la
+consulta: si no se leen con certeza, devuelve "". Un recibo de venta o una nota
+de venta no tienen clave: ahí va "".
 
 "items" ES LO MÁS IMPORTANTE: UNA LÍNEA POR CADA RENGLÓN DE LA FACTURA.
 
@@ -209,6 +221,7 @@ Rubros: ${listaRubros}`,
         ruc: conservar(f.ruc, p.ruc),
         razon_social: conservar(f.razon_social, p.razon_social),
         numero_factura: conservar(f.numero_factura, p.numero_factura),
+        clave_acceso: conservar(f.clave_acceso, String(p.clave_acceso || "").replace(/\D/g, "")),
         numero_cheque: conservar(f.numero_cheque, p.numero_cheque),
         detalle: conservar(f.detalle, p.detalle),
         // Los montos solo si la factura todavía no tiene total: cambiarle el
@@ -255,10 +268,61 @@ Rubros: ${listaRubros}`,
         setRepartos([{ tipo: "rubro", id: p.rubro_id, monto: n(p.total) }]);
       }
       await revisarDuplicados({ ruc: p.ruc, numero_factura: p.numero_factura, razon_social: p.razon_social, total: n(p.total), fecha: p.fecha });
+      // Y SE LE PREGUNTA AL SRI, EN LA MISMA PASADA.
+      //
+      // Es el momento: quien la está cargando tiene la factura delante y
+      // todavía puede devolvérsela al proveedor. Un día después, ya pagada, lo
+      // único que queda es el problema.
+      const clave = String(p.clave_acceso || "").replace(/\D/g, "");
+      if (clave.length === 49) await revisarEnSri(clave, p.ruc);
     } catch {
       setError("NOVA no pudo leer el archivo. Llena los datos a mano.");
     }
     setLeyendo(false);
+  }
+
+  /**
+   * ¿Esta factura la va a aceptar el SRI?
+   *
+   * No es una pregunta de forma. Una factura no autorizada, emitida a nombre
+   * de otro, o de un proveedor marcado como fantasma, no sustenta el gasto:
+   * se paga igual pero el SRI desconoce el IVA y el costo, y eso se descubre
+   * en una revisión, un año después, cuando ya no hay a quién reclamarle.
+   */
+  async function revisarEnSri(claveDada, rucDado) {
+    const clave = String(claveDada ?? form.clave_acceso ?? "").replace(/\D/g, "");
+    if (clave.length !== 49) {
+      setSri({ estado: "sin_clave", hallazgos: [{ nivel: "aviso", regla: "clave",
+        dice: "No se leyó la clave de acceso de 49 dígitos, así que no se pudo consultar al SRI.",
+        hacer: "Está impresa debajo del código de barras, como NÚMERO DE AUTORIZACIÓN. Copiala en el campo y volvé a revisar." }] });
+      return;
+    }
+    setRevisandoSri(true);
+    try {
+      const r = await fetch("/api/nova", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sri: { clave, ruc: rucDado || form.ruc || "" } }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d || d.error) {
+        setSri({ estado: "sin_respuesta", hallazgos: [{ nivel: "aviso", regla: "sri",
+          dice: d?.error || "El SRI no contestó la consulta.",
+          hacer: "Probá de nuevo en un rato. Las páginas del SRI se caen seguido." }] });
+      } else {
+        setSri({ ...d, revisado_at: new Date().toISOString() });
+        // Lo que el SRI tiene guardado manda sobre lo que se leyó del papel:
+        // el XML autorizado es el documento, el papel es una copia impresa.
+        if (d.comprobante?.ruc) {
+          setForm(f => ({ ...f, ruc: d.comprobante.ruc,
+            razon_social: f.razon_social || d.comprobante.razonSocial || "",
+            numero_factura: d.comprobante.numero || f.numero_factura, clave_acceso: clave }));
+        }
+      }
+    } catch (e) {
+      setSri({ estado: "sin_respuesta", hallazgos: [{ nivel: "aviso", regla: "sri",
+        dice: "No se pudo consultar al SRI: " + e.message, hacer: "Probá de nuevo en un rato." }] });
+    }
+    setRevisandoSri(false);
   }
 
   function agregar(tipo, id) {
@@ -325,11 +389,18 @@ Rubros: ${listaRubros}`,
       duplicado_de: dups.exactos[0]?.id || null,
       duplicado_justificacion: dups.exactos.length ? justificacion.trim() : null,
       subido_por: currentUser.id, subido_por_nombre: currentUser.name,
+      // La revisión viaja con la factura: la pregunta "¿esta se puede pagar?"
+      // aparece después, cuando alguien la va a pagar, y para entonces nadie
+      // se acuerda de lo que dijo la pantalla al cargarla.
+      clave_acceso: String(form.clave_acceso || "").replace(/\D/g, "") || null,
+      sri_estado: sri?.estado || null,
+      sri_hallazgos: sri?.hallazgos?.length ? sri.hallazgos : null,
+      sri_revisado_at: sri?.revisado_at || (sri ? new Date().toISOString() : null),
     };
 
     // Sin la migración 060 no existe `clase`: el documento entra igual, como
     // factura, que es lo único que se podía cargar antes.
-    const sinClase = ({ clase, ...resto }) => resto;
+    const sinClase = ({ clase, clave_acceso, sri_estado, sri_hallazgos, sri_revisado_at, ...resto }) => resto;
     let facturaId = factura?.id;
     if (editando) {
       // CON `select()`: un UPDATE que no tocó ninguna fila —porque el permiso
@@ -547,10 +618,76 @@ Rubros: ${listaRubros}`,
       <AlertaDuplicado exactos={dups.exactos} posibles={dups.posibles} justificacion={justificacion} setJustificacion={setJustificacion} />
       {revisandoDups && <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>Revisando si ya está cargada...</div>}
 
+      {/* ── LO QUE DICE EL SRI ──────────────────────────────────────────────
+          Acá y no en un informe aparte: quien carga la factura la tiene
+          delante y todavía puede devolvérsela al proveedor. Un día después,
+          ya pagada, lo único que queda es el problema.
+
+          Y no bloquea nada. La factura existe, el gasto existe y la obra
+          tiene que poder registrarlo: lo que cambia es que ahora se sabe, y
+          queda escrito al lado de la factura para cuando alguien la vaya a
+          pagar. */}
+      {revisandoSri && (
+        <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 8 }}>Preguntándole al SRI por esta factura…</div>
+      )}
+      {sri && !revisandoSri && (() => {
+        const grave = sri.estado === "grave";
+        const limpio = sri.estado === "ok";
+        const tono = grave ? colors.danger : limpio ? colors.success : colors.warning;
+        const fondo = grave ? colors.dangerSoft : limpio ? colors.successSoft : colors.warningSoft;
+        return (
+          <div style={{ background: fondo, border: `1px solid ${tono}33`, borderLeft: `3px solid ${tono}`,
+            borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: tono, flex: 1 }}>
+                {grave ? "⚠ Esta factura no sustenta el gasto"
+                  : limpio ? "✓ Revisada en el SRI: todo en orden"
+                    : sri.estado === "sin_clave" ? "No se pudo revisar en el SRI"
+                      : sri.estado === "sin_respuesta" ? "El SRI no contestó"
+                        : `Revisada en el SRI · ${sri.hallazgos.length} ${sri.hallazgos.length === 1 ? "cosa para mirar" : "cosas para mirar"}`}
+              </div>
+              <button type="button" onClick={() => revisarEnSri()}
+                style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+                  fontSize: 11, fontFamily: colors.font, textDecoration: "underline" }}>
+                volver a revisar
+              </button>
+            </div>
+            {sri.proveedor && (
+              <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 3, lineHeight: 1.45 }}>
+                {sri.proveedor.razonSocial} · {sri.proveedor.regimen}
+                {sri.proveedor.obligadoLlevarContabilidad === "SI" ? " · obligado a llevar contabilidad" : ""}
+                {sri.autorizacion?.estado ? ` · ${sri.autorizacion.estado.toLowerCase()}` : ""}
+              </div>
+            )}
+            {(sri.hallazgos || []).map((x, i) => (
+              <div key={i} style={{ marginTop: 6, fontSize: 11.5, lineHeight: 1.45,
+                color: x.nivel === "grave" ? colors.danger : colors.ink }}>
+                <strong>{x.dice}</strong>
+                {x.hacer && <div style={{ color: colors.inkSoft }}>{x.hacer}</div>}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div><label style={lbl}>FECHA</label><input type="date" value={form.fecha || ""} onChange={e => set("fecha", e.target.value)} style={mini} /></div>
         <div><label style={lbl}>N° FACTURA</label><input value={form.numero_factura || ""} onChange={e => set("numero_factura", e.target.value)} onBlur={() => revisarDuplicados()} style={mini} /></div>
         <div><label style={lbl}>N° CHEQUE</label><input value={form.numero_cheque || ""} onChange={e => set("numero_cheque", e.target.value)} style={mini} /></div>
+        {/* LA CLAVE DE ACCESO, A MANO SI HACE FALTA. NOVA la lee del papel,
+            pero una foto borrosa o un dígito mal copiado dejan la factura sin
+            revisar — y entonces se puede escribir y revisar igual. */}
+        <div style={{ gridColumn: "span 2" }}>
+          <label style={lbl}>CLAVE DE ACCESO (49 dígitos)</label>
+          <input value={form.clave_acceso || ""} onChange={e => set("clave_acceso", e.target.value.replace(/\D/g, "").slice(0, 49))}
+            placeholder="la de abajo del código de barras" style={mini} />
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end" }}>
+          <Button variant="outline" size="sm" type="button" disabled={revisandoSri}
+            onClick={() => revisarEnSri()}>
+            {revisandoSri ? "Revisando…" : "Revisar en el SRI"}
+          </Button>
+        </div>
         <div><label style={lbl}>RUC</label><input value={form.ruc || ""} onChange={e => set("ruc", e.target.value)} style={mini} /></div>
         <div style={{ gridColumn: "span 2" }}><label style={lbl}>PROVEEDOR</label>
           <CampoProveedor valor={form.razon_social || ""} onChange={v => set("razon_social", v)}

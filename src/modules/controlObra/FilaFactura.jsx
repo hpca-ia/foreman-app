@@ -18,6 +18,21 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
         <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {f.razon_social || "Sin proveedor"}
           {f.numero_factura && <span style={{ color: colors.muted, fontWeight: 400, marginLeft: 6 }}>#{f.numero_factura}</span>}
+          {/* LO QUE DIJO EL SRI, DONDE SE PAGA.
+              La revisión se hace al cargar la factura, pero la pregunta "¿esta
+              se puede pagar?" aparece después, en esta lista, y para entonces
+              nadie se acuerda de lo que dijo la pantalla aquel día. Una marca
+              roja acá es "no la pagues todavía". */}
+          {f.sri_estado === "grave" && (
+            <span title={(f.sri_hallazgos || []).map(h => h.dice).join("\n")}
+              style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: "#fff", background: colors.danger,
+                borderRadius: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>SRI</span>
+          )}
+          {f.sri_estado === "aviso" && (
+            <span title={(f.sri_hallazgos || []).map(h => h.dice).join("\n")}
+              style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: colors.warning,
+                background: colors.warningSoft, borderRadius: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>SRI</span>
+          )}
         </div>
         <div style={{ fontSize: 11, color: colors.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {f.fecha} · {tipoLabel(f.tipo)}{f.detalle ? ` · ${f.detalle}` : ""}
