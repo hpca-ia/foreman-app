@@ -72,7 +72,12 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   // Revisar y enviar es del director: un acta la escribe quien lleva la obra,
   // pero el documento que sale con el nombre de la empresa lo aprueba quien
   // responde por ella.
-  const puedeEnviar = puede ? puede("obras.aprobar") : true;
+  //
+  // Preguntaba por "obras.aprobar", que no existe. Un permiso que no existe es
+  // false para todo el mundo, así que el botón de dar el visto no le aparecía
+  // a nadie —ni al director— y el acta no podía salir nunca. Un permiso mal
+  // escrito no falla: cierra la puerta en silencio.
+  const puedeEnviar = puede ? puede("actas.aprobar") : true;
 
   async function tocarActa(campos) {
     const e = await guardarActa(abierta.id, campos);
@@ -251,6 +256,17 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           </div>
         )}
         {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}
+        {!editable && !cerrada && (
+          /* POR QUÉ NO SE PUEDE ESCRIBIR. Un formulario entero en gris sin una
+             palabra manda a pensar que está roto, y es lo primero que pensó
+             quien lo abrió. */
+          <div style={{ fontSize: 12, color: colors.warning, background: colors.warningSoft,
+            border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+            padding: "9px 12px", marginBottom: 12, lineHeight: 1.5 }}>
+            No podés escribir en esta acta: no estás asignado a esta obra con permiso de editar. Se arregla en
+            Ajustes → Proyectos, dándote acceso de edición a la obra.
+          </div>
+        )}
         {cerrada && (
           <div style={{ fontSize: 12, color: colors.inkSoft, background: colors.bg, borderRadius: colors.radiusMd,
             padding: "9px 12px", marginBottom: 12, lineHeight: 1.5 }}>
