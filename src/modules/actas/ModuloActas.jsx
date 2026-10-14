@@ -37,6 +37,9 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
   const [cont, setCont] = useState({ asistentes: [], temas: [], compromisos: [], fotos: [], adjuntos: [] });
   const [enlaces, setEnlaces] = useState({});
   const [convocados, setConvocados] = useState([]);
+  // A quién le estamos corrigiendo el correo para reenviarle su copia.
+  const [corrigiendo, setCorrigiendo] = useState(null);
+  const [correoNuevo, setCorreoNuevo] = useState("");
   const [verConvocados, setVerConvocados] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
@@ -182,6 +185,12 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
     const tareaHecha = c => yaSeHizo(c, tareas);
     const clave = x => String(x.email || x.nombre || "").trim().toLowerCase();
     const esDeSiempre = a => convocados.some(c => clave(c) && clave(c) === clave(a));
+    /** ¿El correo de esta persona rebotó? Va con `function` y no con `const`:
+        se usa arriba del lugar donde está escrito, y una constante no se puede
+        leer antes de inicializarse —eso deja la pantalla en blanco—. */
+    function malLlego(a) {
+      return ["bounced", "complained", "failed", "error"].includes(String(a?.envio_estado || "").toLowerCase());
+    }
     const nuevos = cont.compromisos.filter(c => !c.viene_de);
 
     return (
@@ -462,12 +471,44 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                         se lee distinto si el acta nunca entró en su casilla.
                         Y el plazo de 48 horas no corre para quien no la
                         recibió. */}
-                    {["bounced", "complained", "failed", "error"].includes(String(a.envio_estado || "").toLowerCase()) && (
+                    {malLlego(a) && (
                       <div style={{ fontSize: 11.5, color: colors.danger, fontWeight: 700, lineHeight: 1.45 }}>
                         El acta NO le llegó: {a.envio_estado === "complained" ? "la marcó como no deseada"
                           : a.envio_estado === "error" ? "el envío falló" : "la dirección rebotó"}.
                         Hay que hacérsela llegar por otro lado.
                       </div>
+                    )}
+                    {/* CORREGIR EL SOBRE, NO EL ACTA.
+                        El acta enviada se traba a propósito. Una dirección mal
+                        escrita no es parte del acta: es el sobre, y dejarla
+                        mal quiere decir que esa persona no la recibió nunca y
+                        que el error se repite en todas las que vengan. Se
+                        arregla acá, le sale su copia con su propio enlace, y a
+                        los otros once no les llega nada —un reenvío a todos
+                        por un correo mal escrito es la forma más rápida de que
+                        la gente empiece a ignorar las actas—. */}
+                    {editable && puedeEnviar && corrigiendo === a.id && (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 5 }}>
+                        <input value={correoNuevo} onChange={e => setCorreoNuevo(e.target.value)} type="email"
+                          placeholder="correo@…" autoFocus
+                          style={{ ...inputStyle, flex: "1 1 180px", minWidth: 150, fontSize: 12, padding: "5px 8px", height: 28 }} />
+                        <Button variant="primary" size="sm" disabled={ocupado}
+                          onClick={() => corregirYReenviar(a)}>
+                          {ocupado ? "Enviando…" : "Guardar y reenviarle"}
+                        </Button>
+                        <button onClick={() => setCorrigiendo(null)}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, fontSize: 11, fontFamily: colors.font }}>
+                          cancelar
+                        </button>
+                      </div>
+                    )}
+                    {editable && puedeEnviar && corrigiendo !== a.id && !a.conforme_at && (
+                      <button onClick={() => { setCorrigiendo(a.id); setCorreoNuevo(a.email || ""); setAviso(""); }}
+                        style={{ background: "none", border: "none", padding: "2px 0", cursor: "pointer", fontFamily: colors.font,
+                          fontSize: 11.5, fontWeight: malLlego(a) ? 700 : 400,
+                          color: malLlego(a) ? colors.danger : colors.muted, textDecoration: "underline" }}>
+                        {malLlego(a) ? "Corregir el correo y reenviarle" : "Reenviarle su copia"}
+                      </button>
                     )}
                     {/* LA OBSERVACIÓN, ENTERA Y ACÁ.
                         Es lo único que obliga a hacer algo, y es lo que se
@@ -1204,6 +1245,34 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       }, "compromisos");
     }
 
+    /**
+     * EL CORREO ESTABA MAL: SE ARREGLA Y SE LE MANDA, SIN TOCAR EL ACTA.
+     *
+     * Un acta enviada no se modifica —ese es el punto de que se trabe— pero
+     * una dirección mal escrita no es parte del acta: es el sobre. Dejarla
+     * mal significa que esa persona no la recibió nunca y que el error se
+     * repite en todas las actas que vengan.
+     *
+     * Por eso se corrige en los dos lados: en esta acta, para que su copia
+     * salga ahora, y en "los de siempre", para que la próxima reunión no
+     * arranque con el mismo error.
+     */
+    async function corregirYReenviar(a) {
+      const antes = String(a.email || "").trim().toLowerCase();
+      const nuevo = String(correoNuevo ?? "").trim().toLowerCase() || antes;
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(nuevo)) { setError("Ese correo no está bien escrito."); return; }
+      setOcupado(true); setError("");
+      if (nuevo !== antes) {
+        const r = await guardarFila("acta_asistentes", { id: a.id, email: nuevo });
+        if (r.error) { setOcupado(false); setError(r.error); return; }
+        const suyo = convocados.find(c => clave(c) && (clave(c) === antes || clave(c) === String(a.nombre || "").trim().toLowerCase()));
+        if (suyo) await guardarConvocado({ id: suyo.id, lead_id: lead.id, email: nuevo });
+        setCont(c => ({ ...c, asistentes: c.asistentes.map(x => (x.id === a.id ? { ...x, email: nuevo } : x)) }));
+      }
+      setOcupado(false);
+      await enviar({ soloA: nuevo });
+    }
+
     async function verPdf(modo) {
       setOcupado(true); setError("");
       try {
@@ -1214,10 +1283,18 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       setOcupado(false);
     }
 
-    async function enviar({ prueba = false } = {}) {
-      const destino = prueba ? [String(currentUser.email).trim().toLowerCase()] : correos;
+    /**
+     * @param soloA  mandársela a una sola dirección, con el acta ya enviada.
+     *   Es el caso del rebote: la dirección estaba mal, se corrige y esa
+     *   persona recibe su copia —con su propio enlace— sin volver a mandarle
+     *   el acta a los otros once, que ya la tienen. Un reenvío a todos por un
+     *   correo mal escrito es la forma más rápida de que la gente empiece a
+     *   ignorar las actas.
+     */
+    async function enviar({ prueba = false, soloA = null } = {}) {
+      const destino = prueba ? [String(currentUser.email).trim().toLowerCase()] : soloA ? [soloA] : correos;
       if (!destino.length) { setError(prueba ? "Tu usuario no tiene correo cargado." : "Nadie tiene correo para recibirla."); return; }
-      if (!prueba && !window.confirm(
+      if (!prueba && !soloA && !window.confirm(
         `¿Enviar el acta N° ${abierta.numero} a ${correos.length} ${correos.length === 1 ? "persona" : "personas"}?\n\n`
         + correos.join("\n")
         + "\n\nVa el acta en el cuerpo del correo y el PDF adjunto, para imprimir y firmar."
@@ -1288,6 +1365,17 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
           + (data?.aviso ? `\n\n${data.aviso}` : "")
           + (sinPdf ? "\n\nEl PDF no viajó: pesa más de lo que admite un envío. El acta va entera en el cuerpo igual. Si lo necesitan adjunto, bajalo con «Ver el PDF» y mandalo aparte." : "")
           + " El acta sigue como está.");
+        return;
+      }
+      if (soloA) {
+        // No se vuelve a marcar enviada ni se pisa la fecha: ya lo está. Lo
+        // único que cambia es que ahora la lista de a quién le llegó dice la
+        // verdad.
+        const ya = abierta.enviada_a || [];
+        await tocarActa({ enviada_a: [...new Set([...ya, ...salieron])] });
+        await cargarActa(abierta.id);
+        setCorrigiendo(null);
+        setAviso(`Reenviada a ${soloA}. Le llega su propio enlace para dar conformidad.`);
         return;
       }
       await tocarActa({ estado: "enviada", enviada_at: new Date().toISOString(), enviada_a: salieron });
