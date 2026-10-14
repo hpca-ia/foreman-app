@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles, Star } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles, Star, Paperclip } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, borrarFila,
   convocadosDe, guardarConvocado, borrarConvocado, subirFoto, enlacesDeFotos,
-  correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106 } from "./actas";
+  correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106, subirAdjunto } from "./actas";
 import { pdfActa } from "./pdfActa";
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
@@ -31,7 +31,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   const [actas, setActas] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
   const [abierta, setAbierta] = useState(null);
-  const [cont, setCont] = useState({ asistentes: [], temas: [], compromisos: [], fotos: [] });
+  const [cont, setCont] = useState({ asistentes: [], temas: [], compromisos: [], fotos: [], adjuntos: [] });
   const [enlaces, setEnlaces] = useState({});
   const [convocados, setConvocados] = useState([]);
   const [verConvocados, setVerConvocados] = useState(false);
@@ -71,7 +71,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
     const c = await contenidoDe(id);
     setCont(c);
     setSinGuardar(new Set());
-    setEnlaces(await enlacesDeFotos(c.fotos));
+    setEnlaces(await enlacesDeFotos([...c.fotos, ...(c.adjuntos || [])]));
   }, []);
   useEffect(() => { if (abierta?.id) cargarActa(abierta.id); }, [abierta?.id, cargarActa]);
 
@@ -753,6 +753,65 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           )}
         </div>
 
+        {/* ANEXOS: lo que respalda lo que se decidió.
+            Un acta que dice "se aprueba el cambio según el plano presentado" y
+            no lleva el plano no sirve tres meses después: nadie va a poder
+            decir CUÁL plano, y la decisión queda tan floja como si no se
+            hubiera escrito. El documento que respalda el acuerdo tiene que
+            viajar con el acuerdo.
+            Aparte de las fotos porque se usan distinto: una foto se mira, un
+            anexo se abre y se guarda. */}
+        <div style={caja}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+            <Paperclip size={14} color={colors.muted} />
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
+              Anexos · {cont.adjuntos.length}
+            </div>
+            {sePuede && (
+              <label style={{ cursor: "pointer" }}>
+                <input type="file" multiple style={{ display: "none" }}
+                  onChange={async e => {
+                    const files = [...e.target.files];
+                    e.target.value = "";
+                    setOcupado(true); setError("");
+                    for (let i = 0; i < files.length; i++) {
+                      const r = await subirAdjunto({ actaId: abierta.id, file: files[i], quien: currentUser, orden: cont.adjuntos.length + i });
+                      if (r.error) { setError(r.error); break; }
+                    }
+                    setOcupado(false);
+                    await cargarActa(abierta.id);
+                  }} />
+                <span style={{ fontSize: 12, color: colors.brand, fontWeight: 600 }}>
+                  {ocupado ? "Subiendo…" : "+ Adjuntar archivos"}
+                </span>
+              </label>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8, lineHeight: 1.45 }}>
+            El plano sobre el que se decidió, la proforma que se discutió, el informe que mandó el proveedor.
+            Van adjuntos en el correo, así que el que lo recibe no necesita entrar a FOREMAN.
+          </div>
+          {cont.adjuntos.map(f => (
+            <div key={f.id} style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+              <a href={enlaces[f.storage_path] || "#"} target="_blank" rel="noreferrer"
+                style={{ fontSize: 12, color: colors.brand, textDecoration: "none", flex: "1 1 160px",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.nombre}</a>
+              <span style={{ fontSize: 10.5, color: colors.muted, flexShrink: 0 }}>
+                {f.bytes ? `${Math.max(1, Math.round(f.bytes / 1024))} KB` : ""}
+              </span>
+              <input defaultValue={f.descripcion || ""} disabled={!sePuede} placeholder="¿Qué es?"
+                onBlur={e => tocarFila("acta_adjuntos", "adjuntos", f.id, { descripcion: e.target.value || null })}
+                style={{ ...inputStyle, flex: "1 1 160px", minWidth: 110, fontSize: 11.5, padding: "4px 7px", height: 26 }} />
+              {sePuede && (
+                <button onClick={() => quitarFila("acta_adjuntos", "adjuntos", f.id)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
         {/* 7 · CIERRE */}
         <div style={caja}>
           <Campo label="CÓMO VA LA OBRA, DICHO EN LA REUNIÓN">
@@ -989,7 +1048,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
       }
       const r = await fetch("/api/aviso?de=acta", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acta_id: abierta.id, para: correos, adjunto }),
+        body: JSON.stringify({ acta_id: abierta.id, para: correos, adjunto, conAnexos: true }),
       });
       const data = await r.json().catch(() => ({}));
       setOcupado(false);

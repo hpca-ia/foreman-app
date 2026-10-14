@@ -43,15 +43,16 @@ export async function actasDe(leadId) {
 }
 
 export async function contenidoDe(actaId) {
-  const [a, t, c, f] = await Promise.all([
+  const [a, t, c, f, adj] = await Promise.all([
     supabase.from("acta_asistentes").select("*").eq("acta_id", actaId).order("orden"),
     supabase.from("acta_temas").select("*").eq("acta_id", actaId).order("orden"),
     supabase.from("acta_compromisos").select("*").eq("acta_id", actaId).order("orden"),
     supabase.from("acta_fotos").select("*").eq("acta_id", actaId).order("orden"),
+    supabase.from("acta_adjuntos").select("*").eq("acta_id", actaId).order("orden"),
   ]);
   return {
     asistentes: a.data || [], temas: t.data || [],
-    compromisos: c.data || [], fotos: f.data || [],
+    compromisos: c.data || [], fotos: f.data || [], adjuntos: adj.data || [],
   };
 }
 
@@ -191,6 +192,28 @@ export async function subirFoto({ actaId, file, descripcion, quien, orden = 0 })
   }).select().single();
   if (e2) return { error: e2.message };
   return { foto: data };
+}
+
+/**
+ * Un anexo: el plano sobre el que se decidió, la proforma que se discutió.
+ *
+ * Aparte de las fotos porque se usan distinto: una foto se mira, un anexo se
+ * abre y se guarda. Un acta que dice "se aprueba según el plano presentado" y
+ * no lleva el plano no sirve tres meses después — nadie va a poder decir CUÁL
+ * plano.
+ */
+export async function subirAdjunto({ actaId, file, quien, orden = 0 }) {
+  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const ruta = `acta-${actaId}/anexos/${Date.now()}-${safe}`;
+  const { error } = await subirArchivo(ruta, file);
+  if (error) return { error: error.message };
+  const { data, error: e2 } = await supabase.from("acta_adjuntos").insert({
+    acta_id: actaId, storage_path: ruta, nombre: file.name.slice(0, 160),
+    tipo: file.type || null, bytes: file.size || null, orden,
+    autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
+  }).select().single();
+  if (e2) return { error: falta(e2) ? "Falta correr la migración 109 para adjuntar archivos." : e2.message };
+  return { adjunto: data };
 }
 
 export async function enlacesDeFotos(fotos = []) {

@@ -20,7 +20,7 @@ const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const { acta_id: actaId, para, adjunto } = req.body || {};
+  const { acta_id: actaId, para, adjunto, conAnexos } = req.body || {};
   if (!actaId) return res.status(400).json({ error: "Falta el acta." });
   if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
 
@@ -34,6 +34,33 @@ export default async function handler(req, res) {
     db.from("acta_temas").select("*").eq("acta_id", actaId).order("orden"),
     db.from("acta_compromisos").select("*").eq("acta_id", actaId).order("orden"),
   ]);
+
+  // LOS ANEXOS VIAJAN CON EL CORREO.
+  //
+  // Quien recibe el acta no tiene cuenta en FOREMAN —es el cliente, la
+  // fiscalización, un contratista— así que un enlace al sistema es un enlace
+  // que no puede abrir. El plano sobre el que se decidió tiene que llegarle.
+  //
+  // Con un techo: Resend no acepta un correo de cualquier tamaño, y un acta
+  // que no sale por culpa de un anexo pesado es peor que un anexo que no
+  // viaja. Lo que no entra se nombra en el cuerpo y queda en FOREMAN.
+  const anexos = [];
+  const afuera = [];
+  if (conAnexos) {
+    const { data: lista } = await db.from("acta_adjuntos").select("*").eq("acta_id", actaId).order("orden");
+    let usado = (adjunto?.contenido?.length || 0) * 0.75;
+    for (const a of lista || []) {
+      const peso = Number(a.bytes) || 0;
+      if (usado + peso > 18 * 1024 * 1024) { afuera.push(a); continue; }
+      try {
+        const { data: blob, error } = await db.storage.from("task-files").download(a.storage_path);
+        if (error || !blob) { afuera.push(a); continue; }
+        const buf = Buffer.from(await blob.arrayBuffer());
+        anexos.push({ filename: a.nombre, content: buf.toString("base64") });
+        usado += buf.length;
+      } catch { afuera.push(a); }
+    }
+  }
 
   const vinieron = (asistentes || []).filter(a => a.asistio);
   const faltaron = (asistentes || []).filter(a => !a.asistio);
@@ -105,6 +132,12 @@ export default async function handler(req, res) {
     ${acta.resumen ? `<h3 style="margin:20px 0 6px;font-size:13px;color:#555;letter-spacing:.3px">OTRAS CONSTANCIAS</h3>
       <p style="margin:0;font-size:13px;color:#1A1A1A;line-height:1.55">${esc(acta.resumen)}</p>` : ""}
 
+    ${anexos.length || afuera.length ? `<h3 style="margin:20px 0 6px;font-size:13px;color:#555;letter-spacing:.3px">ANEXOS</h3>
+      <p style="margin:0;font-size:13px;color:#1A1A1A;line-height:1.6">
+        ${anexos.map(a => `· ${esc(a.filename)}`).join("<br>")}
+        ${afuera.length ? `<br><span style="color:#92400E">No entraron en este correo por tamaño: ${afuera.map(a => esc(a.nombre)).join(", ")}. Pedilos y te los mandamos aparte.</span>` : ""}
+      </p>` : ""}
+
     ${acta.proxima_fecha ? `<p style="margin:20px 0 0;font-size:13px;color:#1A1A1A">
       <strong>Próxima reunión:</strong> ${dia(acta.proxima_fecha)}${acta.proxima_hora ? ` a las ${acta.proxima_hora.slice(0, 5)}` : ""}</p>` : ""}
   `;
@@ -153,9 +186,10 @@ export default async function handler(req, res) {
     // El PDF lo arma el navegador y viaja en el pedido: acá no hay librería de
     // PDF ni las fotos firmadas, y poner una sería mantener dos veces el mismo
     // documento.
-    adjuntos: adjunto?.contenido
-      ? [{ filename: adjunto.nombre || `Acta ${acta.numero}.pdf`, content: adjunto.contenido }]
-      : undefined,
+    adjuntos: [
+      ...(adjunto?.contenido ? [{ filename: adjunto.nombre || `Acta ${acta.numero}.pdf`, content: adjunto.contenido }] : []),
+      ...anexos,
+    ],
     subject: `Acta de reunión N° ${acta.numero} · ${lead?.nombre || "Obra"} · ${dia(acta.fecha)}`,
     html,
   });

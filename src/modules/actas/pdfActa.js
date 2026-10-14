@@ -33,7 +33,7 @@ const hora = h => (h ? String(h).slice(0, 5) : "");
  *   correo. Previsualizar es lo que hace que alguien corrija una falta antes
  *   de que la lean ocho personas.
  */
-export async function pdfActa({ acta, obra, asistentes = [], temas = [], compromisos = [], fotos = [], enlaces = {} }, modo = "abrir") {
+export async function pdfActa({ acta, obra, asistentes = [], temas = [], compromisos = [], fotos = [], adjuntos = [], enlaces = {} }, modo = "abrir") {
   const { jsPDF, autoTable } = await cargarPDF();
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const ANCHO = doc.internal.pageSize.getWidth();
@@ -212,6 +212,14 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
       if (col === 1) y += 28;
     });
     if (vinieron.length % 2 === 1) y += 28;
+  }
+
+  // ── Anexos: nombrados, aunque no estén pegados al papel ──
+  if (adjuntos.length) {
+    if (y > ALTO - 40) { doc.addPage(); y = 18; }
+    titulo("ANEXOS");
+    adjuntos.forEach(a => parrafo(`· ${a.nombre}${a.descripcion ? `  —  ${a.descripcion}` : ""}`));
+    y += 4;
   }
 
   // ── A QUIÉN SE LE MANDA ──
