@@ -726,6 +726,26 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     if (valor !== null) setEtapaNueva(etapa);   // se queda puesta: casi siempre van varios seguidos
   }
 
+  /**
+   * Poner una etapa a un montón de rubros de una, en UNA sola escritura.
+   *
+   * De a uno, un presupuesto de ciento sesenta renglones son ciento sesenta
+   * viajes a la base: medio minuto mirando una pantalla que no responde, y la
+   * mitad de las veces alguien se va antes de que termine.
+   */
+  async function etapaEnLote(ids, etapa) {
+    if (!ids.length) return;
+    const updated = itemsRef.current.map(i => (ids.includes(i.id) ? { ...i, etapa: etapa || null } : i));
+    itemsRef.current = updated;
+    setItems(updated);
+    const { error } = await supabase.from("presupuesto_items").update({ etapa: etapa || null }).in("id", ids);
+    if (error) {
+      alert(/column|schema cache/i.test(error.message)
+        ? "Falta correr la migración 096 para cobrar por etapas."
+        : "No se pudo guardar la etapa: " + error.message);
+    }
+  }
+
   async function aplicarUtilidadCapitulo(capNombre, pct) {
     const capItems = items.filter(i=>i.capitulo===capNombre);
     const updated = items.map(i => {
@@ -1467,7 +1487,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               mano—. Acá el presupuesto es uno y se lee de las dos maneras. */}
           {modoDetalle==="etapas"&&(
             <PanelEtapas items={items} capitulos={capitulosActivos} soloLectura={bloqueado}
-              onActualizar={(id,campos)=>bloqueado?alert(motivoBloqueo):actualizarItemMulti(id,campos)}/>
+              onEtapaEnLote={(ids,etapa)=>bloqueado?alert(motivoBloqueo):etapaEnLote(ids,etapa)}/>
           )}
 
           {modoDetalle==="revisar"&&(

@@ -24,7 +24,7 @@ import { subtotalesPorEtapa, etapasUsadas, SIN_ETAPA } from "./etapas";
 
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function PanelEtapas({ items = [], capitulos = [], soloLectura = false, onActualizar }) {
+export default function PanelEtapas({ items = [], capitulos = [], soloLectura = false, onEtapaEnLote }) {
   const [abierto, setAbierto] = useState(null);
   const [modo, setModo] = useState("capitulo");
   const [nueva, setNueva] = useState("");
@@ -50,9 +50,11 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
   }).filter(c => c.rubros > 0);
 
   async function ponerEtapa(lista, etapa) {
-    if (soloLectura) return;
+    if (soloLectura || !lista.length) return;
     setOcupado(true);
-    for (const i of lista) await onActualizar(i.id, { etapa: etapa || null });
+    // En UNA escritura: de a uno, un presupuesto de ciento sesenta renglones
+    // son ciento sesenta viajes a la base.
+    await onEtapaEnLote(lista.map(i => i.id), etapa);
     setOcupado(false);
   }
 
@@ -81,7 +83,7 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
           {!soloLectura && (
             <>
               <input value={nueva} onChange={e => setNueva(e.target.value)}
-                placeholder="Nueva etapa. Ej: Etapa 1"
+                placeholder={etapas.length ? "Otra etapa. Ej: Etapa 2" : "Nombre de la primera. Ej: Etapa 1"}
                 style={{ ...inputStyle, width: 170, fontSize: 12, padding: "5px 8px", height: 30 }} />
               <span style={{ fontSize: 10.5, color: colors.muted }}>
                 escribila y después elegila en el capítulo
@@ -89,6 +91,32 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
             </>
           )}
         </div>
+
+        {/* TODO A UNA, Y DESPUÉS LAS EXCEPCIONES.
+            Es como se arma de verdad: casi toda la obra es la etapa uno y lo
+            que se posterga son unos pocos capítulos. Empezar con todo vacío y
+            marcar ciento sesenta renglones para decir "casi todo es la uno" es
+            al revés del trabajo. */}
+        {!soloLectura && (
+          <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            <Button variant="primary" size="sm" disabled={ocupado || !(nueva.trim() || etapas[0])}
+              onClick={async () => {
+                const e = nueva.trim() || etapas[0];
+                if (!window.confirm(
+                  `¿Poner los ${items.length} rubros del presupuesto en "${e}"?\n\n`
+                  + "Es la forma normal de arrancar: casi toda la obra es la primera etapa, y después se "
+                  + "cambian las excepciones una por una.\n\n"
+                  + (etapas.length ? "Pisa las etapas que ya estén puestas." : "Nada queda sin etapa."))) return;
+                await ponerEtapa(items, e);
+                setNueva("");
+              }}>
+              {ocupado ? "Poniendo…" : `Poner los ${items.length} rubros en "${nueva.trim() || etapas[0] || "Etapa 1"}"`}
+            </Button>
+            <span style={{ fontSize: 10.5, color: colors.muted, flex: 1, minWidth: 180, lineHeight: 1.4 }}>
+              Y después cambiás las excepciones: el capítulo o el rubro que va en otra.
+            </span>
+          </div>
+        )}
 
         {!etapas.length ? (
           <div style={{ fontSize: 12.5, color: colors.muted, lineHeight: 1.55 }}>
