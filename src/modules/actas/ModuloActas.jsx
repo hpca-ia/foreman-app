@@ -390,8 +390,24 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                   FOREMAN —alguien aprieta un botón en su teléfono— así que la
                   pantalla abierta desde la mañana muestra lo de la mañana. */}
               <Button variant="secondary" size="sm" disabled={ocupado} onClick={async () => {
-                setOcupado(true); await cargarActa(abierta.id); setOcupado(false);
-                setAviso("Al día.");
+                setOcupado(true); setError("");
+                // DE PASO SE PREGUNTA SI LLEGARON. El servidor de correo
+                // contesta "sent" un segundo después de mandar, que quiere
+                // decir "entró el pedido": el rebote aparece minutos más tarde,
+                // cuando ya nadie mira la pantalla. Acá se vuelve a preguntar.
+                let entrega = null;
+                try {
+                  const r = await fetch("/api/aviso?de=acta", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ acta_id: abierta.id, revisar: true }),
+                  });
+                  entrega = await r.json().catch(() => null);
+                } catch { /* si no se puede preguntar, al menos se recarga */ }
+                await cargarActa(abierta.id);
+                setOcupado(false);
+                setAviso(entrega?.rebotaron?.length
+                  ? `OJO: el acta NO le llegó a ${entrega.rebotaron.join(", ")}. Hay que hacérsela llegar por otro lado.`
+                  : "Al día.");
               }}><RefreshCw size={12} /> Ver si contestaron</Button>
             </div>
             {/* QUÉ ENTRA A FOREMAN Y QUÉ NO. Las dos cosas se ven iguales
@@ -425,8 +441,22 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                       {c.estado === "conforme" ? `Dio conformidad el ${dia(String(c.cuando).slice(0, 10))}`
                         : c.estado === "observacion" ? "Escribió una observación"
                           : c.estado === "visto" ? `La abrió el ${dia(String(c.cuando).slice(0, 10))} y no dijo nada`
-                            : "Todavía no la abrió"}
+                            : String(a.envio_estado || "").toLowerCase() === "delivered" ? "Le llegó y todavía no la abrió"
+                              : "Todavía no la abrió"}
                     </div>
+                    {/* SI NO LE LLEGÓ, ACÁ Y EN ROJO.
+                        Es lo primero que hay que saber de una persona en esta
+                        lista: todo lo demás —que no contestó, que no la abrió—
+                        se lee distinto si el acta nunca entró en su casilla.
+                        Y el plazo de 48 horas no corre para quien no la
+                        recibió. */}
+                    {["bounced", "complained", "failed", "error"].includes(String(a.envio_estado || "").toLowerCase()) && (
+                      <div style={{ fontSize: 11.5, color: colors.danger, fontWeight: 700, lineHeight: 1.45 }}>
+                        El acta NO le llegó: {a.envio_estado === "complained" ? "la marcó como no deseada"
+                          : a.envio_estado === "error" ? "el envío falló" : "la dirección rebotó"}.
+                        Hay que hacérsela llegar por otro lado.
+                      </div>
+                    )}
                     {/* LA OBSERVACIÓN, ENTERA Y ACÁ.
                         Es lo único que obliga a hacer algo, y es lo que se
                         pierde: llega por el enlace, no por correo, y si no se

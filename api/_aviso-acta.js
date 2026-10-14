@@ -67,9 +67,22 @@ async function mandarActa(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const { acta_id: actaId, para, adjunto, conAnexos, prueba } = req.body || {};
   if (!actaId) return res.status(400).json({ error: "Falta el acta." });
-  if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
-
   if (!configurado()) return res.status(500).json({ error: "Falta la llave de la base en el servidor (SUPABASE_SECRET_KEY)." });
+
+  // ── ¿LE LLEGÓ A CADA UNO? ────────────────────────────────────────────────
+  //
+  // Mandar devuelve "sent", que quiere decir "lo recibimos para mandarlo", no
+  // "le llegó". El rebote —una dirección vieja, una casilla llena, un dominio
+  // que rechaza al remitente— aparece minutos después, cuando ya nadie está
+  // mirando la pantalla. Por eso se vuelve a preguntar: acá, cuando alguien
+  // abre el acta y quiere saber.
+  //
+  // Solo por los que todavía pueden cambiar. Un "delivered" o un "bounced" ya
+  // no se mueven, y preguntar de nuevo por ellos es gastar el envío de todos
+  // los demás.
+  if ((req.body || {}).revisar) return await revisarEntregas(req, res);
+
+  if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
 
   const id = Number(actaId);
   if (!id) return res.status(400).json({ error: "El acta no es válida." });
@@ -348,6 +361,24 @@ async function mandarActa(req, res) {
     e.malo = !!e.error || MALOS.includes(String(e.estado || "").toLowerCase());
   }));
 
+  // CADA ENVÍO QUEDA ANOTADO EN SU FILA. Es lo que permite volver a preguntar
+  // mañana: sin el identificador, un rebote que llega cinco minutos tarde no se
+  // puede atar a nadie.
+  if (!prueba) {
+    await Promise.all(envios.map(async e => {
+      const quien = porCorreo.get(String(e.dir).trim().toLowerCase());
+      if (!quien) return;
+      await rest(`acta_asistentes?id=eq.${quien.id}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          envio_id: e.id || null,
+          envio_estado: e.error ? "error" : (e.estado || "sent"),
+          envio_at: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+    }));
+  }
+
   const fallaron = envios.filter(e => e.malo);
   const salieron = envios.filter(e => !e.malo).map(e => e.dir);
   const porQue = e => e.error || `el servidor de correo dice "${e.estado}"`;
@@ -365,5 +396,40 @@ async function mandarActa(req, res) {
     enviados: salieron.length, entregados: salieron,
     estado: envios[0]?.estado || null, id: envios[0]?.id || null,
     ...(explicacion ? { aviso: explicacion, fallaron: fallaron.map(e => e.dir) } : {}),
+  });
+}
+
+/**
+ * Volver a preguntarle al servidor de correo en qué quedó cada envío.
+ *
+ * "sent" es lo que contesta un segundo después de mandar y no quiere decir
+ * nada: quiere decir que el pedido entró. Lo que importa —"delivered" o
+ * "bounced"— se sabe minutos más tarde. Esto es lo que convierte "se mandó" en
+ * "le llegó", que es la única de las dos que sirve cuando alguien dice que
+ * nunca vio el acta.
+ */
+async function revisarEntregas(req, res) {
+  const id = Number((req.body || {}).acta_id);
+  if (!id) return res.status(400).json({ error: "El acta no es válida." });
+  const FINALES = ["delivered", "bounced", "complained", "canceled"];
+  const gente = await filas("acta_asistentes",
+    `acta_id=eq.${id}&envio_id=not.is.null&select=id,nombre,envio_id,envio_estado`);
+  const pendientes = gente.filter(a => !FINALES.includes(String(a.envio_estado || "").toLowerCase()));
+
+  let cambiaron = 0;
+  for (const a of pendientes) {
+    const estado = await estadoDeCorreo(a.envio_id);
+    if (!estado || estado === a.envio_estado) continue;
+    await rest(`acta_asistentes?id=eq.${a.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ envio_estado: estado, envio_at: new Date().toISOString() }),
+    });
+    a.envio_estado = estado;
+    cambiaron++;
+  }
+  const rebotaron = gente.filter(a => ["bounced", "complained", "failed"].includes(String(a.envio_estado || "").toLowerCase()));
+  return res.status(200).json({
+    revisados: pendientes.length, cambiaron,
+    rebotaron: rebotaron.map(a => a.nombre),
   });
 }
