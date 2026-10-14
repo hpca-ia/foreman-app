@@ -252,6 +252,19 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               setAviso(`Revisada. Ya se puede enviar.${r.creadas ? ` Y ${r.creadas} ${r.creadas === 1 ? "tarea creada" : "tareas creadas"} en el tablero del equipo.` : ""}`);
             }}><Check size={13} /> Dar el visto</Button>
           )}
+          {/* UNA PRUEBA A MI PROPIO CORREO, SIN TRABAR EL ACTA.
+              Antes de mandarle algo a ocho personas de afuera uno quiere ver
+              cómo llega: si el PDF abre, si los anexos están, si los
+              compromisos se leen. La única manera era destildar a todos,
+              enviar —y ahí el acta queda enviada y no se toca más— y después
+              no poder mandarla de verdad. Esto manda solo a quien lo aprieta y
+              no cambia el estado: se puede probar las veces que haga falta. */}
+          {sePuede && puedeEnviar && currentUser?.email && abierta.estado !== "enviada" && (
+            <Button variant="secondary" size="sm" disabled={ocupado}
+              onClick={() => enviar({ prueba: true })}>
+              <Send size={13} /> Probar a mi correo
+            </Button>
+          )}
           {sePuede && puedeEnviar && abierta.estado === "revisada" && (
             <Button variant="primary" size="sm" disabled={ocupado || !correos.length} onClick={() => enviar()}>
               <Send size={13} /> {ocupado ? "Enviando…" : `Enviar a ${correos.length}`}
@@ -1054,9 +1067,10 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       setOcupado(false);
     }
 
-    async function enviar() {
-      if (!correos.length) { setError("Nadie tiene correo para recibirla."); return; }
-      if (!window.confirm(
+    async function enviar({ prueba = false } = {}) {
+      const destino = prueba ? [String(currentUser.email).trim().toLowerCase()] : correos;
+      if (!destino.length) { setError(prueba ? "Tu usuario no tiene correo cargado." : "Nadie tiene correo para recibirla."); return; }
+      if (!prueba && !window.confirm(
         `¿Enviar el acta N° ${abierta.numero} a ${correos.length} ${correos.length === 1 ? "persona" : "personas"}?\n\n`
         + correos.join("\n")
         + "\n\nVa el acta en el cuerpo del correo y el PDF adjunto, para imprimir y firmar."
@@ -1080,11 +1094,17 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       }
       const r = await fetch("/api/aviso?de=acta", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acta_id: abierta.id, para: correos, adjunto, conAnexos: true }),
+        body: JSON.stringify({ acta_id: abierta.id, para: destino, adjunto, conAnexos: true, prueba }),
       });
       const data = await r.json().catch(() => ({}));
       setOcupado(false);
       if (!r.ok || data?.error) { setError(data?.error || "No se pudo enviar el acta."); return; }
+      if (prueba) {
+        // Una prueba no cambia nada: el acta sigue donde estaba y se puede
+        // probar otra vez. Si la marcara enviada, el primer ensayo la trabaría.
+        setAviso(`Prueba enviada a ${destino[0]}. El acta sigue como está: revisala y después mandala a todos.`);
+        return;
+      }
       await tocarActa({ estado: "enviada", enviada_at: new Date().toISOString(), enviada_a: correos });
       setAviso(`Enviada a ${correos.length} ${correos.length === 1 ? "correo" : "correos"}.`);
     }

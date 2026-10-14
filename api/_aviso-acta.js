@@ -20,7 +20,7 @@ const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const { acta_id: actaId, para, adjunto, conAnexos } = req.body || {};
+  const { acta_id: actaId, para, adjunto, conAnexos, prueba } = req.body || {};
   if (!actaId) return res.status(400).json({ error: "Falta el acta." });
   if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
 
@@ -190,7 +190,9 @@ export default async function handler(req, res) {
       ...(adjunto?.contenido ? [{ filename: adjunto.nombre || `Acta ${acta.numero}.pdf`, content: adjunto.contenido }] : []),
       ...anexos,
     ],
-    subject: `Acta de reunión N° ${acta.numero} · ${lead?.nombre || "Obra"} · ${dia(acta.fecha)}`,
+    // La prueba se marca en el asunto: dos correos iguales en la bandeja, uno
+    // de ensayo y otro de verdad, se confunden en cinco minutos.
+    subject: `${prueba ? "[PRUEBA] " : ""}Acta de reunión N° ${acta.numero} · ${lead?.nombre || "Obra"} · ${dia(acta.fecha)}`,
     html,
   });
   if (r?.error) return res.status(502).json({ error: r.error });

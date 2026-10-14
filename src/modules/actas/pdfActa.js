@@ -22,10 +22,16 @@ const TINTA = [15, 61, 62];
 const NEGRO = [17, 24, 39];
 const GRIS = [107, 114, 128];
 
-const dia = f => (f
-  ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" })
-  : "");
+const fechaDe = f => new Date(`${String(f).slice(0, 10)}T12:00:00`);
+const dia = f => (f ? fechaDe(f).toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
 const hora = h => (h ? String(h).slice(0, 5) : "");
+// En una columna de 26 mm "15 de octubre de 2026" no entra y se parte en tres
+// renglones. En una tabla de compromisos la fecha se mira de reojo: con el día
+// y el mes alcanza, y el año está en el encabezado del acta.
+const breve = f => {
+  const d = fechaDe(f);
+  return `${d.getDate()} ${["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][d.getMonth()]}`;
+};
 
 /**
  * @param modo  "abrir" para verlo antes de mandarlo, "imprimir" para la
@@ -117,13 +123,30 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   // anterior y los compromisos nuevos son dos cosas distintas para quien lee
   // el acta: la primera dice si la obra cumple lo que promete, la segunda dice
   // qué prometió ahora. Mezcladas, ninguna de las dos se puede leer.
+  // LA TABLA DE COMPROMISOS, CON AIRE PARA LOS NOMBRES.
+  //
+  // "Quién" tenía treinta milímetros, y en una reunión de obra el responsable
+  // se escribe "Especialidades / Instalaciones" o "Proveedor de detección de
+  // incendios". En esa columna eso se parte en cuatro renglones de dos
+  // palabras, desalineados contra un texto que ocupa dos: la tabla se lee
+  // como un borrador, y un acta no puede verse como un borrador.
+  //
+  // Y todo alineado ARRIBA: con el centrado, una celda de cuatro renglones
+  // deja a sus vecinas flotando en el medio y las filas dejan de leerse como
+  // filas.
   const tabla = (filas, cabeza) => {
     autoTable(doc, {
       startY: y, head: [cabeza], body: filas,
       margin: { left: M, right: M },
-      styles: { fontSize: 8.5, cellPadding: 2.2, textColor: NEGRO, lineColor: [225, 222, 216], lineWidth: 0.1 },
-      headStyles: { fillColor: TINTA, textColor: 255, fontSize: 7.5, fontStyle: "bold" },
-      columnStyles: { 0: { cellWidth: "auto" }, 1: { cellWidth: 30 }, 2: { cellWidth: 28 }, 3: { cellWidth: 26 } },
+      styles: { fontSize: 8.5, cellPadding: { top: 2.6, bottom: 2.6, left: 2.4, right: 2.4 },
+        textColor: NEGRO, lineColor: [225, 222, 216], lineWidth: 0.1, valign: "top" },
+      headStyles: { fillColor: TINTA, textColor: 255, fontSize: 7.5, fontStyle: "bold", valign: "middle" },
+      columnStyles: {
+        0: { cellWidth: "auto" },
+        1: { cellWidth: 44 },
+        2: { cellWidth: 26, halign: "center" },
+        3: { cellWidth: 22, halign: "center", fontStyle: "bold", fontSize: 7.5 },
+      },
     });
     y = doc.lastAutoTable.finalY + 7;
   };
@@ -139,8 +162,8 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
       (c.urgente && c.estado !== "cumplido" ? "URGENTE · " : "")
         + c.texto + (c.estado !== "cumplido" && c.nota ? `\n(${c.nota})` : ""),
       c.responsable_nombre || "—",
-      c.fecha_limite ? dia(c.fecha_limite) : "—",
-      c.estado === "cumplido" ? "CUMPLIDO" : c.estado === "reprogramado" ? "Reprogramado" : "PENDIENTE",
+      c.fecha_limite ? breve(c.fecha_limite) : "—",
+      c.estado === "cumplido" ? "SÍ" : c.estado === "reprogramado" ? "repr." : "NO",
     ]), ["QUÉ SE HABÍA COMPROMETIDO", "QUIÉN", "PARA CUÁNDO", "¿SE HIZO?"]);
   }
 
@@ -149,8 +172,8 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     titulo("COMPROMISOS DE ESTA REUNIÓN");
     tabla(nuevos.map(c => [
       (c.urgente ? "URGENTE · " : "") + c.texto, c.responsable_nombre || "—",
-      c.fecha_limite ? dia(c.fecha_limite) : "—",
-      { pendiente: "Pendiente", cumplido: "Cumplido", reprogramado: "Reprogramado" }[c.estado] || c.estado,
+      c.fecha_limite ? breve(c.fecha_limite) : "—",
+      { pendiente: "Pend.", cumplido: "Hecho", reprogramado: "Repr." }[c.estado] || c.estado,
     ]), ["QUÉ", "QUIÉN", "PARA CUÁNDO", "ESTADO"]);
   }
 
