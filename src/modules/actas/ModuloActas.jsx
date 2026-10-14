@@ -10,6 +10,7 @@ import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, 
 import { pdfActa } from "./pdfActa";
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
+import { crearTareas, paraTarea, estadoDeTareas, yaSeHizo } from "./aTareas";
 
 // Las actas de reunión de obra.
 //
@@ -25,7 +26,7 @@ const dia = f => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-EC", { da
 const titulito = { fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 4 };
 const caja = { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 13, marginBottom: 12 };
 
-export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
+export default function ModuloActas({ currentUser, users = [], puede, nivelProyecto }) {
   const [proyectos, setProyectos] = useState([]);
   const [lead, setLead] = useState(null);
   const [actas, setActas] = useState([]);
@@ -43,6 +44,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
   // Lo que NOVA encontró al revisar: las correcciones se aceptan, los avisos
   // se van a preguntar.
   const [revision, setRevision] = useState(null);
+  const [tareas, setTareas] = useState({});
   // Qué filas de asistentes se tocaron y todavía no se guardaron.
   const [sinGuardar, setSinGuardar] = useState(() => new Set());
   // El reloj del guardado solo: se reinicia con cada tecla y dispara cuando
@@ -71,6 +73,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
     const c = await contenidoDe(id);
     setCont(c);
     setSinGuardar(new Set());
+    // Qué pasó con las tareas que salieron de este acta: es lo que deja que el
+    // repaso diga "ya se hizo" sin que nadie lo marque dos veces. El que la
+    // hizo la cerró en su tablero, que es donde trabaja.
+    setTareas(await estadoDeTareas(c.compromisos));
     setEnlaces(await enlacesDeFotos([...c.fotos, ...(c.adjuntos || [])]));
   }, []);
   useEffect(() => { if (abierta?.id) cargarActa(abierta.id); }, [abierta?.id, cargarActa]);
@@ -168,6 +174,10 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
      * inicializar", y React se lleva puesta la pantalla entera. Lo que se ve
      * es un módulo en blanco, sin ninguna pista de qué pasó.
      */
+    // Quién puede recibir una tarea: el equipo de FOREMAN. Un externo no
+    // tiene cuenta, y una tarea en el tablero de nadie es ruido.
+    const equipo = users.filter(u => u.activo !== false);
+    const tareaHecha = c => yaSeHizo(c, tareas);
     const clave = x => String(x.email || x.nombre || "").trim().toLowerCase();
     const esDeSiempre = a => convocados.some(c => clave(c) && clave(c) === clave(a));
     const nuevos = cont.compromisos.filter(c => !c.viene_de);
@@ -223,9 +233,23 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
           )}
           {sePuede && puedeEnviar && (abierta.estado === "borrador" || abierta.estado === "lista") && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
+              // LAS TAREAS SE CREAN ACÁ, al dar el visto y no antes. Mientras
+              // el acta es borrador lo escrito todavía se puede cambiar, y una
+              // tarea que aparece y desaparece del tablero de alguien es peor
+              // que ninguna.
+              const van = paraTarea(cont.compromisos);
+              if (van.length && !window.confirm(
+                `Al dar el visto se le crea la tarea a ${van.length === 1 ? "una persona" : `${van.length} personas`}:\n\n`
+                + van.map(c => `  · ${equipo.find(u => u.id === c.asignado_a)?.name || "?"} — ${c.texto.slice(0, 60)}`).join("\n")
+                + "\n\nVan a su tablero de Tareas con la fecha del compromiso. ¿Seguimos?")) return;
+              setOcupado(true);
               await tocarActa({ estado: "revisada", revisada_at: new Date().toISOString(),
                 revisada_por: currentUser?.id ?? null, revisada_nombre: currentUser?.name || null });
-              setAviso("Revisada. Ya se puede enviar a los correos.");
+              const r = van.length ? await crearTareas({ compromisos: cont.compromisos, acta: abierta, lead, quien: currentUser }) : { creadas: 0 };
+              setOcupado(false);
+              if (r.error) { setError("El acta quedó revisada, pero una tarea no se pudo crear: " + r.error); return; }
+              await cargarActa(abierta.id);
+              setAviso(`Revisada. Ya se puede enviar.${r.creadas ? ` Y ${r.creadas} ${r.creadas === 1 ? "tarea creada" : "tareas creadas"} en el tablero del equipo.` : ""}`);
             }}><Check size={13} /> Dar el visto</Button>
           )}
           {sePuede && puedeEnviar && abierta.estado === "revisada" && (
@@ -386,7 +410,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             <div style={{ fontSize: 11, color: colors.muted, marginBottom: 9, lineHeight: 1.45 }}>
               Lo primero de la reunión: compromiso por compromiso, qué se cumplió y qué sigue pendiente.
             </div>
-            {arrastrados.map(c => <Repaso key={c.id} c={c} sePuede={sePuede}
+            {arrastrados.map(c => <Repaso key={c.id} c={c} sePuede={sePuede} tareaHecha={tareaHecha}
               onTocar={campos => tocarFila("acta_compromisos", "compromisos", c.id, campos)}
               quien={currentUser} />)}
             <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.45 }}>
@@ -663,7 +687,7 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
             Cada uno con <strong>responsable</strong> y <strong>fecha</strong>. Es lo único del acta que sirve
             para reclamar algo, y lo que la próxima reunión va a traer de vuelta.
           </div>
-          {nuevos.map(c => <Compromiso key={c.id} c={c} sePuede={sePuede}
+          {nuevos.map(c => <Compromiso key={c.id} c={c} sePuede={sePuede} equipo={equipo}
             onTocar={campos => tocarFila("acta_compromisos", "compromisos", c.id, campos)}
             onQuitar={() => quitarFila("acta_compromisos", "compromisos", c.id)} quien={currentUser} />)}
           {/* LOS TRES CAMPOS AL AGREGAR, no uno solo.
@@ -1158,7 +1182,7 @@ const Chip = ({ estado }) => {
  * pasar. Y si no se hizo, el campo que aparece es el que importa: por qué —eso
  * es lo que después explica un atraso— y para cuándo queda ahora.
  */
-const Repaso = ({ c, sePuede, onTocar, quien }) => {
+const Repaso = ({ c, sePuede, onTocar, quien, tareaHecha = () => false }) => {
   const hecho = c.estado === "cumplido";
   const anulado = c.estado === "anulado";
   const vencido = !hecho && !anulado && c.fecha_limite && c.fecha_limite < hoy();
@@ -1189,6 +1213,12 @@ const Repaso = ({ c, sePuede, onTocar, quien }) => {
               {" · "}era para el {dia(c.fecha_limite)}{vencido ? " · vencido" : ""}
             </span>}
             {hecho && c.cerrado_nombre && ` · lo dio por hecho ${c.cerrado_nombre}`}
+            {!hecho && c.tarea_id && tareaHecha(c) && (
+              <span style={{ color: colors.success, fontWeight: 600 }}> · su tarea ya está completada</span>
+            )}
+            {!hecho && c.tarea_id && !tareaHecha(c) && (
+              <span style={{ color: colors.muted }}> · tiene tarea en el tablero</span>
+            )}
           </div>
         </div>
         {sePuede && !hecho && (
@@ -1230,7 +1260,7 @@ const Repaso = ({ c, sePuede, onTocar, quien }) => {
  * Texto, responsable, fecha y estado. Sin responsable y sin fecha es una buena
  * intención, y una buena intención no se puede revisar en la reunión que viene.
  */
-const Compromiso = ({ c, sePuede, onTocar, onQuitar, quien }) => {
+const Compromiso = ({ c, sePuede, onTocar, onQuitar, quien, equipo = [] }) => {
   const vencido = c.estado === "pendiente" && c.fecha_limite && c.fecha_limite < hoy();
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 7 }}>
@@ -1259,6 +1289,23 @@ const Compromiso = ({ c, sePuede, onTocar, onQuitar, quien }) => {
         onChange={e => onTocar({ fecha_limite: e.target.value || null })}
         style={{ ...inputStyle, width: 136, fontSize: 11.5, padding: "4px 6px", height: 28,
           color: vencido ? colors.danger : colors.ink, fontWeight: vencido ? 600 : 400 }} />
+      {/* A QUIÉN DEL EQUIPO SE LE PONE LA TAREA.
+          Quién lo hace no se puede deducir del texto: en un acta real el
+          responsable se escribe "HCARQ", "Especialidades / Eléctrica", "Área
+          Mecánica" —empresas y frentes, no personas— y está bien así, es como
+          se habla en la reunión. Por eso la asignación es aparte y explícita.
+          Vacío quiere decir que lo hace alguien de afuera y no se crea
+          ninguna tarea: una tarea en el tablero de nadie es ruido. */}
+      {equipo.length > 0 && (
+        <select value={c.asignado_a || ""} disabled={!sePuede || !!c.tarea_id}
+          onChange={e => onTocar({ asignado_a: e.target.value ? Number(e.target.value) : null })}
+          title={c.tarea_id ? "Ya tiene su tarea creada" : "Si lo hace alguien del equipo, se le crea la tarea al dar el visto"}
+          style={{ ...inputStyle, width: 124, fontSize: 11, padding: "4px 6px", height: 28,
+            color: c.asignado_a ? colors.brand : colors.muted }}>
+          <option value="">lo hace un externo</option>
+          {equipo.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+      )}
       <select value={c.estado} disabled={!sePuede}
         onChange={e => onTocar({
           estado: e.target.value,

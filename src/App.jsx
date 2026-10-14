@@ -819,7 +819,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloObservaciones currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelObra} />
             )}
             {puede("actas.ver") && vista === "actas" && (
-              <ModuloActas currentUser={usuario} puede={puede} nivelProyecto={nivelObra} />
+              <ModuloActas currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelObra} />
             )}
             {puede("cronograma.ver") && vista === "cronograma" && (
               <ModuloCronograma currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto} />
