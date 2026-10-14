@@ -490,6 +490,22 @@ Rubros: ${listaRubros}`,
       }
     }
 
+    // EL AVISO DE UNA FACTURA QUE EL SRI NO ACEPTA.
+    //
+    // La pantalla ya lo mostró, pero quien carga la factura no siempre es
+    // quien paga, y una pantalla que se cerró no para un pago. Un correo sí.
+    //
+    // Solo las graves —no autorizada, a nombre de otro, proveedor fantasma—.
+    // Si avisara por cada leyenda que falta, a la tercera semana nadie abriría
+    // el correo. Y si el aviso falla, la factura ya está guardada: lo que no
+    // se puede perder es el gasto, no el correo.
+    if (sri?.estado === "grave" && facturaId) {
+      fetch("/api/aviso?de=sri", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ factura_id: facturaId }),
+      }).catch(() => {});
+    }
+
     setGuardando(false);
     onGuardado();
   }
