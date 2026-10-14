@@ -394,6 +394,16 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                 setAviso("Al día.");
               }}><RefreshCw size={12} /> Ver si contestaron</Button>
             </div>
+            {/* QUÉ ENTRA A FOREMAN Y QUÉ NO. Las dos cosas se ven iguales
+                desde afuera —las dos son "contestar el acta"— y no lo son:
+                una queda registrada y vuelve sola a la próxima reunión, la
+                otra es un correo en la casilla de dos personas. Quien manda el
+                acta tiene que saber cuál es cuál. */}
+            <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginBottom: 8 }}>
+              Lo que escriban desde su enlace aparece acá y entra solo como primer tema de la próxima reunión.
+              Si en cambio <strong>responden el correo</strong>, eso no llega a FOREMAN: llega a la casilla de
+              quien escribió el acta y de quien le dio el visto, y hay que traerlo a mano.
+            </div>
             {conNombre.filter(a => a.token || a.email).map(a => {
               const c = conformidadDe(a);
               const color = c.estado === "conforme" ? colors.success
@@ -1261,9 +1271,14 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
             if (r.error) { setError(r.error); return; }
             await cargarActas(lead.id);
             setAbierta(r.acta);
-            setAviso(r.arrastrados
-              ? `Acta N° ${r.acta.numero}. Traje ${r.arrastrados} ${r.arrastrados === 1 ? "compromiso pendiente" : "compromisos pendientes"} de la anterior.`
-              : `Acta N° ${r.acta.numero}.`);
+            setAviso([
+              `Acta N° ${r.acta.numero}.`,
+              r.arrastrados && `Traje ${r.arrastrados} ${r.arrastrados === 1 ? "compromiso pendiente" : "compromisos pendientes"} de la anterior.`,
+              // Lo que alguien objetó por su enlace entra como primer tema: es
+              // lo único del circuito que obliga a discutir algo, y si no
+              // aparece acá no aparece en ningún lado.
+              r.observaciones && `Y ${r.observaciones === 1 ? "una observación que hicieron" : `${r.observaciones} observaciones que hicieron`} al acta anterior, como primer tema.`,
+            ].filter(Boolean).join(" "));
           }}><Plus size={13} /> Nueva reunión</Button>
         )}
       </div>

@@ -132,7 +132,35 @@ export async function abrirActa({ leadId, obraId, fecha, quien }) {
       arrastrados = abiertos.length;
     }
   }
-  return { acta, arrastrados, convocados: convocados.length };
+
+  // ── LO QUE OBJETARON DEL ACTA ANTERIOR ────────────────────────────────────
+  //
+  // Alguien abrió su enlace, leyó el acta y escribió que algo no refleja lo
+  // acordado. Eso es lo único de todo el circuito que obliga a hacer algo, y
+  // es justo lo que se perdía: quedaba guardado en el acta vieja, que nadie
+  // vuelve a abrir, y la reunión siguiente empezaba sin saber que existía.
+  //
+  // Entra como el primer tema de la reunión nueva, con el nombre de quien lo
+  // dijo. Un tema y no un compromiso: todavía no se sabe qué hay que hacer —de
+  // eso se trata la discusión—, y de ahí sale el compromiso si hace falta.
+  let observaciones = 0;
+  if (anterior) {
+    const { data: objetaron } = await supabase.from("acta_asistentes")
+      .select("nombre,empresa,observacion").eq("acta_id", anterior)
+      .not("observacion", "is", null).order("orden");
+    if (objetaron?.length) {
+      const { error: malTema } = await supabase.from("acta_temas").insert({
+        acta_id: acta.id, orden: 0,
+        titulo: `Observaciones al acta N° ${numero - 1}`,
+        detalle: objetaron
+          .map(o => `${o.nombre}${o.empresa ? ` (${o.empresa})` : ""}: ${o.observacion}`)
+          .join("\n\n"),
+      });
+      if (!malTema) observaciones = objetaron.length;
+    }
+  }
+
+  return { acta, arrastrados, convocados: convocados.length, observaciones };
 }
 
 export async function guardarActa(id, campos) {
