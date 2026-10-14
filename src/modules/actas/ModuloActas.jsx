@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles, Star } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -463,8 +463,26 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
                   onChange={e => cambiarAsistente(a.id, { recibe: e.target.checked })} />
                 recibe
               </label>
+              {/* QUE ESTA PERSONA PASE A LOS DE SIEMPRE.
+                  En una reunión entra gente que viene una vez —un proveedor
+                  que presenta algo, un técnico— y gente que va a estar en
+                  todas. Quien llena la lista sabe cuál es cuál en el momento,
+                  y es el único momento en que lo sabe: tres días después nadie
+                  vuelve a una pantalla de configuración a cargar a alguien.
+                  Por eso la decisión se toma acá, en la misma fila. */}
+              {sePuede && (
+                <button onClick={() => fijarConvocado(a)}
+                  title={esDeSiempre(a) ? "Ya está en los de siempre" : "Guardarlo en los de siempre: va a entrar solo en cada reunión"}
+                  disabled={esDeSiempre(a) || !String(a.nombre || "").trim()}
+                  style={{ background: "none", border: "none", display: "flex", padding: 0,
+                    cursor: esDeSiempre(a) || !String(a.nombre || "").trim() ? "default" : "pointer",
+                    color: esDeSiempre(a) ? colors.brand : colors.border }}>
+                  <Star size={13} fill={esDeSiempre(a) ? colors.brand : "none"} />
+                </button>
+              )}
               {sePuede && (
                 <button onClick={() => quitarFila("acta_asistentes", "asistentes", a.id)}
+                  title="Sacarlo de esta acta"
                   style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
                   <Trash2 size={12} />
                 </button>
@@ -522,13 +540,30 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
                 ocho nombres y ocho correos en cada reunión es lo que hace que a la tercera acta alguien deje
                 de llevarlas.
               </div>
+              {/* SE EDITAN ACÁ MISMO. Antes solo se podían agregar y borrar:
+                  para corregir un correo mal escrito había que borrar a la
+                  persona y volver a escribirla entera, y eso además la saca de
+                  la lista mientras tanto. Un correo cambia; una persona no se
+                  borra por una letra. */}
               {convocados.map(c => (
-                <div key={c.id} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 12 }}>
-                  <span style={{ flex: 1, color: colors.ink }}>{c.nombre}</span>
-                  <span style={{ color: colors.muted, fontSize: 11 }}>{c.empresa}</span>
-                  <span style={{ color: colors.inkSoft, fontSize: 11 }}>{c.cargo}</span>
-                  <span style={{ color: colors.muted, fontSize: 11 }}>{c.email}</span>
-                  <button onClick={async () => { await borrarConvocado(c.id); setConvocados(await convocadosDe(lead.id)); }}
+                <div key={c.id} style={{ display: "flex", gap: 5, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+                  <input defaultValue={c.nombre} key={`cn${c.id}-${c.nombre}`} placeholder="Nombre"
+                    onBlur={e => tocarConvocado(c, { nombre: e.target.value })}
+                    style={{ ...inputStyle, flex: "1 1 110px", minWidth: 90, fontSize: 12, padding: "4px 7px", height: 26 }} />
+                  <input defaultValue={c.empresa || ""} key={`ce${c.id}-${c.empresa}`} placeholder="Empresa"
+                    onBlur={e => tocarConvocado(c, { empresa: e.target.value || null })}
+                    style={{ ...inputStyle, flex: "1 1 95px", minWidth: 80, fontSize: 12, padding: "4px 7px", height: 26 }} />
+                  <input defaultValue={c.cargo || ""} key={`cc${c.id}-${c.cargo}`} placeholder="Responsable de…"
+                    onBlur={e => tocarConvocado(c, { cargo: e.target.value || null })}
+                    style={{ ...inputStyle, flex: "1 1 105px", minWidth: 85, fontSize: 12, padding: "4px 7px", height: 26 }} />
+                  <input defaultValue={c.email || ""} key={`cm${c.id}-${c.email}`} placeholder="correo@…" type="email"
+                    onBlur={e => tocarConvocado(c, { email: e.target.value || null })}
+                    style={{ ...inputStyle, flex: "1 1 140px", minWidth: 110, fontSize: 12, padding: "4px 7px", height: 26 }} />
+                  <button onClick={async () => {
+                    if (!window.confirm(`¿Sacar a ${c.nombre} de los de siempre?\n\nNo se toca ninguna acta ya escrita: deja de entrar solo en las nuevas.`)) return;
+                    await borrarConvocado(c.id); setConvocados(await convocadosDe(lead.id));
+                  }}
+                    title="Sacarlo de los de siempre"
                     style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
                     <Trash2 size={12} />
                   </button>
@@ -812,6 +847,30 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
       if (fallaron.length) { setError(fallaron[0]); return; }
       setSinGuardar(new Set());
       if (!solito) setAviso("Asistentes guardados.");
+    }
+
+    /** Cómo se reconoce a la misma persona en las dos listas: por el correo, y
+     *  si no lo tiene, por el nombre. */
+    const clave = x => String(x.email || x.nombre || "").trim().toLowerCase();
+    const esDeSiempre = a => convocados.some(c => clave(c) && clave(c) === clave(a));
+
+    async function fijarConvocado(a) {
+      if (!String(a.nombre || "").trim() || esDeSiempre(a)) return;
+      const { error: e } = await guardarConvocado({
+        lead_id: lead.id, nombre: a.nombre, empresa: a.empresa || null,
+        cargo: a.cargo || null, email: a.email || null, orden: convocados.length,
+      });
+      if (e) { setError(e); return; }
+      setConvocados(await convocadosDe(lead.id));
+      setAviso(`${a.nombre} queda en los de siempre: va a entrar solo en cada reunión nueva.`);
+    }
+
+    async function tocarConvocado(c, campos) {
+      if (Object.entries(campos).every(([k, v]) => (c[k] || null) === (v || null))) return;
+      const { error: e } = await guardarConvocado({ id: c.id, ...campos });
+      if (e) { setError(e); return; }
+      setError("");
+      setConvocados(await convocadosDe(lead.id));
     }
 
     async function revisar() {
