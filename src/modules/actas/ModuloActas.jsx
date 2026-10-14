@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles, Star, Paperclip } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Send, Check, Camera, Users, FileText, Printer, Sparkles, Star, Paperclip,
+  Eye, Link2, RefreshCw, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, borrarFila,
   convocadosDe, guardarConvocado, borrarConvocado, subirFoto, enlacesDeFotos,
-  correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106, subirAdjunto } from "./actas";
+  correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106, subirAdjunto,
+  conformidadDe, llaveDeAsistente, enlaceDeFirma } from "./actas";
 import { pdfActa } from "./pdfActa";
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
@@ -261,8 +263,13 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               no cambia el estado: se puede probar las veces que haga falta. */}
           {sePuede && puedeEnviar && currentUser?.email && abierta.estado !== "enviada" && (
             <Button variant="secondary" size="sm" disabled={ocupado}
-              onClick={() => enviar({ prueba: true })}>
-              <Send size={13} /> Probar a mi correo
+              onClick={() => enviar({ prueba: true })}
+              /* CON LA DIRECCIÓN A LA VISTA. "Probar a mi correo" manda al
+                 correo del usuario de FOREMAN, que no siempre es la casilla
+                 que uno tiene abierta: así "no me llegó" no se confunde con
+                 "llegó a la otra". */
+              title={`Manda una copia de prueba a ${currentUser.email} y no cambia el estado del acta`}>
+              <Send size={13} /> Probar a {currentUser.email}
             </Button>
           )}
           {sePuede && puedeEnviar && abierta.estado === "revisada" && (
@@ -356,6 +363,94 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
             {(abierta.enviada_a || []).length} {(abierta.enviada_a || []).length === 1 ? "correo" : "correos"} y
             ya no se toca. Lo que haya que corregir va en la próxima: un acta que cambia después de enviada no
             sirve como prueba de nada.
+          </div>
+        )}
+
+        {/* ── QUIÉN DIO CONFORMIDAD ──────────────────────────────────────────
+            El acta sale con un enlace propio para cada uno. Lo que vuelve es
+            lo que antes no existía: quién la abrió, quién dijo que está de
+            acuerdo —con fecha— y quién escribió que algo no refleja lo
+            acordado.
+
+            Las tres cosas son distintas y en una discusión se confunden. "Se
+            la mandamos" no prueba nada; "la abrió el martes y no objetó nada
+            en 48 horas" sí, y "objetó esto" cambia lo que hay que hacer. Por
+            eso están separadas y no resumidas en un número.
+
+            Se mira acá y no en el correo porque el correo es de ida: las
+            respuestas llegan de a una, a dos casillas distintas, y a la
+            tercera acta nadie sabe quién contestó qué. */}
+        {cerrada && conNombre.some(a => a.token || a.email) && (
+          <div style={caja}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 9, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
+                Conformidad · {conNombre.filter(a => a.conforme_at).length} de {conNombre.filter(a => a.token || a.email).length}
+              </div>
+              {/* SE ACTUALIZA SOLO CUANDO SE PIDE. Esto cambia afuera de
+                  FOREMAN —alguien aprieta un botón en su teléfono— así que la
+                  pantalla abierta desde la mañana muestra lo de la mañana. */}
+              <Button variant="secondary" size="sm" disabled={ocupado} onClick={async () => {
+                setOcupado(true); await cargarActa(abierta.id); setOcupado(false);
+                setAviso("Al día.");
+              }}><RefreshCw size={12} /> Ver si contestaron</Button>
+            </div>
+            {conNombre.filter(a => a.token || a.email).map(a => {
+              const c = conformidadDe(a);
+              const color = c.estado === "conforme" ? colors.success
+                : c.estado === "observacion" ? colors.warning
+                  : c.estado === "visto" ? colors.inkSoft : colors.muted;
+              return (
+                <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "flex-start",
+                  padding: "7px 0", borderTop: `1px solid ${colors.bg}` }}>
+                  <div style={{ flexShrink: 0, color, display: "flex", paddingTop: 1 }}>
+                    {c.estado === "conforme" ? <Check size={14} />
+                      : c.estado === "observacion" ? <AlertTriangle size={14} />
+                        : <Eye size={14} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, color: colors.ink }}>
+                      {a.nombre}{a.empresa ? <span style={{ color: colors.muted }}> · {a.empresa}</span> : null}
+                    </div>
+                    <div style={{ fontSize: 11.5, color, lineHeight: 1.45 }}>
+                      {c.estado === "conforme" ? `Dio conformidad el ${dia(String(c.cuando).slice(0, 10))}`
+                        : c.estado === "observacion" ? "Escribió una observación"
+                          : c.estado === "visto" ? `La abrió el ${dia(String(c.cuando).slice(0, 10))} y no dijo nada`
+                            : "Todavía no la abrió"}
+                    </div>
+                    {/* LA OBSERVACIÓN, ENTERA Y ACÁ.
+                        Es lo único que obliga a hacer algo, y es lo que se
+                        pierde: llega por el enlace, no por correo, y si no se
+                        lee en esta pantalla no se lee en ninguna. Va al repaso
+                        de la próxima reunión. */}
+                    {c.texto && (
+                      <div style={{ fontSize: 12, color: colors.ink, background: colors.warningSoft,
+                        border: `1px solid ${colors.warningBorder}`, borderRadius: 6,
+                        padding: "6px 9px", marginTop: 4, lineHeight: 1.45, whiteSpace: "pre-line" }}>
+                        {c.texto}
+                      </div>
+                    )}
+                  </div>
+                  {/* EL ENLACE A MANO. La mitad de la gente de una obra
+                      contesta por WhatsApp y no abre el correo. */}
+                  <button onClick={async () => {
+                    const r = await llaveDeAsistente(a);
+                    if (r.error) { setError(r.error); return; }
+                    const url = enlaceDeFirma(r.token);
+                    try {
+                      await navigator.clipboard.writeText(url);
+                      setAviso(`Enlace de ${a.nombre} copiado. Es suyo: no se lo pases a otro.`);
+                    } catch {
+                      setAviso(`Enlace de ${a.nombre}: ${url}`);
+                    }
+                    if (!a.token) await cargarActa(abierta.id);
+                  }} title="Copiar su enlace de conformidad"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+                      display: "flex", flexShrink: 0, padding: 2 }}>
+                    <Link2 size={13} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -1099,16 +1194,26 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       const data = await r.json().catch(() => ({}));
       setOcupado(false);
       if (!r.ok || data?.error) { setError(data?.error || "No se pudo enviar el acta."); return; }
+      // SE MARCA ENVIADA A LOS QUE SALIERON, no a los que se intentó. Un
+      // acta que dice "enviada a ocho" cuando dos rebotaron es una mentira
+      // que se descubre tarde, en la reunión siguiente, cuando dos personas
+      // dicen que nunca la vieron.
+      const salieron = Array.isArray(data?.entregados) && data.entregados.length ? data.entregados : destino;
       if (prueba) {
         // Una prueba no cambia nada: el acta sigue donde estaba y se puede
         // probar otra vez. Si la marcara enviada, el primer ensayo la trabaría.
         setAviso(`Prueba enviada a ${destino[0]}${data?.estado ? ` · el servidor de correo dice "${data.estado}"` : ""}.`
+          + " Trae el enlace de conformidad de la primera persona de la lista, para que lo puedas abrir y probar el botón."
           + " Si no llega en un par de minutos, mirá el spam: un correo nuevo de un remitente que nunca te escribió suele caer ahí la primera vez."
+          + (data?.aviso ? `\n\n${data.aviso}` : "")
           + " El acta sigue como está.");
         return;
       }
-      await tocarActa({ estado: "enviada", enviada_at: new Date().toISOString(), enviada_a: correos });
-      setAviso(`Enviada a ${correos.length} ${correos.length === 1 ? "correo" : "correos"}.`);
+      await tocarActa({ estado: "enviada", enviada_at: new Date().toISOString(), enviada_a: salieron });
+      await cargarActa(abierta.id);
+      setAviso(`Enviada a ${salieron.length} ${salieron.length === 1 ? "correo" : "correos"}.`
+        + " Cada uno recibió su enlace para dar conformidad; acá abajo vas viendo quién contestó."
+        + (data?.aviso ? `\n\n${data.aviso}` : ""));
     }
   }
 

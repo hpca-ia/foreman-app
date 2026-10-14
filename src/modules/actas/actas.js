@@ -221,3 +221,41 @@ export async function enlacesDeFotos(fotos = []) {
 }
 
 export { correosDe } from "./correos";
+
+// ── LA CONFORMIDAD DE CADA ASISTENTE ───────────────────────────────────────
+//
+// El acta sale por correo con un enlace propio para cada uno: lo abre, la lee
+// y da conformidad —o escribe qué no refleja lo acordado—. Eso es lo que
+// convierte un envío en una firma. Antes, el que estaba de acuerdo no hacía
+// nada y el silencio no se distinguía de "no la leyó".
+//
+// La llave la crea el servidor al mandar el acta. Acá se crea también a pedido,
+// para el caso que igual pasa: alguien no tiene correo, o lo tiene y no lo
+// mira, y hay que mandarle el enlace por WhatsApp.
+
+/** La llave de este asistente. Si no tiene, se le crea una y no cambia más. */
+export async function llaveDeAsistente(asistente) {
+  if (asistente?.token) return { token: asistente.token };
+  if (!asistente?.id) return { error: "Guardá el asistente antes de generar su enlace." };
+  const token = (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, "");
+  const { error } = await supabase.from("acta_asistentes").update({ token }).eq("id", asistente.id);
+  if (error) {
+    return { error: /token/i.test(error.message)
+      ? "Falta correr la migración 111 (la conformidad de los asistentes)."
+      : error.message };
+  }
+  return { token };
+}
+
+export const enlaceDeFirma = token => `${window.location.origin}/?acta=${token}`;
+
+/**
+ * En qué quedó cada uno. Tres estados que no son lo mismo y en una discusión
+ * se confunden: no la abrió, la abrió y no dijo nada, y dijo algo.
+ */
+export function conformidadDe(a) {
+  if (a?.conforme_at) return { estado: "conforme", cuando: a.conforme_at };
+  if (a?.observacion) return { estado: "observacion", cuando: a.observacion_at, texto: a.observacion };
+  if (a?.visto_at) return { estado: "visto", cuando: a.visto_at };
+  return { estado: "nada" };
+}

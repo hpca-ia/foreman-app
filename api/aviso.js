@@ -27,6 +27,15 @@ const AVISOS = { tarea, reunion, comentario, cuenta, resumen, orden, plan, acta 
 // de tamaño que no dice nada de lo que pasó.
 export const config = { api: { bodyParser: { sizeLimit: "15mb" } } };
 
+// SESENTA SEGUNDOS, NO DIEZ.
+//
+// El acta sale de a un correo por persona —cada uno lleva su enlace de
+// conformidad— y cada envío sube el PDF y los anexos. Catorce asistentes no
+// entran en los diez segundos que Vercel da por defecto: la función se corta a
+// la mitad, el navegador recibe un error que no explica nada, y lo que queda es
+// un acta mandada a la mitad de la gente.
+export const maxDuration = 60;
+
 export default async function handler(req, res) {
   const de = String(req.query?.de || "");
   const aviso = AVISOS[de];

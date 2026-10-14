@@ -20,8 +20,22 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 // cliente no tiene ninguna credencial de la base, y por eso un enlace
 // reenviado no abre nada más que ese proyecto.
 const llaveCliente = new URLSearchParams(window.location.search).get('cliente');
+// El acta de reunión, para quien la firma. Misma idea que el portal del
+// cliente y por la misma razón: el que tiene que dar conformidad —el cliente,
+// la fiscalización, un contratista— no tiene cuenta acá, y pedirle que se
+// registre para leer un acta es garantizar que no la lea.
+const llaveActa = new URLSearchParams(window.location.search).get('acta');
 
-if (llaveCliente) {
+if (llaveActa) {
+  const Firma = React.lazy(() => import('./portal/FirmaDelActa'));
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <Firma token={llaveActa} />
+      </React.Suspense>
+    </React.StrictMode>
+  );
+} else if (llaveCliente) {
   const Portal = React.lazy(() => import('./portal/PortalCliente'));
   root.render(
     <React.StrictMode>

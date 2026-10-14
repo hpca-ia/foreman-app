@@ -59,8 +59,95 @@ async function firmar(rutas = []) {
   return mapa;
 }
 
+/**
+ * EL ACTA DE REUNIÓN, PARA QUIEN LA TIENE QUE FIRMAR.
+ *
+ * Misma puerta y misma regla que el portal del cliente: la llave es lo único
+ * que nombra qué se puede ver. Acá identifica a UN asistente de UN acta, así
+ * que no existe un camino en el que alguien pida otra.
+ *
+ * Y es lo que convierte un envío en una firma. Hoy, si alguien está de acuerdo
+ * no hace nada, y el silencio no se puede distinguir de "no lo leyó": tres
+ * meses después "se lo mandamos" no prueba nada. Con esto queda quién, cuándo
+ * y desde dónde.
+ */
+async function asistenteDe(token) {
+  if (!token || String(token).length < 20) return null;
+  const limpio = String(token).replace(/[^A-Za-z0-9_-]/g, "");
+  if (limpio.length < 20) return null;
+  const filas = await json(await rest(
+    `acta_asistentes?token=eq.${encodeURIComponent(limpio)}&select=id,acta_id,nombre,empresa,cargo,email,conforme_at,observacion,visto_at`));
+  return filas?.[0] || null;
+}
+
+async function actaParaFirmar(req, res, asistente) {
+  const [actas, lead0, temas, compromisos, adjuntos] = await Promise.all([
+    json(await rest(`obra_actas?id=eq.${asistente.acta_id}&select=*`)),
+    null,
+    json(await rest(`acta_temas?acta_id=eq.${asistente.acta_id}&select=titulo,detalle,resuelto&order=orden`)),
+    json(await rest(`acta_compromisos?acta_id=eq.${asistente.acta_id}&select=texto,responsable_nombre,fecha_limite,estado,urgente,viene_de&order=orden`)),
+    json(await rest(`acta_adjuntos?acta_id=eq.${asistente.acta_id}&select=nombre,descripcion&order=orden`)),
+  ]);
+  void lead0;
+  const acta = actas?.[0];
+  if (!acta) return res.status(404).json({ error: "Este enlace no está disponible." });
+  const leads = await json(await rest(`leads?id=eq.${acta.lead_id}&select=nombre`));
+  const otros = await json(await rest(`acta_asistentes?acta_id=eq.${asistente.acta_id}&select=nombre,empresa,cargo,asistio,conforme_at&order=orden`));
+
+  // La primera vez que lo abre queda anotado. Distingue "no contestó" de "ni
+  // la miró", que en una discusión no es lo mismo.
+  if (!asistente.visto_at) {
+    await rest(`acta_asistentes?id=eq.${asistente.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ visto_at: new Date().toISOString() }),
+    });
+  }
+  return res.status(200).json({
+    obra: leads?.[0]?.nombre || "",
+    acta: {
+      numero: acta.numero, fecha: acta.fecha, lugar: acta.lugar,
+      hora_inicio: acta.hora_inicio, hora_fin: acta.hora_fin,
+      avance_nota: acta.avance_nota, resumen: acta.resumen,
+      proxima_fecha: acta.proxima_fecha, proxima_hora: acta.proxima_hora,
+    },
+    yo: { nombre: asistente.nombre, empresa: asistente.empresa, cargo: asistente.cargo,
+      conforme_at: asistente.conforme_at, observacion: asistente.observacion },
+    asistentes: otros || [], temas: temas || [], compromisos: compromisos || [], adjuntos: adjuntos || [],
+  });
+}
+
+async function firmarActa(req, res, asistente) {
+  const { conforme, observacion } = req.body || {};
+  const texto = String(observacion || "").trim().slice(0, 2000);
+  if (!conforme && !texto) return res.status(400).json({ error: "Decí si estás de acuerdo o escribí qué no refleja lo acordado." });
+  // La IP es la mitad del rastro: sin ella, "alguien con el enlace apretó un
+  // botón" no es una firma.
+  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || null;
+  const ahora = new Date().toISOString();
+  const campos = {};
+  if (conforme) { campos.conforme_at = ahora; campos.conforme_ip = ip; }
+  if (texto) { campos.observacion = texto; campos.observacion_at = ahora; }
+  const r = await rest(`acta_asistentes?id=eq.${asistente.id}`, {
+    method: "PATCH", headers: { Prefer: "return=representation" },
+    body: JSON.stringify(campos),
+  });
+  if (!r.ok) return res.status(500).json({ error: "No se pudo guardar." });
+  return res.status(200).json({ ok: true, conforme_at: campos.conforme_at || asistente.conforme_at, observacion: texto || asistente.observacion });
+}
+
 export default async function handler(req, res) {
   if (!configurado()) return res.status(500).json({ error: "El portal no está configurado." });
+
+  // El acta entra por la misma puerta con su propia llave: una función más en
+  // /api costaría un despliegue entero del plan, y son doce.
+  if (req.query?.acta || (req.body || {}).acta) {
+    const t = req.method === "GET" ? req.query?.t : (req.body || {}).token;
+    const asistente = await asistenteDe(t);
+    if (!asistente) return res.status(404).json({ error: "Este enlace no está disponible." });
+    if (req.method === "GET") return actaParaFirmar(req, res, asistente);
+    if (req.method === "POST") return firmarActa(req, res, asistente);
+    return res.status(405).json({ error: "Método no permitido" });
+  }
 
   const token = req.method === "GET" ? req.query?.t : (req.body || {}).token;
   const lead = await proyectoDe(token);

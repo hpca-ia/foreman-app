@@ -31,10 +31,13 @@ export async function crearTareas({ compromisos = [], acta, lead, quien }) {
       title: c.texto.slice(0, 200),
       lead_id: lead?.id ?? null,
       assignee_id: c.asignado_a,
-      type: "Obra",
+      // Un tipo de los que el tablero ya conoce. "Obra" no existe en la lista
+      // y la tarea aparecía sin tipo, fuera de los filtros con los que la
+      // gente mira su día.
+      type: "Gestión",
       due_date: c.fecha_limite || null,
       // Lo urgente del acta es lo que detiene a los demás: entra como alta.
-      priority: c.urgente ? "alta" : "media",
+      priority: c.urgente ? "urgente" : "media",
       status: ESTADO_NUEVO,
       // De dónde salió. Sin esto, dentro de un mes nadie sabe por qué está esa
       // tarea ahí ni con quién discutirla.
