@@ -10,11 +10,29 @@
 // seis meses cuando haya que demostrar que algo se dijo.
 
 import { randomUUID } from "crypto";
-import { createClient } from "@supabase/supabase-js";
+import { rest, SUPABASE_URL, configurado } from "./_supabase.js";
 import { enviarCorreo, plantilla, estadoDeCorreo } from "./_correo.js";
 
-const URL = process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL;
-const KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_KEY;
+// POR LA MISMA PUERTA QUE TODO LO DEMÁS.
+//
+// Esto era lo único en /api que hablaba con la base por su cuenta, con
+// `createClient` y dos variables de entorno —SUPABASE_URL, SUPABASE_SERVICE_ROLE—
+// que en Vercel no existen: acá la llave se llama SUPABASE_SECRET_KEY y la
+// dirección vive en _supabase.js. O sea que el acta nunca se pudo mandar: la
+// función se rompía en la primera línea, antes de leer nada, y un error así no
+// devuelve JSON. Lo único que llegaba a la pantalla era "No se pudo enviar el
+// acta", sin una palabra de por qué.
+//
+// Dos maneras de conectarse a la misma base son una de más. Esta usa la de
+// siempre, la que ya usan el portal, las órdenes y los respaldos.
+
+/** Las filas de una consulta, o una lista vacía. */
+async function filas(tabla, consulta) {
+  const r = await rest(`${tabla}?${consulta}`);
+  if (!r.ok) return [];
+  return (await r.json().catch(() => [])) || [];
+}
+const fila = async (tabla, consulta) => (await filas(tabla, consulta))[0] || null;
 
 // Donde vive FOREMAN para quien no tiene cuenta. El enlace de conformidad
 // tiene que abrirse desde el correo, en el teléfono, sin iniciar sesión.
@@ -46,15 +64,18 @@ async function mandarActa(req, res) {
   if (!actaId) return res.status(400).json({ error: "Falta el acta." });
   if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
 
-  const db = createClient(URL, KEY);
-  const { data: acta, error } = await db.from("obra_actas").select("*").eq("id", actaId).single();
-  if (error || !acta) return res.status(404).json({ error: "No encontré el acta." });
+  if (!configurado()) return res.status(500).json({ error: "Falta la llave de la base en el servidor (SUPABASE_SECRET_KEY)." });
 
-  const [{ data: lead }, { data: asistentes }, { data: temas }, { data: compromisos }] = await Promise.all([
-    db.from("leads").select("nombre").eq("id", acta.lead_id).single(),
-    db.from("acta_asistentes").select("*").eq("acta_id", actaId).order("orden"),
-    db.from("acta_temas").select("*").eq("acta_id", actaId).order("orden"),
-    db.from("acta_compromisos").select("*").eq("acta_id", actaId).order("orden"),
+  const id = Number(actaId);
+  if (!id) return res.status(400).json({ error: "El acta no es válida." });
+  const acta = await fila("obra_actas", `id=eq.${id}&select=*`);
+  if (!acta) return res.status(404).json({ error: "No encontré el acta." });
+
+  const [lead, asistentes, temas, compromisos] = await Promise.all([
+    fila("leads", `id=eq.${acta.lead_id}&select=nombre`),
+    filas("acta_asistentes", `acta_id=eq.${id}&select=*&order=orden`),
+    filas("acta_temas", `acta_id=eq.${id}&select=*&order=orden`),
+    filas("acta_compromisos", `acta_id=eq.${id}&select=*&order=orden`),
   ]);
 
   // LOS ANEXOS VIAJAN CON EL CORREO.
@@ -69,15 +90,17 @@ async function mandarActa(req, res) {
   const anexos = [];
   const afuera = [];
   if (conAnexos) {
-    const { data: lista } = await db.from("acta_adjuntos").select("*").eq("acta_id", actaId).order("orden");
+    const lista = await filas("acta_adjuntos", `acta_id=eq.${id}&select=*&order=orden`);
     let usado = (adjunto?.contenido?.length || 0) * 0.75;
+    const llave = process.env.SUPABASE_SECRET_KEY || "";
     for (const a of lista || []) {
       const peso = Number(a.bytes) || 0;
       if (usado + peso > 18 * 1024 * 1024) { afuera.push(a); continue; }
       try {
-        const { data: blob, error } = await db.storage.from("task-files").download(a.storage_path);
-        if (error || !blob) { afuera.push(a); continue; }
-        const buf = Buffer.from(await blob.arrayBuffer());
+        const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/task-files/${a.storage_path}`,
+          { headers: { apikey: llave, ...(llave.startsWith("eyJ") ? { Authorization: `Bearer ${llave}` } : {}) } });
+        if (!resp.ok) { afuera.push(a); continue; }
+        const buf = Buffer.from(await resp.arrayBuffer());
         anexos.push({ filename: a.nombre, content: buf.toString("base64") });
         usado += buf.length;
       } catch { afuera.push(a); }
@@ -117,8 +140,10 @@ async function mandarActa(req, res) {
   async function llaveDe(a) {
     if (a.token) return a.token;
     const token = (randomUUID() + randomUUID()).replace(/-/g, "");
-    const { error } = await db.from("acta_asistentes").update({ token }).eq("id", a.id);
-    if (error) return null;
+    const r = await rest(`acta_asistentes?id=eq.${a.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ token }),
+    });
+    if (!r.ok) return null;
     a.token = token;
     return token;
   }
@@ -238,12 +263,12 @@ async function mandarActa(req, res) {
   // depende de que alguien se acuerde es un reenvío que a veces no pasa.
   const ids = [...new Set([acta.creado_por, acta.revisada_por].filter(Boolean))];
   const responderA = [];
-  for (const id of ids) {
+  for (const quienId of ids) {
     // `usuarios`, no `users`: la tabla se llama así y la consulta fallaba en
     // silencio, así que el acta salía sin responderA y "respondé este correo"
     // era una invitación al vacío. Lo que se perdía no era un correo: era la
     // objeción de alguien que no estuvo de acuerdo.
-    const { data: u } = await db.from("usuarios").select("email").eq("id", id).maybeSingle();
+    const u = await fila("usuarios", `id=eq.${quienId}&select=email`);
     const e = String(u?.email || "").trim().toLowerCase();
     if (e && !responderA.includes(e)) responderA.push(e);
   }
