@@ -61,7 +61,7 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
   const Selector = ({ valor, onElegir, ancho = 150, titulo }) => (
     <select value={valor || ""} disabled={soloLectura || ocupado} title={titulo}
       onChange={e => onElegir(e.target.value)}
-      style={{ ...inputStyle, width: ancho, fontSize: 11.5, padding: "4px 7px", height: 28,
+      style={{ ...inputStyle, width: ancho, flexShrink: 0, fontSize: 11.5, padding: "4px 7px", height: 28,
         color: valor ? colors.brand : colors.muted, fontWeight: valor ? 600 : 400 }}>
       <option value="">Sin etapa</option>
       {etapas.map(e => <option key={e} value={e}>{e}</option>)}
@@ -185,7 +185,7 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
         borderRadius: colors.radiusMd, overflow: "hidden" }}>
         {caps.map(c => (
           <div key={c.nombre} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", flexWrap: "wrap", minWidth: 0 }}>
               <button onClick={() => modo === "capitulo" && setAbierto(abierto === c.nombre ? null : c.nombre)}
                 title={modo === "capitulo" ? "Abrirlo para marcar sus rubros uno por uno" : undefined}
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
@@ -212,14 +212,23 @@ export default function PanelEtapas({ items = [], capitulos = [], soloLectura = 
             </div>
 
             {(modo === "rubro" || abierto === c.nombre) && (
-              <div style={{ padding: "0 12px 10px 26px", display: "grid", gap: 3 }}>
+              {/* `minmax(0,1fr)` y no el ancho automático.
+                  Una columna de grilla crece con su contenido salvo que se le
+                  diga que no, así que una descripción como "CERRAMIENTO
+                  DEFINITIVO FRONTAL CON GARITA DE SEGURIDAD (L=14.16 ml...)"
+                  estiraba la fila más allá de la pantalla y empujaba el precio
+                  y el selector fuera de la vista. Se veían los capítulos con
+                  sus rubros y sin con qué marcarlos — y el que mira concluye,
+                  con razón, que a esos rubros les falta el selector. */}
+              <div style={{ padding: "0 12px 10px 26px", display: "grid",
+                gridTemplateColumns: "minmax(0,1fr)", gap: 3 }}>
                 {c.items.map(i => (
-                  <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: colors.inkSoft,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {i.numero ? `${i.numero} ` : ""}{i.descripcion}
                     </span>
-                    <span style={{ fontSize: 11.5, color: colors.muted, width: 100, textAlign: "right" }}>${fmt(i.total)}</span>
+                    <span style={{ fontSize: 11.5, color: colors.muted, width: 100, textAlign: "right", flexShrink: 0 }}>${fmt(i.total)}</span>
                     <Selector valor={i.etapa || ""} ancho={140}
                       titulo="La etapa de este rubro"
                       onElegir={v => ponerEtapa([i], v)} />
