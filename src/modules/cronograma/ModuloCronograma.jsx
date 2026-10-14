@@ -2842,6 +2842,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                                   title="Días hábiles. Enter para guardar."
                                   style={{ width: 52, padding: "3px 5px", fontSize: 11, height: 26, textAlign: "center" }} />
                               )}
+                              {/* QUIÉN LA HACE, SI NO ES LA OBRA.
+                                  Estaba en la ficha de la tabla —tocar el
+                                  nombre, esperar el panel— y acá es donde uno
+                                  está repasando las actividades una por una
+                                  después de que NOVA las arma. Un campo que
+                                  hay que ir a buscar a otra pantalla es un
+                                  campo que queda vacío. */}
+                              <input defaultValue={a.externo || ""} key={`ex${a.id}-${a.externo}`}
+                                placeholder="la hace…"
+                                onBlur={e => { if ((e.target.value || "") !== (a.externo || "")) cambiar(a, { externo: e.target.value || null }); }}
+                                onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                title="Si la ejecuta un externo —el proveedor de ascensores, el contratista directo del cliente, el municipio— escribí quién. Su barra se dibuja en gris. Vacío = la hace la obra."
+                                style={{ ...inputStyle, width: 104, padding: "3px 6px", fontSize: 10.5, height: 26,
+                                  color: a.externo ? colors.inkSoft : colors.muted,
+                                  fontStyle: a.externo ? "normal" : "italic" }} />
                               <Button variant="secondary" size="sm" disabled={k === 0}
                                 onClick={() => moverActividad(a, -1)} title="Subir">▲</Button>
                               <Button variant="secondary" size="sm" disabled={k === suyas.length - 1}
