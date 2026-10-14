@@ -82,3 +82,45 @@ export async function logoParaPDF(url) {
     return null;
   }
 }
+
+/**
+ * UNA FOTO DE OBRA PARA EL PDF: JPEG, no PNG.
+ *
+ * `logoParaPDF` devuelve PNG porque un logo necesita transparencia. Una foto
+ * de obra no, y la diferencia no es un detalle: la misma imagen de 1200px pesa
+ * 2,5 MB en PNG y 120 KB en JPEG. Tres fotos convertían un acta de dos páginas
+ * en un PDF de ocho megas.
+ *
+ * Eso rompía el envío entero. El PDF lo arma el navegador y viaja dentro del
+ * pedido, y un pedido así no entra en el tope de Vercel: la función se caía
+ * antes de leer nada y lo único que llegaba a la pantalla era "No se pudo
+ * enviar el acta". El acta con las fotos no se podía mandar, y no había manera
+ * de saber por qué.
+ */
+export async function fotoParaPDF(url, { lado = 1000, calidad = 0.72 } = {}) {
+  if (!url) return null;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    await new Promise((ok, mal) => {
+      const reloj = setTimeout(() => mal(new Error("la foto tardó demasiado")), 15000);
+      img.onload = () => { clearTimeout(reloj); ok(); };
+      img.onerror = () => { clearTimeout(reloj); mal(new Error("la foto no cargó")); };
+      img.src = url;
+    });
+    const w = img.naturalWidth || 1000, h = img.naturalHeight || 750;
+    const escala = Math.min(1, lado / Math.max(w, h));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(w * escala);
+    canvas.height = Math.round(h * escala);
+    const ctx = canvas.getContext("2d");
+    // Fondo blanco: un JPEG no tiene transparencia y sin esto lo transparente
+    // sale negro.
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { dataUrl: canvas.toDataURL("image/jpeg", calidad), width: canvas.width, height: canvas.height };
+  } catch {
+    return null;
+  }
+}

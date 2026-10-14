@@ -11,7 +11,14 @@ export async function enviarCorreo({ to, subject, html, adjuntos, responderA }) 
   if (!destinatarios.length) return { ok: false, error: "sin destinatarios" };
   if (!process.env.RESEND_API_KEY) return { ok: false, error: "falta RESEND_API_KEY" };
 
-  const r = await fetch("https://api.resend.com/emails", {
+  // SI EL PEDIDO SE CAE, SE CUENTA. `fetch` no devuelve un error: lo lanza, y
+  // lo que se lanza acá arriba se lleva puesta la función entera. Del otro
+  // lado eso no es "el correo falló": es un 500 sin una palabra adentro,
+  // porque un corte del servidor no devuelve JSON. Pasó mandando un acta con
+  // el PDF adjunto y no hubo manera de saber qué había sido.
+  let r;
+  try {
+    r = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.RESEND_API_KEY },
     // adjuntos: [{ filename, content }] con el contenido en base64.
@@ -20,9 +27,13 @@ export async function enviarCorreo({ to, subject, html, adjuntos, responderA }) 
       ...(responderA ? { reply_to: responderA } : {}),
       ...(adjuntos?.length ? { attachments: adjuntos } : {}),
     }),
-  });
+    });
+  } catch (e) {
+    return { ok: false, error: `no se pudo hablar con el servidor de correo: ${e?.message || e}`
+      + (adjuntos?.length ? ". Suele ser el adjunto: si el PDF pesa mucho, la conexión se corta antes de terminar de subirlo." : "") };
+  }
   const datos = await r.json().catch(() => ({}));
-  return r.ok ? { ok: true, enviadoA: destinatarios, id: datos.id } : { ok: false, error: datos.message || "Resend rechazó el envío" };
+  return r.ok ? { ok: true, enviadoA: destinatarios, id: datos.id } : { ok: false, error: datos.message || `Resend rechazó el envío (${r.status})` };
 }
 
 /**

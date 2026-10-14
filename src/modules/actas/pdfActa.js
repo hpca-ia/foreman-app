@@ -1,6 +1,6 @@
 import { cargarPDF } from "../../lib/exportar";
 import { mostrarPdf } from "../../lib/abrirPdf";
-import { logoParaPDF } from "../../lib/logos";
+import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 
 // El acta en PDF: el que se imprime, se firma y se archiva.
@@ -195,7 +195,7 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     let x = M;
     for (const f of conEnlace) {
       try {
-        const img = await logoParaPDF(enlaces[f.storage_path]);
+        const img = await fotoParaPDF(enlaces[f.storage_path]);
         if (!img) continue;
         const alto = Math.min((ancho * img.height) / img.width, 70);
         if (y + alto > ALTO - 24) { doc.addPage(); y = 18; x = M; }

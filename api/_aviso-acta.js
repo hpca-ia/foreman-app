@@ -23,7 +23,24 @@ const APP = process.env.APP_URL || "https://foreman-app-ebon.vercel.app";
 const dia = f => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
 const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
+/**
+ * QUE EL ERROR LLEGUE A LA PANTALLA.
+ *
+ * Cualquier cosa que se lance acá adentro sin atajar termina en un 500 que no
+ * devuelve JSON, y del otro lado queda "No se pudo enviar el acta" a secas:
+ * no se puede ni contar ni arreglar, y manda a adivinar. Si algo se rompe, lo
+ * que se rompió se dice, con la línea donde pasó.
+ */
 export default async function handler(req, res) {
+  try {
+    return await mandarActa(req, res);
+  } catch (e) {
+    const donde = String(e?.stack || "").split("\n")[1]?.trim().replace(/^at\s+/, "") || "";
+    return res.status(500).json({ error: `Se rompió mandando el acta: ${e?.message || e}${donde ? ` (${donde})` : ""}` });
+  }
+}
+
+async function mandarActa(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const { acta_id: actaId, para, adjunto, conAnexos, prueba } = req.body || {};
   if (!actaId) return res.status(400).json({ error: "Falta el acta." });

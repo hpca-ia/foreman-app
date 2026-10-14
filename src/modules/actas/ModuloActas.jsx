@@ -1187,6 +1187,20 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
         // no puede pasar es que un problema con el adjunto frene el envío.
         void e;
       }
+      // EL PEDIDO TIENE UN TECHO Y NO ES NUESTRO.
+      //
+      // El PDF viaja adentro del pedido y Vercel no acepta pedidos de más de
+      // 4,5 MB: pasado eso la función se cae antes de leer una línea, y lo que
+      // llega a la pantalla es un 500 sin explicación. Un acta con fotos lo
+      // pasaba sin problema.
+      //
+      // Antes que no mandar el acta, se manda sin el adjunto: el acta entera
+      // va igual en el cuerpo del correo, que es como la va a leer la mitad de
+      // la gente. Y se dice, para que quien la mandó sepa que al PDF hay que
+      // mandarlo aparte.
+      let sinPdf = false;
+      if (adjunto?.contenido && adjunto.contenido.length > 3.6e6) { sinPdf = true; adjunto = null; }
+
       const r = await fetch("/api/aviso?de=acta", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ acta_id: abierta.id, para: destino, adjunto, conAnexos: true, prueba }),
@@ -1220,6 +1234,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
           + " Trae el enlace de conformidad de la primera persona de la lista, para que lo puedas abrir y probar el botón."
           + " Si no llega en un par de minutos, mirá el spam: un correo nuevo de un remitente que nunca te escribió suele caer ahí la primera vez."
           + (data?.aviso ? `\n\n${data.aviso}` : "")
+          + (sinPdf ? "\n\nEl PDF no viajó: pesa más de lo que admite un envío. El acta va entera en el cuerpo igual. Si lo necesitan adjunto, bajalo con «Ver el PDF» y mandalo aparte." : "")
           + " El acta sigue como está.");
         return;
       }
@@ -1227,7 +1242,8 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       await cargarActa(abierta.id);
       setAviso(`Enviada a ${salieron.length} ${salieron.length === 1 ? "correo" : "correos"}.`
         + " Cada uno recibió su enlace para dar conformidad; acá abajo vas viendo quién contestó."
-        + (data?.aviso ? `\n\n${data.aviso}` : ""));
+        + (data?.aviso ? `\n\n${data.aviso}` : "")
+        + (sinPdf ? "\n\nEl PDF no viajó adjunto: pesa más de lo que admite un envío. El acta fue entera en el cuerpo del correo." : ""));
     }
   }
 
