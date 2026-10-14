@@ -1,4 +1,5 @@
 import { rest, SUPABASE_URL, configurado } from "./_supabase.js";
+import { enviarCorreo, plantilla } from "./_correo.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -116,6 +117,70 @@ async function actaParaFirmar(req, res, asistente) {
   });
 }
 
+/**
+ * CUANDO ALGUIEN OBJETA, QUE SE ENTEREN HOY.
+ *
+ * Una observación es lo único de todo el circuito que obliga a hacer algo, y
+ * hasta acá quedaba guardada esperando que alguien abriera el acta y apretara
+ * "ver si contestaron". Una objeción que nadie mira en una semana es una
+ * objeción perdida: para cuando se lee, la obra ya siguió de largo y lo que se
+ * discutía ya se hizo —o ya se hizo mal—.
+ *
+ * Les llega a los dos que son dueños del acta —quien la escribió y quien le
+ * dio el visto— y al equipo de la casa que estuvo en esa reunión, que son los
+ * que van a tener que hacer algo con esto. Se reconocen porque su correo es el
+ * de un usuario de FOREMAN: los de afuera no tienen cuenta.
+ *
+ * Si el aviso falla, la firma ya quedó guardada igual. Es al revés de lo que
+ * parece: lo que no se puede perder es la objeción, no el correo.
+ */
+async function avisarObservacion(asistente, texto) {
+  try {
+    const acta = (await json(await rest(
+      `obra_actas?id=eq.${asistente.acta_id}&select=numero,fecha,lead_id,creado_por,revisada_por`)))?.[0];
+    if (!acta) return;
+    const [leads, usuarios, asistentes] = await Promise.all([
+      json(await rest(`leads?id=eq.${acta.lead_id}&select=nombre`)),
+      json(await rest("usuarios?activo=eq.true&select=id,email")),
+      json(await rest(`acta_asistentes?acta_id=eq.${asistente.acta_id}&select=email`)),
+    ]);
+    const dueños = [acta.creado_por, acta.revisada_por].filter(Boolean).map(String);
+    const enLaReunion = new Set((asistentes || []).map(a => String(a.email || "").trim().toLowerCase()).filter(Boolean));
+    const para = [];
+    for (const u of usuarios || []) {
+      const e = String(u.email || "").trim().toLowerCase();
+      if (!e) continue;
+      if (dueños.includes(String(u.id)) || enLaReunion.has(e)) { if (!para.includes(e)) para.push(e); }
+    }
+    if (!para.length) return;
+
+    const obra = leads?.[0]?.nombre || "la obra";
+    const quien = `${asistente.nombre}${asistente.empresa ? ` · ${asistente.empresa}` : ""}`;
+    await enviarCorreo({
+      to: para,
+      subject: `Observación al acta N° ${acta.numero} · ${obra} · ${asistente.nombre}`,
+      html: plantilla({
+        titulo: `Observación al acta N° ${acta.numero}`,
+        subtitulo: obra,
+        cuerpo: `
+          <p style="margin:0 0 12px;font-size:14px;color:#1A1A1A">
+            <strong>${escaparHtml(quien)}</strong> abrió el acta por su enlace y escribió que algo no refleja
+            lo acordado:
+          </p>
+          <div style="font-size:14px;color:#1A1A1A;line-height:1.6;padding:12px 14px;background:#FEF6E7;
+            border:1px solid #F0D9A8;border-radius:8px;white-space:pre-line">${escaparHtml(texto)}</div>
+          <p style="margin:14px 0 0;font-size:13px;color:#555;line-height:1.55">
+            Queda registrada en el acta con su nombre y la fecha, y entra sola como primer tema de la próxima
+            reunión. No hace falta copiarla a ningún lado.
+          </p>`,
+        pie: "Correo automático de FOREMAN · HCA Studio. La observación ya está guardada en el acta.",
+      }),
+    });
+  } catch { /* el aviso no puede tumbar la firma: lo que importa ya se guardó */ }
+}
+
+const escaparHtml = t => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
 async function firmarActa(req, res, asistente) {
   const { conforme, observacion } = req.body || {};
   const texto = String(observacion || "").trim().slice(0, 2000);
@@ -132,6 +197,7 @@ async function firmarActa(req, res, asistente) {
     body: JSON.stringify(campos),
   });
   if (!r.ok) return res.status(500).json({ error: "No se pudo guardar." });
+  if (texto) await avisarObservacion(asistente, texto);
   return res.status(200).json({ ok: true, conforme_at: campos.conforme_at || asistente.conforme_at, observacion: texto || asistente.observacion });
 }
 
