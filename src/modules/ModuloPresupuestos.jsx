@@ -29,7 +29,8 @@ import ResultadosBase from "./presupuestos/ResultadosBase";
 import { puntaje } from "../lib/buscarRubros";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
 import { LECTURA, textoDeNova } from "../lib/modelos";
-import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA } from "./presupuestos/etapas";
+import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA,
+  etiquetaDeEtapa, colorDeEtapa } from "./presupuestos/etapas";
 
 // Los precios y totales van siempre a dos decimales: 0,75 con 10 % de
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
@@ -1139,6 +1140,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   // documento.
   const mando = true;
   const bloqueado = !!presupuestoActivo && congelado(presupuestoActivo);
+  // ¿Este presupuesto se cobra por etapas? Lo dicen los rubros, no una opción:
+  // con dos etapas puestas, la pantalla de armado tiene que decir en cuál está
+  // cada uno. Con una sola —o ninguna— sería una columna de guiones.
+  const hayEtapas = tieneEtapas(items);
   const motivoBloqueo = presupuestoActivo?.archivado_at
     ? "Es un presupuesto histórico: reactívalo o haz una nueva versión para cambiarlo."
     : "Este presupuesto ya salió al cliente. Para cambiarlo, crea la versión siguiente.";
@@ -1786,6 +1791,25 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                             </div>
                           </td>
                           <td style={{padding:"3px 4px"}}>
+                            <div style={{display:"flex",alignItems:"flex-start",gap:5,minWidth:0}}>
+                              {/* EN QUÉ ETAPA QUEDÓ ESTE RUBRO.
+                                  Solo si el presupuesto se cobra por etapas: en
+                                  uno normal sería una columna de guiones.
+                                  Marca el que NO tiene etapa también —y en
+                                  gris, que se lee como "falta"—: un rubro sin
+                                  etapa en un presupuesto por etapas no se
+                                  cobra en ninguna, y es el error que recién se
+                                  descubre cuando el cliente suma. */}
+                              {hayEtapas&&(
+                                <span title={item.etapa?`${item.etapa} · se cambia en la pestaña Etapas`:"Sin etapa: no entra en ningún subtotal. Se pone en la pestaña Etapas."}
+                                  style={{flexShrink:0,marginTop:1,fontSize:9.5,fontWeight:700,letterSpacing:.2,
+                                    padding:"1px 5px",borderRadius:5,lineHeight:1.5,
+                                    color:colorDeEtapa(item.etapa).texto,background:colorDeEtapa(item.etapa).fondo,
+                                    border:item.etapa?"none":"1px dashed var(--border)"}}>
+                                  {etiquetaDeEtapa(item.etapa)||"sin"}
+                                </span>
+                              )}
+                              <div style={{flex:1,minWidth:0}}>
                             <CampoTexto valor={item.descripcion} multilinea titulo="Toca para editar la descripción"
                               onGuardar={v=>actualizarItemMulti(item.id,{descripcion:v})}
                               style={{color:"var(--ink)",fontSize:12,lineHeight:1.35}}/>
@@ -1793,6 +1817,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 aproximado, que falta el estudio, que la cotización
                                 no llegó. Se escribe a mano, no hay lista. */}
                             <NotaDeRubro item={item} onGuardar={v=>actualizarItemMulti(item.id,{nota:v})}/>
+                              </div>
+                            </div>
                           </td>
                           <td style={{padding:"3px 4px"}}>
                             <SelectorUnidad valor={item.unidad} onCambiar={v=>actualizarItemMulti(item.id,{unidad:v})}/>

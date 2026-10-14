@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA }
+import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA, etiquetaDeEtapa, colorDeEtapa }
   from "../src/modules/presupuestos/etapas.js";
 
 const items = [
@@ -64,4 +64,33 @@ test("con dos, sí", () => {
 test("sin rubros no revienta", () => {
   assert.deepEqual(subtotalesPorEtapa([]), []);
   assert.deepEqual(etapasUsadas([]), []);
+});
+
+// La marca que se ve al lado de cada rubro mientras se arma el presupuesto.
+
+test("la marca es corta: el número de la etapa, no la palabra entera", () => {
+  assert.equal(etiquetaDeEtapa("Etapa 2 - acabados"), "E2");
+  assert.equal(etiquetaDeEtapa("etapa 10"), "E10");
+});
+
+test("una etapa sin número se muestra igual, recortada si es larga", () => {
+  assert.equal(etiquetaDeEtapa("Gris"), "Gris");
+  assert.equal(etiquetaDeEtapa("Acabados finos"), "Acabad…");
+});
+
+test("sin etapa no hay marca", () => {
+  assert.equal(etiquetaDeEtapa(""), "");
+  assert.equal(etiquetaDeEtapa(null), "");
+});
+
+test("el color sale del número, así la etapa 2 es igual en todas las pantallas", () => {
+  assert.deepEqual(colorDeEtapa("Etapa 2 - acabados"), colorDeEtapa("etapa 2"));
+  assert.notDeepEqual(colorDeEtapa("Etapa 1"), colorDeEtapa("Etapa 2"));
+});
+
+test("lo que no tiene etapa va en gris, y nada revienta con un nombre raro", () => {
+  const gris = colorDeEtapa("");
+  assert.deepEqual(colorDeEtapa(null), gris);
+  assert.deepEqual(colorDeEtapa("Gris"), gris);
+  assert.ok(colorDeEtapa("Etapa 0").texto);
 });

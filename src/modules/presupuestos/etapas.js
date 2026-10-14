@@ -65,3 +65,45 @@ export function etapasUsadas(items = []) {
 export function tieneEtapas(items = []) {
   return etapasUsadas(items).length > 1;
 }
+
+/**
+ * LA ETAPA, A LA VISTA EN LA PANTALLA DE ARMADO.
+ *
+ * El desglose por etapas vive en su propia pestaña, y eso alcanza para cobrar
+ * pero no para armar: mientras se escriben los rubros, saber en cuál quedó
+ * cada uno obliga a cambiar de pantalla, y nadie cambia de pantalla cuarenta
+ * veces. El resultado es que los rubros nuevos se van quedando sin etapa, o
+ * peor, en la que no era — y eso recién se ve cuando el cliente pregunta por
+ * qué la etapa uno le salió más cara de lo que se habló.
+ *
+ * Una marca corta al lado de cada rubro. "E2" y no "Etapa 2": en una tabla de
+ * cuarenta renglones lo que se lee de un vistazo es la diferencia entre dos
+ * colores y un número, no una palabra repetida cuarenta veces.
+ */
+export function etiquetaDeEtapa(etapa) {
+  const t = limpia(etapa);
+  if (!t) return "";
+  const m = t.match(/\d+/);
+  return m ? `E${m[0]}` : t.length > 7 ? `${t.slice(0, 6)}…` : t;
+}
+
+// Colores por número de etapa, no por orden de aparición: así la etapa 2 es
+// del mismo color en todos los presupuestos y en todas las pantallas. Un color
+// que cambia de significado entre dos pantallas es peor que no tener color.
+const PALETA = [
+  { texto: "#0F3D3E", fondo: "#E4EFEE" },
+  { texto: "#8A4B00", fondo: "#FBEEDC" },
+  { texto: "#1D4ED8", fondo: "#E6EDFD" },
+  { texto: "#7A1F6B", fondo: "#F8E8F6" },
+  { texto: "#15803D", fondo: "#E6F4EA" },
+];
+const NEUTRO = { texto: "#6B7280", fondo: "#F1F1EF" };
+
+export function colorDeEtapa(etapa) {
+  const t = limpia(etapa);
+  if (!t) return NEUTRO;
+  const m = t.match(/\d+/);
+  if (!m) return NEUTRO;
+  const i = ((Number(m[0]) - 1) % PALETA.length + PALETA.length) % PALETA.length;
+  return PALETA[i];
+}
