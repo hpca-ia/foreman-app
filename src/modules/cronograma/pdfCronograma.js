@@ -32,30 +32,52 @@ const fechaDe = f => new Date(`${String(f).slice(0, 10)}T12:00:00`);
 const corta = f => { const d = fechaDe(f); return `${d.getDate()} ${MESES[d.getMonth()]}`; };
 const larga = f => { const d = fechaDe(f); return `${d.getDate()} ${MESES[d.getMonth()]} ${d.getFullYear()}`; };
 
+// Cuánto mide cada hoja apaisada, en milímetros. De A4 a A1 el ancho se
+// duplica cada dos tamaños, y con él los días que entran: la misma letra, la
+// misma barra, más calendario por hoja.
+export const HOJAS = {
+  a4: { label: "A4", ancho: 297, nota: "la hoja de siempre" },
+  a3: { label: "A3", ancho: 420, nota: "el doble de tiempo por hoja" },
+  a2: { label: "A2", ancho: 594, nota: "plano chico" },
+  a1: { label: "A1", ancho: 841, nota: "para la pared" },
+};
+
+// Margen, columnas de la izquierda y ancho de cada día. Viven acá porque la
+// pantalla los necesita para poder decir, ANTES de bajar el PDF, cuántos días
+// entran en cada tamaño y cuántas hojas van a salir.
+export const MARGEN = 10;
+export const IZQUIERDA = 86;
+export const MM_POR_DIA = 3.1;
+
+export const diasPorHoja = hoja =>
+  Math.max(7, Math.floor(((HOJAS[hoja] || HOJAS.a4).ancho - MARGEN * 2 - IZQUIERDA) / MM_POR_DIA));
+
 /**
  * @param filas  [{ tipo: "etapa"|"barra", ... }] en el orden en que se ven
- * @param ancho  "a4" o "a3": el A3 entra el doble de tiempo por hoja
+ * @param hoja   a4 | a3 | a2 | a1. Cambia cuánto tiempo entra por hoja, no el
+ *   tamaño de la letra ni el de las barras: una obra larga se lee igual, en
+ *   menos hojas.
  */
-export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, diasDeContrato = 0 }, ancho = "a4") {
+export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, diasDeContrato = 0 }, hoja = "a4") {
   const { jsPDF } = await cargarPDF();
-  const doc = new jsPDF({ unit: "mm", format: ancho === "a3" ? "a3" : "a4", orientation: "landscape" });
+  const doc = new jsPDF({ unit: "mm", format: HOJAS[hoja] ? hoja : "a4", orientation: "landscape" });
   const ANCHO = doc.internal.pageSize.getWidth();
   const ALTO = doc.internal.pageSize.getHeight();
-  const M = 10;
-  const IZQ = 86;                      // nombre + días + las dos fechas
+  const M = MARGEN;
+  const IZQ = IZQUIERDA;               // nombre + días + las dos fechas
   const ARRIBA = 34;                   // encabezado, resumen y escala
   const ABAJO = 12;
   const FILA = 5.6;
   // Cada día mide lo mismo en todas las hojas: una barra de dos días se tiene
   // que ver como de dos días, acá y tres páginas más allá.
-  const MM_DIA = 3.1;
+  const MM_DIA = MM_POR_DIA;
 
   const inicio = fechaDe(plan.inicio);
   const fin = fechaDe(plan.fin);
   const totalDias = Math.max(1, Math.round((fin - inicio) / DIA_MS) + 1);
   const anchoLienzo = ANCHO - M * 2 - IZQ;
-  const diasPorHoja = Math.max(7, Math.floor(anchoLienzo / MM_DIA));
-  const hojasAncho = Math.ceil(totalDias / diasPorHoja);
+  const diasHoja = Math.max(7, Math.floor(anchoLienzo / MM_DIA));
+  const hojasAncho = Math.ceil(totalDias / diasHoja);
   const filasPorHoja = Math.max(6, Math.floor((ALTO - ARRIBA - ABAJO) / FILA));
   const hojasAlto = Math.max(1, Math.ceil(filas.length / filasPorHoja));
 
@@ -87,7 +109,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
     // y escribía OCTUBRE encima de OCTUBRE treinta y un veces. El resultado
     // era una mancha negra donde tenía que ir el calendario.
     const tramos = [];
-    for (let i = 0; i < diasPorHoja; i++) {
+    for (let i = 0; i < diasHoja; i++) {
       const n = desdeDia + i;
       if (n >= totalDias) break;
       const d = new Date(inicio.getTime() + n * DIA_MS);
@@ -135,7 +157,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
   const dibujarHoy = desdeDia => {
     if (!hoyISO) return;
     const n = Math.round((fechaDe(hoyISO) - inicio) / DIA_MS);
-    if (n < desdeDia || n >= desdeDia + diasPorHoja) return;
+    if (n < desdeDia || n >= desdeDia + diasHoja) return;
     const x = M + IZQ + (n - desdeDia) * MM_DIA + MM_DIA / 2;
     doc.setDrawColor(...ROJO); doc.setLineWidth(0.4);
     doc.line(x, ARRIBA - 3, x, ALTO - ABAJO);
@@ -145,7 +167,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
 
   let primera = true;
   for (let hojaAncho = 0; hojaAncho < hojasAncho; hojaAncho++) {
-    const desdeDia = hojaAncho * diasPorHoja;
+    const desdeDia = hojaAncho * diasHoja;
     for (let hojaAlto = 0; hojaAlto < hojasAlto; hojaAlto++) {
       if (!primera) doc.addPage();
       primera = false;
@@ -195,7 +217,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
           const d1 = Math.round((fechaDe(f.inicio) - inicio) / DIA_MS);
           const d2 = Math.round((fechaDe(f.fin) - inicio) / DIA_MS);
           const desde = Math.max(d1, desdeDia);
-          const hasta = Math.min(d2, desdeDia + diasPorHoja - 1);
+          const hasta = Math.min(d2, desdeDia + diasHoja - 1);
           if (hasta >= desde) {
             const x = M + IZQ + (desde - desdeDia) * MM_DIA;
             const ancho = Math.max((hasta - desde + 1) * MM_DIA, 1.2);

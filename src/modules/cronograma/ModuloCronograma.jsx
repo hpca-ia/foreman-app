@@ -19,7 +19,7 @@ import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./ver
 import { comparar } from "./compararVersion";
 import { sinCiclos } from "./sinCiclos";
 import { bajarProject } from "./exportarProject";
-import { pdfCronograma } from "./pdfCronograma";
+import { pdfCronograma, HOJAS, diasPorHoja } from "./pdfCronograma";
 import { porFases } from "./agruparPorFase";
 import TablaGantt from "./TablaGantt";
 // El valorado baja aparte: es una matriz con su gráfico y pesa.
@@ -96,6 +96,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
   // único que vuelve confiable a una memoria.
   const [memoria, setMemoria] = useState([]);
   const [verMemoria, setVerMemoria] = useState(false);
+  // El elegidor de tamaño de hoja del PDF.
+  const [pdf, setPdf] = useState(false);
   // LAS ETAPAS DE LA OBRA: demoliciones, obra gris, instalaciones, acabados.
   // No mandan sobre las fechas —eso lo dicen las dependencias— sino sobre cómo
   // se lee el cronograma, que con cuarenta barras es la mitad del problema.
@@ -1084,6 +1086,51 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     await Promise.all([cargarFases(), cargar()]);
   }
 
+  /**
+   * Las filas del PDF, tal como se ven en la pantalla.
+   *
+   * El PDF tiene que decir lo mismo que el Gantt. Si las armara por su cuenta,
+   * a la tercera versión dirían cosas distintas y nadie sabría cuál creer.
+   */
+  function filasParaPdf() {
+    const porAg = new Map();
+    todas.forEach(a => {
+      const k = a.obra_actividad_id || `sola-${a.id}`;
+      if (!porAg.has(k)) porAg.set(k, []);
+      porAg.get(k).push(a);
+    });
+    const grupos = [...porAg.values()].map(hijas => {
+      const ord = [...hijas].sort((x, y) => String(x.inicio || "").localeCompare(String(y.inicio || "")));
+      const ini = ord.map(a => a.inicio).filter(Boolean).sort();
+      const fin = ord.map(a => a.fin).filter(Boolean).sort();
+      return { hijas: ord, posicion: Math.min(...hijas.map(a => a.orden ?? 0)),
+        inicio: ini[0] || null, fin: fin[fin.length - 1] || null };
+    }).sort((a, b) => a.posicion - b.posicion);
+
+    const filas = [];
+    let nEtapa = 0;
+    porFases(grupos, fases).forEach(({ fase, grupos: suyos }) => {
+      if (fases.length) {
+        if (fase) nEtapa++;
+        const ini = suyos.map(g => g.inicio).filter(Boolean).sort();
+        const fin = suyos.map(g => g.fin).filter(Boolean).sort();
+        filas.push({ tipo: "etapa",
+          nombre: fase ? `${nEtapa}. ${fase.nombre}` : "Todavía sin etapa",
+          inicio: ini[0] || null, fin: fin[fin.length - 1] || null });
+      }
+      let n = 0;
+      suyos.forEach(g => g.hijas.forEach(a => {
+        n++;
+        filas.push({ tipo: "barra",
+          numero: fases.length ? `${fase ? nEtapa : "—"}.${n}` : String(n),
+          nombre: a.nombre, duracion: a.duracion, inicio: a.inicio, fin: a.fin,
+          critica: a.critica, hito: a.es_hito, externo: a.externo || null,
+          avance: Number(a.avance_pct) || 0, sangria: g.hijas.length > 1 });
+      }));
+    });
+    return filas;
+  }
+
   async function moverEtapaDeObra(fase, direccion) {
     const e = await moverFase(fases, fase.id, direccion);
     if (e) { setError(e); return; }
@@ -2065,52 +2112,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                               "entrega, instalación. No se tocan ni las fechas ni las dependencias.")) return;
                             await ordenarComoElControl();
                           }],
-                          ["Bajar el PDF", "El cronograma para imprimir: todos los días con sus fechas", async () => {
-                            // Las filas tal como se ven: las etapas en su
-                            // orden y adentro sus barras. El PDF tiene que
-                            // decir lo mismo que la pantalla; si se armara por
-                            // su cuenta, a la tercera versión dirían cosas
-                            // distintas.
-                            const porAg = new Map();
-                            todas.forEach(a => {
-                              const k = a.obra_actividad_id || `sola-${a.id}`;
-                              if (!porAg.has(k)) porAg.set(k, []);
-                              porAg.get(k).push(a);
-                            });
-                            const grupos = [...porAg.values()].map(hijas => {
-                              const ord = [...hijas].sort((x, y) => String(x.inicio || "").localeCompare(String(y.inicio || "")));
-                              const ini = ord.map(a => a.inicio).filter(Boolean).sort();
-                              const fin = ord.map(a => a.fin).filter(Boolean).sort();
-                              return { hijas: ord, posicion: Math.min(...hijas.map(a => a.orden ?? 0)),
-                                inicio: ini[0] || null, fin: fin[fin.length - 1] || null };
-                            }).sort((a, b) => a.posicion - b.posicion);
-
-                            const filasPdf = [];
-                            let nEtapa = 0;
-                            porFases(grupos, fases).forEach(({ fase, grupos: suyos }) => {
-                              if (fases.length) {
-                                if (fase) nEtapa++;
-                                const ini = suyos.map(g => g.inicio).filter(Boolean).sort();
-                                const fin = suyos.map(g => g.fin).filter(Boolean).sort();
-                                filasPdf.push({ tipo: "etapa",
-                                  nombre: fase ? `${nEtapa}. ${fase.nombre}` : "Todavía sin etapa",
-                                  inicio: ini[0] || null, fin: fin[fin.length - 1] || null });
-                              }
-                              let n = 0;
-                              suyos.forEach(g => g.hijas.forEach(a => {
-                                n++;
-                                filasPdf.push({ tipo: "barra",
-                                  numero: fases.length ? `${fase ? nEtapa : "—"}.${n}` : String(n),
-                                  nombre: a.nombre, duracion: a.duracion, inicio: a.inicio, fin: a.fin,
-                                  critica: a.critica, hito: a.es_hito, externo: a.externo || null,
-                                  avance: Number(a.avance_pct) || 0, sangria: g.hijas.length > 1 });
-                              }));
-                            });
-                            await pdfCronograma({
-                              nombre: lead.nombre, plan, filas: filasPdf, cal, hoyISO,
-                              diasDeContrato,
-                            });
-                          }],
+                          ["Bajar el PDF", "El cronograma para imprimir: todos los días con sus fechas",
+                            () => setPdf(true)],
                           ["Bajar para Project", "Para una fiscalización que lo pide en su formato", () => bajarProject({
                             nombre: `Cronograma ${lead.nombre}`, actividades: todas, dependencias,
                             inicio: plan.inicio, fin: plan.fin, cal,
@@ -2292,6 +2295,52 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
             Lee el cronograma como está —con tus duraciones, cadenas y etapas— y propone mejoras sueltas.
             No borra nada: vos aceptás una por una.
           </span>
+        </div>
+      )}
+
+      {/* EN QUÉ HOJA.
+          El tamaño no cambia la letra ni el ancho de las barras: cambia
+          cuánto tiempo entra por hoja. Un cronograma de seis meses en A4 sale
+          en tres hojas que hay que pegar; el mismo en A1 sale en una, y esa
+          es la que se clava en la pared del contenedor. Cada opción dice de
+          antemano cuántos días entran y cuántas hojas van a salir, que es lo
+          único que uno necesita para elegir. */}
+      {pdf && todas.length > 0 && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`,
+          borderRadius: colors.radiusMd, padding: 12, marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, flex: 1 }}>¿En qué hoja lo imprimís?</div>
+            <Button variant="secondary" size="sm" onClick={() => setPdf(false)}>Cerrar</Button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
+            {Object.entries(HOJAS).map(([id, h]) => {
+              const dias = diasPorHoja(id);
+              const totalDias = Math.max(1, cal.entre(plan.inicio, plan.fin));
+              const hojas = Math.ceil(totalDias / dias);
+              return (
+                <button key={id} disabled={pensando} onClick={async () => {
+                  setPensando(true);
+                  await pdfCronograma({
+                    nombre: lead.nombre, plan, filas: filasParaPdf(), cal, hoyISO, diasDeContrato,
+                  }, id);
+                  setPensando(false); setPdf(false);
+                }}
+                  style={{ textAlign: "left", background: colors.bg, border: `1px solid ${colors.border}`,
+                    borderRadius: 8, padding: "9px 11px", cursor: "pointer", fontFamily: colors.font }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>
+                    {h.label} <span style={{ fontWeight: 400, color: colors.muted, fontSize: 11 }}>{h.nota}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
+                    {dias} días por hoja · {hojas === 1 ? "entra en una" : `${hojas} hojas a lo ancho`}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8, lineHeight: 1.45 }}>
+            El tamaño no achica la letra ni las barras: cada día mide lo mismo en todos. Lo que cambia es
+            cuánto calendario entra antes de pasar a la hoja siguiente.
+          </div>
         </div>
       )}
 
