@@ -157,6 +157,19 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
     const conNombre = cont.asistentes.filter(a => String(a.nombre || "").trim());
     const vacias = cont.asistentes.filter(a => !String(a.nombre || "").trim());
     const arrastrados = cont.compromisos.filter(c => c.viene_de);
+    /**
+     * Cómo se reconoce a la misma persona en las dos listas: por el correo, y
+     * si no lo tiene, por el nombre.
+     *
+     * VA ANTES DEL `return`, y eso no es un detalle de estilo. Estas dos
+     * estaban declaradas después, con `const`: una función declarada con
+     * `function` se puede usar antes de escribirla, una constante NO. El
+     * dibujo las llamaba, JavaScript cortaba con "no se puede acceder antes de
+     * inicializar", y React se lleva puesta la pantalla entera. Lo que se ve
+     * es un módulo en blanco, sin ninguna pista de qué pasó.
+     */
+    const clave = x => String(x.email || x.nombre || "").trim().toLowerCase();
+    const esDeSiempre = a => convocados.some(c => clave(c) && clave(c) === clave(a));
     const nuevos = cont.compromisos.filter(c => !c.viene_de);
 
     return (
@@ -907,11 +920,6 @@ export default function ModuloActas({ currentUser, puede, nivelProyecto }) {
       setSinGuardar(new Set());
       if (!solito) setAviso("Asistentes guardados.");
     }
-
-    /** Cómo se reconoce a la misma persona en las dos listas: por el correo, y
-     *  si no lo tiene, por el nombre. */
-    const clave = x => String(x.email || x.nombre || "").trim().toLowerCase();
-    const esDeSiempre = a => convocados.some(c => clave(c) && clave(c) === clave(a));
 
     async function fijarConvocado(a) {
       if (!String(a.nombre || "").trim() || esDeSiempre(a)) return;
