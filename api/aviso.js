@@ -25,16 +25,22 @@ const AVISOS = { tarea, reunion, comentario, cuenta, resumen, orden, plan, acta 
 // El acta viaja con su PDF adjunto en base64, y un acta con fotos pesa más
 // que el megabyte que viene por defecto. Sin esto el envío falla con un error
 // de tamaño que no dice nada de lo que pasó.
-export const config = { api: { bodyParser: { sizeLimit: "15mb" } } };
-
-// SESENTA SEGUNDOS, NO DIEZ.
-//
-// El acta sale de a un correo por persona —cada uno lleva su enlace de
-// conformidad— y cada envío sube el PDF y los anexos. Catorce asistentes no
-// entran en los diez segundos que Vercel da por defecto: la función se corta a
-// la mitad, el navegador recibe un error que no explica nada, y lo que queda es
-// un acta mandada a la mitad de la gente.
-export const maxDuration = 60;
+export const config = {
+  api: { bodyParser: { sizeLimit: "15mb" } },
+  // SESENTA SEGUNDOS, NO DIEZ.
+  //
+  // El acta sale de a un correo por persona —cada uno lleva su enlace de
+  // conformidad— y cada envío sube el PDF y los anexos. Catorce asistentes no
+  // entran en los diez segundos que Vercel da por defecto: la función se corta
+  // a la mitad y un corte del servidor no devuelve JSON, devuelve una página
+  // de error que no tiene adentro ningún mensaje que mostrar. Del otro lado se
+  // ve "No se pudo enviar el acta" y nada más.
+  //
+  // VA ADENTRO DE `config`, no como `export const maxDuration`. Esa otra forma
+  // es la de Next; acá son funciones sueltas de Vercel y la ignora en silencio,
+  // que es exactamente lo que pasó: quedó en diez segundos igual.
+  maxDuration: 60,
+};
 
 export default async function handler(req, res) {
   const de = String(req.query?.de || "");

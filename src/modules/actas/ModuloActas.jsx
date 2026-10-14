@@ -1193,7 +1193,21 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       });
       const data = await r.json().catch(() => ({}));
       setOcupado(false);
-      if (!r.ok || data?.error) { setError(data?.error || "No se pudo enviar el acta."); return; }
+      // QUÉ DECIR CUANDO NO HAY NADA QUE DECIR.
+      //
+      // Si el servidor se corta —por tiempo o por tamaño— no devuelve JSON:
+      // devuelve una página de error, y acá quedaba "No se pudo enviar el
+      // acta" a secas. Eso no se puede arreglar ni contar: no distingue "una
+      // dirección rebotó" de "la función se cortó a los diez segundos". El
+      // código de respuesta sí lo distingue, así que se dice.
+      if (!r.ok || data?.error) {
+        setError(data?.error || (r.status === 504 || r.status === 502
+          ? `El servidor se cortó mandando el acta (${r.status}). Si tiene muchos anexos, probá destildando "anexos" o mandala a menos gente.`
+          : r.status === 413
+            ? "El acta con el PDF y los anexos pesa demasiado para un correo. Saca algún anexo y volvé a intentar."
+            : `No se pudo enviar el acta (${r.status}).`));
+        return;
+      }
       // SE MARCA ENVIADA A LOS QUE SALIERON, no a los que se intentó. Un
       // acta que dice "enviada a ocho" cuando dos rebotaron es una mentira
       // que se descubre tarde, en la reunión siguiente, cuando dos personas
