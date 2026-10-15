@@ -6,6 +6,7 @@ import { sincronizarCapitulos } from "./sincronizarCapitulos";
 import Button from "../../components/ui/Button";
 import { fmt, calcularControl, agrupar, totalesObra, repartirSolicitudes } from "./calculos";
 import TablaControl from "./TablaControl";
+import { totales } from "./cuentaBeneficios.js";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import LibroFacturas from "./LibroFacturas";
@@ -129,7 +130,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto").eq("obra_id", obra.id);
     setPagos(pg || []);
     const { data: ben } = await supabase.from("obra_beneficios")
-      .select("obra_rubro_id,descripcion,presupuestado,real").eq("obra_id", obra.id);
+      .select("obra_rubro_id,descripcion,presupuestado,real,estado").eq("obra_id", obra.id);
     setBeneficios(ben || []);
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
@@ -248,10 +249,13 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             utilidad entera comprando mal — y hasta ahora eso no se veía en
             ningún número de esta pantalla. */}
         {beneficios.length > 0 && (() => {
-          const neto = Math.round(beneficios.reduce((x, b) =>
-            x + (Number(b.presupuestado) || 0) - (Number(b.real) || 0), 0) * 100) / 100;
-          return <Tarjeta label={neto >= 0 ? "Beneficio" : "Sobreprecio"} valor={Math.abs(neto)}
-            color={neto >= 0 ? colors.success : colors.danger} />;
+          // Solo lo ya comprado. Lo previsto sale de una proforma y todavía
+          // puede no pasar: meterlo acá sería decir que la obra tiene una
+          // utilidad que nadie cobró.
+          const t = totales(beneficios);
+          if (!t.cuantos) return null;
+          return <Tarjeta label={t.neto >= 0 ? "Beneficio" : "Sobreprecio"} valor={Math.abs(t.neto)}
+            color={t.neto >= 0 ? colors.success : colors.danger} />;
         })()}
         {/* LOS DOS AVANCES, SEPARADOS.
             El económico es invertido sobre presupuesto: dice cuánta plata se

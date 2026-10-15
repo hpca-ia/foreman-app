@@ -1,4 +1,7 @@
 import { supabase } from "../../lib/supabase";
+// Las cuentas viven aparte: son lo único de este archivo que se puede probar
+// sin un navegador, y son justo lo que no puede estar mal.
+export { totales, esPrevisto, netoPorRubro } from "./cuentaBeneficios.js";
 
 // Los beneficios de la obra: lo presupuestado contra lo que de verdad costó.
 //
@@ -43,28 +46,6 @@ export async function guardarVarios(filas = []) {
 export async function borrarBeneficio(id) {
   const { error } = await supabase.from("obra_beneficios").delete().eq("id", id);
   return error ? error.message : null;
-}
-
-/**
- * Cuánto se ganó y cuánto se perdió, por separado.
- *
- * NUNCA solo el neto: un neto de "+$300" puede esconder $4.000 de ahorro y
- * $3.700 de sobreprecio, y esas son dos obras muy distintas. La primera compra
- * bien y tiene un problema puntual; la segunda no sabe lo que le está pasando.
- */
-export function totales(beneficios = []) {
-  let presupuestado = 0, real = 0, ahorro = 0, sobreprecio = 0;
-  beneficios.forEach(b => {
-    const p = n(b.presupuestado), r = n(b.real);
-    presupuestado += p; real += r;
-    const d = p - r;
-    if (d > 0) ahorro += d; else sobreprecio += -d;
-  });
-  return {
-    presupuestado: c2(presupuestado), real: c2(real),
-    ahorro: c2(ahorro), sobreprecio: c2(sobreprecio), neto: c2(ahorro - sobreprecio),
-    cuantos: beneficios.length,
-  };
 }
 
 /**

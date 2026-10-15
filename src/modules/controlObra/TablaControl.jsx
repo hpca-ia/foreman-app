@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { fmt, gastosDe } from "./calculos";
+import { netoPorRubro } from "./cuentaBeneficios.js";
 
 // Una columna más que antes: el avance de OBRA al lado del económico. Son dos
 // preguntas distintas —cuánta obra hay hecha y cuánta plata se consumió— y la
@@ -146,12 +147,9 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   // rubro nos está dejando algo?" se hace acá, mirando el control: ir a otra
   // pantalla a buscarla es no hacerse la pregunta. Una marca verde o roja al
   // lado del renglón alcanza; el detalle está en Beneficios.
-  const beneficioDe = {};
-  (beneficios || []).forEach(b => {
-    if (!b.obra_rubro_id) return;
-    const d = (Number(b.presupuestado) || 0) - (Number(b.real) || 0);
-    beneficioDe[b.obra_rubro_id] = Math.round(((beneficioDe[b.obra_rubro_id] || 0) + d) * 100) / 100;
-  });
+  // Solo lo ya comprado: un beneficio previsto sale de una proforma y todavía
+  // puede no pasar.
+  const beneficioDe = netoPorRubro(beneficios);
   // Qué renglón está abierto mostrando sus gastos. Uno a la vez: abrir varios
   // llena la pantalla de listas y se pierde la tabla, que es lo que se vino a
   // mirar.

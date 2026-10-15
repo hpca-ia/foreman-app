@@ -6,7 +6,8 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
-import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto } from "./beneficios";
+import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto } from "./beneficios";
+import { comprimirImagen } from "../../lib/imagenes";
 
 // Lo que cotizan hoy contra lo que se presupuestó.
 //
@@ -48,11 +49,19 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const vivos = rubros.filter(x => !x.oculto && !x.anulado_por_oc);
 
   async function leer(e) {
-    const file = e.target.files?.[0];
+    let file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
     setLeyendo(true); setError("");
     try {
+      // LA FOTO SE ACHICA ANTES DE MANDARLA.
+      //
+      // Una foto de teléfono pesa seis u ocho megas, y el pedido no puede
+      // pasar de cuatro y medio: lo rechaza el servidor antes de que el código
+      // llegue a correr, y lo que vuelve no es un error sino una página de
+      // error — "Unexpected token 'A'... is not valid JSON", que no significa
+      // nada para quien está subiendo una proforma.
+      if (/^image\//.test(file.type || "")) file = await comprimirImagen(file);
       const b64 = /\.(xlsx|xlsm|xls)$/i.test(file.name || "") ? null : await new Promise(res => {
         const fr = new FileReader();
         fr.onload = () => res(fr.result.split(",")[1]);
@@ -99,8 +108,15 @@ Rubros de la obra: ${lista}`,
           }],
         }),
       });
-      const data = await res.json();
-      if (!res.ok || data?.error) throw new Error(data?.error?.message || "NOVA no pudo leerla.");
+      // Si el servidor se cortó devuelve una página de error, no JSON: hay
+      // que decirlo con palabras, no con el error de JavaScript.
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        throw new Error(res.status === 413
+          ? "El archivo pesa demasiado para mandarlo. Sacale páginas al PDF, o mandá una foto en vez del PDF entero."
+          : `El servidor se cortó leyendo el archivo (${res.status}). Si es muy grande, probá con una parte.`);
+      }
+      if (!res.ok || data?.error) throw new Error(data?.error?.message || data?.error || "NOVA no pudo leerla.");
       const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
       const p = JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0] || txt);
       setProveedor((p.proveedor || "").trim());
@@ -139,6 +155,10 @@ Rubros de la obra: ${lista}`,
       descripcion: l.descripcion, cantidad: n(l.cantidad) || null, unidad: l.unidad || null,
       presupuestado: n(l.presupuestado), real: n(l.cotizado),
       proveedor: proveedor || null, origen: "proforma",
+      // LO QUE SALE DE UNA PROFORMA NACE PREVISTO. Una proforma dice lo que va
+      // a costar, no lo que costó: entre que el proveedor cotiza y la factura
+      // llega se cae la mitad. Se confirma de a uno cuando la compra se cierra.
+      estado: "previsto",
       creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null,
     })));
     setOcupado(false);
@@ -162,6 +182,9 @@ Rubros de la obra: ${lista}`,
       presupuestado: n(f.presupuestado) || (rubro ? n(rubro.total_base) : 0),
       real: n(f.real), proveedor: f.proveedor || null, nota: f.nota || null,
       origen: "manual", fecha: f.fecha || undefined,
+      // A mano lo decide quien escribe: muchos beneficios reales no tienen
+      // papel —se negoció por teléfono— y esos ya están cobrados.
+      estado: f.previsto ? "previsto" : "confirmado",
       creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null,
     });
     setOcupado(false);
@@ -226,7 +249,7 @@ Rubros de la obra: ${lista}`,
             <Tarjeta label="NETO" valor={r.neto} color={r.neto >= 0 ? colors.success : colors.danger} />
             <div style={{ display: "flex", alignItems: "center" }}>
               <Button variant="primary" size="sm" disabled={ocupado} onClick={guardarComparacion}>
-                <Check size={13} /> {ocupado ? "Guardando…" : "Guardar estos beneficios"}
+                <Check size={13} /> {ocupado ? "Guardando…" : "Guardar como previstos"}
               </Button>
             </div>
           </div>
@@ -333,6 +356,14 @@ Rubros de la obra: ${lista}`,
             <Tarjeta label="SE PASÓ" valor={t.sobreprecio} color={colors.danger}
               icono={<TrendingUp size={11} color={colors.danger} />} />
             <Tarjeta label="NETO DE LA OBRA" valor={t.neto} color={t.neto >= 0 ? colors.success : colors.danger} />
+            {/* LO PREVISTO, APARTE. Es plata que todavía no existe: sumarla al
+                neto es lo que hace que una obra parezca rentable hasta el
+                último mes. Pero tampoco se calla: adelantar el beneficio de un
+                rubro es lo que deja decidir con tiempo dónde se puede gastar
+                más. */}
+            {t.cuantosPrevistos > 0 && (
+              <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin comprar`} valor={t.previsto} color={colors.warning} />
+            )}
           </div>
         )}
 
@@ -361,6 +392,12 @@ Rubros de la obra: ${lista}`,
               style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
             <input type="date" value={aMano.fecha || ""} onChange={e => setAMano(a => ({ ...a, fecha: e.target.value }))}
               style={{ ...inputStyle, fontSize: 12, padding: "6px 10px" }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: colors.inkSoft, cursor: "pointer" }}
+              title="Todavía no se compró: es una previsión. No suma a los números de la obra hasta que se confirme.">
+              <input type="checkbox" checked={!!aMano.previsto}
+                onChange={e => setAMano(a => ({ ...a, previsto: e.target.checked }))} />
+              Todavía no se compró
+            </label>
             <div style={{ gridColumn: "1 / -1", display: "flex", gap: 7, alignItems: "center" }}>
               <input value={aMano.nota || ""} placeholder="Por qué (se cambió de marca, se negoció el flete…)"
                 onChange={e => setAMano(a => ({ ...a, nota: e.target.value }))}
@@ -395,6 +432,7 @@ Rubros de la obra: ${lista}`,
                       {b.fecha}{rub ? ` · ${rub.numero} ${rub.descripcion.slice(0, 40)}` : " · sin rubro"}
                       {b.proveedor ? ` · ${b.proveedor}` : ""}
                       {b.origen === "manual" ? " · a mano" : ""}
+                      {esPrevisto(b) ? " · todavía no se compró" : ""}
                       {b.nota ? ` · ${b.nota}` : ""}
                     </div>
                   </div>
@@ -402,9 +440,23 @@ Rubros de la obra: ${lista}`,
                     ${fmt(b.presupuestado)} → ${fmt(b.real)}
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700,
+                    opacity: esPrevisto(b) ? 0.55 : 1,
                     color: dif >= 0 ? colors.success : colors.danger }}>
                     {dif >= 0 ? "+" : "−"}${fmt(Math.abs(dif))}
                   </div>
+                  {esPrevisto(b) && (
+                    <button onClick={async () => {
+                      const r2 = await guardarBeneficio({ id: b.id, estado: "confirmado", confirmado_at: new Date().toISOString() });
+                      if (r2.error) { setError(r2.error); return; }
+                      await cargar();
+                      setAviso("Confirmado: ya suma a los números de la obra.");
+                    }} title="Ya se compró a ese precio: pasa a contar en la obra"
+                      style={{ background: colors.successSoft, border: "none", borderRadius: 7, padding: "3px 8px",
+                        color: colors.success, fontSize: 10.5, fontWeight: 700, cursor: "pointer",
+                        fontFamily: colors.font, flexShrink: 0 }}>
+                      Confirmar
+                    </button>
+                  )}
                   <button onClick={async () => {
                     if (!window.confirm(`¿Borrar "${b.descripcion}" de los beneficios?`)) return;
                     const err = await borrarBeneficio(b.id);
