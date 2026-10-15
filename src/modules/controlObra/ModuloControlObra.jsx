@@ -92,7 +92,11 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
     setCargando(false);
   }
 
-  function abrirObra(o) { setObraActiva(o); setVista("obra"); }
+  // Se puede entrar a la obra por la puerta de siempre o apuntando a algo: el
+  // aviso de "$0,60 sin asignar" no servía de nada si después hay que buscar a
+  // mano cuál de ciento cuarenta facturas es.
+  const [entrarEn, setEntrarEn] = useState(null);
+  function abrirObra(o, donde = null) { setObraActiva(o); setEntrarEn(donde); setVista("obra"); }
 
   if (vista === "activar") {
     return <ActivarObra currentUser={currentUser} onCancelar={() => setVista("lista")} onCreada={async o => { await fetchObras(); setObraActiva(o); setVista("obra"); }} />;
@@ -103,9 +107,9 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
   }
 
   if (vista === "obra" && obraActiva) {
-    return <VistaObra obra={obraActiva} currentUser={currentUser}
+    return <VistaObra obra={obraActiva} currentUser={currentUser} entrarEn={entrarEn}
       puede={permiso => puedeEnObra(obraActiva, permiso)}
-      onVolver={() => { setVista("lista"); fetchObras(); }} />;
+      onVolver={() => { setVista("lista"); setEntrarEn(null); fetchObras(); }} />;
   }
 
   return (
@@ -182,13 +186,22 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
                     <Dato label="Presupuesto" valor={r.base} />
                     <Dato label="Invertido" valor={r.invertido} color={colors.ink} />
                     <Dato label="Saldo" valor={saldo} color={saldo < 0 ? colors.danger : colors.success} />
+                    {/* EL AVISO LLEVA A LAS FACTURAS QUE LO CAUSAN.
+                        Decía cuánta plata está sin asignar y no decía de
+                        cuáles: con ciento cuarenta facturas cargadas, buscar
+                        sesenta centavos a mano es no buscarlos. Ahora abre el
+                        libro de la obra ya filtrado en esas. */}
                     {r.sinAsignar > 0.009 && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 5, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: 20, padding: "4px 10px" }}>
+                      <button onClick={e => { e.stopPropagation(); abrirObra(o, { tab: "facturas", sueltas: true }); }}
+                        title="Ver las facturas que tienen plata sin asignar a un rubro"
+                        style={{ display: "flex", alignItems: "center", gap: 5, background: colors.warningSoft,
+                          border: `1px solid ${colors.warningBorder}`, borderRadius: 20, padding: "4px 10px",
+                          cursor: "pointer", fontFamily: colors.font }}>
                         <AlertTriangle size={12} color={colors.warning} />
                         <span style={{ fontSize: 11, color: colors.warning, fontWeight: 600 }}>
                           ${fmt(r.sinAsignar)} sin asignar a rubro
                         </span>
-                      </div>
+                      </button>
                     )}
                   </div>
                 </div>

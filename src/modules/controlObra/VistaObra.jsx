@@ -26,7 +26,7 @@ const PanelFondos = lazy(() => import("./PanelFondos"));
 const PanelProveedores = lazy(() => import("./PanelProveedores"));
 const Cargando = () => <div style={{ textAlign: "center", color: colors.muted, padding: "30px 0", fontSize: 12.5 }}>Cargando…</div>;
 
-export default function VistaObra({ obra, currentUser, puede, onVolver }) {
+export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn = null }) {
   // La obra no tiene nombre propio: se llama como su proyecto, y el
   // presupuesto del que salió va de detalle. Se leen ahora y no se copian, así
   // renombrar cualquiera de los dos se ve acá sin tocar nada más.
@@ -93,7 +93,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
     return () => { vivo = false; };
   }, [obra.lead_id, obra.presupuesto_id]);
 
-  const [tab, setTab] = useState("control");
+  // Dónde se abre. Casi siempre en el control; cuando se entra desde un aviso
+  // de la lista, en lo que ese aviso señalaba.
+  const [tab, setTab] = useState(entrarEn?.tab || "control");
   const [rubros, setRubros] = useState([]);
   const [planillas, setPlanillas] = useState([]);
   const [facturas, setFacturas] = useState([]);
@@ -360,7 +362,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver }) {
           )}
           {tab === "facturas" && (
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
-              facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar} />
+              facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar}
+              sueltasAlEntrar={!!entrarEn?.sueltas} />
           )}
           {tab === "proveedores" && vePlata && (
             <Suspense fallback={<Cargando />}>

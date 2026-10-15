@@ -23,6 +23,9 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [cajas, setCajas] = useState([]);
   const [cajaActiva, setCajaActiva] = useState(null);
   const [gastos, setGastos] = useState([]);
+  // Para cada gasto: a qué rubro de la obra fue a parar, y cuánto quedó sin
+  // asignar. Se lee aparte porque vive en el control de la obra, no en la caja.
+  const [destinos, setDestinos] = useState({});
   // Buscar por proveedor y por monto dentro de la caja: "¿cuánto gastó el
   // chofer en esa gasolinera?" se contesta filtrando y sumando, y la suma es
   // la mitad de la respuesta.
@@ -122,7 +125,51 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     setCajas((data||[]).filter(c => c.responsable_id === currentUser.id || admin || entraATodo
       || (c.lead_id ? !!nivelObra(c.lead_id) : gerente)));
   }
-  async function fetchGastos(id) { const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setGastos(data||[]); }
+  async function fetchGastos(id) {
+    const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false});
+    setGastos(data||[]);
+    await fetchDestinos(data||[]);
+  }
+
+  /**
+   * EN QUÉ TERMINÓ CADA GASTO DE LA CAJA.
+   *
+   * Un gasto de caja chica no termina en la caja: entra al control de la obra
+   * como una factura y después alguien le pone a qué rubro va. Esas dos cosas
+   * pasan en otra pantalla y a veces no pasan — y entonces la caja dice que
+   * está todo cargado mientras la obra no sabe nada de esa plata.
+   *
+   * Desde acá no se veía ninguna de las dos. Ahora cada renglón dice si llegó
+   * al control y a qué rubro fue, que es la pregunta que uno se hace mirando
+   * la caja: "este cemento, ¿a dónde se cargó?".
+   */
+  async function fetchDestinos(lista) {
+    const ids = [...new Set(lista.map(g => g.obra_factura_id).filter(Boolean))];
+    if (!ids.length) { setDestinos({}); return; }
+    const { data: asigs } = await supabase.from("obra_asignaciones")
+      .select("factura_id,obra_rubro_id,obra_actividad_id,capitulo,monto").in("factura_id", ids);
+    const rubroIds = [...new Set((asigs||[]).map(a => a.obra_rubro_id).filter(Boolean))];
+    const actIds = [...new Set((asigs||[]).map(a => a.obra_actividad_id).filter(Boolean))];
+    const [{ data: rubros }, { data: actividades }] = await Promise.all([
+      rubroIds.length ? supabase.from("obra_rubros").select("id,numero,descripcion").in("id", rubroIds) : { data: [] },
+      actIds.length ? supabase.from("obra_actividades").select("id,codigo,nombre").in("id", actIds) : { data: [] },
+    ]);
+    const nombreRubro = Object.fromEntries((rubros||[]).map(r => [r.id, `${r.numero||""} ${r.descripcion||""}`.trim()]));
+    const nombreAct = Object.fromEntries((actividades||[]).map(a => [a.id, `${a.codigo||""} ${a.nombre||""}`.trim()]));
+    const mapa = {};
+    lista.forEach(g => {
+      if (!g.obra_factura_id) return;
+      const suyas = (asigs||[]).filter(a => String(a.factura_id) === String(g.obra_factura_id));
+      const asignado = suyas.reduce((x, a) => x + (Number(a.monto)||0), 0);
+      mapa[g.id] = {
+        destinos: suyas.map(a => a.obra_rubro_id ? nombreRubro[a.obra_rubro_id]
+          : a.obra_actividad_id ? nombreAct[a.obra_actividad_id]
+            : a.capitulo ? `capítulo ${a.capitulo}` : "sin destino").filter(Boolean),
+        sinAsignar: Math.round(((Number(g.monto)||0) - asignado) * 100) / 100,
+      };
+    });
+    setDestinos(mapa);
+  }
   async function fetchAnticipos(id) { const { data } = await supabase.from("cajas_anticipos").select("*").eq("caja_id",id).order("fecha",{ascending:false}); setAnticipos(data||[]); }
   async function fetchCierres(id) { const r = await cargarCierres(id); setCierres(r.cierres); setSinCierres(r.sinTabla); }
 
@@ -999,6 +1046,31 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
                   <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{g.fecha} {g.proveedor?`· ${g.proveedor}`:""} {g.capitulo?`· ${g.capitulo}`:""} · {g.tipo}</div>
                   {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url)} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
+                  {/* ¿DÓNDE TERMINÓ ESTE GASTO?
+                      Un gasto de caja chica no termina en la caja: entra al
+                      control de la obra como factura y después alguien le pone
+                      el rubro. Las dos cosas pasan en otra pantalla y a veces
+                      no pasan —y entonces la caja dice que está todo cargado
+                      mientras la obra no sabe nada de esa plata—. Acá se ve,
+                      que es donde uno se hace la pregunta. */}
+                  {cajaActiva?.obra_id&&(
+                    !g.obra_factura_id
+                      ? <div style={{fontSize:10.5,color:"var(--danger)",fontWeight:700,marginTop:3}}>
+                          ⚠ No está en Control de Obra
+                          <span style={{fontWeight:400,color:"var(--muted)"}}> · esta plata no cuenta en el avance de la obra</span>
+                        </div>
+                      : destinos[g.id]?.destinos?.length
+                        ? <div style={{fontSize:10.5,color:"var(--ink-soft)",marginTop:3}}>
+                            En obra · <strong>{destinos[g.id].destinos.join(" · ")}</strong>
+                            {destinos[g.id].sinAsignar>0.009&&(
+                              <span style={{color:"var(--warning)",fontWeight:700}}> · ${fmt(destinos[g.id].sinAsignar)} sin asignar</span>
+                            )}
+                          </div>
+                        : <div style={{fontSize:10.5,color:"var(--warning)",fontWeight:600,marginTop:3}}>
+                            En obra, sin rubro todavía
+                            <span style={{fontWeight:400,color:"var(--muted)"}}> · se asigna en Control de Obra</span>
+                          </div>
+                  )}
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
                   <div style={{fontWeight:700,color:"var(--danger)",fontSize:14}}>${fmt(g.monto)}</div>

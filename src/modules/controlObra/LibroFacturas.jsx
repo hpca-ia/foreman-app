@@ -19,13 +19,13 @@ import { Mini } from "./PanelFacturas";
 const pelado = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
-export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, currentUser, onCambio, porRubro = {} }) {
+export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false }) {
   const [alcance, setAlcance] = useState("todo");        // todo | sin | id de planilla
   const [proveedor, setProveedor] = useState("");
   const [tipo, setTipo] = useState("");
   const [rubro, setRubro] = useState("");
   const [texto, setTexto] = useState("");
-  const [soloSueltas, setSoloSueltas] = useState(false);
+  const [soloSueltas, setSoloSueltas] = useState(!!sueltasAlEntrar);
   const [modal, setModal] = useState(null);
 
   const nombrePlanilla = id => {
