@@ -97,6 +97,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // de la lista, en lo que ese aviso señalaba.
   const [tab, setTab] = useState(entrarEn?.tab || "control");
   const [rubros, setRubros] = useState([]);
+  // Lo que se ganó o se perdió comprando, rubro por rubro. Se lee acá y se baja
+  // a la tabla: el beneficio nace en su propia pestaña, pero la pregunta
+  // "¿cómo vamos en este rubro?" se hace mirando el control.
+  const [beneficios, setBeneficios] = useState([]);
   const [planillas, setPlanillas] = useState([]);
   const [facturas, setFacturas] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
@@ -124,6 +128,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     // todavía no llegó.
     const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto").eq("obra_id", obra.id);
     setPagos(pg || []);
+    const { data: ben } = await supabase.from("obra_beneficios")
+      .select("obra_rubro_id,descripcion,presupuestado,real").eq("obra_id", obra.id);
+    setBeneficios(ben || []);
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
     const facturasConNumero = (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null }));
@@ -234,6 +241,18 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           <Tarjeta label="Anticipado a proveedores" valor={porRubro._anticipado} color={colors.warning} />
         )}
         <Tarjeta label="Saldo" valor={totales.saldo} color={totales.saldo < 0 ? colors.danger : colors.success} />
+        {/* EL BENEFICIO, ARRIBA CON LO DEMÁS.
+            Es la plata que de verdad queda, y es la única de estas cifras que
+            no sale de facturar: sale de comprar mejor que lo presupuestado.
+            Una obra puede ir perfecta en avance y en plazo y haber perdido la
+            utilidad entera comprando mal — y hasta ahora eso no se veía en
+            ningún número de esta pantalla. */}
+        {beneficios.length > 0 && (() => {
+          const neto = Math.round(beneficios.reduce((x, b) =>
+            x + (Number(b.presupuestado) || 0) - (Number(b.real) || 0), 0) * 100) / 100;
+          return <Tarjeta label={neto >= 0 ? "Beneficio" : "Sobreprecio"} valor={Math.abs(neto)}
+            color={neto >= 0 ? colors.success : colors.danger} />;
+        })()}
         {/* LOS DOS AVANCES, SEPARADOS.
             El económico es invertido sobre presupuesto: dice cuánta plata se
             consumió. El de obra sale de lo que cada rubro dice que tiene
@@ -321,7 +340,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                   </span>
                 )}
               </div>
-              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor}
+              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} beneficios={beneficios}
                 comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
                 facturas={facturas} asignaciones={asignaciones} rubros={rubros}
                 onAvance={puede && !puede("facturas.registrar") ? null : guardarAvance} />

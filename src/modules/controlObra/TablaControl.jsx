@@ -14,7 +14,7 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
-function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null }) {
+function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null, beneficio = 0 }) {
   // Sacado del contrato por una orden de cambio: se lee tachado y en gris. Que
   // siga a la vista es el punto — alguien tiene que poder ver que ese trabajo
   // estaba y ya no está, sin ir a buscar la orden.
@@ -28,6 +28,21 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = n
       <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         title={fuera ? `${r.descripcion} — sacado del contrato por una orden de cambio` : r.descripcion}>
         <span style={{ color: colors.muted, marginRight: 6 }}>{r.numero}</span>{r.descripcion}
+        {/* LO QUE ESTE RUBRO DEJÓ, O COSTÓ DE MÁS.
+            El beneficio se carga en su propia pestaña, pero la pregunta "¿este
+            rubro nos está dejando algo?" se hace acá, mirando el control. Ir a
+            otra pantalla a buscarla es no hacérsela. */}
+        {Math.abs(beneficio) > 0.009 && (
+          <span title={beneficio > 0
+            ? `Se compró $${fmt(beneficio)} por debajo de lo presupuestado en este rubro`
+            : `Se pasó $${fmt(-beneficio)} del presupuesto de este rubro`}
+            style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, padding: "1px 5px", borderRadius: 9,
+              whiteSpace: "nowrap",
+              color: beneficio > 0 ? colors.success : colors.danger,
+              background: beneficio > 0 ? colors.successSoft : colors.dangerSoft }}>
+            {beneficio > 0 ? "+" : "−"}${fmt(Math.abs(beneficio))}
+          </span>
+        )}
       </span>
       <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{r.unidad}</span>
       <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{fmt(r.cantidad)}</span>
@@ -124,7 +139,19 @@ function Gastos({ gastos, sangria }) {
 }
 
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null,
-  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [], onAvance = null }) {
+  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [], onAvance = null, beneficios = [] }) {
+  // EL BENEFICIO, PEGADO AL RUBRO.
+  //
+  // Vive en su propia pestaña porque ahí se carga, pero la pregunta "¿este
+  // rubro nos está dejando algo?" se hace acá, mirando el control: ir a otra
+  // pantalla a buscarla es no hacerse la pregunta. Una marca verde o roja al
+  // lado del renglón alcanza; el detalle está en Beneficios.
+  const beneficioDe = {};
+  (beneficios || []).forEach(b => {
+    if (!b.obra_rubro_id) return;
+    const d = (Number(b.presupuestado) || 0) - (Number(b.real) || 0);
+    beneficioDe[b.obra_rubro_id] = Math.round(((beneficioDe[b.obra_rubro_id] || 0) + d) * 100) / 100;
+  });
   // Qué renglón está abierto mostrando sus gastos. Uno a la vez: abrir varios
   // llena la pantalla de listas y se pierde la tabla, que es lo que se vino a
   // mirar.
@@ -260,6 +287,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <div key={r.id} onClick={() => setVerGastos(v => (v === `r${r.id}` ? null : `r${r.id}`))}
                     style={{ cursor: "pointer" }} title="Ver de qué gastos está hecho este número">
                     <FilaRubro rubro={r} porRubro={porRubro} sangria={14} onAvance={onAvance}
+                      beneficio={beneficioDe[r.id] || 0}
                       comprometido={comprometido?.porRubro?.[r.id] || 0} />
                     {verGastos === `r${r.id}` && (
                       <Gastos sangria={14}
