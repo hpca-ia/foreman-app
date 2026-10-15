@@ -382,7 +382,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             </Suspense>
           )}
 
-          {tab === "beneficios" && <PanelBeneficios rubros={rubros} />}
+          {tab === "beneficios" && <PanelBeneficios obra={obra} rubros={rubros} currentUser={currentUser} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
