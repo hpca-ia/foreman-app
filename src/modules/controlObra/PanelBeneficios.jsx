@@ -7,7 +7,7 @@ import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto } from "./beneficios";
-import { comprimirImagen } from "../../lib/imagenes";
+import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 
 // Lo que cotizan hoy contra lo que se presupuestó.
 //
@@ -74,6 +74,9 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
       // antemano porque cada proveedor arma la suya—.
       const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file.name || "");
       const texto = esHoja ? await hojaComoTexto(file) : null;
+      // Antes de hacer esperar a nadie por un viaje que ya sabemos que falla.
+      const pesa = noEntraElArchivo(b64, file);
+      if (pesa) throw new Error(pesa);
       const lista = vivos.slice(0, 220).map(x => `${x.id}:${x.descripcion.slice(0, 60)}`).join(" | ");
 
       const res = await fetch("/api/nova", {

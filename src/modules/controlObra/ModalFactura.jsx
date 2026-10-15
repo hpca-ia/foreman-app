@@ -9,7 +9,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt, TIPOS_GASTO } from "./calculos";
 import { CLASES_DOC } from "./pagos";
 import { buscarDuplicados, hashArchivo } from "./duplicados";
-import { comprimirImagen } from "../../lib/imagenes";
+import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
 import { comprasSinFacturar, engancharFactura } from "../compras/compras";
@@ -154,6 +154,10 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
         r.readAsDataURL(file);
       });
       const esPdf = file.type === "application/pdf";
+      // El catch de abajo dice "NOVA no pudo leerla", que acá sería mentira:
+      // el archivo no llegó a salir. Cuando sabemos qué pasó, se dice.
+      const pesa = noEntraElArchivo(b64, file);
+      if (pesa) { setError(pesa); setLeyendo(false); return; }
       const listaRubros = rubros.slice(0, 220).map(r => `${r.id}:${r.descripcion.slice(0, 60)}`).join(" | ");
 
       const res = await fetch("/api/nova", {
@@ -208,7 +212,14 @@ Rubros: ${listaRubros}`,
           }],
         }),
       });
-      const data = await res.json();
+      // Si el servidor se cortó, lo que vuelve es una página de error en HTML:
+      // leerla como JSON da «Unexpected token 'A'...», que no le dice nada a
+      // nadie y parece que se rompió el programa entero.
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        setError(`El servidor se cortó leyendo la factura (${res.status}). Si el archivo es muy grande, mandá una foto en vez del PDF entero.`);
+        setLeyendo(false); return;
+      }
       const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
       const p = JSON.parse(txt);
       // Al editar, lo que ya está escrito manda: alguien pudo haberlo
