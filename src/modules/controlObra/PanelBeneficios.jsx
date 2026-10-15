@@ -7,6 +7,7 @@ import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto } from "./beneficios";
+import { FORMATO, interpretarRespuesta, partirHoja } from "./leerProforma.js";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 
 // Lo que cotizan hoy contra lo que se presupuestó.
@@ -27,6 +28,9 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const [items, setItems] = useState([]);
   const [proveedor, setProveedor] = useState("");
   const [leyendo, setLeyendo] = useState(false);
+  const [paso, setPaso] = useState("");
+  // Cuando NOVA se quedó sin espacio antes de terminar la proforma.
+  const [faltan, setFaltan] = useState("");
   const [error, setError] = useState("");
   // LO QUE YA SE GANÓ, GUARDADO. Antes la comparación se perdía al cerrar la
   // pantalla: servía para mirar una proforma y no para saber cómo va la obra.
@@ -52,7 +56,7 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
     let file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    setLeyendo(true); setError("");
+    setLeyendo(true); setError(""); setPaso(""); setFaltan("");
     try {
       // LA FOTO SE ACHICA ANTES DE MANDARLA.
       //
@@ -62,7 +66,8 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
       // error — "Unexpected token 'A'... is not valid JSON", que no significa
       // nada para quien está subiendo una proforma.
       if (/^image\//.test(file.type || "")) file = await comprimirImagen(file);
-      const b64 = /\.(xlsx|xlsm|xls)$/i.test(file.name || "") ? null : await new Promise(res => {
+      const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file.name || "");
+      const b64 = esHoja ? null : await new Promise(res => {
         const fr = new FileReader();
         fr.onload = () => res(fr.result.split(",")[1]);
         fr.readAsDataURL(file);
@@ -72,69 +77,90 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
       // un zip. Se abre acá, se vuelca como texto y el modelo encuentra las
       // columnas —que es lo que sabe hacer, y lo que nadie puede adivinar de
       // antemano porque cada proveedor arma la suya—.
-      const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file.name || "");
       const texto = esHoja ? await hojaComoTexto(file) : null;
       // Antes de hacer esperar a nadie por un viaje que ya sabemos que falla.
       const pesa = noEntraElArchivo(b64, file);
       if (pesa) throw new Error(pesa);
       const lista = vivos.slice(0, 220).map(x => `${x.id}:${x.descripcion.slice(0, 60)}`).join(" | ");
 
-      const res = await fetch("/api/nova", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: LECTURA, max_tokens: 4000,
-          system: `Eres NOVA. Lees proformas de proveedores de construcción en Ecuador y devuelves SOLO JSON, sin markdown:
+      const sistema = `Eres NOVA. Lees proformas de proveedores de construcción en Ecuador.
 
-{"proveedor":"","items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"rubro_id":null}]}
+${FORMATO}
 
-Una línea por cada renglón de la proforma. "monto" es lo que suma ESE renglón
-CON IVA incluido, porque se va a comparar contra el presupuesto de la obra, que
-está cargado con IVA: comparar un precio sin IVA contra uno con IVA inventaría
-un ahorro del 15% que no existe.
+"monto" es lo que suma ESE renglón CON IVA incluido, porque se va a comparar
+contra el presupuesto de la obra, que está cargado con IVA: comparar un precio
+sin IVA contra uno con IVA inventaría un ahorro del 15% que no existe.
 
-"rubro_id" es el rubro de la lista al que corresponde ese renglón, o null si no
-estás seguro. Null es una respuesta válida y es mejor que adivinar: acá se está
-midiendo si se compró mejor o peor que lo presupuestado, y un renglón comparado
-contra el rubro equivocado da un ahorro o un sobreprecio que no existe.
+"rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
+no estás seguro. El guion es una respuesta válida y es mejor que adivinar: acá
+se está midiendo si se compró mejor o peor que lo presupuestado, y un renglón
+comparado contra el rubro equivocado da un ahorro o un sobreprecio que no existe.
 
-Rubros de la obra: ${lista}`,
-          messages: [{
-            role: "user",
-            content: esHoja
-              ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${texto}\n\nExtrae los renglones. Solo JSON.` }]
-              : [
-                esPdf
-                  ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-                  : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
-                { type: "text", text: "Extrae los renglones de esta proforma. Solo JSON." },
-              ],
-          }],
-        }),
-      });
-      // Si el servidor se cortó devuelve una página de error, no JSON: hay
-      // que decirlo con palabras, no con el error de JavaScript.
-      const data = await res.json().catch(() => null);
-      if (!data) {
-        throw new Error(res.status === 413
-          ? "El archivo pesa demasiado para mandarlo. Sacale páginas al PDF, o mandá una foto en vez del PDF entero."
-          : `El servidor se cortó leyendo el archivo (${res.status}). Si es muy grande, probá con una parte.`);
+Rubros de la obra: ${lista}`;
+
+      // UNA PLANILLA LARGA SE LEE POR PARTES.
+      //
+      // Doscientos renglones no entran en una sola respuesta, y aunque entraran
+      // el servidor corta la función al minuto. De a sesenta filas cada viaje
+      // termina rápido y la planilla entra entera.
+      const bloques = esHoja ? partirHoja(texto, 60) : [null];
+      if (!bloques.length) throw new Error("La planilla no tiene filas con datos.");
+
+      const juntos = [];
+      let quien = "";
+      let cortado = false;
+      for (let i = 0; i < bloques.length; i++) {
+        setPaso(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
+        const res = await fetch("/api/nova", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: LECTURA, max_tokens: 3000, system: sistema,
+            messages: [{
+              role: "user",
+              content: esHoja
+                ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.` }]
+                : [
+                  esPdf
+                    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+                    : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+                  { type: "text", text: "Extrae los renglones de esta proforma." },
+                ],
+            }],
+          }),
+        });
+        // Si el servidor se cortó devuelve una página de error, no JSON: hay
+        // que decirlo con palabras, no con el error de JavaScript.
+        const data = await res.json().catch(() => null);
+        if (!data) {
+          if (res.status === 413) throw new Error("El archivo pesa demasiado para mandarlo. Sacale páginas al PDF, o mandá una foto en vez del PDF entero.");
+          if (res.status === 504) throw new Error("NOVA se demoró más de un minuto leyendo y el servidor la cortó. Si es un PDF de varias hojas, mandá solo las que tienen los precios.");
+          throw new Error(`El servidor se cortó leyendo el archivo (${res.status}). Si es muy grande, probá con una parte.`);
+        }
+        if (!res.ok || data?.error) throw new Error(data?.error?.message || data?.error || "NOVA no pudo leerla.");
+        const leido = interpretarRespuesta(textoDeNova(data) || "");
+        // SE QUEDÓ SIN ESPACIO ANTES DE TERMINAR.
+        //
+        // La última línea quedó a medio escribir, y un monto cortado —"48" de
+        // "48,90"— entra como un renglón que parece bueno. Se tira, y se dice
+        // que la proforma sigue: un renglón de menos se ve, un monto mal no.
+        if (data?.stop_reason === "max_tokens") {
+          leido.items.pop();
+          cortado = true;
+        }
+        if (leido.proveedor && !quien) quien = leido.proveedor;
+        juntos.push(...leido.items);
       }
-      if (!res.ok || data?.error) throw new Error(data?.error?.message || data?.error || "NOVA no pudo leerla.");
-      const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
-      const p = JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0] || txt);
-      setProveedor((p.proveedor || "").trim());
-      setItems((Array.isArray(p.items) ? p.items : [])
-        .filter(x => x && (x.descripcion || n(x.monto)))
-        .map((x, k) => ({
-          k,
-          descripcion: String(x.descripcion || "").trim().slice(0, 90),
-          cantidad: n(x.cantidad), unidad: String(x.unidad || "").slice(0, 10),
-          monto: Math.round(n(x.monto) * 100) / 100,
-          rubro_id: vivos.some(v => v.id === Number(x.rubro_id)) ? Number(x.rubro_id) : null,
-        })));
+
+      if (cortado) setFaltan(`Se leyeron ${juntos.length} renglones y la proforma seguía: NOVA se quedó sin espacio. Revisá el final contra el papel, o mandá las hojas que faltan aparte.`);
+      if (!juntos.length) throw new Error("NOVA no encontró renglones con precios en el archivo. Si es una foto, que se lean los números; si es un PDF escaneado, probá con una foto de la hoja de precios.");
+      setProveedor(quien);
+      setItems(juntos
+        .filter(x => x.descripcion || x.monto)
+        .map((x, k) => ({ ...x, k, rubro_id: vivos.some(v => v.id === x.rubro_id) ? x.rubro_id : null })));
     } catch (e2) {
       setError(e2.message);
     }
+    setPaso("");
     setLeyendo(false);
   }
 
@@ -218,7 +244,7 @@ Rubros de la obra: ${lista}`,
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: leyendo ? "wait" : "pointer",
           background: colors.brand, borderRadius: colors.radiusSm, padding: "8px 13px",
           fontSize: 12.5, fontWeight: 600, color: "#fff", fontFamily: colors.font }}>
-          <Upload size={13} /> {leyendo ? "NOVA está leyendo…" : "Subir una proforma (PDF, foto o Excel)"}
+          <Upload size={13} /> {leyendo ? (paso ? `NOVA está leyendo… ${paso}` : "NOVA está leyendo…") : "Subir una proforma (PDF, foto o Excel)"}
           <input type="file" accept="image/*,.pdf,.xlsx,.xlsm,.xls" onChange={leer} disabled={leyendo} style={{ display: "none" }} />
         </label>
         {proveedor && (
@@ -233,6 +259,7 @@ Rubros de la obra: ${lista}`,
       </div>
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}
+      {faltan && <div style={{ fontSize: 12, color: colors.warning, marginBottom: 10 }}>{faltan}</div>}
       {aviso && <div style={{ fontSize: 12, color: colors.success, marginBottom: 10 }}>{aviso}</div>}
 
       {items.length > 0 && (
