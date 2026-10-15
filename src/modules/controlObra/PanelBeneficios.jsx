@@ -6,7 +6,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
-import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto, guardarProforma, enlaceDeProforma } from "./beneficios";
+import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -44,11 +44,15 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const [ocupado, setOcupado] = useState(false);
   const [aMano, setAMano] = useState(null);
 
+  // Los enlaces a las proformas guardadas, firmados al cargar la pantalla.
+  const [enlaces, setEnlaces] = useState({});
+
   const cargar = useCallback(async () => {
     if (!obra?.id) return;
     const r = await beneficiosDe(obra.id);
     if (r.error) { setError(r.error); return; }
     setGuardados(r.beneficios);
+    setEnlaces(await enlacesDeProformas(r.beneficios));
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -611,16 +615,12 @@ Rubros de la obra: ${lista}`;
                   {/* EL PAPEL CON EL QUE SE HIZO LA CUENTA, a un clic del
                       número que sostiene. Tres meses después, cuando el
                       proveedor factura otra cosa, es lo único que queda. */}
-                  {b.archivo_path && (
-                    <button onClick={async () => {
-                      const url = await enlaceDeProforma(b);
-                      if (!url) { setError("La proforma guardada no se encontró en el depósito."); return; }
-                      window.open(url, "_blank", "noopener");
-                    }} title={`Ver la proforma: ${b.archivo_nombre || "archivo"}`}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: colors.brand,
-                        display: "flex", flexShrink: 0, padding: 0 }}>
+                  {b.archivo_path && enlaces[b.id] && (
+                    <a href={enlaces[b.id]} target="_blank" rel="noopener noreferrer"
+                      title={`Bajar la proforma: ${b.archivo_nombre || "archivo"}`}
+                      style={{ color: colors.brand, display: "flex", flexShrink: 0 }}>
                       <Paperclip size={13} />
-                    </button>
+                    </a>
                   )}
                   {esPrevisto(b) && (
                     <button onClick={async () => {

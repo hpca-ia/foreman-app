@@ -104,9 +104,29 @@ export async function guardarProforma(obraId, file) {
   return { path: ruta, nombre: file.name || limpio };
 }
 
-/** Un enlace temporal para abrir la proforma guardada: el depósito es privado. */
-export async function enlaceDeProforma(beneficio) {
-  if (!beneficio?.archivo_path) return null;
-  const mapa = await enlacesFirmados([{ id: beneficio.id, storage_path: beneficio.archivo_path }], BUCKET);
-  return mapa[beneficio.id] || null;
+/**
+ * Los enlaces para bajar las proformas guardadas, firmados de antemano.
+ *
+ * DE ANTEMANO Y NO AL HACER CLIC: una ventana que se abre DESPUÉS de esperar a
+ * un servidor ya no cuenta como "la abrió una persona", y Safari la bloquea sin
+ * decir nada. Lo que se ve es un clip que no hace nada. Con el enlace ya
+ * firmado el clip es un enlace de verdad: se abre, se baja, y se puede copiar
+ * con el botón derecho para mandárselo al proveedor.
+ *
+ * `&download=` es lo que hace que el archivo se BAJE en vez de abrirse adentro
+ * del navegador. El atributo `download` del enlace no sirve acá: el archivo
+ * viene de otro dominio y el navegador lo ignora.
+ */
+export async function enlacesDeProformas(beneficios = []) {
+  const conPapel = beneficios.filter(b => b?.archivo_path)
+    .map(b => ({ id: b.id, storage_path: b.archivo_path }));
+  if (!conPapel.length) return {};
+  const mapa = await enlacesFirmados(conPapel, BUCKET);
+  const nombres = new Map(beneficios.map(b => [b.id, b.archivo_nombre]));
+  const salida = {};
+  for (const [id, url] of Object.entries(mapa)) {
+    const nombre = nombres.get(Number(id)) || nombres.get(id);
+    salida[id] = nombre ? `${url}&download=${encodeURIComponent(nombre)}` : url;
+  }
+  return salida;
 }
