@@ -7,7 +7,8 @@ import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto } from "./beneficios";
-import { FORMATO, interpretarRespuesta, partirHoja } from "./leerProforma.js";
+import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
+import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 
 // Lo que cotizan hoy contra lo que se presupuestó.
@@ -52,6 +53,50 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const r = compararContraPresupuesto(items, rubros);
   const vivos = rubros.filter(x => !x.oculto && !x.anulado_por_oc);
 
+  // UN PEDIDO A NOVA, CON LOS ERRORES DICHOS EN CASTELLANO.
+  //
+  // Cuando la función se corta, lo que vuelve no es JSON sino la página de
+  // error del servidor. Leerla como datos da «Unexpected token 'A'...», que no
+  // le dice nada a nadie y parece que se rompió el programa entero.
+  async function pedirTexto(body) {
+    const res = await fetch("/api/nova", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      if (res.status === 413) throw new Error("El archivo pesa demasiado para mandarlo. Sacale páginas al PDF, o mandá una foto en vez del PDF entero.");
+      if (res.status === 504) throw new Error("NOVA se demoró más de un minuto leyendo y el servidor la cortó. Si es un PDF de varias hojas, mandá solo las que tienen los precios.");
+      throw new Error(`El servidor se cortó leyendo el archivo (${res.status}). Si es muy grande, probá con una parte.`);
+    }
+    if (!res.ok || data?.error) throw new Error(data?.error?.message || data?.error || "NOVA no pudo leerla.");
+    return { texto: textoDeNova(data) || "", cortado: data?.stop_reason === "max_tokens" };
+  }
+
+  /**
+   * A qué rubro va cada renglón, que es lo único que la planilla no dice.
+   *
+   * Se pregunta en corto —"3:44"— en vez de hacerle reescribir la proforma
+   * entera para agregarle una columna.
+   */
+  async function conRubros(renglones, lista) {
+    const salida = renglones.map(x => ({ ...x }));
+    const TANDA = 120;
+    for (let i = 0; i < salida.length; i += TANDA) {
+      if (salida.length > TANDA) setPaso(`emparejando ${i + 1}-${Math.min(i + TANDA, salida.length)} de ${salida.length}`);
+      const tanda = salida.slice(i, i + TANDA);
+      const { texto } = await pedirTexto({
+        model: LECTURA, max_tokens: 2000,
+        system: `${PROMPT_RUBROS}\n\nRubros de la obra: ${lista}`,
+        messages: [{ role: "user", content: tanda.map((x, k) => `${i + k}: ${x.descripcion}`).join("\n") }],
+      });
+      for (const [indice, id] of asignacionDeTexto(texto)) {
+        if (salida[indice]) salida[indice].rubro_id = id;
+      }
+    }
+    return salida;
+  }
+
   async function leer(e) {
     let file = e.target.files?.[0];
     e.target.value = "";
@@ -60,11 +105,9 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
     try {
       // LA FOTO SE ACHICA ANTES DE MANDARLA.
       //
-      // Una foto de teléfono pesa seis u ocho megas, y el pedido no puede
-      // pasar de cuatro y medio: lo rechaza el servidor antes de que el código
-      // llegue a correr, y lo que vuelve no es un error sino una página de
-      // error — "Unexpected token 'A'... is not valid JSON", que no significa
-      // nada para quien está subiendo una proforma.
+      // Una foto de teléfono pesa seis u ocho megas, y el pedido no puede pasar
+      // de cuatro y medio: lo rechaza el servidor antes de que el código llegue
+      // a correr, y lo que vuelve no es un error sino una página de error.
       if (/^image\//.test(file.type || "")) file = await comprimirImagen(file);
       const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file.name || "");
       const b64 = esHoja ? null : await new Promise(res => {
@@ -73,17 +116,35 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
         fr.readAsDataURL(file);
       });
       const esPdf = file.type === "application/pdf";
-      // UNA PLANILLA DE EXCEL NO SE LE PASA AL MODELO COMO ARCHIVO: adentro es
-      // un zip. Se abre acá, se vuelca como texto y el modelo encuentra las
-      // columnas —que es lo que sabe hacer, y lo que nadie puede adivinar de
-      // antemano porque cada proveedor arma la suya—.
-      const texto = esHoja ? await hojaComoTexto(file) : null;
       // Antes de hacer esperar a nadie por un viaje que ya sabemos que falla.
       const pesa = noEntraElArchivo(b64, file);
       if (pesa) throw new Error(pesa);
       const lista = vivos.slice(0, 220).map(x => `${x.id}:${x.descripcion.slice(0, 60)}`).join(" | ");
 
-      const sistema = `Eres NOVA. Lees proformas de proveedores de construcción en Ecuador.
+      // UNA PLANILLA NO SE TRANSCRIBE: SE LEE.
+      //
+      // Es lo que hace el importador de presupuestos desde siempre, y por eso
+      // nunca se corta. A NOVA se le pide que diga cuál columna es cuál —cuatro
+      // números— y las filas las lee el código, que no se queda sin espacio ni
+      // se equivoca copiando un monto. Lo único que la planilla no dice es a qué
+      // rubro de la obra va cada renglón, y eso se pregunta aparte y en corto.
+      let renglones = null, quien = "";
+      if (esHoja) {
+        setPaso("reconociendo las columnas");
+        try {
+          const { filas, mapa, datos } = await reconocerExcel(file);
+          const leidos = renglonesDeHoja(filas, mapa);
+          if (leidos.length) { renglones = leidos; quien = String(datos?.emisor || "").trim(); }
+        } catch (err) { void err; } // si no se reconocen las columnas, se lee como texto
+      }
+
+      let juntos = [];
+      let cortado = false;
+
+      if (renglones) {
+        juntos = await conRubros(renglones, lista);
+      } else {
+        const sistema = `Eres NOVA. Lees proformas de proveedores de construcción en Ecuador.
 
 ${FORMATO}
 
@@ -98,22 +159,16 @@ comparado contra el rubro equivocado da un ahorro o un sobreprecio que no existe
 
 Rubros de la obra: ${lista}`;
 
-      // UNA PLANILLA LARGA SE LEE POR PARTES.
-      //
-      // Doscientos renglones no entran en una sola respuesta, y aunque entraran
-      // el servidor corta la función al minuto. De a sesenta filas cada viaje
-      // termina rápido y la planilla entra entera.
-      const bloques = esHoja ? partirHoja(texto, 60) : [null];
-      if (!bloques.length) throw new Error("La planilla no tiene filas con datos.");
+        // UNA PLANILLA DE EXCEL NO SE LE PASA AL MODELO COMO ARCHIVO: adentro
+        // es un zip. Se vuelca como texto, y si es larga va por partes: el
+        // modelo tiene un techo de escritura y la función uno de tiempo.
+        const texto = esHoja ? await hojaComoTexto(file) : null;
+        const bloques = esHoja ? partirHoja(texto, 60) : [null];
+        if (!bloques.length) throw new Error("La planilla no tiene filas con datos.");
 
-      const juntos = [];
-      let quien = "";
-      let cortado = false;
-      for (let i = 0; i < bloques.length; i++) {
-        setPaso(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
-        const res = await fetch("/api/nova", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        for (let i = 0; i < bloques.length; i++) {
+          setPaso(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
+          const { texto: salida, cortado: seCorto } = await pedirTexto({
             model: LECTURA, max_tokens: 3000, system: sistema,
             messages: [{
               role: "user",
@@ -126,29 +181,16 @@ Rubros de la obra: ${lista}`;
                   { type: "text", text: "Extrae los renglones de esta proforma." },
                 ],
             }],
-          }),
-        });
-        // Si el servidor se cortó devuelve una página de error, no JSON: hay
-        // que decirlo con palabras, no con el error de JavaScript.
-        const data = await res.json().catch(() => null);
-        if (!data) {
-          if (res.status === 413) throw new Error("El archivo pesa demasiado para mandarlo. Sacale páginas al PDF, o mandá una foto en vez del PDF entero.");
-          if (res.status === 504) throw new Error("NOVA se demoró más de un minuto leyendo y el servidor la cortó. Si es un PDF de varias hojas, mandá solo las que tienen los precios.");
-          throw new Error(`El servidor se cortó leyendo el archivo (${res.status}). Si es muy grande, probá con una parte.`);
+          });
+          const leido = interpretarRespuesta(salida);
+          // SE QUEDÓ SIN ESPACIO ANTES DE TERMINAR. La última línea quedó a
+          // medio escribir, y un monto cortado —"48" de "48,90"— entra como un
+          // renglón que parece bueno. Se tira: un renglón de menos se ve, un
+          // monto mal no.
+          if (seCorto) { leido.items.pop(); cortado = true; }
+          if (leido.proveedor && !quien) quien = leido.proveedor;
+          juntos.push(...leido.items);
         }
-        if (!res.ok || data?.error) throw new Error(data?.error?.message || data?.error || "NOVA no pudo leerla.");
-        const leido = interpretarRespuesta(textoDeNova(data) || "");
-        // SE QUEDÓ SIN ESPACIO ANTES DE TERMINAR.
-        //
-        // La última línea quedó a medio escribir, y un monto cortado —"48" de
-        // "48,90"— entra como un renglón que parece bueno. Se tira, y se dice
-        // que la proforma sigue: un renglón de menos se ve, un monto mal no.
-        if (data?.stop_reason === "max_tokens") {
-          leido.items.pop();
-          cortado = true;
-        }
-        if (leido.proveedor && !quien) quien = leido.proveedor;
-        juntos.push(...leido.items);
       }
 
       if (cortado) setFaltan(`Se leyeron ${juntos.length} renglones y la proforma seguía: NOVA se quedó sin espacio. Revisá el final contra el papel, o mandá las hojas que faltan aparte.`);

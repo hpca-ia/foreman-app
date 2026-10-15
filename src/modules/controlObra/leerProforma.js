@@ -113,3 +113,70 @@ export function partirHoja(texto = "", filas = 60) {
   }
   return bloques;
 }
+
+// UNA PLANILLA NO SE TRANSCRIBE: SE LEE.
+//
+// Es lo que hace el importador de presupuestos desde siempre, y por eso nunca
+// se corta. A NOVA no se le pide que copie trescientas filas —eso es escribir,
+// y escribir es lo que tarda— sino que diga cuál columna es la descripción,
+// cuál la cantidad y cuál el total. Eso son cuatro números. Las trescientas
+// filas las lee el código, que no se cansa, no se queda sin espacio y no se
+// equivoca al copiar un monto.
+//
+// Para una proforma vale igual: las columnas las reconoce NOVA una vez, los
+// renglones salen de la planilla tal como están.
+
+const TOTALES = /^\s*(sub\s*-?\s*total|total|son[:\s]|iva\b|i\.v\.a|descuento|anticipo|forma de pago|observaciones|nota)/i;
+
+export function renglonesDeHoja(filas = [], mapa = {}) {
+  const cD = mapa.col_descripcion, cC = mapa.col_cantidad, cU = mapa.col_unidad, cT = mapa.col_total;
+  if (cD == null || cT == null) return [];
+  const desde = Number(mapa.fila_encabezado ?? 0) + 1;
+  const items = [];
+  for (let i = desde; i < filas.length; i++) {
+    const f = filas[i] || [];
+    const descripcion = String(f[cD] ?? "").trim();
+    const monto = Math.round(num(f[cT]) * 100) / 100;
+    // Sin descripción o sin monto es una fila vacía, un título de capítulo o
+    // una línea de separación. No es un renglón que se compre.
+    if (!descripcion || !monto) continue;
+    // Un subtotal tiene monto y parece un renglón. Sumarlo contaría la
+    // proforma dos veces, y el beneficio saldría del doble de lo que es.
+    if (TOTALES.test(descripcion)) continue;
+    items.push({
+      descripcion: descripcion.slice(0, 90),
+      cantidad: num(cC == null ? 0 : f[cC]),
+      unidad: String(cU == null ? "" : (f[cU] ?? "")).trim().slice(0, 10),
+      monto,
+      rubro_id: null,
+    });
+  }
+  return items;
+}
+
+/**
+ * A qué rubro va cada renglón, que es lo único que la planilla no dice.
+ *
+ * Se pregunta aparte y en corto —"3:44", cinco tokens— en vez de hacerle
+ * reescribir la proforma entera para agregarle una columna.
+ */
+export const PROMPT_RUBROS = `Para cada renglón numerado, decí a qué rubro del presupuesto corresponde.
+
+Contestá una línea por renglón, sin JSON y sin explicaciones:
+
+número:rubro_id
+
+Si no estás seguro, poné un guion: número:-
+El guion es una respuesta válida y es mejor que adivinar: acá se mide si se
+compró mejor o peor que lo presupuestado, y un renglón comparado contra el rubro
+equivocado inventa un ahorro o un sobreprecio que no existe.`;
+
+export function asignacionDeTexto(txt = "") {
+  const mapa = new Map();
+  for (const linea of String(txt).split("\n")) {
+    const m = linea.trim().match(/^(\d+)\s*[:=]\s*(\d+|-)/);
+    if (!m) continue;
+    if (m[2] !== "-") mapa.set(Number(m[1]), Number(m[2]));
+  }
+  return mapa;
+}

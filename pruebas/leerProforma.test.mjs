@@ -72,3 +72,49 @@ test("una planilla larga va por partes, y los títulos van en todas", () => {
   const total = bloques.flatMap(b => renglonesDeTexto(b).items).filter(x => /^material /.test(x.descripcion));
   assert.equal(new Set(total.map(x => x.descripcion)).size, 137);
 });
+
+// UNA PLANILLA NO SE TRANSCRIBE: SE LEE. NOVA dice cuál columna es cuál —cuatro
+// números— y las filas las lee el código, que no se queda sin espacio.
+import { renglonesDeHoja, asignacionDeTexto } from "../src/modules/controlObra/leerProforma.js";
+
+const MAPA = { fila_encabezado: 1, col_descripcion: 0, col_cantidad: 1, col_unidad: 2, col_total: 3 };
+const HOJA = [
+  ["PROFORMA 0012", "", "", ""],
+  ["DESCRIPCIÓN", "CANT", "UNIDAD", "TOTAL"],
+  ["Cemento Holcim 50kg", "120", "sacos", "1.020,00"],
+  ["", "", "", ""],
+  ["CAPÍTULO 2 — HIERRO", "", "", ""],
+  ["Varilla corrugada 12mm", "80", "u", "960,50"],
+  ["SUBTOTAL", "", "", "1980,50"],
+  ["IVA 15%", "", "", "297,08"],
+  ["TOTAL", "", "", "2277,58"],
+];
+
+test("las filas de la planilla se leen sin pasar por el modelo", () => {
+  const r = renglonesDeHoja(HOJA, MAPA);
+  assert.equal(r.length, 2);
+  assert.equal(r[0].descripcion, "Cemento Holcim 50kg");
+  assert.equal(r[0].monto, 1020);
+  assert.equal(r[1].monto, 960.5);
+});
+
+// Sumar un subtotal contaría la proforma dos veces y el beneficio saldría del
+// doble de lo que es.
+test("los subtotales, el IVA y el total no son renglones", () => {
+  const r = renglonesDeHoja(HOJA, MAPA);
+  assert.equal(r.some(x => /total|iva/i.test(x.descripcion)), false);
+  assert.equal(r.reduce((t, x) => t + x.monto, 0), 1980.5);
+});
+
+test("sin columnas reconocidas no se inventa nada", () => {
+  assert.deepEqual(renglonesDeHoja(HOJA, { fila_encabezado: 1 }), []);
+  assert.deepEqual(renglonesDeHoja([], MAPA), []);
+});
+
+test("el emparejamiento vuelve en corto y el guion no asigna", () => {
+  const m = asignacionDeTexto("0:44\n1:-\n2: 19\nno entiendo esta línea\n3:7");
+  assert.equal(m.get(0), 44);
+  assert.equal(m.has(1), false);
+  assert.equal(m.get(2), 19);
+  assert.equal(m.get(3), 7);
+});
