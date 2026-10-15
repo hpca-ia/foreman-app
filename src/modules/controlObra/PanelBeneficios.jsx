@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Upload, Sparkles, TrendingUp, TrendingDown, Plus, Trash2, Check } from "lucide-react";
+import { Upload, Sparkles, TrendingUp, TrendingDown, Plus, Trash2, Check, X, Paperclip } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
-import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto } from "./beneficios";
+import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto, guardarProforma, enlaceDeProforma } from "./beneficios";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -32,6 +32,10 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const [paso, setPaso] = useState("");
   // Cuando NOVA se quedó sin espacio antes de terminar la proforma.
   const [faltan, setFaltan] = useState("");
+  // EL PAPEL CON EL QUE SE HIZO LA CUENTA. Se guarda recién al guardar los
+  // beneficios: una proforma que se miró y se descartó no deja basura en el
+  // depósito, y la que sostiene un número queda guardada tal como vino.
+  const [archivo, setArchivo] = useState(null);
   const [error, setError] = useState("");
   // LO QUE YA SE GANÓ, GUARDADO. Antes la comparación se perdía al cerrar la
   // pantalla: servía para mirar una proforma y no para saber cómo va la obra.
@@ -51,6 +55,9 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const t = totales(guardados);
 
   const r = compararContraPresupuesto(items, rubros);
+  // Renglones sin precio: títulos de sección, opcionales, notas al pie que
+  // el lector tomó por material. No son un beneficio de nada.
+  const enCero = items.filter(x => !n(x.monto)).length;
   const vivos = rubros.filter(x => !x.oculto && !x.anulado_por_oc);
 
   // UN PEDIDO A NOVA, CON LOS ERRORES DICHOS EN CASTELLANO.
@@ -101,7 +108,7 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
     let file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    setLeyendo(true); setError(""); setPaso(""); setFaltan("");
+    setLeyendo(true); setError(""); setPaso(""); setFaltan(""); setArchivo(null);
     try {
       // LA FOTO SE ACHICA ANTES DE MANDARLA.
       //
@@ -196,6 +203,7 @@ Rubros de la obra: ${lista}`;
       if (cortado) setFaltan(`Se leyeron ${juntos.length} renglones y la proforma seguía: NOVA se quedó sin espacio. Revisá el final contra el papel, o mandá las hojas que faltan aparte.`);
       if (!juntos.length) throw new Error("NOVA no encontró renglones con precios en el archivo. Si es una foto, que se lean los números; si es un PDF escaneado, probá con una foto de la hoja de precios.");
       setProveedor(quien);
+      setArchivo(file);
       setItems(juntos
         .filter(x => x.descripcion || x.monto)
         .map((x, k) => ({ ...x, k, rubro_id: vivos.some(v => v.id === x.rubro_id) ? x.rubro_id : null })));
@@ -221,11 +229,23 @@ Rubros de la obra: ${lista}`;
     const van = r.lineas.filter(l => l.presupuestado != null);
     if (!van.length) { setError("Ningún renglón tiene rubro: no hay nada que comparar todavía."); return; }
     setOcupado(true); setError(""); setAviso("");
+
+    // Primero el papel. Si el depósito falla no se pierde el trabajo: se
+    // guardan igual los números y se dice que el archivo no quedó, que es algo
+    // que se puede volver a subir. Al revés —perder la carga por un archivo—
+    // sería cambiar un problema chico por uno grande.
+    let papel = {};
+    if (archivo) {
+      setAviso("Guardando la proforma…");
+      papel = await guardarProforma(obra.id, archivo);
+    }
+
     const res = await guardarVarios(van.map(l => ({
       obra_id: obra.id, obra_rubro_id: l.rubro_id ?? null,
       descripcion: l.descripcion, cantidad: n(l.cantidad) || null, unidad: l.unidad || null,
       presupuestado: n(l.presupuestado), real: n(l.cotizado),
       proveedor: proveedor || null, origen: "proforma",
+      archivo_path: papel.path || null, archivo_nombre: papel.nombre || null,
       // LO QUE SALE DE UNA PROFORMA NACE PREVISTO. Una proforma dice lo que va
       // a costar, no lo que costó: entre que el proveedor cotiza y la factura
       // llega se cae la mitad. Se confirma de a uno cuando la compra se cierra.
@@ -234,9 +254,11 @@ Rubros de la obra: ${lista}`;
     })));
     setOcupado(false);
     if (res.error) { setError(res.error); return; }
-    setItems([]); setProveedor("");
+    setItems([]); setProveedor(""); setArchivo(null);
     await cargar();
-    setAviso(`${res.guardados} ${res.guardados === 1 ? "beneficio guardado" : "beneficios guardados"}. Ya suman al total de la obra.`);
+    setAviso(`${res.guardados} ${res.guardados === 1 ? "beneficio guardado" : "beneficios guardados"}.`
+      + (papel.path ? " La proforma queda guardada como respaldo." : ""));
+    if (papel.error) setFaltan(`Los beneficios se guardaron, pero la proforma no se pudo guardar como respaldo: ${papel.error}`);
   }
 
   async function guardarAMano() {
@@ -294,7 +316,7 @@ Rubros de la obra: ${lista}`;
             style={{ ...inputStyle, width: 240, padding: "7px 10px", fontSize: 12.5 }} />
         )}
         {items.length > 0 && (
-          <button onClick={() => { setItems([]); setProveedor(""); }}
+          <button onClick={() => { setItems([]); setProveedor(""); setArchivo(null); }}
             style={{ background: "none", border: "none", color: colors.muted, fontSize: 11.5,
               cursor: "pointer", fontFamily: colors.font }}>empezar de nuevo</button>
         )}
@@ -332,27 +354,75 @@ Rubros de la obra: ${lista}`;
               padding: "8px 11px", marginBottom: 10, lineHeight: 1.5 }}>
               Hay <strong>{r.sinRubro}</strong> {r.sinRubro === 1 ? "renglón" : "renglones"} sin emparejar con un
               rubro. No entran en ningún total: un beneficio calculado sobre la mitad de la proforma no es un
-              beneficio. Elegiles el rubro abajo.
+              beneficio. Elegiles el rubro abajo, o sacalos de la comparación.
+            </div>
+          )}
+
+          {/* SOLO SE COMPARA LO MISMO CONTRA LO MISMO. Con la misma cantidad,
+              el total contra el total. Con cantidades distintas lo único
+              comparable es el precio unitario: el rubro son 120 varillas y la
+              proforma cotiza 80, y los dos totales uno al lado del otro dirían
+              que se ahorró un tercio cuando lo que pasó es que se compró menos
+              material. */}
+          {r.porUnitario > 0 && (
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 10, lineHeight: 1.5 }}>
+              En <strong>{r.porUnitario}</strong> {r.porUnitario === 1 ? "renglón" : "renglones"} la cantidad de la
+              proforma no es la del presupuesto, así que ahí se compara el <strong>precio unitario</strong> y la
+              diferencia se mide sobre lo que de verdad se está comprando. Comparar los totales diría que se ahorró
+              cuando lo que cambió es cuánto material se compra.
+            </div>
+          )}
+
+          {/* QUITAR DE A MUCHOS. Una proforma trae renglones en cero —títulos,
+              opcionales, cosas sin precio— y cosas que esta obra no tiene
+              presupuestadas. Sacarlos de a uno con la X es la mitad de la
+              tarde cuando son treinta. */}
+          {(enCero > 0 || r.sinRubro > 0) && (
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 9 }}>
+              {enCero > 0 && (
+                <button onClick={() => setItems(xs => xs.filter(x => n(x.monto)))}
+                  style={{ background: "none", border: "none", padding: 0, color: colors.muted,
+                    fontSize: 11.5, cursor: "pointer", fontFamily: colors.font, textDecoration: "underline" }}>
+                  quitar los {enCero} que están en $0
+                </button>
+              )}
+              {r.sinRubro > 0 && (
+                <button onClick={() => setItems(xs => xs.filter(x => vivos.some(v => v.id === Number(x.rubro_id))))}
+                  style={{ background: "none", border: "none", padding: 0, color: colors.muted,
+                    fontSize: 11.5, cursor: "pointer", fontFamily: colors.font, textDecoration: "underline" }}>
+                  quitar los {r.sinRubro} que no están en el presupuesto
+                </button>
+              )}
             </div>
           )}
 
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
             borderRadius: colors.radiusMd, overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1.3fr 90px 90px 100px", gap: 8,
+            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1.3fr 90px 90px 100px 24px", gap: 8,
               padding: "8px 12px", background: colors.bg, fontSize: 9.5, fontWeight: 700,
               color: colors.muted, letterSpacing: 0.3 }}>
               <span>RENGLÓN DE LA PROFORMA</span><span>RUBRO DEL PRESUPUESTO</span>
               <span style={{ textAlign: "right" }}>PRESUPUESTO</span>
               <span style={{ textAlign: "right" }}>COTIZADO</span>
               <span style={{ textAlign: "right" }}>DIFERENCIA</span>
+              <span />
             </div>
             {r.lineas.map((l, i) => (
-              <div key={l.k} style={{ display: "grid", gridTemplateColumns: "1.3fr 1.3fr 90px 90px 100px", gap: 8,
+              <div key={l.k} style={{ display: "grid", gridTemplateColumns: "1.3fr 1.3fr 90px 90px 100px 24px", gap: 8,
                 padding: "7px 12px", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center", fontSize: 11.5 }}>
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   color: colors.ink }} title={l.descripcion}>
                   {l.descripcion}
                   {l.cantidad ? <span style={{ color: colors.muted }}> · {l.cantidad} {l.unidad}</span> : null}
+                  {/* LAS CANTIDADES NO SON LAS MISMAS. Hay que decirlo donde se
+                      mira el renglón: el número de la derecha salió de comparar
+                      precios unitarios, no totales, y son dos cuentas
+                      distintas aunque se vean iguales. */}
+                  {l.porUnitario && (
+                    <span style={{ display: "block", fontSize: 9.5, color: colors.warning }}>
+                      el rubro son {l.cantidadRubro} {l.unidadRubro} · se compara el precio unitario
+                    </span>
+                  )}
                 </span>
                 <select value={l.rubro_id ?? ""}
                   onChange={e => setItems(xs => xs.map((x, j) => j === i
@@ -366,10 +436,22 @@ Rubros de la obra: ${lista}`;
                 </select>
                 <span style={{ textAlign: "right", color: colors.muted }}>
                   {l.presupuestado == null ? "—" : `$${fmt(l.presupuestado)}`}
+                  {l.porUnitario && (
+                    <span style={{ display: "block", fontSize: 9.5 }}>
+                      ${fmt(l.puRubro)} × {l.cantidad}
+                    </span>
+                  )}
                 </span>
-                <input type="number" step="0.01" value={l.monto}
-                  onChange={e => setItems(xs => xs.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
-                  style={{ ...inputStyle, padding: "4px 6px", fontSize: 11.5, textAlign: "right" }} />
+                <div>
+                  <input type="number" step="0.01" value={l.monto}
+                    onChange={e => setItems(xs => xs.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
+                    style={{ ...inputStyle, padding: "4px 6px", fontSize: 11.5, textAlign: "right", width: "100%" }} />
+                  {l.porUnitario && (
+                    <span style={{ display: "block", fontSize: 9.5, color: colors.muted, textAlign: "right" }}>
+                      ${fmt(l.puProforma)} × {l.cantidad}
+                    </span>
+                  )}
+                </div>
                 <span style={{ textAlign: "right", fontWeight: 700,
                   color: l.diferencia == null ? colors.muted : l.diferencia >= 0 ? colors.success : colors.danger }}>
                   {l.diferencia == null ? "—"
@@ -380,6 +462,16 @@ Rubros de la obra: ${lista}`;
                     </span>
                   )}
                 </span>
+                {/* QUITAR EL RENGLÓN. Una proforma trae cosas que no son de
+                    esta obra, renglones en cero y notas al pie que el lector
+                    tomó por material. Si no se pueden sacar, estorban en la
+                    pantalla y ensucian el total guardado. */}
+                <button onClick={() => setItems(xs => xs.filter((_, j) => j !== i))}
+                  title="Sacar este renglón de la comparación"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+                    display: "flex", padding: 0 }}>
+                  <X size={13} />
+                </button>
               </div>
             ))}
           </div>
@@ -516,6 +608,20 @@ Rubros de la obra: ${lista}`;
                     color: dif >= 0 ? colors.success : colors.danger }}>
                     {dif >= 0 ? "+" : "−"}${fmt(Math.abs(dif))}
                   </div>
+                  {/* EL PAPEL CON EL QUE SE HIZO LA CUENTA, a un clic del
+                      número que sostiene. Tres meses después, cuando el
+                      proveedor factura otra cosa, es lo único que queda. */}
+                  {b.archivo_path && (
+                    <button onClick={async () => {
+                      const url = await enlaceDeProforma(b);
+                      if (!url) { setError("La proforma guardada no se encontró en el depósito."); return; }
+                      window.open(url, "_blank", "noopener");
+                    }} title={`Ver la proforma: ${b.archivo_nombre || "archivo"}`}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: colors.brand,
+                        display: "flex", flexShrink: 0, padding: 0 }}>
+                      <Paperclip size={13} />
+                    </button>
+                  )}
                   {esPrevisto(b) && (
                     <button onClick={async () => {
                       const r2 = await guardarBeneficio({ id: b.id, estado: "confirmado", confirmado_at: new Date().toISOString() });

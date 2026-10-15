@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { enlacesFirmados } from "../../lib/enlacesFirmados";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son justo lo que no puede estar mal.
 export { totales, esPrevisto, netoPorRubro } from "./cuentaBeneficios.js";
@@ -79,4 +80,33 @@ export async function hojaComoTexto(file, maxFilas = 300) {
     });
   });
   return lineas.join("\n");
+}
+
+// EL PAPEL CON EL QUE SE HIZO LA CUENTA.
+//
+// Un beneficio es una afirmación sobre plata: "esto se compró $400 abajo de lo
+// presupuestado". Tres meses después, cuando el proveedor factura otra cosa o
+// dice que esa proforma nunca existió, lo único que la sostiene es el archivo
+// con el que se hizo la cuenta.
+//
+// Se guarda tal como se subió —el Excel, el PDF, la foto— y no una
+// interpretación: lo que se discute con el proveedor es su papel, no nuestra
+// lectura de su papel.
+
+const BUCKET = "task-files";
+
+export async function guardarProforma(obraId, file) {
+  if (!file) return {};
+  const limpio = String(file.name || "proforma").replace(/[^\w.-]+/g, "_").slice(-60);
+  const ruta = `beneficios/${obraId}/${Date.now()}-${limpio}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(ruta, file, { upsert: false });
+  if (error) return { error: error.message };
+  return { path: ruta, nombre: file.name || limpio };
+}
+
+/** Un enlace temporal para abrir la proforma guardada: el depósito es privado. */
+export async function enlaceDeProforma(beneficio) {
+  if (!beneficio?.archivo_path) return null;
+  const mapa = await enlacesFirmados([{ id: beneficio.id, storage_path: beneficio.archivo_path }], BUCKET);
+  return mapa[beneficio.id] || null;
 }

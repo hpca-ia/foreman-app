@@ -34,13 +34,42 @@ export function compararContraPresupuesto(items = [], rubros = []) {
     // Contra el presupuesto del rubro CON IVA, que es como está cargado el
     // control: comparar una proforma sin IVA contra un presupuesto con IVA
     // inventaría un ahorro del 15% que no existe.
-    const presupuestado = r ? centavos(r.total_base) : null;
+    const delRubro = r ? centavos(r.total_base) : null;
+
+    // SOLO SE COMPARA LO MISMO CONTRA LO MISMO.
+    //
+    // El rubro son 120 varillas y la proforma cotiza 80. Los dos totales
+    // puestos uno al lado del otro dicen "se ahorró un tercio", y no se ahorró
+    // nada: se compró menos material. El mismo error al revés —la proforma trae
+    // de más— inventa un sobreprecio y hace que una compra buena parezca mala.
+    //
+    // Con la misma cantidad, el total contra el total: esa diferencia es
+    // beneficio de verdad. Con cantidades distintas, lo único comparable es el
+    // precio unitario, y la diferencia se mide sobre lo que de verdad se está
+    // comprando.
+    const cantRubro = n(r?.cantidad);
+    const cantProforma = n(it.cantidad);
+    const puRubro = cantRubro && delRubro != null ? delRubro / cantRubro : null;
+    const puProforma = cantProforma ? cotizado / cantProforma : null;
+    const porUnitario = !!(puRubro != null && cantProforma
+      && Math.abs(cantProforma - cantRubro) / cantRubro > 0.01);
+
+    const presupuestado = delRubro == null ? null
+      : porUnitario ? centavos(puRubro * cantProforma) : delRubro;
     const diferencia = presupuestado == null ? null : centavos(presupuestado - cotizado);
     return {
       ...it,
       rubro: r || null,
       cotizado,
       presupuestado,
+      // Lo que el rubro tiene presupuestado entero, aunque se compare una parte.
+      delRubro,
+      cantidadRubro: cantRubro || null,
+      unidadRubro: r?.unidad || "",
+      puRubro: puRubro == null ? null : Math.round(puRubro * 10000) / 10000,
+      puProforma: puProforma == null ? null : Math.round(puProforma * 10000) / 10000,
+      // Las cantidades no coinciden: se comparó el precio unitario.
+      porUnitario,
       // Positivo es a favor: se compra por menos de lo presupuestado.
       diferencia,
       pct: presupuestado ? Math.round((diferencia / presupuestado) * 1000) / 10 : null,
@@ -57,6 +86,9 @@ export function compararContraPresupuesto(items = [], rubros = []) {
     // cuentan en ningún total, y hay que decir cuántos son: un beneficio
     // calculado sobre la mitad de la proforma no es un beneficio.
     sinRubro: lineas.filter(l => l.presupuestado == null).length,
+    // Cuántos se compararon por precio unitario porque las cantidades no son
+    // las mismas. Hay que decirlo: es otra cuenta, aunque dé un número igual.
+    porUnitario: lineas.filter(l => l.porUnitario).length,
     cotizado: centavos(conRubro.reduce((t, l) => t + l.cotizado, 0)),
     presupuestado: centavos(conRubro.reduce((t, l) => t + l.presupuestado, 0)),
     ahorro,

@@ -74,3 +74,51 @@ test("sin renglones no revienta", () => {
   assert.equal(r.neto, 0);
   assert.equal(r.sinRubro, 0);
 });
+
+// SOLO SE COMPARA LO MISMO CONTRA LO MISMO.
+//
+// Con la misma cantidad, el total contra el total: esa diferencia es beneficio
+// de verdad. Con cantidades distintas lo único comparable es el precio
+// unitario — si no, comprar menos material parece un ahorro.
+
+const conCantidad = [
+  { id: 1, descripcion: "Varilla 12mm", total_base: 1200, cantidad: 120, unidad: "u" },
+];
+
+test("misma cantidad, mejor precio: el beneficio es real y sale de los totales", () => {
+  const l = compararContraPresupuesto([{ monto: 960, cantidad: 120, rubro_id: 1 }], conCantidad).lineas[0];
+  assert.equal(l.porUnitario, false);
+  assert.equal(l.diferencia, 240);
+});
+
+test("menos cantidad al mismo precio unitario NO es un ahorro", () => {
+  // 80 varillas a los mismos $10 que presupuestó: no se ahorró nada, se compró
+  // menos material. Comparando totales habría dicho "+$400".
+  const l = compararContraPresupuesto([{ monto: 800, cantidad: 80, rubro_id: 1 }], conCantidad).lineas[0];
+  assert.equal(l.porUnitario, true);
+  assert.equal(l.diferencia, 0);
+});
+
+test("con cantidades distintas se compara el precio unitario", () => {
+  // 80 a $7 contra $10 presupuestado: se ahorran $3 en cada una de las 80.
+  const l = compararContraPresupuesto([{ monto: 560, cantidad: 80, rubro_id: 1 }], conCantidad).lineas[0];
+  assert.equal(l.puRubro, 10);
+  assert.equal(l.puProforma, 7);
+  assert.equal(l.diferencia, 240);
+  assert.equal(l.presupuestado, 800, "se compara contra lo que costarían 80, no 120");
+  assert.equal(l.delRubro, 1200, "pero el rubro entero sigue a la vista");
+});
+
+test("más cantidad que la presupuestada tampoco inventa un sobreprecio", () => {
+  // 150 a los mismos $10: por totales parecería que se pasó $300.
+  const r = compararContraPresupuesto([{ monto: 1500, cantidad: 150, rubro_id: 1 }], conCantidad);
+  assert.equal(r.lineas[0].diferencia, 0);
+  assert.equal(r.sobreprecio, 0);
+  assert.equal(r.porUnitario, 1);
+});
+
+test("sin cantidades se compara por totales, como siempre", () => {
+  const l = compararContraPresupuesto([{ monto: 900, rubro_id: 1 }], conCantidad).lineas[0];
+  assert.equal(l.porUnitario, false);
+  assert.equal(l.diferencia, 300);
+});
