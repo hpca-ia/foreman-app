@@ -4,6 +4,7 @@ import { BookOpen, ChevronLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import DiaDeObra from "./DiaDeObra";
+import LibroImpreso from "./LibroImpreso";
 import { diasDe, hoyEnObra, estadoDelDia } from "./libro";
 import { listaDeDias, sinEscribir } from "./diasDelLibro";
 
@@ -99,7 +100,7 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, marginBottom: 12 }}>{lead.nombre}</div>
 
         <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 8, padding: 3, marginBottom: 14 }}>
-          {[["libro", "Libro de obra diario"], ["plan", "Plan semanal"]].map(([v, l]) => (
+          {[["libro", "Libro de obra diario"], ["plan", "Plan semanal"], ["impreso", "El libro"]].map(([v, l]) => (
             <button key={v} onClick={() => setVista(v)}
               style={{ padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font,
                 fontSize: 12.5, fontWeight: 600, background: vista === v ? "#fff" : "transparent",
@@ -107,7 +108,9 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
           ))}
         </div>
 
-        {vista === "plan" ? (
+        {vista === "impreso" ? (
+          <LibroImpreso lead={lead} dias={dias} onCambio={() => cargarDias(lead.id)} />
+        ) : vista === "plan" ? (
           <PlanSemanal lead={lead} currentUser={currentUser}
             puedeEscribir={nivelProyecto(lead.id) === "editar"} />
         ) : (

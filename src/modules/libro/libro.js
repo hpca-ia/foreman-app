@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
+import { subirArchivo } from "../../lib/archivos";
 
 // El libro del día: lo que pasó en la obra, escrito el día que pasó.
 //
@@ -260,4 +261,52 @@ export async function avanceDeLaObra(leadId) {
     base: capitulos.reduce((s, c) => s + c.base, 0),
     invertido: capitulos.reduce((s, c) => s + c.invertido, 0),
   };
+}
+
+// ── EL DÍA, IMPRESO ────────────────────────────────────────────────────────
+//
+// Cerrar un día no es solo marcarlo: es imprimirlo. Mientras el libro vive
+// nada más que en la base, para un reclamo no existe — ahí nadie entra a
+// FOREMAN, se pide "el libro", y el libro es un PDF con fecha. Los PDF se van
+// acumulando y ese montón ES el libro de obra.
+
+/** Guarda el PDF del día en el depósito y lo cuelga del día. */
+export async function guardarPdfDelDia(dia, blob) {
+  const ruta = `libro/${dia.lead_id}/dia-${String(dia.fecha).slice(0, 10)}-${Date.now()}.pdf`;
+  const archivo = new File([blob], `libro-${String(dia.fecha).slice(0, 10)}.pdf`, { type: "application/pdf" });
+  const { ruta: guardada, error } = await subirArchivo(ruta, archivo);
+  if (error) return { error: error.message || "No se pudo guardar el PDF del día." };
+  const { error: e2 } = await supabase.from("libro_obra_dias")
+    .update({ pdf_url: guardada }).eq("id", dia.id);
+  if (e2) return { error: falta(e2) ? "Falta la columna pdf_url en el libro." : e2.message };
+  return { ruta: guardada };
+}
+
+/**
+ * Cerrar el día: marcarlo e imprimirlo, en ese orden.
+ *
+ * Si el PDF falla —sin red, el depósito caído— el día queda cerrado igual y se
+ * dice. Lo que no se puede perder es el cierre: el PDF se vuelve a generar
+ * desde el libro cuando haga falta, un día que quedó abierto para siempre no
+ * se arregla solo.
+ */
+export async function cerrarEImprimir(dia, armarPdf) {
+  const err = await cerrarDia(dia);
+  if (err) return { error: err };
+  try {
+    const blob = await armarPdf();
+    const r = await guardarPdfDelDia({ ...dia, estado: "cerrado", cerrado_at: new Date().toISOString() }, blob);
+    if (r.error) return { cerrado: true, avisoPdf: r.error };
+    return { cerrado: true, ruta: r.ruta };
+  } catch (e) {
+    return { cerrado: true, avisoPdf: "El día quedó cerrado, pero el PDF no se pudo armar: " + e.message };
+  }
+}
+
+/** Los días del libro de un proyecto, del más nuevo al más viejo. */
+export async function diasDelProyecto(leadId) {
+  const { data, error } = await supabase.from("libro_obra_dias")
+    .select("*").eq("lead_id", leadId).order("fecha", { ascending: false });
+  if (error) return { error: falta(error) ? "sin_tablas" : error.message, dias: [] };
+  return { dias: data || [] };
 }

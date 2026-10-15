@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, Plus, X, Check, Lock, Unlock } from "lucide-react";
+import { Camera, Plus, X, Check, Lock, Unlock, FileText } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
 import {
   CATEGORIAS, CLIMAS, abrirDia, contenidoDe, anotar, borrarEntrada,
-  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia, reabrirDia, cerrarDia,
-  abrirDiaPasado } from "./libro";
+  guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia, reabrirDia,
+  abrirDiaPasado, cerrarEImprimir, guardarPdfDelDia } from "./libro";
+import { pdfDiaDeObra } from "./pdfDiaDeObra";
+import { abrirArchivo } from "../../lib/archivos";
 
 // El día de obra, pensado para el teléfono y para una mano sucia de cemento.
 //
@@ -179,15 +181,46 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
               <Unlock size={12} /> Reabrir
             </Button>
           )}
-          {/* Y volver a cerrarlo cuando se terminó de completar. */}
-          {abierto && dia && !esHoy && puedeReabrir && (
-            <Button variant="secondary" size="sm" disabled={ocupado} onClick={async () => {
-              setOcupado(true);
-              const err = await cerrarDia(dia);
+          {/* CERRAR EL DÍA LO HACE QUIEN LO ESCRIBE.
+              Es el único que sabe si ya está todo: si esperamos a que lo
+              cierre el reloj, el día se cierra igual pero nadie dijo "esto es
+              lo que pasó hoy". Y al cerrarlo se imprime: mientras el libro
+              vive nada más que en la base, para un reclamo no existe —ahí
+              nadie entra a FOREMAN, se pide "el libro", y el libro es un PDF
+              con fecha—. */}
+          {abierto && dia && (puedeEscribir || puedeReabrir) && (
+            <Button variant={esHoy ? "primary" : "secondary"} size="sm" disabled={ocupado} onClick={async () => {
+              if (!window.confirm(`¿Cerrar el día ${diaLargo(fecha)}?\n\n`
+                + "Se guarda el PDF de este día en el libro de la obra y no se escribe más, salvo que se reabra con un motivo.")) return;
+              setOcupado(true); setError("");
+              const r = await cerrarEImprimir(dia, () => pdfDiaDeObra({ dia, obra: lead.nombre, entradas, fotos, enlaces }, "blob"));
               setOcupado(false);
-              if (err) { setError(err); return; }
-              setError(""); await cargar();
-            }}><Lock size={12} /> Cerrar de nuevo</Button>
+              if (r.error) { setError(r.error); return; }
+              setError(r.avisoPdf || "");
+              await cargar();
+              onCambio?.();
+            }}><Lock size={12} /> {ocupado ? "Cerrando…" : esHoy ? "Cerrar el día" : "Cerrar de nuevo"}</Button>
+          )}
+          {/* EL PDF DEL DÍA, A MANO. El guardado al cerrar es el que vale; este
+              botón es para mirarlo, imprimirlo o mandarlo por WhatsApp. Si el
+              día se cerró sin PDF —se cayó la red, lo cerró el reloj— lo arma
+              ahora y lo deja guardado. */}
+          {dia && (
+            <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
+              setOcupado(true); setError("");
+              try {
+                if (dia.pdf_url) { await abrirArchivo(dia.pdf_url); }
+                else {
+                  await pdfDiaDeObra({ dia, obra: lead.nombre, entradas, fotos, enlaces }, "abrir");
+                  if (!abierto) {
+                    const blob = await pdfDiaDeObra({ dia, obra: lead.nombre, entradas, fotos, enlaces }, "blob");
+                    await guardarPdfDelDia(dia, blob);
+                    await cargar();
+                  }
+                }
+              } catch (e) { setError("No se pudo armar el PDF: " + e.message); }
+              setOcupado(false);
+            }}><FileText size={12} /> PDF del día</Button>
           )}
         </div>
 
