@@ -8,6 +8,7 @@ import { ETAPAS, cualTraba } from "./cpm";
 import { fmt } from "../controlObra/calculos";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { porFases, tramoDe } from "./agruparPorFase";
+import { numerarBandas } from "./numeros";
 
 // La tabla del cronograma: cómo se lee.
 //
@@ -220,18 +221,10 @@ export default function TablaGantt({
   //
   // Lo que NO depende del número es la cadena: las dependencias guardan la
   // barra, no su lugar. Reordenar no desarma nada.
-  const numeroDe = new Map();
-  {
-    let etapaN = 0;
-    bandas.forEach(({ fase, grupos: suyos }) => {
-      if (fase) etapaN++;
-      let barra = 0;
-      suyos.forEach(g => g.hijas.forEach(a => {
-        barra++;
-        numeroDe.set(a.id, fases.length ? `${fase ? etapaN : "—"}.${barra}` : String(barra));
-      }));
-    });
-  }
+  //
+  // La regla vive en numeros.js: la tabla y lo que se le manda a NOVA tienen
+  // que decir el mismo número, o "la 2.1" no quiere decir nada.
+  const numeroDe = numerarBandas(bandas, fases.length);
 
   // Los rubros de cada grupo, para poder abrirlos y señalar el que traba.
   const rubrosDe = new Map();

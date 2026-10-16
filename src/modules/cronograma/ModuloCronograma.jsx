@@ -28,6 +28,7 @@ import PartirEnEtapas from "./PartirEnEtapas";
 import { guardarPlazo, desfase, diasDelPlazo, mesesEntre, finDeMeses, diasHastaFin } from "./plazo";
 import { plataDelPlan } from "./plataDelPlan";
 import { fmt } from "../controlObra/calculos";
+import { numerosDeBarras } from "./numeros";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -1525,6 +1526,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
               const nombre = id => todas.find(a => a.id === id)?.nombre || `#${id}`;
               const dice = x.tipo === "ajustar"
                   ? `«${nombre(x.id)}» pasa a ${x.duracion} días`
+                : x.tipo === "fechar"
+                  ? `«${nombre(x.id)}» arranca el ${x.inicio}${x.fin ? ` y termina el ${x.fin}` : ""}${x.duracion ? ` · ${x.duracion} ${x.duracion === 1 ? "día hábil" : "días hábiles"}` : ""}`
                 : x.tipo === "encadenar"
                   ? `«${nombre(x.a)}» va después de «${nombre(x.de)}»${x.retardo ? ` con ${x.retardo > 0 ? "+" : ""}${x.retardo} días` : ""}${x.enlace && x.enlace !== "FC" ? ` (${x.enlace})` : ""}`
                 : x.tipo === "desencadenar"
@@ -1545,6 +1548,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                     if (x.tipo === "ajustar") {
                       const r = await supabase.from("cronograma_actividades")
                         .update({ duracion: x.duracion }).eq("id", x.id);
+                      err = r.error?.message || null;
+                    } else if (x.tipo === "fechar") {
+                      // LA FECHA QUE DICTÓ. `inicio_fijo` es "no empieza antes
+                      // de", que es lo que uno quiere decir al dar una fecha:
+                      // si lo que tiene antes se corre, la barra se corre
+                      // también en vez de quedar mintiendo en el papel.
+                      const campos = { inicio_fijo: x.inicio };
+                      if (x.duracion) campos.duracion = x.duracion;
+                      const r = await supabase.from("cronograma_actividades")
+                        .update(campos).eq("id", x.id);
                       err = r.error?.message || null;
                     } else if (x.tipo === "encadenar") {
                       // REEMPLAZA SI YA EXISTE, no inserta a ciegas.
@@ -2243,11 +2256,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 const r = await ordenarConPalabras({
                   plan: todas, dependencias, texto: dictado,
                   nombreObra: lead.nombre, dias: diasDeContrato, cal,
+                  // LOS MISMOS NÚMEROS QUE SE VEN EN LA TABLA. Sin esto, quien
+                  // dicta "la 2.1 va del 12 al 15" le está hablando a NOVA de
+                  // algo que NOVA no puede ver: del otro lado solo había ids
+                  // de base de datos.
+                  numeros: numerosDeBarras(todas, fases),
                 });
                 setPensando(false);
                 if (r.error) { setError(r.error); return; }
                 const ops = [
                   ...r.ajustar.map(x => ({ ...x, tipo: "ajustar" })),
+                  ...(r.fechar || []).map(x => ({ ...x, tipo: "fechar" })),
                   ...r.encadenar.map(({ tipo, ...x }) => ({ ...x, enlace: tipo, tipo: "encadenar" })),
                   ...r.desencadenar.map(x => ({ ...x, tipo: "desencadenar" })),
                   ...r.reordenar.map(x => ({ ...x, tipo: "reordenar" })),

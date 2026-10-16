@@ -977,7 +977,10 @@ cronograma está bien, mandá {"nota":"..."} y nada más.`;
  * porqué— y se aceptan de a una en la misma pantalla: lo que NOVA entendió mal
  * se descarta en un clic en vez de quedar metido adentro del plan.
  */
-export async function ordenarConPalabras({ plan = [], dependencias = [], texto = "", nombreObra = "", dias = 0, cal = calendario() }) {
+// Una fecha de verdad, no "octubre" ni "la semana que viene".
+const esFecha = v => /^\d{4}-\d{2}-\d{2}/.test(String(v || ""));
+
+export async function ordenarConPalabras({ plan = [], dependencias = [], texto = "", nombreObra = "", dias = 0, cal = calendario(), numeros = new Map() }) {
   const dicho = String(texto || "").trim();
   if (!dicho) return { error: "Escribí cómo va la obra." };
   if (!plan.length) return { error: "Primero tiene que haber actividades en el cronograma." };
@@ -987,7 +990,12 @@ export async function ordenarConPalabras({ plan = [], dependencias = [], texto =
     const suyas = dependencias.filter(d => d.actividad_id === a.id)
       .map(d => `${d.tipo || "FC"}${d.retardo ? ` ${d.retardo > 0 ? "+" : ""}${d.retardo}d` : ""} de ${nombreDe.get(d.depende_de_id) || "?"}`)
       .join("; ");
-    return `${a.id} · ${a.nombre} · ${a.duracion}d`
+    // EL NÚMERO PRIMERO, que es como la persona la nombra. En la pantalla cada
+    // barra dice "2.1", y sin ese número acá NOVA recibía una lista de ids de
+    // base de datos y no podía saber a cuál se refería nadie.
+    const num = numeros.get(a.id);
+    return `${num ? `[${num}] ` : ""}${a.id} · ${a.nombre} · ${a.duracion}d`
+      + (a.inicio ? ` · hoy del ${a.inicio} al ${a.fin || a.inicio}` : "")
       + (suyas ? ` · hoy va después de: ${suyas}` : " · hoy SIN DEPENDENCIAS");
   }).join("\n");
 
@@ -999,7 +1007,7 @@ export async function ordenarConPalabras({ plan = [], dependencias = [], texto =
 construye, con sus palabras, y tu trabajo es traducirlo a operaciones sobre el
 cronograma que ya existe.${dias ? ` El plazo son ${dias} días hábiles` : ""} y se trabaja ${jornada}.
 
-LAS BARRAS QUE HAY HOY (id · nombre · duración · de qué depende):
+LAS BARRAS QUE HAY HOY ([número] id · nombre · duración · fechas · de qué depende):
 ${planEnTexto}
 
 LO QUE TE ESTÁ DICTANDO:
@@ -1023,6 +1031,18 @@ CÓMO LEERLO:
 SI NO MENCIONA TIEMPOS, NO INVENTES DEPENDENCIAS NI DURACIONES que no te pidió.
 Pero sí podés ajustar una duración si lo que dicta la contradice de frente.
 
+LAS NOMBRA POR SU NÚMERO. En la pantalla cada barra lleva el número que acá va
+entre corchetes —"2.1", "1.4"— y así es como se habla de un cronograma cuando
+hay cuarenta barras con nombres parecidos. Si dicta "2.1 del 12 al 15 de
+octubre" está hablando de la barra que figura como [2.1]: usá SU id en la
+operación. El número es el lugar en la lista, no el id.
+
+LE DICTA FECHAS PARA QUE LAS CORRIJAS. "2.1 - 12 oct al 15 oct" es un pedido
+completo: esa barra arranca el 12 y termina el 15. Va en "fechar", con las
+fechas en formato AAAA-MM-DD. La duración NO la mandes: se calcula sola con el
+calendario de la obra. Si solo dice cuándo empieza, mandá "inicio" sin "fin".
+Si no dice el año, es el del cronograma que estás viendo.
+
 NOMBRES APROXIMADOS. Va a decir "la mampostería" y la barra se llama
 "MAMPOSTERÍA Y ENLUCIDOS". Emparejalo por sentido. Lo que no puedas emparejar
 con confianza, NO lo adivines: escribilo en la "nota" diciendo qué no
@@ -1032,6 +1052,7 @@ Devolvés SOLO JSON, sin markdown. Cada operación con su "porque" en diez
 palabras, y el porqué sale de LO QUE ÉL DIJO, no de tu criterio:
 
 {"ajustar":[{"id":12,"duracion":22,"porque":"dijo tres semanas"}],
+ "fechar":[{"id":12,"inicio":"2026-10-12","fin":"2026-10-15","porque":"dictó ese rango"}],
  "encadenar":[{"de":12,"a":13,"tipo":"FC","retardo":-5,"porque":"entra por planta baja antes de terminar"}],
  "desencadenar":[{"de":8,"a":9,"porque":"dijo que no se traban"}],
  "reordenar":[{"id":15,"antes_de":14,"porque":"el montaje va antes de la entrega"}],
@@ -1100,6 +1121,16 @@ Las listas son opcionales: mandá solo las que tengan algo.`;
         .map(x => ({ de: Number(x.de), a: Number(x.a), porque: x.porque || "" })),
       reordenar: lim(datos.reordenar, x => vivos.has(Number(x.id)) && vivos.has(Number(x.antes_de)))
         .map(x => ({ id: Number(x.id), antes_de: Number(x.antes_de), porque: x.porque || "" })),
+      // LAS FECHAS DICTADAS. La duración se calcula con el calendario de la
+      // obra y no se le pide al modelo: contar días hábiles salteando sábados
+      // y feriados es aritmética, y la aritmética no se adivina.
+      fechar: lim(datos.fechar, x => vivos.has(Number(x.id)) && esFecha(x.inicio))
+        .map(x => {
+          const inicio = String(x.inicio).slice(0, 10);
+          const fin = esFecha(x.fin) ? String(x.fin).slice(0, 10) : null;
+          const duracion = fin && fin >= inicio ? Math.max(1, cal.entre(inicio, fin)) : null;
+          return { id: Number(x.id), inicio, fin, duracion, porque: x.porque || "" };
+        }),
       // Partir una barra para darle lugar a un trabajo que no tiene actividad
       // propia. No rompe el espejo con el control: la agrupación sigue siendo
       // la misma, lo que cambia es que adentro tiene dos momentos en vez de
