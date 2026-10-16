@@ -318,28 +318,17 @@ export default function TablaGantt({
                         )}
                         {g.nombre}
                       </span>
-                      {/* De qué capítulo sale, debajo. El nombre de una
-                          agrupación dice qué es; el capítulo, de dónde viene
-                          en el presupuesto, que es como se la busca. */}
-                      {/* Sin el monto: en el Gantt se decide CUÁNDO, no
-                          cuánto. La plata del capítulo es la otra lectura del
-                          mismo plan y se mira en el valorado. */}
-                      <span title={[g.capitulo, g.hijas.length > 1 ? `${g.hijas.length} partes` : ""]
-                        .filter(Boolean).join(" · ")}
-                        style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
+                      {/* EL CAPÍTULO NO SE DIBUJA EN NINGUNA FILA.
+                          Decía de qué capítulo del presupuesto viene la barra.
+                          Debajo del nombre no se lee así: se lee como una
+                          descripción del trabajo, y entonces dice algo falso
+                          —"Counter en hormigón / Estructura metálica"—. En el
+                          Gantt se decide CUÁNDO; de dónde sale la plata se mira
+                          en el control y en el valorado, que es donde se la
+                          busca. */}
+                      <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 400, letterSpacing: 0.2 }}>
-                        {g.capitulo || (typeof g.id === "string"
-                          /* PROPIA DEL CRONOGRAMA, no "sin capítulo". Lo que
-                             alguien agregó a mano —el permiso municipal, la
-                             aprobación de planos, la inspección de bomberos— no
-                             está en ningún presupuesto, y eso no es una falta:
-                             es lo que el cronograma tiene y el presupuesto no.
-                             Llamarlo "sin capítulo" lo hace ver como un dato
-                             incompleto, y entonces alguien lo "arregla"
-                             borrándolo. */
-                          ? null
-                          : <span style={{ color: colors.muted }}>sin capítulo</span>)}
-                        {g.hijas.length > 1 ? ` · ${g.hijas.length} partes` : ""}
+                        {g.hijas.length > 1 ? `${g.hijas.length} partes` : ""}
                         {/* Lo que falta, en la segunda línea: arriba competía
                             por el ancho con el nombre del rubro y lo dejaba en
                             "Instalacione…", que es peor que no decirlo. */}
@@ -444,8 +433,7 @@ export default function TablaGantt({
                           </div>
                         )}
                         <button onClick={() => setAbierta(esta ? null : a.id)}
-                          title={`Ver y cambiar de qué depende, su etapa y su fecha${
-                            g.simple && g.capitulo ? `\n\nSu plata sale de «${g.capitulo}»` : ""}`}
+                          title="Ver y cambiar de qué depende, su etapa y su fecha"
                           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
                             textAlign: "left", flex: "1 1 auto", minWidth: 40, overflow: "hidden" }}>
                           <span style={{ display: "block", fontSize: 12, color: colors.ink, fontWeight: g.simple ? 600 : 400,
