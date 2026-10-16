@@ -444,7 +444,8 @@ export default function TablaGantt({
                           </div>
                         )}
                         <button onClick={() => setAbierta(esta ? null : a.id)}
-                          title="Ver y cambiar de qué depende, su etapa y su fecha"
+                          title={`Ver y cambiar de qué depende, su etapa y su fecha${
+                            g.simple && g.capitulo ? `\n\nSu plata sale de «${g.capitulo}»` : ""}`}
                           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
                             textAlign: "left", flex: "1 1 auto", minWidth: 40, overflow: "hidden" }}>
                           <span style={{ display: "block", fontSize: 12, color: colors.ink, fontWeight: g.simple ? 600 : 400,
@@ -465,29 +466,23 @@ export default function TablaGantt({
                               style={{ color: colors.brand, marginRight: 3 }}>◆</span>}
                             {g.simple ? a.nombre : (etapa || sufijo(a.nombre))}
                           </span>
-                          {/* El capítulo, legible. Estaba en 9px y en gris
-                              claro: técnicamente visible, que no es lo mismo
-                              que leerse. Es el dato con el que uno busca un
-                              rubro, así que tiene que poder leerse de un
-                              vistazo. */}
-                          {g.simple && (
-                            <span style={{ display: "block", fontSize: 10.5, color: colors.inkSoft, overflow: "hidden",
-                              textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}>
-                              {g.capitulo || (typeof g.id === "string"
-                          /* PROPIA DEL CRONOGRAMA, no "sin capítulo". Lo que
-                             alguien agregó a mano —el permiso municipal, la
-                             aprobación de planos, la inspección de bomberos— no
-                             está en ningún presupuesto, y eso no es una falta:
-                             es lo que el cronograma tiene y el presupuesto no.
-                             Llamarlo "sin capítulo" lo hace ver como un dato
-                             incompleto, y entonces alguien lo "arregla"
-                             borrándolo. */
-                          ? null
-                          : <span style={{ color: colors.muted }}>sin capítulo</span>)}
-                              {!deps.length && (
-                                <span title="No depende de nada, así que arranca el día uno. Si tiene que ir después de algo, encadenala."
-                                  style={{ color: colors.warning, fontWeight: 600 }}> · arranca el día 1</span>
-                              )}
+                          {/* EL CAPÍTULO NO VA DEBAJO DE LA BARRA.
+                              Decía de qué agrupación del control cuelga la
+                              barra, y leído abajo del nombre parecía otra cosa:
+                              una descripción del trabajo. "Counter en hormigón
+                              / Estructura metálica" no se lee como "su plata
+                              sale de ese capítulo", se lee como un error —o
+                              peor, se lee como que el counter es de estructura
+                              metálica—. Un renglón de texto que hay que
+                              aprender a no leer es ruido en una tabla de
+                              cuarenta filas.
+                              El dato no se pierde: está en el globo del nombre,
+                              donde se va a buscarlo cuando se lo necesita. */}
+                          {g.simple && !deps.length && (
+                            <span style={{ display: "block", fontSize: 10.5, color: colors.warning, fontWeight: 600,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}
+                              title="No depende de nada, así que arranca el día uno. Si tiene que ir después de algo, encadenala.">
+                              arranca el día 1
                             </span>
                           )}
                         </button>
