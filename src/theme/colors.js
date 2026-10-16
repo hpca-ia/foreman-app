@@ -21,6 +21,12 @@ export const colors = {
   dangerBorder: "#F3C6C6",
   neutralSoft: "#F1F1EE",
 
+  // EL COLOR DE LOS HITOS. Ámbar, y no el ámbar de los avisos: un hito no es
+  // un problema, es un momento —la entrega, el anticipo, la fecha que se
+  // comprometió—. Lo que uno busca al abrir un cronograma son esos cuatro
+  // puntos, y pintados del verde de todo lo demás hay que ir a buscarlos.
+  hito: "#F59E0B",
+
   radiusSm: 6,
   radiusMd: 10,
   radiusLg: 16,

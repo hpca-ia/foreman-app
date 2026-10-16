@@ -24,6 +24,8 @@ const TINTA = [15, 61, 62];
 const NEGRO = [17, 24, 39];
 const GRIS = [107, 114, 128];
 const ROJO = [185, 28, 28];
+// El mismo ámbar de la pantalla: un hito es un momento, no un problema.
+const AMBAR = [245, 158, 11];
 const SUAVE = [231, 241, 239];
 const LINEA = [225, 222, 216];
 
@@ -227,7 +229,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
               // trabajo cortito, y lo que uno busca al abrir un cronograma
               // —cuándo cobro, cuándo entrego— se pierde entre el resto.
               const cx = x + MM_DIA / 2, cy = y + FILA / 2;
-              doc.setFillColor(...TINTA);
+              doc.setFillColor(...AMBAR);
               doc.triangle(cx, cy - 1.6, cx + 1.6, cy, cx, cy + 1.6, "F");
               doc.triangle(cx, cy - 1.6, cx - 1.6, cy, cx, cy + 1.6, "F");
             } else {
@@ -251,7 +253,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
       // suelto sin fecha de emisión es peligroso: no se sabe si es el vigente.
       doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
       doc.text(`${nombre || ""} · emitido el ${larga(new Date().toISOString())}`, M, ALTO - 5);
-      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo: hito  ·  Barra clara: lo que falta ejecutar",
+      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Barra clara: lo que falta ejecutar",
         ANCHO / 2, ALTO - 5, { align: "center" });
       doc.text(`${doc.internal.getNumberOfPages()}`, ANCHO - M, ALTO - 5, { align: "right" });
     }

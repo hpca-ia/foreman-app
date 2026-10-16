@@ -458,7 +458,7 @@ export default function TablaGantt({
                                 fuera de la columna —"Instalaciones elé…" en
                                 las tres, sin poder distinguirlas—. */}
                             {a.es_hito && <span title="Hito: un momento de la obra, no un trabajo"
-                              style={{ color: colors.brand, marginRight: 3 }}>◆</span>}
+                              style={{ color: colors.hito, marginRight: 3 }}>◆</span>}
                             {g.simple ? a.nombre : (etapa || sufijo(a.nombre))}
                           </span>
                           {/* EL CAPÍTULO NO VA DEBAJO DE LA BARRA.
@@ -562,7 +562,7 @@ export default function TablaGantt({
                            anticipo es pedir un dato que no existe, y una
                            casilla vacía invita a llenarla con cualquier cosa. */
                         <span title="Es un hito: pasa en un día. Para clavarlo a una fecha, tocá el nombre."
-                          style={{ textAlign: "center", fontSize: 11, color: colors.muted }}>◆</span>
+                          style={{ textAlign: "center", fontSize: 11, color: colors.hito }}>◆</span>
                       ) : (
                       <Numero value={a.duracion} min={1} max={2000} disabled={!editable}
                         onCommit={v => onCambiar(a, { duracion: v })}
@@ -1145,20 +1145,49 @@ const Lienzo = ({ ui, children }) => (
  * directo por el cliente, el municipio cuando inspecciona. Esa última
  * distinción importa porque cuando una de ésas se atrasa la responsabilidad
  * es de otro, y mezcladas el cronograma se lee como si todo fuera de la obra.
+ *
+ * Los hitos no pasan por acá: son ámbar y son un rombo, porque no son tiempo
+ * de nadie —son un momento—. Ver `Barra`.
  */
 const colorDe = a => (a.externo ? colors.inkSoft : a.critica ? colors.danger : colors.brand);
 
-const Barra = ({ ui, a, tenue }) => a.inicio && (
-  <div title={`${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`}
-    style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : 0,
-      left: `${ui.posicion(a.inicio) * 100}%`, width: `${Math.max(ui.largo(a) * 100, 0.6)}%`,
-      background: colorDe(a), borderRadius: 4,
-      opacity: tenue ? 0.3 : 1, display: "flex", alignItems: "center", overflow: "hidden" }}>
-    {!tenue && a.avance_pct > 0 && (
-      <div style={{ width: `${Math.min(100, a.avance_pct)}%`, height: "100%", background: "rgba(255,255,255,.45)" }} />
-    )}
-  </div>
-);
+const Barra = ({ ui, a, tenue }) => {
+  if (!a.inicio) return null;
+  const cuando = `${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`;
+
+  // UN HITO ES UN ROMBO ÁMBAR, NO UNA BARRA DE UN DÍA.
+  //
+  // Dibujado como barra se ve igual que un trabajo cortito, y lo que uno busca
+  // al abrir un cronograma —cuándo entrego, cuándo cobro— queda escondido entre
+  // cuarenta barras verdes. En el PDF ya era un rombo desde siempre; en la
+  // pantalla, que es donde se trabaja, no.
+  //
+  // Si además está en la ruta crítica lleva el borde rojo: el ámbar dice qué
+  // es, el rojo dice que no tiene colchón, y son dos cosas distintas que a
+  // nadie le sirve que se tapen entre sí.
+  if (a.es_hito) {
+    return (
+      <div title={`◆ ${cuando}`}
+        style={{ position: "absolute", top: "50%", left: `${ui.posicion(a.inicio) * 100}%`,
+          width: 11, height: 11, marginTop: -5.5, transform: "rotate(45deg)",
+          background: colors.hito, borderRadius: 2,
+          border: a.critica ? `1.5px solid ${colors.danger}` : "none",
+          opacity: tenue ? 0.3 : 1 }} />
+    );
+  }
+
+  return (
+    <div title={cuando}
+      style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : 0,
+        left: `${ui.posicion(a.inicio) * 100}%`, width: `${Math.max(ui.largo(a) * 100, 0.6)}%`,
+        background: colorDe(a), borderRadius: 4,
+        opacity: tenue ? 0.3 : 1, display: "flex", alignItems: "center", overflow: "hidden" }}>
+      {!tenue && a.avance_pct > 0 && (
+        <div style={{ width: `${Math.min(100, a.avance_pct)}%`, height: "100%", background: "rgba(255,255,255,.45)" }} />
+      )}
+    </div>
+  );
+};
 
 /**
  * Qué falta de un grupo, y cómo abrirlo.

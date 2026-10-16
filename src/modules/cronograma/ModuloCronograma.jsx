@@ -2909,7 +2909,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                               <span style={{ fontSize: 10.5, color: colors.muted, width: 30, flexShrink: 0 }}>
                                 {i + 1}.{k + 1}
                               </span>
-                              {a.es_hito && <span title="Hito: un momento, no un trabajo" style={{ color: colors.brand, fontSize: 11, flexShrink: 0 }}>◆</span>}
+                              {a.es_hito && <span title="Hito: un momento, no un trabajo" style={{ color: colors.hito, fontSize: 11, flexShrink: 0 }}>◆</span>}
                               <input defaultValue={a.nombre} key={`n${a.id}-${a.nombre}`}
                                 onBlur={e => renombrarActividad(a, e.target.value)}
                                 onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
