@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
 import { Link2, Trash2, CalendarClock, ChevronRight, ChevronDown, ChevronUp, Scissors, X, List, ArrowDown, ArrowRight } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -250,8 +250,90 @@ export default function TablaGantt({
   // otro camino.
   const ui = { COLS, IZQ, anchoLienzo, posicion, largo, dentro, hoyISO, dia, verRubros, setVerRubros };
 
+  // ── LAS CADENAS, DIBUJADAS ────────────────────────────────────────────────
+  //
+  // Las dependencias se podían leer —"↳ de 2", y la lista adentro de la ficha—
+  // pero no se podían VER: había que abrir una barra para saber de qué cuelga,
+  // y para entender la cadena entera, abrirlas todas y acordarse. Un cronograma
+  // es justamente el dibujo de esas cadenas; sin ellas es una lista de fechas.
+  //
+  // SE MIDEN DEL DOM, no se calculan. Las filas no tienen todas el mismo alto
+  // —un nombre largo, una ficha abierta, un rubro con partes— así que deducir
+  // la posición de cada barra con aritmética da líneas que apuntan a cualquier
+  // lado en cuanto algo cambia. Medir es la única manera de que las flechas
+  // sigan a las barras cuando se despliega una etapa o se abre una ficha.
+  const cajaRef = useRef(null);
+  const [verEnlaces, setVerEnlaces] = useState(true);
+  const [enlaces, setEnlaces] = useState({ lineas: [], ancho: 0, alto: 0 });
+  // SOLO SE GUARDA LO QUE CAMBIÓ.
+  //
+  // `todas` es un arreglo nuevo en cada render —sale del cálculo del CPM, no de
+  // un estado— así que el efecto corre siempre. Guardar sin comparar sería
+  // pintar, volver a renderizar, volver a medir, para siempre: la pantalla
+  // trabada con el ventilador a todo lo que da.
+  const firmaRef = useRef("");
+
+  // Cuál dependencia es la que de verdad está trabando a cada actividad: se
+  // dibuja más fuerte, porque es la única que mueve la fecha si se adelanta.
+  const trabas = new Set(todas.map(a => trabaDe(a)).filter(Boolean));
+
+  useLayoutEffect(() => {
+    const caja = cajaRef.current;
+    if (!caja || !verEnlaces) {
+      if (firmaRef.current !== "") { firmaRef.current = ""; setEnlaces({ lineas: [], ancho: 0, alto: 0 }); }
+      return undefined;
+    }
+
+    const medir = () => {
+      const base = caja.getBoundingClientRect();
+      const donde = id => {
+        const el = caja.querySelector(`[data-barra="${id}"]`);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return null;
+        return {
+          x1: r.left - base.left + caja.scrollLeft,
+          x2: r.right - base.left + caja.scrollLeft,
+          y: r.top - base.top + caja.scrollTop + r.height / 2,
+        };
+      };
+      const lineas = [];
+      dependencias.forEach(d => {
+        const de = donde(d.depende_de_id), a = donde(d.actividad_id);
+        if (!de || !a) return;
+        lineas.push({ id: d.id, tipo: d.tipo || "FC", de, a, traba: trabas.has(d.id) });
+      });
+      const ancho = caja.scrollWidth, alto = caja.scrollHeight;
+      const firma = `${ancho}x${alto}|` + lineas
+        .map(l => `${l.id},${l.tipo},${l.traba ? 1 : 0},${Math.round(l.de.x1)},${Math.round(l.de.x2)},${Math.round(l.de.y)},${Math.round(l.a.x1)},${Math.round(l.a.x2)},${Math.round(l.a.y)}`)
+        .join(";");
+      if (firma === firmaRef.current) return;
+      firmaRef.current = firma;
+      setEnlaces({ lineas, ancho, alto });
+    };
+
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(caja);
+    return () => ro.disconnect();
+    // Se vuelve a medir cuando cambia cualquier cosa que mueva una barra de
+    // lugar: el zoom, una ficha abierta, una etapa plegada, la lista de rubros.
+  }, [verEnlaces, dependencias, todas, zoom, escala, abierta, plegados, verRubros, fases, anchoLienzo, IZQ]);
+
   return (
-    <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflowX: "auto" }}>
+    <div ref={cajaRef} style={{ position: "relative", background: colors.surface, border: `1px solid ${colors.border}`,
+      borderRadius: colors.radiusMd, overflowX: "auto" }}>
+      {/* Debajo de la columna fija (zIndex 4) y encima del fondo: las líneas
+          cruzan el cronograma y desaparecen bajo los nombres, que es donde
+          estorbarían. */}
+      {enlaces.lineas.length > 0 && (
+        <svg width={enlaces.ancho} height={enlaces.alto} aria-hidden
+          style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 2 }}>
+          {enlaces.lineas.map(l => (
+            <Cadena key={l.id} l={l} izq={IZQ} />
+          ))}
+        </svg>
+      )}
       {/* Encabezado */}
       <div style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px`, gap: 7,
         padding: "8px 12px 8px 0", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted,
@@ -263,7 +345,16 @@ export default function TablaGantt({
           <span>EMPIEZA</span>
           <span>TERMINA</span>
           <span style={{ textAlign: "center" }}>COLCHÓN</span>
-          <span />
+          {/* VER LAS CADENAS O NO VERLAS. Con cuarenta barras encadenadas el
+              dibujo se vuelve una maraña, y a veces uno viene a mirar las
+              fechas y nada más. */}
+          <button onClick={() => setVerEnlaces(v => !v)}
+            title={verEnlaces ? "Ocultar las cadenas entre actividades" : "Ver cómo están encadenadas las actividades"}
+            style={{ background: verEnlaces ? colors.brandSoft : "none", border: "none", borderRadius: 4,
+              color: verEnlaces ? colors.brand : colors.muted, cursor: "pointer", fontFamily: colors.font,
+              fontSize: 9, fontWeight: 700, letterSpacing: 0.3, padding: "2px 5px", justifySelf: "end" }}>
+            ↳ CADENAS
+          </button>
         </span>
         <span style={{ position: "relative", height: 12 }}>
           {marcas.map((m, k) => (
@@ -680,7 +771,7 @@ export default function TablaGantt({
                       </div>
                     ) : <span />}
                     </Fijo>
-                    <Lienzo ui={ui}><Barra ui={ui} a={a} /></Lienzo>
+                    <Lienzo ui={ui}><Barra ui={ui} a={a} marca /></Lienzo>
                   </Fila>
 
                   {/* LA FICHA. Todo lo que se cambia de vez en cuando vive acá
@@ -1105,6 +1196,50 @@ const BandaEtapa = ({ ui, fase, grupos, diasTotales, cal, numero }) => {
 };
 
 
+/**
+ * Una cadena entre dos barras.
+ *
+ * Sale de donde manda la dependencia y entra por donde empieza —o termina— la
+ * que espera: fin→comienzo sale por la derecha de la primera y entra por la
+ * izquierda de la segunda; "a la vez" sale por el arranque de una y entra en el
+ * arranque de la otra; "terminan juntas", por los finales.
+ *
+ * Cuando la que sigue arranca ANTES de que termine la anterior —un traslape,
+ * que es de donde sale el tiempo en una obra apretada— la línea derecha no
+ * existe: tiene que rodear. Eso se ve enseguida en el dibujo y es justamente lo
+ * que uno quiere ver.
+ */
+const Cadena = ({ l }) => {
+  const S = 9, F = 6, M = 3.2;
+  const { de, a } = l;
+  let d, flecha;
+  if (l.tipo === "FF") {
+    const x = Math.max(de.x2, a.x2) + S;
+    d = `M ${de.x2} ${de.y} H ${x} V ${a.y} H ${a.x2 + F}`;
+    flecha = `${a.x2 + F},${a.y - M} ${a.x2 + F},${a.y + M} ${a.x2},${a.y}`;
+  } else if (l.tipo === "CC") {
+    const x = Math.min(de.x1, a.x1) - S;
+    d = `M ${de.x1} ${de.y} H ${x} V ${a.y} H ${a.x1 - F}`;
+    flecha = `${a.x1 - F},${a.y - M} ${a.x1 - F},${a.y + M} ${a.x1},${a.y}`;
+  } else if (a.x1 - de.x2 >= S + F + 2) {
+    d = `M ${de.x2} ${de.y} H ${de.x2 + S} V ${a.y} H ${a.x1 - F}`;
+    flecha = `${a.x1 - F},${a.y - M} ${a.x1 - F},${a.y + M} ${a.x1},${a.y}`;
+  } else {
+    const ym = (de.y + a.y) / 2;
+    d = `M ${de.x2} ${de.y} H ${de.x2 + S} V ${ym} H ${a.x1 - S - F} V ${a.y} H ${a.x1 - F}`;
+    flecha = `${a.x1 - F},${a.y - M} ${a.x1 - F},${a.y + M} ${a.x1},${a.y}`;
+  }
+  // La que traba, más fuerte: es la única que mueve la fecha si se adelanta.
+  const color = l.traba ? colors.warning : colors.muted;
+  return (
+    <g opacity={l.traba ? 0.95 : 0.5}>
+      <path d={d} fill="none" stroke={color} strokeWidth={l.traba ? 1.6 : 1}
+        strokeLinejoin="round" strokeLinecap="round" />
+      <polygon points={flecha} fill={color} />
+    </g>
+  );
+};
+
 const Fila = ({ ui, children, fondo }) => (
   <div style={{ display: "grid", gridTemplateColumns: `${ui.IZQ}px ${ui.anchoLienzo}px`, gap: 7,
     padding: "7px 12px 7px 0", borderTop: `1px solid ${colors.neutralSoft}`, alignItems: "center",
@@ -1151,7 +1286,7 @@ const Lienzo = ({ ui, children }) => (
  */
 const colorDe = a => (a.externo ? colors.inkSoft : a.critica ? colors.danger : colors.brand);
 
-const Barra = ({ ui, a, tenue }) => {
+const Barra = ({ ui, a, tenue, marca }) => {
   if (!a.inicio) return null;
   const cuando = `${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`;
 
@@ -1167,7 +1302,7 @@ const Barra = ({ ui, a, tenue }) => {
   // nadie le sirve que se tapen entre sí.
   if (a.es_hito) {
     return (
-      <div title={`◆ ${cuando}`}
+      <div title={`◆ ${cuando}`} data-barra={marca ? a.id : undefined}
         style={{ position: "absolute", top: "50%", left: `${ui.posicion(a.inicio) * 100}%`,
           width: 11, height: 11, marginTop: -5.5, transform: "rotate(45deg)",
           background: colors.hito, borderRadius: 2,
@@ -1177,7 +1312,7 @@ const Barra = ({ ui, a, tenue }) => {
   }
 
   return (
-    <div title={cuando}
+    <div title={cuando} data-barra={marca ? a.id : undefined}
       style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : 0,
         left: `${ui.posicion(a.inicio) * 100}%`, width: `${Math.max(ui.largo(a) * 100, 0.6)}%`,
         background: colorDe(a), borderRadius: 4,
