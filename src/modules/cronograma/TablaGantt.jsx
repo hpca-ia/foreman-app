@@ -4,7 +4,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { ETAPAS, cualTraba } from "./cpm";
+import { ETAPAS, cualTraba, cuandoDejanEmpezar } from "./cpm";
 import { fmt } from "../controlObra/calculos";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { porFases, tramoDe } from "./agruparPorFase";
@@ -396,6 +396,13 @@ export default function TablaGantt({
             {/* Las actividades */}
             {(!plegado || g.simple) && g.hijas.map((a, j) => {
               const deps = dependencias.filter(d => d.actividad_id === a.id);
+              // Desde cuándo la deja empezar cada una de las que espera.
+              const dejan = cuandoDejanEmpezar(a, deps, porId, cal);
+              // La más tardía de todas es la que manda: así se arma la fecha.
+              const topes = [...dejan.values()].map(x => x.desde);
+              const porDeps = topes.length ? topes.reduce((m, x) => (x > m ? x : m)) : null;
+              const fijaISO = a.inicio_fijo ? String(a.inicio_fijo).slice(0, 10) : null;
+              const mandaLaFija = !!fijaISO && (!porDeps || fijaISO > porDeps);
               const esta = abierta === a.id;
               // Si la oficina ya midió un trabajo con este nombre, en otra obra.
               const apunte = apunteDe(memoria, a.nombre);
@@ -722,6 +729,11 @@ export default function TablaGantt({
                           const forma = formaDe(d);
                           const manda = d.id === trabaDe(a);
                           const cuantos = Math.abs(Number(d.retardo) || 0);
+                          // LA CUENTA, A LA VISTA. "Es la que traba" sin fechas
+                          // al lado hay que creerlo; con las fechas se entiende,
+                          // y se puede discutir —que es lo que uno hace con un
+                          // cronograma—.
+                          const cuenta = dejan.get(d.id);
                           return (
                             <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 5 }}>
                               {editable ? (
@@ -751,6 +763,13 @@ export default function TablaGantt({
                                   {forma.id === "traslape" && (
                                     <span style={{ fontSize: 10.5, color: colors.brand, fontWeight: 600 }}>traslapadas</span>
                                   )}
+                                  {cuenta && (
+                                    <span title={`«${cuenta.otra.nombre}» va del ${dia(cuenta.otra.inicio)} al ${dia(cuenta.otra.fin)}`}
+                                      style={{ fontSize: 10.5, color: manda ? colors.ink : colors.muted,
+                                        fontWeight: manda ? 600 : 400, whiteSpace: "nowrap" }}>
+                                      {dia(cuenta.otra.inicio)} → {dia(cuenta.otra.fin)} · deja empezar el {dia(cuenta.desde)}
+                                    </span>
+                                  )}
                                   {/* CUÁL DE TODAS LA ESTÁ DETENIENDO.
                                       Una actividad puede esperar a tres cosas
                                       y solo una la traba: las otras terminaron
@@ -775,6 +794,22 @@ export default function TablaGantt({
                             </div>
                           );
                         })}
+                        {/* LA CONCLUSIÓN, ESCRITA.
+                            Arriba quedan tres fechas y la pregunta que trae
+                            uno es una sola: por qué arranca cuando arranca. La
+                            respuesta es siempre la misma cuenta —la más tardía
+                            de todas manda— y escribirla evita la lectura que
+                            hace perder una mañana: adelantar la que no era. */}
+                        {deps.length > 0 && a.inicio && (
+                          <div style={{ fontSize: 11, color: colors.muted, marginTop: 4, lineHeight: 1.45 }}>
+                            Arranca el <span style={{ color: colors.ink, fontWeight: 700 }}>{dia(a.inicio)}</span>
+                            {mandaLaFija
+                              ? <> porque se lo pediste con la fecha fija: ninguna de las que espera la detiene más allá de eso.</>
+                              : porDeps
+                                ? <> porque es la más tardía de las fechas de arriba. Adelantar cualquier otra no la mueve.</>
+                                : null}
+                          </div>
+                        )}
                         {/* AGREGAR UNA, SIN ADIVINAR.
                             La única manera de encadenar era el eslabón de la
                             fila: marcar una, buscar la otra entre cuarenta,

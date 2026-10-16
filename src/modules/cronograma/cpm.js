@@ -499,22 +499,46 @@ export function desvio(actividades = [], hoy = new Date(), cal = calendario()) {
  * @returns el id de la dependencia que manda, o null si ninguna la traba
  *   —arranca por su fecha fija o por el día uno de la obra—.
  */
-export function cualTraba(a, deps = [], porId, cal) {
-  if (!a?.inicio || deps.length < 2) return null;
-  let mejor = null, cuando = null;
+/**
+ * Desde cuándo deja empezar cada una de las que espera.
+ *
+ * Es la cuenta que explica una fecha: "la eléctrica termina el 6, así que esto
+ * no puede arrancar antes del 9". La cuenta ya se hacía —es la que decide cuál
+ * traba— pero se tiraba: afuera salía solo el nombre de la que manda, sin el
+ * número que lo demuestra. Y un "es la que traba" sin fechas al lado hay que
+ * creerlo, que es lo contrario de entenderlo.
+ */
+export function cuandoDejanEmpezar(a, deps = [], porId, cal) {
+  const mapa = new Map();
   deps.forEach(d => {
     const otra = porId.get(d.depende_de_id);
     if (!otra?.fin || !otra?.inicio) return;
     const f = new Date(`${otra.fin}T12:00:00`), i = new Date(`${otra.inicio}T12:00:00`);
     let candidato;
     if (d.tipo === "CC") candidato = desplazar(cal, i, d.retardo);
-    else if (d.tipo === "FF") candidato = retroceder(cal, desplazar(cal, f, d.retardo), a.duracion);
+    else if (d.tipo === "FF") candidato = retroceder(cal, desplazar(cal, f, d.retardo), a?.duracion);
     else candidato = desplazar(cal, cal.siguienteHabil(new Date(f.getTime() + 86400000)), d.retardo);
     if (!candidato) return;
-    if (!cuando || candidato > cuando) { cuando = candidato; mejor = d.id; }
+    mapa.set(d.id, { desde: claveFecha(candidato), otra });
   });
-  // Si lo que manda no es ninguna dependencia sino su fecha fija, no se señala
-  // ninguna: decir que la traba una que ya terminó sería mentir.
+  return mapa;
+}
+
+export function cualTraba(a, deps = [], porId, cal) {
+  if (!a?.inicio || deps.length < 2) return null;
+  let mejor = null, cuando = null;
+  cuandoDejanEmpezar(a, deps, porId, cal).forEach(({ desde }, id) => {
+    if (!cuando || desde > cuando) { cuando = desde; mejor = id; }
+  });
+  // SI LO QUE MANDA ES LA FECHA FIJA, NO SE SEÑALA NINGUNA.
+  //
+  // Decir que la traba una que ya terminó sería mentir, y es una mentira cara:
+  // manda a adelantar una actividad que no va a mover nada. Se comparaba contra
+  // `inicio` —la fecha ya calculada— y eso dejaba pasar justo este caso, porque
+  // una barra empujada por su fecha fija arranca DESPUÉS de lo que sus
+  // dependencias permiten, y «después» pasaba la prueba igual.
   if (!cuando) return null;
-  return claveFecha(cuando) <= a.inicio ? mejor : null;
+  const fija = a.inicio_fijo ? String(a.inicio_fijo).slice(0, 10) : null;
+  if (fija && fija > cuando) return null;
+  return cuando <= a.inicio ? mejor : null;
 }
