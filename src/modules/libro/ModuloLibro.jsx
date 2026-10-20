@@ -109,7 +109,7 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
         </div>
 
         {vista === "impreso" ? (
-          <LibroImpreso lead={lead} dias={dias} onCambio={() => cargarDias(lead.id)} />
+          <LibroImpreso lead={lead} dias={dias} currentUser={currentUser} onCambio={() => cargarDias(lead.id)} />
         ) : vista === "plan" ? (
           <PlanSemanal lead={lead} currentUser={currentUser}
             puedeEscribir={nivelProyecto(lead.id) === "editar"} />

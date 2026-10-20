@@ -251,5 +251,9 @@ export async function pdfLibroDeObra({ obra, dias = [], traerDia }, modo = "abri
 
   const nombre = `Libro de obra ${obra || ""}.pdf`.replace(/\s+/g, " ");
   if (modo === "blob") return doc.output("blob");
+  // Para mandarlo por correo: el PDF se arma acá, en el navegador, que es
+  // donde están las fotos firmadas y la librería. Sale en base64 y viaja con
+  // el pedido de envío.
+  if (modo === "base64") return { nombre, contenido: doc.output("datauristring").split(",")[1] };
   return mostrarPdf(doc, nombre, modo);
 }
