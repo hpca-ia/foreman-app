@@ -191,7 +191,7 @@ export function mapaQueCuadra(filasTodas, m) {
   };
 }
 
-export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false } = {}) {
+export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false, bloque: bloqueInicial = null } = {}) {
   // `respetarMapa` salta el saneo automático: lo usa quien corrige la lectura
   // a mano desde la pantalla. El saneo existe para cuando NOVA se equivoca,
   // pero si la persona está mirando su propio Excel y dice de qué columna sale
@@ -234,11 +234,19 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
 
   const leidas = filasTodas.slice(inicio).map((f, k) => {
     let desc = texto(val(f, m.col_descripcion));
+    // DE DÓNDE SALIÓ LA DESCRIPCIÓN, QUE NO ES UN DETALLE.
+    //
     // Muchas planillas escriben "SUBTOTAL" u "Honorarios" fuera de la columna
-    // de descripción: se toma el primer texto de la fila.
+    // de descripción, así que si esa celda está vacía se toma el primer texto
+    // de la fila. Eso sirve para reconocer un subtotal y NO sirve para armar
+    // un rubro: un rubro de verdad tiene su descripción en la columna de las
+    // descripciones. Cuando sale de otro lado, la fila es otra cosa —un
+    // subtotal, un cargo, el cuadro de áreas del pie— y tratarla como rubro es
+    // lo que metía el total del presupuesto adentro del presupuesto.
+    const descPropia = !!desc;
     if (!desc) desc = f.map(texto).find(t => t && isNaN(Number(t)) && !esCodigo(t)) || "";
     return {
-      fila: inicio + k, desc,
+      fila: inicio + k, desc, descPropia,
       codigo: texto(val(f, m.col_item)),
       unidad: unidadValida(texto(val(f, m.col_unidad))) ? texto(val(f, m.col_unidad)) : "",
       // Distingue "total en 0" de "celda de total vacía": una fila con cantidad
@@ -289,7 +297,11 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
   };
 
   const rubros = [], omitidas = [], cargos = [], capitulos = [], subtotalesDeBloque = [];
-  let cap = null, subtotalExcel = null, totalExcel = null, ivaExcel = null, bloque = null;
+  // `bloqueInicial` es el nombre de la hoja cuando el presupuesto viene
+  // repartido en varias: "CASA PRINCIPAL · OBRAS PRELIMINARES". Sin eso, las
+  // tres hojas tienen un capítulo llamado OBRAS PRELIMINARES y se fundirían en
+  // uno solo, que después nadie puede controlar por separado.
+  let cap = null, subtotalExcel = null, totalExcel = null, ivaExcel = null, bloque = bloqueInicial;
   const abrir = (nombre, codigo, declarado, pref = null, fila = null) => {
     // Un título que no llegó a tener rubros propios ni subtotal y ya viene
     // otro título encima no es un capítulo: es un bloque —"CASA DE SEGURIDAD",
@@ -356,7 +368,7 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     }
     // Un total con nombre cierra su bloque: lo que viene después ya no es de
     // la casa de seguridad ni de las caballerizas.
-    if (esTotal(r)) { if (r.total) totalExcel = r.total; bloque = null; return; }
+    if (esTotal(r)) { if (r.total) totalExcel = r.total; bloque = bloqueInicial; return; }
     if (esIva(r)) {
       if (r.total) {
         const pct = (r.linea.match(/(\d+(?:[.,]\d+)?)\s*%/) || [])[1];
@@ -364,17 +376,39 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
       }
       return;
     }
-    if (k > ultimoRubro) { if (r.total) cargos.push({ descripcion: r.desc, total: r.total, fila: r.fila }); return; }
+    // Después del último rubro, lo que tiene total es un cargo: honorarios,
+    // imprevistos, utilidad. PERO el cuadro de áreas del pie también cae acá
+    // —"VIAS VEHICULARES | 1.354,34 | SERVICIOS | 358.823,78"— y entraba como
+    // un cargo de trescientos mil que nadie pidió. Un cargo no tiene cantidad:
+    // es un monto. Si tiene cantidad y la descripción no salió de su columna,
+    // es el cuadro de áreas y no es plata de esta obra.
+    if (k > ultimoRubro) {
+      if (r.total && (r.descPropia || !r.cant)) cargos.push({ descripcion: r.desc, total: r.total, fila: r.fila });
+      return;
+    }
 
     // Un global sin desglose: tiene unidad y total pero le falta cantidad o precio.
-    if (r.unidad && r.total) {
+    //
+    // Con la descripción en su columna. Al pie de muchas planillas hay un
+    // cuadro de áreas —"AREA VERDE | 6.499,45 | ... | 7.209.185"— cuyas celdas
+    // caen justo en las columnas de unidad, cantidad y total, y sin esto
+    // entraba como tres rubros que sumaban el presupuesto entero otra vez:
+    // ocho millones de los que nadie podía decir de dónde salían.
+    if (r.unidad && r.total && r.descPropia) {
       const cantidad = r.cant || 1;
       return rubro(r, cantidad, r.precio || r.total / cantidad, r.total, true);
     }
     // Entra en $0, con la cantidad si ya la tiene y el precio si ya lo tiene.
     if (esPendiente(r)) return rubro(r, r.cant || 0, r.precio || 0, 0, false, true);
     if (r.unidad) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "detalle" });
-    if (m.col_capitulo == null && r.desc && r.desc.length <= 120) {
+    // UN CAPÍTULO SE LLAMA DESDE LA COLUMNA DE LAS DESCRIPCIONES.
+    //
+    // El cuadro de áreas del pie —"AREA VERDE", "CAMINERIAS", "VIAS
+    // VEHICULARES", cada uno con el total de una hoja al lado— abría tres
+    // capítulos con total declarado y sin rubros, y un capítulo así se cuenta
+    // como un cargo. Resultado: trescientos mil dólares de "VIAS VEHICULARES"
+    // sumados al presupuesto, que en realidad eran el total de otra hoja.
+    if (m.col_capitulo == null && r.descPropia && r.desc && r.desc.length <= 120) {
       if (esCodigoCapitulo(r.codigo)) return abrir(r.desc.toUpperCase(), r.codigo, r.total, null, r.fila);
       const p = siguientePrefijo(k);
       if (cap && (p === "mismo" || (usarPrefijos && cap.prefijo && p && p === cap.prefijo))) return;   // subtítulo o nota dentro del capítulo
@@ -405,6 +439,60 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, advertencias,
     corregido: m.corregido || null,
     preciosIncluyenIva: typeof mapaNova.precios_incluyen_iva === "boolean" ? mapaNova.precios_incluyen_iva : null,
+  };
+}
+
+/**
+ * UN PRESUPUESTO REPARTIDO EN VARIAS HOJAS SE LEE HOJA POR HOJA.
+ *
+ * Pegarlas una debajo de otra y leerlas de corrido parecía lo simple y no lo
+ * es: cada hoja trae su propio total al pie —y el lector se queda con el
+ * último—, su propia fila de encabezados en el medio, y capítulos que se
+ * llaman igual en las tres. "OBRAS PRELIMINARES" aparece en la casa, en el
+ * wellness y en servicios, y fundidas en una sola son un capítulo que ya no
+ * se puede controlar por separado.
+ *
+ * Leída hoja por hoja, cada una cuadra contra SU total —que es la única
+ * comprobación que vale— y el nombre de la hoja queda como bloque de sus
+ * capítulos.
+ */
+export function interpretarVariasHojas(hojas = [], opciones = {}) {
+  const leidas = hojas.map(h => ({
+    nombre: h.nombre,
+    r: interpretarPresupuesto(h.filas, h.mapa, { ...opciones, bloque: hojas.length > 1 ? h.nombre : null }),
+  }));
+
+  const sumar = (xs, campo) => xs.reduce((t, x) => t + (Number(x[campo]) || 0), 0);
+  const unir = campo => leidas.flatMap(({ nombre, r }) =>
+    (r[campo] || []).map(x => (hojas.length > 1 ? { ...x, hoja: nombre } : x)));
+
+  const rubros = unir("rubros");
+  const cargos = unir("cargos");
+  // Cada hoja aporta SU total declarado. Quedarse con el de la última es lo
+  // que hacía que un presupuesto de ocho millones se comparara contra los
+  // trescientos mil de la última hoja.
+  const totales = leidas.map(({ r }) => Number(r.totalExcel) || 0);
+  const hayTotales = totales.some(t => t > 0);
+
+  return {
+    ...leidas[0]?.r,
+    rubros, cargos,
+    omitidas: unir("omitidas"),
+    capitulos: [...new Set(rubros.map(x => x.capitulo))],
+    advertencias: leidas.flatMap(({ nombre, r }) => (r.advertencias || [])
+      .map(a => (hojas.length > 1 ? { ...a, hoja: nombre } : a))),
+    descuadres: leidas.flatMap(({ nombre, r }) => (r.descuadres || [])
+      .map(d => (hojas.length > 1 ? { ...d, hoja: nombre } : d))),
+    subtotalExcel: null,
+    totalExcel: hayTotales ? Math.round(totales.reduce((t, x) => t + x, 0) * 100) / 100 : null,
+    sumaRubros: Math.round(sumar(rubros, "total") * 100) / 100,
+    sumaCargos: Math.round(sumar(cargos, "total") * 100) / 100,
+    hojas: leidas.map(({ nombre, r }) => ({
+      nombre,
+      rubros: r.rubros.length,
+      total: Math.round((sumar(r.rubros, "total") + sumar(r.cargos, "total")) * 100) / 100,
+      declarado: Number(r.totalExcel) || null,
+    })),
   };
 }
 

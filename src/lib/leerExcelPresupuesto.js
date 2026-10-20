@@ -99,14 +99,12 @@ export async function reconocerExcel(file, { signal, onPaso } = {}) {
     if (firmaBase && firmaDe(h.filas) === firmaBase) pegadas.push(h);
     else sueltas.push(h.nombre);
   }
-  const filas = pegadas.length
-    ? pegadas.reduce((acc, h) => acc.concat(h.filas), [...principal])
-    : principal;
-  const hojas = {
-    leidas: [laPrincipal?.nombre, ...pegadas.map(h => h.nombre)].filter(Boolean),
-    afuera: sueltas,
-    total: todas.length,
-  };
+  // La principal primero, y las del mismo formato detrás. Cada una se lee
+  // aparte —con su total al pie, que es la única comprobación que vale— y el
+  // nombre de la hoja queda como bloque de sus capítulos.
+  const delMismoFormato = [laPrincipal || { nombre: wb.SheetNames[0], filas: principal }, ...pegadas];
+  const filas = principal;
+  const afueraHojas = sueltas;
 
   const { data: formatos } = await supabase.from("formatos_presupuesto").select("*");
   const recordado = buscarFormato(filas, formatos || []);
@@ -120,14 +118,25 @@ export async function reconocerExcel(file, { signal, onPaso } = {}) {
         messages: [{ role: "user", content: [{ type: "text", text: `${muestra(filas, 15)}\n\n${DATOS_PROMPT}` }] }] }, signal);
       datos = parseJSONTolerante(textoDeNova(d) || "") || {};
     } catch (e) { if (e.name === "AbortError") throw e; }
-    return { filas, hojas, mapa: recordado.mapa, origen: { tipo: "recordado", veces: recordado.formato.veces, archivo: recordado.formato.ejemplo_archivo }, datos };
+    return {
+      filas, mapa: recordado.mapa, datos,
+      hojas: delMismoFormato.map(h => ({ nombre: h.nombre, filas: h.filas, mapa: recordado.mapa })),
+      afueraHojas, totalHojas: todas.length,
+      origen: { tipo: "recordado", veces: recordado.formato.veces, archivo: recordado.formato.ejemplo_archivo },
+    };
   }
 
   onPaso?.("NOVA está reconociendo las columnas...");
   const d = await pedirNova({ model: LECTURA, max_tokens: 1000,
     messages: [{ role: "user", content: [{ type: "text", text: `${muestra(filas, 40)}\n\n${MAPA_PROMPT}` }] }] }, signal);
   const mapa = parseJSONTolerante(textoDeNova(d) || "");
-  return { filas, hojas, mapa: mapa || { fila_encabezado: 0 }, origen: { tipo: "nova" }, datos: mapa || {} };
+  const elMapa = mapa || { fila_encabezado: 0 };
+  return {
+    filas, mapa: elMapa, datos: mapa || {},
+    hojas: delMismoFormato.map(h => ({ nombre: h.nombre, filas: h.filas, mapa: elMapa })),
+    afueraHojas, totalHojas: todas.length,
+    origen: { tipo: "nova" },
+  };
 }
 
 /** Guarda el mapa como formato conocido; si ya existía, suma un uso. Devuelve el error, si hubo. */

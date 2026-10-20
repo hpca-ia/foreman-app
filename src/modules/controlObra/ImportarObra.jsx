@@ -12,7 +12,7 @@ import { guardarOriginal } from "../../lib/archivosPresupuesto";
 import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
-import { interpretarPresupuesto, aplicarDecisiones } from "./leerPresupuesto";
+import { interpretarPresupuesto, interpretarVariasHojas, aplicarDecisiones } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
@@ -101,8 +101,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
 
   // Lee las filas con un mapa de columnas y deja todo listo para la vista
   // previa. Se usa al leer, al reconocer un formato y al corregir a mano.
-  function aplicarMapa(filas, mapa, origen) {
-    const r = interpretarPresupuesto(filas, mapa, { conPendientes: paraPresupuesto });
+  function aplicarMapa(filas, mapa, origen, hojasDelLibro = null) {
+    // Varias hojas se leen UNA POR UNA y se suman: cada una trae su propio
+    // total al pie y capítulos que se llaman igual que los de las otras.
+    const r = hojasDelLibro && hojasDelLibro.length > 1
+      ? interpretarVariasHojas(hojasDelLibro.map(h => ({ ...h, mapa })), { conPendientes: paraPresupuesto })
+      : interpretarPresupuesto(filas, mapa, { conPendientes: paraPresupuesto });
     setFilasExcel(filas); setMapaActual(r.mapa); setOrigenMapa(origen);
     setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
     setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
@@ -135,11 +139,11 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
         // QUÉ HOJAS ENTRARON Y CUÁLES NO. Un presupuesto repartido en tres
         // hojas entraba antes con una sola y sin avisar: el total parecía bien
         // y le faltaban dos tercios.
-        setHojas(lectura.hojas || null);
+        setHojas({ leidas: (lectura.hojas || []).map(h => h.nombre), afuera: lectura.afueraHojas || [], total: lectura.totalHojas || 1 });
         setNombre(lectura.datos.nombre || file.name.replace(/\.[^.]+$/, ""));
         setSugerencia({ emisor: lectura.datos.emisor || "", cliente: lectura.datos.cliente || "" });
         setPreguntas({ ...RESPUESTAS_VACIAS, cliente: lectura.datos.cliente || "" });
-        const cuantos = aplicarMapa(lectura.filas, lectura.mapa, lectura.origen);
+        const cuantos = aplicarMapa(lectura.filas, lectura.mapa, lectura.origen, lectura.hojas);
         // Si con esas columnas no salen rubros, no se adivina más: se muestran
         // las columnas para corregirlas, con la opción de que NOVA lea todo.
         if (cuantos < 3) setVerColumnas(true);
