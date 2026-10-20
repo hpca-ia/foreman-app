@@ -310,3 +310,18 @@ export async function diasDelProyecto(leadId) {
   if (error) return { error: falta(error) ? "sin_tablas" : error.message, dias: [] };
   return { dias: data || [] };
 }
+
+// ── LAS ENTREGAS DEL LIBRO ────────────────────────────────────────────────
+//
+// Cada vez que se le mandó un tramo del libro a alguien queda anotado: a quién,
+// qué fechas, si llegó y si lo dio por revisado. "El libro de septiembre te lo
+// mandé el 3 de octubre" no vale nada sin el acuse al lado.
+
+export const SIN_117 = "Falta correr la migración 117 para llevar el registro de las entregas del libro.";
+
+export async function entregasDe(leadId) {
+  const { data, error } = await supabase.from("libro_envios")
+    .select("*").eq("lead_id", leadId).order("created_at", { ascending: false });
+  if (error) return { error: falta(error) ? SIN_117 : error.message, entregas: [] };
+  return { entregas: data || [] };
+}

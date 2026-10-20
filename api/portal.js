@@ -201,8 +201,128 @@ async function firmarActa(req, res, asistente) {
   return res.status(200).json({ ok: true, conforme_at: campos.conforme_at || asistente.conforme_at, observacion: texto || asistente.observacion });
 }
 
+/** La entrega del libro que abre esta llave. */
+async function entregaDe(token) {
+  if (!token || String(token).length < 20) return null;
+  const limpio = String(token).replace(/[^A-Za-z0-9_-]/g, "");
+  if (limpio.length < 20) return null;
+  const filas = await json(await rest(
+    `libro_envios?token=eq.${encodeURIComponent(limpio)}&select=id,lead_id,desde,hasta,dias,nombre,email,visto_at,conforme_at,observacion`));
+  return filas?.[0] || null;
+}
+
+/**
+ * El libro del tramo, para leerlo antes de darlo por revisado.
+ *
+ * El PDF ya le llegó por correo, pero el correo se archiva y el enlace se abre
+ * tres semanas después desde el teléfono. Si al entrar no se ve QUÉ se está
+ * aprobando, lo que queda es un botón a ciegas — y una conformidad a ciegas no
+ * es una conformidad.
+ */
+async function libroParaFirmar(req, res, entrega) {
+  const [leads, dias] = await Promise.all([
+    json(await rest(`leads?id=eq.${entrega.lead_id}&select=nombre`)),
+    json(await rest(`libro_obra_dias?lead_id=eq.${entrega.lead_id}`
+      + `${entrega.desde ? `&fecha=gte.${entrega.desde}` : ""}${entrega.hasta ? `&fecha=lte.${entrega.hasta}` : ""}`
+      + "&estado=in.(cerrado,aprobado)&select=id,fecha,estado&order=fecha")),
+  ]);
+  const ids = (dias || []).map(d => d.id);
+  const entradas = ids.length
+    ? await json(await rest(`libro_obra_entradas?dia_id=in.(${ids.join(",")})&select=dia_id,categoria,contenido&order=id`))
+    : [];
+  const porDia = new Map();
+  for (const e of entradas || []) {
+    if (!porDia.has(e.dia_id)) porDia.set(e.dia_id, []);
+    porDia.get(e.dia_id).push({ categoria: e.categoria, contenido: e.contenido });
+  }
+
+  // La primera vez que lo abre queda anotado. Distingue "no contestó" de "ni
+  // lo miró", que en una discusión no es lo mismo.
+  if (!entrega.visto_at) {
+    await rest(`libro_envios?id=eq.${entrega.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ visto_at: new Date().toISOString() }),
+    });
+  }
+
+  return res.status(200).json({
+    obra: leads?.[0]?.nombre || "",
+    tramo: { desde: entrega.desde, hasta: entrega.hasta, dias: entrega.dias },
+    yo: { nombre: entrega.nombre, email: entrega.email,
+      conforme_at: entrega.conforme_at, observacion: entrega.observacion },
+    dias: (dias || []).map(d => ({ fecha: d.fecha, estado: d.estado, entradas: porDia.get(d.id) || [] })),
+  });
+}
+
+async function firmarLibro(req, res, entrega) {
+  const { conforme, observacion } = req.body || {};
+  const texto = String(observacion || "").trim().slice(0, 2000);
+  if (!conforme && !texto) return res.status(400).json({ error: "Decí si lo das por revisado o escribí qué no coincide." });
+  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || null;
+  const ahora = new Date().toISOString();
+  const campos = {};
+  if (conforme) { campos.conforme_at = ahora; campos.conforme_ip = ip; }
+  if (texto) { campos.observacion = texto; campos.observacion_at = ahora; }
+  const r = await rest(`libro_envios?id=eq.${entrega.id}`, {
+    method: "PATCH", headers: { Prefer: "return=representation" },
+    body: JSON.stringify(campos),
+  });
+  if (!r.ok) return res.status(500).json({ error: "No se pudo guardar." });
+  if (texto) await avisarObservacionDelLibro(entrega, texto);
+  return res.status(200).json({ ok: true, conforme_at: campos.conforme_at || entrega.conforme_at, observacion: texto || entrega.observacion });
+}
+
+/**
+ * Si alguien dice que el libro no coincide con lo que vio en obra, eso no
+ * puede quedar esperando a que alguien abra una pantalla.
+ *
+ * Va al equipo de la casa —los usuarios de FOREMAN— porque son los que pueden
+ * hacer algo: reabrir el día, corregirlo, o ir a mirar.
+ */
+async function avisarObservacionDelLibro(entrega, texto) {
+  try {
+    const [leads, usuarios] = await Promise.all([
+      json(await rest(`leads?id=eq.${entrega.lead_id}&select=nombre`)),
+      json(await rest("usuarios?activo=eq.true&select=email")),
+    ]);
+    const para = (usuarios || []).map(u => String(u.email || "").trim().toLowerCase()).filter(Boolean);
+    if (!para.length) return;
+    const obra = leads?.[0]?.nombre || "la obra";
+    const quien = entrega.nombre || entrega.email;
+    await enviarCorreo({
+      to: para,
+      subject: `Observación al libro de obra · ${obra} · ${quien}`,
+      html: plantilla({
+        titulo: "Observación al libro de obra",
+        subtitulo: obra,
+        cuerpo: `
+          <p style="margin:0 0 12px;font-size:14px;color:#1A1A1A">
+            <strong>${escaparHtml(quien)}</strong> abrió el libro por su enlace y escribió que algo no coincide
+            con lo que vio en obra:
+          </p>
+          <div style="font-size:14px;color:#1A1A1A;line-height:1.6;padding:12px 14px;background:#FEF6E7;
+            border:1px solid #F0D9A8;border-radius:8px;white-space:pre-line">${escaparHtml(texto)}</div>
+          <p style="margin:14px 0 0;font-size:13px;color:#555;line-height:1.55">
+            Queda anotada en la entrega del libro, con su nombre y la fecha.
+          </p>`,
+        pie: "Correo automático de FOREMAN · HCA Studio.",
+      }),
+    });
+  } catch { /* el aviso no puede tumbar la firma: lo que importa ya se guardó */ }
+}
+
 export default async function handler(req, res) {
   if (!configurado()) return res.status(500).json({ error: "El portal no está configurado." });
+
+  // El libro entra por la misma puerta con su propia llave, igual que el acta.
+  if (req.query?.libro || (req.body || {}).libro) {
+    const t = req.method === "GET" ? req.query?.t : (req.body || {}).token;
+    const entrega = await entregaDe(t);
+    if (!entrega) return res.status(404).json({ error: "Este enlace no está disponible." });
+    if (req.method === "GET") return libroParaFirmar(req, res, entrega);
+    if (req.method === "POST") return firmarLibro(req, res, entrega);
+    return res.status(405).json({ error: "Método no permitido" });
+  }
 
   // El acta entra por la misma puerta con su propia llave: una función más en
   // /api costaría un despliegue entero del plan, y son doce.

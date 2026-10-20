@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
-import { FileText, Download, Lock, Mail } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { FileText, Download, Lock, Mail, Check, AlertTriangle, Eye, RefreshCw } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { contenidoDe, enlacesDeFotos, guardarPdfDelDia } from "./libro";
+import { contenidoDe, enlacesDeFotos, guardarPdfDelDia, entregasDe } from "./libro";
 import { pdfDiaDeObra, pdfLibroDeObra, comoSeLee } from "./pdfDiaDeObra";
 import { abrirArchivo } from "../../lib/archivos";
 import { convocadosDe } from "../actas/actas";
@@ -63,6 +63,37 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
     convocadosDe(lead.id).then(cs => setConvocados((cs || []).filter(c => esCorreo(c.email))));
   }, [mandando, lead?.id]);
 
+  // ── LO QUE YA SE ENTREGÓ ───────────────────────────────────────────────
+  //
+  // Un libro que rebotó sin que nadie se entere es peor que uno que no se
+  // mandó: el que lo pidió cree que ya lo tiene y no lo vuelve a pedir.
+  const [entregas, setEntregas] = useState([]);
+  const cargarEntregas = useCallback(async () => {
+    if (!lead?.id) return;
+    const r = await entregasDe(lead.id);
+    if (r.error) { setError(r.error); return; }
+    setEntregas(r.entregas);
+  }, [lead?.id]);
+  useEffect(() => { cargarEntregas(); }, [cargarEntregas]);
+
+  async function revisarEntregas() {
+    setOcupado("revisando"); setError(""); setAviso("");
+    try {
+      const r = await fetch("/api/aviso?de=libro", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revisar: 1, lead_id: lead.id }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!d || d.error) throw new Error(d?.error || "No se pudo preguntar por las entregas.");
+      await cargarEntregas();
+      setAviso(d.rebotaron?.length
+        ? `No le llegó a ${d.rebotaron.join(", ")}. Corregí la dirección y volvé a mandarlo.`
+        : d.cambiaron ? `${d.cambiaron} ${d.cambiaron === 1 ? "entrega cambió" : "entregas cambiaron"} de estado.`
+          : "Sin novedades: nada cambió desde la última vez.");
+    } catch (e) { setError(e.message); }
+    setOcupado("");
+  }
+
   // Sin repetir: la misma persona puede estar dos veces en los de siempre, y
   // recibir el libro dos veces es el tipo de detalle que hace dudar de todo lo
   // demás que manda el sistema.
@@ -120,12 +151,19 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
         throw new Error(`El libro de ese tramo pesa ${(pesa / 1024 / 1024).toFixed(1)} MB y el máximo que`
           + " acepta el servidor es 4,5 MB. Mandalo por partes: achicá el tramo de fechas y mandá dos correos.");
       }
+      // Quién es cada dirección: una entrega que dice "info@proeficaz.com" y no
+      // "PROEFICAZ" obliga a traducir mentalmente cada vez que se la mira.
+      const quien = {};
+      for (const c of convocados) {
+        const mail = String(c.email).trim().toLowerCase();
+        if (destinatarios.includes(mail)) quien[mail] = c.nombre || null;
+      }
       const r = await fetch("/api/aviso?de=libro", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lead_id: lead.id, desde: fecha(enRango[0].fecha), hasta: fecha(enRango[enRango.length - 1].fecha),
-          dias: enRango.length, para: destinatarios, adjunto, nota: nota.trim() || null,
-          de: currentUser?.email || null,
+          dias: enRango.length, para: destinatarios, adjunto, nota: nota.trim() || null, quien,
+          de: currentUser ? { id: currentUser.id ?? null, nombre: currentUser.name || null, email: currentUser.email || null } : null,
         }),
       });
       const data = await r.json().catch(() => null);
@@ -139,6 +177,7 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
       setAviso(`${data.mandados} ${data.mandados === 1 ? "copia enviada" : "copias enviadas"}`
         + `${fallaron.length ? ` · ${fallaron.length} no salió: ${fallaron.map(f => f.dir).join(", ")}` : ""}.`);
       if (!fallaron.length) { setMandando(false); setOtros(""); setNota(""); setElegidos(new Set()); }
+      await cargarEntregas();
     } catch (e) {
       setError(e.message);
     }
@@ -256,6 +295,69 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10, lineHeight: 1.45 }}>{error}</div>}
       {aviso && <div style={{ fontSize: 12, color: colors.success, marginBottom: 10 }}>{aviso}</div>}
+
+      {/* A QUIÉN SE LE ENTREGÓ, SI LLEGÓ Y SI LO REVISÓ.
+          Es lo que hace falta cuando se discute: "el libro de septiembre te lo
+          mandé el 3 de octubre" no prueba nada sin el acuse al lado. */}
+      {entregas.length > 0 && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
+              Entregas · {entregas.filter(e => e.conforme_at).length} de {entregas.length} dadas por revisadas
+            </div>
+            {/* SE ACTUALIZA CUANDO SE PIDE: esto cambia afuera de FOREMAN, en
+                el servidor de correo y en el teléfono del que lo recibió. */}
+            <button onClick={revisarEntregas} disabled={!!ocupado}
+              style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+                padding: "3px 9px", cursor: "pointer", fontFamily: colors.font, fontSize: 11,
+                color: colors.inkSoft, display: "flex", alignItems: "center", gap: 5 }}>
+              <RefreshCw size={11} /> {ocupado === "revisando" ? "Preguntando…" : "¿Llegó? ¿Contestaron?"}
+            </button>
+          </div>
+          {entregas.map(e => {
+            const reboto = ["bounced", "complained", "failed"].includes(String(e.envio_estado || "").toLowerCase());
+            const color = reboto ? colors.danger
+              : e.observacion ? colors.warning
+                : e.conforme_at ? colors.success
+                  : e.visto_at ? colors.inkSoft : colors.muted;
+            return (
+              <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "flex-start",
+                padding: "6px 0", borderTop: `1px solid ${colors.bg}` }}>
+                <div style={{ flexShrink: 0, color, display: "flex", paddingTop: 2 }}>
+                  {reboto ? <AlertTriangle size={13} />
+                    : e.observacion ? <AlertTriangle size={13} />
+                      : e.conforme_at ? <Check size={13} /> : <Eye size={13} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: colors.ink }}>
+                    {e.nombre || e.email}
+                    <span style={{ color: colors.muted }}>
+                      {" · "}{e.desde === e.hasta ? comoSeLee(e.desde) : `${comoSeLee(e.desde)} a ${comoSeLee(e.hasta)}`}
+                      {e.dias ? ` · ${e.dias} ${e.dias === 1 ? "día" : "días"}` : ""}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color }}>
+                    {reboto ? `No le llegó a ${e.email}: la dirección rebotó.`
+                      : e.conforme_at ? `Lo dio por revisado el ${fecha(e.conforme_at)}`
+                        : e.observacion ? "Escribió una observación"
+                          : e.visto_at ? `Lo abrió el ${fecha(e.visto_at)} y no dijo nada`
+                            : String(e.envio_estado || "").toLowerCase() === "delivered" ? "Le llegó y todavía no lo abrió"
+                              : "Enviado, todavía sin acuse"}
+                  </div>
+                  {e.observacion && (
+                    <div style={{ fontSize: 11.5, color: colors.ink, background: colors.warningSoft,
+                      border: `1px solid ${colors.warningBorder}`, borderRadius: 6, padding: "5px 8px",
+                      marginTop: 3, lineHeight: 1.45, whiteSpace: "pre-line" }}>
+                      {e.observacion}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {!cerrados.length ? (
         <div style={{ fontSize: 12.5, color: colors.muted, background: colors.surface, border: `1px solid ${colors.border}`,

@@ -25,8 +25,20 @@ const llaveCliente = new URLSearchParams(window.location.search).get('cliente');
 // la fiscalización, un contratista— no tiene cuenta acá, y pedirle que se
 // registre para leer un acta es garantizar que no la lea.
 const llaveActa = new URLSearchParams(window.location.search).get('acta');
+// El libro de obra, para quien lo da por revisado. Misma puerta y misma razón:
+// la fiscalización, el cliente o un perito no tienen cuenta acá.
+const llaveLibro = new URLSearchParams(window.location.search).get('libro');
 
-if (llaveActa) {
+if (llaveLibro) {
+  const FirmaLibro = React.lazy(() => import('./portal/FirmaDelLibro'));
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <FirmaLibro token={llaveLibro} />
+      </React.Suspense>
+    </React.StrictMode>
+  );
+} else if (llaveActa) {
   const Firma = React.lazy(() => import('./portal/FirmaDelActa'));
   root.render(
     <React.StrictMode>
