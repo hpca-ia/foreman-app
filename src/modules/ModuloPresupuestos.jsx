@@ -9,7 +9,7 @@ import AdminBD from "./AdminBD";
 import BaseRubros from "./presupuestos/BaseRubros";
 import PreguntasNova from "../components/PreguntasNova";
 import { reconocerExcel, recordarFormato } from "../lib/leerExcelPresupuesto";
-import { interpretarPresupuesto } from "./controlObra/leerPresupuesto";
+import { interpretarPresupuesto, interpretarVariasHojas } from "./controlObra/leerPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
@@ -929,7 +929,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         // La misma lectura que al importar una obra: formato aprendido o NOVA
         // reconoce las columnas, y las filas se recorren sin IA.
         const lectura = await reconocerExcel(file);
-        const r = interpretarPresupuesto(lectura.filas, lectura.mapa);
+        // VARIAS HOJAS SE LEEN DE A UNA Y SE SUMAN. Un presupuesto repartido
+        // en bloques —casa, wellness, servicios— entraba con una sola hoja:
+        // el total parecía bien y le faltaban dos tercios.
+        const r = (lectura.hojas || []).length > 1
+          ? interpretarVariasHojas(lectura.hojas)
+          : interpretarPresupuesto(lectura.filas, lectura.mapa);
         if (r.rubros.length >= 3) {
           setBdResult({ capitulos: [...new Set(r.rubros.map(x => x.capitulo))], rubros: r.rubros, cargos: r.cargos, corregido: r.corregido });
           setBdRubros(r.rubros.map(x => ({ fila: x.fila, capitulo: x.capitulo, descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad, precio_unitario: x.precio_unitario })));
