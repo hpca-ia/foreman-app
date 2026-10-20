@@ -41,6 +41,13 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
   const [corrigiendo, setCorrigiendo] = useState(null);
   const [correoNuevo, setCorreoNuevo] = useState("");
   const [verConvocados, setVerConvocados] = useState(false);
+  // A QUIEN SE OLVIDARON DE PONER EN LA LISTA.
+  //
+  // Pasa en todas las obras: el acta sale y alguien dice "¿y al fiscalizador no
+  // se la mandaron?". Sin esto había que elegir entre dejarlo afuera del
+  // registro o reenviarle el acta a los doce que ya la tienen —que es la forma
+  // más rápida de que la gente empiece a ignorar las actas—.
+  const [tarde, setTarde] = useState(null);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -446,6 +453,15 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                     <div style={{ fontSize: 12.5, color: colors.ink }}>
                       {a.nombre}{a.empresa ? <span style={{ color: colors.muted }}> · {a.empresa}</span> : null}
                     </div>
+                    {/* A QUÉ DIRECCIÓN SE LE MANDÓ, ESCRITO.
+                        Cuando algo rebota, la pregunta es "¿a qué correo se lo
+                        mandaste?" y la respuesta estaba a dos clics, adentro de
+                        la ficha del asistente. Acá se ve al lado del estado,
+                        que es donde se pregunta. */}
+                    {a.email && (
+                      <div style={{ fontSize: 10.5, color: colors.muted, overflow: "hidden",
+                        textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.email}</div>
+                    )}
                     <div style={{ fontSize: 11.5, color, lineHeight: 1.45 }}>
                       {c.estado === "conforme" ? `Dio conformidad el ${dia(String(c.cuando).slice(0, 10))}`
                         : c.estado === "observacion" ? "Escribió una observación"
@@ -544,6 +560,59 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                 </div>
               );
             })}
+
+            {/* FALTÓ ALGUIEN EN LA LISTA.
+                El acta ya salió y alguien dice "¿y al fiscalizador no se la
+                mandaron?". Las dos salidas que había eran malas: dejarlo fuera
+                del registro de la reunión, o reenviarle el acta a los doce que
+                ya la tienen. Acá entra, recibe SU copia con SU enlace, y queda
+                en los de siempre para que no vuelva a faltar. */}
+            {editable && puedeEnviar && (
+              tarde ? (
+                <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: 8, paddingTop: 9, display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <input autoFocus value={tarde.nombre} placeholder="Nombre"
+                      onChange={e => setTarde(t => ({ ...t, nombre: e.target.value }))}
+                      style={{ ...inputStyle, flex: "1 1 150px", fontSize: 12, padding: "6px 9px" }} />
+                    <input value={tarde.empresa} placeholder="Empresa"
+                      onChange={e => setTarde(t => ({ ...t, empresa: e.target.value }))}
+                      style={{ ...inputStyle, flex: "1 1 130px", fontSize: 12, padding: "6px 9px" }} />
+                    <input value={tarde.email} placeholder="correo@…" type="email"
+                      onChange={e => setTarde(t => ({ ...t, email: e.target.value }))}
+                      style={{ ...inputStyle, flex: "1 1 190px", fontSize: 12, padding: "6px 9px" }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    {/* VINO O NO VINO, QUE NO ES LO MISMO QUE RECIBIRLA.
+                        Un acta dice quién estuvo en la reunión. Marcar como
+                        asistente a alguien que no fue es falsificar el acta
+                        para arreglar una lista de correo. */}
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: colors.inkSoft, cursor: "pointer" }}>
+                      <input type="checkbox" checked={!!tarde.asistio}
+                        onChange={e => setTarde(t => ({ ...t, asistio: e.target.checked }))} />
+                      Vino a la reunión
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: colors.inkSoft, cursor: "pointer" }}
+                      title="Queda en «los de siempre» y entra solo en las próximas actas de esta obra">
+                      <input type="checkbox" checked={!!tarde.deSiempre}
+                        onChange={e => setTarde(t => ({ ...t, deSiempre: e.target.checked }))} />
+                      Que quede en los de siempre
+                    </label>
+                    <Button variant="primary" size="sm" disabled={ocupado} onClick={agregarYMandarle}>
+                      {ocupado ? "Mandando…" : "Agregarlo y mandarle el acta"}
+                    </Button>
+                    <button onClick={() => setTarde(null)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted,
+                        fontSize: 11.5, fontFamily: colors.font }}>cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setTarde({ nombre: "", empresa: "", email: "", asistio: false, deSiempre: true }); setAviso(""); }}
+                  style={{ background: "none", border: "none", padding: "9px 0 0", cursor: "pointer", fontFamily: colors.font,
+                    fontSize: 11.5, color: colors.brand, textDecoration: "underline" }}>
+                  Faltó alguien: agregarlo y mandarle su copia
+                </button>
+              )
+            )}
           </div>
         )}
 
@@ -1257,6 +1326,47 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
      * salga ahora, y en "los de siempre", para que la próxima reunión no
      * arranque con el mismo error.
      */
+    /**
+     * El que faltaba en la lista: entra al acta, recibe SU copia y queda.
+     *
+     * Las tres cosas juntas y en ese orden. Si solo se le manda el correo, el
+     * acta sigue diciendo que esa persona no estaba en la reunión y su
+     * conformidad no tiene dónde anotarse. Si solo se lo agrega, nadie le
+     * avisa. Y si no queda en los de siempre, el mes que viene falta de nuevo:
+     * una lista que hay que corregir todos los meses no es una lista.
+     */
+    async function agregarYMandarle() {
+      const nombre = String(tarde?.nombre || "").trim();
+      const email = String(tarde?.email || "").trim().toLowerCase();
+      if (!nombre) { setError("Escribí el nombre."); return; }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { setError("Ese correo no está bien escrito."); return; }
+      if (cont.asistentes.some(x => String(x.email || "").trim().toLowerCase() === email)) {
+        setError("Esa dirección ya está en la lista de esta acta."); return;
+      }
+      setOcupado(true); setError("");
+
+      const { fila: puesta, error: e } = await guardarFila("acta_asistentes", {
+        acta_id: abierta.id, nombre, empresa: String(tarde.empresa || "").trim() || null,
+        email, asistio: !!tarde.asistio, recibe: true, orden: cont.asistentes.length,
+      });
+      if (e) { setOcupado(false); setError(e); return; }
+      setCont(c => ({ ...c, asistentes: [...c.asistentes, puesta] }));
+
+      // En los de siempre, si no estaba ya. Comparado por correo, que es lo
+      // único que no se escribe de dos maneras distintas.
+      if (tarde.deSiempre && !convocados.some(c2 => String(c2.email || "").trim().toLowerCase() === email)) {
+        await guardarConvocado({ lead_id: lead.id, nombre, email,
+          empresa: String(tarde.empresa || "").trim() || null, orden: convocados.length });
+        setConvocados(await convocadosDe(lead.id));
+      }
+
+      setTarde(null);
+      setOcupado(false);
+      // Solo a él: los otros doce ya la tienen, y un reenvío a todos por una
+      // persona que faltaba es la forma más rápida de que dejen de abrirlas.
+      await enviar({ soloA: email });
+    }
+
     async function corregirYReenviar(a) {
       const antes = String(a.email || "").trim().toLowerCase();
       const nuevo = String(correoNuevo ?? "").trim().toLowerCase() || antes;
@@ -1265,8 +1375,17 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       if (nuevo !== antes) {
         const r = await guardarFila("acta_asistentes", { id: a.id, email: nuevo });
         if (r.error) { setOcupado(false); setError(r.error); return; }
-        const suyo = convocados.find(c => clave(c) && (clave(c) === antes || clave(c) === String(a.nombre || "").trim().toLowerCase()));
-        if (suyo) await guardarConvocado({ id: suyo.id, lead_id: lead.id, email: nuevo });
+        // TODAS LAS FICHAS DE ESA PERSONA, no la primera que aparezca.
+        //
+        // En los de siempre la misma persona puede estar dos veces —se la
+        // cargó, se la volvió a cargar con otro correo— y corrigiendo una sola
+        // la otra sigue ahí con la dirección mala. La próxima acta la trae de
+        // vuelta y el correo vuelve a rebotar: la corrección parecía no
+        // guardarse, y lo que pasaba es que se guardaba en el lugar equivocado.
+        const suyos = convocados.filter(c => clave(c)
+          && (clave(c) === antes || clave(c) === String(a.nombre || "").trim().toLowerCase()));
+        for (const suyo of suyos) await guardarConvocado({ id: suyo.id, lead_id: lead.id, email: nuevo });
+        if (suyos.length) setConvocados(await convocadosDe(lead.id));
         setCont(c => ({ ...c, asistentes: c.asistentes.map(x => (x.id === a.id ? { ...x, email: nuevo } : x)) }));
       }
       setOcupado(false);
