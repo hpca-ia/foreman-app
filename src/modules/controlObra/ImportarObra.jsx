@@ -66,6 +66,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
   const [mapaActual, setMapaActual] = useState(null);
   const [origenMapa, setOrigenMapa] = useState(null);  // { tipo: "recordado" | "nova" | "manual", veces, archivo }
   const [verColumnas, setVerColumnas] = useState(false);
+  // Las hojas del libro de Excel: cuáles se leyeron y cuáles quedaron afuera.
+  const [hojas, setHojas] = useState(null);
   const [nombre, setNombre] = useState("");
   // Lo que NOVA pregunta antes de guardar: de dónde vienen los precios, de
   // qué cliente o proveedor, y las unidades que no se entienden.
@@ -130,6 +132,10 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
         // Con un formato ya aprendido se lee igual que la vez anterior; si es
         // nuevo, NOVA reconoce las columnas.
         const lectura = await reconocerExcel(file, { signal: ctrl.signal, onPaso: setPaso });
+        // QUÉ HOJAS ENTRARON Y CUÁLES NO. Un presupuesto repartido en tres
+        // hojas entraba antes con una sola y sin avisar: el total parecía bien
+        // y le faltaban dos tercios.
+        setHojas(lectura.hojas || null);
         setNombre(lectura.datos.nombre || file.name.replace(/\.[^.]+$/, ""));
         setSugerencia({ emisor: lectura.datos.emisor || "", cliente: lectura.datos.cliente || "" });
         setPreguntas({ ...RESPUESTAS_VACIAS, cliente: lectura.datos.cliente || "" });
@@ -436,6 +442,25 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       )}
 
       {error && <div style={{ color: colors.danger, fontSize: 12, marginTop: 10 }}>{error}</div>}
+
+      {/* LAS HOJAS DEL EXCEL, DICHAS. Un presupuesto en tres hojas que entra
+          con una sola no da ningún error: da un total que parece bien. */}
+      {hojas && hojas.total > 1 && (
+        <div style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.5,
+          color: hojas.afuera.length ? colors.warning : colors.inkSoft,
+          background: hojas.afuera.length ? colors.warningSoft : colors.neutralSoft,
+          border: `1px solid ${hojas.afuera.length ? colors.warningBorder : colors.border}`,
+          borderRadius: colors.radiusMd, padding: "8px 11px" }}>
+          El archivo tiene <strong>{hojas.total} hojas</strong>. Se leyeron juntas{" "}
+          <strong>{hojas.leidas.join(", ")}</strong>: tienen el mismo encabezado, así que son el mismo
+          presupuesto partido en pedazos.
+          {hojas.afuera.length > 0 && (
+            <> Quedó afuera <strong>{hojas.afuera.join(", ")}</strong>, porque sus columnas no son las
+            mismas: leerla con este mapa pondría el precio donde va la cantidad, y eso no se nota mirando
+            el total. Si esa hoja también es parte del presupuesto, subila aparte.</>
+          )}
+        </div>
+      )}
 
       {/* Excel cuyas columnas no dieron rubros: corregir antes de seguir */}
       {filasExcel && rubros.length < 3 && (

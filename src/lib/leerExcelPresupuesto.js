@@ -14,6 +14,30 @@ export function hojaPresupuesto(XLSX, wb) {
   return wb.SheetNames.map(leer).sort((a, b) => b.length - a.length)[0] || [];
 }
 
+/**
+ * UN PRESUPUESTO PUEDE VENIR EN VARIAS HOJAS, y casi siempre viene así.
+ *
+ * Tres hojas —bloque A, bloque B, exteriores; o estructura, instalaciones,
+ * acabados— que al final se suman en un total. Hasta acá se leía UNA: la que
+ * se llamara "presupuesto" o la más larga, y las otras se descartaban sin
+ * decir nada. El presupuesto entraba completo en apariencia y le faltaban dos
+ * tercios, que es la peor forma de equivocarse: no hay error que mirar, hay un
+ * número que parece bien y no lo está.
+ *
+ * Las hojas que comparten encabezado se leen como una sola: son el mismo
+ * formato partido en pedazos, y el lector de abajo ya sabe saltear la fila de
+ * títulos cuando reaparece en el medio —hay planillas que la repiten en cada
+ * capítulo—. La que tiene OTRO encabezado no se mezcla: meterla con el mapa de
+ * columnas de otra hoja leería el precio donde está la cantidad, y eso no se
+ * nota mirando el total. Esa se deja afuera y se dice cuál.
+ */
+export function hojasDelLibro(XLSX, wb) {
+  return wb.SheetNames.map(nombre => ({
+    nombre,
+    filas: XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, blankrows: false, defval: "" }),
+  })).filter(h => h.filas.length >= 3);
+}
+
 export async function pedirNova(body, signal) {
   const res = await fetch("/api/nova", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -55,7 +79,34 @@ que hizo el documento (quien cotiza). Si algo no aparece, déjalo vacío. No inv
 export async function reconocerExcel(file, { signal, onPaso } = {}) {
   const XLSX = await import("xlsx");
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-  const filas = hojaPresupuesto(XLSX, wb);
+  const principal = hojaPresupuesto(XLSX, wb);
+
+  // Las demás hojas del libro, pegadas abajo si son del mismo formato.
+  const todas = hojasDelLibro(XLSX, wb);
+  const laPrincipal = todas.find(h => h.filas === principal)
+    || todas.find(h => h.filas.length === principal.length) || null;
+  const otras = todas.filter(h => h !== laPrincipal);
+  const firmaDe = f => {
+    for (let i = 0; i < Math.min(f.length, 12); i++) {
+      const fi = firmaEncabezado(f[i] || []);
+      if (fi) return fi;
+    }
+    return null;
+  };
+  const firmaBase = firmaDe(principal);
+  const pegadas = [], sueltas = [];
+  for (const h of otras) {
+    if (firmaBase && firmaDe(h.filas) === firmaBase) pegadas.push(h);
+    else sueltas.push(h.nombre);
+  }
+  const filas = pegadas.length
+    ? pegadas.reduce((acc, h) => acc.concat(h.filas), [...principal])
+    : principal;
+  const hojas = {
+    leidas: [laPrincipal?.nombre, ...pegadas.map(h => h.nombre)].filter(Boolean),
+    afuera: sueltas,
+    total: todas.length,
+  };
 
   const { data: formatos } = await supabase.from("formatos_presupuesto").select("*");
   const recordado = buscarFormato(filas, formatos || []);
@@ -69,14 +120,14 @@ export async function reconocerExcel(file, { signal, onPaso } = {}) {
         messages: [{ role: "user", content: [{ type: "text", text: `${muestra(filas, 15)}\n\n${DATOS_PROMPT}` }] }] }, signal);
       datos = parseJSONTolerante(textoDeNova(d) || "") || {};
     } catch (e) { if (e.name === "AbortError") throw e; }
-    return { filas, mapa: recordado.mapa, origen: { tipo: "recordado", veces: recordado.formato.veces, archivo: recordado.formato.ejemplo_archivo }, datos };
+    return { filas, hojas, mapa: recordado.mapa, origen: { tipo: "recordado", veces: recordado.formato.veces, archivo: recordado.formato.ejemplo_archivo }, datos };
   }
 
   onPaso?.("NOVA está reconociendo las columnas...");
   const d = await pedirNova({ model: LECTURA, max_tokens: 1000,
     messages: [{ role: "user", content: [{ type: "text", text: `${muestra(filas, 40)}\n\n${MAPA_PROMPT}` }] }] }, signal);
   const mapa = parseJSONTolerante(textoDeNova(d) || "");
-  return { filas, mapa: mapa || { fila_encabezado: 0 }, origen: { tipo: "nova" }, datos: mapa || {} };
+  return { filas, hojas, mapa: mapa || { fila_encabezado: 0 }, origen: { tipo: "nova" }, datos: mapa || {} };
 }
 
 /** Guarda el mapa como formato conocido; si ya existía, suma un uso. Devuelve el error, si hubo. */
