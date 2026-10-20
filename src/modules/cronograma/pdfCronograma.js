@@ -2,6 +2,7 @@ import { cargarPDF } from "../../lib/exportar";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
+import { cuandoDejanEmpezar } from "./cpm";
 
 // El cronograma en PDF: el que se imprime y se clava en la pared.
 //
@@ -61,7 +62,7 @@ export const diasPorHoja = hoja =>
  *   tamaño de la letra ni el de las barras: una obra larga se lee igual, en
  *   menos hojas.
  */
-export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, diasDeContrato = 0 }, hoja = "a4") {
+export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [], cal, hoyISO, diasDeContrato = 0 }, hoja = "a4") {
   const { jsPDF } = await cargarPDF();
   const doc = new jsPDF({ unit: "mm", format: HOJAS[hoja] ? hoja : "a4", orientation: "landscape" });
   const ANCHO = doc.internal.pageSize.getWidth();
@@ -83,6 +84,22 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
   const hojasAncho = Math.ceil(totalDias / diasHoja);
   const filasPorHoja = Math.max(6, Math.floor((ALTO - ARRIBA - ABAJO) / FILA));
   const hojasAlto = Math.max(1, Math.ceil(filas.length / filasPorHoja));
+
+  // CUÁL DEPENDENCIA TRABA A CUÁL, con la misma cuenta que la pantalla: la que
+  // deja empezar más tarde es la que manda. Se dibuja más fuerte porque es la
+  // única que mueve la fecha si se adelanta; las otras ya terminaron.
+  const porId = new Map(filas.filter(f => f.id != null)
+    .map(f => [f.id, { id: f.id, inicio: f.inicio, fin: f.fin, duracion: f.duracion }]));
+  const trabas = new Set();
+  porId.forEach(a2 => {
+    const suyas = dependencias.filter(d => d.actividad_id === a2.id);
+    if (suyas.length < 2) return;
+    let mejor = null, cuando = null;
+    cuandoDejanEmpezar(a2, suyas, porId, cal).forEach(({ desde }, id) => {
+      if (!cuando || desde > cuando) { cuando = desde; mejor = id; }
+    });
+    if (mejor) trabas.add(mejor);
+  });
 
   let logo = null;
   try { logo = await logoParaPDF(logoEmpresa()); } catch { /* sin logo se sigue */ }
@@ -168,6 +185,67 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
     doc.text("HOY", x, ALTO - ABAJO + 3, { align: "center" });
   };
 
+  /**
+   * Las cadenas entre barras: de dónde sale cada trabajo.
+   *
+   * En la pantalla se pueden abrir las fichas; en el papel no hay nada que
+   * abrir, así que un cronograma impreso sin flechas es una lista de fechas y
+   * el lector tiene que creerlas. Con las flechas se ve POR QUÉ una barra
+   * empieza cuando empieza, que es lo que se discute en una reunión de obra.
+   *
+   * ORDENADAS, que es lo único que las hace servir: salen por la derecha de la
+   * que manda y entran por la izquierda de la que espera, siempre con el mismo
+   * retiro, y cuando hay traslape —la que sigue arranca antes de que termine
+   * la anterior— rodean por abajo en vez de cruzar la barra de punta a punta.
+   */
+  const dibujarCadenas = donde => {
+    if (!dependencias.length || donde.size < 2) return;
+    const S = 1.6, F = 1.1, P = 0.9;   // retiro, flecha y medio ancho de la punta
+    dependencias.forEach(d => {
+      const de = donde.get(d.depende_de_id), a2 = donde.get(d.actividad_id);
+      if (!de || !a2) return;
+      const manda = trabas.has(d.id);
+      const color = manda ? AMBAR : [170, 168, 163];
+      doc.setDrawColor(...color);
+      doc.setLineWidth(manda ? 0.32 : 0.18);
+
+      const tipo = d.tipo || "FC";
+      // "A la vez" y "terminan juntas" se atan por donde de verdad se atan:
+      // arranque con arranque, final con final. Dibujarlas todas como
+      // fin→comienzo diría una relación que no es la que está cargada.
+      const xSale = tipo === "CC" ? de.x1 : de.x2;
+      const xEntra = tipo === "FF" ? a2.x2 : a2.x1;
+      const haciaDerecha = tipo !== "FF";
+      const puntoX = haciaDerecha ? xEntra - F : xEntra + F;
+
+      if (tipo === "CC") {
+        const x = Math.min(xSale, xEntra) - S;
+        doc.line(xSale, de.y, x, de.y);
+        doc.line(x, de.y, x, a2.y);
+        doc.line(x, a2.y, puntoX, a2.y);
+      } else if (tipo === "FF") {
+        const x = Math.max(xSale, xEntra) + S;
+        doc.line(xSale, de.y, x, de.y);
+        doc.line(x, de.y, x, a2.y);
+        doc.line(x, a2.y, puntoX, a2.y);
+      } else if (xEntra - xSale >= S + F + 0.6) {
+        doc.line(xSale, de.y, xSale + S, de.y);
+        doc.line(xSale + S, de.y, xSale + S, a2.y);
+        doc.line(xSale + S, a2.y, puntoX, a2.y);
+      } else {
+        // El traslape: rodea por el medio de las dos filas.
+        const ym = (de.y + a2.y) / 2;
+        doc.line(xSale, de.y, xSale + S, de.y);
+        doc.line(xSale + S, de.y, xSale + S, ym);
+        doc.line(xSale + S, ym, xEntra - S - F, ym);
+        doc.line(xEntra - S - F, ym, xEntra - S - F, a2.y);
+        doc.line(xEntra - S - F, a2.y, puntoX, a2.y);
+      }
+      doc.setFillColor(...color);
+      doc.triangle(puntoX, a2.y - P, puntoX, a2.y + P, xEntra, a2.y, "F");
+    });
+  };
+
   let primera = true;
   for (let hojaAncho = 0; hojaAncho < hojasAncho; hojaAncho++) {
     const desdeDia = hojaAncho * diasHoja;
@@ -178,6 +256,10 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
       dibujarHoy(desdeDia);
 
       let y = ARRIBA;
+      // Dónde quedó cada barra en ESTA hoja, para poder encadenarlas después.
+      // Las cadenas se dibujan al final y no mientras se recorren las filas:
+      // una flecha sale de una barra que todavía no se dibujó.
+      const donde = new Map();
       const suyas = filas.slice(hojaAlto * filasPorHoja, (hojaAlto + 1) * filasPorHoja);
       suyas.forEach(f => {
         if (f.tipo === "etapa") {
@@ -224,6 +306,12 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
           if (hasta >= desde) {
             const x = M + IZQ + (desde - desdeDia) * MM_DIA;
             const ancho = Math.max((hasta - desde + 1) * MM_DIA, 1.2);
+            // Solo las que entran ENTERAS en la hoja se encadenan: una flecha
+            // que sale de una barra cortada por el borde apunta a un lugar que
+            // no es el final de ese trabajo, y eso se lee como una fecha.
+            if (f.id != null && d1 >= desdeDia && d2 <= desdeDia + diasHoja - 1) {
+              donde.set(f.id, { x1: x, x2: x + ancho, y: y + FILA / 2 });
+            }
             if (f.hito) {
               // Un hito es un rombo: una barra de un día se ve igual que un
               // trabajo cortito, y lo que uno busca al abrir un cronograma
@@ -249,11 +337,13 @@ export async function pdfCronograma({ nombre, plan, filas = [], cal, hoyISO, dia
         y += FILA;
       });
 
+      dibujarCadenas(donde);
+
       // Pie: de qué obra es, qué hoja es y cuándo se emitió. Un cronograma
       // suelto sin fecha de emisión es peligroso: no se sabe si es el vigente.
       doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
       doc.text(`${nombre || ""} · emitido el ${larga(new Date().toISOString())}`, M, ALTO - 5);
-      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Barra clara: lo que falta ejecutar",
+      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Flecha ámbar: la que traba  ·  Barra clara: lo que falta ejecutar",
         ANCHO / 2, ALTO - 5, { align: "center" });
       doc.text(`${doc.internal.getNumberOfPages()}`, ANCHO - M, ALTO - 5, { align: "right" });
     }

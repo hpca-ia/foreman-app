@@ -1135,7 +1135,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
       let n = 0;
       suyos.forEach(g => g.hijas.forEach(a => {
         n++;
-        filas.push({ tipo: "barra",
+        filas.push({ tipo: "barra", id: a.id,
           numero: fases.length ? `${fase ? nEtapa : "—"}.${n}` : String(n),
           nombre: a.nombre, duracion: a.duracion, inicio: a.inicio, fin: a.fin,
           critica: a.critica, hito: a.es_hito, externo: a.externo || null,
@@ -2353,7 +2353,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 <button key={id} disabled={pensando} onClick={async () => {
                   setPensando(true);
                   await pdfCronograma({
-                    nombre: lead.nombre, plan, filas: filasParaPdf(), cal, hoyISO, diasDeContrato,
+                    nombre: lead.nombre, plan, filas: filasParaPdf(), dependencias, cal, hoyISO, diasDeContrato,
                   }, id);
                   setPensando(false); setPdf(false);
                 }}
