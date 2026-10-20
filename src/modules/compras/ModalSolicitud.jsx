@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText, Paperclip, Banknote, Sparkles } from "lucide-react";
+import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText, Paperclip, Banknote, Sparkles, MessageSquare } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
-import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, historialDe, rubrosDelProyecto,
+import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, actualizarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
   moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe } from "./compras";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
@@ -363,6 +363,16 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
    * 500 y ahora son 800—, vuelve a quien dio el visto: ese número ya no es el
    * que aprobó, y hacerlo pasar por el residente no arregla eso.
    */
+  /** Comentar sin mover nada: la solicitud se queda donde está. */
+  const comentar = () => hacer(async () => {
+    const r = await comentarSolicitud(viva, { quien: currentUser, texto: comentario });
+    if (r.error) return { error: r.error };
+    setComentario("");
+    historialDe(viva.id).then(setHistorial);
+    // No se cierra el modal: casi siempre se comenta para seguir mirando.
+    return { cerrar: false, ok: true };
+  });
+
   const devolverCompras = destino => hacer(async () => {
     if (!comentario.trim()) return { error: "Escribí qué hace falta saber." };
     const aQuienPidio = destino === "pide";
@@ -1138,6 +1148,26 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 : estado === "aprobada" && gestionaCompras ? "Para devolverla, escribí acá la consulta"
                 : "Opcional"}
               style={{ ...mini, resize: "vertical" }} />
+            {/* PREGUNTAR SIN APROBAR NI DEVOLVER.
+                Entre las dos faltaba el caso más común: la compra no está para
+                aprobar, pero tampoco hay por qué devolvérsela a nadie —falta un
+                dato que lo tiene un tercero, hay que confirmar una medida—. Sin
+                esto las salidas eran aprobar algo incompleto o devolverlo como
+                si quien lo pidió se hubiera equivocado.
+                No mueve nada: la solicitud se queda donde está y en el tablero
+                de la misma persona. Lo que cambia es que los demás se enteran
+                hoy, y no cuando alguien abra la solicitud. */}
+            {comentario.trim() && (
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 6, flexWrap: "wrap" }}>
+                <Button variant="outline" size="sm" disabled={ocupado} onClick={comentar}>
+                  <MessageSquare size={12} /> Comentar y avisar
+                </Button>
+                <span style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.4, flex: 1, minWidth: 180 }}>
+                  Queda en el historial y les llega a los de esta compra. No la aprueba ni la devuelve:
+                  sigue donde está.
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>

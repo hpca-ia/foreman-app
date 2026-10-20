@@ -227,6 +227,49 @@ export async function anotar(solicitudId, antes, despues, quien, comentario) {
 }
 
 /**
+ * COMENTAR SIN MOVER NADA.
+ *
+ * Entre "aprobar" y "devolver" faltaba el caso más común de todos: la compra
+ * no está para aprobar, pero tampoco hay por qué devolvérsela a nadie. Falta
+ * un dato que lo tiene un tercero, hay que confirmar una medida, hay que
+ * preguntarle al proveedor. Sin esto, las dos salidas que quedaban eran malas:
+ * aprobar algo incompleto, o devolvérsela a quien la pidió como si se hubiera
+ * equivocado.
+ *
+ * La solicitud se queda exactamente donde está —mismo estado, misma tarea, en
+ * el tablero de la misma persona— y el comentario queda en su historial. Lo
+ * que sí pasa es que los involucrados se enteran hoy: un comentario que nadie
+ * ve no sirve para nada, y leerlo recién cuando alguien abre la solicitud es
+ * no leerlo.
+ */
+export async function comentarSolicitud(solicitud, { quien, texto }) {
+  const limpio = String(texto || "").trim();
+  if (!limpio) return { error: "Escribí el comentario." };
+  // Mismo estado de un lado y del otro: en el historial eso se lee como un
+  // comentario y no como un movimiento, que es exactamente lo que es.
+  const e = await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, limpio);
+  if (e) return { error: e };
+
+  // En la bitácora del proyecto también: ahí se lee la historia de la obra, y
+  // una pregunta sobre una compra es parte de esa historia.
+  if (solicitud.lead_id) {
+    await supabase.from("lead_movimientos").insert({
+      lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
+      detalle: `Comentario sobre «${solicitud.descripcion}»: ${limpio}`,
+      autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
+    });
+  }
+
+  // El correo no puede frenar el comentario: si falla, lo escrito ya está.
+  fetch("/api/aviso?de=compra", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ solicitudId: solicitud.id, texto: limpio, autorId: quien?.id ?? null }),
+  }).catch(() => {});
+
+  return { ok: true };
+}
+
+/**
  * Mover la solicitud al siguiente paso y avisarle al que sigue.
  *
  * El aviso es una tarea de FOREMAN: así aparece en el tablero de esa persona,
