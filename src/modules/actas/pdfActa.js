@@ -187,27 +187,45 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   }
 
   // ── Fotos ──
-  const conEnlace = fotos.filter(f => enlaces[f.storage_path]);
-  if (conEnlace.length) {
+  //
+  // LA LLAVE ERA LA EQUIVOCADA Y NO SE VEÍA NINGUNA. `enlacesFirmados` las
+  // indexa por el ID de la foto —así las usa la pantalla— y acá se las buscaba
+  // por `storage_path`: el resultado era siempre vacío, así que el acta salía
+  // SIEMPRE sin registro fotográfico y sin decir nada.
+  const conFoto = [];
+  for (const f of fotos) {
+    const url = enlaces[f.id];
+    if (!url) continue;
+    try {
+      const img = await fotoParaPDF(url);
+      if (img) conFoto.push({ f, img });
+    } catch { /* una foto que no se puede bajar no frena el acta */ }
+  }
+
+  if (conFoto.length) {
     doc.addPage(); y = 18;
     titulo("REGISTRO FOTOGRÁFICO");
-    const ancho = (ANCHO - M * 2 - 6) / 2;
-    let x = M;
-    for (const f of conEnlace) {
-      try {
-        const img = await fotoParaPDF(enlaces[f.storage_path]);
-        if (!img) continue;
-        const alto = Math.min((ancho * img.height) / img.width, 70);
-        if (y + alto > ALTO - 24) { doc.addPage(); y = 18; x = M; }
-        doc.addImage(img.dataUrl, "JPEG", x, y, ancho, alto);
-        if (f.descripcion) {
+    // De a dos, y la fila se mide antes de dibujarla: así ninguna queda
+    // partida entre dos hojas ni se monta sobre el pie de la anterior.
+    const anchoFoto = (ANCHO - M * 2 - 6) / 2;
+    for (let i = 0; i < conFoto.length; i += 2) {
+      const fila = conFoto.slice(i, i + 2);
+      const altos = fila.map(({ img }) => Math.min((anchoFoto * img.height) / img.width, 70));
+      const pies = fila.map(({ f }) => (f.descripcion
+        ? doc.splitTextToSize(String(f.descripcion), anchoFoto) : []));
+      const altoPie = Math.max(0, ...pies.map(l => l.length * 3.6));
+      const necesita = Math.max(...altos) + altoPie + 7;
+      if (y + necesita > ALTO - 24) { doc.addPage(); y = 18; }
+      fila.forEach(({ img }, k) => {
+        const x = M + k * (anchoFoto + 6);
+        doc.addImage(img.dataUrl, "JPEG", x, y, anchoFoto, altos[k]);
+        if (pies[k].length) {
           doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-          doc.text(doc.splitTextToSize(f.descripcion, ancho), x, y + alto + 3.5);
+          doc.text(pies[k], x, y + altos[k] + 3.5);
         }
-        if (x === M) { x = M + ancho + 6; } else { x = M; y += alto + 12; }
-      } catch { /* una foto que no se puede bajar no frena el acta */ }
+      });
+      y += necesita;
     }
-    if (x !== M) y += 80;
   }
 
   // ── Firmas ──

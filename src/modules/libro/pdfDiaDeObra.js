@@ -82,8 +82,12 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     dia.aprobado_nombre ? `aprobado por ${dia.aprobado_nombre}` : "",
   ].filter(Boolean).join("   ·   ");
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GRIS);
-  doc.text(seguro(ficha), M, y);
-  y += 16;
+  // PARTIDA AL ANCHO DE LA HOJA. Escrita de un tirón, una ficha con clima y
+  // con quién lo aprobó se iba por el margen derecho y la mitad no se leía:
+  // jsPDF no corta solo, escribe hasta donde llegue y sigue fuera del papel.
+  const fichaLineas = doc.splitTextToSize(seguro(ficha), ancho - M * 2);
+  doc.text(fichaLineas, M, y);
+  y += fichaLineas.length * 11 + 5;
 
   // UNA REAPERTURA SE DICE, Y SE DICE ARRIBA.
   //
@@ -128,7 +132,7 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
       doc.text(lineas, M + 8, y);
       y += lineas.length * 11 + 2;
       doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-      doc.text(seguro(`${e.autor_nombre || "sin firma"} · ${hora(e.created_at)}`), M + 8, y);
+      doc.text(doc.splitTextToSize(seguro(`${e.autor_nombre || "sin firma"} · ${hora(e.created_at)}`), ancho - M * 2 - 10), M + 8, y);
       y += 12;
     }
     y += 4;
@@ -136,8 +140,24 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
 
   // Las fotos, dos por fila. Son la mitad del valor del libro: una foto con
   // fecha discute mejor que tres párrafos.
-  const conEnlace = fotos.filter(f => enlaces[f.storage_path]);
-  if (conEnlace.length) {
+  // LA LLAVE ERA LA EQUIVOCADA Y NO SE VEÍA NINGUNA.
+  //
+  // `enlacesFirmados` devuelve las direcciones indexadas por el ID de la foto
+  // —así lo usa la pantalla del día— y acá se las buscaba por `storage_path`.
+  // El resultado era siempre vacío, así que el libro salía SIEMPRE sin fotos y
+  // sin decir nada: ni un error, ni un hueco, ni un título. Una foto con fecha
+  // discute mejor que tres párrafos, y eran justo lo que faltaba.
+  const conFoto = [];
+  for (const f of fotos) {
+    const url = enlaces[f.id];
+    if (!url) continue;
+    try {
+      const img = await fotoParaPDF(url);
+      if (img) conFoto.push({ f, img });
+    } catch { /* una foto que no se puede bajar no frena el libro */ }
+  }
+
+  if (conFoto.length) {
     salto(90);
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...TINTA);
     doc.text("FOTOS DEL DIA", M, y);
@@ -145,21 +165,30 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     doc.setDrawColor(...LINEA); doc.setLineWidth(0.5);
     doc.line(M, y, ancho - M, y);
     y += 12;
+
+    // DE A DOS, Y LA FILA SE MIDE ANTES DE DIBUJARLA. Antes el alto de la fila
+    // era el de la última foto y el salto de página podía partir una fila al
+    // medio: una foto quedaba arriba, la otra en la hoja siguiente, y debajo
+    // un hueco de 170 puntos puesto a ojo.
     const anchoFoto = (ancho - M * 2 - 14) / 2;
-    let x = M;
-    for (const f of conEnlace) {
-      const img = await fotoParaPDF(enlaces[f.storage_path]);
-      if (!img) continue;
-      const altoFoto = Math.min((anchoFoto * img.height) / img.width, 150);
-      if (y + altoFoto + 22 > alto - 50) { doc.addPage(); y = 44; x = M; }
-      doc.addImage(img.dataUrl, "JPEG", x, y, anchoFoto, altoFoto);
-      if (f.descripcion) {
-        doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-        doc.text(doc.splitTextToSize(seguro(f.descripcion), anchoFoto), x, y + altoFoto + 9);
-      }
-      if (x === M) { x = M + anchoFoto + 14; } else { x = M; y += altoFoto + 26; }
+    for (let i = 0; i < conFoto.length; i += 2) {
+      const fila = conFoto.slice(i, i + 2);
+      const altos = fila.map(({ img }) => Math.min((anchoFoto * img.height) / img.width, 150));
+      const pies = fila.map(({ f }) => (f.descripcion
+        ? doc.splitTextToSize(seguro(f.descripcion), anchoFoto) : []));
+      const altoPie = Math.max(0, ...pies.map(l => l.length * 9));
+      const necesita = Math.max(...altos) + altoPie + 16;
+      if (y + necesita > alto - 50) { doc.addPage(); y = 44; }
+      fila.forEach(({ img }, k) => {
+        const x = M + k * (anchoFoto + 14);
+        doc.addImage(img.dataUrl, "JPEG", x, y, anchoFoto, altos[k]);
+        if (pies[k].length) {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+          doc.text(pies[k], x, y + altos[k] + 9);
+        }
+      });
+      y += necesita;
     }
-    if (x !== M) y += 170;
   }
 
   return y;
