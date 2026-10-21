@@ -77,3 +77,66 @@ test("una sola hoja se lee como siempre, sin prefijo de bloque", () => {
   assert.ok(r.capitulos.includes("OBRAS PRELIMINARES"));
   assert.equal(r.totalExcel, 300);
 });
+
+// ── EL IVA EN COLUMNA APARTE ──────────────────────────────────────────────
+//
+// Los honorarios y los indirectos son un porcentaje del costo directo. Si el
+// costo directo trae el impuesto adentro, el honorario se cobra sobre el IVA.
+
+const CON_IVA = { fila_encabezado: 1, col_item: 0, col_descripcion: 1, col_unidad: 2, col_cantidad: 3, col_precio: 4, col_total: 7, col_capitulo: null };
+const encIva = ["RUBRO", "DESCRIPCION", "UNIDAD", "CANTIDAD", "P.UNITARIO", "IVA 15%", "P.U CON IVA", "TOTAL"];
+// Seis renglones y no dos: la tasa se reconoce sobre la planilla, no sobre un
+// par de filas, porque una coincidencia en dos filas no es una regla.
+const hojaIva = [
+  ["PRESUPUESTO", "", "", "", "", "", "", ""],
+  encIva,
+  ["", "PRELIMINARES", "", "", "", "", "", 6900],
+  ["1", "Cerramiento", "ml", 100, 10, 1.5, 11.5, 1150],
+  ["2", "Replanteo", "m2", 50, 20, 3, 23, 1150],
+  ["3", "Desalojo", "m3", 20, 50, 7.5, 57.5, 1150],
+  ["4", "Excavación", "m3", 10, 100, 15, 115, 1150],
+  ["5", "Relleno", "m3", 25, 40, 6, 46, 1150],
+  ["6", "Compactado", "m2", 5, 200, 30, 230, 1150],
+  ["", "TOTAL", "", "", "Valor total", "", "", 6900],
+];
+
+test("el precio unitario entra SIN IVA, como está escrito", () => {
+  const r = interpretarPresupuesto(hojaIva, { ...CON_IVA });
+  const c = r.rubros.find(x => /Cerramiento/.test(x.descripcion));
+  assert.equal(c.precio_unitario, 10, "no 11,5");
+  assert.equal(c.iva_pct, 15);
+  assert.equal(c.total, 1150, "el total sigue siendo el del Excel, con IVA");
+});
+
+test("la base sin IVA se dice, y es la de los honorarios", () => {
+  const r = interpretarPresupuesto(hojaIva, { ...CON_IVA });
+  assert.equal(r.ivaPorFila, 15);
+  assert.equal(r.baseSinIva, 6000);
+  // 10 % de honorarios: 200 sobre la base, 230 sobre el total. La diferencia
+  // son honorarios cobrados sobre el impuesto.
+  assert.equal(Math.round(r.baseSinIva * 0.1), 600);
+});
+
+test("cada rubro multiplica: cantidad × precio × IVA = total", () => {
+  const r = interpretarPresupuesto(hojaIva, { ...CON_IVA });
+  for (const x of r.rubros) {
+    assert.ok(Math.abs(x.cantidad * x.precio_unitario * 1.15 - x.total) < 0.02,
+      `${x.descripcion} no multiplica`);
+  }
+});
+
+// Una columna que NO es un recargo parejo es una columna equivocada, y ahí sí
+// hay que corregir el mapa en vez de inventar un impuesto.
+test("una diferencia despareja no se confunde con IVA", () => {
+  const raro = [
+    ["PRESUPUESTO", "", "", "", "", "", "", ""],
+    encIva,
+    ["1", "Uno", "u", 10, 3, 0, 7, 70],
+    ["2", "Dos", "u", 10, 5, 0, 31, 310],
+    ["3", "Tres", "u", 10, 2, 0, 9, 90],
+    ["4", "Cuatro", "u", 10, 8, 0, 11, 110],
+    ["5", "Cinco", "u", 10, 1, 0, 40, 400],
+  ];
+  const r = interpretarPresupuesto(raro, { ...CON_IVA });
+  assert.equal(r.ivaPorFila, null, "sin tasa pareja no se anota ningún IVA");
+});

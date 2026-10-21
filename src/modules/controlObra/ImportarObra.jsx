@@ -80,6 +80,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
   // sale inflado cerca de un 15 %. Venía marcado "ya incluye IVA" y así se
   // importó mal una obra cuyo Excel no lo incluía.
   const [incluyeIva, setIncluyeIva] = useState(null);
+  // La tasa que el propio Excel trae en su columna de IVA, y la base sin IVA.
+  const [ivaPorFila, setIvaPorFila] = useState(null);
+  const [baseSinIva, setBaseSinIva] = useState(null);
   const [sugerenciaIva, setSugerenciaIva] = useState("");
   const [ivaPct, setIvaPct] = useState(15);
   const [incluirCargos, setIncluirCargos] = useState(true);
@@ -109,6 +112,14 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       : interpretarPresupuesto(filas, mapa, { conPendientes: paraPresupuesto });
     setFilasExcel(filas); setMapaActual(r.mapa); setOrigenMapa(origen);
     setRubros(r.rubros); setCargos(r.cargos); setOmitidas(r.omitidas);
+    // EL IVA EN COLUMNA APARTE NO SE PREGUNTA: SE LEE.
+    //
+    // Si el Excel trae P.UNITARIO, IVA y P.UNITARIO CON IVA, ya está dicho
+    // todo: los totales llevan IVA y el precio unitario no. Preguntarlo sería
+    // pedirle a alguien que adivine algo que el archivo afirma.
+    setIvaPorFila(r.ivaPorFila ?? null);
+    setBaseSinIva(r.baseSinIva ?? null);
+    if (r.ivaPorFila != null) { setIncluyeIva(true); setIvaPct(r.ivaPorFila); }
     setControl({ subtotal: r.subtotalExcel, total: r.totalExcel, iva: r.ivaExcel, descuadres: r.descuadres });
     setAdvertencias(r.advertencias || []); setDecisiones({});
     if (r.ivaExcel) {
@@ -515,6 +526,27 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
               <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
                 {paraPresupuesto ? "Si no lo incluyen, el presupuesto lo suma al final, como en el Excel." : "El control de obra se hace con IVA, porque las facturas lo traen."} {sugerenciaIva}
               </div>
+              {/* CUANDO EL EXCEL LO DICE, NO HAY NADA QUE PREGUNTAR.
+                  Y lo importante es la base: los honorarios y los costos
+                  indirectos son un porcentaje del costo directo, y calcularlos
+                  sobre un total que ya trae el impuesto es cobrar honorarios
+                  sobre el IVA. El IVA no es de nadie. */}
+              {ivaPorFila != null && baseSinIva != null && (
+                <div style={{ fontSize: 11.5, color: colors.inkSoft, background: colors.surface,
+                  border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
+                  padding: "8px 10px", marginBottom: 9, lineHeight: 1.55 }}>
+                  Tu Excel trae el IVA en una columna aparte, al <strong>{ivaPorFila} %</strong>. Los rubros entran
+                  con el precio unitario <strong>sin IVA</strong>, tal como los escribiste, y el total con IVA.
+                  <div style={{ marginTop: 5 }}>
+                    Costo directo sin IVA <strong>${fmt(baseSinIva + (incluirCargos ? sumaTodosCargos / (1 + ivaPorFila / 100) : 0))}</strong>
+                    {" · "}IVA ${fmt((baseSinIva + (incluirCargos ? sumaTodosCargos / (1 + ivaPorFila / 100) : 0)) * ivaPorFila / 100)}
+                    {" · "}con IVA <strong>${fmt(base)}</strong>
+                  </div>
+                  <div style={{ marginTop: 4, color: colors.muted }}>
+                    Los honorarios y los indirectos van sobre el costo directo, no sobre el total.
+                  </div>
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {[[true, "Sí, ya incluyen IVA"], [false, "No, sumarle IVA"]].map(([v, t]) => (
                   <button key={t} onClick={() => setIncluyeIva(v)}

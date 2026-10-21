@@ -178,6 +178,43 @@ export function mapaQueCuadra(filasTodas, m) {
     return { mapa: m, cambios: [] };
   }
 
+  // ── EL IVA EN COLUMNA APARTE ─────────────────────────────────────────────
+  //
+  // Muchísimas planillas traen P.UNITARIO, IVA 15 % y P.UNITARIO CON IVA, y
+  // el total es cantidad × el precio CON IVA. Visto desde acá, el precio que
+  // "cuadra" es el de la columna con IVA, y hasta ahora se cambiaba a esa y
+  // listo: el presupuesto entraba con precios unitarios inflados un 15 %.
+  //
+  // Eso no es un detalle de presentación. Los honorarios y los indirectos se
+  // calculan como un porcentaje del costo directo, y si el costo directo trae
+  // el impuesto adentro, el honorario se está cobrando sobre el IVA. En una
+  // obra de ocho millones son cien mil dólares que no son de nadie.
+  //
+  // Si lo único que cambia es la columna del precio y la nueva es un
+  // porcentaje parejo por encima de la vieja, eso no es una columna
+  // equivocada: es el IVA. Se queda el precio sin IVA y se anota la tasa.
+  if (mejor.cc === actual.cc && mejor.ct === actual.ct && mejor.cp !== actual.cp) {
+    const razones = filas
+      .map(f => ({ viejo: num(f[actual.cp]), nuevo: num(f[mejor.cp]) }))
+      .filter(x => x.viejo > 0 && x.nuevo > 0)
+      .map(x => x.nuevo / x.viejo - 1)
+      .sort((a2, b2) => a2 - b2);
+    const medio = razones.length >= 5 ? razones[Math.floor(razones.length / 2)] : null;
+    // Una tasa de impuesto, no cualquier diferencia: entre 5 % y 25 %, y
+    // pareja —si cada fila tiene otro recargo, son dos columnas distintas y
+    // no un impuesto—.
+    const pareja = medio != null
+      && razones.filter(v => Math.abs(v - medio) <= 0.004).length >= razones.length * 0.8;
+    if (pareja && medio >= 0.05 && medio <= 0.25) {
+      return {
+        mapa: { ...m, col_cantidad: mejor.cc, col_precio: actual.cp, col_total: mejor.ct },
+        cambios: [],
+        iva: { pct: Math.round(medio * 1000) / 10, columnaConIva: mejor.cp, columnaSinIva: actual.cp },
+        cuadran: mejor.calzan, de: mejor.de,
+      };
+    }
+  }
+
   const cambios = [];
   const nombre = { cc: "cantidad", cp: "precio unitario", ct: "total" };
   const letra = i => String.fromCharCode(65 + (i % 26));
@@ -203,7 +240,11 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
   const revisado = mapaQueCuadra(filasTodas, saneado);
   const m = revisado.mapa;
   m.corregido = revisado.cambios?.length ? revisado : null;
-  m.ivaEnFilas = precioQueCuadra(filasTodas, m);
+  // El IVA que viene en su propia columna: el precio unitario queda limpio y
+  // la tasa se guarda con cada rubro, para que los honorarios y los
+  // indirectos se calculen sobre el costo directo y no sobre el impuesto.
+  m.ivaEnFilas = revisado.iva || precioQueCuadra(filasTodas, m);
+  const ivaDeFila = revisado.iva ? revisado.iva.pct : null;
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;
 
@@ -325,6 +366,10 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     return rubros.push({
     capitulo: cap?.nombre || "SIN CAPÍTULO", codigo: r.codigo, descripcion: r.desc,
     unidad: r.unidad, cantidad, precio_unitario: precio, total, fila: r.fila, global,
+    // La tasa que trae ESA fila en su columna de IVA. Con el precio sin IVA y
+    // la tasa al lado, el total con IVA se puede reconstruir y la base para
+    // honorarios también.
+    ...(ivaDeFila != null ? { iva_pct: ivaDeFila } : {}),
     ...(pendiente ? { pendiente: true } : {}),
     });
   };
@@ -353,7 +398,23 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     }
     if (r.capCol && cap?.nombre !== r.capCol.toUpperCase()) abrir(r.capCol.toUpperCase(), "", null, null, r.fila);
 
-    if (esRubro(r)) return rubro(r, r.cant, r.precio, m.col_total != null ? r.total : r.cant * r.precio);
+    if (esRubro(r)) {
+      const total = m.col_total != null ? r.total : r.cant * r.precio;
+      // EL PRECIO TIENE QUE MULTIPLICAR.
+      //
+      // Hay planillas donde las columnas de precio vienen combinadas y repiten
+      // el valor del grupo en cada renglón, mientras el total de cada uno sí es
+      // el suyo. Copiar ese precio deja rubros que no multiplican: cantidad por
+      // precio no da el total, y a partir de ahí nada cuadra —ni el control, ni
+      // una planilla, ni un reajuste—. Cuando no multiplica, manda el total,
+      // que es el número que el Excel suma.
+      const factor = 1 + (ivaDeFila || 0) / 100;
+      const esperado = r.cant * r.precio * factor;
+      const precio = Math.abs(esperado - total) <= Math.max(0.02, Math.abs(total) * 0.005)
+        ? r.precio
+        : Math.round((total / factor / (r.cant || 1)) * 10000) / 10000;
+      return rubro(r, r.cant, precio, total);
+    }
     if (r.cant && r.precio && r.totalVacio) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "sin_total", cant: r.cant, precio: r.precio, unidad: r.unidad, capitulo: cap?.nombre || "SIN CAPÍTULO" });
 
     if (esSubtotal(r)) {
@@ -396,7 +457,11 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     // ocho millones de los que nadie podía decir de dónde salían.
     if (r.unidad && r.total && r.descPropia) {
       const cantidad = r.cant || 1;
-      return rubro(r, cantidad, r.precio || r.total / cantidad, r.total, true);
+      // Un global sin precio saca el suyo del total, y ese total trae IVA: hay
+      // que quitárselo, o este renglón entra con el precio inflado mientras
+      // los demás entran limpios.
+      const delTotal = (r.total / cantidad) / (1 + (ivaDeFila || 0) / 100);
+      return rubro(r, cantidad, r.precio || Math.round(delTotal * 10000) / 10000, r.total, true);
     }
     // Entra en $0, con la cantidad si ya la tiene y el precio si ya lo tiene.
     if (esPendiente(r)) return rubro(r, r.cant || 0, r.precio || 0, 0, false, true);
@@ -434,8 +499,16 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
 
   const advertencias = revisar({ rubros, omitidas, cargos, capitulos: conRubros, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, ivaEnFilas: m.ivaEnFilas, usarPrefijos });
 
+  // LA BASE SIN IVA, dicha una vez y bien. Es sobre esto que se calculan los
+  // honorarios y los costos indirectos; el total con IVA es otra cosa.
+  // Del total, no de cantidad × precio: hay rubros globales cuyo precio se
+  // dedujo, y el total es el número que de verdad está escrito en el Excel.
+  const baseSinIva = ivaDeFila == null ? null
+    : Math.round(rubros.reduce((t, x) => t + (Number(x.total) || 0) / (1 + ivaDeFila / 100), 0) * 100) / 100;
+
   return {
     mapa: m, rubros, omitidas, cargos, capitulos: conRubros, subtotalesDeBloque, ivaEnFilas: m.ivaEnFilas || null,
+    ivaPorFila: ivaDeFila, baseSinIva,
     subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, advertencias,
     corregido: m.corregido || null,
     preciosIncluyenIva: typeof mapaNova.precios_incluyen_iva === "boolean" ? mapaNova.precios_incluyen_iva : null,
