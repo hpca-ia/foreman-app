@@ -187,8 +187,13 @@ Si el texto ya está bien escrito, devolvelo igual.`,
     }
 
     const puestas = [];
-    for (const l of conMonto) {
+    // EL ORDEN SE GUARDA. Se leía con `order=orden` y nadie lo escribía, así
+    // que todas las partidas quedaban en cero y el orden salía por casualidad
+    // —el del id—. Acomodar las partidas y que al volver a abrirlas estén
+    // como estaban es la diferencia entre ordenarlas y hacer como que sí.
+    for (const [indice, l] of conMonto.entries()) {
       const linea = {
+        orden: indice,
         tipo: l.tipo,
         obra_rubro_id: l.obra_rubro_id ? Number(l.obra_rubro_id) : null,
         item: siguienteItem(puestas, l.tipo),
@@ -340,7 +345,29 @@ Si el texto ya está bien escrito, devolvelo igual.`,
         <div>
           <label style={lbl}>CAPÍTULO II · PARTIDAS</label>
           {lineas.map((l, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "88px 1fr 58px 70px 90px 26px", gap: 5, marginBottom: 5, alignItems: "center" }}>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 88px 1fr 58px 70px 90px 26px", gap: 5, marginBottom: 5, alignItems: "center" }}>
+              {/* EL ORDEN DE LAS PARTIDAS ES EL ORDEN EN QUE SE LEE LA OBRA.
+                  NOVA las carga en el orden en que vienen en la proforma del
+                  proveedor, que es el de él: primero lo que factura más fácil.
+                  El que aprueba las lee en el orden del trabajo —primero lo
+                  que se demuele, después lo que se construye— y una lista
+                  desordenada obliga a saltar de arriba abajo para entender un
+                  cambio que es uno solo. */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <button onClick={() => setLineas(v => {
+                  if (i === 0) return v;
+                  const n = [...v]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n;
+                })} disabled={i === 0} title="Subirla"
+                  style={{ background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 8,
+                    cursor: i === 0 ? "default" : "pointer", color: i === 0 ? colors.border : colors.muted }}>▲</button>
+                <button onClick={() => setLineas(v => {
+                  if (i === v.length - 1) return v;
+                  const n = [...v]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n;
+                })} disabled={i === lineas.length - 1} title="Bajarla"
+                  style={{ background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 8,
+                    cursor: i === lineas.length - 1 ? "default" : "pointer",
+                    color: i === lineas.length - 1 ? colors.border : colors.muted }}>▼</button>
+              </div>
               <select value={l.tipo} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, tipo: e.target.value } : x))}
                 style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }}>
                 <option value="aumenta">Adición</option>
