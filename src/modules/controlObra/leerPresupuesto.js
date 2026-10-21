@@ -360,7 +360,7 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
       declarado: declarado || null, prefijo: esCodigoCapitulo(codigo) ? prefijo(codigo) : pref, fila, rubros: 0, suma: 0 };
     capitulos.push(cap);
   };
-  const rubro = (r, cantidad, precio, total, global = false, pendiente = false) => {
+  const rubro = (r, cantidad, precio, total, global = false, pendiente = false, noMultiplica = null) => {
     if (cap && !cap.prefijo) cap.prefijo = prefijo(r.codigo);
     if (cap) { cap.rubros++; cap.suma += total || 0; }
     return rubros.push({
@@ -370,6 +370,10 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     // la tasa al lado, el total con IVA se puede reconstruir y la base para
     // honorarios también.
     ...(ivaDeFila != null ? { iva_pct: ivaDeFila } : {}),
+    // CORREGIR NO ES CALLAR. El precio se deduce del total para que la fila
+    // multiplique, pero lo que venía escrito queda anotado: es un dato que el
+    // Excel trae mal y el que lo hizo tiene que saberlo.
+    ...(noMultiplica ? { noMultiplica } : {}),
     ...(pendiente ? { pendiente: true } : {}),
     });
   };
@@ -410,10 +414,11 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
       // que es el número que el Excel suma.
       const factor = 1 + (ivaDeFila || 0) / 100;
       const esperado = r.cant * r.precio * factor;
-      const precio = Math.abs(esperado - total) <= Math.max(0.02, Math.abs(total) * 0.005)
-        ? r.precio
+      const multiplica = Math.abs(esperado - total) <= Math.max(0.02, Math.abs(total) * 0.005);
+      const precio = multiplica ? r.precio
         : Math.round((total / factor / (r.cant || 1)) * 10000) / 10000;
-      return rubro(r, r.cant, precio, total);
+      return rubro(r, r.cant, precio, total, false, false,
+        multiplica ? null : { precio: r.precio, daba: Math.round(esperado * 100) / 100 });
     }
     if (r.cant && r.precio && r.totalVacio) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "sin_total", cant: r.cant, precio: r.precio, unidad: r.unidad, capitulo: cap?.nombre || "SIN CAPÍTULO" });
 
@@ -445,6 +450,13 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     // es el cuadro de áreas y no es plata de esta obra.
     if (k > ultimoRubro) {
       if (r.total && (r.descPropia || !r.cant)) cargos.push({ descripcion: r.desc, total: r.total, fila: r.fila });
+      // Una fila medida —con unidad y cantidad— que no tiene plata no es un
+      // cargo ni es nada: se estaba cayendo en silencio. Es justo la que hay
+      // que avisar, porque es trabajo que alguien va a hacer sin presupuesto.
+      else if (!r.total && r.unidad && r.cant) {
+        omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "detalle",
+          unidad: r.unidad, cant: r.cant, precio: r.precio, capitulo: cap?.nombre || "SIN CAPÍTULO" });
+      }
       return;
     }
 
@@ -465,7 +477,8 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     }
     // Entra en $0, con la cantidad si ya la tiene y el precio si ya lo tiene.
     if (esPendiente(r)) return rubro(r, r.cant || 0, r.precio || 0, 0, false, true);
-    if (r.unidad) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "detalle" });
+    if (r.unidad) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "detalle",
+      unidad: r.unidad, cant: r.cant, precio: r.precio, capitulo: cap?.nombre || "SIN CAPÍTULO" });
     // UN CAPÍTULO SE LLAMA DESDE LA COLUMNA DE LAS DESCRIPCIONES.
     //
     // El cuadro de áreas del pie —"AREA VERDE", "CAMINERIAS", "VIAS
@@ -609,7 +622,14 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
   });
 
   const subExplicado = difSub != null && Math.abs(difSub) > 1 && descuadres.length && Math.abs(difSub - explicado) <= 1;
-  if (difSub != null && Math.abs(difSub) > 1 && !subExplicado)
+  // EL SUBTOTAL DEL EXCEL PUEDE INCLUIR LOS CARGOS.
+  //
+  // Muchas planillas ponen los imprevistos o los honorarios ANTES de la línea
+  // de SUBTOTAL, así que ese número es rubros + cargos. Comparándolo contra los
+  // rubros solos salta un error de miles de dólares que no existe — y un error
+  // que no existe es peor que ninguno: enseña a saltearse los errores.
+  const conCargos = difSub != null && Math.abs(sumaRubros + sumaCargos - subtotalExcel) <= 1;
+  if (difSub != null && Math.abs(difSub) > 1 && !subExplicado && !conCargos)
     add("suma_subtotal", "error", `Los rubros suman $${plata(sumaRubros)} y el SUBTOTAL del Excel dice $${plata(subtotalExcel)} (diferencia $${plata(difSub)}).`, [],
       { excel: subtotalExcel, importado: sumaRubros });
   const heredada = difSub != null ? difSub : explicado;
@@ -628,14 +648,44 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
   // "cuadra" y sale un error por cada una. No es un error del presupuesto: es
   // cómo está hecho. Se dice una vez, y claro.
   if (ivaEnFilas) add("total_con_iva", "aviso",
-    `El TOTAL de cada fila incluye IVA${ivaEnFilas.pct ? ` del ${ivaEnFilas.pct} %` : ""}: sale de multiplicar la cantidad por el precio CON IVA (${ivaEnFilas.filas} de ${ivaEnFilas.de} filas). El precio unitario que se importa es el de sin IVA.`,
+    `El TOTAL de cada fila incluye IVA${ivaEnFilas.pct ? ` del ${ivaEnFilas.pct} %` : ""}: sale de multiplicar la cantidad por el precio CON IVA`
+    + `${ivaEnFilas.filas ? ` (${ivaEnFilas.filas} de ${ivaEnFilas.de} filas)` : ""}.`
+    + " El precio unitario que se importa es el de sin IVA, y los honorarios e indirectos se calculan sobre esa base.",
     [], ivaEnFilas);
-  const malas = ivaEnFilas ? [] : rubros.filter(x => !x.global && x.cantidad && x.precio_unitario
-    && Math.abs(x.total - x.cantidad * x.precio_unitario) > Math.max(0.02, Math.abs(x.total) * 0.0005));
+  // LAS FILAS QUE NO MULTIPLICAN.
+  //
+  // Esta regla estuvo muda y fue culpa mía, dos veces. Primero porque con el
+  // IVA en filas se saltaba entera —cantidad × precio nunca da el total cuando
+  // el total lleva impuesto—; ahora la tasa se conoce y la cuenta se puede
+  // hacer bien. Y después porque al deducir el precio del total para que la
+  // fila multiplicara, ya no quedaba ninguna fila que denunciar: se corregía
+  // en silencio lo que había que avisar.
+  //
+  // Se corrige para poder trabajar Y se avisa, con el precio que venía escrito.
+  const malas = rubros.filter(x => x.noMultiplica);
   if (malas.length) add("suma_fila", "error",
-    `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito. Se importa el total del Excel.`,
-    malas.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.precio_unitario)} = $${plata(x.cantidad * x.precio_unitario)}, el Excel dice $${plata(x.total)}` })),
-    { filas: malas.map(x => x.fila), dif: malas.reduce((s, x) => s + x.cantidad * x.precio_unitario - x.total, 0) });
+    `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito. Se importa el total del Excel y se recalcula el precio unitario.`,
+    malas.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.noMultiplica.precio)} = $${plata(x.noMultiplica.daba)}, el Excel dice $${plata(x.total)}` })),
+    { filas: malas.map(x => x.fila), dif: malas.reduce((s, x) => s + x.noMultiplica.daba - x.total, 0) });
+
+  // RUBROS EN CERO.
+  //
+  // Una fila con su descripción y su unidad pero sin plata es trabajo que
+  // alguien va a hacer y que el presupuesto no cuenta. No cambia el total
+  // —cero no suma— y por eso ninguna comprobación de sumas lo encuentra: hay
+  // que ir a buscarlo a propósito. Después llega la factura y no hay rubro
+  // contra qué cargarla.
+  // Las que tienen unidad Y cantidad pero no plata: están cuantificadas, o
+  // sea que alguien las midió y nadie les puso precio. Una sub-línea sin
+  // cantidad es un detalle del rubro de arriba y no se cuenta acá.
+  const enCero = [
+    ...rubros.filter(x => !x.pendiente && !Number(x.total)),
+    ...omitidas.filter(o => o.motivo === "detalle" && Number(o.cant) > 0 && !Number(o.precio)),
+  ];
+  if (enCero.length) add("rubro_en_cero", "aviso",
+    `${plural(enCero.length, "rubro entra", "rubros entran")} en $0: tienen descripción pero la planilla no les pone precio.`,
+    enCero.slice(0, 60).map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}${x.unidad ? ` (${x.unidad})` : ""}${x.cantidad ? ` · cantidad ${x.cantidad}` : " · sin cantidad"}` })),
+    { filas: enCero.map(x => x.fila) });
 
   // Cargos con porcentaje que no coincide
   cargos.forEach(c => {
