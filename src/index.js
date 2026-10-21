@@ -28,8 +28,20 @@ const llaveActa = new URLSearchParams(window.location.search).get('acta');
 // El libro de obra, para quien lo da por revisado. Misma puerta y misma razón:
 // la fiscalización, el cliente o un perito no tienen cuenta acá.
 const llaveLibro = new URLSearchParams(window.location.search).get('libro');
+// La orden de cambio, para quien la aprueba. El fiscalizador y el contratante
+// no tienen cuenta, y mientras no firmen el trabajo no se ejecuta.
+const llaveOdc = new URLSearchParams(window.location.search).get('odc');
 
-if (llaveLibro) {
+if (llaveOdc) {
+  const FirmaOdc = React.lazy(() => import('./portal/AprobarOrdenDeCambio'));
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <FirmaOdc token={llaveOdc} />
+      </React.Suspense>
+    </React.StrictMode>
+  );
+} else if (llaveLibro) {
   const FirmaLibro = React.lazy(() => import('./portal/FirmaDelLibro'));
   root.render(
     <React.StrictMode>

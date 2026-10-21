@@ -717,6 +717,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             </div>
             <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5 }}>
               Va el documento completo: las líneas, la diferencia y el nuevo valor del contrato.
+              Marcá <strong>aprueba</strong> a los que tienen que firmarla: cada uno recibe su propio enlace y,
+              cuando firman todos, la orden entra sola al presupuesto como adicional.
             </div>
 
             {invitados.length > 0 && (
@@ -725,11 +727,30 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 {invitados.map(i => {
                   const puesto = mandando.correos.includes(i.email);
                   return (
-                    <label key={i.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 0", fontSize: 12.5, color: colors.ink, cursor: "pointer" }}>
-                      <input type="checkbox" checked={puesto}
-                        onChange={() => setMandando(m => ({ ...m, correos: puesto ? m.correos.filter(c => c !== i.email) : [...m.correos, i.email] }))} />
-                      {i.nombre}{i.rol ? ` · ${i.rol}` : ""} <span style={{ color: colors.muted, fontSize: 11 }}>{i.email}</span>
-                    </label>
+                    <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 0", fontSize: 12.5, color: colors.ink }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 7, flex: 1, minWidth: 0, cursor: "pointer" }}>
+                        <input type="checkbox" checked={puesto}
+                          onChange={() => setMandando(m => ({ ...m, correos: puesto ? m.correos.filter(c => c !== i.email) : [...m.correos, i.email] }))} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {i.nombre}{i.rol ? ` · ${i.rol}` : ""} <span style={{ color: colors.muted, fontSize: 11 }}>{i.email}</span>
+                        </span>
+                      </label>
+                      {/* QUIÉN FIRMA Y QUIÉN SOLO SE ENTERA. No es lo mismo:
+                          el que firma recibe su enlace y la orden no se aplica
+                          hasta que él aprueba; el otro recibe una copia. */}
+                      {puesto && (
+                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11,
+                          color: (mandando.firman || []).includes(i.email) ? colors.brand : colors.muted,
+                          fontWeight: (mandando.firman || []).includes(i.email) ? 700 : 400, cursor: "pointer", whiteSpace: "nowrap" }}>
+                          <input type="checkbox" checked={(mandando.firman || []).includes(i.email)}
+                            onChange={e => setMandando(m => ({ ...m,
+                              firman: e.target.checked
+                                ? [...(m.firman || []), i.email]
+                                : (m.firman || []).filter(c => c !== i.email) }))} />
+                          aprueba
+                        </label>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -750,8 +771,14 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   const sueltos = String(mandando.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
                   const todos = [...new Set([...mandando.correos, ...sueltos])];
                   if (!todos.length) { setAviso("Elegí a quién mandársela."); return; }
+                  // Los que firman reciben SU enlace; los demás, una copia.
+                  const firman = (mandando.firman || []);
+                  const aprobadores = invitados
+                    .filter(i => firman.includes(i.email))
+                    .map(i => ({ nombre: i.nombre, email: i.email, rol: i.rol || "" }));
+                  const soloCopia = todos.filter(c => !firman.includes(c));
                   setOcupado(true);
-                  const r = await enviarOrden(mandando.orden, todos, mandando.cuerpo, currentUser);
+                  const r = await enviarOrden(mandando.orden, soloCopia, mandando.cuerpo, currentUser, aprobadores);
                   setOcupado(false);
                   if (r.error) { setAviso(r.error); return; }
                   setMandando(null); setAviso(""); await cargar(); onCambio?.();

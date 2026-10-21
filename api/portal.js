@@ -311,8 +311,221 @@ async function avisarObservacionDelLibro(entrega, texto) {
   } catch { /* el aviso no puede tumbar la firma: lo que importa ya se guardó */ }
 }
 
+/** La aprobación de orden de cambio que abre esta llave. */
+async function aprobacionDe(token) {
+  if (!token || String(token).length < 20) return null;
+  const limpio = String(token).replace(/[^A-Za-z0-9_-]/g, "");
+  if (limpio.length < 20) return null;
+  const filas = await json(await rest(
+    `orden_cambio_aprobaciones?token=eq.${encodeURIComponent(limpio)}&select=id,orden_id,nombre,email,rol,visto_at,aprobado_at,observacion`));
+  return filas?.[0] || null;
+}
+
+/**
+ * La orden de cambio, para el que la tiene que aprobar.
+ *
+ * Entera: los argumentos, lo que se agrega y lo que se quita con su precio, y
+ * cuántos días suma al plazo. Aprobar un documento que no se ve no es aprobar.
+ */
+async function ordenParaFirmar(req, res, firma) {
+  const ordenes = await json(await rest(`ordenes_cambio?id=eq.${firma.orden_id}&select=*`));
+  const orden = ordenes?.[0];
+  if (!orden) return res.status(404).json({ error: "Este enlace no está disponible." });
+  const [lineas, obras, otros] = await Promise.all([
+    json(await rest(`orden_cambio_lineas?orden_id=eq.${orden.id}&select=*&order=orden`)),
+    json(await rest(`obras?id=eq.${orden.obra_id}&select=nombre,cliente_nombre`)),
+    json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${orden.id}&select=nombre,rol,aprobado_at&order=id`)),
+  ]);
+
+  // La primera vez que lo abre queda anotado: "no contestó" y "ni lo miró" no
+  // son lo mismo cuando la obra está parada esperando esa firma.
+  if (!firma.visto_at) {
+    await rest(`orden_cambio_aprobaciones?id=eq.${firma.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ visto_at: new Date().toISOString() }),
+    });
+  }
+
+  return res.status(200).json({
+    obra: obras?.[0]?.nombre || "",
+    cliente: obras?.[0]?.cliente_nombre || "",
+    orden: {
+      codigo: orden.codigo, numero: orden.numero, titulo: orden.titulo, tipo: orden.tipo,
+      fecha: orden.fecha, lugar: orden.lugar, justificacion: orden.justificacion,
+      impacto_cronograma: orden.impacto_cronograma, dias_impacto: orden.dias_impacto,
+      anulada: orden.anulada,
+    },
+    lineas: (lineas || []).map(l => ({
+      item: l.item, descripcion: l.descripcion, unidad: l.unidad,
+      cantidad: l.cantidad, precio_unitario: l.precio_unitario, total: l.total, accion: l.accion,
+    })),
+    yo: { nombre: firma.nombre, rol: firma.rol, aprobado_at: firma.aprobado_at, observacion: firma.observacion },
+    firmantes: otros || [],
+  });
+}
+
+async function firmarOrden(req, res, firma) {
+  const { aprueba, observacion } = req.body || {};
+  const texto = String(observacion || "").trim().slice(0, 2000);
+  if (!aprueba && !texto) return res.status(400).json({ error: "Decí si la aprobás o escribí qué objetás." });
+  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || null;
+  const ahora = new Date().toISOString();
+  const campos = {};
+  if (aprueba) { campos.aprobado_at = ahora; campos.aprobado_ip = ip; }
+  if (texto) { campos.observacion = texto; campos.observacion_at = ahora; }
+  const r = await rest(`orden_cambio_aprobaciones?id=eq.${firma.id}`, {
+    method: "PATCH", headers: { Prefer: "return=representation" },
+    body: JSON.stringify(campos),
+  });
+  if (!r.ok) return res.status(500).json({ error: "No se pudo guardar." });
+  // Con la última firma, la orden entra al presupuesto.
+  const aplicada = aprueba ? await siFirmaronTodos(firma.orden_id) : null;
+  await avisarDeLaOrden(firma, aprueba, texto, aplicada);
+  return res.status(200).json({
+    ok: true, aprobado_at: campos.aprobado_at || firma.aprobado_at,
+    observacion: texto || firma.observacion, aplicada: !!aplicada,
+  });
+}
+
+/**
+ * ¿Ya firmaron todos? Entonces la orden se aplica al presupuesto.
+ *
+ * Es el momento en que una orden de cambio deja de ser un pedido y pasa a ser
+ * plata del contrato: sus rubros entran al control como ADICIONALES —en más o
+ * en menos— y los que la orden quita quedan tachados. Hacerlo a mano después,
+ * cuando alguien se acuerde, es como se llega a fin de obra con cuatro órdenes
+ * aprobadas que el control nunca contó.
+ *
+ * NO SE APLICA SI ALGUIEN OBJETÓ, aunque después haya aprobado: una objeción
+ * sin resolver es trabajo que no se ejecuta.
+ *
+ * La misma cuenta vive en src/modules/controlObra/ordenesDeCambio.js, que es
+ * la que usa la oficina cuando aprueba desde adentro. Si una cambia, la otra
+ * también: son el mismo documento entrando por dos puertas.
+ */
+async function siFirmaronTodos(ordenId) {
+  const firmas = await json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${ordenId}&select=aprobado_at,observacion`));
+  if (!firmas?.length) return null;
+  if (firmas.some(f => !f.aprobado_at || (f.observacion && String(f.observacion).trim()))) return null;
+
+  const ordenes = await json(await rest(`ordenes_cambio?id=eq.${ordenId}&select=*`));
+  const orden = ordenes?.[0];
+  // Idempotente: si ya se aplicó, no se aplica dos veces. Un adicional
+  // duplicado es plata inventada en el control.
+  if (!orden || orden.aprobada_at) return null;
+
+  const lineas = await json(await rest(`orden_cambio_lineas?orden_id=eq.${ordenId}&select=*&order=orden`)) || [];
+  const codigo = orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`;
+
+  const anulan = lineas.filter(l => l.tipo === "quita" && l.obra_rubro_id);
+  if (anulan.length) {
+    await rest(`obra_rubros?id=in.(${anulan.map(l => Number(l.obra_rubro_id)).join(",")})`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ anulado_por_oc: orden.id }),
+    });
+  }
+
+  const filas = lineas.filter(l => !(l.tipo === "quita" && l.obra_rubro_id)).map((l, i) => {
+    const signo = l.tipo === "quita" ? -1 : 1;
+    return {
+      obra_id: orden.obra_id,
+      numero: 9000 + orden.numero * 100 + i,
+      capitulo: l.capitulo || `ADICIONALES · ${codigo}`,
+      capitulo_orden: 9000 + orden.numero,
+      orden: 9000000 + orden.numero * 1000 + i,
+      descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigo}`,
+      unidad: l.unidad || "",
+      cantidad: Number(l.cantidad) || 0,
+      precio_unitario: signo * (Number(l.precio_unitario) || 0),
+      total_base: signo * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0),
+      origen: "orden_cambio",
+      orden_cambio_id: orden.id,
+    };
+  });
+  if (filas.length) {
+    await rest("obra_rubros", {
+      method: "POST", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(filas),
+    });
+  }
+
+  const ahora = new Date().toISOString();
+  await rest(`ordenes_cambio?id=eq.${orden.id}`, {
+    method: "PATCH", headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      estado: "aprobada", aprobada_at: ahora, visto_at: orden.visto_at || ahora,
+      ejecucion: orden.ejecucion === "por_definir" ? "ejecutado" : orden.ejecucion,
+    }),
+  });
+
+  const monto = filas.reduce((t, f) => t + (Number(f.total_base) || 0), 0);
+  return { codigo, rubros: filas.length, monto: Math.round(monto * 100) / 100 };
+}
+
+/**
+ * Que la oficina se entere hoy, sobre todo si objetaron.
+ *
+ * Mientras no estén las firmas el trabajo no se ejecuta y el plazo corre. Una
+ * objeción que nadie mira en una semana es una semana de obra parada por un
+ * correo que nadie abrió.
+ */
+async function avisarDeLaOrden(firma, aprueba, texto, aplicada) {
+  try {
+    const ordenes = await json(await rest(`ordenes_cambio?id=eq.${firma.orden_id}&select=codigo,numero,titulo,obra_id,created_by`));
+    const orden = ordenes?.[0];
+    if (!orden) return;
+    const [obras, usuarios] = await Promise.all([
+      json(await rest(`obras?id=eq.${orden.obra_id}&select=nombre`)),
+      json(await rest("usuarios?activo=eq.true&select=email")),
+    ]);
+    const para = (usuarios || []).map(u => String(u.email || "").trim().toLowerCase()).filter(Boolean);
+    if (!para.length) return;
+    const quien = `${firma.nombre || firma.email}${firma.rol ? ` · ${firma.rol}` : ""}`;
+    const codigo = orden.codigo || `N° ${orden.numero}`;
+    await enviarCorreo({
+      to: para,
+      subject: `${aprueba ? "Aprobada" : "Observada"}: Orden de Cambio ${codigo} · ${quien}`,
+      html: plantilla({
+        titulo: aprueba ? `Orden de Cambio ${codigo} aprobada` : `Observación a la Orden de Cambio ${codigo}`,
+        subtitulo: [obras?.[0]?.nombre, orden.titulo].filter(Boolean).join(" · "),
+        cuerpo: `
+          <p style="margin:0 0 12px;font-size:14px;color:#1A1A1A">
+            <strong>${escaparHtml(quien)}</strong> ${aprueba ? "aprobó la orden de cambio desde su enlace." : "entró por su enlace y objetó:"}
+          </p>
+          ${texto ? `<div style="font-size:14px;color:#1A1A1A;line-height:1.6;padding:12px 14px;background:#FEF6E7;
+            border:1px solid #F0D9A8;border-radius:8px;white-space:pre-line">${escaparHtml(texto)}</div>` : ""}
+          <p style="margin:14px 0 0;font-size:13px;color:#555;line-height:1.55">
+            Queda registrado con su nombre, la fecha y desde dónde. Las firmas que faltan se ven en la obra,
+            en Órdenes de cambio.
+          </p>
+          ${aplicada ? `
+          <div style="margin:16px 0 0;padding:12px 14px;background:#EAF6EE;border:1px solid #BFE3CC;border-radius:8px">
+            <div style="font-size:13.5px;font-weight:700;color:#15803D;margin-bottom:4px">Firmaron todos: ya entró al presupuesto</div>
+            <div style="font-size:12.5px;color:#374151;line-height:1.6">
+              Sus ${aplicada.rubros} ${aplicada.rubros === 1 ? "rubro entró" : "rubros entraron"} al control de obra
+              como <strong>ADICIONALES · ${escaparHtml(aplicada.codigo)}</strong>, por
+              <strong>$${Number(aplicada.monto).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>.
+              Lo que la orden quita quedó tachado del presupuesto original.
+            </div>
+          </div>` : ""}`,
+        pie: "Correo automático de FOREMAN · HCA Studio.",
+      }),
+    });
+  } catch { /* el aviso no puede tumbar la firma: lo que importa ya se guardó */ }
+}
+
 export default async function handler(req, res) {
   if (!configurado()) return res.status(500).json({ error: "El portal no está configurado." });
+
+  // La orden de cambio entra por la misma puerta con su propia llave.
+  if (req.query?.odc || (req.body || {}).odc) {
+    const t = req.method === "GET" ? req.query?.t : (req.body || {}).token;
+    const firma = await aprobacionDe(t);
+    if (!firma) return res.status(404).json({ error: "Este enlace no está disponible." });
+    if (req.method === "GET") return ordenParaFirmar(req, res, firma);
+    if (req.method === "POST") return firmarOrden(req, res, firma);
+    return res.status(405).json({ error: "Método no permitido" });
+  }
 
   // El libro entra por la misma puerta con su propia llave, igual que el acta.
   if (req.query?.libro || (req.body || {}).libro) {

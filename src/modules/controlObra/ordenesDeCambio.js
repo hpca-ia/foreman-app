@@ -261,13 +261,20 @@ export async function desaprobarOrden(orden) {
 }
 
 /** Mandar el documento por correo. Queda escrito a quién y cuándo. */
-export async function enviarOrden(orden, destinatarios, cuerpo, quien) {
+/**
+ * @param aprobadores [{nombre, email, rol}] — los que TIENEN QUE FIRMAR.
+ *   Cada uno recibe su propio enlace: la firma es de alguien, y con una llave
+ *   compartida cualquiera podría aprobar en nombre de los otros. Los demás
+ *   reciben la misma orden sin botón, de puro informativa.
+ */
+export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobadores = []) {
   const limpios = (destinatarios || []).map(d => String(d).trim()).filter(Boolean);
-  if (!limpios.length) return { error: "No hay a quién mandársela." };
+  const firman = (aprobadores || []).filter(a => a?.email);
+  if (!limpios.length && !firman.length) return { error: "No hay a quién mandársela." };
 
   const r = await fetch("/api/aviso?de=orden", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ orden_id: orden.id, destinatarios: limpios, cuerpo }),
+    body: JSON.stringify({ orden_id: orden.id, destinatarios: limpios, cuerpo, aprobadores: firman }),
   });
   const datos = await r.json().catch(() => ({}));
   if (!r.ok) return { error: datos.error || "No se pudo mandar el correo." };
@@ -288,6 +295,14 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien) {
 // privado, como las del libro de obra, y viajan adjuntas en el correo: un
 // enlace que caduca deja el respaldo inservible justo cuando alguien lo
 // necesita, seis meses después, para justificar un adicional.
+
+/** Quiénes tienen que firmar esta orden, y quién firmó ya. */
+export async function aprobacionesDe(ordenId) {
+  const { data, error } = await supabase.from("orden_cambio_aprobaciones")
+    .select("*").eq("orden_id", ordenId).order("id");
+  if (error) return [];
+  return data || [];
+}
 
 export async function subirSoporte(orden, archivo, descripcion, quien, cuantasHay = 0) {
   const limpio = archivo.name.replace(/[^\w.\-]/g, "_").slice(-60);

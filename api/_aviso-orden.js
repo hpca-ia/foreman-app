@@ -15,6 +15,10 @@ import { rest, configurado, SUPABASE_URL } from "./_supabase.js";
 const json = async r => { try { return await r.json(); } catch { return null; } };
 const uno = async ruta => (await json(await rest(ruta)))?.[0] || null;
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
+import { randomUUID } from "crypto";
+
+const APP = process.env.APP_URL || "https://foreman-app-ebon.vercel.app";
+const pausa = ms => new Promise(ok => setTimeout(ok, ms));
 
 const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fecha = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
@@ -23,9 +27,16 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Solo POST" });
   if (!configurado()) return res.status(503).json({ error: "Falta SUPABASE_SECRET_KEY" });
 
-  const { orden_id, destinatarios, cuerpo } = req.body || {};
+  const { orden_id, destinatarios, cuerpo, aprobadores } = req.body || {};
   const correos = (Array.isArray(destinatarios) ? destinatarios : []).map(x => String(x).trim()).filter(Boolean);
-  if (!orden_id || !correos.length) return res.status(400).json({ error: "Falta la orden o a quién mandarla" });
+  // QUIÉNES TIENEN QUE APROBAR, cada uno con su llave. Si vienen, la orden sale
+  // de a un correo por persona con su propio enlace; si no, sale como antes, a
+  // una lista, que es lo que hace falta para mandarla de puro informativa.
+  const firman = (Array.isArray(aprobadores) ? aprobadores : [])
+    .map(a2 => ({ nombre: String(a2?.nombre || "").trim(), rol: String(a2?.rol || "").trim(),
+      email: String(a2?.email || "").trim().toLowerCase() }))
+    .filter(a2 => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(a2.email));
+  if (!orden_id || (!correos.length && !firman.length)) return res.status(400).json({ error: "Falta la orden o a quién mandarla" });
 
   const orden = await uno(`ordenes_cambio?id=eq.${orden_id}&select=*&limit=1`);
   if (!orden) return res.status(404).json({ error: "Esa orden de cambio no existe" });
@@ -117,6 +128,7 @@ export default async function handler(req, res) {
     cuerpo: `
       ${orden.anulada ? `<div style="background:#FEF2F2;border:1px solid #FCA5A5;color:#B91C1C;font-weight:700;font-size:12.5px;padding:8px 10px;border-radius:6px;margin-bottom:14px;text-align:center">ORDEN DE CAMBIO ANULADA — NO EJECUTADA</div>` : ""}
       ${cuerpo ? `<p style="margin:0 0 14px">${esc(cuerpo)}</p>` : ""}
+      <!--FIRMA-->
 
       <!-- Qué tiene que hacer con esto. Sin decirlo, el cliente recibe un
            documento formal y no sabe si hay que contestar, firmar, o nada: se
@@ -243,11 +255,80 @@ export default async function handler(req, res) {
     } catch { /* un soporte que no se pudo traer no frena el envío */ }
   }
 
+  const asunto = `Orden de Cambio ${codigo} · ${proyecto}`;
+
+  // ── DE A UNO, CON SU LLAVE ────────────────────────────────────────────────
+  //
+  // La firma es de alguien. Con una sola llave para los cinco, cualquiera
+  // podría aprobar —o negar— en nombre de los otros cuatro, y lo que queda
+  // escrito no valdría para nada el día que se discuta.
+  if (firman.length) {
+    const envios = [];
+    for (const quien of firman) {
+      const token = (randomUUID() + randomUUID()).replace(/-/g, "");
+      const fila = (await json(await rest("orden_cambio_aprobaciones", {
+        method: "POST", headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          orden_id: orden.id, nombre: quien.nombre || null, email: quien.email,
+          rol: quien.rol || null, token,
+        }),
+      })))?.[0] || null;
+
+      const suyo = fila?.token
+        ? bloqueDeFirma(`${APP}/?odc=${fila.token}`, quien)
+        : "";
+      const r2 = await enviarCorreo({
+        to: [quien.email], subject: asunto, html: html.replace("<!--FIRMA-->", suyo), adjuntos,
+      });
+      if (fila?.id) {
+        await rest(`orden_cambio_aprobaciones?id=eq.${fila.id}`, {
+          method: "PATCH", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            envio_id: r2?.id || null,
+            envio_estado: r2?.error ? "failed" : "sent",
+            envio_at: new Date().toISOString(),
+          }),
+        });
+      }
+      envios.push({ email: quien.email, error: r2?.error || null });
+      if (firman.length > 1) await pausa(550);
+    }
+    // Y a los que solo miran, sin botón: una copia igual, sin enlace de firma.
+    if (correos.length) {
+      await enviarCorreo({ to: correos, subject: asunto, html: html.replace("<!--FIRMA-->", ""), adjuntos });
+    }
+    const fallaron = envios.filter(e => e.error);
+    return res.status(200).json({
+      ok: fallaron.length < envios.length,
+      mandados: envios.length - fallaron.length,
+      fallaron: fallaron.map(e => ({ dir: e.email, error: e.error })),
+    });
+  }
+
   const r = await enviarCorreo({
     to: correos,
-    subject: `Orden de Cambio ${codigo} · ${proyecto}`,
-    html,
+    subject: asunto,
+    html: html.replace("<!--FIRMA-->", ""),
     adjuntos,
   });
   return r.ok ? res.status(200).json({ ok: true, enviadoA: r.enviadoA }) : res.status(500).json({ error: r.error });
+}
+
+/** El bloque con el botón de aprobar, que es lo único que cambia por persona. */
+function bloqueDeFirma(url, quien) {
+  return `
+  <div style="margin:0 0 18px;padding:14px 16px;background:#F0F7F5;border:1px solid #CFE3DD;border-radius:8px">
+    <div style="font-size:13.5px;font-weight:700;color:#0F3D3E;margin-bottom:6px">
+      ${esc(quien.nombre || "Tu aprobación")}${quien.rol ? ` · ${esc(quien.rol)}` : ""}
+    </div>
+    <div style="font-size:12.5px;color:#374151;line-height:1.6;margin-bottom:10px">
+      Leé el detalle de abajo y aprobá desde acá. Es tu enlace personal: no lo reenvíes,
+      porque la aprobación queda a tu nombre.
+    </div>
+    <a href="${url}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;
+      border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Aprobar o hacer una observación →</a>
+    <div style="font-size:11.5px;color:#6B7280;margin-top:9px;line-height:1.5">
+      No hace falta usuario ni contraseña. Queda registrado quién aprobó, cuándo y desde dónde.
+    </div>
+  </div>`;
 }
