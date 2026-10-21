@@ -1,14 +1,27 @@
 import { useState } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronRight, Check, X } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronRight, Check, X, FileText, Mail } from "lucide-react";
 import { colors } from "../../theme/colors";
+import { inputStyle } from "../../components/ui/Input";
 import { efectos } from "./leerPresupuesto";
 
 // Lo que la revisión encontró en el Excel. Se usa al importar —antes de crear
 // la obra, con Aceptar / No aceptar en cada punto— y después en la pestaña
 // Presupuesto, para ver qué se decidió. Cada advertencia se abre para ver las
 // filas, con el número de fila de Excel.
-export default function RevisionPresupuesto({ advertencias = [], guardada = false, decisiones = {}, onDecidir }) {
+export default function RevisionPresupuesto({ advertencias = [], guardada = false, decisiones = {}, onDecidir, nombre, archivo, currentUser }) {
   const [abiertas, setAbiertas] = useState(() => new Set());
+  // MANDÁRSELO AL QUE LO TIENE QUE ARREGLAR.
+  //
+  // Esto se mira en la pantalla de quien importa, y el que corrige el Excel es
+  // otro: el contratista que armó la planilla, el proveedor que la mandó.
+  // Contárselo por teléfono no sirve —son catorce renglones con números de
+  // fila— y una captura de pantalla no se puede buscar ni ordenar.
+  const [mandando, setMandando] = useState(false);
+  const [correos, setCorreos] = useState("");
+  const [nota, setNota] = useState("");
+  const [ocupado, setOcupado] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [falla, setFalla] = useState("");
   const [todas, setTodas] = useState(() => new Set());
   const errores = advertencias.filter(a => a.nivel === "error").length;
   const avisos = advertencias.length - errores;
@@ -24,6 +37,43 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
   }
 
   const alternar = (setter, i) => setter(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
+
+  const paraQuien = () => [...new Set(String(correos).split(/[\s,;]+/)
+    .map(x => x.trim().toLowerCase())
+    .filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(x)))];
+
+  async function bajar() {
+    setOcupado("pdf"); setFalla("");
+    try {
+      const { pdfRevision } = await import("./pdfRevision");
+      await pdfRevision({ nombre, archivo, advertencias, quien: currentUser?.name }, "abrir");
+    } catch (e) { setFalla("No se pudo armar el PDF: " + e.message); }
+    setOcupado("");
+  }
+
+  async function enviar() {
+    const para = paraQuien();
+    if (!para.length) { setFalla("Escribí a qué dirección mandárselo."); return; }
+    setOcupado("correo"); setFalla(""); setAviso("");
+    try {
+      const { pdfRevision } = await import("./pdfRevision");
+      const adjunto = await pdfRevision({ nombre, archivo, advertencias, quien: currentUser?.name }, "base64");
+      const r = await fetch("/api/aviso?de=revision", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          para, nota: nota.trim() || null, adjunto, nombre, errores, avisos,
+          de: currentUser ? { nombre: currentUser.name || null, email: currentUser.email || null } : null,
+        }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!d) throw new Error(`El servidor se cortó mandando la revisión (${r.status}).`);
+      if (!r.ok || d.error) throw new Error(d.error || "No se pudo mandar.");
+      setAviso(`${d.mandados} ${d.mandados === 1 ? "correo enviado" : "correos enviados"}.`
+        + (d.fallaron?.length ? ` No salió a: ${d.fallaron.map(f => f.dir).join(", ")}.` : ""));
+      if (!d.fallaron?.length) { setMandando(false); setCorreos(""); setNota(""); }
+    } catch (e) { setFalla(e.message); }
+    setOcupado("");
+  }
 
   return (
     <div style={{ border: `1.5px solid ${errores ? colors.dangerBorder : colors.warningBorder}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
@@ -42,6 +92,49 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
               ? `Acepta o no acepta cada error para poder crear la obra (faltan ${pendientes}). Los avisos son opcionales.`
               : "Revisa los avisos si quieres; ya se puede crear la obra."}
         </span>
+
+        {/* QUIEN CORRIGE EL EXCEL ES OTRO. Esta hoja lleva el número de fila
+            al lado de cada cosa, para abrir el archivo en la pantalla de al
+            lado y corregir de arriba abajo. */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", width: "100%", marginTop: 2 }}>
+          <button onClick={bajar} disabled={!!ocupado}
+            style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff",
+              border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "5px 10px",
+              fontSize: 11.5, fontWeight: 600, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+            <FileText size={12} /> {ocupado === "pdf" ? "Armando…" : "Bajar en PDF"}
+          </button>
+          <button onClick={() => { setMandando(m => !m); setFalla(""); setAviso(""); }} disabled={!!ocupado}
+            style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff",
+              border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "5px 10px",
+              fontSize: 11.5, fontWeight: 600, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+            <Mail size={12} /> Mandárselo al que lo hizo
+          </button>
+          {aviso && <span style={{ fontSize: 11.5, color: colors.success }}>{aviso}</span>}
+          {falla && <span style={{ fontSize: 11.5, color: colors.danger }}>{falla}</span>}
+        </div>
+
+        {mandando && (
+          <div style={{ width: "100%", display: "grid", gap: 6, marginTop: 4 }}>
+            <input value={correos} onChange={e => setCorreos(e.target.value)} autoFocus
+              placeholder="correo del responsable (varios separados por coma)"
+              style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", background: "#fff" }} />
+            <input value={nota} onChange={e => setNota(e.target.value)}
+              placeholder="Una línea, si hace falta: «para la reunión del jueves» (opcional)"
+              style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", background: "#fff" }} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={enviar} disabled={!!ocupado || !paraQuien().length}
+                style={{ background: paraQuien().length ? colors.brand : colors.neutralSoft, border: "none",
+                  borderRadius: colors.radiusSm, padding: "7px 13px", fontSize: 12, fontWeight: 700,
+                  color: paraQuien().length ? "#fff" : colors.muted, fontFamily: colors.font,
+                  cursor: paraQuien().length ? "pointer" : "default" }}>
+                {ocupado === "correo" ? "Armando y mandando…" : "Enviar la revisión"}
+              </button>
+              <span style={{ fontSize: 11, color: colors.muted }}>
+                Va el PDF adjunto. No se cambia nada de tu archivo.
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {advertencias.map((a, i) => {

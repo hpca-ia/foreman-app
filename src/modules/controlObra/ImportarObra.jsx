@@ -596,7 +596,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
 
             {control && (
               <div style={{ marginTop: 14 }}>
-                <RevisionPresupuesto advertencias={advertencias} decisiones={decisiones} onDecidir={decidir} />
+                <RevisionPresupuesto advertencias={advertencias} decisiones={decisiones} onDecidir={decidir}
+                  nombre={nombre} archivo={archivo?.name} currentUser={currentUser} />
               </div>
             )}
 

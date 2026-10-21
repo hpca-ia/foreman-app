@@ -9,7 +9,7 @@ const n = v => Number(v) || 0;
 // El presupuesto como vino: capítulos en su orden, con los códigos, cantidades
 // y precios del archivo, sus subtotales y el total. No cambia al agrupar ni al
 // cargar facturas: es la referencia contra la que se mide todo lo demás.
-export default function PresupuestoOriginal({ obra, rubros }) {
+export default function PresupuestoOriginal({ obra, rubros, currentUser }) {
   // EL CAPÍTULO CON EL QUE SE APROBÓ, no el de trabajo.
   //
   // El control se puede acomodar —esconder renglones en $0, mover rubros de
@@ -72,7 +72,8 @@ export default function PresupuestoOriginal({ obra, rubros }) {
 
       {Array.isArray(obra.advertencias) && (
         <div style={{ marginBottom: 12 }}>
-          <RevisionPresupuesto advertencias={obra.advertencias} guardada />
+          <RevisionPresupuesto advertencias={obra.advertencias} guardada
+            nombre={obra.nombre} currentUser={currentUser} />
         </div>
       )}
 

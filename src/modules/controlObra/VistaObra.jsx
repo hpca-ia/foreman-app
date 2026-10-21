@@ -397,7 +397,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             <PanelOrdenesCambio obra={obra} proyecto={cadena.proyecto} rubros={rubros}
               currentUser={currentUser} puede={puede} onCambio={cargar} />
           )}
-          {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} />}
+          {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} currentUser={currentUser} />}
 
           {tab === "fondos" && veCaja && (
             <Suspense fallback={<Cargando />}>
