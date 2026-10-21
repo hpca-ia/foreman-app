@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Camera, X, Plus, Trash2, Sparkles } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
@@ -48,7 +48,36 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [ocupadoNova, setOcupadoNova] = useState(false);
   const [errorNova, setErrorNova] = useState("");
   const [leyendo, setLeyendo] = useState("");
+  const [encima, setEncima] = useState(false);
   const cotizacionRef = useRef(null);
+
+  /**
+   * PEGAR, ARRASTRAR O ELEGIR: las tres cosas terminan en la misma lectura.
+   *
+   * Una cotización llega por WhatsApp y se mira en la pantalla: lo natural es
+   * recortarla y pegarla, no guardarla en Descargas con un nombre que nadie va
+   * a volver a encontrar para después buscarla en un diálogo de archivos. Y un
+   * PDF que ya está abierto se arrastra.
+   *
+   * El pegado escucha en toda la ventana mientras este modal está abierto: no
+   * hay dónde "hacer foco" para pegar, y pedirle a alguien que haga clic en el
+   * lugar correcto antes de pegar es pedirle que adivine.
+   */
+  useEffect(() => {
+    const alPegar = ev => {
+      // Si están pegando texto en un campo, es texto: no se toca.
+      const items = [...(ev.clipboardData?.items || [])];
+      const archivo = items.find(i => i.kind === "file" && /^(image\/|application\/pdf)/.test(i.type));
+      if (!archivo) return;
+      const f2 = archivo.getAsFile();
+      if (!f2) return;
+      ev.preventDefault();
+      leerArchivoDeCotizacion(f2);
+    };
+    window.addEventListener("paste", alPegar);
+    return () => window.removeEventListener("paste", alPegar);
+    // eslint-disable-next-line
+  }, [rubros]);
 
   /**
    * Subir la cotización del proveedor y que NOVA la pase a líneas.
@@ -63,8 +92,13 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
    * mismo papel daría dos resultados según por dónde entre.
    */
   async function leerCotizacion_(e) {
-    let file = e.target.files?.[0];
+    const file = e.target.files?.[0];
     e.target.value = "";
+    await leerArchivoDeCotizacion(file);
+  }
+
+  async function leerArchivoDeCotizacion(original) {
+    let file = original;
     if (!file) return;
     setLeyendo("leyendo"); setErrorNova("");
     try {
@@ -169,7 +203,19 @@ Si el texto ya está bien escrito, devolvelo igual.`,
   // aprobarla son cuatro pasos para confirmar algo que ya decidió al escribir.
   async function guardar(despues) {
     if (!f.titulo.trim()) { setError("Ponele un título: es lo que se cita después en las actas."); return; }
-    if (!conMonto.length) { setError("Una orden de cambio sin partidas no se puede mandar a nadie."); return; }
+    // SIN PARTIDAS SE PUEDE GUARDAR, PERO NO APROBAR.
+    //
+    // Una orden de cambio no nace entera: aparece el problema, se escribe el
+    // argumento ese día, y el precio llega una semana después con la cotización
+    // del proveedor. Obligar a tener las partidas para poder guardar hace que
+    // ese argumento —escrito con el problema delante y con las palabras justas—
+    // viva mientras tanto en un WhatsApp, y lo que se escribe tres semanas
+    // después ya es un resumen de memoria.
+    //
+    // Aprobar sí las necesita: aprobar es mandar plata al presupuesto.
+    if (despues === "aprobar" && !conMonto.length) {
+      setError("Para aprobarla tiene que tener partidas: aprobar es meter esos montos al presupuesto."); return;
+    }
     setGuardando(true); setError("");
 
     const r = await crearOrden(obra.id, { ...f, dias_impacto: Number(f.dias_impacto) || null }, currentUser);
@@ -260,7 +306,18 @@ Si el texto ya está bien escrito, devolvelo igual.`,
         </div>
 
         {/* LA COTIZACIÓN DEL QUE VA A HACER EL TRABAJO, LEÍDA. */}
-        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          onDragOver={e => { e.preventDefault(); setEncima(true); }}
+          onDragLeave={() => setEncima(false)}
+          onDrop={e => {
+            e.preventDefault(); setEncima(false);
+            const f2 = [...(e.dataTransfer?.files || [])][0];
+            if (f2) leerArchivoDeCotizacion(f2);
+          }}
+          style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap",
+            border: `1px dashed ${encima ? colors.brand : "transparent"}`,
+            background: encima ? colors.brandSoft : "transparent",
+            borderRadius: colors.radiusSm, padding: encima ? 6 : 0, transition: "background .12s" }}>
           <button onClick={() => cotizacionRef.current?.click()} disabled={!!leyendo}
             style={{ display: "flex", alignItems: "center", gap: 6, background: colors.brandSoft,
               border: `1px solid ${colors.brand}`, borderRadius: colors.radiusSm, padding: "6px 11px",
@@ -272,7 +329,8 @@ Si el texto ya está bien escrito, devolvelo igual.`,
           <input ref={cotizacionRef} type="file" accept="image/*,.pdf,.xlsx,.xlsm,.xls"
             onChange={leerCotizacion_} style={{ display: "none" }} />
           <span style={{ fontSize: 10.5, color: colors.muted }}>
-            PDF, foto o Excel. Llena las líneas de abajo; después las revisás.
+            PDF, foto o Excel. También podés <strong>pegar una captura</strong> (Cmd/Ctrl+V) o arrastrar el archivo acá.
+            Llena las líneas de abajo; después las revisás.
           </span>
         </div>
 
@@ -455,7 +513,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
 
       <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
         <Button variant="primary" onClick={() => guardar()} disabled={guardando}>
-          {guardando ? "Guardando…" : "Guardar la orden"}
+          {guardando ? "Guardando…" : conMonto.length ? "Guardar la orden" : "Guardar como borrador"}
         </Button>
         {/* Para quien puede aprobar: de una. Una orden la redacta quien la
             decidió, y guardar, cerrar, buscarla en la lista, abrirla y recién
@@ -469,9 +527,11 @@ Si el texto ya está bien escrito, devolvelo igual.`,
         <Button variant="secondary" onClick={onCerrar}>Cancelar</Button>
       </div>
       <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
-        {puedeAprobar
-          ? "Aprobada, sus adiciones entran al control de obra y lo que reduce queda tachado del presupuesto. Si preferís que la vea alguien antes, guardala y desde la lista pedís el visto o se la mandás al cliente."
-          : "Después se decide qué hacer con ella: bajar el PDF, pedirle el visto al Director, o mandársela al cliente."}
+        {!conMonto.length
+          ? "Guardar NO la envía a nadie. Queda como borrador en la lista de la obra y la seguís armando cuando tengas la cotización: el argumento no se pierde."
+          : puedeAprobar
+            ? "Guardar NO la envía. Aprobada, sus adiciones entran al control de obra y lo que reduce queda tachado del presupuesto. Si preferís que la vea alguien antes, guardala y desde la lista pedís el visto o se la mandás."
+            : "Guardar NO la envía. Después se decide qué hacer con ella: bajar el PDF, pedirle el visto al Director, o mandársela al cliente."}
       </div>
     </Modal>
   );

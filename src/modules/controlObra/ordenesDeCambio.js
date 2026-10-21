@@ -272,6 +272,14 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
   const firman = (aprobadores || []).filter(a => a?.email);
   if (!limpios.length && !firman.length) return { error: "No hay a quién mandársela." };
 
+  // UN BORRADOR NO SE MANDA. Ahora una orden se puede guardar sin partidas
+  // —el argumento se escribe el día del problema y el precio llega después—,
+  // así que hay que atajar el caso acá: lo que recibiría el cliente sería un
+  // documento formal con el cuadro de partidas vacío.
+  const { count } = await supabase.from("orden_cambio_lineas")
+    .select("id", { count: "exact", head: true }).eq("orden_id", orden.id);
+  if (!count) return { error: "Esta orden todavía no tiene partidas: es un borrador. Agregale las partidas antes de mandarla." };
+
   const r = await fetch("/api/aviso?de=orden", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ orden_id: orden.id, destinatarios: limpios, cuerpo, aprobadores: firman }),
