@@ -43,6 +43,7 @@ const EN_LA_BARRA = {
   arquitecto:    ["tareas", "presupuestos", "controlObra", "observaciones"],
   arquitecto_jr: ["tareas", "presupuestos", "observaciones", "libro"],
   conductor:     ["tareas", "compras", "cajaChica", "observaciones"],
+  ehs:           ["libro"],
 };
 
 export default function Sidebar({ puede, usuario, empresa, vista, setVista, admin, verPipeline, pendientes = {} }) {

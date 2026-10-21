@@ -87,7 +87,7 @@ export const TODOS_LOS_PERMISOS = GRUPOS_PERMISOS.flatMap(g => g.permisos);
 
 // El Director no aparece acá: siempre puede todo, por código. Si sus permisos
 // fueran editables, un error de edición lo dejaría fuera de su propia app.
-export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitecto_jr", "residente", "conductor"];
+export const ROLES_EDITABLES = ["assistant", "gerente", "arquitecto", "arquitecto_jr", "residente", "conductor", "ehs"];
 
 // Se usa mientras la tabla carga, y para sembrar permisos nuevos que todavía
 // no existan en la base.
@@ -175,6 +175,27 @@ export const POR_DEFECTO = {
     "manoObra.ver": false,
     "facturas.registrar": false, "planillas.cerrar": false,
     "cajaChica.ver": true, "cajaChica.administrar": false, "leads.ver": false, "leads.editar": false,
+    "pipeline.ver": false,
+    "ajustes.ver": false,
+    "borrar.definitivo": false,
+  },
+  // EHS entra a una sola cosa: su parte del libro de obra. Las charlas que
+  // dio, las inspecciones, la entrega de EPP, los casi-accidentes. No cierra
+  // el día —eso lo hace el residente, que es quien responde por el registro—
+  // ni toca ninguna otra pantalla. Todo lo demás en falso a propósito: es más
+  // fácil prenderle algo después que descubrir que veía de más.
+  ehs: {
+    "tareas.ver": false, "libro.ver": true, "libro.reabrir": false, "observaciones.ver": false, "actas.ver": false, "actas.aprobar": false,
+    "compras.ver": false, "compras.gestionar": false,
+    "compras.aprobar": false,
+    "tareas.todas": false, "tareas.asignar": false, "tareas.fechas": false,
+    "fondos.ver": false, "proveedores.ver": false,
+    "presupuestos.ver": false, "presupuestos.crear": false,
+    "controlObra.ver": false, "obras.crear": false,
+    "cronograma.ver": false,
+    "manoObra.ver": false,
+    "facturas.registrar": false, "planillas.cerrar": false,
+    "cajaChica.ver": false, "cajaChica.administrar": false, "leads.ver": false, "leads.editar": false,
     "pipeline.ver": false,
     "ajustes.ver": false,
     "borrar.definitivo": false,

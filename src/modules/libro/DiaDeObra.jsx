@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Camera, Plus, X, Check, Lock, Unlock, FileText } from "lucide-react";
 import { colors } from "../../theme/colors";
+import { esEHS } from "../../lib/roles";
 import { inputStyle } from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
 import {
@@ -47,6 +48,15 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
   const estado = estadoDelDia(dia, hoyEnObra());
   const abierto = estado.seEscribe;
   const sePuede = abierto && puedeEscribir;
+  // EHS ESCRIBE LO SUYO Y NADA MÁS.
+  //
+  // El jefe de seguridad entra a dejar constancia de su trabajo —la charla que
+  // dio, la inspección, la entrega de EPP, el casi-accidente— y eso es todo lo
+  // que le toca. No escribe el avance ni los materiales, y no cierra el día:
+  // cerrarlo es hacerse responsable del registro entero, y de eso responde el
+  // residente.
+  const soloSeguridad = esEHS(currentUser?.role);
+  const puedoEnLa = cat => sePuede && (!soloSeguridad || cat === "seguridad");
 
   const cargar = useCallback(async () => {
     const r = await abrirDia(lead.id, fecha, currentUser);
@@ -188,7 +198,7 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
               vive nada más que en la base, para un reclamo no existe —ahí
               nadie entra a FOREMAN, se pide "el libro", y el libro es un PDF
               con fecha—. */}
-          {abierto && dia && (puedeEscribir || puedeReabrir) && (
+          {abierto && dia && !soloSeguridad && (puedeEscribir || puedeReabrir) && (
             <Button variant={esHoy ? "primary" : "secondary"} size="sm" disabled={ocupado} onClick={async () => {
               if (!window.confirm(`¿Cerrar el día ${diaLargo(fecha)}?\n\n`
                 + "Se guarda el PDF de este día en el libro de la obra y no se escribe más, salvo que se reabra con un motivo.")) return;
@@ -275,7 +285,10 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
       {/* Las categorías, una debajo de la otra. */}
       {CATEGORIAS.map(cat => {
         const suyas = deLaCategoria(cat.id);
-        if (!sePuede && !suyas.length) return null;
+        const escribo = puedoEnLa(cat.id);
+        // Lo que no escribe igual lo lee: el de seguridad necesita saber qué
+        // se hizo hoy en la obra para escribir algo que tenga sentido.
+        if (!escribo && !suyas.length) return null;
         return (
           <div key={cat.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 8 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 6 }}>
@@ -310,7 +323,7 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
               </div>
             ))}
 
-            {sePuede && (
+            {escribo && (
               <div style={{ display: "flex", gap: 5, marginTop: suyas.length ? 7 : 0 }}>
                 <input value={borradores[cat.id] || ""} placeholder={cat.pista}
                   onChange={ev => setBorradores(b => ({ ...b, [cat.id]: ev.target.value }))}
@@ -334,7 +347,7 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
             {/* Y EL ERROR AL LADO DEL CAMPO que falló, no arriba de todo.
                 Lo que se escribió sigue en el campo —no se pierde— y el aviso
                 está donde uno está mirando. */}
-            {sePuede && error && borradores[cat.id] && (
+            {escribo && error && borradores[cat.id] && (
               <div style={{ fontSize: 11.5, color: colors.danger, marginTop: 4, lineHeight: 1.45 }}>
                 {error}
               </div>
@@ -422,7 +435,7 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
         </div>
       )}
 
-      {abierto && puedeEscribir && !entradas.length && !fotos.length && (
+      {abierto && puedeEscribir && !soloSeguridad && !entradas.length && !fotos.length && (
         <Button variant="outline" size="sm" style={{ marginTop: 8 }}
           onClick={async () => {
             if (!window.confirm("¿Cerrar el día como “sin novedades”? Queda registrado que hoy no hubo nada que anotar.")) return;

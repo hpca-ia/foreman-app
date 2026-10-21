@@ -19,7 +19,11 @@ export const CATEGORIAS = [
   { id: "equipo",        label: "Equipo y maquinaria", pista: "Qué hay en sitio: andamios, concretera…" },
   { id: "novedades",     label: "Novedades",          pista: "Lo que se salió de lo previsto" },
   { id: "decisiones",    label: "Decisiones",         pista: "Quién decidió qué, y por qué" },
-  { id: "seguridad",     label: "Seguridad",          pista: "Incidentes, casi-accidentes, lo que se corrigió" },
+  // LA PARTE DE EHS. No es solo "qué salió mal": lo que se le pide a una obra
+  // en una auditoría —o después de un accidente— es la constancia de lo que se
+  // hizo para prevenirlo. La charla de alturas que se dio el martes vale tanto
+  // como el casi-accidente del jueves, y las dos van acá, con fecha y firma.
+  { id: "seguridad",     label: "Seguridad y salud · EHS", pista: "Charlas, inspecciones, entrega de EPP, incidentes y casi-accidentes" },
   { id: "observaciones", label: "Observaciones",      pista: "Lo demás que valga la pena dejar escrito" },
 ];
 

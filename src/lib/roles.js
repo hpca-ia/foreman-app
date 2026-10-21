@@ -15,6 +15,12 @@ export const ROLES = {
   // más grande "porque total no va a mirar" es cómo se termina con la
   // información de la oficina abierta a quien no le toca.
   conductor: { label: "Conductor", color: "#8A7A5C" },
+  // Seguridad, salud y ambiente. Entra al libro de obra y escribe lo suyo:
+  // las charlas que dio, las inspecciones, la entrega de equipo de
+  // protección, los casi-accidentes. Es un registro que se le pide a la obra
+  // en una auditoría o después de un accidente, y hasta ahora vivía en un
+  // cuaderno aparte —o en el teléfono de alguien—.
+  ehs: { label: "Jefe de EHS", color: "#B45309" },
 };
 
 // "Equipo" ya no existe: se muestra si algún usuario viejo lo tiene, pero no
@@ -26,4 +32,7 @@ export const rolInfo = role => ROLES[role] || LEGACY[role] || { label: "Equipo",
 export const esAdmin = role => role === "owner" || role === "assistant";
 export const esResidente = role => role === "residente";
 export const puedeControlObra = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr"].includes(role);
+/** Solo escribe la parte de seguridad del libro: nada más, por ahora. */
+export const esEHS = role => role === "ehs";
+
 export const puedeCajaChica = role => ["owner", "assistant", "gerente", "arquitecto", "arquitecto_jr", "residente", "conductor"].includes(role);
