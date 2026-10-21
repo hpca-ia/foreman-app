@@ -180,3 +180,70 @@ export function asignacionDeTexto(txt = "") {
   }
   return mapa;
 }
+
+// ── LEER UNA COTIZACIÓN, DE DONDE VENGA ───────────────────────────────────
+//
+// La misma lectura sirve en dos lados: comparar una proforma contra el
+// presupuesto (Beneficios) y llenar las líneas de una orden de cambio. Es el
+// mismo papel —lo que un proveedor cotiza— y tiene que leerse igual en los
+// dos, o el mismo archivo daría dos resultados distintos según por dónde entre.
+
+export function sistemaDeCotizacion(lista = "") {
+  return `Eres NOVA. Lees proformas de proveedores de construcción en Ecuador.
+
+${FORMATO}
+
+"monto" es lo que suma ESE renglón CON IVA incluido.
+
+"rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
+no estás seguro. El guion es una respuesta válida y es mejor que adivinar.
+${lista ? `\nRubros de la obra: ${lista}` : ""}`;
+}
+
+/**
+ * Un archivo de cotización —PDF, foto o Excel— leído a renglones.
+ *
+ * @param pedir  función que habla con NOVA: (cuerpo) => { texto, cortado }
+ * @returns { proveedor, items, cortado }
+ */
+export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, hojaComoTexto } = {}) {
+  const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file?.name || "");
+  const esPdf = file?.type === "application/pdf";
+  const sistema = sistemaDeCotizacion(lista);
+
+  const b64 = esHoja ? null : await new Promise(res => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(",")[1]);
+    fr.readAsDataURL(file);
+  });
+
+  const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
+  const bloques = esHoja ? partirHoja(texto, 60) : [null];
+  const items = [];
+  let proveedor = "", cortado = false;
+
+  for (let i = 0; i < bloques.length; i++) {
+    onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
+    const { texto: salida, cortado: seCorto } = await pedir({
+      model: modelo, max_tokens: 3000, system: sistema,
+      messages: [{
+        role: "user",
+        content: esHoja
+          ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.` }]
+          : [
+            esPdf
+              ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+              : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+            { type: "text", text: "Extrae los renglones de esta proforma." },
+          ],
+      }],
+    });
+    const leido = interpretarRespuesta(salida);
+    // Si se quedó sin espacio, la última línea quedó a medio escribir: un monto
+    // cortado —"48" de "48,90"— entra como un renglón que parece bueno.
+    if (seCorto) { leido.items.pop(); cortado = true; }
+    if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
+    items.push(...leido.items);
+  }
+  return { proveedor, items, cortado };
+}

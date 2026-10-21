@@ -5,7 +5,10 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
-import { pedirANova, JUICIO, textoDeNova } from "../../lib/modelos";
+import { pedirANova, JUICIO, LECTURA, textoDeNova } from "../../lib/modelos";
+import { leerCotizacion } from "./leerProforma.js";
+import { hojaComoTexto } from "./beneficios";
+import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 
 // Una orden de cambio entera, de una sola vez.
 //
@@ -44,6 +47,68 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [previo, setPrevio] = useState(null);
   const [ocupadoNova, setOcupadoNova] = useState(false);
   const [errorNova, setErrorNova] = useState("");
+  const [leyendo, setLeyendo] = useState("");
+  const cotizacionRef = useRef(null);
+
+  /**
+   * Subir la cotización del proveedor y que NOVA la pase a líneas.
+   *
+   * Una orden de cambio se arma con la proforma del que va a hacer el trabajo
+   * delante: la misma descripción, la misma unidad, el mismo precio. Copiar
+   * catorce renglones a mano en el teléfono es donde se pierde media hora y
+   * donde se cuela el error que después nadie encuentra — un 1.250 que entró
+   * como 125.
+   *
+   * Es el MISMO lector que compara proformas en Beneficios. Si fueran dos, el
+   * mismo papel daría dos resultados según por dónde entre.
+   */
+  async function leerCotizacion_(e) {
+    let file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setLeyendo("leyendo"); setErrorNova("");
+    try {
+      if (/^image\//.test(file.type || "")) file = await comprimirImagen(file);
+      const pesa = noEntraElArchivo(
+        /\.(xlsx|xlsm|xls)$/i.test(file.name || "") ? null : "x".repeat(Math.round(file.size * 1.37)), file);
+      if (pesa) throw new Error(pesa);
+
+      const lista = (rubros || []).filter(r => !r.oculto && !r.anulado_por_oc).slice(0, 220)
+        .map(r => `${r.id}:${String(r.descripcion || "").slice(0, 60)}`).join(" | ");
+
+      const { items, cortado } = await leerCotizacion(file, {
+        lista, modelo: LECTURA, hojaComoTexto,
+        onPaso: p2 => setLeyendo(p2 || "leyendo"),
+        pedir: async cuerpo => {
+          const { res, data } = await pedirANova(cuerpo);
+          if (!res.ok || data?.error) {
+            throw new Error(data?.error?.message || data?.error
+              || (res.status === 504 ? "NOVA se demoró más de un minuto leyendo y el servidor la cortó. Probá con menos hojas."
+                : `El servidor se cortó leyendo el archivo (${res.status}).`));
+          }
+          return { texto: textoDeNova(data) || "", cortado: data?.stop_reason === "max_tokens" };
+        },
+      });
+
+      const utiles = items.filter(x => x.descripcion && Number(x.monto));
+      if (!utiles.length) throw new Error("NOVA no encontró renglones con precios en la cotización.");
+      setLineas(utiles.map(x => ({
+        tipo: "aumenta",
+        descripcion: String(x.descripcion).slice(0, 160),
+        unidad: x.unidad || "u",
+        cantidad: Number(x.cantidad) || 1,
+        // El precio unitario sale del total, que es el número que el proveedor
+        // suma: si la proforma trae el unitario y el total, el que vale es el
+        // que multiplica.
+        precio_unitario: Math.round((Number(x.monto) / (Number(x.cantidad) || 1)) * 100) / 100,
+        obra_rubro_id: "",
+      })));
+      if (cortado) setErrorNova("La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel.");
+    } catch (err) {
+      setErrorNova(err.message);
+    }
+    setLeyendo("");
+  }
 
   /**
    * Ordenar el argumento, no escribirlo.
@@ -187,6 +252,23 @@ Si el texto ya está bien escrito, devolvelo igual.`,
             <label style={lbl}>FECHA</label>
             <input type="date" value={f.fecha} onChange={e => setF(v => ({ ...v, fecha: e.target.value }))} style={mini} />
           </div>
+        </div>
+
+        {/* LA COTIZACIÓN DEL QUE VA A HACER EL TRABAJO, LEÍDA. */}
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => cotizacionRef.current?.click()} disabled={!!leyendo}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: colors.brandSoft,
+              border: `1px solid ${colors.brand}`, borderRadius: colors.radiusSm, padding: "6px 11px",
+              fontSize: 12, fontWeight: 700, color: colors.brand, fontFamily: colors.font,
+              cursor: leyendo ? "wait" : "pointer" }}>
+            <Sparkles size={13} />
+            {leyendo ? `NOVA está leyendo… ${leyendo === "leyendo" ? "" : leyendo}` : "Subir la cotización y que NOVA la lea"}
+          </button>
+          <input ref={cotizacionRef} type="file" accept="image/*,.pdf,.xlsx,.xlsm,.xls"
+            onChange={leerCotizacion_} style={{ display: "none" }} />
+          <span style={{ fontSize: 10.5, color: colors.muted }}>
+            PDF, foto o Excel. Llena las líneas de abajo; después las revisás.
+          </span>
         </div>
 
         <div>
