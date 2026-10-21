@@ -1,10 +1,11 @@
 import { useState, useRef } from "react";
-import { Camera, X, Plus, Trash2 } from "lucide-react";
+import { Camera, X, Plus, Trash2, Sparkles } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
+import { pedirANova, JUICIO, textoDeNova } from "../../lib/modelos";
 
 // Una orden de cambio entera, de una sola vez.
 //
@@ -38,6 +39,58 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [fotos, setFotos] = useState([]);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
+  // Lo que había escrito antes de que NOVA lo ordenara: se puede volver.
+  // Un texto que no se puede deshacer no se deja tocar por nadie.
+  const [previo, setPrevio] = useState(null);
+  const [ocupadoNova, setOcupadoNova] = useState(false);
+  const [errorNova, setErrorNova] = useState("");
+
+  /**
+   * Ordenar el argumento, no escribirlo.
+   *
+   * Una orden de cambio se escribe en la obra, con el problema delante y
+   * apurado, y la lee un fiscalizador que no estuvo ahí. El argumento suele
+   * estar completo y mal puesto. Lo que NOVA NO puede hacer es agregar razones
+   * o hechos que nadie dijo: este documento se firma y se cobra con él, y un
+   * motivo inventado convierte un reclamo legítimo en uno falso.
+   */
+  async function corregirTexto() {
+    const original = String(f.justificacion || "").trim();
+    if (!original) return;
+    setOcupadoNova(true); setErrorNova("");
+    const { res, data } = await pedirANova({
+      model: JUICIO, max_tokens: 1500,
+      system: `Sos NOVA. Te paso los argumentos de una ORDEN DE CAMBIO de obra, escritos a las apuradas
+en el sitio. Devolvés el MISMO texto ordenado y corregido, y nada más: sin encabezado, sin comillas,
+sin explicar qué cambiaste.
+
+QUÉ HACÉS:
+· Corregís ortografía, tildes y puntuación.
+· Separás las ideas en oraciones y en párrafos cuando hagan falta.
+· Lo ponés en el castellano con el que se firma un papel: tercera persona, sin modismos,
+  sin "o sea", sin abreviaturas de chat.
+· Ordenás el razonamiento: primero qué pasó, después por qué obliga a cambiar algo,
+  al final qué pasa si no se hace.
+
+QUÉ NO HACÉS NUNCA:
+· No agregás razones, hechos, cantidades, fechas ni normas que no estén en el texto.
+· No sacás nada de lo que dice: si una frase es confusa, la aclarás con las mismas palabras.
+· No exagerás ni suavizás. Este documento se firma y se cobra con él: un motivo inventado
+  convierte un reclamo legítimo en uno falso, y lo descubre el que lo tiene que pagar.
+
+Si el texto ya está bien escrito, devolvelo igual.`,
+      messages: [{ role: "user", content: original }],
+    });
+    setOcupadoNova(false);
+    if (!res.ok || data?.error) {
+      setErrorNova(data?.error?.message || data?.error || "NOVA no pudo ordenarlo. Probá de nuevo.");
+      return;
+    }
+    const limpio = String(textoDeNova(data) || "").trim();
+    if (!limpio) { setErrorNova("NOVA devolvió un texto vacío: lo que escribiste sigue como estaba."); return; }
+    setPrevio(original);
+    setF(v => ({ ...v, justificacion: limpio }));
+  }
   const camRef = useRef(null);
 
   const conMonto = lineas.filter(l => l.descripcion?.trim());
@@ -141,6 +194,35 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
           <textarea value={f.justificacion} onChange={e => setF(v => ({ ...v, justificacion: e.target.value }))} rows={3}
             placeholder="Por qué se pide, qué pasa si no se hace, y en qué se apoya. Es lo que lee quien aprueba."
             style={{ ...mini, resize: "vertical" }} />
+          {/* ESCRIBIR MAL UN ARGUMENTO BUENO CUESTA PLATA.
+              Una orden de cambio se escribe en la obra, con el problema
+              delante y apurado, y después la lee un fiscalizador que no estuvo
+              ahí. El argumento suele estar completo y mal puesto: tres ideas
+              en una oración, faltas, la conclusión al principio. NOVA no
+              inventa razones ni agrega hechos —eso sería falsificar el
+              documento—: ordena lo que ya está escrito y lo pone en el
+              castellano con el que se firma un papel. */}
+          <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginTop: 5 }}>
+            <button onClick={corregirTexto} disabled={!f.justificacion.trim() || ocupadoNova}
+              style={{ display: "flex", alignItems: "center", gap: 5, background: "none",
+                border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "4px 9px",
+                fontSize: 11.5, fontWeight: 600, fontFamily: colors.font,
+                color: f.justificacion.trim() ? colors.brand : colors.muted,
+                cursor: f.justificacion.trim() ? "pointer" : "default" }}>
+              <Sparkles size={12} /> {ocupadoNova ? "NOVA está ordenándolo…" : "Que NOVA lo ordene"}
+            </button>
+            {previo != null && (
+              <button onClick={() => { setF(v => ({ ...v, justificacion: previo })); setPrevio(null); }}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11.5, color: colors.muted, textDecoration: "underline" }}>
+                dejarlo como lo escribí
+              </button>
+            )}
+            <span style={{ fontSize: 10.5, color: colors.muted }}>
+              Ordena y corrige lo que escribiste. No agrega razones ni hechos.
+            </span>
+          </div>
+          {errorNova && <div style={{ fontSize: 11.5, color: colors.danger, marginTop: 4 }}>{errorNova}</div>}
         </div>
 
         {/* Los soportes acá y no después: quien aprueba deja de tener que
