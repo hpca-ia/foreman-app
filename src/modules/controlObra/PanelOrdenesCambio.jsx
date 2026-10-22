@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
-  borrarOrden, agregarLinea, borrarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
+  borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
   pedirVisto, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
 } from "./ordenesDeCambio";
@@ -56,6 +56,10 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [invitados, setInvitados] = useState([]);
 
   const puedeEditar = puede?.("obras.crear") !== false;
+  // Una celda que se puede escribir y no parece un formulario: la tabla sigue
+  // leyéndose como una tabla hasta que alguien toca un número.
+  const celda = { border: `1px solid transparent`, borderRadius: 5, padding: "2px 5px",
+    fontSize: 12, fontFamily: colors.font, color: colors.ink, background: "transparent", outline: "none" };
   // El visto es del Director y de nadie más: es el que responde por el precio
   // que sale de la oficina.
   const esDirector = currentUser?.role === "owner";
@@ -248,10 +252,35 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     ORDEN DE CAMBIO ANULADA — NO EJECUTADA
                   </div>
                 )}
-                <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>
-                  {[o.tipo, o.lugar, o.fecha && new Date(`${o.fecha}T12:00:00`).toLocaleDateString("es-EC"),
-                    o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
-                </div>
+                {/* LA CABECERA TAMBIÉN SE CORRIGE. Un borrador se abre para
+                    seguirlo: el título cambia cuando se entiende mejor el
+                    problema, y la fecha es la del día en que se emite, no la
+                    del día en que se empezó a escribir. */}
+                {editable ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 150px 120px 130px", gap: 6, marginBottom: 8 }}>
+                    <input defaultValue={o.titulo || ""} key={`t${o.id}-${o.titulo}`} placeholder="Título"
+                      onBlur={e => e.target.value.trim() && e.target.value !== (o.titulo || "")
+                        && hacer(() => guardarOrden(o.id, { titulo: e.target.value.trim() }))}
+                      style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+                    <input defaultValue={o.tipo || ""} key={`ti${o.id}-${o.tipo}`} placeholder="Tipo"
+                      onBlur={e => e.target.value !== (o.tipo || "")
+                        && hacer(() => guardarOrden(o.id, { tipo: e.target.value.trim() || null }))}
+                      style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+                    <input defaultValue={o.lugar || ""} key={`lu${o.id}-${o.lugar}`} placeholder="Lugar"
+                      onBlur={e => e.target.value !== (o.lugar || "")
+                        && hacer(() => guardarOrden(o.id, { lugar: e.target.value.trim() || null }))}
+                      style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+                    <input type="date" defaultValue={(o.fecha || "").slice(0, 10)} key={`fe${o.id}-${o.fecha}`}
+                      onBlur={e => e.target.value !== (o.fecha || "").slice(0, 10)
+                        && hacer(() => guardarOrden(o.id, { fecha: e.target.value || null }))}
+                      style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>
+                    {[o.tipo, o.lugar, o.fecha && new Date(`${o.fecha}T12:00:00`).toLocaleDateString("es-EC"),
+                      o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
+                  </div>
+                )}
                 {o.visto_at && (
                   <div style={{ fontSize: 11.5, color: colors.success, marginBottom: 6 }}>
                     Aprobada por {o.visto_nombre || "la dirección"} · {new Date(o.visto_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
@@ -346,14 +375,48 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                               <tr key={l.id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
                                 <td style={{ padding: "5px 6px", color: colors.muted, fontSize: 11, whiteSpace: "nowrap" }}>{l.item || ""}</td>
                                 <td style={{ padding: "5px 6px", color: colors.muted, fontSize: 11, whiteSpace: "nowrap" }}>{l.rubro_codigo || ""}</td>
+                                {/* LAS PARTIDAS SE CORRIGEN DONDE SE LEEN.
+                                    Una orden se arma de a poco y el precio
+                                    cambia una vez más antes de mandarla. Sin
+                                    esto, corregir una cantidad obligaba a
+                                    borrar la línea y escribirla de nuevo
+                                    entera, que es como se pierde la
+                                    descripción que alguien ya había redactado
+                                    bien. Se guarda al salir del campo. */}
                                 <td style={{ padding: "5px 6px", color: colors.ink }}>
-                                  {l.descripcion}
+                                  {editable ? (
+                                    <input defaultValue={l.descripcion || ""} key={`d${l.id}-${l.descripcion}`}
+                                      onBlur={e => e.target.value.trim() !== (l.descripcion || "")
+                                        && hacer(() => guardarLinea(l.id, { descripcion: e.target.value }))}
+                                      style={{ ...celda, width: "100%" }} />
+                                  ) : l.descripcion}
                                   {l.especificacion && <div style={{ fontSize: 10, color: colors.muted }}>{l.especificacion}</div>}
                                   {l.capitulo && <div style={{ fontSize: 10, color: colors.muted }}>{l.capitulo}</div>}
                                 </td>
-                                <td style={{ padding: "5px 6px", textAlign: "center", color: colors.muted }}>{l.unidad || ""}</td>
-                                <td style={{ padding: "5px 6px", textAlign: "right" }}>{fmt(l.cantidad)}</td>
-                                <td style={{ padding: "5px 6px", textAlign: "right" }}>{fmt(l.precio_unitario)}</td>
+                                <td style={{ padding: "5px 6px", textAlign: "center", color: colors.muted }}>
+                                  {editable ? (
+                                    <input defaultValue={l.unidad || ""} key={`u${l.id}-${l.unidad}`}
+                                      onBlur={e => e.target.value.trim() !== (l.unidad || "")
+                                        && hacer(() => guardarLinea(l.id, { unidad: e.target.value }))}
+                                      style={{ ...celda, width: 46, textAlign: "center" }} />
+                                  ) : (l.unidad || "")}
+                                </td>
+                                <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                  {editable ? (
+                                    <input type="number" step="0.01" defaultValue={l.cantidad ?? ""} key={`c${l.id}-${l.cantidad}`}
+                                      onBlur={e => Number(e.target.value) !== Number(l.cantidad)
+                                        && hacer(() => guardarLinea(l.id, { cantidad: e.target.value }))}
+                                      style={{ ...celda, width: 66, textAlign: "right" }} />
+                                  ) : fmt(l.cantidad)}
+                                </td>
+                                <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                  {editable ? (
+                                    <input type="number" step="0.01" defaultValue={l.precio_unitario ?? ""} key={`p${l.id}-${l.precio_unitario}`}
+                                      onBlur={e => Number(e.target.value) !== Number(l.precio_unitario)
+                                        && hacer(() => guardarLinea(l.id, { precio_unitario: e.target.value }))}
+                                      style={{ ...celda, width: 82, textAlign: "right" }} />
+                                  ) : fmt(l.precio_unitario)}
+                                </td>
                                 <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>${fmt((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0))}</td>
                                 <td style={{ padding: "5px 6px", textAlign: "right" }}>
                                   {editable && (

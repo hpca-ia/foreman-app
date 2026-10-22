@@ -173,6 +173,25 @@ export function subtotales(lineas = []) {
   return { adiciones, reducciones, total: adiciones - reducciones };
 }
 
+/**
+ * Corregir una partida ya guardada.
+ *
+ * Una orden de cambio se arma de a poco: el argumento el día del problema, las
+ * partidas cuando llega la cotización, y el precio cambia una vez más antes de
+ * mandarla. Sin esto la única manera de corregir una cantidad era borrar la
+ * línea y volver a escribirla entera.
+ */
+export async function guardarLinea(id, campos) {
+  const limpio = {};
+  if (campos.descripcion != null) limpio.descripcion = String(campos.descripcion).trim();
+  if (campos.unidad != null) limpio.unidad = String(campos.unidad).trim() || null;
+  if (campos.cantidad != null) limpio.cantidad = Number(campos.cantidad) || 0;
+  if (campos.precio_unitario != null) limpio.precio_unitario = Number(campos.precio_unitario) || 0;
+  if (!Object.keys(limpio).length) return {};
+  const { error } = await supabase.from("orden_cambio_lineas").update(limpio).eq("id", id);
+  return error ? { error: error.message } : {};
+}
+
 export async function borrarLinea(id) {
   const { error } = await supabase.from("orden_cambio_lineas").delete().eq("id", id);
   return error ? error.message : null;
