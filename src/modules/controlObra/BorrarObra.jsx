@@ -49,6 +49,13 @@ export default function BorrarObra({ obra, onCancelar, onBorrada }) {
       await supabase.from("obra_rubros").delete().eq("obra_id", obra.id);
       await supabase.from("obra_actividades").delete().eq("obra_id", obra.id);
       await supabase.from("cajas_chicas").update({ obra_id: null }).eq("obra_id", obra.id);
+      // EL PROYECTO DEJA DE APUNTAR A UNA OBRA QUE YA NO EXISTE.
+      //
+      // Sin esto, `leads.obra_id` queda señalando una fila borrada y el
+      // proyecto no se puede borrar nunca más: el pipeline dice "ya arrancó
+      // como obra, bórralo desde Control de Obra" y en Control de Obra no hay
+      // nada que borrar. Un callejón sin salida que no se puede ni explicar.
+      await supabase.from("leads").update({ obra_id: null }).eq("obra_id", obra.id);
       const { error: e } = await supabase.from("obras").delete().eq("id", obra.id);
       if (e) { setError("No se pudo borrar: " + e.message); setBorrando(false); return; }
       onBorrada();

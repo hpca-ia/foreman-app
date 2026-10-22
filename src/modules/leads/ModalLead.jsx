@@ -248,8 +248,19 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   // Un lead que se borra se lleva su ruta, sus etapas y su bitácora: dejarlos
   // sueltos llenaría las tareas de pasos de algo que ya no existe.
   async function revisarBorrado() {
+    // SE PREGUNTA SI LA OBRA EXISTE, no si el puntero está puesto.
+    //
+    // `leads.obra_id` podía quedar señalando una obra ya borrada, y entonces
+    // el proyecto no se podía borrar nunca: acá decía "bórralo desde Control
+    // de Obra" y allá no había nada que borrar. El puntero muerto se limpia al
+    // pasar, que es lo único que hace falta para salir del callejón.
     if (lead.obra_id) {
-      return { bloqueo: "Este proyecto ya arrancó como obra. Bórralo desde Control de Obra si de verdad quieres eliminarlo; desde acá no, para no dejar la obra sin su origen." };
+      const { data: obra } = await supabase.from("obras")
+        .select("id,nombre").eq("id", lead.obra_id).maybeSingle();
+      if (obra) {
+        return { bloqueo: `Este proyecto ya arrancó como la obra "${obra.nombre}". Bórrala desde Control de Obra si de verdad querés eliminarlo; desde acá no, para no dejar la obra sin su origen.` };
+      }
+      await supabase.from("leads").update({ obra_id: null }).eq("id", lead.id);
     }
     const [{ count: etapas }, { count: invitados }] = await Promise.all([
       supabase.from("lead_etapas").select("id", { count: "exact", head: true }).eq("lead_id", lead.id),
