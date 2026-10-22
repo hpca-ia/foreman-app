@@ -7,7 +7,7 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt, TIPOS_GASTO } from "./calculos";
-import { CLASES_DOC } from "./pagos";
+import { CLASES_DOC, esNotaDeCredito } from "./pagos";
 import { buscarDuplicados, hashArchivo } from "./duplicados";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
@@ -379,11 +379,22 @@ Rubros: ${listaRubros}`,
       }
     }
 
+    // UNA NOTA DE CRÉDITO ENTRA EN NEGATIVO, Y NO SE LO PEDIMOS A NADIE.
+    //
+    // Es plata que vuelve: devolución de material, un cobro de más. Si entrara
+    // en positivo sumaría a lo gastado justo cuando hay que restarlo. Quien la
+    // carga escribe los montos como están impresos en el papel —positivos— y
+    // el signo lo pone el sistema: pedirle que escriba un menos es garantizar
+    // que algún día alguien lo olvide, y ese error no se ve en ningún total
+    // hasta que no cuadra nada.
+    const signo = esNotaDeCredito(form.clase) ? -1 : 1;
+    const m = v => signo * Math.abs(n(v));
+
     const payload = {
       obra_id: obra.id,
       planilla_id: planilla?.id || null,
       fecha: form.fecha || hoy(),
-      tipo_documento: form.tipo_documento || "FACTURA",
+      tipo_documento: esNotaDeCredito(form.clase) ? "NOTA DE CREDITO" : (form.tipo_documento || "FACTURA"),
       clase: form.clase || "factura",
       numero_factura: form.numero_factura || null,
       ruc: form.ruc || null,
@@ -391,8 +402,8 @@ Rubros: ${listaRubros}`,
       detalle: form.detalle || null,
       justificacion: form.justificacion || null,
       numero_cheque: form.numero_cheque || null,
-      subtotal_0: n(form.subtotal_0), subtotal_5: n(form.subtotal_5), subtotal_15: n(form.subtotal_15),
-      iva: n(form.iva), total: n(form.total),
+      subtotal_0: m(form.subtotal_0), subtotal_5: m(form.subtotal_5), subtotal_15: m(form.subtotal_15),
+      iva: m(form.iva), total: m(form.total),
       tipo: form.tipo || "material",
       archivo_url, archivo_nombre,
       origen: archivo ? "nova" : (form.origen || "manual"),
@@ -755,6 +766,11 @@ Rubros: ${listaRubros}`,
           </select>
           <div style={{ fontSize: 10, color: colors.muted, marginTop: 3 }}>
             {(CLASES_DOC[form.clase || "factura"]).pista}
+            {esNotaDeCredito(form.clase) && (
+              <div style={{ color: colors.success, fontWeight: 600, marginTop: 3 }}>
+                Escribí los montos como están en el papel, en positivo: entran restando solos.
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -33,7 +33,19 @@ export const CLASES_DOC = {
   // en la caja —salió— y no cuenta como invertido: se liquida cuando llega lo
   // que se anticipó, y ahí vale la factura.
   anticipo:      { label: "Anticipo a proveedor", pista: "Plata adelantada por algo que todavía no llegó: no cuenta como obra hecha hasta que se liquide" },
+  // UNA NOTA DE CRÉDITO ES PLATA QUE VUELVE.
+  //
+  // Se devolvió material, el proveedor cobró de más, llegó algo roto. El
+  // documento que emite no es un gasto: es un vale que descuenta de lo que se
+  // le debe o se vuelve a gastar con él. Hasta ahora había que cargarlo como
+  // "otro" con el monto en negativo —alguien ya lo hizo, por −99,97— y eso
+  // funciona de casualidad: nadie sabe que hay que poner el menos, y el que lo
+  // olvida suma un gasto donde tenía que restar.
+  nota_credito:  { label: "Nota de crédito (devolución)", pista: "Plata que vuelve: se devolvió material o se cobró de más. Entra en negativo y baja lo gastado" },
 };
+
+/** Los documentos que RESTAN en vez de sumar. */
+export const esNotaDeCredito = clase => clase === "nota_credito";
 
 export const FORMAS_PAGO = ["transferencia", "cheque", "efectivo", "otro"];
 

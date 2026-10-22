@@ -504,7 +504,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       if(!error){archivoUrl=ruta;archivoNombre=archivoGasto.name;}
       else setNovaError("No se pudo subir la foto (el gasto igual se guarda): "+error.message);
     }
-    const monto=Number(gastoForm.monto);
+    // UNA NOTA DE CRÉDITO RESTA, Y EL SIGNO NO SE LO PEDIMOS A NADIE.
+    //
+    // Quien la carga escribe el monto como está impreso en el papel —positivo—
+    // y el sistema le pone el menos. Pedirle que escriba un signo es garantizar
+    // que algún día alguien lo olvide, y ese error no se ve: la caja queda
+    // cuadrando al revés y recién se descubre al cerrarla.
+    const monto = (gastoForm.tipo === "nota_credito" ? -1 : 1) * Math.abs(Number(gastoForm.monto));
     // Lo que apunta a algo: un rubro exacto o una agrupación entera. Antes
     // solo se miraba la agrupación, así que elegir el rubro exacto no servía
     // de nada —se guardaba en la pantalla y se perdía al grabar.
@@ -864,7 +870,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Tipo</label>
                 <select value={gastoForm.tipo} onChange={e=>setGastoForm(p=>({...p,tipo:e.target.value}))} style={iS}>
-                  <option value="factura">Factura</option><option value="recibo">Recibo</option><option value="otro">Otro</option>
+                  <option value="factura">Factura</option><option value="recibo">Recibo</option>
+                  {/* UNA NOTA DE CRÉDITO ES PLATA QUE VUELVE A LA CAJA.
+                      Se devolvió material, el proveedor cobró de más. El
+                      documento no es un gasto: es un vale que se vuelve a
+                      gastar. Entra restando, así que el saldo disponible sube. */}
+                  <option value="nota_credito">Nota de crédito (devolución)</option>
+                  <option value="otro">Otro</option>
                 </select></div>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Fecha</label>
                 <input type="date" value={gastoForm.fecha} onChange={e=>setGastoForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
@@ -1121,7 +1133,15 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                   )}
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontWeight:700,color:"var(--danger)",fontSize:14}}>${fmt(g.monto)}</div>
+                  {/* UNA DEVOLUCIÓN NO SE LEE COMO UN GASTO. En rojo y con el
+                      mismo formato, un −99,97 al lado de un 99,97 se confunde
+                      a la velocidad a la que se mira una lista. */}
+                  <div style={{fontWeight:700,color:Number(g.monto) < 0 ? "var(--success)" : "var(--danger)",fontSize:14}}>
+                    {Number(g.monto) < 0 ? `+$${fmt(Math.abs(g.monto))}` : `$${fmt(g.monto)}`}
+                  </div>
+                  {Number(g.monto) < 0 && (
+                    <div style={{fontSize:9.5,color:"var(--success)",fontWeight:700,letterSpacing:0.3}}>DEVOLUCIÓN</div>
+                  )}
                   <div style={{fontSize:10,color:g.estado==="aprobado"?"var(--success)":"var(--warning)",fontWeight:600,marginTop:2}}>{g.estado}</div>
                   {admin&&g.estado==="pendiente"&&<button onClick={()=>aprobarGasto(g.id)} style={{background:"var(--success)",border:"none",borderRadius:6,padding:"3px 8px",color:"#fff",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block"}}>✓ Aprobar</button>}
                   {(admin||g.subido_por===currentUser.id)&&(
