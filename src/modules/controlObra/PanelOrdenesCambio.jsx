@@ -865,7 +865,37 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               </div>
             )}
 
-            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>OTROS CORREOS</label>
+            {/* QUIEN FIRMA Y NO ESTÁ EN LA LISTA DEL PROYECTO.
+                El cliente, el fiscalizador externo, el gerente del mandante:
+                son los que más tienen que firmar y los que nunca están
+                cargados. Con nombre y empresa, porque eso es lo que después
+                se lee en el documento al lado de su aprobación — "aprobado
+                por fulano" sin decir de qué empresa no prueba nada. */}
+            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>QUIEN FIRMA Y NO ESTÁ EN LA LISTA</label>
+            {(mandando.externos || []).map((x, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr 22px", gap: 5, marginTop: 4 }}>
+                <input value={x.nombre} placeholder="Nombre"
+                  onChange={e => setMandando(m => ({ ...m, externos: m.externos.map((y, k) => k === i ? { ...y, nombre: e.target.value } : y) }))}
+                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                <input value={x.empresa} placeholder="Empresa o cargo"
+                  onChange={e => setMandando(m => ({ ...m, externos: m.externos.map((y, k) => k === i ? { ...y, empresa: e.target.value } : y) }))}
+                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                <input value={x.email} placeholder="correo@empresa.com" type="email"
+                  onChange={e => setMandando(m => ({ ...m, externos: m.externos.map((y, k) => k === i ? { ...y, email: e.target.value } : y) }))}
+                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                <button onClick={() => setMandando(m => ({ ...m, externos: m.externos.filter((_, k) => k !== i) }))}
+                  style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: 0 }}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+            <button onClick={() => setMandando(m => ({ ...m, externos: [...(m.externos || []), { nombre: "", empresa: "", email: "" }] }))}
+              style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 7, padding: "5px 10px",
+                color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font, marginTop: 5, marginBottom: 8 }}>
+              + Agregar a quien firma
+            </button>
+
+            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>OTROS CORREOS (solo copia, sin firmar)</label>
             <input placeholder="cliente@empresa.com, gerente@…"
               onChange={e => setMandando(m => ({ ...m, sueltos: e.target.value }))}
               style={{ ...inputStyle, marginTop: 4, marginBottom: 8 }} />
@@ -879,13 +909,21 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 onClick={async () => {
                   const sueltos = String(mandando.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
                   const todos = [...new Set([...mandando.correos, ...sueltos])];
-                  if (!todos.length) { setAviso("Elegí a quién mandársela."); return; }
+                  const hayExternos = (mandando.externos || []).some(x => String(x.email || "").includes("@"));
+                  if (!todos.length && !hayExternos) { setAviso("Elegí a quién mandársela."); return; }
                   // Los que firman reciben SU enlace; los demás, una copia.
                   const firman = (mandando.firman || []);
-                  const aprobadores = invitados
-                    .filter(i => firman.includes(i.email))
-                    .map(i => ({ nombre: i.nombre, email: i.email, rol: i.rol || "" }));
-                  const soloCopia = todos.filter(c => !firman.includes(c));
+                  const deAfuera = (mandando.externos || [])
+                    .map(x => ({ nombre: String(x.nombre || "").trim(), email: String(x.email || "").trim().toLowerCase(),
+                      rol: String(x.empresa || "").trim() }))
+                    .filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(x.email));
+                  const aprobadores = [
+                    ...invitados.filter(i => firman.includes(i.email))
+                      .map(i => ({ nombre: i.nombre, email: i.email, rol: i.rol || "" })),
+                    ...deAfuera,
+                  ];
+                  const correosQueFirman = new Set(aprobadores.map(a => a.email));
+                  const soloCopia = todos.filter(c => !correosQueFirman.has(c));
                   setOcupado(true);
                   const r = await enviarOrden(mandando.orden, soloCopia, mandando.cuerpo, currentUser, aprobadores);
                   setOcupado(false);
