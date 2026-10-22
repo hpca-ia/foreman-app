@@ -10,7 +10,7 @@ import {
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
   pedirVisto, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
-  guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea,
+  guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado } from "./pdfOrdenCambio";
 import ModalOrdenCambio from "./ModalOrdenCambio";
@@ -84,11 +84,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   }, [obra.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  // A quién se le manda: la gente del proyecto que ya está cargada.
+  // A quién se le manda: la gente del proyecto que ya está cargada, de las
+  // dos listas donde vive —los convocados del acta y los invitados del
+  // pipeline—. El que arma la orden no tiene por qué saber en cuál quedó cada
+  // uno: lo que no aparece acá se termina tipeando de nuevo.
   useEffect(() => {
     if (!obra.lead_id) return;
-    supabase.from("pipeline_invitados").select("*").eq("lead_id", obra.lead_id)
-      .then(({ data }) => setInvitados((data || []).filter(i => i.email)));
+    gentePara(obra.lead_id).then(setInvitados);
   }, [obra.lead_id]);
 
   // La base de la que se saca y sobre la que se agrega es el PRESUPUESTO
@@ -116,13 +118,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // recibe órdenes y no está ya en la lista.
   async function traerLosDeSiempre(o) {
     const ya = new Set((aprobadores[o.id] || []).map(a => String(a.email || "").toLowerCase()));
-    const faltan = invitados
-      .filter(i => i.recibe_ordenes !== false && !ya.has(String(i.email).toLowerCase()));
+    const faltan = invitados.filter(i => !ya.has(String(i.email).toLowerCase()));
     if (!faltan.length) { setAviso("Ya están todos los del proyecto en la lista."); return; }
     await hacer(async () => {
       for (const i of faltan) {
         const r = await guardarAprobador({
-          orden_id: o.id, nombre: i.nombre || "", rol: i.rol || "", email: i.email,
+          orden_id: o.id, nombre: i.nombre || "", empresa: i.empresa || null,
+          rol: i.rol || "", email: i.email,
+          // Vienen SIN marcar. De un proyecto salen veinte involucrados y
+          // una orden la firman dos o tres; si vinieran marcados, la orden
+          // quedaría esperando veinte firmas que nadie pidió y no entraría
+          // nunca al presupuesto. Se tilda a los que aprueban.
+          aprueba: false,
         });
         if (r.error) return r.error;
       }
@@ -814,14 +821,29 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     sale el envío, y en esta lista aparece quién aprobó. */}
                 <div style={{ display: "grid", gap: 4, marginBottom: 9 }}>
                   {(aprobadores[o.id] || []).map(a2 => {
-                    const estado = a2.aprobado_at ? "aprobó" : a2.observacion ? "objetó"
+                    const estado = a2.aprueba === false ? (a2.envio_at ? "copia enviada" : "solo copia")
+                      : a2.aprobado_at ? "aprobó" : a2.observacion ? "objetó"
                       : ["bounced", "failed", "complained"].includes(String(a2.envio_estado || "").toLowerCase()) ? "no le llegó"
                         : a2.envio_at ? (a2.visto_at ? "lo abrió" : "enviado") : "sin enviar";
                     const color = a2.aprobado_at ? colors.success : a2.observacion ? colors.warning
                       : estado === "no le llegó" ? colors.danger : colors.muted;
                     const cerrado = !!a2.envio_at;
                     return (
-                      <div key={a2.id} style={{ display: "grid", gridTemplateColumns: "104px 1fr 1fr 1.2fr 86px 20px", gap: 5, alignItems: "center" }}>
+                      <div key={a2.id} style={{ display: "grid", gridTemplateColumns: "66px 96px 1fr 1fr 1.2fr 86px 20px", gap: 5, alignItems: "center" }}>
+                        {/* QUIÉN APRUEBA Y QUIÉN SOLO SE ENTERA. No es lo
+                            mismo: el que aprueba recibe su enlace y la orden
+                            no entra al presupuesto hasta que él firma; el
+                            otro recibe una copia. Mandarle el botón de
+                            aprobar a quien no tiene que aprobar es pedirle
+                            que decida algo que no le toca, y alguien lo va a
+                            apretar. */}
+                        <label title={a2.aprueba ? "Su firma es necesaria" : "Solo recibe copia"}
+                          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, cursor: editable && !cerrado ? "pointer" : "default",
+                            color: a2.aprueba ? colors.brand : colors.muted, fontWeight: a2.aprueba ? 700 : 400 }}>
+                          <input type="checkbox" checked={a2.aprueba !== false} disabled={!editable || cerrado}
+                            onChange={e => hacer(() => guardarAprobador({ id: a2.id, aprueba: e.target.checked }).then(r => r.error || null))} />
+                          aprueba
+                        </label>
                         <input defaultValue={a2.rol || ""} readOnly={!editable || cerrado} placeholder="Papel"
                           onBlur={e => e.target.value !== (a2.rol || "") && hacer(() => guardarAprobador({ id: a2.id, rol: e.target.value || null }).then(r => r.error || null))}
                           style={{ ...inputStyle, fontSize: 11, padding: "5px 7px" }} />
@@ -867,7 +889,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         traer los de siempre
                       </button>
                       <span style={{ fontSize: 10.5, color: colors.muted }}>
-                        De esta lista sale el envío: cada uno recibe su enlace y aprueba desde ahí.
+                        De esta lista sale el envío. Tildá <strong>aprueba</strong> a los que tienen que firmar:
+                        la orden entra al presupuesto cuando firman todos ellos. Los demás reciben copia.
                       </span>
                     </div>
                   )}
@@ -1033,14 +1056,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             {(aprobadores[mandando.orden.id] || []).filter(a => !a.envio_at && String(a.email || "").includes("@")).length > 0 && (
               <div style={{ marginBottom: 10, background: colors.neutralSoft,
                 border: `1px solid ${colors.border}`, borderRadius: 7, padding: "8px 10px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>FIRMAN (DEL CAPÍTULO IV)</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>DEL CAPÍTULO IV</div>
                 {(aprobadores[mandando.orden.id] || []).filter(a => !a.envio_at && String(a.email || "").includes("@")).map(a => (
                   <div key={a.id} style={{ fontSize: 12, color: colors.ink, padding: "1px 0" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: a.aprueba === false ? colors.muted : colors.brand }}>
+                      {a.aprueba === false ? "COPIA" : "FIRMA"}
+                    </span>{" "}
                     {a.nombre || a.email}{a.empresa ? ` · ${a.empresa}` : ""}{a.rol ? ` · ${a.rol}` : ""}
                     <span style={{ color: colors.muted, fontSize: 11 }}> {a.email}</span>
                   </div>
                 ))}
-                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>Cada uno recibe su propio enlace para aprobar.</div>
+                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
+                  Los que firman reciben su propio enlace para aprobar; los demás, una copia.
+                </div>
               </div>
             )}
 
@@ -1124,8 +1152,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   const sueltos = String(mandando.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
                   const todos = [...new Set([...mandando.correos, ...sueltos])];
                   const hayExternos = (mandando.externos || []).some(x => String(x.email || "").includes("@"));
-                  const hayCapitulo = (aprobadores[mandando.orden.id] || []).some(a => !a.envio_at && String(a.email || "").includes("@"));
-                  if (!todos.length && !hayExternos && !hayCapitulo) { setAviso("Elegí a quién mandársela."); return; }
+                  const enCapitulo = (aprobadores[mandando.orden.id] || [])
+                    .filter(a => !a.envio_at && /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(a.email || "").trim()));
+                  if (!todos.length && !hayExternos && !enCapitulo.length) { setAviso("Elegí a quién mandársela."); return; }
                   // Los que firman reciben SU enlace; los demás, una copia.
                   const firman = (mandando.firman || []);
                   const deAfuera = (mandando.externos || [])
@@ -1140,10 +1169,12 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   // Va el `id` para que el servidor use esa fila y no cree
                   // otra: dos filas de la misma persona son dos enlaces y una
                   // orden que nunca termina de estar firmada por todos.
-                  const delCapitulo = (aprobadores[mandando.orden.id] || [])
-                    .filter(a => !a.envio_at && /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(a.email || "").trim()))
+                  const delCapitulo = enCapitulo.filter(a => a.aprueba !== false)
                     .map(a => ({ id: a.id, nombre: a.nombre || "", empresa: a.empresa || "",
                       rol: a.rol || "", email: String(a.email).trim().toLowerCase() }));
+                  // Los del cuadro que no aprueban reciben la copia, sin botón.
+                  const copiasCapitulo = enCapitulo.filter(a => a.aprueba === false)
+                    .map(a => String(a.email).trim().toLowerCase());
                   const porCorreo = new Map();
                   for (const a of [...delCapitulo,
                     ...invitados.filter(i => firman.includes(i.email))
@@ -1153,7 +1184,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   }
                   const quienesFirman = [...porCorreo.values()];
                   const correosQueFirman = new Set(quienesFirman.map(a => a.email));
-                  const soloCopia = todos.filter(c => !correosQueFirman.has(c));
+                  const soloCopia = [...new Set([...todos, ...copiasCapitulo])]
+                    .filter(c => !correosQueFirman.has(c));
                   setOcupado(true);
                   const r = await enviarOrden(mandando.orden, soloCopia, mandando.cuerpo, currentUser, quienesFirman);
                   setOcupado(false);

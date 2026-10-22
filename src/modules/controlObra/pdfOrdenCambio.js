@@ -211,7 +211,8 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
         (a.rol || "INTERESADO").toUpperCase(),
         [a.nombre || a.email, a.empresa].filter(Boolean).join("\n"),
         dia(a.aprobado_at || a.observacion_at),
-        a.aprobado_at ? "APROBADO\nELECTRÓNICAMENTE" : a.observacion ? "CON OBSERVACIÓN" : "",
+        a.aprobado_at ? "APROBADO\nELECTRÓNICAMENTE" : a.observacion ? "CON OBSERVACIÓN"
+          : a.aprueba === false ? "RECIBE COPIA" : "",
         a.observacion || "",
       ])
       : [

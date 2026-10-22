@@ -34,8 +34,12 @@ export default async function handler(req, res) {
   // una lista, que es lo que hace falta para mandarla de puro informativa.
   const firman = (Array.isArray(aprobadores) ? aprobadores : [])
     .map(a2 => ({ id: a2?.id ?? null, nombre: String(a2?.nombre || "").trim(), rol: String(a2?.rol || "").trim(),
-      empresa: String(a2?.empresa || "").trim(), email: String(a2?.email || "").trim().toLowerCase() }))
-    .filter(a2 => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(a2.email));
+      empresa: String(a2?.empresa || "").trim(), email: String(a2?.email || "").trim().toLowerCase(),
+      aprueba: a2?.aprueba !== false }))
+    .filter(a2 => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(a2.email))
+    // Al que recibe copia no se le manda el botón de aprobar: es pedirle que
+    // decida algo que no le toca, y alguien lo va a apretar.
+    .filter(a2 => a2.aprueba !== false);
   if (!orden_id || (!correos.length && !firman.length)) return res.status(400).json({ error: "Falta la orden o a quién mandarla" });
 
   const orden = await uno(`ordenes_cambio?id=eq.${orden_id}&select=*&limit=1`);
@@ -221,7 +225,8 @@ export default async function handler(req, res) {
         (a2.rol || "Interesado").toUpperCase(),
         [a2.nombre || a2.email, a2.empresa].filter(Boolean).join(" · "),
         a2.aprobado_at || a2.observacion_at,
-        a2.aprobado_at ? "Aprobado electrónicamente" : a2.observacion || "Pendiente de aprobación",
+        a2.aprobado_at ? "Aprobado electrónicamente"
+          : a2.observacion || (a2.aprueba === false ? "Recibe copia" : "Pendiente de aprobación"),
       )).join("")
       : `${revisor("CONTRATISTA", orden.contratista_nombre || "HCARQ SA", orden.contratista_fecha, orden.contratista_comentario)}
         ${revisor("FISCALIZACIÓN", orden.fiscalizacion_nombre, orden.fiscalizacion_fecha, orden.fiscalizacion_comentario)}
@@ -284,7 +289,7 @@ export default async function handler(req, res) {
       const token = (randomUUID() + randomUUID()).replace(/-/g, "");
       const campos = {
         orden_id: orden.id, nombre: quien.nombre || null, email: quien.email,
-        rol: quien.rol || null, empresa: quien.empresa || null, token,
+        rol: quien.rol || null, empresa: quien.empresa || null, aprueba: true, token,
       };
       // SI YA ESTABA EN EL CAPÍTULO IV, ES ESA FILA.
       //

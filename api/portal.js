@@ -424,7 +424,9 @@ async function siFirmaronTodos(ordenId) {
   // orden le quedaba esperando una firma a alguien que nunca recibió nada:
   // firmaban los tres que sí tenían el correo y la orden no entraba al
   // presupuesto, sin que nada lo dijera.
-  const firmas = await json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${ordenId}&envio_at=not.is.null&select=aprobado_at,observacion`));
+  // Y solo los que tienen que firmar: en el cuadro de revisión también están
+  // los que reciben copia, y una copia no es una firma que falta.
+  const firmas = await json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${ordenId}&envio_at=not.is.null&aprueba=is.true&select=aprobado_at,observacion`));
   if (!firmas?.length) return null;
   if (firmas.some(f => !f.aprobado_at || (f.observacion && String(f.observacion).trim()))) return null;
 

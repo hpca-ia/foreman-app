@@ -375,6 +375,36 @@ export async function moverLinea(lineas, id, direccion) {
   return null;
 }
 
+/**
+ * La gente del proyecto, de las dos listas donde vive.
+ *
+ * Los involucrados se cargan una vez: los convocados del acta de reunión
+ * —nombre, empresa, cargo y correo— y los invitados del pipeline. Son dos
+ * tablas por historia, no por decisión, y el que arma una orden de cambio no
+ * tiene por qué saber en cuál quedó cada uno: termina volviendo a tipear
+ * correos que ya están escritos, que es de donde sale la letra cambiada que
+ * después rebota.
+ *
+ * Se juntan y se deduplica por correo, que es la identidad que importa para
+ * mandar. Gana el convocado, que trae empresa y cargo.
+ */
+export async function gentePara(leadId) {
+  if (!leadId) return [];
+  const [{ data: convocados }, { data: invitados }] = await Promise.all([
+    supabase.from("obra_convocados").select("*").eq("lead_id", leadId).eq("activo", true).order("orden"),
+    supabase.from("pipeline_invitados").select("*").eq("lead_id", leadId),
+  ]);
+  const por = new Map();
+  const poner = (nombre, empresa, rol, email, extra) => {
+    const limpio = String(email || "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(limpio) || por.has(limpio)) return;
+    por.set(limpio, { nombre: nombre || "", empresa: empresa || "", rol: rol || "", email: limpio, ...extra });
+  };
+  for (const c of convocados || []) poner(c.nombre, c.empresa, c.cargo, c.email, { id: `c${c.id}` });
+  for (const i of invitados || []) poner(i.nombre, "", i.rol, i.email, { id: `i${i.id}`, recibe_ordenes: i.recibe_ordenes });
+  return [...por.values()];
+}
+
 export async function guardarAprobador(fila) {
   const { id, ...campos } = fila;
   const q = id
