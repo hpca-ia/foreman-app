@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { proponerCierre, cerrarCaja, cargarCierres, reabrirCierre } from "./cajaChica/cierres";
+import { porFecha, deLaVuelta } from "./cajaChica/lista";
 import { inputStyle } from "../components/ui/Input";
 import { Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
@@ -37,6 +38,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [cierres, setCierres] = useState([]);
   const [sinCierres, setSinCierres] = useState(false);
   const [cerrando, setCerrando] = useState(null);
+  // Qué vuelta se está mirando: null es la que está por rendir. Una caja
+  // rendida ya se revisó y se firmó; dejarla en la lista obliga a bajar
+  // sesenta renglones para llegar a lo de esta semana.
+  const [viendoCierre, setViendoCierre] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [novaLeyendo, setNovaLeyendo] = useState(false);
   const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", ruc:"", numero_factura:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
@@ -735,7 +740,11 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const cajaValida = !!nuevaCajaForm.responsable_id && (!!nuevaCajaForm.obra_id || !!nuevaCajaForm.proyecto_nombre?.trim());
   const saldoColor=c=>c>(cajaActiva?.limite_alerta||50)*2?"var(--success)":c>(cajaActiva?.limite_alerta||50)?"var(--warning)":"var(--danger)";
 
-  const gastosFiltrados = filtrarGastos(gastos, buscaGasto, ["proveedor", "descripcion", "numero_factura", "notas"]);
+  // Lo que se ve: la vuelta abierta —o la cerrada que se esté mirando—, por
+  // fecha, el más nuevo arriba.
+  const gastosALaVista = porFecha(deLaVuelta(gastos, viendoCierre));
+  const cierreMirado = viendoCierre ? cierres.find(c => String(c.id) === String(viendoCierre)) : null;
+  const gastosFiltrados = filtrarGastos(gastosALaVista, buscaGasto, ["proveedor", "descripcion", "numero_factura", "notas"]);
 
   return(
     <div style={{fontFamily:"var(--font)"}}>
@@ -1075,6 +1084,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                     {c.cerrado_nombre?` · ${c.cerrado_nombre}`:""}{c.nota?` · ${c.nota}`:""}
                   </div>
                 </div>
+                <button onClick={()=>setViendoCierre(String(c.id)===String(viendoCierre)?null:String(c.id))}
+                  style={{background:"none",border:"none",color:"var(--brand)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                  {String(c.id)===String(viendoCierre)?"ocultar":"ver sus gastos"}
+                </button>
                 {i===0&&puede?.("borrar.definitivo")&&(
                   <button onClick={async()=>{
                     if(!window.confirm(`¿Reabrir el cierre ${c.numero}?\n\nSus gastos vuelven a quedar por rendir.`))return;
@@ -1174,12 +1187,28 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
               </div>
             )}
           </div>}
-          <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8}}>📋 Gastos ({gastos.length})</div>
-          {gastos.length>0 && (
+          <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <span>📋 {cierreMirado ? `Gastos del cierre ${cierreMirado.numero}` : "Gastos por rendir"} ({gastosALaVista.length})</span>
+            {cierreMirado && (
+              <button onClick={()=>setViendoCierre(null)}
+                style={{background:"none",border:"none",color:"var(--brand)",fontSize:11.5,cursor:"pointer",
+                  fontFamily:"inherit",textDecoration:"underline",padding:0}}>
+                volver a la vuelta abierta
+              </button>
+            )}
+            {!cierreMirado && cierres.length>0 && gastos.length>gastosALaVista.length && (
+              <span style={{color:"var(--muted)",fontWeight:400}}>
+                · {gastos.length-gastosALaVista.length} ya rendidos, en sus cierres
+              </span>
+            )}
+          </div>
+          {gastosALaVista.length>0 && (
             <BuscadorDeGastos filas={gastos} filtro={buscaGasto} setFiltro={setBuscaGasto}
               total={sumar(gastosFiltrados)} cuantos={gastosFiltrados.length} etiqueta="gastos" />
           )}
-          {gastos.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>Sin gastos aún.</div>
+          {gastosALaVista.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>
+            {cierreMirado ? "Ese cierre no tiene gastos." : cierres.length ? "Todo rendido: no hay gastos nuevos en esta vuelta." : "Sin gastos aún."}
+          </div>
           :gastosFiltrados.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>Ningún gasto con ese proveedor o ese monto.</div>
           :gastosFiltrados.map(g=>(
             <div key={g.id} style={{background:"#fff",border:`1px solid ${g.estado==="aprobado"?"var(--success-border)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
