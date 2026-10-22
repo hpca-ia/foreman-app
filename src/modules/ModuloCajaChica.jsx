@@ -337,8 +337,39 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     }
     const { error } = await supabase.from("cajas_gastos").delete().eq("id", g.id);
     if (error) { alert("No se pudo borrar el gasto: " + error.message); return; }
+    // UN CIERRE GUARDA SUS TOTALES CONGELADOS, Y HAY QUE DESCONGELARLOS.
+    //
+    // El cierre no se calcula al mirarlo: se grabó el día que se cerró la caja
+    // —cuántos gastos, cuánto se gastó, qué saldo quedó—. Si después se borra o
+    // se corrige uno de esos gastos, el cierre sigue mostrando el total viejo y
+    // la caja dice una cifra que no sale de ninguna suma que se pueda hacer.
+    // Pasó: un cierre de $1.216,43 sobre gastos que suman $1.116,46.
+    if (g.cierre_id) await recalcularCierre(g.cierre_id);
     setGastos(gs => gs.filter(x => x.id !== g.id));
     if (cajaActiva?.id) await fetchGastos(cajaActiva.id);
+  }
+
+  /**
+   * Volver a sumar un cierre desde sus propias filas.
+   *
+   * Lo que se grabó el día que se cerró deja de ser cierto en cuanto alguien
+   * corrige un gasto que estaba adentro. El número que vale es el que sale de
+   * sumar lo que hay, y es el único que alguien puede verificar.
+   */
+  async function recalcularCierre(cierreId) {
+    const [{ data: gs }, { data: ants }] = await Promise.all([
+      supabase.from("cajas_gastos").select("monto").eq("cierre_id", cierreId),
+      supabase.from("cajas_anticipos").select("monto").eq("cierre_id", cierreId),
+    ]);
+    const gastado = (gs || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    const abonado = (ants || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    const r2 = v => Math.round(v * 100) / 100;
+    await supabase.from("cajas_cierres").update({
+      gastos: (gs || []).length,
+      total_gastado: r2(gastado),
+      total_abonado: r2(abonado),
+      saldo: r2(abonado - gastado),
+    }).eq("id", cierreId);
   }
 
   async function borrarAnticipo(a) {
@@ -531,6 +562,9 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
       };
       const {error:errEdit}=await supabase.from("cajas_gastos").update(campos).eq("id",gastoEditando.id);
+      // Corregir el monto de un gasto que ya está dentro de un cierre mueve el
+      // total de ese cierre: si no se vuelve a sumar, queda diciendo el viejo.
+      if (!errEdit && gastoEditando.cierre_id) await recalcularCierre(gastoEditando.cierre_id);
       if (errEdit) { setNovaError("No se pudo guardar la corrección: "+errEdit.message); setUploading(false); return false; }
 
       // Su copia en el control de obra tiene que decir lo mismo: si no, la
