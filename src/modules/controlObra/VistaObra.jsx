@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -112,8 +112,19 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const [agruparPor, setAgruparPor] = useState("capitulo");   // capitulo | actividad
   const [abierta, setAbierta] = useState(null);               // la planilla que se está mirando por dentro
 
+  // RECARGAR NO ES ENTRAR.
+  //
+  // Cada vez que algo se guardaba —una línea de una orden de cambio, una
+  // factura, un avance— se volvía a cargar la obra entera y la pantalla se
+  // reemplazaba por "Cargando…". Eso DESMONTA todo lo que hay adentro: la
+  // orden de cambio que estabas escribiendo se cierra, la pestaña vuelve al
+  // principio, y la sensación es que guardar te echó de donde estabas.
+  //
+  // La pantalla en blanco es para entrar, cuando todavía no hay nada que
+  // mostrar. Después se actualiza en su lugar, sin perder dónde estaba cada uno.
+  const yaEntro = useRef(false);
   const cargar = useCallback(async () => {
-    setCargando(true);
+    if (!yaEntro.current) setCargando(true);
     // Los capítulos de la obra son los del presupuesto, siempre: si allá se
     // renombró o se reorganizó, acá se dice lo mismo. Mueve nombre y orden de
     // capítulo y ningún monto — la línea base no se toca.
@@ -152,6 +163,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
       const abierta = (p || []).find(x => x.estado === "abierta");
       return abierta?.id || (p || [])[(p || []).length - 1]?.id || null;
     });
+    yaEntro.current = true;
     setCargando(false);
   }, [obra.id]);
 
