@@ -405,7 +405,14 @@ async function firmarOrden(req, res, firma) {
  * también: son el mismo documento entrando por dos puertas.
  */
 async function siFirmaronTodos(ordenId) {
-  const firmas = await json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${ordenId}&select=aprobado_at,observacion`));
+  // SOLO CUENTAN LOS QUE RECIBIERON SU ENLACE.
+  //
+  // La lista del CAPÍTULO IV se arma mientras la orden se escribe, y puede
+  // tener a alguien que al final no se incluyó en el envío. Contándolo, la
+  // orden le quedaba esperando una firma a alguien que nunca recibió nada:
+  // firmaban los tres que sí tenían el correo y la orden no entraba al
+  // presupuesto, sin que nada lo dijera.
+  const firmas = await json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${ordenId}&envio_at=not.is.null&select=aprobado_at,observacion`));
   if (!firmas?.length) return null;
   if (firmas.some(f => !f.aprobado_at || (f.observacion && String(f.observacion).trim()))) return null;
 

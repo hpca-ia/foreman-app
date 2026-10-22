@@ -67,7 +67,7 @@ async function comoJpeg(url, maxAncho = 900) {
 }
 
 /** Pinta una orden completa, empezando en la página actual del documento. */
-async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato }) {
+async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [] }) {
   const ancho = doc.internal.pageSize.getWidth();
   const margen = 40;
   const util = ancho - margen * 2;
@@ -198,11 +198,27 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   tabla(autoTable, doc, {
     startY: y,
     head: [["INTERESADO", "NOMBRE", "FECHA", "FIRMA", "COMENTARIOS"]],
-    body: [
-      ["CONTRATISTA", orden.contratista_nombre || "HCARQ SA", dia(orden.contratista_fecha), "", orden.contratista_comentario || ""],
-      ["FISCALIZACIÓN", orden.fiscalizacion_nombre || "NOMBRE:", dia(orden.fiscalizacion_fecha), "", orden.fiscalizacion_comentario || ""],
-      ["CONTRATANTE", orden.contratante_nombre || "NOMBRE:", dia(orden.contratante_fecha), "", orden.contratante_comentario || ""],
-    ],
+    // EL CUADRO DICE QUIÉN FIRMÓ DE VERDAD.
+    //
+    // Eran tres renglones fijos con un nombre tecleado por alguien de la
+    // oficina. Si la orden tiene su lista de firmantes, el cuadro es esa
+    // lista, con la empresa de cada uno y la fecha en que aprobó u objetó: eso
+    // es lo que se discute el día que se discute el adicional. Sin lista
+    // —órdenes viejas, o una que se va a firmar en papel— quedan los tres
+    // renglones para firmar a mano.
+    body: aprobadores.length
+      ? aprobadores.map(a => [
+        (a.rol || "INTERESADO").toUpperCase(),
+        [a.nombre || a.email, a.empresa].filter(Boolean).join("\n"),
+        dia(a.aprobado_at || a.observacion_at),
+        a.aprobado_at ? "APROBADO\nELECTRÓNICAMENTE" : a.observacion ? "CON OBSERVACIÓN" : "",
+        a.observacion || "",
+      ])
+      : [
+        ["CONTRATISTA", orden.contratista_nombre || "HCARQ SA", dia(orden.contratista_fecha), "", orden.contratista_comentario || ""],
+        ["FISCALIZACIÓN", orden.fiscalizacion_nombre || "NOMBRE:", dia(orden.fiscalizacion_fecha), "", orden.fiscalizacion_comentario || ""],
+        ["CONTRATANTE", orden.contratante_nombre || "NOMBRE:", dia(orden.contratante_fecha), "", orden.contratante_comentario || ""],
+      ],
     theme: "grid",
     headStyles: { fillColor: [249, 250, 251], textColor: GRIS, fontSize: 7, fontStyle: "bold", lineColor: [229, 231, 235] },
     // Alto de verdad: una fila de 10pt no deja firmar a nadie.

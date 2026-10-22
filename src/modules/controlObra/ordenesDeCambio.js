@@ -22,7 +22,10 @@ import { supabase } from "../../lib/supabase";
 // como adicionales, en su propia columna.
 
 /** El código que se cita en las actas: OC-01, y a veces OC-08A. */
-export const codigoDe = orden => orden?.codigo || `OC-${String(orden?.numero ?? 0).padStart(2, "0")}`;
+// El código y el nombre de archivo viven en su propio módulo, probado: acá
+// adentro no se los podría probar sin levantar Supabase.
+export { codigoDe, nombreDelArchivo } from "./nombreOrden";
+import { codigoDe } from "./nombreOrden";
 
 /** Qué pasó con ella en obra, que no es lo mismo que en qué paso va el papel. */
 export const EJECUCION = {
@@ -323,12 +326,46 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
 // enlace que caduca deja el respaldo inservible justo cuando alguien lo
 // necesita, seis meses después, para justificar un adicional.
 
+/** Guardar o corregir a quien firma. Mientras no se mandó, se edita. */
+export async function guardarAprobador(fila) {
+  const { id, ...campos } = fila;
+  const q = id
+    ? supabase.from("orden_cambio_aprobaciones").update(campos).eq("id", id)
+    : supabase.from("orden_cambio_aprobaciones").insert(campos);
+  const { data, error } = await q.select().single();
+  if (error) return { error: /relation|column|schema cache/i.test(error.message)
+    ? "Falta correr la migración 118 para la aprobación por correo." : error.message };
+  return { aprobador: data };
+}
+
+export async function borrarAprobador(id) {
+  const { error } = await supabase.from("orden_cambio_aprobaciones").delete().eq("id", id);
+  return error ? error.message : null;
+}
+
 /** Quiénes tienen que firmar esta orden, y quién firmó ya. */
 export async function aprobacionesDe(ordenId) {
   const { data, error } = await supabase.from("orden_cambio_aprobaciones")
     .select("*").eq("orden_id", ordenId).order("id");
   if (error) return [];
   return data || [];
+}
+
+/**
+ * La lista de quién firma, para varias órdenes de una vez.
+ *
+ * El panel muestra todas las órdenes de la obra abiertas a la vez; pedir la
+ * lista de firmantes de a una es una consulta por orden y un parpadeo por
+ * orden.
+ */
+export async function aprobacionesDeOrdenes(ids) {
+  if (!ids?.length) return {};
+  const { data, error } = await supabase.from("orden_cambio_aprobaciones")
+    .select("*").in("orden_id", ids).order("id");
+  if (error) return {};
+  const por = {};
+  for (const f of data || []) (por[f.orden_id] = por[f.orden_id] || []).push(f);
+  return por;
 }
 
 export async function subirSoporte(orden, archivo, descripcion, quien, cuantasHay = 0) {

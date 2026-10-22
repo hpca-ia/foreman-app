@@ -33,19 +33,28 @@ export default async function handler(req, res) {
   // de a un correo por persona con su propio enlace; si no, sale como antes, a
   // una lista, que es lo que hace falta para mandarla de puro informativa.
   const firman = (Array.isArray(aprobadores) ? aprobadores : [])
-    .map(a2 => ({ nombre: String(a2?.nombre || "").trim(), rol: String(a2?.rol || "").trim(),
-      email: String(a2?.email || "").trim().toLowerCase() }))
+    .map(a2 => ({ id: a2?.id ?? null, nombre: String(a2?.nombre || "").trim(), rol: String(a2?.rol || "").trim(),
+      empresa: String(a2?.empresa || "").trim(), email: String(a2?.email || "").trim().toLowerCase() }))
     .filter(a2 => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(a2.email));
   if (!orden_id || (!correos.length && !firman.length)) return res.status(400).json({ error: "Falta la orden o a quién mandarla" });
 
   const orden = await uno(`ordenes_cambio?id=eq.${orden_id}&select=*&limit=1`);
   if (!orden) return res.status(404).json({ error: "Esa orden de cambio no existe" });
 
-  const [lineas, obra, soportes] = await Promise.all([
+  const [lineas, obra, soportes, yaCargados] = await Promise.all([
     json(await rest(`orden_cambio_lineas?orden_id=eq.${orden.id}&select=*&order=orden`)),
     uno(`obras?id=eq.${orden.obra_id}&select=id,nombre,cliente_nombre,lead_id&limit=1`),
     json(await rest(`orden_cambio_fotos?orden_id=eq.${orden.id}&select=*&order=orden`)),
+    json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${orden.id}&select=*&order=id`)),
   ]);
+
+  // EL CUADRO DE REVISIÓN ES LA LISTA DE FIRMANTES, no tres renglones fijos
+  // con un nombre que alguien tecleó. Van los que ya estaban cargados —con la
+  // fecha en que aprobaron u objetaron— más los que se agregan en este envío.
+  const delCuadro = [...(yaCargados || [])];
+  for (const q of firman) {
+    if (!delCuadro.some(x => String(x.email || "").toLowerCase() === q.email)) delCuadro.push(q);
+  }
 
   // El nombre que manda es el del proyecto, como en toda la app.
   let proyecto = obra?.nombre || "";
@@ -207,9 +216,16 @@ export default async function handler(req, res) {
           <th style="text-align:left;padding:5px 8px;border:1px solid #E5E7EB;font-size:9.5px;color:#6B7280;letter-spacing:.3px">FECHA</th>
           <th style="text-align:left;padding:5px 8px;border:1px solid #E5E7EB;font-size:9.5px;color:#6B7280;letter-spacing:.3px">COMENTARIOS</th>
         </tr>
-        ${revisor("CONTRATISTA", orden.contratista_nombre || "HCARQ SA", orden.contratista_fecha, orden.contratista_comentario)}
+        ${delCuadro.length
+      ? delCuadro.map(a2 => revisor(
+        (a2.rol || "Interesado").toUpperCase(),
+        [a2.nombre || a2.email, a2.empresa].filter(Boolean).join(" · "),
+        a2.aprobado_at || a2.observacion_at,
+        a2.aprobado_at ? "Aprobado electrónicamente" : a2.observacion || "Pendiente de aprobación",
+      )).join("")
+      : `${revisor("CONTRATISTA", orden.contratista_nombre || "HCARQ SA", orden.contratista_fecha, orden.contratista_comentario)}
         ${revisor("FISCALIZACIÓN", orden.fiscalizacion_nombre, orden.fiscalizacion_fecha, orden.fiscalizacion_comentario)}
-        ${revisor("CONTRATANTE", orden.contratante_nombre, orden.contratante_fecha, orden.contratante_comentario)}
+        ${revisor("CONTRATANTE", orden.contratante_nombre, orden.contratante_fecha, orden.contratante_comentario)}`}
       </table>
 
       <!-- A cuánto asciende el contrato sale solo si alguien lo decidió para
@@ -266,13 +282,24 @@ export default async function handler(req, res) {
     const envios = [];
     for (const quien of firman) {
       const token = (randomUUID() + randomUUID()).replace(/-/g, "");
-      const fila = (await json(await rest("orden_cambio_aprobaciones", {
-        method: "POST", headers: { Prefer: "return=representation" },
-        body: JSON.stringify({
-          orden_id: orden.id, nombre: quien.nombre || null, email: quien.email,
-          rol: quien.rol || null, token,
-        }),
-      })))?.[0] || null;
+      const campos = {
+        orden_id: orden.id, nombre: quien.nombre || null, email: quien.email,
+        rol: quien.rol || null, empresa: quien.empresa || null, token,
+      };
+      // SI YA ESTABA EN EL CAPÍTULO IV, ES ESA FILA.
+      //
+      // Los firmantes se cargan al armar la orden, con su nombre y su empresa.
+      // Insertar igual dejaba a la misma persona dos veces: dos enlaces, y una
+      // orden que no se aplica nunca porque le falta una firma que es la misma
+      // que ya dio. Se busca por id —el que mandó el panel— o por correo.
+      const yaEsta = quien.id
+        ? await uno(`orden_cambio_aprobaciones?id=eq.${quien.id}&orden_id=eq.${orden.id}&select=id&limit=1`)
+        : await uno(`orden_cambio_aprobaciones?orden_id=eq.${orden.id}&email=eq.${encodeURIComponent(quien.email)}&envio_at=is.null&select=id&limit=1`);
+      const fila = (await json(await rest(
+        yaEsta ? `orden_cambio_aprobaciones?id=eq.${yaEsta.id}` : "orden_cambio_aprobaciones", {
+          method: yaEsta ? "PATCH" : "POST", headers: { Prefer: "return=representation" },
+          body: JSON.stringify(campos),
+        })))?.[0] || null;
 
       const suyo = fila?.token
         ? bloqueDeFirma(`${APP}/?odc=${fila.token}`, { ...quien, limite: fecha(orden.fecha_limite_aprobacion) })
