@@ -573,8 +573,50 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         </>
                       ) : (
                         <>
+                          {/* ADICIONAR ALGO QUE YA ESTÁ CONTRATADO.
+                              Más metros del mismo piso, dos puertas más de las
+                              mismas. No toca el rubro original —el contrato no
+                              se modifica, la adición vive en la orden— pero se
+                              lleva su descripción, su unidad y su PRECIO
+                              CONTRACTUAL, que es el que ya se negoció.
+                              Tipearlo de nuevo es como aparece un adicional
+                              del mismo trabajo a otro precio, y esa diferencia
+                              la encuentra justo el que lo paga. */}
+                          <select value=""
+                            onChange={e => {
+                              const r = rubrosBase.find(x => String(x.id) === e.target.value);
+                              if (!r) return;
+                              setLinea(l => ({
+                                ...l,
+                                descripcion: r.descripcion || "",
+                                capitulo: r.capitulo || "",
+                                unidad: r.unidad || "",
+                                precio_unitario: r.precio_unitario ?? "",
+                                rubro_codigo: String(r.numero ?? r.codigo ?? ""),
+                                // La cantidad la pone quien arma la orden: lo que
+                                // se adiciona casi nunca es todo el rubro de nuevo.
+                                cantidad: l.cantidad || 1,
+                              }));
+                            }}
+                            style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
+                            <option value="">Tomar un rubro del contrato (opcional): se copia su precio</option>
+                            {capitulos.map(cap => (
+                              <optgroup key={cap} label={cap}>
+                                {rubrosBase.filter(r => (r.capitulo || "SIN CAPÍTULO") === cap).map(r => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.numero}. {r.descripcion}{r.unidad ? ` · ${r.unidad}` : ""} · ${fmt(r.precio_unitario)}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
                           <input value={linea.descripcion} onChange={e => setLinea(l => ({ ...l, descripcion: e.target.value }))}
                             placeholder="Qué se adiciona al contrato" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5 }} />
+                          {linea.rubro_codigo && (
+                            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: -2 }}>
+                              Precio tomado del rubro {linea.rubro_codigo} del contrato. El rubro original no se toca.
+                            </div>
+                          )}
                           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.8fr 1fr", gap: 6 }}>
                             <select value={linea.capitulo} onChange={e => setLinea(l => ({ ...l, capitulo: e.target.value }))}
                               style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }}>
