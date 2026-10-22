@@ -356,10 +356,22 @@ async function ordenParaFirmar(req, res, firma) {
       impacto_cronograma: orden.impacto_cronograma, dias_impacto: orden.dias_impacto,
       anulada: orden.anulada,
     },
-    lineas: (lineas || []).map(l => ({
-      item: l.item, descripcion: l.descripcion, unidad: l.unidad,
-      cantidad: l.cantidad, precio_unitario: l.precio_unitario, total: l.total, accion: l.accion,
-    })),
+    // EL MONTO SE CALCULA ACÁ. Se mandaban `l.total` y `l.accion`, dos
+    // columnas que la tabla no tiene: la línea guarda cantidad y precio, y lo
+    // que se quita se marca en `tipo`. El que abría el enlace veía cada
+    // partida en $0,00, la diferencia en $0,00 y la reducción listada entre
+    // las adiciones. Un documento así no se aprueba: se llama por teléfono
+    // para preguntar qué pasó, que es justo lo que este enlace venía a
+    // evitar.
+    lineas: (lineas || []).map(l => {
+      const signo = l.tipo === "quita" ? -1 : 1;
+      return {
+        item: l.item, descripcion: l.descripcion, especificacion: l.especificacion,
+        unidad: l.unidad, cantidad: l.cantidad, precio_unitario: l.precio_unitario,
+        tipo: l.tipo,
+        total: signo * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0),
+      };
+    }),
     yo: { nombre: firma.nombre, rol: firma.rol, aprobado_at: firma.aprobado_at, observacion: firma.observacion },
     firmantes: otros || [],
   });

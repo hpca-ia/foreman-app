@@ -54,8 +54,11 @@ export default function AprobarOrdenDeCambio({ token }) {
 
   const { orden, lineas, yo, obra, firmantes } = datos;
   const yaFirmo = !!yo.aprobado_at || listo === "aprobada";
-  const agrega = lineas.filter(l => (Number(l.total) || 0) >= 0);
-  const quita = lineas.filter(l => (Number(l.total) || 0) < 0);
+  // Se agrupa por lo que la partida ES, no por el signo de su monto: una
+  // reducción a la que todavía no le pusieron precio no es una adición de
+  // cero pesos, y así es como la leía este cuadro.
+  const agrega = lineas.filter(l => l.tipo !== "quita");
+  const quita = lineas.filter(l => l.tipo === "quita");
   const suma = lineas.reduce((t, l) => t + (Number(l.total) || 0), 0);
 
   return (
