@@ -277,6 +277,9 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     await supabase.from("cajas_chicas").update(campos).eq("id", cajaId);
     setCajaActiva(c => (c && c.id === cajaId ? { ...c, ...campos } : c));
     fetchCajas();
+    // Lo devuelve para que quien lo llamó no tenga que volver a leerlo: el
+    // aviso de reposición se decide con el saldo nuevo, no con el de antes.
+    return campos;
   }
 
   async function guardarAnticipo() {
@@ -346,7 +349,9 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     // Pasó: un cierre de $1.216,43 sobre gastos que suman $1.116,46.
     if (g.cierre_id) await recalcularCierre(g.cierre_id);
     setGastos(gs => gs.filter(x => x.id !== g.id));
-    if (cajaActiva?.id) await fetchGastos(cajaActiva.id);
+    // Y EL SALDO DE LA CAJA. Borrar sacaba el gasto de la lista pero no de la
+    // suma: la caja seguía contando una plata que ya no estaba gastada.
+    if (cajaActiva?.id) { await recalcularSaldos(cajaActiva.id); await fetchGastos(cajaActiva.id); }
   }
 
   /**
@@ -541,16 +546,34 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     // y el sistema le pone el menos. Pedirle que escriba un signo es garantizar
     // que algún día alguien lo olvide, y ese error no se ve: la caja queda
     // cuadrando al revés y recién se descubre al cerrarla.
-    const monto = (gastoForm.tipo === "nota_credito" ? -1 : 1) * Math.abs(Number(gastoForm.monto));
+    //
+    // Y UN MONTO NEGATIVO YA ES UNA DEVOLUCIÓN, aunque el tipo diga otra cosa.
+    // NOVA lee la nota de crédito del proveedor y devuelve el monto en
+    // negativo, que es lo correcto; el `Math.abs` lo daba vuelta y el gasto
+    // entraba sumando. Pasó: una nota de crédito de $99,97 cargada como
+    // gasto de $99,97 —200 dólares de diferencia contra la realidad—, y el
+    // menos sobrevivía solo en el rubro, así que la factura quedó mostrando
+    // "$199,94 sin asignar", un número que no existe en ningún papel.
+    const devuelve = gastoForm.tipo === "nota_credito" || Number(gastoForm.monto) < 0;
+    const monto = (devuelve ? -1 : 1) * Math.abs(Number(gastoForm.monto));
+    // El tipo tiene que decir lo que el monto hace: si no, el renglón no
+    // muestra DEVOLUCIÓN y nadie entiende por qué esa compra resta.
+    const tipoGasto = devuelve ? "nota_credito" : gastoForm.tipo;
     // Lo que apunta a algo: un rubro exacto o una agrupación entera. Antes
     // solo se miraba la agrupación, así que elegir el rubro exacto no servía
     // de nada —se guardaba en la pantalla y se perdía al grabar.
     const conRubros = rubrosGasto.filter(r=>r.obra_actividad_id||r.obra_rubro_id);
+    // LO QUE SE CARGA AL RUBRO TIENE EL SIGNO DEL DOCUMENTO, SIEMPRE.
+    //
+    // Se guardaba tal como estaba escrito en el renglón. Si el documento era
+    // una devolución y el renglón no, la factura decía una cosa y los rubros
+    // otra, y la resta "monto − asignado" daba el doble. El signo lo manda el
+    // documento: una nota de crédito descarga el rubro, una factura lo carga.
     const aAsignacion = (facturaId, r) => ({
       factura_id: facturaId,
       obra_rubro_id: r.obra_rubro_id ?? null,
       obra_actividad_id: r.obra_rubro_id ? null : (r.obra_actividad_id ?? null),
-      monto: Number(r.monto) || 0,
+      monto: (devuelve ? -1 : 1) * Math.abs(Number(r.monto) || 0),
     });
 
     // ── Corregir uno que ya estaba ───────────────────────────────────────
@@ -558,7 +581,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       const campos = {
         descripcion:gastoForm.descripcion, proveedor:gastoForm.proveedor,
         ruc:gastoForm.ruc||null, numero_factura:gastoForm.numero_factura||null, monto,
-        fecha:gastoForm.fecha, tipo:gastoForm.tipo, notas:gastoForm.notas,
+        fecha:gastoForm.fecha, tipo:tipoGasto, notas:gastoForm.notas,
         ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
       };
       const {error:errEdit}=await supabase.from("cajas_gastos").update(campos).eq("id",gastoEditando.id);
@@ -581,17 +604,37 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           await supabase.from("obra_asignaciones").insert(conRubros
             .map(r=>aAsignacion(gastoEditando.obra_factura_id, r))
             .filter(f=>f.monto!==0));
+        } else {
+          // SI NO SE TOCARON LOS RUBROS, AL MENOS QUE NO CONTRADIGAN AL
+          // DOCUMENTO. Corregir un gasto a devolución dejaba las asignaciones
+          // con el signo viejo: la factura restando y el rubro sumando, que
+          // es exactamente el descuadre que apareció.
+          const {data:ya} = await supabase.from("obra_asignaciones")
+            .select("id,monto").eq("factura_id",gastoEditando.obra_factura_id);
+          for (const a of ya||[]) {
+            const m = (devuelve?-1:1) * Math.abs(Number(a.monto)||0);
+            if (m !== Number(a.monto)) await supabase.from("obra_asignaciones").update({monto:m}).eq("id",a.id);
+          }
+        }
+        // El pago de caja chica vale lo que vale el documento. Sin esto, la
+        // factura quedaba corregida y el pago seguía diciendo el monto viejo:
+        // Proveedores mostraba una diferencia que no existía.
+        if (devuelve) {
+          // Si se corrige a devolución, el pago que se había registrado deja
+          // de existir: no salió plata, volvió.
+          await supabase.from("obra_pagos").delete()
+            .eq("factura_id",gastoEditando.obra_factura_id).eq("referencia",`CAJA-${cajaActiva.id}`);
+        } else {
+          await supabase.from("obra_pagos").update({monto, fecha:gastoForm.fecha})
+            .eq("factura_id",gastoEditando.obra_factura_id).eq("referencia",`CAJA-${cajaActiva.id}`);
         }
       }
 
-      // El saldo se vuelve a sumar de los gastos, no se ajusta por diferencia:
-      // un saldo que se arrastra sumando y restando termina desviándose.
-      const nuevos = gastos.map(g=>g.id===gastoEditando.id?{...g,...campos}:g);
-      const gastado = nuevos.reduce((t,g)=>t+(Number(g.monto)||0),0);
-      const disponible = (cajaActiva.saldo_total||0)-gastado;
-      await supabase.from("cajas_chicas").update({saldo_gastado:gastado,saldo_disponible:disponible}).eq("id",cajaActiva.id);
-      setCajaActiva(prev=>({...prev,saldo_gastado:gastado,saldo_disponible:disponible}));
-      setGastos(nuevos);
+      // El saldo se vuelve a sumar de las filas que hay en la base, no de lo
+      // que esta pantalla tiene en memoria: es la única cifra que cualquiera
+      // puede verificar contando los papeles.
+      setGastos(gastos.map(g=>g.id===gastoEditando.id?{...g,...campos}:g));
+      await recalcularSaldos(cajaActiva.id);
       setGastoEditando(null);
       setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
       setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
@@ -603,7 +646,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     const{data,error:errGasto}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
       proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
-      tipo:gastoForm.tipo,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
+      tipo:tipoGasto,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
     }).select().single();
 
@@ -622,7 +665,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           .order("numero",{ascending:false}).limit(1).maybeSingle();
         const {data:facturaObra, error:errObra} = await supabase.from("obra_facturas").insert({
           obra_id:cajaActiva.obra_id, planilla_id:planillaAbierta?.id||null,
-          fecha:gastoForm.fecha, tipo_documento:(gastoForm.tipo||"factura").toUpperCase(),
+          fecha:gastoForm.fecha, tipo_documento:devuelve ? "NOTA DE CREDITO" : (gastoForm.tipo||"factura").toUpperCase(),
           razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
           numero_factura:gastoForm.numero_factura||null, archivo_hash:archivoHash||null,
           duplicado_de:dupsGasto.exactos[0]?.id||null,
@@ -648,7 +691,11 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           // El pago se registra acá y no al aprobar: la plata salió cuando se
           // compró, no cuando administración lo revisó. Aprobar es controlar
           // que el gasto corresponda, no pagarlo.
-          const {error:errPago} = await supabase.from("obra_pagos").insert({
+          // UNA NOTA DE CRÉDITO NO ES UN PAGO. Es plata que vuelve: no hay
+          // salida que registrar, y la base ni siquiera acepta un pago en
+          // negativo. Lo que la devolución hace es bajar el gasto, y eso ya
+          // lo hace la factura con su monto negativo.
+          const {error:errPago} = devuelve ? {} : await supabase.from("obra_pagos").insert({
             obra_id:cajaActiva.obra_id, factura_id:facturaObra.id,
             monto, fecha:gastoForm.fecha,
             nota:`Pagado de caja chica${cajaActiva.nombre?` «${cajaActiva.nombre}»`:""}`,
@@ -664,16 +711,17 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         }
         else if (errObra) setNovaError("El gasto se guardó, pero no entró al control de la obra: " + errObra.message);
       }
-      const nuevoGastado=(cajaActiva.saldo_gastado||0)+monto;
-      const nuevoDisp=(cajaActiva.saldo_total||0)-nuevoGastado;
-      await supabase.from("cajas_chicas").update({saldo_gastado:nuevoGastado,saldo_disponible:nuevoDisp}).eq("id",cajaActiva.id);
-      setCajaActiva(prev=>({...prev,saldo_gastado:nuevoGastado,saldo_disponible:nuevoDisp}));
       setGastos(prev=>[data,...prev]);
+      // Sumando de a uno sobre el saldo anterior, cualquier gasto que después
+      // se borre queda adentro para siempre: la caja decía $1.325,40 sobre
+      // gastos que sumaban $1.225,43. Se vuelve a sumar lo que hay.
+      const saldos = await recalcularSaldos(cajaActiva.id);
       setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
       setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
       setRubrosGasto([]);
       setArchivoGasto(null);setArchivoPreview(null);fetchCajas();
-      if(nuevoDisp<=(cajaActiva.limite_alerta||50)) await avisarReposicion(nuevoDisp);
+      const disponible = saldos?.saldo_disponible ?? 0;
+      if(disponible<=(cajaActiva.limite_alerta||50)) await avisarReposicion(disponible);
     }
     setUploading(false);
     return true;
