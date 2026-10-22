@@ -537,8 +537,18 @@ Si el texto ya está bien escrito, devolvelo igual.`,
                       que se puede recorrer. */}
                   {porCapitulo.map(([capitulo, suyos]) => (
                     <optgroup key={capitulo} label={capitulo}>
+                      {/* CON TODA SU INFORMACIÓN.
+                          Para decidir cuánto se reduce hay que saber qué hay:
+                          la cantidad contratada, la unidad, el precio y el
+                          total. Con solo la descripción, quien arma la orden
+                          tiene que ir a buscar esos cuatro números a otra
+                          pantalla —y el que no los busca pone un número a ojo. */}
                       {suyos.map(r => (
-                        <option key={r.id} value={r.id}>{r.numero}. {String(r.descripcion || "").slice(0, 70)}</option>
+                        <option key={r.id} value={r.id}>
+                          {r.numero}. {String(r.descripcion || "").slice(0, 52)}
+                          {"  ·  "}{Number(r.cantidad) || 0} {r.unidad || ""} × ${fmt(r.precio_unitario)}
+                          {"  =  $"}{fmt(r.total_base)}
+                        </option>
                       ))}
                     </optgroup>
                   ))}

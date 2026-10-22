@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { hoyEnObra, HORA_DE_CIERRE } from "./jornada.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { subirArchivo } from "../../lib/archivos";
 
@@ -32,10 +33,10 @@ export const CLIMAS = ["Despejado", "Nublado", "Llovizna", "Lluvia", "Lluvia fue
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 
 /** Hoy en Quito, que es donde está la obra y no donde está el servidor. */
-export function hoyEnObra() {
-  const f = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guayaquil", year: "numeric", month: "2-digit", day: "2-digit" });
-  return f.format(new Date());
-}
+// La jornada de obra —de 6 a 6— vive aparte, que es lo único de acá que se
+// puede probar sin un navegador. Se reexporta para no tocar a quien ya la
+// importaba desde este archivo.
+export { hoyEnObra, HORA_DE_CIERRE };
 
 /** El libro de un día: si es hoy y no existe, se abre solo al entrar. */
 /**
