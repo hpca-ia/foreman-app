@@ -34,7 +34,7 @@ const VACIA = {
 };
 // "aumenta" y no "agrega": es el valor que guarda la base y el que suma
 // `subtotales`. Con el otro, la vista previa de totales mostraba cero.
-const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "", obra_rubro_id: "" });
+const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "", obra_rubro_id: "", rubro_codigo: "" });
 
 const TIPOS = ["Requerimiento del cliente", "Vicio oculto", "Cambio de especificación", "Error de proyecto", "Condición del terreno"];
 
@@ -52,6 +52,8 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [leyendo, setLeyendo] = useState("");
   const [encima, setEncima] = useState(false);
   const [verPresupuesto, setVerPresupuesto] = useState(false);
+  // Qué partida está eligiendo un rubro del presupuesto para copiarle el precio.
+  const [tomando, setTomando] = useState(null);
   const [busca, setBusca] = useState("");
 
   // Los rubros vivos, agrupados por capítulo y en el orden del presupuesto.
@@ -263,6 +265,9 @@ Si el texto ya está bien escrito, devolvelo igual.`,
         tipo: l.tipo,
         obra_rubro_id: l.obra_rubro_id ? Number(l.obra_rubro_id) : null,
         item: siguienteItem(puestas, l.tipo),
+        // De qué rubro del contrato salió el precio. Es lo que después deja
+        // comparar un adicional contra lo que ya estaba contratado.
+        rubro_codigo: l.rubro_codigo || null,
         descripcion: l.descripcion.trim(),
         unidad: l.unidad || "u",
         cantidad: Number(l.cantidad) || 0,
@@ -553,9 +558,56 @@ Si el texto ya está bien escrito, devolvelo igual.`,
                     </optgroup>
                   ))}
                 </select>
+              ) : tomando === i ? (
+                /* TOMAR UN RUBRO DEL CONTRATO PARA ADICIONARLO.
+                   Más metros del mismo piso, dos puertas más de las mismas.
+                   No toca el rubro original —el contrato no se modifica— pero
+                   se lleva su descripción, su unidad y su PRECIO CONTRACTUAL,
+                   que es el que ya se negoció. Tipearlo de nuevo es como
+                   aparece un adicional al mismo trabajo con otro precio, y esa
+                   diferencia la encuentra el que paga. */
+                <select autoFocus value="" style={{ ...mini, padding: "6px 8px" }}
+                  onChange={e => {
+                    const r = rubros.find(x => String(x.id) === e.target.value);
+                    setTomando(null);
+                    if (!r) return;
+                    setLineas(v => v.map((x, k) => k === i ? {
+                      ...x,
+                      descripcion: r.descripcion || "",
+                      unidad: r.unidad || "u",
+                      precio_unitario: r.precio_unitario ?? "",
+                      rubro_codigo: r.numero || "",
+                    } : x));
+                  }}>
+                  <option value="">Elegí el rubro del que sale el precio…</option>
+                  {porCapitulo.map(([capitulo, suyos]) => (
+                    <optgroup key={capitulo} label={capitulo}>
+                      {suyos.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.numero}. {String(r.descripcion || "").slice(0, 52)}
+                          {"  ·  "}{Number(r.cantidad) || 0} {r.unidad || ""} × ${fmt(r.precio_unitario)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
               ) : (
-                <input value={l.descripcion} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, descripcion: e.target.value } : x))}
-                  placeholder="Qué se adiciona" style={{ ...mini, padding: "6px 8px" }} />
+                <div>
+                  <input value={l.descripcion} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, descripcion: e.target.value } : x))}
+                    placeholder="Qué se adiciona" style={{ ...mini, padding: "6px 8px", width: "100%" }} />
+                  <div style={{ display: "flex", gap: 7, alignItems: "baseline", marginTop: 2 }}>
+                    <button onClick={() => setTomando(i)}
+                      style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                        fontSize: 10.5, color: colors.brand, textDecoration: "underline" }}>
+                      tomar del presupuesto
+                    </button>
+                    {l.rubro_codigo && (
+                      <span style={{ fontSize: 10, color: colors.muted }}>
+                        precio del rubro {l.rubro_codigo}
+                      </span>
+                    )}
+                  </div>
+                </div>
               )}
               <input value={l.unidad} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, unidad: e.target.value } : x))}
                 placeholder="und" style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }} />
