@@ -293,6 +293,54 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     await recalcularSaldos(cajaActiva.id);
   }
 
+  /**
+   * Borrar un gasto, y con él la factura que generó en el control.
+   *
+   * Un gasto de caja chica que entró al control de obra son DOS cosas con el
+   * mismo papel: el gasto que rinde la caja y la factura que carga el rubro.
+   * Borrar una y dejar la otra es lo peor de todos los mundos —la caja cuadra
+   * y el control cobra de más, o al revés— así que se van las dos. Es lo que
+   * uno quiere cuando una factura se cargó mal: que desaparezca de todos lados.
+   *
+   * Si ya está dentro de una planilla se avisa ANTES, con el nombre: esa
+   * planilla ya se presentó, y cambiarle una factura por atrás es la clase de
+   * cosa que se descubre en una reunión.
+   */
+  async function borrarGasto(g) {
+    let aviso = `¿Borrar el gasto "${g.descripcion || "sin descripción"}" de $${fmt(g.monto)}?`;
+    let factura = null;
+    if (g.obra_factura_id) {
+      const { data } = await supabase.from("obra_facturas")
+        .select("id,numero_factura,razon_social,planilla_id,obra_id").eq("id", g.obra_factura_id).maybeSingle();
+      factura = data || null;
+      if (factura) {
+        aviso += `\n\nTambién se borra del control de obra la factura ${factura.numero_factura || ""} de ${factura.razon_social || "ese proveedor"}, con lo que tenía asignado a los rubros.`;
+        if (factura.planilla_id) {
+          const { data: pl } = await supabase.from("obra_planillas")
+            .select("numero,estado").eq("id", factura.planilla_id).maybeSingle();
+          aviso += `\n\nOJO: esa factura está dentro de la planilla N° ${pl?.numero ?? factura.planilla_id}`
+            + `${pl?.estado ? ` (${pl.estado})` : ""}. Si esa planilla ya se presentó, su monto va a cambiar.`;
+        }
+      }
+    }
+    aviso += "\n\nEsto no se deshace.";
+    if (!window.confirm(aviso)) return;
+
+    if (factura) {
+      // Primero lo que cuelga de la factura, después la factura: al revés
+      // quedarían asignaciones apuntando a una factura que ya no existe.
+      await supabase.from("obra_asignaciones").delete().eq("factura_id", factura.id);
+      await supabase.from("obra_factura_rubros").delete().eq("factura_id", factura.id);
+      await supabase.from("obra_pagos").delete().eq("factura_id", factura.id);
+      const { error: eF } = await supabase.from("obra_facturas").delete().eq("id", factura.id);
+      if (eF) { alert("No se pudo borrar la factura del control: " + eF.message); return; }
+    }
+    const { error } = await supabase.from("cajas_gastos").delete().eq("id", g.id);
+    if (error) { alert("No se pudo borrar el gasto: " + error.message); return; }
+    setGastos(gs => gs.filter(x => x.id !== g.id));
+    if (cajaActiva?.id) await fetchGastos(cajaActiva.id);
+  }
+
   async function borrarAnticipo(a) {
     if (!window.confirm(`¿Borrar el anticipo de $${fmt(a.monto)}?\n\nEl saldo de la caja se recalcula.`)) return;
     const { error } = await supabase.from("cajas_anticipos").delete().eq("id", a.id);
@@ -1088,6 +1136,17 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                     }}
                       style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",color:"var(--ink-soft)",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block",fontFamily:"var(--font)"}}>
                       Corregir
+                    </button>
+                  )}
+                  {/* BORRAR UN GASTO MAL CARGADO.
+                      Corregir alcanza casi siempre; a veces no: la factura es
+                      de otra caja, se cargó dos veces, no era de esta obra. Lo
+                      que no puede pasar es que la única salida sea borrar la
+                      caja entera. */}
+                  {administra && (
+                    <button onClick={() => borrarGasto(g)}
+                      style={{background:"none",border:"1px solid var(--danger-border, #F3C6C6)",borderRadius:6,padding:"3px 8px",color:"var(--danger)",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block",fontFamily:"var(--font)"}}>
+                      Borrar
                     </button>
                   )}
                 </div>

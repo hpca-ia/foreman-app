@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Camera, X, Plus, Trash2, Sparkles } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
+import { fmt } from "./calculos";
 import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
 import { pedirANova, JUICIO, LECTURA, textoDeNova } from "../../lib/modelos";
 import { leerCotizacion } from "./leerProforma.js";
@@ -49,6 +50,19 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [errorNova, setErrorNova] = useState("");
   const [leyendo, setLeyendo] = useState("");
   const [encima, setEncima] = useState(false);
+  const [verPresupuesto, setVerPresupuesto] = useState(false);
+  const [busca, setBusca] = useState("");
+
+  // Los rubros vivos, agrupados por capítulo y en el orden del presupuesto.
+  const porCapitulo = useMemo(() => {
+    const mapa = new Map();
+    (rubros || []).filter(r => !r.anulado_por_oc && !r.oculto).forEach(r => {
+      const cap = String(r.capitulo || "SIN CAPÍTULO");
+      if (!mapa.has(cap)) mapa.set(cap, []);
+      mapa.get(cap).push(r);
+    });
+    return [...mapa.entries()];
+  }, [rubros]);
   const cotizacionRef = useRef(null);
 
   /**
@@ -398,6 +412,60 @@ Si el texto ya está bien escrito, devolvelo igual.`,
             onChange={e => { const f2 = [...e.target.files]; e.target.value = ""; setFotos(v => [...v, ...f2]); }} />
         </div>
 
+        {/* EL PRESUPUESTO, A LA MANO MIENTRAS SE ARMA LA ORDEN.
+            Una orden de cambio se escribe contra el contrato: para saber si
+            algo ya estaba previsto, con qué unidad y a qué precio, hay que
+            mirar el presupuesto. Tenerlo en otra pantalla obliga a cerrar lo
+            que uno está escribiendo. Por capítulo y con buscador, porque
+            trescientos rubros en una lista corrida no se recorren. */}
+        {rubros.length > 0 && (
+          <div>
+            <button onClick={() => setVerPresupuesto(v => !v)}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                fontSize: 11.5, fontWeight: 700, color: colors.brand, letterSpacing: 0.3 }}>
+              {verPresupuesto ? "▾" : "▸"} VER EL PRESUPUESTO ({rubros.filter(r => !r.anulado_por_oc).length} rubros)
+            </button>
+            {verPresupuesto && (
+              <div style={{ marginTop: 6, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, overflow: "hidden" }}>
+                <input value={busca} onChange={e => setBusca(e.target.value)}
+                  placeholder="Buscar un rubro o un capítulo…"
+                  style={{ ...mini, border: "none", borderBottom: `1px solid ${colors.border}`, borderRadius: 0, padding: "7px 10px" }} />
+                <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                  {porCapitulo.map(([capitulo, suyos]) => {
+                    const filtrados = suyos.filter(r => !busca.trim()
+                      || `${capitulo} ${r.numero} ${r.descripcion}`.toLowerCase().includes(busca.trim().toLowerCase()));
+                    if (!filtrados.length) return null;
+                    return (
+                      <div key={capitulo}>
+                        <div style={{ background: colors.bg, padding: "4px 10px", fontSize: 10,
+                          fontWeight: 700, color: colors.muted, letterSpacing: 0.3, position: "sticky", top: 0 }}>
+                          {capitulo}
+                        </div>
+                        {filtrados.map(r => (
+                          <div key={r.id} style={{ display: "flex", gap: 8, padding: "4px 10px",
+                            borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 11.5, alignItems: "baseline" }}>
+                            <span style={{ color: colors.muted, flexShrink: 0, minWidth: 34 }}>{r.numero}</span>
+                            <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden",
+                              textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
+                              {r.descripcion}
+                            </span>
+                            <span style={{ color: colors.muted, flexShrink: 0 }}>
+                              {Number(r.cantidad) || 0} {r.unidad}
+                            </span>
+                            <span style={{ color: colors.inkSoft, flexShrink: 0, fontWeight: 600, minWidth: 78, textAlign: "right" }}>
+                              ${fmt(r.total_base)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Las partidas. Es la parte que se arma mirando los argumentos, y por
             eso tiene que estar en la misma pantalla. */}
         <div>
@@ -446,8 +514,17 @@ Si el texto ya está bien escrito, devolvelo igual.`,
                     } : x));
                   }}>
                   <option value="">¿Qué rubro se reduce?</option>
-                  {rubros.filter(r => !r.anulado_por_oc && (Number(r.total_base) || 0) > 0).map(r => (
-                    <option key={r.id} value={r.id}>{r.numero}. {String(r.descripcion || "").slice(0, 70)}</option>
+                  {/* POR CAPÍTULO. Una obra tiene trescientos rubros y en una
+                      lista corrida hay que leerlos todos para encontrar uno:
+                      el capítulo es como se busca —"la pintura está en
+                      acabados"— y es lo único que convierte la lista en algo
+                      que se puede recorrer. */}
+                  {porCapitulo.map(([capitulo, suyos]) => (
+                    <optgroup key={capitulo} label={capitulo}>
+                      {suyos.map(r => (
+                        <option key={r.id} value={r.id}>{r.numero}. {String(r.descripcion || "").slice(0, 70)}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               ) : (
