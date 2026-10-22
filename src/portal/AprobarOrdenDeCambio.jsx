@@ -21,6 +21,9 @@ const F = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`)
   .toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
 const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// "$-7.529,29" es el signo en el lugar donde no se lo lee. El menos va antes
+// del peso, separado: lo que se quita tiene que verse de un vistazo.
+const monto = v => `${(Number(v) || 0) < 0 ? "− " : ""}$${plata(Math.abs(Number(v) || 0))}`;
 
 export default function AprobarOrdenDeCambio({ token }) {
   const [datos, setDatos] = useState(null);
@@ -161,7 +164,7 @@ export default function AprobarOrdenDeCambio({ token }) {
                       </div>
                     </div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: (Number(l.total) || 0) < 0 ? C.verde : C.ink, whiteSpace: "nowrap" }}>
-                      ${plata(l.total)}
+                      {monto(l.total)}
                     </div>
                   </div>
                 ))}
@@ -169,7 +172,7 @@ export default function AprobarOrdenDeCambio({ token }) {
             ) : null))}
             <div style={{ borderTop: `2px solid ${C.borde}`, marginTop: 6, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>Diferencia sobre el contrato</span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: suma < 0 ? C.verde : C.tinta }}>${plata(suma)}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: suma < 0 ? C.verde : C.tinta }}>{monto(suma)}</span>
             </div>
             {!!orden.dias_impacto && (
               <div style={{ fontSize: 12.5, color: C.ambar, marginTop: 7, fontWeight: 600 }}>
