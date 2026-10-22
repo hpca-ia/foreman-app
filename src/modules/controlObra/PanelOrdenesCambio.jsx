@@ -56,10 +56,14 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [invitados, setInvitados] = useState([]);
 
   const puedeEditar = puede?.("obras.crear") !== false;
-  // Una celda que se puede escribir y no parece un formulario: la tabla sigue
-  // leyéndose como una tabla hasta que alguien toca un número.
-  const celda = { border: `1px solid transparent`, borderRadius: 5, padding: "2px 5px",
-    fontSize: 12, fontFamily: colors.font, color: colors.ink, background: "transparent", outline: "none" };
+  // UNA CELDA QUE SE PUEDE ESCRIBIR TIENE QUE PARECERLO.
+  //
+  // Las hice sin borde para que la tabla siguiera leyéndose como una tabla, y
+  // el resultado fue peor que no poder editar: se podía, y no había manera de
+  // saberlo. Un campo invisible que guarda al salir es un campo que nadie usa.
+  // Borde tenue y fondo blanco: se lee igual y se ve que se toca.
+  const celda = { border: `1px solid ${colors.border}`, borderRadius: 5, padding: "3px 6px",
+    fontSize: 12, fontFamily: colors.font, color: colors.ink, background: "#fff", outline: "none" };
   // El visto es del Director y de nadie más: es el que responde por el precio
   // que sale de la oficina.
   const esDirector = currentUser?.role === "owner";
@@ -290,6 +294,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 {!o.visto_at && o.visto_pedido_at && (
                   <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 6 }}>
                     Esperando la aprobación del Director desde el {new Date(o.visto_pedido_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
+                  </div>
+                )}
+
+                {/* QUE SE PUEDA EDITAR SE DICE. Una pantalla donde todo se
+                    guarda solo al salir del campo no se distingue de una de
+                    solo lectura hasta que uno se anima a tocar algo. */}
+                {editable && (
+                  <div style={{ fontSize: 11, color: colors.brand, background: colors.brandSoft,
+                    border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
+                    padding: "5px 9px", marginBottom: 8, lineHeight: 1.45 }}>
+                    Esta orden está en borrador: <strong>todos los campos se pueden corregir</strong> —el título,
+                    los argumentos, y la descripción, cantidad y precio de cada partida—. Se guarda solo al salir
+                    de cada campo.
                   </div>
                 )}
 
