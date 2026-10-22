@@ -352,6 +352,7 @@ async function ordenParaFirmar(req, res, firma) {
     orden: {
       codigo: orden.codigo, numero: orden.numero, titulo: orden.titulo, tipo: orden.tipo,
       fecha: orden.fecha, lugar: orden.lugar, justificacion: orden.justificacion,
+      fecha_limite_aprobacion: orden.fecha_limite_aprobacion,
       impacto_cronograma: orden.impacto_cronograma, dias_impacto: orden.dias_impacto,
       anulada: orden.anulada,
     },

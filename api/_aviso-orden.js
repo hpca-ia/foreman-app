@@ -275,7 +275,7 @@ export default async function handler(req, res) {
       })))?.[0] || null;
 
       const suyo = fila?.token
-        ? bloqueDeFirma(`${APP}/?odc=${fila.token}`, quien)
+        ? bloqueDeFirma(`${APP}/?odc=${fila.token}`, { ...quien, limite: fecha(orden.fecha_limite_aprobacion) })
         : "";
       const r2 = await enviarCorreo({
         to: [quien.email], subject: asunto, html: html.replace("<!--FIRMA-->", suyo), adjuntos,
@@ -325,6 +325,10 @@ function bloqueDeFirma(url, quien) {
       Leé el detalle de abajo y aprobá desde acá. Es tu enlace personal: no lo reenvíes,
       porque la aprobación queda a tu nombre.
     </div>
+    ${quien.limite ? `<div style="font-size:13px;color:#92400E;font-weight:700;margin-bottom:10px">
+      Necesitamos tu respuesta antes del ${esc(quien.limite)}: mientras tanto este trabajo no se ejecuta
+      y el plazo de obra corre igual.
+    </div>` : ""}
     <a href="${url}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;
       border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Aprobar o hacer una observación →</a>
     <div style="font-size:11.5px;color:#6B7280;margin-top:9px;line-height:1.5">

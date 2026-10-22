@@ -30,6 +30,7 @@ import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 const VACIA = {
   titulo: "", tipo: "", lugar: "Quito", fecha: new Date().toISOString().split("T")[0],
   emitido_por: "", justificacion: "", soportes: "", impacto_cronograma: "", dias_impacto: "",
+  fecha_limite_aprobacion: "",
 };
 // "aumenta" y no "agrega": es el valor que guarda la base y el que suma
 // `subtotales`. Con el otro, la vista previa de totales mostraba cero.
@@ -238,6 +239,11 @@ Si el texto ya está bien escrito, devolvelo igual.`,
 
     // El impacto en el cronograma no entra en crearOrden —es de la 056 y vive
     // aparte—, así que se guarda enseguida.
+    if (f.fecha_limite_aprobacion) {
+      await import("./ordenesDeCambio").then(m => m.guardarOrden(orden.id, {
+        fecha_limite_aprobacion: f.fecha_limite_aprobacion,
+      }));
+    }
     if (f.impacto_cronograma?.trim() || f.dias_impacto) {
       await import("./ordenesDeCambio").then(m => m.guardarOrden(orden.id, {
         impacto_cronograma: f.impacto_cronograma?.trim() || null,
@@ -316,6 +322,16 @@ Si el texto ya está bien escrito, devolvelo igual.`,
           <div>
             <label style={lbl}>FECHA</label>
             <input type="date" value={f.fecha} onChange={e => setF(v => ({ ...v, fecha: e.target.value }))} style={mini} />
+          </div>
+          {/* HASTA CUÁNDO HAY PARA APROBARLA.
+              Mientras no se aprueba, el trabajo no se ejecuta y el plazo de la
+              obra corre igual. Esa espera no tiene dueño: el que la manda cree
+              que es urgente y el que la recibe no sabe que hay algo parado
+              esperándolo. Con fecha, el silencio se puede reclamar. */}
+          <div>
+            <label style={lbl}>APROBAR ANTES DEL</label>
+            <input type="date" value={f.fecha_limite_aprobacion || ""}
+              onChange={e => setF(v => ({ ...v, fecha_limite_aprobacion: e.target.value }))} style={mini} />
           </div>
         </div>
 

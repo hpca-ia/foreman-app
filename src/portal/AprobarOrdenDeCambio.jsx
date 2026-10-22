@@ -101,6 +101,16 @@ export default function AprobarOrdenDeCambio({ token }) {
                   Leé el detalle y aprobá. Si algo no está bien, escribilo: queda como constancia y el
                   trabajo no se ejecuta hasta resolverlo.
                 </div>
+                {/* LA FECHA LÍMITE, DONDE SE DECIDE. Sin ella, el que recibe no
+                    sabe que hay una obra parada esperándolo. */}
+                {orden.fecha_limite_aprobacion && (
+                  <div style={{ marginTop: 7, fontSize: 13, fontWeight: 700,
+                    color: String(orden.fecha_limite_aprobacion).slice(0, 10) < new Date().toISOString().slice(0, 10) ? C.rojo : C.ambar }}>
+                    {String(orden.fecha_limite_aprobacion).slice(0, 10) < new Date().toISOString().slice(0, 10)
+                      ? `El plazo venció el ${dia(orden.fecha_limite_aprobacion)}: la obra está esperando esta firma.`
+                      : `Necesitamos tu respuesta antes del ${dia(orden.fecha_limite_aprobacion)}.`}
+                  </div>
+                )}
               </div>
               <button onClick={() => responder(true)} disabled={enviando}
                 style={{ marginTop: 12, width: "100%", background: C.tinta, color: "#fff", border: "none",

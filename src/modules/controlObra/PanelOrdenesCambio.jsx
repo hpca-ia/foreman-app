@@ -243,6 +243,16 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               <span style={{ fontSize: 11, fontWeight: 700, color: colors.muted }}>{codigoDe(o)}</span>
               <span style={{ flex: 1, minWidth: 140, fontSize: 13.5, fontWeight: 600, color: colors.ink }}>{o.titulo}</span>
               {chip(o.estado)}
+              {/* VENCIDA SIN FIRMA. Es el dato que no puede estar escondido
+                  adentro de la fila: la obra está parada esperando esto. */}
+              {o.fecha_limite_aprobacion && !o.aprobada_at && o.estado !== "aprobada"
+                && (o.fecha_limite_aprobacion || "").slice(0, 10) < new Date().toISOString().slice(0, 10) && (
+                <span title={`Había que aprobarla antes del ${o.fecha_limite_aprobacion}`}
+                  style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: colors.danger,
+                    borderRadius: 9, padding: "1px 7px", whiteSpace: "nowrap" }}>
+                  VENCIÓ EL PLAZO
+                </span>
+              )}
               <span style={{ fontSize: 14, fontWeight: 700, color: total < 0 ? colors.danger : colors.brand }}>
                 {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
               </span>
@@ -283,6 +293,25 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>
                     {[o.tipo, o.lugar, o.fecha && new Date(`${o.fecha}T12:00:00`).toLocaleDateString("es-EC"),
                       o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+
+                {/* HASTA CUÁNDO HAY PARA APROBARLA. */}
+                {editable ? (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: 0.3 }}>APROBAR ANTES DEL</span>
+                    <input type="date" defaultValue={(o.fecha_limite_aprobacion || "").slice(0, 10)}
+                      key={`fl${o.id}-${o.fecha_limite_aprobacion}`}
+                      onBlur={e => e.target.value !== (o.fecha_limite_aprobacion || "").slice(0, 10)
+                        && hacer(() => guardarOrden(o.id, { fecha_limite_aprobacion: e.target.value || null }))}
+                      style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, width: 150 }} />
+                    <span style={{ fontSize: 10.5, color: colors.muted }}>
+                      Mientras no se apruebe, el trabajo no se ejecuta y el plazo corre igual.
+                    </span>
+                  </div>
+                ) : o.fecha_limite_aprobacion && (
+                  <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 6 }}>
+                    Había que aprobarla antes del {new Date(`${o.fecha_limite_aprobacion}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
                   </div>
                 )}
                 {o.visto_at && (
