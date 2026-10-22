@@ -10,7 +10,7 @@ import {
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
   pedirVisto, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
-  guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo,
+  guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado } from "./pdfOrdenCambio";
 import ModalOrdenCambio from "./ModalOrdenCambio";
@@ -129,6 +129,47 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       return null;
     });
   }
+
+  /**
+   * PEGAR, ARRASTRAR O ELEGIR: las tres cosas terminan en el mismo soporte.
+   *
+   * La foto de lo que se encontró llega por WhatsApp y se mira en la pantalla.
+   * Lo natural es recortarla y pegarla, no guardarla en Descargas con un
+   * nombre que nadie va a volver a encontrar para después buscarla en un
+   * diálogo de archivos. Y las fotos de un hallazgo nunca son una: son cuatro.
+   */
+  const soportar = useCallback(async (orden, archivos, descripcion = "") => {
+    const lista = [...(archivos || [])].filter(f => /^image\//.test(f.type || ""));
+    if (!lista.length) { setAviso("Eso no es una imagen: el soporte se ve en el PDF y en el correo."); return; }
+    setSubiendo(true); setAviso("");
+    let cuantas = (fotos[orden.id] || []).length;
+    for (const f of lista) {
+      const r = await subirSoporte(orden, f, descripcion, currentUser, cuantas++);
+      if (r.error) { setAviso(r.error); break; }
+    }
+    setSubiendo(false);
+    await cargar();
+  }, [fotos, currentUser, cargar]);
+
+  // Se pega en toda la ventana mientras hay una orden abierta: no hay dónde
+  // "hacer foco" para pegar, y pedirle a alguien que haga clic en el lugar
+  // correcto antes de pegar es pedirle que adivine. Con el modal de una orden
+  // nueva abierto manda el modal, que tiene su propio pegado.
+  useEffect(() => {
+    if (!abierta || nueva || mandando) return;
+    const alPegar = ev => {
+      const items = [...(ev.clipboardData?.items || [])];
+      const item = items.find(i => i.kind === "file" && /^image\//.test(i.type));
+      if (!item) return;
+      const archivo = item.getAsFile();
+      const orden = ordenes.find(x => x.id === abierta);
+      if (!archivo || !orden || !puedeEditar || orden.estado === "aprobada") return;
+      ev.preventDefault();
+      soportar(orden, [archivo]);
+    };
+    window.addEventListener("paste", alPegar);
+    return () => window.removeEventListener("paste", alPegar);
+  }, [abierta, nueva, mandando, ordenes, puedeEditar, soportar]);
 
   async function hacer(fn) {
     setOcupado(true); setAviso("");
@@ -405,21 +446,27 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   {editable && (
                     <>
                       <button onClick={() => { setAbierta(o.id); camRef.current?.click(); }} disabled={subiendo}
+                        onDragOver={ev => { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; }}
+                        onDrop={ev => { ev.preventDefault(); soportar(o, ev.dataTransfer?.files || []); }}
                         style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "9px",
                           color: colors.inkSoft, fontSize: 12, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                         <Camera size={13} /> {subiendo ? "Subiendo…" : "Agregar foto o plano"}
                       </button>
-                      <input ref={camRef} type="file" accept="image/*" style={{ display: "none" }}
+                      <div style={{ fontSize: 10.5, color: colors.muted, textAlign: "center", marginTop: 3 }}>
+                        o pegá una captura con {navigator.platform?.includes("Mac") ? "⌘V" : "Ctrl+V"}, o arrastrala acá
+                      </div>
+                      <input ref={camRef} type="file" accept="image/*" multiple style={{ display: "none" }}
                         onChange={async ev => {
-                          const archivo = ev.target.files?.[0];
+                          const elegidos = [...(ev.target.files || [])];
                           ev.target.value = "";
-                          if (!archivo) return;
-                          setSubiendo(true);
-                          const descripcion = window.prompt("¿Qué se ve en esta imagen? (opcional)", "") || "";
-                          const r = await subirSoporte(o, archivo, descripcion, currentUser, suyasFotos.length);
-                          setSubiendo(false);
-                          if (r.error) { setAviso(r.error); return; }
-                          await cargar();
+                          if (!elegidos.length) return;
+                          // La descripción se pregunta cuando es UNA. Con
+                          // cuatro, un prompt por imagen es un interrogatorio
+                          // y se termina cancelando la carga por el medio.
+                          const descripcion = elegidos.length === 1
+                            ? (window.prompt("¿Qué se ve en esta imagen? (opcional)", "") || "")
+                            : "";
+                          await soportar(o, elegidos, descripcion);
                         }} />
                     </>
                   )}
@@ -435,8 +482,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 520 }}>
                       <thead>
                         <tr style={{ background: colors.bg }}>
-                          {["Item", "Rubro", "Descripción", "Unid", "Cant", "P. unit", "Total", ""].map((h, i) => (
-                            <th key={h + i} style={{ textAlign: i >= 4 && i <= 6 ? "right" : i === 3 ? "center" : "left",
+                          {["", "Item", "Rubro", "Descripción", "Unid", "Cant", "P. unit", "Total", ""].map((h, i) => (
+                            <th key={h + i} style={{ textAlign: i >= 5 && i <= 7 ? "right" : i === 4 ? "center" : "left",
                               padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700 }}>{h.toUpperCase()}</th>
                           ))}
                         </tr>
@@ -444,9 +491,30 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       <tbody>
                         {[["aumenta", "ADICIONES", sub.adiciones], ["quita", "REDUCCIONES", sub.reducciones]].map(([tipo, titulo, monto]) => (
                           <Fragment key={tipo}>
-                            <tr><td colSpan={8} style={{ background: colors.neutralSoft, padding: "3px 6px", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: colors.inkSoft }}>{titulo}</td></tr>
-                            {suyas.filter(l => (tipo === "quita" ? l.tipo === "quita" : l.tipo !== "quita")).map(l => (
+                            <tr><td colSpan={9} style={{ background: colors.neutralSoft, padding: "3px 6px", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: colors.inkSoft }}>{titulo}</td></tr>
+                            {suyas.filter(l => (tipo === "quita" ? l.tipo === "quita" : l.tipo !== "quita")).map((l, i, grupo) => (
                               <tr key={l.id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
+                                {/* SUBIRLA Y BAJARLA. El que aprueba la orden
+                                    la lee en el orden del trabajo: primero lo
+                                    que se demuele, después lo que se
+                                    construye. Las partidas entran en el orden
+                                    en que venían en la proforma, que es el del
+                                    proveedor. */}
+                                <td style={{ padding: "3px 2px", width: 14 }}>
+                                  {editable && grupo.length > 1 && (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                                      <button onClick={() => hacer(() => moverLinea(suyas, l.id, -1))}
+                                        disabled={i === 0 || ocupado} title="Subirla"
+                                        style={{ background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 8,
+                                          cursor: i === 0 ? "default" : "pointer", color: i === 0 ? colors.border : colors.muted }}>▲</button>
+                                      <button onClick={() => hacer(() => moverLinea(suyas, l.id, 1))}
+                                        disabled={i === grupo.length - 1 || ocupado} title="Bajarla"
+                                        style={{ background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 8,
+                                          cursor: i === grupo.length - 1 ? "default" : "pointer",
+                                          color: i === grupo.length - 1 ? colors.border : colors.muted }}>▼</button>
+                                    </div>
+                                  )}
+                                </td>
                                 <td style={{ padding: "5px 6px", color: colors.muted, fontSize: 11, whiteSpace: "nowrap" }}>{l.item || ""}</td>
                                 <td style={{ padding: "5px 6px", color: colors.muted, fontSize: 11, whiteSpace: "nowrap" }}>{l.rubro_codigo || ""}</td>
                                 {/* LAS PARTIDAS SE CORRIGEN DONDE SE LEEN.
@@ -503,7 +571,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                               </tr>
                             ))}
                             <tr>
-                              <td colSpan={6} style={{ padding: "4px 6px", textAlign: "right", fontSize: 11, fontWeight: 700, color: colors.inkSoft }}>SUBTOTAL {titulo}</td>
+                              <td colSpan={7} style={{ padding: "4px 6px", textAlign: "right", fontSize: 11, fontWeight: 700, color: colors.inkSoft }}>SUBTOTAL {titulo}</td>
                               <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: 700 }}>${fmt(monto)}</td>
                               <td />
                             </tr>

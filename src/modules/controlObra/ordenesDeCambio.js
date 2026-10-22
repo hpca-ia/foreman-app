@@ -327,6 +327,54 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
 // necesita, seis meses después, para justificar un adicional.
 
 /** Guardar o corregir a quien firma. Mientras no se mandó, se edita. */
+/**
+ * Subir o bajar una partida dentro de su grupo.
+ *
+ * EL ORDEN DE LAS PARTIDAS ES EL ORDEN EN QUE SE LEE EL CAMBIO. NOVA las carga
+ * en el orden en que vienen en la proforma del proveedor, que es el de él:
+ * primero lo que factura más fácil. El que aprueba las lee en el orden del
+ * trabajo —primero lo que se demuele, después lo que se construye— y una lista
+ * desordenada obliga a saltar de arriba abajo para entender un cambio que es
+ * uno solo.
+ *
+ * Las adiciones se mueven entre adiciones y las reducciones entre
+ * reducciones: son dos cuadros con su propio subtotal, y una reducción en
+ * medio de las adiciones no es un orden, es un error de lectura.
+ *
+ * Se renumera el grupo entero en vez de intercambiar dos filas: el `item`
+ * —ADIC-03— es una etiqueta de posición, y un cuadro que va 01, 03, 02 se lee
+ * como si faltara una partida.
+ */
+export async function moverLinea(lineas, id, direccion) {
+  const todas = [...(lineas || [])];
+  const esta = todas.find(l => l.id === id);
+  if (!esta) return "Esa partida ya no está.";
+  const mismoGrupo = l => (l.tipo === "quita") === (esta.tipo === "quita");
+  const grupo = todas.filter(mismoGrupo);
+  const i = grupo.findIndex(l => l.id === id);
+  const j = i + (direccion < 0 ? -1 : 1);
+  if (j < 0 || j >= grupo.length) return null;
+  [grupo[i], grupo[j]] = [grupo[j], grupo[i]];
+
+  // El `orden` se reparte sobre la lista completa para que la otra mitad no
+  // quede intercalada, y el `item` por posición dentro del grupo.
+  const otros = todas.filter(l => !mismoGrupo(l));
+  const completa = esta.tipo === "quita" ? [...otros, ...grupo] : [...grupo, ...otros];
+  const prefijo = l => (l.tipo === "quita" ? "RED" : "ADIC");
+  const cuantas = { ADIC: 0, RED: 0 };
+  const posicion = {};
+  for (const l of completa) posicion[l.id] = ++cuantas[prefijo(l)];
+  for (let k = 0; k < completa.length; k++) {
+    const l = completa[k];
+    const item = `${prefijo(l)}-${String(posicion[l.id]).padStart(2, "0")}`;
+    if (l.orden === k && l.item === item) continue;
+    const { error } = await supabase.from("orden_cambio_lineas")
+      .update({ orden: k, item }).eq("id", l.id);
+    if (error) return error.message;
+  }
+  return null;
+}
+
 export async function guardarAprobador(fila) {
   const { id, ...campos } = fila;
   const q = id
