@@ -195,6 +195,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     );
   }
 
+  // El cuadro de revisión de la orden que se está por mandar, sin los que ya
+  // recibieron la suya: a esos no se les vuelve a mandar por error.
+  const correoValido = e => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(e || "").trim());
+  const enElCuadro = mandando
+    ? (aprobadores[mandando.orden.id] || []).filter(a => !a.envio_at && correoValido(a.email))
+    : [];
+
   const chip = estado => {
     const e = ESTADOS_ORDEN[estado] || ESTADOS_ORDEN.borrador;
     const c = { muted: colors.muted, warning: colors.warning, success: colors.success, danger: colors.danger }[e.color];
@@ -964,7 +971,16 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       onClick={() => {
                         if (!o.visto_at && !esDirector &&
                           !window.confirm("Esta orden todavía no la aprobó el Director.\n\nUna vez que el cliente ve el precio, bajarlo es una negociación y subirlo es imposible. ¿Mandarla igual?")) return;
-                        setMandando({ orden: o, correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email), cuerpo: "" });
+                        // Se abre con los que tienen que firmar ya marcados.
+                        // El resto del cuadro de revisión es la gente del
+                        // proyecto: no todos tienen que recibir TODAS las
+                        // órdenes, y mandarle quince correos a quien no le
+                        // toca es como se consigue que dejen de abrirlos.
+                        setMandando({
+                          orden: o, cuerpo: "",
+                          correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email),
+                          aQuien: (aprobadores[o.id] || []).filter(a => a.aprueba !== false && !a.envio_at).map(a => String(a.id)),
+                        });
                       }}>
                       <Mail size={12} /> Enviar al cliente
                     </Button>
@@ -1050,29 +1066,52 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               cuando firman todos, la orden entra sola al presupuesto como adicional.
             </div>
 
-            {/* Los que ya están en el CAPÍTULO IV: firman, y no hay que
-                volver a tildarlos acá. Se muestran para que se vea a quién le
-                va a llegar su enlace. */}
-            {(aprobadores[mandando.orden.id] || []).filter(a => !a.envio_at && String(a.email || "").includes("@")).length > 0 && (
+            {/* A QUIÉN DE LA LISTA SE LE MANDA ESTA ORDEN.
+                El cuadro de revisión tiene a toda la gente del proyecto —son
+                quince— y una orden de cambio no le interesa a los quince.
+                Mandársela a todos es como se consigue que dejen de abrirla, y
+                la que sí tenían que leer se pierde entre las otras ocho. Se
+                elige, y los que firman vienen marcados. */}
+            {enElCuadro.length > 0 && (
               <div style={{ marginBottom: 10, background: colors.neutralSoft,
                 border: `1px solid ${colors.border}`, borderRadius: 7, padding: "8px 10px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>DEL CAPÍTULO IV</div>
-                {(aprobadores[mandando.orden.id] || []).filter(a => !a.envio_at && String(a.email || "").includes("@")).map(a => (
-                  <div key={a.id} style={{ fontSize: 12, color: colors.ink, padding: "1px 0" }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: a.aprueba === false ? colors.muted : colors.brand }}>
-                      {a.aprueba === false ? "COPIA" : "FIRMA"}
-                    </span>{" "}
-                    {a.nombre || a.email}{a.empresa ? ` · ${a.empresa}` : ""}{a.rol ? ` · ${a.rol}` : ""}
-                    <span style={{ color: colors.muted, fontSize: 11 }}> {a.email}</span>
-                  </div>
-                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
+                    A QUIÉN SE LE MANDA ({(mandando.aQuien || []).length} de {enElCuadro.length})
+                  </span>
+                  <button onClick={() => setMandando(m => ({ ...m,
+                    aQuien: (m.aQuien || []).length === enElCuadro.length ? [] : enElCuadro.map(a => String(a.id)) }))}
+                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                      fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                    {(mandando.aQuien || []).length === enElCuadro.length ? "ninguno" : "todos"}
+                  </button>
+                </div>
+                {enElCuadro.map(a => {
+                  const va = (mandando.aQuien || []).includes(String(a.id));
+                  return (
+                    <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0",
+                      fontSize: 12, color: va ? colors.ink : colors.muted, cursor: "pointer" }}>
+                      <input type="checkbox" checked={va}
+                        onChange={() => setMandando(m => ({ ...m,
+                          aQuien: va ? (m.aQuien || []).filter(x => x !== String(a.id)) : [...(m.aQuien || []), String(a.id)] }))} />
+                      <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                        color: a.aprueba === false ? colors.muted : colors.brand }}>
+                        {a.aprueba === false ? "COPIA" : "FIRMA"}
+                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {a.nombre || a.email}{a.empresa ? ` · ${a.empresa}` : ""}
+                        <span style={{ color: colors.muted, fontSize: 11 }}> {a.email}</span>
+                      </span>
+                    </label>
+                  );
+                })}
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
-                  Los que firman reciben su propio enlace para aprobar; los demás, una copia.
+                  Los marcados FIRMA reciben su propio enlace para aprobar; los demás, una copia.
                 </div>
               </div>
             )}
 
-            {invitados.length > 0 && (
+            {invitados.length > 0 && !enElCuadro.length && (
               <div style={{ marginBottom: 8 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>GENTE DEL PROYECTO</div>
                 {invitados.map(i => {
@@ -1152,8 +1191,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   const sueltos = String(mandando.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
                   const todos = [...new Set([...mandando.correos, ...sueltos])];
                   const hayExternos = (mandando.externos || []).some(x => String(x.email || "").includes("@"));
-                  const enCapitulo = (aprobadores[mandando.orden.id] || [])
-                    .filter(a => !a.envio_at && /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(a.email || "").trim()));
+                  // Solo los que se marcaron en esta tanda.
+                  const elegidos = new Set((mandando.aQuien || []).map(String));
+                  const enCapitulo = enElCuadro.filter(a => elegidos.has(String(a.id)));
                   if (!todos.length && !hayExternos && !enCapitulo.length) { setAviso("Elegí a quién mandársela."); return; }
                   // Los que firman reciben SU enlace; los demás, una copia.
                   const firman = (mandando.firman || []);
