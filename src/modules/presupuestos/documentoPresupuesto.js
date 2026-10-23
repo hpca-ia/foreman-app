@@ -273,21 +273,55 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   // quería explicarle: encuentra el precio que subió, no por qué subió, y la
   // conversación empieza mal. La memoria de cambios va primero, donde se lee
   // antes que el número.
-  const parrafosCarta = String(carta || "").split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
-  if (parrafosCarta.length) {
+  // SE DIBUJA COMO LISTA, PORQUE SE ESCRIBIÓ COMO LISTA.
+  //
+  // En párrafos no se entiende: el que la lee no sabe leer un presupuesto y
+  // necesita recorrer los cambios con el dedo. Los títulos en mayúsculas
+  // separan, los renglones que empiezan con guión son los cambios —con
+  // sangría francesa, para que la segunda línea no parezca otro cambio— y el
+  // TOTAL del final va resaltado, que es lo primero que se busca.
+  const renglonesCarta = String(carta || "").split("\n").map(x => x.trimEnd());
+  if (renglonesCarta.some(x => x.trim())) {
     doc.setFont("times", "bold"); doc.setFontSize(10.5); doc.setTextColor(...t.primario);
     espaciado("MEMORIA DE CAMBIOS", M, y, { espacio: 1.4 });
-    y += 15;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...t.texto);
-    for (const p of parrafosCarta) {
-      for (const linea of doc.splitTextToSize(p, W - M * 2)) {
-        // Una carta larga no se escribe encima del pie ni del cuadro.
-        if (y > H - 90) { doc.addPage(); y = 56; }
-        doc.text(linea, M, y);
-        y += 12;
+    y += 16;
+    const salto = (alto = 12) => { if (y + alto > H - 80) { doc.addPage(); y = 56; } };
+    for (const crudo of renglonesCarta) {
+      const linea = crudo.trim();
+      if (!linea) { y += 5; continue; }
+      const esTitulo = /^[A-ZÁÉÍÓÚÑ0-9 ·/]+$/.test(linea) && linea.length < 42;
+      const esTotal = /^TOTAL\b/i.test(linea);
+      const esItem = /^[-•*]\s+/.test(linea);
+
+      if (esTotal) {
+        y += 6; salto(16);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(...t.primario);
+        for (const l of doc.splitTextToSize(linea, W - M * 2)) { doc.text(l, M, y); y += 12; }
+        continue;
       }
-      y += 6;
+      if (esTitulo) {
+        y += 7; salto(14);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...t.gris);
+        espaciado(linea, M, y, { espacio: 0.8 });
+        y += 12;
+        continue;
+      }
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...t.texto);
+      if (esItem) {
+        const cuerpo = linea.replace(/^[-•*]\s+/, "");
+        const sangria = 12;
+        const partes = doc.splitTextToSize(cuerpo, W - M * 2 - sangria);
+        partes.forEach((l, i) => {
+          salto();
+          if (i === 0) doc.text("•", M, y);
+          doc.text(l, M + sangria, y);
+          y += 11.5;
+        });
+      } else {
+        for (const l of doc.splitTextToSize(linea, W - M * 2)) { salto(); doc.text(l, M, y); y += 12; }
+      }
     }
+    y += 10;
     doc.setDrawColor(...t.linea); doc.setLineWidth(0.6); doc.line(M, y, W - M, y);
     y += 16;
   }

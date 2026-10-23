@@ -107,48 +107,54 @@ function ficha(item, antes, esQuitado = false) {
  */
 export function renglonesDeCambios(dif, plata = v => `$${(Number(v) || 0).toFixed(2)}`) {
   const l = [];
-  l.push(`TOTAL ANTES: ${plata(dif.totalAntes)}`);
-  l.push(`TOTAL AHORA: ${plata(dif.totalAhora)}`);
-  l.push(`DIFERENCIA: ${dif.diferencia >= 0 ? "+" : "−"}${plata(Math.abs(dif.diferencia))}${dif.porcentaje != null ? ` (${dif.porcentaje >= 0 ? "+" : "−"}${Math.abs(dif.porcentaje).toFixed(1)}%)` : ""}`);
+  const signo = v => (v >= 0 ? "+" : "−");
   if (dif.nuevos.length) {
-    l.push("", `RUBROS NUEVOS (${dif.nuevos.length}), suman ${plata(dif.montoNuevos)}:`);
-    dif.nuevos.forEach(x => l.push(`+ ${x.descripcion} · ${x.cantidad} ${x.unidad} × ${plata(x.precio_unitario)} = ${plata(x.total)}${x.capitulo ? ` · ${x.capitulo}` : ""}`));
+    l.push("SE AGREGÓ");
+    dif.nuevos.forEach(x => l.push(`- ${x.descripcion} — ${x.cantidad} ${x.unidad} a ${plata(x.precio_unitario)} — ${plata(x.total)} más`));
+    l.push("");
   }
   if (dif.quitados.length) {
-    l.push("", `RUBROS QUE YA NO ESTÁN (${dif.quitados.length}), restan ${plata(Math.abs(dif.montoQuitados))}:`);
-    dif.quitados.forEach(x => l.push(`− ${x.descripcion} · ${x.cantidad} ${x.unidad} × ${plata(x.precio_unitario)}${x.capitulo ? ` · ${x.capitulo}` : ""}`));
+    l.push("SE QUITÓ");
+    dif.quitados.forEach(x => l.push(`- ${x.descripcion} — ${x.cantidad} ${x.unidad} a ${plata(x.precio_unitario)} — ${plata(Math.abs(x.total))} menos`));
+    l.push("");
   }
   if (dif.cambiados.length) {
-    l.push("", `RUBROS MODIFICADOS (${dif.cambiados.length}):`);
+    l.push("CAMBIÓ DE PRECIO O CANTIDAD");
     dif.cambiados.forEach(x => {
-      const qué = x.campos.map(c => `${c.campo}: ${c.de} → ${c.a}`).join("; ");
-      l.push(`~ ${x.descripcion} · ${qué} · efecto ${x.delta >= 0 ? "+" : "−"}${plata(Math.abs(x.delta))}`);
+      const qué = x.campos.map(c => `${c.campo}: de ${c.de} a ${c.a}`).join("; ");
+      l.push(`- ${x.descripcion} — ${qué} — ${plata(Math.abs(x.delta))} ${x.delta >= 0 ? "más" : "menos"}`);
     });
+    l.push("");
   }
+  l.push(`TOTAL: de ${plata(dif.totalAntes)} a ${plata(dif.totalAhora)} — ${signo(dif.diferencia)}${plata(Math.abs(dif.diferencia))}${dif.porcentaje != null ? ` (${signo(dif.porcentaje)}${Math.abs(dif.porcentaje).toFixed(1)}%)` : ""}`);
   return l.join("\n");
 }
 
-/**
- * Lo que se le pide a NOVA: la prosa, no la aritmética.
- *
- * Los números van calculados en el texto que recibe. Un modelo que suma ciento
- * ochenta renglones se equivoca en uno y nadie lo nota hasta que lo nota el
- * cliente —y entonces lo que se discute ya no es el presupuesto, es si los
- * números de uno son confiables—.
- */
 export const PROMPT_MEMORIA = [
   "Sos el jefe de proyectos de una constructora en Quito y le escribís al cliente.",
-  "Con la lista de cambios entre dos versiones del presupuesto, redactá una MEMORIA DE CAMBIOS corta",
+  "Con la lista de cambios entre dos versiones del presupuesto, armá una MEMORIA DE CAMBIOS",
   "que vaya adelante del presupuesto nuevo.",
   "",
+  "QUIEN LA LEE NO SABE LEER UN PRESUPUESTO. Es una lista, no una carta: tiene que poder",
+  "recorrerse con el dedo y entenderse sin cruzar dos PDF.",
+  "",
+  "Formato exacto, en texto plano y sin markdown:",
+  "- Una sola frase de arranque: qué versión es y contra cuál se compara.",
+  "- Después, estos títulos EN MAYÚSCULAS, y solo los que tengan contenido:",
+  "  SE AGREGÓ / SE QUITÓ / CAMBIÓ DE PRECIO / CAMBIÓ DE CANTIDAD / OTROS CAMBIOS",
+  "- Debajo de cada título, una línea por cambio que empiece con guión y espacio:",
+  "  - Nombre del rubro — qué cambió, en palabras — monto",
+  "  Ejemplos: `- Locker metálico 16 espacios — rubro nuevo, pedido del cliente — $450,00`",
+  "            `- Tabique de yeso — el precio pasa de $50,00 a $60,00 el m² — $100,00 más`",
+  "- Al final, una línea sola que empiece con TOTAL: y diga la diferencia en plata y en porcentaje.",
+  "",
   "Reglas:",
-  "- Entre 3 y 5 párrafos. Sin encabezados, sin viñetas, sin markdown, sin saludo ni firma.",
-  "- Primero qué cambió y por qué se entiende que cambió; el monto, después.",
   "- Usá EXACTAMENTE los números que te paso. No sumes, no redondees, no estimes.",
-  "- Si algo no se puede saber por la lista —el motivo de un cambio—, no lo inventes:",
-  "  decí qué cambió sin atribuirle una causa.",
-  "- Agrupá: si subieron seis rubros de un mismo capítulo, decilo una vez.",
-  "- Nombrá los rubros como están escritos.",
-  "- Tono profesional y directo, sin disculpas y sin adjetivos de venta.",
-  "- Español de Ecuador, de usted.",
+  "- Una línea por cambio. Nada de párrafos, nada de viñetas anidadas, nada de negritas.",
+  "- Si seis rubros del mismo capítulo subieron por lo mismo, poné una línea que lo diga",
+  "  y el monto sumado que te paso, no seis líneas iguales.",
+  "- Explicá en palabras lo que el número significa: 'se saca', 'se agrega', 'sube', 'baja'.",
+  "- Si la lista no dice POR QUÉ cambió algo, no lo inventes: decí qué cambió y nada más.",
+  "- Nombrá los rubros como están escritos, pero podés acortarlos si son larguísimos.",
+  "- Español de Ecuador, de usted, sin adjetivos de venta y sin disculpas.",
 ].join("\n");

@@ -65,7 +65,10 @@ test("el texto de los cambios se puede leer sin NOVA", () => {
     [item({ descripcion: "Vidrio", cantidad: 2, precio_unitario: 100, total: 200 })],
     [item({ descripcion: "Vidrio", cantidad: 3, precio_unitario: 100, total: 300 })],
   ));
-  assert.match(t, /RUBROS MODIFICADOS \(1\)/);
-  assert.match(t, /cantidad: 2 → 3/);
-  assert.match(t, /DIFERENCIA: \+\$100\.00/);
+  assert.match(t, /CAMBIÓ DE PRECIO O CANTIDAD/);
+  assert.match(t, /cantidad: de 2 a 3/);
+  assert.match(t, /TOTAL: de \$200\.00 a \$300\.00 — \+\$100\.00/);
+  // Como lista: cada cambio en su renglón, con guión, para que el PDF lo
+  // dibuje como lista y no como un párrafo.
+  assert.ok(t.split("\n").some(l => l.startsWith("- ")));
 });

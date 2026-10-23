@@ -500,7 +500,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                         </Button>
                       </div>
                       <textarea value={carta} onChange={e => setCarta(e.target.value)} rows={carta ? 9 : 3}
-                        placeholder="NOVA la redacta de los cambios entre las dos versiones. Se puede corregir y agregarle lo que haga falta: lo que sale es esto."
+                        placeholder="NOVA lista los cambios entre las dos versiones. Se puede corregir y agregarle lo que haga falta: lo que sale es esto."
                         style={{ ...campo, resize: "vertical", lineHeight: 1.5, fontSize: 12 }} />
                       <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12,
                         color: conCarta ? colors.ink : colors.muted, cursor: "pointer", lineHeight: 1.4, marginTop: 7 }}>
@@ -508,7 +508,9 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                         <span><strong>Que vaya adelante del presupuesto</strong> — antes del cuadro de rubros, que es donde se lee antes que el número.</span>
                       </label>
                       <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
-                        Los montos los calcula FOREMAN de los dos presupuestos; NOVA solo los redacta.
+                        Sale como lista: un renglón por cambio. Los títulos EN MAYÚSCULAS separan, los renglones que
+                        empiezan con guión son los cambios y la línea que empieza con TOTAL va resaltada.
+                        Los montos los calcula FOREMAN de los dos presupuestos; NOVA solo los pone en palabras.
                         {formato === "cotizar" ? " En el formato para cotizar no sale: al que cotiza no se le cuenta qué negoció el cliente." : ""}
                       </div>
                     </div>
