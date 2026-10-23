@@ -52,6 +52,14 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const [conM2, setConM2] = useState(true);
   // Las advertencias propias de cada rubro ("rubro aproximado", "falta estudio").
   const [notasRubro, setNotasRubro] = useState(true);
+  // SI LAS NOTAS VAN O NO VAN.
+  //
+  // Un presupuesto que se manda al cliente lleva sus condiciones; el mismo
+  // presupuesto que se imprime para la reunión interna, o el que se le pasa a
+  // un contratista para que cotice un capítulo, no las necesita —y a veces no
+  // las tiene que ver—. Destildar quince notas de a una para sacarlas, y
+  // volver a tildarlas la vez siguiente, es trabajo que se hace mal.
+  const [conNotas, setConNotas] = useState(true);
   const [paraCotizar, setParaCotizar] = useState(NOTAS_COTIZAR.join("\n"));
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -83,6 +91,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       if (propia.paraCotizar != null) setParaCotizar(propia.paraCotizar);
       if (propia.conM2 != null) setConM2(propia.conM2 !== false);
       if (propia.notasRubro != null) setNotasRubro(propia.notasRubro !== false);
+      if (propia.conNotas != null) setConNotas(propia.conNotas !== false);
       setCargado(true);
     })();
     return () => { vivo = false; };
@@ -136,7 +145,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
 
   const eleccion = () => ({
     plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
-    notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro,
+    notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas,
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -173,7 +182,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line
-  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro]);
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -206,7 +215,9 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const notaM2 = porM2 ? `Valor referencial del costo directo: $${fmtM(porM2)} por m², sobre un área de ${area.toLocaleString("es-EC", { maximumFractionDigits: 2 })} m², antes de honorarios e IVA.` : null;
   const notas = formato === "cotizar"
     ? lineas(paraCotizar)
-    : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
+    : !conNotas
+        ? []
+        : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
   const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro };
   const conNotaPropia = items.filter(i => String(i.nota || "").trim()).length;
@@ -393,6 +404,23 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
                   <span>NOTAS Y CONDICIONES</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
+                {/* El interruptor de todo el capítulo. Lo que se elige abajo
+                    queda guardado: se apaga para este envío y se vuelve a
+                    prender sin tener que acordarse de cuáles estaban. */}
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12,
+                  color: conNotas ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm,
+                  padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
+                  <input type="checkbox" checked={conNotas} onChange={e => setConNotas(e.target.checked)} style={{ marginTop: 2 }} />
+                  <span><strong>Que el documento lleve las notas</strong> — si se apaga, no sale el capítulo de notas
+                    y condiciones. Lo marcado acá abajo se guarda igual para la próxima.</span>
+                </label>
+                {!conNotas && (
+                  <div style={{ fontSize: 11.5, color: colors.warning, background: colors.warningSoft,
+                    border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "6px 9px", marginBottom: 10 }}>
+                    Este documento sale <strong>sin notas ni condiciones</strong>: sin validez de la oferta, sin forma de
+                    pago y sin lo que no está incluido.
+                  </div>
+                )}
                 {conNotaPropia > 0 && (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: notasRubro ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
                     <input type="checkbox" checked={notasRubro} onChange={e => setNotasRubro(e.target.checked)} style={{ marginTop: 2 }} />
@@ -407,12 +435,17 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                 ) : (
                   <div style={{ fontSize: 11, color: colors.muted, marginBottom: 10 }}>Para incluir el costo directo por m², pon el área en el presupuesto (abajo, en Información general).</div>
                 )}
+                {/* Apagadas se siguen viendo y se siguen pudiendo elegir:
+                    lo que se marque queda listo para el documento que SÍ las
+                    lleva. Atenuadas, para que nadie crea que van a salir. */}
+                <div style={{ opacity: conNotas ? 1 : 0.5 }}>
                 <NotasExportacion
                   catalogo={catalogo.filter(x => x.activa !== false || marcadas.includes(x.id))} sinBase={sinBase}
                   marcadas={marcadas} onAlternar={alternarNota}
                   textos={textos} onTextoDoc={textoDoc}
                   onGuardarEnCatalogo={guardarEnCatalogo} onRetirar={retirar} onAgregar={agregarNota}
                   particulares={particulares} onParticulares={setParticulares} />
+                </div>
               </>
             )}
           </div>
