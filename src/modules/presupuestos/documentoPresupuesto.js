@@ -167,7 +167,7 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
  * @param aceptacion  espacio para que firme el cliente
  */
 export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [] }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], carta = "" }) {
   await cargarPDF();
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
@@ -264,6 +264,33 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   });
   y = doc.lastAutoTable.finalY + 18;
   if (t.encabezado === "limpio") { doc.setDrawColor(...t.linea); doc.setLineWidth(0.6); doc.line(M, y - 8, W - M, y - 8); y += 6; }
+
+  // ── LA CARTA, ANTES DEL CUADRO ──
+  //
+  // Una versión nueva se manda con una frase —"ajustamos algunos rubros"— y el
+  // cliente se pasa la tarde cruzando dos PDF de ciento ochenta renglones para
+  // encontrar los seis que se movieron. Lo que encuentra así no es lo que uno
+  // quería explicarle: encuentra el precio que subió, no por qué subió, y la
+  // conversación empieza mal. La memoria de cambios va primero, donde se lee
+  // antes que el número.
+  const parrafosCarta = String(carta || "").split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+  if (parrafosCarta.length) {
+    doc.setFont("times", "bold"); doc.setFontSize(10.5); doc.setTextColor(...t.primario);
+    espaciado("MEMORIA DE CAMBIOS", M, y, { espacio: 1.4 });
+    y += 15;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...t.texto);
+    for (const p of parrafosCarta) {
+      for (const linea of doc.splitTextToSize(p, W - M * 2)) {
+        // Una carta larga no se escribe encima del pie ni del cuadro.
+        if (y > H - 90) { doc.addPage(); y = 56; }
+        doc.text(linea, M, y);
+        y += 12;
+      }
+      y += 6;
+    }
+    doc.setDrawColor(...t.linea); doc.setLineWidth(0.6); doc.line(M, y, W - M, y);
+    y += 16;
+  }
 
   // ── Los rubros ──
   // ¿Este presupuesto se cobra por etapas? Lo dicen los rubros, no una opción:

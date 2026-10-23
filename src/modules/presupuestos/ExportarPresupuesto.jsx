@@ -9,6 +9,9 @@ import { money } from "../../lib/exportar";
 import { FORMATOS, PLANTILLAS, NOTAS_COTIZAR, estructura, totalesDe, versionDe, pdfPresupuesto, excelPresupuesto } from "./documentoPresupuesto";
 import { leerCatalogo, guardarNota, retirarNota, leerPredeterminados, guardarPredeterminados, guardarEleccion } from "./datosExportacion";
 import NotasExportacion from "./NotasExportacion";
+import { compararVersiones, renglonesDeCambios, PROMPT_MEMORIA } from "./compararVersiones";
+import { supabase } from "../../lib/supabase";
+import { LECTURA, textoDeNova } from "../../lib/modelos";
 
 // Sacar el presupuesto terminado: con qué plantilla, qué formato, qué logo,
 // qué notas y quién firma.
@@ -64,6 +67,12 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // excluidas y no las incluidas: una nota que se escribe mañana sale, que es
   // lo que uno espera al escribirla.
   const [notasFuera, setNotasFuera] = useState([]);
+  // LA MEMORIA DE CAMBIOS, adelante del presupuesto.
+  const [carta, setCarta] = useState("");
+  const [conCarta, setConCarta] = useState(false);
+  const [desdeId, setDesdeId] = useState("");
+  const [otrasVersiones, setOtrasVersiones] = useState([]);
+  const [redactando, setRedactando] = useState("");
   const [paraCotizar, setParaCotizar] = useState(NOTAS_COTIZAR.join("\n"));
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -97,6 +106,9 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       if (propia.notasRubro != null) setNotasRubro(propia.notasRubro !== false);
       if (propia.conNotas != null) setConNotas(propia.conNotas !== false);
       if (Array.isArray(propia.notasFuera)) setNotasFuera(propia.notasFuera.map(String));
+      if (propia.carta != null) setCarta(propia.carta);
+      if (propia.conCarta != null) setConCarta(propia.conCarta === true);
+      if (propia.desdeId != null) setDesdeId(String(propia.desdeId || ""));
       setCargado(true);
     })();
     return () => { vivo = false; };
@@ -151,6 +163,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const eleccion = () => ({
     plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
     notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera,
+    carta, conCarta, desdeId,
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -187,7 +200,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line
-  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera]);
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera, carta, conCarta, desdeId]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -211,6 +224,53 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     setLogos(await listarLogos());
   }
 
+  // LAS OTRAS VERSIONES DE ESTE MISMO PRESUPUESTO.
+  //
+  // Se reconocen por el nombre: "Tababela (TCC)" y "Tababela (TCC) (v2)" son
+  // el mismo presupuesto. Es con lo que ya se las numera en toda la app.
+  useEffect(() => {
+    const { base } = versionDe(presupuesto.nombre);
+    supabase.from("presupuestos").select("id,nombre,total,created_at").order("id")
+      .then(({ data }) => {
+        setOtrasVersiones((data || [])
+          .filter(p => p.id !== presupuesto.id && versionDe(p.nombre).base === base)
+          .map(p => ({ ...p, version: versionDe(p.nombre).version })));
+      });
+  }, [presupuesto.id, presupuesto.nombre]);
+
+  async function redactarCarta() {
+    if (!desdeId) return;
+    setRedactando("Buscando los cambios…");
+    const { data: antes } = await supabase.from("presupuesto_items")
+      .select("id,rubro_id,capitulo,descripcion,unidad,cantidad,precio_unitario,total")
+      .eq("presupuesto_id", desdeId);
+    const dif = compararVersiones(antes || [], items);
+    if (dif.sinCambios) {
+      setRedactando("");
+      setCarta("Esta versión no tiene cambios de rubros ni de precios contra la anterior.");
+      return;
+    }
+    const cuentas = renglonesDeCambios(dif, v => `$${money(v)}`);
+    setRedactando("NOVA está redactando…");
+    try {
+      const r = await fetch("/api/nova", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: LECTURA, max_tokens: 1200, system: PROMPT_MEMORIA,
+          messages: [{ role: "user", content: `Presupuesto: ${versionDe(presupuesto.nombre).base}\nCliente: ${presupuesto.cliente_nombre || ""}\n\n${cuentas}` }] }),
+      });
+      const d = await r.json();
+      const texto = (textoDeNova(d) || "").trim();
+      // SI NOVA NO CONTESTA, LA CUENTA YA ESTÁ HECHA. Una carta que no sale
+      // porque el modelo no respondió es una carta que se termina escribiendo
+      // a mano a las once de la noche.
+      setCarta(texto || cuentas);
+    } catch {
+      setCarta(cuentas);
+    }
+    setConCarta(true);
+    setRedactando("");
+  }
+
   // Las notas en el orden del catálogo, y después las de este presupuesto.
   const lineas = t => String(t || "").split(/\n+/).map(x => x.trim()).filter(Boolean);
   const area = Number(presupuesto.area_m2) || 0;
@@ -224,7 +284,10 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
         ? []
         : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
-  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera };
+  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera,
+    // Al que cotiza no se le cuenta qué negoció el cliente en la versión
+    // anterior: es información de la otra mesa.
+    carta: conCarta && formato !== "cotizar" ? carta : "" };
   // Los rubros que tienen nota propia, para elegir una por una cuáles salen.
   const conNota = items.filter(i => String(i.nota || "").trim());
   const conNotaPropia = conNota.length;
@@ -410,6 +473,48 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
               </>
             ) : (
               <>
+                {/* LA MEMORIA DE CAMBIOS.
+                    Una versión nueva se manda con una frase —"ajustamos
+                    algunos rubros"— y el cliente se pasa la tarde cruzando dos
+                    PDF de ciento ochenta renglones. Lo que encuentra así es el
+                    precio que subió, no por qué subió, y la conversación
+                    empieza mal. */}
+                {otrasVersiones.length > 0 && (
+                  <>
+                    <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
+                      <span>MEMORIA DE CAMBIOS</span>
+                      <span style={{ fontWeight: 400 }}>{conCarta && carta.trim() ? "va adelante del cuadro" : "no va"}</span>
+                    </div>
+                    <div style={{ background: colors.bg, borderRadius: colors.radiusSm, padding: "8px 9px", marginBottom: 12 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 7 }}>
+                        <span style={{ fontSize: 11.5, color: colors.inkSoft }}>Contra la versión</span>
+                        <select value={desdeId} onChange={e => setDesdeId(e.target.value)}
+                          style={{ ...campo, width: "auto", flex: 1, minWidth: 150, padding: "5px 7px", fontSize: 12 }}>
+                          <option value="">Elegir…</option>
+                          {otrasVersiones.map(v => (
+                            <option key={v.id} value={v.id}>v{v.version} · {money(v.total)}</option>
+                          ))}
+                        </select>
+                        <Button variant="outline" size="sm" disabled={!desdeId || !!redactando} onClick={redactarCarta}>
+                          {redactando ? <Loader2 size={12} /> : null} {redactando || (carta.trim() ? "Rehacer" : "Redactar con NOVA")}
+                        </Button>
+                      </div>
+                      <textarea value={carta} onChange={e => setCarta(e.target.value)} rows={carta ? 9 : 3}
+                        placeholder="NOVA la redacta de los cambios entre las dos versiones. Se puede corregir y agregarle lo que haga falta: lo que sale es esto."
+                        style={{ ...campo, resize: "vertical", lineHeight: 1.5, fontSize: 12 }} />
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12,
+                        color: conCarta ? colors.ink : colors.muted, cursor: "pointer", lineHeight: 1.4, marginTop: 7 }}>
+                        <input type="checkbox" checked={conCarta} onChange={e => setConCarta(e.target.checked)} style={{ marginTop: 2 }} />
+                        <span><strong>Que vaya adelante del presupuesto</strong> — antes del cuadro de rubros, que es donde se lee antes que el número.</span>
+                      </label>
+                      <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
+                        Los montos los calcula FOREMAN de los dos presupuestos; NOVA solo los redacta.
+                        {formato === "cotizar" ? " En el formato para cotizar no sale: al que cotiza no se le cuenta qué negoció el cliente." : ""}
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
                   <span>NOTAS Y CONDICIONES</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
