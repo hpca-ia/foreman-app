@@ -321,6 +321,24 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
         for (const l of doc.splitTextToSize(linea, W - M * 2)) { salto(); doc.text(l, M, y); y += 12; }
       }
     }
+    // LA MEMORIA SE QUEDA SOLA EN SU HOJA.
+    //
+    // Abajo del último renglón empezaba el cuadro de rubros, y entonces la
+    // lista de cambios pasaba a ser el encabezado del presupuesto: se la
+    // saltea para llegar a los números. Es un documento aparte —es lo que uno
+    // querría que leyeran primero— y ocupa su hoja, con el membrete y los
+    // datos del proyecto arriba. El presupuesto empieza en la siguiente.
+    doc.addPage();
+    y = 56;
+    // Y LA HOJA DEL PRESUPUESTO SE PRESENTA SOLA. La portada con el membrete
+    // quedó atrás: una hoja que arranca con la fila de títulos de una tabla no
+    // dice de qué presupuesto es, y esa es la hoja que se imprime suelta, se
+    // reenvía y se discute en la reunión.
+    doc.setFont("times", "bold"); doc.setFontSize(11); doc.setTextColor(...t.primario);
+    espaciado(tituloDoc.toUpperCase(), M, y, { espacio: 1.4 });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...t.gris);
+    doc.text([base, cotizar ? "" : presupuesto.cliente_nombre, `v${version}`].filter(Boolean).join("  ·  "),
+      W - M, y, { align: "right" });
     y += 10;
     doc.setDrawColor(...t.linea); doc.setLineWidth(0.6); doc.line(M, y, W - M, y);
     y += 16;
