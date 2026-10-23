@@ -41,6 +41,11 @@ export function estructura({ capitulos = [], items = [] }) {
         // Las dos las usa `tabla()` más abajo. Lo que esta función no copia,
         // para el documento no existe.
         etapa: String(i.etapa || "").trim(), nota: i.nota || "",
+        // Y SU id, que es con lo que el documento sabe de qué rubro es cada
+        // nota. Sin él, elegir que una nota no salga no tenía efecto: la
+        // pantalla la excluía por id y el documento no tenía ninguno con qué
+        // compararlo, así que salían todas igual.
+        id: i.id,
       })),
     });
   });

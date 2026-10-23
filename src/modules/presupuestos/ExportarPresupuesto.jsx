@@ -60,6 +60,10 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // las tiene que ver—. Destildar quince notas de a una para sacarlas, y
   // volver a tildarlas la vez siguiente, es trabajo que se hace mal.
   const [conNotas, setConNotas] = useState(true);
+  // Las notas de rubro que NO salen en este documento. Se guardan las
+  // excluidas y no las incluidas: una nota que se escribe mañana sale, que es
+  // lo que uno espera al escribirla.
+  const [notasFuera, setNotasFuera] = useState([]);
   const [paraCotizar, setParaCotizar] = useState(NOTAS_COTIZAR.join("\n"));
   const [generando, setGenerando] = useState("");
   const [subiendo, setSubiendo] = useState(false);
@@ -92,6 +96,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       if (propia.conM2 != null) setConM2(propia.conM2 !== false);
       if (propia.notasRubro != null) setNotasRubro(propia.notasRubro !== false);
       if (propia.conNotas != null) setConNotas(propia.conNotas !== false);
+      if (Array.isArray(propia.notasFuera)) setNotasFuera(propia.notasFuera.map(String));
       setCargado(true);
     })();
     return () => { vivo = false; };
@@ -145,7 +150,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
 
   const eleccion = () => ({
     plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
-    notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas,
+    notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera,
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -182,7 +187,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line
-  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas]);
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -219,8 +224,12 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
         ? []
         : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
-  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro };
-  const conNotaPropia = items.filter(i => String(i.nota || "").trim()).length;
+  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera };
+  // Los rubros que tienen nota propia, para elegir una por una cuáles salen.
+  const conNota = items.filter(i => String(i.nota || "").trim());
+  const conNotaPropia = conNota.length;
+  const notaSale = i => notasRubro && !notasFuera.includes(String(i.id));
+  const notasQueSalen = conNota.filter(notaSale).length;
   const nombreArchivo = ext => {
     const { base } = versionDe(presupuesto.nombre);
     return `${(base || "Presupuesto").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim()} - ${FORMATOS[formato].label} v${version}.${ext}`;
@@ -421,11 +430,42 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                     pago y sin lo que no está incluido.
                   </div>
                 )}
+                {/* LAS NOTAS DE LOS RUBROS, UNA POR UNA.
+                    En el mismo presupuesto conviven "Precio incluye
+                    aislamiento acústico" —que el cliente tiene que leer— y
+                    "Rubro nuevo omitido por error" o "PENDIENTE REVISAR", que
+                    son de la oficina. Era todo o nada, así que salían las dos.
+                    Se ven enteras acá: la que no se lee antes de mandar es la
+                    que después hay que explicar. */}
                 {conNotaPropia > 0 && (
-                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: notasRubro ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
-                    <input type="checkbox" checked={notasRubro} onChange={e => setNotasRubro(e.target.checked)} style={{ marginTop: 2 }} />
-                    <span><strong>Las notas de los rubros</strong> — {conNotaPropia} {conNotaPropia === 1 ? "rubro tiene" : "rubros tienen"} una advertencia propia. Sale debajo de su descripción.</span>
-                  </label>
+                  <div style={{ background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10 }}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: notasRubro ? colors.ink : colors.muted, cursor: "pointer", lineHeight: 1.4 }}>
+                      <input type="checkbox" checked={notasRubro} onChange={e => setNotasRubro(e.target.checked)} style={{ marginTop: 2 }} />
+                      <span><strong>Las notas de los rubros</strong> — {notasQueSalen} de {conNotaPropia} {conNotaPropia === 1 ? "nota sale" : "salen"} debajo de la descripción de su rubro.</span>
+                    </label>
+                    {notasRubro && (
+                      <div style={{ marginTop: 7, display: "grid", gap: 4 }}>
+                        {conNota.map(i => {
+                          const sale = !notasFuera.includes(String(i.id));
+                          return (
+                            <label key={i.id} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5,
+                              lineHeight: 1.4, cursor: "pointer", color: sale ? colors.ink : colors.muted,
+                              background: colors.surface, border: `1px solid ${colors.border}`,
+                              borderRadius: colors.radiusSm, padding: "5px 7px" }}>
+                              <input type="checkbox" checked={sale} style={{ marginTop: 2 }}
+                                onChange={() => setNotasFuera(f => sale
+                                  ? [...f, String(i.id)]
+                                  : f.filter(x => x !== String(i.id)))} />
+                              <span style={{ minWidth: 0 }}>
+                                <span style={{ color: colors.muted }}>{i.numero ? `${i.numero} · ` : ""}{String(i.descripcion || "").slice(0, 46)}{String(i.descripcion || "").length > 46 ? "…" : ""}</span>
+                                <span style={{ display: "block", textDecoration: sale ? "none" : "line-through" }}>⚠ {i.nota}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {notaM2 ? (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: conM2 ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>

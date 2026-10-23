@@ -112,7 +112,18 @@ const lugarYFecha = e => `${e?.ciudad ? e.ciudad.split(",")[0] + ", " : ""}${fec
 // advertencia sobre ese rubro y tiene que leerse pegada a él.
 const conNota = (r, incluir) => (incluir && String(r.nota || "").trim() ? `${r.descripcion}\n⚠ ${String(r.nota).trim()}` : r.descripcion);
 
-function tabla(caps, formato, notasRubro = true, conEtapas = false) {
+/**
+ * ¿Sale la nota de ESTE rubro?
+ *
+ * No es todo o nada. En un mismo presupuesto conviven "Precio incluye
+ * aislamiento acústico" —que el cliente tiene que leer— y "Rubro nuevo omitido
+ * por error" o "PENDIENTE REVISAR", que son de la oficina y no pueden salir.
+ * Hasta ahora salían las dos o ninguna, y entonces salían las dos.
+ */
+const muestraNota = (notasRubro, fuera) => r =>
+  notasRubro && !fuera.has(String(r.id ?? r.numero ?? ""));
+
+function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
   if (formato === "capitulos") {
     // Un capítulo repartido entre etapas no se puede rotular con una sola: se
     // dice que está repartido, que es la verdad y además es el aviso de que
@@ -138,7 +149,7 @@ function tabla(caps, formato, notasRubro = true, conEtapas = false) {
   caps.forEach(c => {
     deCapitulo.push(filas.length);
     filas.push(fila(c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.subtotal) : "", ""));
-    c.rubros.forEach(r => filas.push(fila(r.numero, conNota(r, notasRubro), r.unidad, cantidad(r.cantidad),
+    c.rubros.forEach(r => filas.push(fila(r.numero, conNota(r, incluirNota(r)), r.unidad, cantidad(r.cantidad),
       conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : "",
       String(r.etapa || "").trim())));
   });
@@ -156,7 +167,7 @@ function tabla(caps, formato, notasRubro = true, conEtapas = false) {
  * @param aceptacion  espacio para que firme el cliente
  */
 export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [] }) {
   await cargarPDF();
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
@@ -258,7 +269,7 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   // ¿Este presupuesto se cobra por etapas? Lo dicen los rubros, no una opción:
   // si hay dos etapas puestas, el documento tiene que decirlo.
   const conEtapas = tieneEtapas(items);
-  const tb = tabla(caps, formato, notasRubro, conEtapas);
+  const tb = tabla(caps, formato, muestraNota(notasRubro, new Set((notasFuera || []).map(String))), conEtapas);
   const soloCaps = formato === "capitulos";
   // CON LA COLUMNA DE ETAPA, TODO SE CORRE UNO. La descripción es la única que
   // se estira; las demás tienen su ancho porque son números y una columna de
@@ -434,13 +445,15 @@ const argb = c => "FF" + c.map(v => v.toString(16).padStart(2, "0")).join("").to
  * ExcelJS se carga recién al exportar: pesa, y el resto de la app no lo usa.
  */
 export async function excelPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [] }) {
   const ExcelJS = (await import("exceljs")).default;
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const caps = estructura({ capitulos, items });
   const tot = totalesDe(items, presupuesto, conIva);
   const cotizar = formato === "cotizar";
   const soloCapitulos = formato === "capitulos";
+  // Las notas de rubro que se dejan afuera de ESTE documento.
+  const fuera = new Set((notasFuera || []).map(String));
   const lineasMembrete = (membrete ?? [empresa.nombre || "HCA Studio", ...contacto(empresa)]).map(x => String(x || "").trim()).filter(Boolean);
   const nombreEmpresa = lineasMembrete[0] || "";
   const { base, version } = versionDe(presupuesto.nombre);
@@ -551,7 +564,7 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     if (soloCapitulos) return;
 
     c.rubros.forEach(r => {
-      const valores = [r.numero, conNota(r, notasRubro), r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
+      const valores = [r.numero, conNota(r, notasRubro && !fuera.has(String(r.id ?? r.numero ?? ""))), r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
         { formula: `D${fila}*E${fila}`, result: cotizar ? 0 : r2(r.cantidad * r.precio_unitario) }];
       valores.forEach((v, i) => {
         const x = ws.getCell(fila, i + 1);

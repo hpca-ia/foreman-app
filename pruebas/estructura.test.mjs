@@ -27,3 +27,12 @@ test("un rubro sin etapa ni nota no inventa nada", () => {
   assert.equal(caps[0].rubros[0].etapa, "");
   assert.equal(caps[0].rubros[0].nota, "");
 });
+
+test("el rubro lleva su id: es con lo que se elige si su nota sale", () => {
+  const caps = estructura({
+    capitulos: ["ALBAÑILERÍA"],
+    items: [{ id: 77, capitulo: "ALBAÑILERÍA", descripcion: "Tabique", nota: "Rubro omitido por error", total: 10 }],
+  });
+  assert.equal(caps[0].rubros[0].id, 77);
+  assert.equal(caps[0].rubros[0].nota, "Rubro omitido por error");
+});
