@@ -64,6 +64,8 @@ export default function App() {
   const [tareas, setTareas] = useState([]);
   const [cargando, setCargando] = useState(false);
   const [vistaPedida, setVista] = useState("tareas");
+  // El cronograma que se pidió armar desde un presupuesto: proyecto y presupuesto.
+  const [cronoPedido, setCronoPedido] = useState(null);
   const [vistaTareas, setVistaTareas] = useState("lista");
   const [soloMias, setSoloMias] = useState(false);
   // Quién acompaña a cada tarea, y qué tarea espera a cuál.
@@ -796,7 +798,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
           <Suspense fallback={<Cargando />}>
             {puede("presupuestos.ver") && vista === "presupuestos" && (
-              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} entraATodo={entraATodo} />
+              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} entraATodo={entraATodo}
+                onArmarCronograma={puede("cronograma.ver") ? pedido => { setCronoPedido(pedido); setVista("cronograma"); } : undefined} />
             )}
             {puede("controlObra.ver") && vista === "controlObra" && (
               <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={nivelObra} entraATodo={entraATodo} />
@@ -822,7 +825,8 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloActas currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelObra} />
             )}
             {puede("cronograma.ver") && vista === "cronograma" && (
-              <ModuloCronograma currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto} />
+              <ModuloCronograma currentUser={usuario} puede={puede} nivelProyecto={nivelProyecto}
+                abrir={cronoPedido} onAbierto={() => setCronoPedido(null)} />
             )}
             {puede("manoObra.ver") && vista === "manoObra" && (
               <ModuloManoDeObra currentUser={usuario} puede={puede} nivelProyecto={nivelObra} />

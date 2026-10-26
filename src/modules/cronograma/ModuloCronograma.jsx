@@ -29,6 +29,7 @@ import { guardarPlazo, desfase, diasDelPlazo, mesesEntre, finDeMeses, diasHastaF
 import { plataDelPlan } from "./plataDelPlan";
 import { fmt } from "../controlObra/calculos";
 import { numerosDeBarras } from "./numeros";
+import { capitulosComoAgrupaciones, planDelPresupuesto, presupuestoDeReferencia } from "./presupuestoComoObra";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -61,7 +62,7 @@ const JORNADAS = [
   { id: "todos", label: "Todos", dias: [0, 1, 2, 3, 4, 5, 6], pista: "Obra a tres turnos o con plazo contra reloj" },
 ];
 
-export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) {
+export default function ModuloCronograma({ currentUser, puede, nivelProyecto, abrir, onAbierto }) {
   const [proyectos, setProyectos] = useState([]);
   const [lead, setLead] = useState(null);
   const [actividades, setActividades] = useState([]);
@@ -251,6 +252,73 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
     setFases(f);
   }, [lead?.id]);
   useEffect(() => { cargarFases(); }, [cargarFases]);
+
+  // DE QUÉ PRESUPUESTO SALE, cuando todavía no hay obra.
+  //
+  // El cronograma que acompaña a una cotización se arma antes de que exista
+  // la obra en el control. Lo que hay es el presupuesto que se está
+  // trabajando, y tiene todos los metros: armar sin él es adivinar.
+  const [presupuestosDelLead, setPresupuestosDelLead] = useState([]);
+  // Lo que se pidió desde Presupuestos ("armar el cronograma de este").
+  const [pedidoPres, setPedidoPres] = useState(null);
+  useEffect(() => {
+    if (!abrir?.leadId || cargando) return;
+    const p = proyectos.find(x => x.id === abrir.leadId);
+    if (p) {
+      setPedidoPres(abrir.presupuestoId || null);
+      setLead(p);
+      // Que se abra el panel de armar: es lo que se vino a hacer.
+      setArmando({ cubrir: false });
+    }
+    onAbierto?.();
+    // eslint-disable-next-line
+  }, [abrir?.leadId, cargando, proyectos.length]);
+  const [fuenteId, setFuenteId] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    setPresupuestosDelLead([]); setFuenteId(null);
+    if (!lead?.id || lead.obra_id) return;
+    (async () => {
+      const [{ data }, ya] = await Promise.all([
+        supabase.from("presupuestos").select("id,nombre,estado,archivado_at,created_at,iva_pct,total")
+          .eq("lead_id", lead.id).order("created_at", { ascending: false }),
+        // Sin la 123 no está la columna: se sigue sin saber cuál se usó.
+        supabase.from("leads").select("crono_presupuesto_id").eq("id", lead.id).maybeSingle(),
+      ]);
+      if (!vivo) return;
+      const lista = (data || []).filter(p => !p.archivado_at);
+      setPresupuestosDelLead(lista);
+      // Lo que se pidió desde Presupuestos, después el que ya se usó, y si
+      // no, el aprobado o el más nuevo.
+      const pedido = lista.find(p => p.id === pedidoPres);
+      const usado = lista.find(p => p.id === ya?.data?.crono_presupuesto_id);
+      setFuenteId((pedido || usado || presupuestoDeReferencia(lista))?.id ?? null);
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line
+  }, [lead?.id, lead?.obra_id]);
+  const fuente = presupuestosDelLead.find(p => p.id === fuenteId) || null;
+
+  // Lo que NOVA lee para saber de qué tamaño es la obra: las agrupaciones del
+  // control si hay obra, los capítulos del presupuesto si no.
+  async function materiaDeLaObra() {
+    if (obra?.id) return materiaPrima(obra.id);
+    if (!fuente) return [];
+    const { data } = await supabase.from("presupuesto_items")
+      .select("capitulo,descripcion,unidad,cantidad,total,orden,nota").eq("presupuesto_id", fuente.id).order("orden");
+    return capitulosComoAgrupaciones(data || [], fuente.iva_pct);
+  }
+  // Una barra que salió de un capítulo, vista como si colgara de él: así lo
+  // que mira el tamaño de cada barra (los días, lo que se aprende) lo
+  // encuentra igual que en una obra.
+  const conCapitulos = (lista, mp) => obra?.id ? lista : lista.map(a => {
+    const g = a.presupuesto_capitulo && mp.find(x => x.nombre === a.presupuesto_capitulo);
+    return g ? { ...a, obra_actividad_id: g.id } : a;
+  });
+  async function anotarFuente() {
+    if (obra?.id || !fuente) return;
+    await supabase.from("leads").update({ crono_presupuesto_id: fuente.id }).eq("id", lead.id);
+  }
 
   const cargarMemoria = useCallback(async () => {
     const { memoria: m } = await leerMemoria("cronograma");
@@ -1914,17 +1982,53 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 control y el valorado cierren, y es una jaula cuando lo que se
                 quiere es un cronograma que se parezca a la obra. No es una
                 decisión que pueda tomar yo: cambia según para qué es. */}
-            {obra?.id && (
+            {/* SIN OBRA, SALE DEL PRESUPUESTO. El cronograma que va con la
+                cotización se arma antes de que la obra exista, y el
+                presupuesto que se está trabajando tiene todos los metros. */}
+            {!obra?.id && (
               <div>
                 <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 4 }}>
-                  DE DÓNDE SALE
+                  SALE DEL PRESUPUESTO
+                </label>
+                {!presupuestosDelLead.length ? (
+                  <div style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.5 }}>
+                    Este proyecto no tiene ningún presupuesto colgado: NOVA lo arma por lo que sabe del tipo de
+                    obra, sin cantidades. Para que mida con los metros, abrí el presupuesto en Presupuestos y
+                    elegí este proyecto arriba.
+                  </div>
+                ) : (
+                  <>
+                    <select value={fuenteId ?? ""} onChange={e => setFuenteId(Number(e.target.value) || null)}
+                      style={{ ...inputStyle, width: "100%", fontSize: 12.5 }}>
+                      {presupuestosDelLead.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.nombre}{p.estado === "aprobado" ? " · aprobado" : p.estado === "enviado" ? " · enviado" : ""}
+                          {Number(p.total) ? ` · $${fmt(p.total)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.45, marginTop: 4 }}>
+                      Todavía no hay obra activa: NOVA mide cada capítulo con sus cantidades. Lo que no se
+                      cotiza no entra.
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {(obra?.id || fuente) && (
+              <div>
+                <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 4 }}>
+                  CÓMO SE ARMA
                 </label>
                 <div style={{ display: "grid", gap: 4 }}>
                   {[
                     [false, "Como se construye la obra",
                       "NOVA escribe los trabajos que de verdad hay que hacer, con nombres de obra. Mira el presupuesto para saber el tamaño y el alcance, pero no lo copia: puede juntar tres agrupaciones en un trabajo, partir una en cuatro, o poner trabajos que no están en ninguna."],
                     [true, "Cubriendo el presupuesto",
-                      "Cada agrupación del control aparece una vez y ninguna se pierde. Es lo que hace falta para que el valorado reparta toda la plata en el tiempo, y el cronograma se parece más al presupuesto que a la obra."],
+                      obra?.id
+                        ? "Cada agrupación del control aparece una vez y ninguna se pierde. Es lo que hace falta para que el valorado reparta toda la plata en el tiempo, y el cronograma se parece más al presupuesto que a la obra."
+                        : "Cada capítulo del presupuesto aparece una vez y ninguno se pierde. Sirve para mostrarle al cliente cuándo se hace cada parte de lo que cotizó, y el cronograma se parece más al presupuesto que a la obra."],
                   ].map(([valor, titulo, pista]) => (
                     <label key={titulo} style={{ display: "flex", gap: 7, alignItems: "flex-start", cursor: "pointer",
                       background: !!armando.cubrir === valor ? colors.brandSoft : colors.bg,
@@ -1973,25 +2077,30 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                   const paso = (texto, mal) => setArmando(v => ({ ...v, pasos: [...(v.pasos || []), { texto, mal }] }));
                   setError(""); setPensando(true);
                   setArmando(v => ({ ...v, pasos: [] }));
-                  const mp = await materiaPrima(obra.id);
+                  const mp = await materiaDeLaObra();
                   const r = await proponerPlan({
                     agrupaciones: mp, meses: lead.crono_meses, dias: diasDeContrato,
                     nombreObra: lead.nombre, comoVa: armando.comoVa || "", cal,
                     cubrirPresupuesto: !!armando.cubrir,
                   });
                   if (r.error) { setPensando(false); setError(r.error); return; }
+                  if (!obra?.id) r.plan = planDelPresupuesto(r.plan, mp);
                   paso(`El plan: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
-                  if (r.plan.faltantes.length) {
-                    paso(`${r.plan.faltantes.length} agrupaciones quedaron en "Sin ubicar": hay que mirarlas.`, true);
+                  if (r.plan.faltantes.length && armando.cubrir) {
+                    paso(`${r.plan.faltantes.length} ${obra?.id ? "agrupaciones" : "capítulos"} quedaron en "Sin ubicar": hay que mirarlos.`, true);
                   }
                   if (r.cortado) paso("La respuesta vino cortada: guardé lo que llegó entero.", true);
 
+                  // Sin obra no hay control que vigilar: lo que se comprometa
+                  // con las agrupaciones se decide cuando la obra exista.
                   const g = await guardarPlan({
                     lead, obra, plan: r.plan, quien: currentUser,
-                    cubrePresupuesto: !!armando.cubrir,
+                    cubrePresupuesto: obra?.id ? !!armando.cubrir : null,
                   });
                   if (g.error) { setPensando(false); setError(g.error); return; }
                   paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la migración 101)" : ` en ${g.etapas} etapas`}.`);
+                  if (g.sinCapitulo) paso("Falta correr la migración 123: las barras no recuerdan de qué capítulo salen, y armarlo de nuevo no las reemplaza.", true);
+                  await anotarFuente();
 
                   const o = await guardarOrden({
                     actividades: g.creadas, dias: diasDeContrato, nombreObra: lead.nombre, cal,
@@ -2040,11 +2149,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         const paso = (texto, mal) => setArmando(v => ({ ...v, pasos: [...(v.pasos || []), { texto, mal }] }));
                         setError(""); setPensando(true);
                         setArmando(v => ({ ...v, pasos: [] }));
-                        const mp = obra?.id ? await materiaPrima(obra.id) : [];
+                        const mp = await materiaDeLaObra();
                         const r = await leerCronogramaEscrito({
                           texto: armando.texto, agrupaciones: mp, dias: diasDeContrato, cal,
                         });
                         if (r.error) { setPensando(false); setError(r.error); return; }
+                        if (!obra?.id) r.plan = planDelPresupuesto(r.plan, mp);
                         paso(`Leído: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
                         if (r.cortado) paso("Vino cortado: entró lo que llegó entero.", true);
                         const g = await guardarPlan({
@@ -2052,6 +2162,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                         });
                         if (g.error) { setPensando(false); setError(g.error); return; }
                         paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la 101)" : ` en ${g.etapas} etapas`}.`);
+                        await anotarFuente();
                         const o = await guardarOrden({ actividades: g.creadas, dias: diasDeContrato, nombreObra: lead.nombre, cal });
                         if (o.error) paso(`El orden no se pudo: ${o.error}`, true);
                         else paso(`El orden: ${o.creadas} dependencias.`);
@@ -2162,8 +2273,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                               "nadie revisó. En una obra que todavía se está armando, eso le enseña sus " +
                               "propios números.")) return;
                             setPensando(true);
-                            const mp = obra?.id ? await materiaPrima(obra.id) : [];
-                            const n = await aprenderDelCronograma(todas, currentUser, mp);
+                            const mp = await materiaDeLaObra();
+                            const n = await aprenderDelCronograma(conCapitulos(todas, mp), currentUser, mp);
                             await cargarMemoria();
                             setPensando(false); setError("");
                             window.alert(`NOVA anotó ${n} actividades para la próxima obra: los días, y dónde hay cantidades, el rendimiento por día.`);
@@ -3006,9 +3117,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto }) 
                 <Button variant="primary" size="sm" disabled={pensando} onClick={async () => {
                   setError("");
                   setPensando(true);
-                  const mp = obra?.id ? await materiaPrima(obra.id) : [];
+                  const mp = await materiaDeLaObra();
                   const r = await ponerTiemposYOrden({
-                    actividades, fases, agrupaciones: mp, dias: diasDeContrato,
+                    actividades: conCapitulos(actividades, mp), fases, agrupaciones: mp, dias: diasDeContrato,
                     nombreObra: lead.nombre, comoVa: dictado, cal,
                   });
                   if (r.error) { setPensando(false); setError(r.error); return; }

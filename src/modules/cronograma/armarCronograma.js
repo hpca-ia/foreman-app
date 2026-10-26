@@ -197,17 +197,25 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
   // Guardando primero, lo peor que pasa es que queden las dos listas juntas y
   // haya que borrar una a mano. Eso es un rato de trabajo; lo otro era perder
   // el cronograma entero.
-  const { data: previas } = await supabase.from("cronograma_actividades")
-    .select("id,obra_actividad_id").eq("lead_id", lead.id);
+  let { data: previas, error: ePrev } = await supabase.from("cronograma_actividades")
+    .select("id,obra_actividad_id,presupuesto_capitulo").eq("lead_id", lead.id);
+  // Sin la 123 no existe el capítulo: se lee sin él.
+  if (ePrev) {
+    ({ data: previas } = await supabase.from("cronograma_actividades")
+      .select("id,obra_actividad_id").eq("lead_id", lead.id));
+  }
   // LO PROPIO DEL CRONOGRAMA SOBREVIVE: lo que alguien agregó a mano —el
   // permiso municipal, la inspección de bomberos— no está en ningún
-  // presupuesto y no hay de dónde volver a sacarlo.
-  const aBorrar = (previas || []).filter(x => x.obra_actividad_id != null).map(x => x.id);
+  // presupuesto y no hay de dónde volver a sacarlo. Lo que salió del control
+  // o de un capítulo del presupuesto sí se reemplaza.
+  const aBorrar = (previas || [])
+    .filter(x => x.obra_actividad_id != null || x.presupuesto_capitulo != null).map(x => x.id);
   const { data: fasesViejas } = await supabase.from("cronograma_fases").select("id").eq("lead_id", lead.id);
 
   const creadas = [];
   let orden = 1000;   // atrás de lo que haya, hasta que lo viejo se vaya
   let sinEtapas = false;
+  let sinCapitulo = false;
   for (let i = 0; i < plan.etapas.length; i++) {
     const e = plan.etapas[i];
     const hecha = await crearFase({ leadId: lead.id, nombre: e.nombre, orden: i, quien });
@@ -221,11 +229,19 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
       etapa: "ejecucion", incluye: a.incluye?.length ? a.incluye : null,
       es_hito: !!a.hito,
       ...(hecha.fase ? { fase_id: hecha.fase.id } : {}),
+      // Armado desde el presupuesto, sin obra: el capítulo del que sale y lo
+      // que vale, en vez de la agrupación que todavía no existe.
+      ...(a.capitulo ? { presupuesto_capitulo: a.capitulo, monto_ref: a.monto } : {}),
     }));
     let { data, error } = await supabase.from("cronograma_actividades").insert(filas).select();
     // Se va soltando lo que la base no tenga antes que perder el cronograma.
+    if (error && /presupuesto_capitulo/.test(error.message)) {
+      sinCapitulo = true;
+      const sinCap = filas.map(({ presupuesto_capitulo: _c, ...resto }) => resto);
+      ({ data, error } = await supabase.from("cronograma_actividades").insert(sinCap).select());
+    }
     if (error) {
-      const limpias = filas.map(({ incluye, fase_id: _f, etapa, es_hito: _h, ...resto }) => resto);
+      const limpias = filas.map(({ incluye, fase_id: _f, etapa, es_hito: _h, presupuesto_capitulo: _c, monto_ref: _m, ...resto }) => resto);
       ({ data, error } = await supabase.from("cronograma_actividades").insert(limpias).select());
     }
     if (error) {
@@ -262,7 +278,7 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
     await supabase.from("leads").update({ crono_cubre: cubrePresupuesto }).eq("id", lead.id);
   }
 
-  return { creadas, etapas: plan.etapas.length, sinEtapas };
+  return { creadas, etapas: plan.etapas.length, sinEtapas, sinCapitulo };
 }
 
 /**

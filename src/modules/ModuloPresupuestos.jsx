@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, Fragment } from "react";
 import { esNoCotiza, motivoNoCotiza } from "./presupuestos/estructura";
-import { Trash2, Copy, Database, Archive, ArchiveRestore, Search } from "lucide-react";
+import { Trash2, Copy, Database, Archive, ArchiveRestore, Search, GanttChartSquare } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import ElegirProyecto from "../components/ElegirProyecto";
 import { engancharAlProyecto } from "../lib/cadena";
@@ -37,7 +37,7 @@ import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA,
 // utilidad es 0,83, no 0,825. Un presupuesto no cobra fracciones de centavo.
 const centavos = v => Math.round((Number(v) || 0) * 100) / 100;
 
-export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto = () => null, entraATodo = false }) {
+export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto = () => null, entraATodo = false, onArmarCronograma }) {
   const [subVista, setSubVista] = useState("lista");
   const [presupuestos, setPresupuestos] = useState([]);
   const [borrarPre, setBorrarPre] = useState(null);
@@ -1261,6 +1261,25 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             {puedeEditar&&<button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>}
           </>}
           {subVista==="detalle"&&<>
+            {/* EL CRONOGRAMA QUE VA CON ESTE PRESUPUESTO. Se arma antes de que
+                haya obra: es lo que se le muestra al cliente para decirle en
+                cuánto tiempo se le hace lo que está cotizado. Vive en el
+                proyecto, así que sin proyecto no hay dónde guardarlo. */}
+            {onArmarCronograma&&presupuestoActivo&&!presupuestoActivo.archivado_at&&(
+              <button
+                onClick={()=>{
+                  if(!presupuestoActivo.lead_id){
+                    alert("El cronograma se guarda en el proyecto, y este presupuesto no tiene uno.\n\nAsignale el proyecto arriba (\"asignar\") y volvé a tocar este botón.");
+                    setCambiandoProyecto(true);
+                    return;
+                  }
+                  onArmarCronograma({leadId:presupuestoActivo.lead_id,presupuestoId:presupuestoActivo.id});
+                }}
+                title="Armar el cronograma de obra con las cantidades de este presupuesto, aunque la obra todavía no esté activa"
+                style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5}}>
+                <GanttChartSquare size={13}/> Armar cronograma
+              </button>
+            )}
             {/* Archivar desde adentro: acá es donde uno termina de trabajarlo y
                 decide que ya está. En la lista había un iconito que nadie
                 encontraba, y quedaba todo mezclado entre los activos. */}
