@@ -103,7 +103,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   // lo volvía ilegible —ocho meses en 300 píxeles son barras de dos milímetros
   // pegadas unas a otras— y es por lo que un Gantt de verdad corre para el
   // costado. Acá se elige el acercamiento y la pantalla se desplaza.
-  const [zoom, setZoom] = useState(14);
+  // Píxeles por día, o "ajustar": que la obra entera entre en el ancho que
+  // hay. zoomVisto es lo que de verdad mide un día en pantalla, para la regla
+  // y para saber desde dónde acercar.
+  const [zoom, setZoom] = useState("ajustar");
+  const [zoomVisto, setZoomVisto] = useState(14);
   // Las agrupaciones de hoy, para saber si el cronograma quedó viejo.
   const [agrupaciones, setAgrupaciones] = useState([]);
   // LO QUE LA OFICINA YA MIDIÓ. Se trae para dos cosas: marcar en la tabla
@@ -624,7 +628,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     // Una marca cada tantos píxeles, no cada tantos días: con el lienzo ancho
     // caben muchas, y con el acercamiento chico se encimarían. Lo que decide
     // es el espacio que ocupa la etiqueta, que son unos 46 píxeles.
-    const paso = Math.max(1, Math.ceil(46 / zoom));
+    const paso = Math.max(1, Math.ceil(46 / zoomVisto));
     const out = [];
     for (let d = 0; d <= diasTotales; d += paso) {
       let f = aFecha(plan.inicio), saltos = 0, vueltas = 0;
@@ -636,6 +640,34 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     }
     return out;
   })();
+
+  // EL ACERCAMIENTO. Un cronograma de ocho meses entero no se puede leer de
+  // cerca, y de lejos no se ve el detalle: "Ajustar" muestra la obra entera en
+  // el ancho que hay, y − y + se alejan o acercan desde lo que se está viendo.
+  // Están también arriba de la pantalla completa.
+  const PASOS_ZOOM = [5, 8, 14, 24, 40];
+  const cambiarZoom = dir => {
+    const actual = zoom === "ajustar" ? zoomVisto : zoom;
+    const siguiente = dir > 0 ? PASOS_ZOOM.find(p => p > actual + 0.5) : [...PASOS_ZOOM].reverse().find(p => p < actual - 0.5);
+    if (siguiente) setZoom(siguiente);
+  };
+  const botonZoom = (activo, deshabilitado) => ({
+    minWidth: 26, padding: "4px 7px", borderRadius: 5, border: "none",
+    cursor: deshabilitado ? "default" : "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 700,
+    background: activo ? colors.brand : deshabilitado ? "transparent" : "#fff",
+    color: activo ? "#fff" : deshabilitado ? colors.border : colors.inkSoft,
+  });
+  const actualZoom = zoom === "ajustar" ? zoomVisto : zoom;
+  const controlesZoom = (
+    <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3 }}>
+      <button title="Ver más plazo de una vez" disabled={actualZoom <= PASOS_ZOOM[0] + 0.5}
+        onClick={() => cambiarZoom(-1)} style={botonZoom(false, actualZoom <= PASOS_ZOOM[0] + 0.5)}>−</button>
+      <button title="Que la obra entera entre en el ancho de la pantalla" onClick={() => setZoom("ajustar")}
+        style={{ ...botonZoom(zoom === "ajustar", false), fontSize: 11 }}>Ajustar</button>
+      <button title="Acercar: barras más anchas" disabled={actualZoom >= PASOS_ZOOM.at(-1) - 0.5}
+        onClick={() => cambiarZoom(1)} style={botonZoom(false, actualZoom >= PASOS_ZOOM.at(-1) - 0.5)}>+</button>
+    </div>
+  );
 
   async function agregar(nombre, faseId = null, dias = null, hito = false) {
     const texto = (nombre ?? nueva?.nombre ?? "").trim();
@@ -1767,22 +1799,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
         </div>
         {todas.length > 0 && (
           <div style={{ display: "flex", gap: 7, alignItems: "center", marginLeft: "auto" }}>
-            {/* El acercamiento. Un cronograma de ocho meses entero no se
-                puede leer: lo que se mira es el mes que viene, de cerca. */}
-            <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3 }}>
-              {[["−", -1, "Ver más plazo de una vez"], ["+", 1, "Acercar: barras más anchas"]].map(([l, dir, t]) => {
-                const pasos = [5, 8, 14, 24, 40];
-                const i = pasos.indexOf(zoom) < 0 ? 2 : pasos.indexOf(zoom);
-                const tope = dir < 0 ? i === 0 : i === pasos.length - 1;
-                return (
-                  <button key={l} title={t} disabled={tope}
-                    onClick={() => setZoom(pasos[Math.max(0, Math.min(pasos.length - 1, i + dir))])}
-                    style={{ width: 26, padding: "4px 0", borderRadius: 5, border: "none",
-                      cursor: tope ? "default" : "pointer", fontFamily: colors.font, fontSize: 13, fontWeight: 700,
-                      background: tope ? "transparent" : "#fff", color: tope ? colors.border : colors.inkSoft }}>{l}</button>
-                );
-              })}
-            </div>
+            {controlesZoom}
             <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3 }}>
               {(sinFecha ? [["dia", "Días de obra"]] : [["fecha", "Fechas"], ["dia", "Días"]]).map(([v, l]) => (
                 <button key={v} onClick={() => setEscala(v)}
@@ -3532,7 +3549,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
           onMoverEtapa={moverEtapa}
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
           platas={platas} memoria={memoria}
-          fases={fases} onFase={ponerEnEtapa} />
+          fases={fases} onFase={ponerEnEtapa}
+          onZoomReal={setZoomVisto} herramientas={controlesZoom} />
       </>
 
       {editable && (

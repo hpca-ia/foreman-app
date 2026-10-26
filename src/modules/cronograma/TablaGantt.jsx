@@ -105,7 +105,7 @@ export default function TablaGantt({
   uniendo, setUniendo, hoyISO, dia, sinFecha = false,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
   rubros = [], sinSenalar, onSenalar, platas = null, memoria = [],
-  fases = [], onFase,
+  fases = [], onFase, onZoomReal, herramientas = null,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -126,12 +126,26 @@ export default function TablaGantt({
   // dos tercios del ancho y a las barras —que es lo que se viene a mirar— les
   // quedaba una franja. Compacta deja nombre, días y botones: las fechas se
   // leen en la barra y se escriben en la ficha. Queda elegida para la próxima.
-  const [compacta, setCompacta] = useState(() => { try { return localStorage.getItem("foreman_gantt_compacta") === "1"; } catch { return false; } });
+  // De entrada, compacta: lo que se viene a mirar son las barras.
+  const [compacta, setCompacta] = useState(() => { try { return localStorage.getItem("foreman_gantt_compacta") !== "0"; } catch { return true; } });
   const alternarCompacta = () => setCompacta(c => { try { localStorage.setItem("foreman_gantt_compacta", c ? "0" : "1"); } catch {} return !c; });
   const COLS = compacta ? "minmax(230px,1fr) 54px 68px" : "minmax(230px,1fr) 54px 112px 112px 52px 68px";
   const IZQ = compacta ? 230 + 54 + 68 + 2 * 7 + 12 : 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12;
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
-  const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
+  // PANTALLA COMPLETA. Dentro de la página, el cronograma vive entre el menú y
+  // los márgenes de la app: a las barras les quedaba una porción chica de la
+  // pantalla. Completa ocupa la ventana entera; Esc la cierra.
+  const [completa, setCompleta] = useState(false);
+  // AJUSTAR: cada día mide lo que haga falta para que la obra entera entre en
+  // el ancho que hay. Es el de entrada: primero se mira la obra completa, y
+  // con + se acerca a lo que importa.
+  const [anchoCaja, setAnchoCaja] = useState(0);
+  const disponible = anchoCaja - IZQ - 7 - 12 - 6;
+  const zoomReal = zoom === "ajustar"
+    ? (disponible > 0 ? Math.min(60, Math.max(3, disponible / diasTotales)) : 14)
+    : zoom;
+  const anchoLienzo = zoom === "ajustar" ? Math.max(120, Math.floor(diasTotales * zoomReal)) : Math.max(320, Math.round(diasTotales * zoomReal));
+  useEffect(() => { onZoomReal?.(zoomReal); }, [zoomReal]); // eslint-disable-line
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
   const largo = a => (a.inicio && a.fin ? Math.max(cal.entre(a.inicio, a.fin), 1) / diasTotales : 0);
   const dentro = hoyISO >= plan.inicio && hoyISO <= plan.fin;
@@ -271,6 +285,24 @@ export default function TablaGantt({
   // lado en cuanto algo cambia. Medir es la única manera de que las flechas
   // sigan a las barras cuando se despliega una etapa o se abre una ficha.
   const cajaRef = useRef(null);
+  useLayoutEffect(() => {
+    const caja = cajaRef.current;
+    if (!caja) return undefined;
+    const medirAncho = () => setAnchoCaja(caja.clientWidth);
+    medirAncho();
+    const ro = new ResizeObserver(medirAncho);
+    ro.observe(caja);
+    return () => ro.disconnect();
+  }, [completa]);
+  useEffect(() => {
+    if (!completa) return undefined;
+    const salir = e => { if (e.key === "Escape") setCompleta(false); };
+    window.addEventListener("keydown", salir);
+    // La página de atrás no se mueve mientras el cronograma ocupa todo.
+    const antes = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", salir); document.body.style.overflow = antes; };
+  }, [completa]);
   const [verEnlaces, setVerEnlaces] = useState(true);
   const [enlaces, setEnlaces] = useState({ lineas: [], ancho: 0, alto: 0 });
   // SOLO SE GUARDA LO QUE CAMBIÓ.
@@ -336,7 +368,7 @@ export default function TablaGantt({
     return () => ro.disconnect();
     // Se vuelve a medir cuando cambia cualquier cosa que mueva una barra de
     // lugar: el zoom, una ficha abierta, una etapa plegada, la lista de rubros.
-  }, [verEnlaces, dependencias, todas, zoom, escala, abierta, plegados, verRubros, fases, anchoLienzo, IZQ, compacta]);
+  }, [verEnlaces, dependencias, todas, zoom, escala, abierta, plegados, verRubros, fases, anchoLienzo, IZQ, compacta, completa, anchoCaja]);
 
   // RECORRERLO CON EL MOUSE. Se agarra el fondo del cronograma y se arrastra:
   // a los costados corre el cronograma, arriba y abajo corre la página. No en
@@ -352,7 +384,8 @@ export default function TablaGantt({
       if (!r.movido && Math.abs(dx) + Math.abs(dy) < 4) return;
       if (!r.movido) { r.movido = true; setArrastrando(true); }
       cajaRef.current.scrollLeft = r.left - dx;
-      window.scrollTo(window.scrollX, r.top - dy);
+      if (r.adentro) cajaRef.current.scrollTop = r.top - dy;
+      else window.scrollTo(window.scrollX, r.top - dy);
       e.preventDefault();
     };
     const soltar = () => {
@@ -372,14 +405,34 @@ export default function TablaGantt({
   const agarrar = e => {
     if (e.button !== 0) return;
     if (e.target.closest("input,button,select,textarea,a,label,.gantt-fijo,[contenteditable]")) return;
-    arrastre.current = { x: e.clientX, y: e.clientY, left: cajaRef.current.scrollLeft, top: window.scrollY, movido: false };
+    // En pantalla completa lo que corre arriba y abajo es el cronograma, no la página.
+    arrastre.current = completa
+      ? { x: e.clientX, y: e.clientY, left: cajaRef.current.scrollLeft, top: cajaRef.current.scrollTop, adentro: true, movido: false }
+      : { x: e.clientX, y: e.clientY, left: cajaRef.current.scrollLeft, top: window.scrollY, movido: false };
   };
 
   return (
     <div ref={cajaRef} onMouseDown={agarrar} className={compacta ? "gantt-compacta" : undefined}
-      style={{ position: "relative", background: colors.surface, border: `1px solid ${colors.border}`,
-      borderRadius: colors.radiusMd, overflowX: "auto", cursor: arrastrando ? "grabbing" : "grab",
-      userSelect: arrastrando ? "none" : undefined }}>
+      style={{ position: completa ? "fixed" : "relative", background: colors.surface, border: `1px solid ${colors.border}`,
+      borderRadius: completa ? 0 : colors.radiusMd, overflowX: "auto", cursor: arrastrando ? "grabbing" : "grab",
+      userSelect: arrastrando ? "none" : undefined,
+      ...(completa ? { inset: 0, zIndex: 1000, overflowY: "auto" } : {}) }}>
+      {/* Arriba de todo en pantalla completa: el zoom y cómo salir. Pegado
+          arriba mientras se recorre. */}
+      {completa && (
+        <div style={{ position: "sticky", top: 0, left: 0, zIndex: 6, display: "flex", alignItems: "center", gap: 10,
+          padding: "8px 12px", background: colors.surface, borderBottom: `1px solid ${colors.border}`, width: "100%", boxSizing: "border-box" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Cronograma</span>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {herramientas}
+            <button onClick={() => setCompleta(false)}
+              style={{ padding: "5px 11px", borderRadius: 6, border: `1px solid ${colors.border}`, background: "#fff",
+                color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600 }}>
+              ✕ Salir <span style={{ color: colors.muted, fontWeight: 400 }}>(Esc)</span>
+            </button>
+          </span>
+        </div>
+      )}
       {/* En la tabla compacta, la 3.ª, 4.ª y 5.ª celda de cada fila fija
           (empieza, termina y colchón) no se muestran. Las tres filas fijas
           —encabezado, grupo y actividad— tienen las mismas seis celdas en el
@@ -409,8 +462,16 @@ export default function TablaGantt({
               style={{ background: compacta ? colors.brandSoft : "none", border: `1px solid ${compacta ? "transparent" : colors.border}`, borderRadius: 4,
                 color: compacta ? colors.brand : colors.muted, cursor: "pointer", fontFamily: colors.font,
                 fontSize: 9, fontWeight: 700, letterSpacing: 0.3, padding: "2px 6px" }}>
-              {compacta ? "⇤ VER FECHAS" : "⇥ MÁS LUGAR A LAS BARRAS"}
+              {compacta ? "⇤ FECHAS" : "⇥ BARRAS"}
             </button>
+            {!completa && (
+              <button onClick={() => setCompleta(true)} title="El cronograma en toda la pantalla. Esc para volver."
+                style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 4,
+                  color: colors.muted, cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 9, fontWeight: 700, letterSpacing: 0.3, padding: "2px 6px" }}>
+                ⛶ COMPLETA
+              </button>
+            )}
           </span>
           <span style={{ textAlign: "center" }}>DÍAS</span>
           <span>EMPIEZA</span>
