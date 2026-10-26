@@ -532,7 +532,7 @@ export default function TablaGantt({
                         salía sin nombre — el dato por el que uno mira la fila.
                         Un piso de 84px: antes se recorta el aviso. */}
                     <span style={{ minWidth: 84, flex: "1 1 auto", overflow: "hidden" }}>
-                      <span style={{ display: "block", fontWeight: 700, color: colors.ink, overflow: "hidden",
+                      <span title={g.nombre} style={{ display: "block", fontWeight: 700, color: colors.ink, overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.25 }}>
                         {numeroDe.get(g.hijas[0]?.id) && (
                           <span title="Su lugar en el plan" style={{ color: colors.muted, fontWeight: 600 }}>
@@ -662,8 +662,11 @@ export default function TablaGantt({
                                 color: j === g.hijas.length - 1 ? colors.border : colors.muted }}>▼</button>
                           </div>
                         )}
+                        {/* EL NOMBRE ENTERO AL PASAR EL MOUSE. Cortado con "…" no se
+                            sabe qué es "Picado de contrapiso para fundición de…";
+                            la ayuda decía qué hace el botón y no qué dice la fila. */}
                         <button onClick={() => setAbierta(esta ? null : a.id)}
-                          title="Ver y cambiar de qué depende, su etapa y su fecha"
+                          title={`${numeroDe.get(a.id) ? `${numeroDe.get(a.id)} ` : ""}${a.nombre}\n\nTocá para ver de qué depende, su etapa y su fecha.`}
                           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
                             textAlign: "left", flex: "1 1 auto", minWidth: 40, overflow: "hidden" }}>
                           <span style={{ display: "block", fontSize: 12, color: colors.ink, fontWeight: g.simple ? 600 : 400,
@@ -1408,7 +1411,9 @@ const colorDe = a => (a.externo ? colors.inkSoft : a.critica ? colors.danger : c
 
 const Barra = ({ ui, a, tenue, marca }) => {
   if (!a.inicio) return null;
-  const cuando = `${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`;
+  // Sobre la barra, el nombre primero: en la zona de barras no hay otra forma
+  // de saber de qué trabajo es la que uno está mirando.
+  const cuando = `${a.nombre}\n${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`;
 
   // UN HITO ES UN ROMBO ÁMBAR, NO UNA BARRA DE UN DÍA.
   //
