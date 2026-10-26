@@ -50,6 +50,10 @@ function enPalabras(a) {
  */
 export async function proponerPlan({ agrupaciones = [], meses = 0, dias: diasPlazo = 0,
   nombreObra = "", comoVa = "", cal = calendario(), cubrirPresupuesto = true }) {
+  // Una obra grande no entra en un solo pedido: se arma por partes.
+  if (agrupaciones.length > PARTIR_DESDE) {
+    return proponerPlanPorPartes({ agrupaciones, meses, dias: diasPlazo, nombreObra, comoVa, cal, cubrirPresupuesto });
+  }
   const dias = diasPlazo || Math.max(20, Math.round((meses || 6) * 26));
   const { memoria } = await leerMemoria("cronograma");
   const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
@@ -176,6 +180,170 @@ NO DEVUELVAS DEPENDENCIAS. El orden se pide aparte.`;
   } catch (e) {
     return { error: "NOVA devolvió algo que no se entiende: " + e.message };
   }
+}
+
+// ── LA OBRA GRANDE, POR PARTES ──────────────────────────────────────────────
+//
+// NOVA tiene un minuto por pedido: es lo que el servidor deja. Con trece
+// capítulos el cronograma entero —etapas, trabajos, días y el porqué de cada
+// uno— no se alcanza a escribir en un minuto, y el servidor la corta a mitad
+// de camino. No llegaba nada.
+//
+// Entonces se piensa como se piensa una obra: primero el esqueleto —qué
+// etapas hay y qué trabajos van en cada una, que es una respuesta corta— y
+// después cada etapa con sus días, todas a la vez. Ningún pedido se acerca al
+// minuto, y si una etapa falla, las demás llegan igual.
+
+const PARTIR_DESDE = 6;
+
+function jornadaDe(cal) {
+  const L = cal?.laborables || [1, 2, 3, 4, 5, 6];
+  return L.length === 7 ? "se trabaja los siete días"
+    : L.includes(6) ? "se trabaja de lunes a sábado" : "se trabaja de lunes a viernes, sin sábados";
+}
+
+const loQueCuenta = comoVa => (comoVa ? `
+LO QUE CUENTA QUIEN DIRIGE LA OBRA. Esto manda sobre tu criterio: es lo único
+de esta obra que no está en ningún dato.
+"""
+${String(comoVa).slice(0, 3000)}
+"""
+` : "");
+
+const DURACION_DE_LA_CANTIDAD = `CÓMO SALE LA DURACIÓN: DE LA CANTIDAD, NO DE LA PLATA.
+
+  días = cantidad ÷ (lo que rinde una cuadrilla por día × cuántas cuadrillas)
+
+Usá rendimientos de obra en Ecuador. No pongas "20 días" porque suena
+razonable: si la agrupación trae 1.240 m2 y ponés 20 días, estás diciendo 62 m2
+por día, y eso tiene que ser verdad. Esa cuenta va en "porque", en diez
+palabras. Sin cantidades, estimá por la plata y escribí "estimado sin
+cantidades".`;
+
+async function pedirJson(sistema, pedido, max_tokens) {
+  const { res, data } = await pedirANova({
+    model: JUICIO, max_tokens, system: sistema,
+    messages: [{ role: "user", content: pedido }],
+  });
+  if (!res.ok || data?.error) return { error: porQueFallo(res, data, "armar el plan") };
+  const { datos, cortado } = jsonTolerante(textoDeNova(data));
+  if (!datos) {
+    const muestra = String(textoDeNova(data) || "").trim().slice(0, 220);
+    return { error: `NOVA devolvió algo que no se entiende. Empezaba así:\n\n${muestra || "(vacío)"}` };
+  }
+  return { datos, cortado };
+}
+
+async function proponerPlanPorPartes({ agrupaciones, meses, dias: diasPlazo, nombreObra, comoVa, cal, cubrirPresupuesto }) {
+  const dias = diasPlazo || Math.max(20, Math.round((meses || 6) * 26));
+  const { memoria } = await leerMemoria("cronograma");
+  const cabeza = `Sos NOVA y armás el cronograma de la obra "${nombreObra}", en Ecuador.
+${memoriaEnPalabras(memoria, "cronograma")}
+La obra dura ${dias} días de trabajo contados en su calendario: ${jornadaDe(cal)}.`;
+
+  // 1 · EL ESQUELETO: etapas, sus agrupaciones y sus trabajos. Solo nombres.
+  const esqueleto = await pedirJson(`${cabeza}
+
+EL PRESUPUESTO, agrupado, con su plata y SU TAMAÑO medido:
+${agrupaciones.map(enPalabras).join("\n")}
+${loQueCuenta(comoVa)}
+PRIMERO EL ESQUELETO. Los días se piden después, etapa por etapa.
+
+Devolvés SOLO JSON, sin markdown:
+
+{"etapas":[
+  {"nombre":"Preliminares","agrupaciones":[1],
+   "trabajos":["Desmontaje de instalaciones existentes","Replanteo y trazado"]},
+  {"nombre":"Obra gris","agrupaciones":[2,3],
+   "trabajos":["Mampostería","Paso de tubería antes del enlucido","Enlucidos"]}]}
+
+ASÍ SE PIENSA UNA OBRA: POR ETAPAS. Entre tres y seis, en el orden en que
+ocurren —preliminares, demoliciones, obra gris, instalaciones, acabados,
+equipamiento, entrega— con los nombres con los que se habla en obra. No hagas
+una etapa por agrupación: eso no es una etapa, es una lista.
+
+"trabajos" son los trabajos de esa etapa con nombre de obra, en el orden en que
+se hacen. NO TODOS SON RUBROS: el desmontaje de lo que había, el replanteo, las
+pruebas de las instalaciones, la limpieza final, la recepción. Si hace falta
+hacerlo, va. Entre dos y diez por etapa.
+
+"agrupaciones" son los ids del presupuesto que se ejecutan en esa etapa.
+${cubrirPresupuesto
+    ? "CADA ID APARECE EN UNA SOLA ETAPA, y todos tienen que aparecer: el que falte queda sin tiempo y la obra sin esa plata."
+    : "El presupuesto es una referencia, no el índice: poné cada id en la etapa donde se hace, sin forzar."}`,
+    "El esqueleto de la obra por etapas. Solo JSON.", 3000);
+  if (esqueleto.error) return { error: esqueleto.error };
+  const etapas = (esqueleto.datos?.etapas || []).filter(e => e?.nombre && (e.trabajos?.length || e.agrupaciones?.length));
+  if (!etapas.length) return { error: "NOVA no devolvió ninguna etapa. Probá de nuevo." };
+
+  const porId = new Map(agrupaciones.map(a => [Number(a.id), a]));
+  const nombres = etapas.map((e, i) => `${i + 1}. ${e.nombre}`).join("\n");
+
+  // 2 · CADA ETAPA CON SUS DÍAS, todas a la vez.
+  const detallar = async (e, i) => {
+    const suyas = (e.agrupaciones || []).map(Number).map(id => porId.get(id)).filter(Boolean);
+    const trabajos = (e.trabajos || []).map(t => String(t || "").trim()).filter(Boolean);
+    const sistema = `${cabeza}
+
+LAS ETAPAS DE LA OBRA, en orden:
+${nombres}
+
+Ahora detallás SOLO la etapa ${i + 1}: "${e.nombre}".
+${suyas.length ? `
+LO DEL PRESUPUESTO QUE SE HACE EN ESTA ETAPA, con su plata y su tamaño:
+${suyas.map(enPalabras).join("\n")}
+` : "\nEsta etapa no tiene agrupaciones del presupuesto: son trabajos de obra.\n"}
+LOS TRABAJOS DE ESTA ETAPA, en orden:
+${trabajos.map(t => `· ${t}`).join("\n") || "· (decidilos vos)"}
+${loQueCuenta(comoVa)}
+Devolvés SOLO JSON, sin markdown:
+
+{"actividades":[
+  {"nombre":"Mampostería","dias":15,"agrupacion":2,"porque":"420 m2 / 2 cuadrillas x 14 m2 dia",
+   "incluye":["trazado","dinteles"]},
+  {"nombre":"Llegada de la ventanería importada","hito":true,"porque":"fecha del proveedor"}]}
+
+UNA ACTIVIDAD POR TRABAJO de la lista, en ese orden y con ese nombre. Podés
+sumar uno o dos HITOS de esta etapa si los tiene de verdad —un anticipo, una
+llegada, una inspección, una entrega—: van con "hito": true y sin "dias".
+
+"agrupacion" es el id de arriba cuando el trabajo ES esa agrupación, o null.
+${cubrirPresupuesto && suyas.length
+    ? "Cada agrupación de esta etapa tiene que quedar en un trabajo, y en uno solo."
+    : "No fuerces la correspondencia: ante la duda, null."}
+
+${DURACION_DE_LA_CANTIDAD}
+
+Ninguna actividad dura más que la obra entera. "incluye" es opcional: dos a
+cuatro cosas que pasan adentro de esa barra y no son rubros.
+
+NO DEVUELVAS DEPENDENCIAS. El orden se pide aparte.`;
+    let r = await pedirJson(sistema, `La etapa "${e.nombre}" con sus días. Solo JSON.`, 3000);
+    if (r.error) r = await pedirJson(sistema, `La etapa "${e.nombre}" con sus días. Solo JSON.`, 3000);
+    if (!r.error && r.datos?.actividades?.length) return { nombre: e.nombre, actividades: r.datos.actividades, cortado: r.cortado };
+
+    // Si esta etapa no llega, la obra no se pierde por ella: entran sus
+    // trabajos con una duración pareja y avisando que hay que mirarla.
+    const parejo = Math.max(1, Math.round(dias / etapas.length / Math.max(1, trabajos.length)));
+    return {
+      nombre: e.nombre, fallo: true,
+      actividades: trabajos.map((t, k) => ({
+        nombre: t, dias: parejo,
+        agrupacion: suyas.length === trabajos.length ? suyas[k].id : null,
+        porque: "NOVA no alcanzó a pensar esta etapa: duración a revisar",
+      })),
+    };
+  };
+  const hechas = await Promise.all(etapas.map(detallar));
+
+  const crudo = normalizarPlan({ etapas: hechas }, agrupaciones);
+  const plan = cubrirPresupuesto ? conLasFaltantes(crudo, dias) : crudo;
+  if (!plan.barras) return { error: "NOVA no devolvió ninguna actividad. Probá de nuevo." };
+  return {
+    plan,
+    cortado: esqueleto.cortado || hechas.some(h => h.cortado),
+    etapasSinPensar: hechas.filter(h => h.fallo).map(h => h.nombre),
+  };
 }
 
 /**

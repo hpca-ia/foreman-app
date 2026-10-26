@@ -482,6 +482,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     laborables: lead.crono_laborables || [1, 2, 3, 4, 5, 6],
     feriados: lead.crono_feriados || [],
   });
+  // SIN FECHA DE ARRANQUE. Un presupuesto todavía no sabe cuándo empieza:
+  // depende de que el cliente firme. Su cronograma se cuenta en días de obra
+  // —"del día 12 al 30"— y no en fechas que serían inventadas. Por dentro se
+  // calcula desde hoy, que es lo mismo corrido; afuera solo se ven días.
+  const sinFecha = esDePresupuesto(lead) && !lead.crono_inicio;
   const plan = calcular({
     actividades: actividades.map(a => ({ ...a, duracion: a.duracion })),
     dependencias,
@@ -1449,6 +1454,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
       paso(`${r.plan.faltantes.length} ${obra?.id ? "agrupaciones" : "capítulos"} quedaron en "Sin ubicar": hay que mirarlos.`, true);
     }
     if (r.cortado) paso("La respuesta vino cortada: guardé lo que llegó entero.", true);
+    if (r.etapasSinPensar?.length) {
+      paso(`NOVA no alcanzó a pensar ${r.etapasSinPensar.join(", ")}: entró con duraciones parejas para revisar.`, true);
+    }
 
     // Sin obra no hay control que vigilar: lo que se comprometa con las
     // agrupaciones se decide cuando la obra exista.
@@ -1479,9 +1487,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   async function armarPrimero() {
     const meses = Math.round(Number(primero?.meses ?? lead.crono_meses) || 0);
     if (meses < 1) { setError("Poné cuántos meses dura la obra: es contra ese número que NOVA arma."); return; }
-    const inicio = primero.inicio || lead.crono_inicio || hoy();
+    const sinArranque = esDePresupuesto(lead) && (primero.sinFecha ?? !lead.crono_inicio);
+    const inicio = sinArranque ? null : (primero.inicio || lead.crono_inicio || hoy());
     const laborables = primero.laborables || lead.crono_laborables || [1, 2, 3, 4, 5, 6];
-    const fin = finDeMeses(inicio, meses);
+    const fin = sinArranque ? null : finDeMeses(inicio, meses);
     const err = await guardarPlazo(lead, { inicio, meses, fin, laborables });
     if (err) { setError(err); return; }
     setLead(l => ({ ...l, crono_inicio: inicio, crono_meses: meses, crono_fin: fin, crono_laborables: laborables }));
@@ -1489,7 +1498,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     setPrimero(v => ({ ...v, pasos: [] }));
     const paso = (texto, mal) => setPrimero(v => ({ ...v, pasos: [...(v?.pasos || []), { texto, mal }] }));
     const ok = await armarConNova({
-      meses, dias: diasHastaFin(inicio, fin, c), cal: c,
+      meses, dias: fin ? diasHastaFin(inicio, fin, c) : diasDelPlazo(hoy(), meses, c), cal: c,
       comoVa: primero.comoVa || "", cubrir: !!primero.cubrir, paso,
     });
     if (!ok) return;
@@ -1503,6 +1512,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   const primeraVez = editable && !aMano && (esDePresupuesto(lead) || !!obra?.id)
     && leidoDe === claveDe(lead) && !actividades.length;
   const dePres = esDePresupuesto(lead);
+  // Un presupuesto nace sin fecha: arranca cuando el cliente firme.
+  const primeroSinFecha = dePres && (primero.sinFecha ?? !lead.crono_inicio);
 
   return (
     <div style={{ fontFamily: colors.font }}>
@@ -1551,9 +1562,20 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
               <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
                 ARRANCA
               </label>
-              <input type="date" value={primero.inicio || lead.crono_inicio || hoy()}
-                onChange={e => setPrimero(v => ({ ...v, inicio: e.target.value }))}
-                style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }} />
+              {primeroSinFecha ? (
+                <div style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12, color: colors.muted }}>Sin fecha</div>
+              ) : (
+                <input type="date" value={primero.inicio || lead.crono_inicio || hoy()}
+                  onChange={e => setPrimero(v => ({ ...v, inicio: e.target.value }))}
+                  style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }} />
+              )}
+              {dePres && (
+                <label style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 4, fontSize: 11, color: colors.inkSoft, cursor: "pointer" }}>
+                  <input type="checkbox" checked={primeroSinFecha}
+                    onChange={e => setPrimero(v => ({ ...v, sinFecha: e.target.checked }))} />
+                  Todavía sin fecha: contar en días de obra
+                </label>
+              )}
             </div>
             <div>
               <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
@@ -1685,11 +1707,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
               })}
             </div>
             <div style={{ display: "inline-flex", gap: 3, background: colors.neutralSoft, borderRadius: 7, padding: 3 }}>
-              {[["fecha", "Fechas"], ["dia", "Días"]].map(([v, l]) => (
+              {(sinFecha ? [["dia", "Días de obra"]] : [["fecha", "Fechas"], ["dia", "Días"]]).map(([v, l]) => (
                 <button key={v} onClick={() => setEscala(v)}
                   style={{ padding: "4px 10px", borderRadius: 5, border: "none", cursor: "pointer", fontFamily: colors.font,
-                    fontSize: 11.5, fontWeight: 600, background: escala === v ? "#fff" : "transparent",
-                    color: escala === v ? colors.brand : colors.inkSoft }}>{l}</button>
+                    fontSize: 11.5, fontWeight: 600, background: (sinFecha || escala === v) ? "#fff" : "transparent",
+                    color: (sinFecha || escala === v) ? colors.brand : colors.inkSoft }}>{l}</button>
               ))}
             </div>
           </div>
@@ -1709,14 +1731,41 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
             <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
               ARRANCA
             </label>
-            <input type="date" value={lead.crono_inicio || hoy()}
-              style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }}
-              onChange={async e => {
-                const err = await guardarPlazo(lead, { inicio: e.target.value });
+            {sinFecha ? (
+              <div style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12, color: colors.muted,
+                display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                Sin fecha
+                <button onClick={async () => {
+                  const err = await guardarPlazo(lead, { inicio: hoy() });
+                  if (err) { setError(err); return; }
+                  setError("");
+                  setLead(l => ({ ...l, crono_inicio: hoy() }));
+                }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11, color: colors.brand, textDecoration: "underline" }}>ponerle</button>
+              </div>
+            ) : (
+              <input type="date" value={lead.crono_inicio || hoy()}
+                style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }}
+                onChange={async e => {
+                  const err = await guardarPlazo(lead, { inicio: e.target.value });
+                  if (err) { setError(err); return; }
+                  setError("");
+                  setLead(l => ({ ...l, crono_inicio: e.target.value }));
+                }} />
+            )}
+            {/* Un presupuesto puede volver a no tener fecha: se cotizó con una
+                y el cliente todavía no firma. */}
+            {esDePresupuesto(lead) && !sinFecha && (
+              <button onClick={async () => {
+                const err = await guardarPlazo(lead, { inicio: null, fin: null });
                 if (err) { setError(err); return; }
                 setError("");
-                setLead(l => ({ ...l, crono_inicio: e.target.value }));
-              }} />
+                setLead(l => ({ ...l, crono_inicio: null, crono_fin: null }));
+              }} style={{ display: "block", background: "none", border: "none", padding: 0, marginTop: 3, cursor: "pointer",
+                fontFamily: colors.font, fontSize: 10.5, color: colors.muted, textDecoration: "underline" }}>
+                dejarlo sin fecha
+              </button>
+            )}
           </div>
           {/* TERMINA, por fecha. Un contrato de obra casi nunca dice "ocho
               meses": dice "hasta el 15 de noviembre". Traducir esa fecha a
@@ -1726,7 +1775,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
               Los dos campos escriben lo mismo y se siguen: poner la fecha
               calcula los meses y poner los meses calcula la fecha. Manda la
               fecha cuando está, porque es la que alguien escribió a mano. */}
-          <div>
+          {!sinFecha && <div>
             <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
               TERMINA
             </label>
@@ -1742,7 +1791,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
                 setError("");
                 setLead(l => ({ ...l, crono_fin: f, crono_meses: m }));
               }} />
-          </div>
+          </div>}
           <div>
             <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
               O DURA (MESES)
@@ -1750,7 +1799,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
             <Numero value={lead.crono_meses ?? null} min={1} max={120} vacio={null} placeholder="—"
               style={{ width: 82, padding: "6px 9px", fontSize: 12 }}
               onCommit={async m => {
-                const f = m ? finDeMeses(lead.crono_inicio || hoy(), m) : null;
+                const f = m && !sinFecha ? finDeMeses(lead.crono_inicio || hoy(), m) : null;
                 const err = await guardarPlazo(lead, { meses: m, fin: f });
                 if (err) { setError(err); return; }
                 setError("");
@@ -3397,9 +3446,10 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
 
         <TablaGantt
           todas={todas} dependencias={dependencias} agrupaciones={agrupaciones} plata={plata}
-          porId={porId} cal={cal} plan={plan} escala={escala} zoom={zoom} marcas={marcas}
+          porId={porId} cal={cal} plan={plan} escala={sinFecha ? "dia" : escala} zoom={zoom} marcas={marcas}
           editable={editable} conEtapas={conEtapas}
-          uniendo={uniendo} setUniendo={setUniendo} hoyISO={hoyISO} dia={dia}
+          uniendo={uniendo} setUniendo={setUniendo} hoyISO={sinFecha ? null : hoyISO}
+          dia={sinFecha ? (f => (f ? `día ${diaDeObra(f)}` : "—")) : dia} sinFecha={sinFecha}
           onCambiar={cambiar} onCambiarDep={cambiarDep} onDesunir={desunir}
           onUnir={unir} onQuitar={quitar} onPartir={a => setPartiendo(a)} onMoverRubro={moverRubro}
           onMoverEtapa={moverEtapa}

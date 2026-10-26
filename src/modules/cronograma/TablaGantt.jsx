@@ -101,7 +101,7 @@ const titulito = { fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSp
 export default function TablaGantt({
   todas = [], dependencias = [], agrupaciones = [], plata = {},
   porId, cal, plan, escala, zoom, marcas = [], editable, conEtapas,
-  uniendo, setUniendo, hoyISO, dia,
+  uniendo, setUniendo, hoyISO, dia, sinFecha = false,
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
   rubros = [], sinSenalar, onSenalar, platas = null, memoria = [],
   fases = [], onFase,
@@ -682,7 +682,9 @@ export default function TablaGantt({
                           Ahora dice el arranque de verdad, y cuando hay un
                           piso distinto se avisa abajo: eso es información, y
                           es la que explica por qué no arranca cuando se pidió. */}
-                      {editable ? (
+                      {/* Sin fecha de arranque no hay fecha que escribir: se
+                          muestra el día de obra y se mueve con los días. */}
+                      {editable && !sinFecha ? (
                         <input type="date" value={a.inicio || a.inicio_fijo || ""}
                           title={a.inicio_fijo && a.inicio && a.inicio_fijo !== a.inicio
                             ? `Arranca el ${dia(a.inicio)} porque espera a lo que tiene antes. Se pidió que no empiece antes del ${dia(a.inicio_fijo)}.`
@@ -694,7 +696,7 @@ export default function TablaGantt({
                             color: a.inicio_fijo ? colors.brand : colors.inkSoft,
                             fontWeight: a.inicio_fijo ? 600 : 400 }} />
                       ) : <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>}
-                      {editable ? (
+                      {editable && !sinFecha ? (
                         <input type="date" value={a.fin || ""}
                           title="Escribí hasta cuándo va y la duración se calcula sola, contando solo días de trabajo."
                           onChange={e => {
