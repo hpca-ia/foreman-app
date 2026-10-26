@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, Fragment } from "react";
+import { esNoCotiza, motivoNoCotiza } from "./presupuestos/estructura";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import ElegirProyecto from "../components/ElegirProyecto";
@@ -732,6 +733,21 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         ? "Para pasar rubros a extras falta correr en Supabase la migración 122 (extras del capítulo)."
         : "No se pudo cambiar: " + error.message);
     }
+  }
+
+  /**
+   * Marcar como NO COTIZA los rubros seleccionados. La nota que ya tuvieran
+   * queda como su motivo —casi siempre es justo eso: "lo provee el cliente"—
+   * y se corrige abajo, en el cuadro de los que no se cotizan.
+   */
+  async function marcarNoCotiza() {
+    const marcados = moviendo.map(x => itemsRef.current.find(i => i.id === x.id)).filter(Boolean).filter(i => !esNoCotiza(i));
+    setMoviendo([]);
+    for (const i of marcados) {
+      const previa = String(i.nota || "").trim();
+      await actualizarItemMulti(i.id, { nota: previa ? `NO COTIZA - ${previa}` : "NO COTIZA" });
+    }
+    if (marcados.length) setTimeout(() => document.getElementById("no-se-cotizan")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
   }
 
   /**
@@ -1768,6 +1784,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       <button onClick={()=>ponerEnExtras(moviendo.map(x=>x.id),false)}
                         style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",
                           fontFamily:"inherit",fontSize:11}}>sacarlos de extras</button>
+                      <span style={{fontSize:11.5,color:"var(--ink-soft)",marginLeft:6}}>…o</span>
+                      <button onClick={marcarNoCotiza}
+                        style={{background:"#fff",border:"1px solid var(--border)",borderRadius:7,padding:"4px 10px",
+                          color:"var(--ink-soft)",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
+                        No se cotizan
+                      </button>
                     </div>
                   )}
                   <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
@@ -2006,6 +2028,16 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               </div>
             )}
           </div>
+
+          {/* LOS QUE NO SE COTIZAN, JUNTOS. Se marcan con la nota "NO
+              COTIZA" en su fila; acá se ven todos y se escribe el porqué de
+              cada uno, que es lo que sale al pie del documento. */}
+          <NoSeCotizan
+            items={items.filter(esNoCotiza).sort((a,b)=>
+              ((capitulosActivos.find(c=>c.nombre===a.capitulo)?.orden||999)-(capitulosActivos.find(c=>c.nombre===b.capitulo)?.orden||999))||(a.orden-b.orden))}
+            onMotivo={(item,motivo)=>actualizarItemMulti(item.id,{nota:motivo?`NO COTIZA - ${motivo}`:"NO COTIZA"})}
+            onQuitar={item=>actualizarItemMulti(item.id,{nota:motivoNoCotiza(item.nota)||null})}
+            onPrecioCero={item=>actualizarItemMulti(item.id,{precio_unitario:0})}/>
 
           </>}
 
@@ -2322,5 +2354,52 @@ function NotaDeRubro({ item, onGuardar }) {
       onKeyDown={e=>{ if(e.key==="Escape"){ e.currentTarget.value=item.nota||""; e.currentTarget.blur(); } }}
       style={{width:"100%",boxSizing:"border-box",margin:"3px 0 1px",background:"var(--warning-soft)",border:"1px solid var(--warning-border)",
         borderRadius:6,padding:"4px 6px",fontSize:11,color:"var(--ink)",fontFamily:"var(--font)",outline:"none",resize:"vertical",lineHeight:1.35}}/>
+  );
+}
+
+// LOS RUBROS QUE NO SE COTIZAN, CON SU PORQUÉ.
+//
+// Se marcan con la nota "NO COTIZA" en su fila. Acá se juntan y se escribe el
+// motivo de cada uno: el documento los saca del cuadro de precios y los lista
+// al pie con ese porqué. El motivo se guarda en la misma nota —"NO COTIZA -
+// lo provee el cliente"—, así no hay dos lugares que se contradigan.
+function NoSeCotizan({ items, onMotivo, onQuitar, onPrecioCero }) {
+  if (!items.length) return null;
+  const sinMotivo = items.filter(i => !motivoNoCotiza(i.nota)).length;
+  return (
+    <div id="no-se-cotizan" style={{marginBottom:16,background:"#fff",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,flexWrap:"wrap",padding:"9px 14px",background:"var(--bg)",borderBottom:"1px solid var(--border)"}}>
+        <span style={{fontSize:13,fontWeight:700,color:"var(--ink)"}}>Rubros que no se cotizan <span style={{fontWeight:400,color:"var(--muted)"}}>({items.length})</span></span>
+        <span style={{fontSize:11,color:sinMotivo?"var(--warning)":"var(--muted)"}}>
+          {sinMotivo?`${sinMotivo} sin motivo: escríbelo, es lo que sale al pie del documento`:"Salen al pie del documento, con su motivo"}
+        </span>
+      </div>
+      {items.map(item=>{
+        const motivo=motivoNoCotiza(item.nota);
+        return(
+          <div key={item.id} style={{display:"flex",flexWrap:"wrap",gap:"6px 10px",alignItems:"center",padding:"8px 14px",borderBottom:"1px solid var(--neutral-soft)"}}>
+            <div style={{minWidth:0,flex:"1 1 180px"}}>
+              <div style={{fontSize:10,color:"var(--muted)",textTransform:"uppercase"}}>{item.capitulo}</div>
+              <div style={{fontSize:12,color:"var(--ink)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={item.descripcion}>{item.descripcion}</div>
+              {Number(item.total)>0&&(
+                <div style={{fontSize:10.5,color:"var(--warning)"}}>
+                  Tiene precio y suma al total.{" "}
+                  <button onClick={()=>onPrecioCero(item)} style={{background:"none",border:"none",padding:0,color:"var(--brand)",fontSize:10.5,cursor:"pointer",textDecoration:"underline",fontFamily:"var(--font)"}}>Ponerlo en $0</button>
+                </div>
+              )}
+            </div>
+            {/* key con el motivo: si cambia desde la fila, el campo se entera. */}
+            <input key={motivo} defaultValue={motivo} placeholder="¿Por qué no se cotiza? Ej: lo provee el cliente"
+              onBlur={e=>{const v=e.target.value.trim(); if(v!==motivo) onMotivo(item,v);}}
+              onKeyDown={e=>{if(e.key==="Enter") e.currentTarget.blur(); if(e.key==="Escape"){e.currentTarget.value=motivo;e.currentTarget.blur();}}}
+              style={{flex:"2 1 220px",minWidth:0,boxSizing:"border-box",background:motivo?"var(--bg)":"var(--warning-soft, #fff7e6)",border:`1px solid ${motivo?"var(--border)":"var(--warning-border, #f0c36d)"}`,borderRadius:7,padding:"7px 10px",fontSize:12,color:"var(--ink)",fontFamily:"var(--font)",outline:"none"}}/>
+            <button onClick={()=>onQuitar(item)} title="Que vuelva al cuadro de precios. Si tenía motivo, queda como nota."
+              style={{flex:"none",background:"none",border:"none",color:"var(--muted)",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"var(--font)"}}>
+              sí se cotiza
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }
