@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import ElegirProyecto from "../components/ElegirProyecto";
@@ -650,7 +650,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     const orden = capOrden * 1000;
     // Los que ya estaban corren un lugar para hacerle sitio.
     const corridos = delCap.map(i=>({ ...i, orden: capOrden * 1000 + ((Number(i.orden)||0) % 1000) + 1 }));
-    const { data } = await supabase.from("presupuesto_items").insert({
+    const { data, error: eIns } = await supabase.from("presupuesto_items").insert({
       presupuesto_id:presupuestoActivo.id,
       capitulo, rubro_id:rubro.id||null,
       descripcion:rubro.descripcion,
@@ -661,8 +661,16 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       precio_base:centavos(rubro.precio_unitario||rubro.precio_referencia),
       utilidad_pct:0,
       total:centavos((Number(rubro.cantidad)||1)*centavos(rubro.precio_unitario||rubro.precio_referencia)),
-      orden
+      orden,
+      // Solo si lo es: sin la migración 122 un rubro normal entra igual.
+      ...(rubro.extra?{extra:true}:{}),
     }).select().single();
+    if (eIns && rubro.extra) {
+      alert(/column|schema cache/i.test(eIns.message)
+        ? "Para agregar extras falta correr en Supabase la migración 122 (extras del capítulo)."
+        : "No se pudo agregar el extra: " + eIns.message);
+      return;
+    }
     if (data) {
       const ni = items.map(i => corridos.find(c=>c.id===i.id) || i).concat(data);
       setItems(ni); recalcTotales(ni);
@@ -1615,7 +1623,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           )}
 
           {capitulosActivos.map((cap,capIdx)=>{
-            const todosDelCap=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>a.orden-b.orden);
+            // Lo pedido primero y los extras al final, como sale impreso.
+            const todosDelCap=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>(!!a.extra-!!b.extra)||(a.orden-b.orden));
+            const capExtras=todosDelCap.filter(i=>i.extra).reduce((s,i)=>s+(Number(i.total)||0),0);
+            const hayExtras=todosDelCap.some(i=>i.extra);
             const capTotal=todosDelCap.reduce((s,i)=>s+(Number(i.total)||0),0);
             // Buscando se ven solo los que calzan, pero el número y las flechas
             // siguen siendo los de su sitio real en el capítulo.
@@ -1741,10 +1752,20 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       ))}
                     </tr></thead>
                     <tbody>
-                      {capItems.map(item=>{
+                      {capItems.map((item,k)=>{
                       const itemIdx=posEnCap.get(item.id);
+                      // El subcapítulo de extras empieza en el primero que lo es.
+                      const abreExtras=item.extra&&!capItems[k-1]?.extra;
                       return(
-                        <tr key={item.id} style={{borderBottom:"1px solid var(--neutral-soft)",
+                        <Fragment key={item.id}>
+                        {abreExtras&&(
+                          <tr style={{background:"var(--bg)",borderTop:"1.5px solid var(--border)"}}>
+                            <td colSpan={7} style={{padding:"6px 8px",fontSize:11,fontWeight:700,color:"var(--brand)",letterSpacing:.3}}>EXTRAS <span style={{fontWeight:400,color:"var(--muted)",letterSpacing:0}}>· suman aparte de lo pedido</span></td>
+                            <td style={{padding:"6px 8px",fontSize:12,fontWeight:700,color:"var(--brand)",textAlign:"right",whiteSpace:"nowrap"}}>${fmt(capExtras)}</td>
+                            <td/>
+                          </tr>
+                        )}
+                        <tr style={{borderBottom:"1px solid var(--neutral-soft)",
                           background: marcado(item.id) ? "var(--brand-soft)" : undefined}}>
                           <td style={{padding:"5px 6px",color:"var(--muted)",fontSize:11,whiteSpace:"nowrap",fontWeight:500,overflow:"hidden"}}>
                             <div style={{display:"flex",alignItems:"center",gap:3,minWidth:0}}>
@@ -1890,9 +1911,24 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                             <button onClick={()=>eliminarItem(item.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
                           </td>
                         </tr>
+                        </Fragment>
                       );})}
                     </tbody>
                   </table>
+                  </div>
+                )}
+                {/* LOS EXTRAS DEL CAPÍTULO. Rubros que no estaban en lo pedido:
+                    van debajo, con su propio subtotal, y suman aparte. El botón
+                    está en todos los capítulos, tengan extras o no. */}
+                {!buscaArmar&&(
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",padding:"7px 14px",borderTop:"1px dashed var(--border)"}}>
+                    <span style={{fontSize:11,color:"var(--muted)"}}>
+                      {hayExtras?<>Extras del capítulo: <strong style={{color:"var(--ink-soft)"}}>${fmt(capExtras)}</strong>, aparte de lo pedido.</>:"Sin extras en este capítulo."}
+                    </span>
+                    <button onClick={()=>{setModalRubro({capitulo:cap.nombre,modo:"manual",extra:true});setManualRubro({descripcion:"",unidad:"",cantidad:1,precio_unitario:0});}}
+                      style={{background:"#fff",border:"1px solid var(--brand)",borderRadius:6,padding:"4px 11px",color:"var(--brand)",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
+                      + Agregar extra
+                    </button>
                   </div>
                 )}
               </div>
@@ -2168,8 +2204,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:520,width:"100%",maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.15)"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div>
-                <div style={{fontSize:14,fontWeight:700,color:"var(--ink)"}}>Agregar rubro</div>
-                <div style={{fontSize:12,color:"var(--brand)",marginTop:2}}>{capitulosActivos.find(c=>c.nombre===modalRubro.capitulo)?.orden}. {modalRubro.capitulo}</div>
+                <div style={{fontSize:14,fontWeight:700,color:"var(--ink)"}}>{modalRubro.extra?"Agregar extra":"Agregar rubro"}</div>
+                <div style={{fontSize:12,color:"var(--brand)",marginTop:2}}>{capitulosActivos.find(c=>c.nombre===modalRubro.capitulo)?.orden}. {modalRubro.capitulo}{modalRubro.extra?" · Extras: suma aparte de lo pedido":""}</div>
               </div>
               <button onClick={()=>setModalRubro(null)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:6,width:28,height:28,color:"var(--ink-soft)",cursor:"pointer",fontSize:15}}>×</button>
             </div>
@@ -2183,7 +2219,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   placeholder="Buscar por nombre o parte del nombre" style={iS}/>
                 <div style={{overflowY:"auto",flex:1}}>
                   <ResultadosBase base={baseRubros} texto={busquedaRubro} alto={9999}
-                    onAgregar={(r,precio)=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:precio})}/>
+                    onAgregar={(r,precio)=>agregarItem(modalRubro.capitulo,{...r,precio_unitario:precio,extra:!!modalRubro.extra})}/>
                 </div>
               </div>
             )}
@@ -2202,7 +2238,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                 <div style={{background:"var(--bg)",borderRadius:8,padding:"8px 12px",fontSize:12,color:"var(--ink-soft)",display:"flex",justifyContent:"space-between"}}>
                   <span>Total:</span><span style={{fontWeight:700,color:"var(--brand)"}}>${fmt((Number(manualRubro.cantidad)||0)*(Number(manualRubro.precio_unitario)||0))}</span>
                 </div>
-                <button onClick={()=>agregarItem(modalRubro.capitulo,{...manualRubro,precio_referencia:manualRubro.precio_unitario})} disabled={!manualRubro.descripcion}
+                <button onClick={()=>agregarItem(modalRubro.capitulo,{...manualRubro,precio_referencia:manualRubro.precio_unitario,extra:!!modalRubro.extra})} disabled={!manualRubro.descripcion}
                   style={{background:manualRubro.descripcion?"var(--brand)":"var(--neutral-soft)",border:"none",borderRadius:8,padding:"10px",color:manualRubro.descripcion?"#fff":"var(--muted)",fontSize:13,fontWeight:600,cursor:manualRubro.descripcion?"pointer":"default"}}>
                   + Agregar al presupuesto
                 </button>

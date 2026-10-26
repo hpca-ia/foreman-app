@@ -6,7 +6,7 @@ import { colors } from "../../theme/colors";
 import { loadFromStorage } from "../../lib/storage";
 import { listarLogos, subirLogo, borrarLogo, logoParaPDF } from "../../lib/logos";
 import { money } from "../../lib/exportar";
-import { FORMATOS, PLANTILLAS, NOTAS_COTIZAR, estructura, totalesDe, versionDe, pdfPresupuesto, excelPresupuesto } from "./documentoPresupuesto";
+import { FORMATOS, PLANTILLAS, NOTAS_COTIZAR, estructura, noCotizados, totalesDe, versionDe, pdfPresupuesto, excelPresupuesto } from "./documentoPresupuesto";
 import { leerCatalogo, guardarNota, retirarNota, leerPredeterminados, guardarPredeterminados, guardarEleccion } from "./datosExportacion";
 import NotasExportacion from "./NotasExportacion";
 import { compararVersiones, renglonesDeCambios, PROMPT_MEMORIA } from "./compararVersiones";
@@ -74,6 +74,10 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // notasCliente es null cuando el presupuesto no vino de un cliente.
   const [notasCliente, setNotasCliente] = useState(null);
   const [origenNotas, setOrigenNotas] = useState("nuestras");
+  // EL RESUMEN GENERAL al inicio: cuánto suma cada capítulo. null es "lo que
+  // corresponde al formato": sí en el del cliente, que así empieza, y no en
+  // el nuestro.
+  const [conResumen, setConResumen] = useState(null);
   // LA MEMORIA DE CAMBIOS, adelante del presupuesto.
   const [carta, setCarta] = useState("");
   const [conCarta, setConCarta] = useState(false);
@@ -113,6 +117,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       if (propia.notasRubro != null) setNotasRubro(propia.notasRubro !== false);
       if (propia.conNotas != null) setConNotas(propia.conNotas !== false);
       if (Array.isArray(propia.notasFuera)) setNotasFuera(propia.notasFuera.map(String));
+      if (propia.conResumen != null) setConResumen(propia.conResumen === true);
       if (propia.notasCliente != null) {
         setNotasCliente(String(propia.notasCliente));
         setOrigenNotas(propia.origenNotas === "cliente" ? "cliente" : "nuestras");
@@ -176,6 +181,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera,
     carta, conCarta, desdeId,
     ...(notasCliente != null ? { notasCliente, origenNotas } : {}),
+    ...(conResumen != null ? { conResumen } : {}),
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -212,7 +218,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line
-  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera, carta, conCarta, desdeId, notasCliente, origenNotas]);
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera, carta, conCarta, desdeId, notasCliente, origenNotas, conResumen]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -291,6 +297,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const fmtM = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const notaM2 = porM2 ? `Valor referencial del costo directo: $${fmtM(porM2)} por m², sobre un área de ${area.toLocaleString("es-EC", { maximumFractionDigits: 2 })} m², antes de honorarios e IVA.` : null;
   const delCliente = notasCliente != null && origenNotas === "cliente";
+  const resumen = conResumen ?? delCliente;
   const notas = formato === "cotizar"
     ? lineas(paraCotizar)
     : !conNotas
@@ -300,12 +307,15 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
         : delCliente ? lineas(notasCliente)
         : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
-  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera,
+  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera, resumen,
     // Al que cotiza no se le cuenta qué negoció el cliente en la versión
     // anterior: es información de la otra mesa.
     carta: conCarta && formato !== "cotizar" ? carta : "" };
   // Los rubros que tienen nota propia, para elegir una por una cuáles salen.
-  const conNota = items.filter(i => String(i.nota || "").trim());
+  // Los de "NO COTIZA" no: su nota no va debajo del rubro, va al pie con el porqué.
+  const sinCotizar = noCotizados({ capitulos, items });
+  const idsSinCotizar = new Set(sinCotizar.map(r => r.id));
+  const conNota = items.filter(i => String(i.nota || "").trim() && !idsSinCotizar.has(i.id));
   const conNotaPropia = conNota.length;
   const notaSale = i => notasRubro && !notasFuera.includes(String(i.id));
   const notasQueSalen = conNota.filter(notaSale).length;
@@ -554,6 +564,15 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                   </>
                 )}
 
+                {formato !== "capitulos" && (
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12,
+                    color: resumen ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm,
+                    padding: "7px 9px", marginBottom: 12, cursor: "pointer", lineHeight: 1.4 }}>
+                    <input type="checkbox" checked={resumen} onChange={e => setConResumen(e.target.checked)} style={{ marginTop: 2 }} />
+                    <span><strong>Resumen general al inicio</strong> — antes del detalle, cuánto suma cada capítulo{items.some(i => i.extra) ? ", con lo pedido y los extras por separado" : ""}.</span>
+                  </label>
+                )}
+
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
                   <span>{delCliente ? "NOTAS DEL CLIENTE" : "NOTAS Y CONDICIONES"}</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
@@ -620,6 +639,26 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                     <div style={{ fontSize: 11, color: colors.muted, marginTop: 4 }}>Una por línea: cada línea sale numerada. Lo que cambies acá queda solo para este presupuesto.</div>
                   </div>
                 ) : <>
+                {/* LOS QUE NO SE COTIZAN. Salen del cuadro y van al pie con el
+                    porqué. Si la nota no lo dice, la lista sale con un guión,
+                    y eso es lo primero que el cliente va a preguntar. */}
+                {sinCotizar.length > 0 && formato !== "cotizar" && (
+                  <div style={{ background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, fontSize: 12, lineHeight: 1.4 }}>
+                    <strong>{sinCotizar.length} {sinCotizar.length === 1 ? "rubro no se cotiza" : "rubros no se cotizan"}</strong>
+                    <span style={{ color: colors.inkSoft }}> — tienen la nota «NO COTIZA»: salen del cuadro y van al pie, con el porqué.</span>
+                    <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
+                      {sinCotizar.map(r => (
+                        <div key={r.id} style={{ fontSize: 11.5, background: colors.surface, border: `1px solid ${r.motivo && !r.total ? colors.border : colors.warningBorder}`, borderRadius: colors.radiusSm, padding: "5px 7px" }}>
+                          <span style={{ color: colors.muted }}>{r.capitulo} · </span>{r.descripcion.slice(0, 60)}{r.descripcion.length > 60 ? "…" : ""}
+                          <span style={{ display: "block", color: r.motivo ? colors.inkSoft : colors.warning }}>
+                            {r.motivo ? `Por qué: ${r.motivo}` : "Falta el porqué: escríbelo en la nota del rubro, después de «NO COTIZA»."}
+                          </span>
+                          {r.total > 0 && <span style={{ display: "block", color: colors.warning }}>Tiene precio (${money(r.total)}) y suma al total aunque no se cotice: ponlo en $0.</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {notaM2 ? (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: conM2 ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
                     <input type="checkbox" checked={conM2} onChange={e => setConM2(e.target.checked)} style={{ marginTop: 2 }} />
@@ -646,7 +685,8 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
         </div>
 
         <Vista presupuesto={presupuesto} capitulos={capitulos} items={items} formato={formato} plantilla={plantilla} logo={logo}
-          empresa={empresa} titulo={titulo} validez={validez} conIva={conIva} notas={notas} firma={firma} aceptacion={aceptacion} membrete={membrete} />
+          empresa={empresa} titulo={titulo} validez={validez} conIva={conIva} notas={notas} firma={firma} aceptacion={aceptacion} membrete={membrete}
+          resumen={resumen && formato !== "cotizar" && formato !== "capitulos"} />
       </div>
       )}
 
@@ -671,7 +711,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
 }
 
 /** Cómo va a salir la primera hoja, con los colores de la plantilla. */
-function Vista({ presupuesto, capitulos, items, formato, plantilla, logo, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete = [] }) {
+function Vista({ presupuesto, capitulos, items, formato, plantilla, logo, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete = [], resumen = false }) {
   const lineasMembrete = membrete.map(x => String(x || "").trim()).filter(Boolean);
   const t = PLANTILLAS[plantilla] || PLANTILLAS.clasica;
   const caps = estructura({ capitulos, items });
@@ -740,6 +780,25 @@ function Vista({ presupuesto, capitulos, items, formato, plantilla, logo, empres
           <div><span style={{ color: rgb(t.gris), display: "inline-block", width: 76 }}>Versión</span><b>{version}</b></div>
           {conPrecio && validez && <div><span style={{ color: rgb(t.gris), display: "inline-block", width: 76 }}>Validez de la oferta</span><b>{validez}</b></div>}
         </div>
+
+        {/* El resumen general, como sale: un capítulo por renglón. */}
+        {resumen && caps.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 7, fontWeight: 700, letterSpacing: 1, color: rgb(t.acento), marginBottom: 3 }}>RESUMEN GENERAL</div>
+            {caps.slice(0, 4).map(c => (
+              <div key={c.numero} style={{ display: "flex", gap: 6, fontSize: 7, padding: "2px 0", borderBottom: `1px solid ${rgb(t.linea)}` }}>
+                <span style={{ width: 16 }}>{c.numero}</span>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nombre.toUpperCase()}</span>
+                {c.hayExtras && <span style={{ color: rgb(t.gris) }}>+ extras {money(c.subtotalExtras)}</span>}
+                <span style={{ width: 52, textAlign: "right" }}>{money(c.subtotal)}</span>
+              </div>
+            ))}
+            {caps.length > 4 && <div style={{ fontSize: 6.5, color: rgb(t.gris), padding: "2px 0" }}>… y {caps.length - 4} capítulos más</div>}
+            <div style={{ display: "flex", fontSize: 7, fontWeight: 700, color: rgb(t.capTexto), borderTop: `1px solid ${rgb(t.primario)}`, padding: "2px 0" }}>
+              <span style={{ flex: 1, paddingLeft: 22 }}>TOTAL</span><span>{money(caps.reduce((x, c) => x + c.subtotal, 0))}</span>
+            </div>
+          </div>
+        )}
 
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <thead>

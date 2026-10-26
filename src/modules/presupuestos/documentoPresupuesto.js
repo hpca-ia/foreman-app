@@ -36,8 +36,8 @@ import { etiquetaUnidad } from "../../lib/unidades";
 // una prueba. Y había que poder probarla —se le escaparon la etapa y la nota
 // de cada rubro, y el PDF salió con la columna ETAPA en blanco sin que nada
 // avisara—.
-import { estructura } from "./estructura.js";
-export { estructura };
+import { estructura, noCotizados } from "./estructura.js";
+export { estructura, noCotizados };
 
 export const FORMATOS = {
   detallado: { label: "Detallado", titulo: "Presupuesto", ayuda: "Cada rubro con cantidad, precio unitario y total, agrupado por capítulo." },
@@ -110,7 +110,10 @@ const lugarYFecha = e => `${e?.ciudad ? e.ciudad.split(",")[0] + ", " : ""}${fec
 /** Las filas de la tabla principal según el formato: [celdas], y cuáles son de capítulo. */
 // La nota de un rubro va con su descripción, no en una columna aparte: es una
 // advertencia sobre ese rubro y tiene que leerse pegada a él.
-const conNota = (r, incluir) => (incluir && String(r.nota || "").trim() ? `${r.descripcion}\n⚠ ${String(r.nota).trim()}` : r.descripcion);
+const conNota = (r, incluir, marca = "⚠") => (incluir && String(r.nota || "").trim() ? `${r.descripcion}\n${marca} ${String(r.nota).trim()}` : r.descripcion);
+// En el PDF, "Nota:". La letra del PDF no tiene el ⚠: salía un "&" y el resto
+// de la nota con las letras separadas, ilegible.
+const MARCA_PDF = "Nota:";
 
 /**
  * ¿Sale la nota de ESTE rubro?
@@ -138,7 +141,7 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
       : { columnas: ["N°", "Capítulo", "Total"], filas: caps.map(c => [c.numero, c.nombre, money(c.subtotal)]), deCapitulo: [] };
   }
   const conPrecio = formato !== "cotizar";
-  const filas = [], deCapitulo = [];
+  const filas = [], deCapitulo = [], deExtras = [];
   // LA ETAPA, PEGADA AL RUBRO. Un presupuesto por etapas que no dice cuál es
   // la de cada renglón obliga a quien lo lee a creerle al subtotal sin poder
   // comprobarlo — y lo primero que hace un cliente con una cotización por
@@ -148,16 +151,23 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
     : [num, desc, unidad, cant, pu, total]);
   caps.forEach(c => {
     deCapitulo.push(filas.length);
-    filas.push(fila(c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.subtotal) : "", ""));
-    c.rubros.forEach(r => filas.push(fila(r.numero, conNota(r, incluirNota(r)), r.unidad, cantidad(r.cantidad),
-      conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : "",
-      String(r.etapa || "").trim())));
+    // Con extras, el capítulo dice lo pedido y los extras dicen lo suyo.
+    filas.push(fila(c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.hayExtras ? c.subtotalBase : c.subtotal) : "", ""));
+    c.rubros.forEach((r, k) => {
+      if (r.extra && !c.rubros[k - 1]?.extra) {
+        deExtras.push(filas.length);
+        filas.push(fila("", "EXTRAS", "", "", "", conPrecio ? money(c.subtotalExtras) : "", ""));
+      }
+      filas.push(fila(r.numero, conNota(r, incluirNota(r), MARCA_PDF), r.unidad, cantidad(r.cantidad),
+        conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : "",
+        String(r.etapa || "").trim()));
+    });
   });
   return {
     columnas: conEtapas
       ? ["N°", "Descripción", "Etapa", "Unidad", "Cantidad", "P. unitario", "Total"]
       : ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"],
-    filas, deCapitulo,
+    filas, deCapitulo, deExtras,
   };
 }
 
@@ -167,7 +177,7 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
  * @param aceptacion  espacio para que firme el cliente
  */
 export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], carta = "" }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], carta = "", resumen = false }) {
   await cargarPDF();
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
@@ -344,6 +354,45 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
     y += 16;
   }
 
+  // ── Resumen general: cuánto suma cada capítulo, antes del detalle ──
+  //
+  // Es como empiezan los presupuestos de algunos clientes: la primera mirada
+  // es a los capítulos, y el detalle se lee después para ver de dónde sale
+  // cada número. Con extras, cada capítulo dice lo pedido y lo extra.
+  if (resumen && !cotizar && formato !== "capitulos" && caps.length) {
+    const conX = caps.some(c => c.hayExtras);
+    if (y > H - 160) { doc.addPage(); y = 56; }
+    doc.setFont(t.fuenteTitulo, "bold"); doc.setFontSize(9.5); doc.setTextColor(...t.acento);
+    espaciado("RESUMEN GENERAL", M, y, { espacio: 1.2 });
+    y += 8;
+    const sum = k => r2(caps.reduce((s, c) => s + (c[k] || 0), 0));
+    const cuerpo = caps.map(c => conX
+      ? [c.numero, c.nombre.toUpperCase(), money(c.subtotalBase), c.hayExtras ? money(c.subtotalExtras) : "—", money(c.subtotal)]
+      : [c.numero, c.nombre.toUpperCase(), money(c.subtotal)]);
+    cuerpo.push(conX
+      ? ["", "TOTAL", money(sum("subtotalBase")), money(sum("subtotalExtras")), money(sum("subtotal"))]
+      : ["", "TOTAL", money(sum("subtotal"))]);
+    autoTable(doc, {
+      startY: y, margin: { left: M, right: M },
+      head: [conX ? ["N°", "Capítulo", "Presupuesto", "Extras", "Total"] : ["N°", "Capítulo", "Total"]],
+      body: cuerpo, theme: "plain",
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }, textColor: t.texto,
+        lineColor: t.linea, lineWidth: { bottom: 0.4 } },
+      headStyles: { fontSize: 7.5, fontStyle: "bold", textColor: t.gris, lineColor: t.primario, lineWidth: { bottom: 0.8 } },
+      columnStyles: conX
+        ? { 0: { cellWidth: 36 }, 2: { cellWidth: 84, halign: "right" }, 3: { cellWidth: 76, halign: "right" }, 4: { cellWidth: 90, halign: "right" } }
+        : { 0: { cellWidth: 36 }, 2: { cellWidth: 100, halign: "right" } },
+      didParseCell: d => {
+        if (d.section === "head" && d.column.index >= 2) d.cell.styles.halign = "right";
+        if (d.section === "body" && d.row.index === cuerpo.length - 1) {
+          d.cell.styles.fontStyle = "bold"; d.cell.styles.textColor = t.capTexto;
+          d.cell.styles.lineWidth = { top: 0.8 }; d.cell.styles.lineColor = t.primario;
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 22;
+  }
+
   // ── Los rubros ──
   // ¿Este presupuesto se cobra por etapas? Lo dicen los rubros, no una opción:
   // si hay dos etapas puestas, el documento tiene que decirlo.
@@ -383,9 +432,38 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
         if (!t.capFondo) d.cell.styles.lineWidth = { top: 0.6, bottom: 0.4 };
         if (!t.capFondo) d.cell.styles.lineColor = t.primario;
       }
+      // El subtítulo de los extras: en negrita y sin el fondo del capítulo,
+      // para que se lea como parte de él y no como uno nuevo.
+      if (d.section === "body" && tb.deExtras?.includes(d.row.index)) {
+        d.cell.styles.fontStyle = "bold";
+        d.cell.styles.textColor = t.capTexto;
+        d.cell.styles.fillColor = false;
+        d.cell.styles.lineWidth = { top: 0.4, bottom: 0.4 };
+        d.cell.styles.lineColor = t.primario;
+      }
     },
   });
   y = doc.lastAutoTable.finalY + 12;
+
+  // ── Los rubros que no se cotizan, al pie del cuadro, con el porqué ──
+  const sinCotizar = cotizar ? [] : noCotizados({ capitulos, items });
+  if (sinCotizar.length) {
+    if (y > H - 120) { doc.addPage(); y = 56; }
+    y += 6;
+    doc.setFont(t.fuenteTitulo, "bold"); doc.setFontSize(9.5); doc.setTextColor(...t.acento);
+    espaciado("RUBROS QUE NO SE COTIZAN", M, y, { espacio: 1.2 });
+    y += 8;
+    autoTable(doc, {
+      startY: y, margin: { left: M, right: M, bottom: 56 }, theme: "plain",
+      head: [["Capítulo", "Rubro", "Por qué no se cotiza"]],
+      body: sinCotizar.map(r => [r.capitulo.toUpperCase(), r.descripcion, r.motivo || "—"]),
+      styles: { font: "helvetica", fontSize: 8, cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }, textColor: t.texto,
+        lineColor: t.linea, lineWidth: { bottom: 0.4 }, valign: "top" },
+      headStyles: { fontSize: 7.5, fontStyle: "bold", textColor: t.gris, lineColor: t.primario, lineWidth: { bottom: 0.8 } },
+      columnStyles: { 0: { cellWidth: 110, textColor: t.gris }, 2: { cellWidth: 170 } },
+    });
+    y = doc.lastAutoTable.finalY + 12;
+  }
 
   // ── Lo que cuesta cada etapa ──
   //
@@ -418,13 +496,19 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
 
   // ── Totales, a la derecha ──
   if (!cotizar) {
+    // Los extras suman aparte: se dice cuánto es lo pedido y cuánto lo extra
+    // antes del subtotal, que es la suma de los dos.
+    const extras = r2(caps.reduce((s, c) => s + (c.subtotalExtras || 0), 0));
     const filas = [
+      ...(extras ? [["Presupuesto", money(r2(tot.subtotal - extras))], ["Extras", money(extras)]] : []),
       ["Subtotal", money(tot.subtotal)],
       ...tot.honorarios.map(h => [etiquetaHonorario(h), money(h.monto)]),
       conIva && [`IVA (${cantidad(tot.iva_pct)} %)`, money(tot.iva)],
       ["TOTAL", `$ ${money(tot.total)}`],
     ].filter(Boolean);
-    if (y > H - 130) { doc.addPage(); y = 56; }
+    // El cuadro de totales no se parte: el TOTAL solo en la hoja siguiente no
+    // se encuentra. Se mide con sus renglones, que ahora pueden ser más.
+    if (y > H - 70 - filas.length * 21) { doc.addPage(); y = 56; }
     autoTable(doc, {
       // Ancho para "Honorarios de diseño arquitectónico" en una sola línea.
       startY: y, body: filas, theme: "plain", margin: { left: W - M - 340, right: M },
@@ -524,7 +608,7 @@ const argb = c => "FF" + c.map(v => v.toString(16).padStart(2, "0")).join("").to
  * ExcelJS se carga recién al exportar: pesa, y el resto de la app no lo usa.
  */
 export async function excelPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [] }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], resumen = false }) {
   const ExcelJS = (await import("exceljs")).default;
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const caps = estructura({ capitulos, items });
@@ -598,8 +682,37 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
   });
   fila++;
 
+  // ── Resumen general: cuánto suma cada capítulo, antes del detalle ──
+  if (resumen && !cotizar && !soloCapitulos && caps.length) {
+    const conX = caps.some(c => c.hayExtras);
+    ws.mergeCells(fila, 1, fila, 6);
+    ws.getCell(fila, 1).value = "RESUMEN GENERAL";
+    ws.getCell(fila, 1).font = fuente({ bold: true, color: { argb: PRIMARIO } });
+    fila++;
+    const cols = conX ? ["N°", "Capítulo", "", "Presupuesto", "Extras", "Total"] : ["N°", "Capítulo", "", "", "", "Total"];
+    const filaResumen = (valores, { cabeza = false, total = false } = {}) => {
+      valores.forEach((v, i) => {
+        const x = ws.getCell(fila, i + 1);
+        x.value = v;
+        x.font = fuente(cabeza ? { bold: true, size: 9, color: { argb: GRIS } } : total ? { bold: true } : {});
+        x.border = cabeza ? { bottom: linea(PRIMARIO) } : total ? { top: linea(PRIMARIO) } : { bottom: linea(LINEA) };
+        if (i >= 3) { x.alignment = { horizontal: "right" }; if (!cabeza) x.numFmt = "#,##0.00"; }
+      });
+      fila++;
+    };
+    filaResumen(cols, { cabeza: true });
+    caps.forEach(c => filaResumen(conX
+      ? [c.numero, c.nombre.toUpperCase(), null, c.subtotalBase, c.hayExtras ? c.subtotalExtras : null, c.subtotal]
+      : [c.numero, c.nombre.toUpperCase(), null, null, null, c.subtotal]));
+    const sum = k => r2(caps.reduce((s, c) => s + (c[k] || 0), 0));
+    filaResumen(conX
+      ? [null, "TOTAL", null, sum("subtotalBase"), sum("subtotalExtras"), sum("subtotal")]
+      : [null, "TOTAL", null, null, null, sum("subtotal")], { total: true });
+    fila++;
+  }
+
   // ── La tabla ──
-  const cabecera = soloCapitulos ? ["N°", "Capítulo", "", "", "", "Total"] : ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"];
+  const cabecera =soloCapitulos ? ["N°", "Capítulo", "", "", "", "Total"] : ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"];
   cabecera.forEach((txt, i) => {
     const c = ws.getCell(fila, i + 1);
     c.value = txt;
@@ -613,17 +726,22 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
   ws.pageSetup.printTitlesRow = `${fila}:${fila}`;          // se repite en cada hoja impresa
   fila++;
 
-  const celdasSubtotal = [];
+  const celdasSubtotal = [], celdasExtras = [];
   caps.forEach(c => {
     const filaCap = fila;
-    const rubroIni = fila + 1, rubroFin = fila + c.rubros.length;
+    // Con extras, la fórmula del capítulo suma solo lo pedido: los extras
+    // tienen su fila con su propia suma, y contarlos en las dos duplicaría.
+    const nBase = c.rubros.filter(r => !r.extra).length;
+    const rubroIni = fila + 1, rubroFin = fila + (c.hayExtras ? nBase : c.rubros.length);
     ws.getCell(fila, 1).value = c.numero;
     ws.getCell(fila, 2).value = soloCapitulos ? c.nombre : c.nombre.toUpperCase();
     if (soloCapitulos) {
       ws.mergeCells(fila, 2, fila, 5);
       ws.getCell(fila, 6).value = c.subtotal;
     } else {
-      ws.getCell(fila, 6).value = { formula: `SUM(F${rubroIni}:F${rubroFin})`, result: cotizar ? 0 : c.subtotal };
+      ws.getCell(fila, 6).value = nBase || !c.hayExtras
+        ? { formula: `SUM(F${rubroIni}:F${rubroFin})`, result: cotizar ? 0 : (c.hayExtras ? c.subtotalBase : c.subtotal) }
+        : 0;
     }
     for (let k = 1; k <= 6; k++) {
       const x = ws.getCell(fila, k);
@@ -642,7 +760,23 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     fila++;
     if (soloCapitulos) return;
 
-    c.rubros.forEach(r => {
+    c.rubros.forEach((r, k) => {
+      // El subtítulo de los extras, con la suma de los que vienen debajo.
+      if (r.extra && !c.rubros[k - 1]?.extra) {
+        const desde = fila + 1, hasta = fila + (c.rubros.length - k);
+        ws.getCell(fila, 2).value = "EXTRAS";
+        ws.getCell(fila, 6).value = { formula: `SUM(F${desde}:F${hasta})`, result: cotizar ? 0 : c.subtotalExtras };
+        for (let j = 1; j <= 6; j++) {
+          const x = ws.getCell(fila, j);
+          x.font = fuente({ bold: true, color: { argb: argb(t.capTexto) } });
+          x.border = { top: linea(PRIMARIO), bottom: linea(LINEA) };
+        }
+        ws.getCell(fila, 6).numFmt = "#,##0.00";
+        ws.getCell(fila, 6).alignment = { horizontal: "right" };
+        celdasSubtotal.push(`F${fila}`);
+        celdasExtras.push(`F${fila}`);
+        fila++;
+      }
       const valores = [r.numero, conNota(r, notasRubro && !fuera.has(String(r.id ?? r.numero ?? ""))), r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
         { formula: `D${fila}*E${fila}`, result: cotizar ? 0 : r2(r.cantidad * r.precio_unitario) }];
       valores.forEach((v, i) => {
@@ -660,6 +794,33 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
       fila++;
     });
   });
+
+  // ── Los rubros que no se cotizan, al pie del cuadro, con el porqué ──
+  const sinCotizar = cotizar ? [] : noCotizados({ capitulos, items });
+  if (sinCotizar.length) {
+    fila++;
+    ws.mergeCells(fila, 1, fila, 6);
+    ws.getCell(fila, 1).value = "RUBROS QUE NO SE COTIZAN";
+    ws.getCell(fila, 1).font = fuente({ bold: true, color: { argb: PRIMARIO } });
+    fila++;
+    const filaNo = (cap, rubro, motivo, cabeza = false) => {
+      ws.getCell(fila, 1).value = cap;
+      ws.getCell(fila, 2).value = rubro;
+      ws.mergeCells(fila, 3, fila, 6);
+      ws.getCell(fila, 3).value = motivo;
+      [1, 2, 3].forEach(k => {
+        const x = ws.getCell(fila, k);
+        x.font = fuente(cabeza ? { bold: true, size: 9, color: { argb: GRIS } } : k === 1 ? { color: { argb: GRIS } } : {});
+        x.border = { bottom: linea(cabeza ? PRIMARIO : LINEA) };
+        x.alignment = { vertical: "top", wrapText: true };
+      });
+      const largo = Math.max(String(rubro).length / 62, String(motivo).length / 40);
+      if (largo > 1) ws.getRow(fila).height = 15 * Math.ceil(largo);
+      fila++;
+    };
+    filaNo("Capítulo", "Rubro", "Por qué no se cotiza", true);
+    sinCotizar.forEach(r => filaNo(r.capitulo.toUpperCase(), r.descripcion, r.motivo || "—"));
+  }
 
   // ── Totales: fórmulas, para que el Excel siga cuadrando si lo tocan ──
   fila++;
@@ -679,6 +840,13 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     }
     return `F${fila++}`;
   };
+  // Lo pedido y los extras, aparte, antes del subtotal que los suma.
+  if (celdasExtras.length && !cotizar) {
+    const extras = r2(caps.reduce((s, c) => s + (c.subtotalExtras || 0), 0));
+    const base = celdasSubtotal.filter(x => !celdasExtras.includes(x));
+    lineaTotal("Presupuesto", base.length ? base.join("+") : "0", r2(tot.subtotal - extras));
+    lineaTotal("Extras", celdasExtras.join("+"), extras);
+  }
   const sub = lineaTotal("Subtotal", celdasSubtotal.length ? celdasSubtotal.join("+") : "0", cotizar ? 0 : tot.subtotal);
   // Un honorario en porcentaje es fórmula sobre el subtotal; uno fijo, su monto.
   const hon = cotizar ? [] : tot.honorarios.map(h => lineaTotal(etiquetaHonorario(h), h.tipo === "monto" ? `${Number(h.valor) || 0}` : `${sub}*${Number(h.valor) || 0}/100`, h.monto));

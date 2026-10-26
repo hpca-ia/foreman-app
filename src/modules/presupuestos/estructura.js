@@ -11,21 +11,50 @@ import { etiquetaUnidad } from "../../lib/unidades.js";
 const n = v => Number(v) || 0;
 const r2 = v => Math.round(v * 100) / 100;
 
+// LOS RUBROS QUE NO SE COTIZAN.
+//
+// Un presupuesto de cliente trae rubros que no nos tocan —los pone otro, los
+// provee el cliente, falta definirlos— marcados con la nota "NO COTIZA". En el
+// cuadro de precios estorban: un renglón sin precio parece un olvido. Salen
+// del cuadro y se listan al pie, cada uno con el porqué, que es lo que el
+// cliente necesita para saber qué le falta contratar por otro lado.
+const NO_COTIZA = /\bno\s+(se\s+)?cotiza(do|da|mos|n)?\b/i;
+
+/** ¿La nota de este rubro dice que no se cotiza? */
+export const esNoCotiza = i => NO_COTIZA.test(String(i?.nota || ""));
+
+/** El porqué: lo que dice la nota además de "NO COTIZA". Vacío si no lo dice. */
+export function motivoNoCotiza(nota) {
+  let m = String(nota || "").replace(NO_COTIZA, " ").replace(/^[\s:;,.\-–—()]+|[\s:;,\-–—(]+$/g, "").replace(/\s+/g, " ").trim();
+  // "NO COTIZA (falta diseño)": se fue el paréntesis de apertura, va el de cierre.
+  if (m.endsWith(")") && (m.match(/\(/g) || []).length < (m.match(/\)/g) || []).length) m = m.slice(0, -1).trim();
+  return m;
+}
+
 /** Capítulos con sus rubros, numerados como en pantalla (1, 1.1, 1.2…) y sin capítulos vacíos. */
-export function estructura({ capitulos = [], items = [] }) {
+export function estructura({ capitulos = [], items: todos = [] }) {
+  // Los que no se cotizan no van en el cuadro: van en noCotizados().
+  const items = todos.filter(i => !esNoCotiza(i));
   const orden = [...capitulos].sort((a, b) => a.orden - b.orden).map(c => c.nombre);
   // Un rubro cuyo capítulo no está en la lista no se pierde: va al final.
   items.forEach(i => { if (i.capitulo && !orden.includes(i.capitulo)) orden.push(i.capitulo); });
   if (items.some(i => !i.capitulo)) orden.push("");
   const salida = [];
   orden.forEach(nombre => {
-    const suyos = items.filter(i => (i.capitulo || "") === nombre).sort((a, b) => n(a.orden) - n(b.orden));
-    if (!suyos.length) return;
+    // Los extras van al final del capítulo, debajo de lo pedido, y suman
+    // aparte: el capítulo dice cuánto es cada cosa.
+    const delCap = items.filter(i => (i.capitulo || "") === nombre).sort((a, b) => n(a.orden) - n(b.orden));
+    if (!delCap.length) return;
+    const suyos = [...delCap.filter(i => !i.extra), ...delCap.filter(i => i.extra)];
+    const suma = l => r2(l.reduce((s, i) => s + n(i.total), 0));
     const num = salida.length + 1;
     salida.push({
       numero: String(num),
       nombre: nombre || "OTROS",
-      subtotal: r2(suyos.reduce((s, i) => s + n(i.total), 0)),
+      subtotal: suma(suyos),
+      subtotalBase: suma(suyos.filter(i => !i.extra)),
+      subtotalExtras: suma(suyos.filter(i => i.extra)),
+      hayExtras: suyos.some(i => i.extra),
       rubros: suyos.map((i, k) => ({
         numero: `${num}.${k + 1}`, descripcion: i.descripcion || "", unidad: etiquetaUnidad(i.unidad),
         cantidad: n(i.cantidad), precio_unitario: n(i.precio_unitario), total: n(i.total),
@@ -46,8 +75,25 @@ export function estructura({ capitulos = [], items = [] }) {
         // pantalla la excluía por id y el documento no tenía ninguno con qué
         // compararlo, así que salían todas igual.
         id: i.id,
+        extra: !!i.extra,
       })),
     });
   });
   return salida;
+}
+
+/**
+ * Los rubros que no se cotizan, en el orden del presupuesto, con su capítulo
+ * y el porqué. Van al pie del cuadro.
+ */
+export function noCotizados({ capitulos = [], items = [] }) {
+  const orden = [...capitulos].sort((a, b) => a.orden - b.orden).map(c => c.nombre);
+  const pos = c => { const k = orden.indexOf(c); return k < 0 ? orden.length : k; };
+  return items.filter(esNoCotiza)
+    .sort((a, b) => (pos(a.capitulo) - pos(b.capitulo)) || (n(a.orden) - n(b.orden)))
+    .map(i => ({
+      id: i.id, capitulo: i.capitulo || "OTROS", descripcion: i.descripcion || "",
+      unidad: etiquetaUnidad(i.unidad), cantidad: n(i.cantidad), total: n(i.total),
+      motivo: motivoNoCotiza(i.nota),
+    }));
 }

@@ -26,7 +26,7 @@ const CAP_CARGOS = "HONORARIOS Y CARGOS";
 // esta importación crea la obra directamente, sin pasar por Presupuestos.
 const PROMPT = `Replica este presupuesto de construcción TAL CUAL, sin resumir ni reagrupar.
 Devuelve SOLO JSON compacto, sin markdown:
-{"nombre":"","cliente":"","emisor":"","notas":["texto"],"rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0,"n":"nota del rubro"}]}
+{"nombre":"","cliente":"","emisor":"","notas":["texto"],"resumen":[{"c":"CAPITULO","t":0}],"rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0,"n":"nota del rubro","x":true}]}
 Reglas:
 - "emisor" es la empresa que hizo el documento (quien cotiza); "cliente", a quién va dirigido.
 - Un objeto por rubro, en el MISMO ORDEN del documento.
@@ -36,6 +36,9 @@ Reglas:
 - "n" = la nota, observación o instrucción escrita para ESE rubro (debajo de la fila, al lado, o con un asterisco o llamada que remite a él). Cópiala textual. Si el rubro no tiene nota, omite "n".
 - "notas" = todo texto fuera de la tabla de rubros que sea nota, observación, condición, exclusión, forma de pago, plazo, validez o instrucción del cliente. Una entrada por nota, TEXTUAL, en el orden del documento, sin su numeración. No incluyas el membrete, datos de contacto, firmas ni totales. Si no hay, [].
 - Las notas NO son rubros: no las pongas en "rubros".
+- NO COTIZA: si un rubro dice "NO COTIZA" (o "no se cotiza") en cualquier columna —precio, total u observación—, igual va en "rubros", con "p":0 y "t":0, y su "n" empieza con "NO COTIZA" seguido del motivo que dé el documento, textual (por ejemplo "NO COTIZA - lo provee el cliente").
+- RESUMEN: si el documento trae un resumen general (una lista de capítulos, cada uno con su total, normalmente al inicio), va en "resumen": un objeto por capítulo con su nombre en "c" y su total en "t". Esas líneas NO son rubros: no las pongas en "rubros". Si no hay resumen, [].
+- EXTRAS: si dentro de un capítulo hay una línea como "Extras", "Extras (describir)" o "Adicionales", los rubros que vienen DEBAJO de ella, dentro de ese mismo capítulo, son extras: ponles "x":true y el mismo "c" del capítulo. Esa línea no es un rubro: no la incluyas, tampoco si está vacía o solo dice "describir". Los rubros que no son extras no llevan "x".
 - No inventes rubros ni cambies descripciones.`;
 
 // Cuando el PDF se lee por páginas, cada una no sabe qué venía antes.
@@ -69,7 +72,8 @@ function juntarPaginas(paginas) {
     rubros.push({ ...r, c: c || capitulo });
   }));
   return { nombre: primera("nombre"), cliente: primera("cliente"), emisor: primera("emisor"),
-    notas: notasDe(paginas.flatMap(p => p?.notas || [])), rubros };
+    notas: notasDe(paginas.flatMap(p => p?.notas || [])), rubros,
+    resumen: paginas.flatMap(p => (Array.isArray(p?.resumen) ? p.resumen : [])) };
 }
 
 // Este mismo lector sirve para el presupuesto inicial, en Presupuestos: se lee
@@ -110,6 +114,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
   // Las notas, condiciones e instrucciones del documento, una por línea. Van
   // al presupuesto tal cual, para que al exportarlo salga lo mismo.
   const [notasDoc, setNotasDoc] = useState("");
+  // El resumen por capítulos que traía el documento: sirve para comprobar
+  // que lo leído suma lo mismo, capítulo por capítulo.
+  const [resumenDoc, setResumenDoc] = useState([]);
   // Lo que NOVA pregunta antes de guardar: de dónde vienen los precios, de
   // qué cliente o proveedor, y las unidades que no se entienden.
   const [preguntas, setPreguntas] = useState(RESPUESTAS_VACIAS);
@@ -140,7 +147,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]); setDecisiones({});
     setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
     setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true);
-    setPreguntas(RESPUESTAS_VACIAS); setSugerencia({}); setNotasDoc("");
+    setPreguntas(RESPUESTAS_VACIAS); setSugerencia({}); setNotasDoc(""); setResumenDoc([]);
   }
 
   // Lee las filas con un mapa de columnas y deja todo listo para la vista
@@ -268,8 +275,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       precio_unitario: n(r.p ?? r.precio_unitario),
       total: n(r.t ?? r.total) || n(r.q ?? r.cantidad) * n(r.p ?? r.precio_unitario),
       nota: String(r.n ?? r.nota ?? "").trim() || null,
-    })).filter(r => r.descripcion));
+      extra: r.x === true || r.extra === true,
+    })).filter(r => r.descripcion && !/^extras?\b[\s(]*(describir)?\)?\s*$/i.test(r.descripcion)));
     setNotasDoc(notasDe(parsed.notas).join("\n"));
+    setResumenDoc((Array.isArray(parsed.resumen) ? parsed.resumen : [])
+      .map(x => ({ capitulo: String(x?.c ?? x?.capitulo ?? "").trim().toUpperCase(), total: n(x?.t ?? x?.total) }))
+      .filter(x => x.capitulo && x.total));
     setSugerenciaIva("Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
     setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
     setSugerencia({ emisor: parsed.emisor || "", cliente: parsed.cliente || "" });
@@ -296,6 +307,18 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
   const ivaSumado = base * (factor - 1);
   const lineaBase = base * factor;
   const capitulos = [...new Set(final.rubros.map(r => r.capitulo))];
+
+  // CONTRA EL RESUMEN DEL DOCUMENTO. Si el cliente puso al inicio cuánto suma
+  // cada capítulo, lo leído tiene que dar lo mismo: un rubro que NOVA se
+  // saltó o leyó mal se ve acá, en el capítulo donde pasó. El resumen puede
+  // contar los extras o no, así que vale cualquiera de las dos sumas.
+  const contraResumen = resumenDoc.map(x => {
+    const suyos = final.rubros.filter(r => clave(r.capitulo) === clave(x.capitulo));
+    const todo = suyos.reduce((s, r) => s + n(r.total), 0);
+    const sinExtras = suyos.filter(r => !r.extra).reduce((s, r) => s + n(r.total), 0);
+    const dif = Math.abs(sinExtras - x.total) < Math.abs(todo - x.total) ? sinExtras - x.total : todo - x.total;
+    return { ...x, encontrado: suyos.length > 0, dif };
+  });
 
   // Contra el Excel: los rubros contra su SUBTOTAL; rubros + cargos (+ su línea
   // de IVA, si tenía) contra su TOTAL. Con las decisiones ya aplicadas.
@@ -443,11 +466,12 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
         cantidad: n(r.cantidad), precio_unitario: r2(n(r.precio_unitario)), total: r2(n(r.total)),
         orden: c * 1000 + pos[c],
         ...(r.nota ? { nota: r.nota } : {}),
+        ...(r.extra ? { extra: true } : {}),
       };
     });
     for (let i = 0; i < filas.length; i += 100) {
       const { error: e2 } = await supabase.from("presupuesto_items").insert(filas.slice(i, i + 100));
-      if (e2) { setError("Se creó el presupuesto pero fallaron algunos rubros: " + e2.message); setGuardando(false); return; }
+      if (e2) { setError(/column.*extra|extra.*schema cache/i.test(e2.message) ? "Se creó el presupuesto, pero para guardar los extras falta correr en Supabase la migración 122 (extras del capítulo)." : "Se creó el presupuesto pero fallaron algunos rubros: " + e2.message); setGuardando(false); return; }
     }
 
     // EL FORMATO DEL CLIENTE. Si su documento traía notas, el presupuesto
@@ -667,6 +691,19 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
               )}
             </div>
 
+            {contraResumen.length > 0 && (
+              <div style={{ marginTop: 14, fontSize: 12, color: colors.inkSoft }}>
+                <div style={{ fontWeight: 600, color: colors.ink, marginBottom: 4 }}>
+                  Contra el resumen del documento · {contraResumen.filter(x => x.encontrado && Math.abs(x.dif) <= 1).length} de {contraResumen.length} capítulos cuadran
+                </div>
+                {contraResumen.map(x => x.encontrado
+                  ? <Cuadra key={x.capitulo} t={`${x.capitulo} ($${fmt(x.total)}):`} dif={x.dif} />
+                  : <div key={x.capitulo} style={{ display: "flex", alignItems: "center", gap: 6, color: colors.warning, padding: "2px 0" }}>
+                      <AlertTriangle size={13} /> {x.capitulo} (${fmt(x.total)}): no se leyó ningún rubro de este capítulo, o tiene otro nombre en el detalle
+                    </div>)}
+              </div>
+            )}
+
             {control && (
               <div style={{ marginTop: 14 }}>
                 <RevisionPresupuesto advertencias={advertencias} decisiones={decisiones} onDecidir={decidir}
@@ -706,6 +743,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
                       <span style={{ color: r.origen === "ajuste" ? colors.warning : colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.descripcion}>
                         {r.origen && r.origen !== "ajuste" && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>{r.origen === "agregado" ? "AGREGADO" : "CORREGIDO"}</span>}
                         {r.pendiente && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>SIN PRECIO</span>}
+                        {r.extra && <span style={{ fontSize: 9, fontWeight: 700, color: colors.brand, marginRight: 5 }}>EXTRA</span>}
                         {r.descripcion}
                         {r.nota && <span title={r.nota} style={{ display: "block", fontSize: 10.5, color: colors.warning, overflow: "hidden", textOverflow: "ellipsis" }}>⚠ {r.nota}</span>}
                       </span>
