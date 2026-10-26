@@ -67,15 +67,16 @@ test("un capítulo sin extras no dice que los tiene", () => {
 // sin precio parece un olvido—: va al pie, con el porqué.
 import { noCotizados, motivoNoCotiza } from "../src/modules/presupuestos/estructura.js";
 
-test("los rubros NO COTIZA salen del cuadro y van al pie con su motivo", () => {
+test("los rubros NO COTIZA se quedan en el cuadro, marcados, y van también al pie con su motivo", () => {
   const conNoCotiza = [
     { id: 1, capitulo: "OBRA GRIS", orden: 1, descripcion: "Replanteo", total: 20 },
     { id: 2, capitulo: "OBRA GRIS", orden: 2, descripcion: "Acometida eléctrica", total: 0, nota: "NO COTIZA - la hace la empresa eléctrica" },
     { id: 3, capitulo: "OBRA GRIS", orden: 3, descripcion: "Mampostería", total: 50 },
   ];
   const [c] = estructura({ capitulos, items: conNoCotiza });
-  assert.deepEqual(c.rubros.map(r => r.descripcion), ["Replanteo", "Mampostería"]);
-  assert.deepEqual(c.rubros.map(r => r.numero), ["1.1", "1.2"]);
+  assert.deepEqual(c.rubros.map(r => r.descripcion), ["Replanteo", "Acometida eléctrica", "Mampostería"]);
+  assert.deepEqual(c.rubros.map(r => r.numero), ["1.1", "1.2", "1.3"]);
+  assert.deepEqual(c.rubros.map(r => r.noCotiza), [false, true, false]);
   const pie = noCotizados({ capitulos, items: conNoCotiza });
   assert.equal(pie.length, 1);
   assert.equal(pie[0].descripcion, "Acometida eléctrica");
@@ -88,7 +89,7 @@ test("el motivo es lo que la nota dice además de NO COTIZA", () => {
   assert.equal(motivoNoCotiza("NO COTIZA"), "");
 });
 
-test("una nota cualquiera no saca al rubro del cuadro", () => {
+test("una nota cualquiera no marca al rubro como NO COTIZA", () => {
   const [c] = estructura({ capitulos, items: [{ capitulo: "OBRA GRIS", descripcion: "X", total: 1, nota: "precio cotizado ayer" }] });
-  assert.equal(c.rubros.length, 1);
+  assert.equal(c.rubros[0].noCotiza, false);
 });

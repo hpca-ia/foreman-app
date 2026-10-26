@@ -14,10 +14,11 @@ const r2 = v => Math.round(v * 100) / 100;
 // LOS RUBROS QUE NO SE COTIZAN.
 //
 // Un presupuesto de cliente trae rubros que no nos tocan —los pone otro, los
-// provee el cliente, falta definirlos— marcados con la nota "NO COTIZA". En el
-// cuadro de precios estorban: un renglón sin precio parece un olvido. Salen
-// del cuadro y se listan al pie, cada uno con el porqué, que es lo que el
-// cliente necesita para saber qué le falta contratar por otro lado.
+// provee el cliente, falta definirlos— marcados con la nota "NO COTIZA". Se
+// quedan en el cuadro, en su lugar y con su número —el cliente los busca
+// donde los puso él—, pero en vez de precio dicen NO COTIZA. Y además se
+// listan al pie, cada uno con el porqué, que es lo que el cliente necesita
+// para saber qué le falta contratar por otro lado.
 const NO_COTIZA = /\bno\s+(se\s+)?cotiza(do|da|mos|n)?\b/i;
 
 /** ¿La nota de este rubro dice que no se cotiza? */
@@ -32,9 +33,7 @@ export function motivoNoCotiza(nota) {
 }
 
 /** Capítulos con sus rubros, numerados como en pantalla (1, 1.1, 1.2…) y sin capítulos vacíos. */
-export function estructura({ capitulos = [], items: todos = [] }) {
-  // Los que no se cotizan no van en el cuadro: van en noCotizados().
-  const items = todos.filter(i => !esNoCotiza(i));
+export function estructura({ capitulos = [], items = [] }) {
   const orden = [...capitulos].sort((a, b) => a.orden - b.orden).map(c => c.nombre);
   // Un rubro cuyo capítulo no está en la lista no se pierde: va al final.
   items.forEach(i => { if (i.capitulo && !orden.includes(i.capitulo)) orden.push(i.capitulo); });
@@ -76,6 +75,7 @@ export function estructura({ capitulos = [], items: todos = [] }) {
         // compararlo, así que salían todas igual.
         id: i.id,
         extra: !!i.extra,
+        noCotiza: esNoCotiza(i),
       })),
     });
   });

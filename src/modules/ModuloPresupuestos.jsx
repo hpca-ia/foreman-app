@@ -1662,6 +1662,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             </div>
           )}
 
+          {/* El resumen de los capítulos, como el que abre el documento. */}
+          {capitulosActivos.length>1&&!buscaArmar&&<ResumenCapitulos capitulos={capitulosActivos} items={items}/>}
+
           {capitulosActivos.map((cap,capIdx)=>{
             // Lo pedido primero y los extras al final, como sale impreso.
             const todosDelCap=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>(!!a.extra-!!b.extra)||(a.orden-b.orden));
@@ -1674,7 +1677,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             const capItems=buscaArmar?todosDelCap.filter(i=>coincideBusqueda(i)):todosDelCap;
             if(buscaArmar&&capItems.length===0) return null;
             return(
-              <div key={cap.nombre} style={{marginBottom:10,background:"#fff",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
+              <div key={cap.nombre} id={`capitulo-${cap.orden}`} style={{marginBottom:10,background:"#fff",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden",scrollMarginTop:70}}>
                 {/* Capítulo header */}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"8px 14px",background:"var(--brand-soft)"}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flex:"1 1 320px",minWidth:0}}>
@@ -2400,6 +2403,73 @@ function NoSeCotizan({ items, onMotivo, onQuitar, onPrecioCero }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// EL RESUMEN DE LOS CAPÍTULOS, ARRIBA DEL DETALLE.
+//
+// Es lo primero que se mira de un presupuesto: cuánto es cada capítulo y cuánto
+// pesa. Con extras, lo pedido y lo extra por separado. Tocar un capítulo lleva
+// hasta él, que en un presupuesto de quince capítulos es medio minuto de
+// scroll. Se puede plegar y queda así para la próxima.
+function ResumenCapitulos({ capitulos, items }) {
+  const [abierto, setAbierto] = useState(() => { try { return localStorage.getItem("foreman_resumen_caps") !== "0"; } catch { return true; } });
+  const alternar = () => setAbierto(a => { try { localStorage.setItem("foreman_resumen_caps", a ? "0" : "1"); } catch {} return !a; });
+  const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const filas = [...capitulos].sort((a, b) => a.orden - b.orden).map(c => {
+    const suyos = items.filter(i => i.capitulo === c.nombre);
+    const base = suyos.filter(i => !i.extra).reduce((s, i) => s + (Number(i.total) || 0), 0);
+    const extras = suyos.filter(i => i.extra).reduce((s, i) => s + (Number(i.total) || 0), 0);
+    return { ...c, base, extras, total: base + extras, rubros: suyos.length };
+  });
+  const total = filas.reduce((s, f) => s + f.total, 0);
+  const conX = filas.some(f => f.extras);
+  const th = { padding: "5px 8px", fontSize: 10, color: "var(--ink-soft)", fontWeight: 600, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
+  const td = { padding: "5px 8px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid var(--neutral-soft)" };
+  return (
+    <div style={{ marginBottom: 12, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+      <button onClick={alternar} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "9px 14px", background: "var(--bg)", border: "none", cursor: "pointer", fontFamily: "var(--font)" }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>Resumen de capítulos <span style={{ fontWeight: 400, color: "var(--muted)" }}>({filas.length})</span></span>
+        <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>{!abierto && <strong>${fmt(total)} · </strong>}{abierto ? "ocultar ▴" : "ver ▾"}</span>
+      </button>
+      {abierto && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: conX ? 520 : 380 }}>
+            <thead><tr>
+              <th style={{ ...th, textAlign: "left", width: 34 }}>N°</th>
+              <th style={{ ...th, textAlign: "left" }}>Capítulo</th>
+              {conX && <th style={th}>Presupuesto</th>}
+              {conX && <th style={th}>Extras</th>}
+              <th style={th}>Total</th>
+              <th style={{ ...th, width: 56 }}>Peso</th>
+            </tr></thead>
+            <tbody>
+              {filas.map(f => (
+                <tr key={f.nombre} onClick={() => document.getElementById(`capitulo-${f.orden}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  style={{ cursor: "pointer" }} title="Ir al capítulo">
+                  <td style={{ ...td, textAlign: "left", color: "var(--muted)" }}>{f.orden}</td>
+                  <td style={{ ...td, textAlign: "left", whiteSpace: "normal", color: "var(--brand)", fontWeight: 600 }}>
+                    {f.nombre} {!f.rubros && <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· sin rubros</span>}
+                  </td>
+                  {conX && <td style={td}>${fmt(f.base)}</td>}
+                  {conX && <td style={{ ...td, color: f.extras ? "var(--ink)" : "var(--muted)" }}>{f.extras ? `$${fmt(f.extras)}` : "—"}</td>}
+                  <td style={{ ...td, fontWeight: 600 }}>${fmt(f.total)}</td>
+                  <td style={{ ...td, color: "var(--muted)", fontSize: 11 }}>{total > 0 ? `${(f.total / total * 100).toLocaleString("es-EC", { maximumFractionDigits: 1 })} %` : ""}</td>
+                </tr>
+              ))}
+              <tr>
+                <td style={{ ...td, borderBottom: "none" }} />
+                <td style={{ ...td, textAlign: "left", fontWeight: 700, borderBottom: "none" }}>TOTAL <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· costo directo, sin honorarios ni IVA</span></td>
+                {conX && <td style={{ ...td, fontWeight: 700, borderBottom: "none" }}>${fmt(filas.reduce((s, f) => s + f.base, 0))}</td>}
+                {conX && <td style={{ ...td, fontWeight: 700, borderBottom: "none" }}>${fmt(filas.reduce((s, f) => s + f.extras, 0))}</td>}
+                <td style={{ ...td, fontWeight: 700, borderBottom: "none" }}>${fmt(total)}</td>
+                <td style={{ ...td, borderBottom: "none" }} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

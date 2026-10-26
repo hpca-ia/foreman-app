@@ -141,7 +141,7 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
       : { columnas: ["N°", "Capítulo", "Total"], filas: caps.map(c => [c.numero, c.nombre, money(c.subtotal)]), deCapitulo: [] };
   }
   const conPrecio = formato !== "cotizar";
-  const filas = [], deCapitulo = [], deExtras = [];
+  const filas = [], deCapitulo = [], deExtras = [], deNoCotiza = [];
   // LA ETAPA, PEGADA AL RUBRO. Un presupuesto por etapas que no dice cuál es
   // la de cada renglón obliga a quien lo lee a creerle al subtotal sin poder
   // comprobarlo — y lo primero que hace un cliente con una cotización por
@@ -158,6 +158,13 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
         deExtras.push(filas.length);
         filas.push(fila("", "EXTRAS", "", "", "", conPrecio ? money(c.subtotalExtras) : "", ""));
       }
+      // NO COTIZA: el renglón queda en su lugar, sin precio. Su porqué va al
+      // pie, así que la nota no se repite acá.
+      if (r.noCotiza) {
+        deNoCotiza.push(filas.length);
+        filas.push(fila(r.numero, r.descripcion, r.unidad, cantidad(r.cantidad), "", "NO COTIZA", String(r.etapa || "").trim()));
+        return;
+      }
       filas.push(fila(r.numero, conNota(r, incluirNota(r), MARCA_PDF), r.unidad, cantidad(r.cantidad),
         conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : "",
         String(r.etapa || "").trim()));
@@ -167,7 +174,7 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
     columnas: conEtapas
       ? ["N°", "Descripción", "Etapa", "Unidad", "Cantidad", "P. unitario", "Total"]
       : ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"],
-    filas, deCapitulo, deExtras,
+    filas, deCapitulo, deExtras, deNoCotiza,
   };
 }
 
@@ -434,6 +441,13 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
       }
       // El subtítulo de los extras: en negrita y sin el fondo del capítulo,
       // para que se lea como parte de él y no como uno nuevo.
+      // "NO COTIZA" en gris y en la columna del total, que es donde se busca.
+      if (d.section === "body" && tb.deNoCotiza?.includes(d.row.index)) {
+        d.cell.styles.textColor = t.gris;
+        if (d.column.index === tb.columnas.length - 1) {
+          d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 7;
+        }
+      }
       if (d.section === "body" && tb.deExtras?.includes(d.row.index)) {
         d.cell.styles.fontStyle = "bold";
         d.cell.styles.textColor = t.capTexto;
@@ -777,8 +791,12 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
         celdasExtras.push(`F${fila}`);
         fila++;
       }
-      const valores = [r.numero, conNota(r, notasRubro && !fuera.has(String(r.id ?? r.numero ?? ""))), r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
-        { formula: `D${fila}*E${fila}`, result: cotizar ? 0 : r2(r.cantidad * r.precio_unitario) }];
+      // NO COTIZA: en su lugar, sin precio, y el texto donde iría el total
+      // (la suma del capítulo no cuenta un texto).
+      const valores = r.noCotiza
+        ? [r.numero, r.descripcion, r.unidad, r.cantidad, null, "NO COTIZA"]
+        : [r.numero, conNota(r, notasRubro && !fuera.has(String(r.id ?? r.numero ?? ""))), r.unidad, r.cantidad, cotizar ? null : r.precio_unitario,
+          { formula: `D${fila}*E${fila}`, result: cotizar ? 0 : r2(r.cantidad * r.precio_unitario) }];
       valores.forEach((v, i) => {
         const x = ws.getCell(fila, i + 1);
         x.value = v;
@@ -789,7 +807,8 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
         if (i >= 4) x.numFmt = "#,##0.00";
       });
       // Lo que el contratista tiene que llenar se ve distinto.
-      if (cotizar) ws.getCell(fila, 5).fill = relleno(LLENAR);
+      if (cotizar && !r.noCotiza) ws.getCell(fila, 5).fill = relleno(LLENAR);
+      if (r.noCotiza) for (let k = 1; k <= 6; k++) ws.getCell(fila, k).font = fuente({ color: { argb: GRIS }, bold: k === 6 });
       if (r.descripcion.length > 62) ws.getRow(fila).height = 15 * Math.ceil(r.descripcion.length / 62);
       fila++;
     });

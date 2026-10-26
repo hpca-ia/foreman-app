@@ -74,9 +74,8 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // notasCliente es null cuando el presupuesto no vino de un cliente.
   const [notasCliente, setNotasCliente] = useState(null);
   const [origenNotas, setOrigenNotas] = useState("nuestras");
-  // EL RESUMEN GENERAL al inicio: cuánto suma cada capítulo. null es "lo que
-  // corresponde al formato": sí en el del cliente, que así empieza, y no en
-  // el nuestro.
+  // EL RESUMEN GENERAL al inicio: cuánto suma cada capítulo. Va de entrada
+  // en los dos formatos; null es "no lo tocaron", y se puede apagar.
   const [conResumen, setConResumen] = useState(null);
   // LA MEMORIA DE CAMBIOS, adelante del presupuesto.
   const [carta, setCarta] = useState("");
@@ -297,7 +296,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const fmtM = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const notaM2 = porM2 ? `Valor referencial del costo directo: $${fmtM(porM2)} por m², sobre un área de ${area.toLocaleString("es-EC", { maximumFractionDigits: 2 })} m², antes de honorarios e IVA.` : null;
   const delCliente = notasCliente != null && origenNotas === "cliente";
-  const resumen = conResumen ?? delCliente;
+  const resumen = conResumen ?? true;
   const notas = formato === "cotizar"
     ? lineas(paraCotizar)
     : !conNotas
