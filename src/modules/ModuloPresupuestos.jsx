@@ -1261,21 +1261,14 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             {puedeEditar&&<button onClick={()=>setSubVista("nuevo")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Nuevo presupuesto</button>}
           </>}
           {subVista==="detalle"&&<>
-            {/* EL CRONOGRAMA QUE VA CON ESTE PRESUPUESTO. Se arma antes de que
-                haya obra: es lo que se le muestra al cliente para decirle en
-                cuánto tiempo se le hace lo que está cotizado. Vive en el
-                proyecto, así que sin proyecto no hay dónde guardarlo. */}
+            {/* EL CRONOGRAMA DE ESTE PRESUPUESTO. Cada presupuesto tiene el
+                suyo y se arma mientras se trabaja, sin obra y sin proyecto: es
+                lo que se le muestra al cliente para decirle en cuánto tiempo
+                se le hace lo que está cotizado. */}
             {onArmarCronograma&&presupuestoActivo&&!presupuestoActivo.archivado_at&&(
               <button
-                onClick={()=>{
-                  if(!presupuestoActivo.lead_id){
-                    alert("El cronograma se guarda en el proyecto, y este presupuesto no tiene uno.\n\nAsignale el proyecto arriba (\"asignar\") y volvé a tocar este botón.");
-                    setCambiandoProyecto(true);
-                    return;
-                  }
-                  onArmarCronograma({leadId:presupuestoActivo.lead_id,presupuestoId:presupuestoActivo.id});
-                }}
-                title="Armar el cronograma de obra con las cantidades de este presupuesto, aunque la obra todavía no esté activa"
+                onClick={()=>onArmarCronograma({presupuestoId:presupuestoActivo.id})}
+                title="El cronograma de obra de este presupuesto: NOVA lo arma con sus cantidades"
                 style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5}}>
                 <GanttChartSquare size={13}/> Armar cronograma
               </button>

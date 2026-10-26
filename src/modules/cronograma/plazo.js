@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { dueno } from "./dueno";
 import { calendario, calcular } from "./cpm";
 
 // El plazo de la obra: una fecha de arranque y una cantidad de meses.
@@ -12,15 +13,16 @@ import { calendario, calcular } from "./cpm";
 // algo del proyecto. Por eso se guarda en el proyecto.
 
 export async function leerPlazo(leadId) {
-  if (!leadId) return { inicio: null, meses: null };
-  const { data, error } = await supabase.from("leads")
-    .select("crono_inicio,crono_meses").eq("id", leadId).maybeSingle();
+  const d = dueno(leadId);
+  if (!d?.id) return { inicio: null, meses: null };
+  const { data, error } = await supabase.from(d.tabla)
+    .select("crono_inicio,crono_meses").eq("id", d.id).maybeSingle();
   // Sin la 082 la consulta falla entera y se perdería también la fecha de
   // arranque, que sí existe. Se vuelve a pedir sin los meses: devolver menos
   // es aceptable, devolver nada cuando se tiene la mitad no.
   if (error) {
-    const { data: d2 } = await supabase.from("leads")
-      .select("crono_inicio").eq("id", leadId).maybeSingle();
+    const { data: d2 } = await supabase.from(d.tabla)
+      .select("crono_inicio").eq("id", d.id).maybeSingle();
     return { inicio: d2?.crono_inicio || null, meses: null, sinPlazo: true };
   }
   return { inicio: data?.crono_inicio || null, meses: data?.crono_meses || null };
@@ -34,8 +36,10 @@ export async function guardarPlazo(leadId, { inicio, meses, topeMes, fin, labora
   if (fin !== undefined) campos.crono_fin = fin || null;
   if (laborables !== undefined) campos.crono_laborables = laborables?.length ? laborables : null;
   if (!Object.keys(campos).length) return null;
-  const { error } = await supabase.from("leads").update(campos).eq("id", leadId);
+  const d = dueno(leadId);
+  const { error } = await supabase.from(d.tabla).update(campos).eq("id", d.id);
   if (!error) return null;
+  if (d.tabla === "presupuestos" && /column|schema cache/i.test(error.message)) return "Falta correr la migración 124.";
   if (/crono_tope_mes/.test(error.message)) return "Falta correr la migración 084.";
   if (/crono_fin|crono_laborables/.test(error.message)) return "Falta correr la migración 091.";
   return /column|schema cache/i.test(error.message) ? "Falta correr la migración 082." : error.message;
@@ -130,10 +134,10 @@ export function diasDelPlazo(inicio, meses, cal) {
  * que las dos pantallas no pueden discrepar: leen de acá.
  */
 export async function cargarPlan(leadId) {
-  const id = leadId?.id ?? leadId;
-  if (!id) return { actividades: [], plan: null, cal: null };
+  const d = dueno(leadId);
+  if (!d?.id) return { actividades: [], plan: null, cal: null };
   const { data: act, error } = await supabase.from("cronograma_actividades")
-    .select("*").eq("lead_id", id).order("orden");
+    .select("*").eq(d.campo, d.id).order("orden");
   if (error || !act?.length) return { actividades: [], plan: null, cal: null, sinTablas: !!error };
   const { data: dep } = await supabase.from("cronograma_dependencias")
     .select("*").in("actividad_id", act.map(a => a.id));
@@ -141,8 +145,8 @@ export async function cargarPlan(leadId) {
   // El arranque y los días laborables se leen acá y no se reciben de afuera:
   // el calendario de la obra es uno, y si cada pantalla lo arma con lo que
   // tiene a mano, la que llamó con menos datos calcula otras fechas.
-  const { data: l } = await supabase.from("leads")
-    .select("crono_inicio,crono_laborables,crono_feriados").eq("id", id).maybeSingle();
+  const { data: l } = await supabase.from(d.tabla)
+    .select("crono_inicio,crono_laborables,crono_feriados").eq("id", d.id).maybeSingle();
 
   const cal = calendario({
     laborables: l?.crono_laborables || [1, 2, 3, 4, 5, 6],

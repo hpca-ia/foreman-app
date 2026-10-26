@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { dueno, filaDe } from "./dueno";
 import { calcular, calendario } from "./cpm";
 import { expandir, ordenar, n, etapaDe, SIN_TILDE, ETAPA_CORTA } from "./armarPropuesta";
 
@@ -490,7 +491,7 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
   // presupuesto y no hay de dónde volver a sacarlo. Borrarlo al rearmar era
   // perder trabajo que nadie podía recuperar.
   const { data: previas } = await supabase.from("cronograma_actividades")
-    .select("id,obra_actividad_id").eq("lead_id", lead.id);
+    .select("id,obra_actividad_id").eq(dueno(lead).campo, lead.id);
   const aBorrar = (previas || []).filter(x => x.obra_actividad_id != null).map(x => x.id);
   if (aBorrar.length) {
     await supabase.from("cronograma_dependencias").delete().in("actividad_id", aBorrar);
@@ -499,7 +500,7 @@ export async function guardarPropuesta({ lead, obra, propuesta, quien }) {
   }
 
   const filas = propuesta.actividades.map(a => ({
-    lead_id: lead.id, obra_id: obra?.id || null,
+    ...filaDe(lead), obra_id: obra?.id || null,
     nombre: a.nombre, duracion: a.duracion,
     obra_actividad_id: a.agrupacion_id, nota: a.porque || null, orden: a.orden,
     etapa: a.etapa || "ejecucion", peso_pct: a.peso ?? null,

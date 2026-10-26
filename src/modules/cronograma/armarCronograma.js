@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { dueno, filaDe } from "./dueno";
 import { calendario } from "./cpm";
 import { normalizarPlan, conLasFaltantes } from "./planDeObra";
 import { leerMemoria } from "./memoriaNova";
@@ -197,12 +198,13 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
   // Guardando primero, lo peor que pasa es que queden las dos listas juntas y
   // haya que borrar una a mano. Eso es un rato de trabajo; lo otro era perder
   // el cronograma entero.
+  const d = dueno(lead);
   let { data: previas, error: ePrev } = await supabase.from("cronograma_actividades")
-    .select("id,obra_actividad_id,presupuesto_capitulo").eq("lead_id", lead.id);
+    .select("id,obra_actividad_id,presupuesto_capitulo").eq(d.campo, d.id);
   // Sin la 123 no existe el capítulo: se lee sin él.
   if (ePrev) {
     ({ data: previas } = await supabase.from("cronograma_actividades")
-      .select("id,obra_actividad_id").eq("lead_id", lead.id));
+      .select("id,obra_actividad_id").eq(d.campo, d.id));
   }
   // LO PROPIO DEL CRONOGRAMA SOBREVIVE: lo que alguien agregó a mano —el
   // permiso municipal, la inspección de bomberos— no está en ningún
@@ -210,7 +212,7 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
   // o de un capítulo del presupuesto sí se reemplaza.
   const aBorrar = (previas || [])
     .filter(x => x.obra_actividad_id != null || x.presupuesto_capitulo != null).map(x => x.id);
-  const { data: fasesViejas } = await supabase.from("cronograma_fases").select("id").eq("lead_id", lead.id);
+  const { data: fasesViejas } = await supabase.from("cronograma_fases").select("id").eq(d.campo, d.id);
 
   const creadas = [];
   let orden = 1000;   // atrás de lo que haya, hasta que lo viejo se vaya
@@ -218,12 +220,12 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
   let sinCapitulo = false;
   for (let i = 0; i < plan.etapas.length; i++) {
     const e = plan.etapas[i];
-    const hecha = await crearFase({ leadId: lead.id, nombre: e.nombre, orden: i, quien });
+    const hecha = await crearFase({ leadId: lead, nombre: e.nombre, orden: i, quien });
     // Sin la 101 no hay etapas: el cronograma entra igual, en una sola lista.
     // Perder las barras por no poder guardar un título sería absurdo.
     if (hecha.error) sinEtapas = true;
     const filas = e.actividades.map(a => ({
-      lead_id: lead.id, obra_id: obra?.id || null,
+      ...filaDe(lead), obra_id: obra?.id || null,
       nombre: a.nombre, duracion: a.dias,
       obra_actividad_id: a.agrupacion, nota: a.porque, orden: orden++,
       etapa: "ejecucion", incluye: a.incluye?.length ? a.incluye : null,
@@ -275,7 +277,7 @@ export async function guardarPlan({ lead, obra, plan, quien, cubrePresupuesto = 
   // prendido para siempre y ofrece "ponerlo al día", que agregaría una barra
   // por cada agrupación faltante y desarmaría lo que alguien acaba de pensar.
   if (cubrePresupuesto !== null) {
-    await supabase.from("leads").update({ crono_cubre: cubrePresupuesto }).eq("id", lead.id);
+    await supabase.from(d.tabla).update({ crono_cubre: cubrePresupuesto }).eq("id", d.id);
   }
 
   return { creadas, etapas: plan.etapas.length, sinEtapas, sinCapitulo };

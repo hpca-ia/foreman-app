@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { dueno, filaDe } from "./dueno";
 
 // Las etapas del cronograma: cómo se LEE una obra de cuarenta barras.
 //
@@ -12,16 +13,17 @@ const falta = e => /relation|column|does not exist|schema cache/i.test(e?.messag
 export const SIN_101 = "Falta correr la migración 101 para usar etapas en el cronograma.";
 
 export async function fasesDe(leadId) {
-  if (!leadId) return { fases: [], sinTabla: false };
+  const d = dueno(leadId);
+  if (!d?.id) return { fases: [], sinTabla: false };
   const { data, error } = await supabase.from("cronograma_fases")
-    .select("*").eq("lead_id", leadId).order("orden");
+    .select("*").eq(d.campo, d.id).order("orden");
   if (error) return { fases: [], sinTabla: falta(error) };
   return { fases: data || [], sinTabla: false };
 }
 
 export async function crearFase({ leadId, nombre, orden, quien }) {
   const { data, error } = await supabase.from("cronograma_fases").insert({
-    lead_id: leadId, nombre: String(nombre || "").trim().slice(0, 80) || "Etapa",
+    ...filaDe(leadId), nombre: String(nombre || "").trim().slice(0, 80) || "Etapa",
     orden: orden ?? 0,
     creado_por: quien?.id ?? null, creado_nombre: quien?.name || null,
   }).select();

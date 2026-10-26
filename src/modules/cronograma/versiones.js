@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { dueno, filaDe } from "./dueno";
 import { fotoDe } from "./compararVersion";
 
 // Guardar y leer las fotos del cronograma.
@@ -21,7 +22,7 @@ export async function guardarVersion({ lead, obra, actividades, dependencias, pl
   const foto = fotoDe(actividades, dependencias);
   const fin = actividades.reduce((m, a) => (String(a.fin || "") > m ? String(a.fin).slice(0, 10) : m), "");
   const fila = {
-    lead_id: lead.id, obra_id: obra?.id || lead.obra_id || null,
+    ...filaDe(lead), obra_id: obra?.id || lead.obra_id || null,
     nombre: new Date().toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" }),
     motivo: String(motivo || "").trim().slice(0, 300) || null,
     es_linea_base: !!lineaBase,
@@ -42,10 +43,11 @@ export async function guardarVersion({ lead, obra, actividades, dependencias, pl
 
 /** Las versiones guardadas, de la más nueva a la más vieja. */
 export async function versionesDe(leadId) {
-  if (!leadId) return [];
+  const d = dueno(leadId);
+  if (!d?.id) return [];
   const { data } = await supabase.from("cronograma_versiones")
     .select("id,nombre,motivo,es_linea_base,dias,fin,creado_nombre,created_at")
-    .eq("lead_id", leadId).order("created_at", { ascending: false });
+    .eq(d.campo, d.id).order("created_at", { ascending: false });
   return data || [];
 }
 

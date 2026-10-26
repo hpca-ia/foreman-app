@@ -30,6 +30,8 @@ import { plataDelPlan } from "./plataDelPlan";
 import { fmt } from "../controlObra/calculos";
 import { numerosDeBarras } from "./numeros";
 import { capitulosComoAgrupaciones, planDelPresupuesto, presupuestoDeReferencia } from "./presupuestoComoObra";
+import { dueno, filaDe, esDePresupuesto, presupuestoComoDueno } from "./dueno";
+import { esAdmin } from "../../lib/roles";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
 //
@@ -62,8 +64,11 @@ const JORNADAS = [
   { id: "todos", label: "Todos", dias: [0, 1, 2, 3, 4, 5, 6], pista: "Obra a tres turnos o con plazo contra reloj" },
 ];
 
-export default function ModuloCronograma({ currentUser, puede, nivelProyecto, abrir, onAbierto }) {
+export default function ModuloCronograma({ currentUser, puede, nivelProyecto, entraATodo = false, abrir, onAbierto }) {
   const [proyectos, setProyectos] = useState([]);
+  const [presupuestos, setPresupuestos] = useState([]);
+  const [conCrono, setConCrono] = useState(() => new Set());
+  const [sin124, setSin124] = useState(false);
   const [lead, setLead] = useState(null);
   const [actividades, setActividades] = useState([]);
   const [dependencias, setDependencias] = useState([]);
@@ -73,6 +78,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
   const [error, setError] = useState("");
   const [uniendo, setUniendo] = useState(null);
   const [armando, setArmando] = useState(null);
+  // El primer cronograma de un presupuesto: plazo, jornada y lo que se cuente.
+  const [primero, setPrimero] = useState({});
   const [pensando, setPensando] = useState(false);
   // La escala de arriba: en fechas o en días de obra. Las dos sirven para
   // cosas distintas —"el 14 de marzo" se coordina con el cliente, "el día 62"
@@ -137,7 +144,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
 
   useEffect(() => {
     let vivo = true;
-    if (lead?.id) versionesDe(lead.id).then(v => { if (vivo) setVersiones(v); }).catch(() => {});
+    if (lead?.id) versionesDe(lead).then(v => { if (vivo) setVersiones(v); }).catch(() => {});
     return () => { vivo = false; };
   }, [lead?.id]);
   // El menú de lo que se hace de vez en cuando: bajarlo para Project,
@@ -174,6 +181,17 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
       // cuando más se la necesita — cuando hay que mostrarle al cliente en
       // cuánto tiempo se le hace la obra.
       setProyectos((data || []).filter(l => l.resultado !== "perdido"));
+
+      // LOS PRESUPUESTOS QUE SE ESTÁN TRABAJANDO, cada uno con su cronograma.
+      // Los archivados no: son historia. Y cuáles ya tienen cronograma, para
+      // que se vea de un vistazo cuál falta armar.
+      const [{ data: pres }, conAct] = await Promise.all([
+        supabase.from("presupuestos").select("*").is("archivado_at", null).order("created_at", { ascending: false }),
+        supabase.from("cronograma_actividades").select("presupuesto_id").not("presupuesto_id", "is", null),
+      ]);
+      setPresupuestos(pres || []);
+      setSin124(!!conAct.error);
+      setConCrono(new Set((conAct.data || []).map(a => a.presupuesto_id)));
       setCargando(false);
     })();
   }, []);
@@ -181,8 +199,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
   const cargar = useCallback(async () => {
     if (!lead?.id) return;
     const { data: act, error: e } = await supabase.from("cronograma_actividades")
-      .select("*").eq("lead_id", lead.id).order("orden");
-    if (e) { setSinTablas(/relation|does not exist|schema cache/i.test(e.message)); return; }
+      .select("*").eq(dueno(lead).campo, lead.id).order("orden");
+    if (e) {
+      // El de un presupuesto necesita la 124; decir "falta la 076" mandaría a
+      // buscar el problema donde no está.
+      if (esDePresupuesto(lead) && /presupuesto_id/.test(e.message)) { setSin124(true); return; }
+      setSinTablas(/relation|does not exist|schema cache/i.test(e.message)); return;
+    }
     setActividades(act || []);
     if (lead.obra_id) {
       const { data: ags } = await supabase.from("obra_actividades")
@@ -248,7 +271,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
 
   const cargarFases = useCallback(async () => {
     if (!lead?.id) { setFases([]); return; }
-    const { fases: f } = await fasesDe(lead.id);
+    const { fases: f } = await fasesDe(lead);
     setFases(f);
   }, [lead?.id]);
   useEffect(() => { cargarFases(); }, [cargarFases]);
@@ -259,25 +282,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
   // la obra en el control. Lo que hay es el presupuesto que se está
   // trabajando, y tiene todos los metros: armar sin él es adivinar.
   const [presupuestosDelLead, setPresupuestosDelLead] = useState([]);
-  // Lo que se pidió desde Presupuestos ("armar el cronograma de este").
-  const [pedidoPres, setPedidoPres] = useState(null);
+  // Lo que se pidió desde Presupuestos: el cronograma de ESE presupuesto.
   useEffect(() => {
-    if (!abrir?.leadId || cargando) return;
-    const p = proyectos.find(x => x.id === abrir.leadId);
-    if (p) {
-      setPedidoPres(abrir.presupuestoId || null);
-      setLead(p);
-      // Que se abra el panel de armar: es lo que se vino a hacer.
-      setArmando({ cubrir: false });
-    }
-    onAbierto?.();
+    if (!abrir?.presupuestoId || cargando) return;
+    (async () => {
+      const { data } = await supabase.from("presupuestos").select("*").eq("id", abrir.presupuestoId).maybeSingle();
+      if (data) setLead(presupuestoComoDueno(data));
+      onAbierto?.();
+    })();
     // eslint-disable-next-line
-  }, [abrir?.leadId, cargando, proyectos.length]);
+  }, [abrir?.presupuestoId, cargando]);
   const [fuenteId, setFuenteId] = useState(null);
   useEffect(() => {
     let vivo = true;
     setPresupuestosDelLead([]); setFuenteId(null);
-    if (!lead?.id || lead.obra_id) return;
+    if (!lead?.id || lead.obra_id || esDePresupuesto(lead)) return;
     (async () => {
       const [{ data }, ya] = await Promise.all([
         supabase.from("presupuestos").select("id,nombre,estado,archivado_at,created_at,iva_pct,total")
@@ -288,16 +307,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
       if (!vivo) return;
       const lista = (data || []).filter(p => !p.archivado_at);
       setPresupuestosDelLead(lista);
-      // Lo que se pidió desde Presupuestos, después el que ya se usó, y si
-      // no, el aprobado o el más nuevo.
-      const pedido = lista.find(p => p.id === pedidoPres);
+      // El que ya se usó, y si no, el aprobado o el más nuevo.
       const usado = lista.find(p => p.id === ya?.data?.crono_presupuesto_id);
-      setFuenteId((pedido || usado || presupuestoDeReferencia(lista))?.id ?? null);
+      setFuenteId((usado || presupuestoDeReferencia(lista))?.id ?? null);
     })();
     return () => { vivo = false; };
     // eslint-disable-next-line
   }, [lead?.id, lead?.obra_id]);
-  const fuente = presupuestosDelLead.find(p => p.id === fuenteId) || null;
+  // El cronograma de un presupuesto sale de él mismo.
+  const fuente = esDePresupuesto(lead) ? lead : (presupuestosDelLead.find(p => p.id === fuenteId) || null);
 
   // Lo que NOVA lee para saber de qué tamaño es la obra: las agrupaciones del
   // control si hay obra, los capítulos del presupuesto si no.
@@ -316,7 +334,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     return g ? { ...a, obra_actividad_id: g.id } : a;
   });
   async function anotarFuente() {
-    if (obra?.id || !fuente) return;
+    if (obra?.id || !fuente || esDePresupuesto(lead)) return;
     await supabase.from("leads").update({ crono_presupuesto_id: fuente.id }).eq("id", lead.id);
   }
 
@@ -342,7 +360,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
   // casos el control avisa de lo único que de verdad cambia la obra: las
   // órdenes de cambio.
   const cubrePresupuesto = lead?.crono_cubre === true;
-  const editable = !lead || nivelProyecto?.(lead.id) === "editar";
+  // El de un presupuesto lo edita quien edita su proyecto; si todavía no
+  // cuelga de ninguno, quien entra a todo, como en Presupuestos.
+  const puedeTodo = entraATodo || esAdmin(currentUser?.role);
+  const editable = !lead || (esDePresupuesto(lead)
+    ? (lead.lead_id ? nivelProyecto?.(lead.lead_id) === "editar" : puedeTodo)
+    : nivelProyecto?.(lead.id) === "editar");
   // El cronograma vive en el proyecto; la obra es de dónde salen el
   // presupuesto y sus agrupaciones. Un proyecto para cotizar todavía no tiene
   // obra, y ahí el cronograma se arma a mano — que es justamente el caso.
@@ -352,6 +375,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
 
   if (!lead) {
     const mios = proyectos.filter(p => !nivelProyecto || !!nivelProyecto(p.id));
+    // Los presupuestos que uno ve en Presupuestos: los de sus proyectos, y los
+    // sueltos si entra a todo. Los borradores primero: son los que se arman.
+    const misPres = presupuestos
+      .filter(p => p.lead_id ? (!nivelProyecto || !!nivelProyecto(p.lead_id)) : puedeTodo)
+      .sort((a, b) => (a.estado === "borrador" || !a.estado ? 0 : 1) - (b.estado === "borrador" || !b.estado ? 0 : 1));
+    const nombreProyecto = id => proyectos.find(x => x.id === id)?.nombre;
     return (
       <div style={{ fontFamily: colors.font }}>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>Cronograma</div>
@@ -367,6 +396,48 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
             puede guardar todavía, así que el Gantt y el cronograma valorado no comparten plazo. Lo demás funciona.
           </Aviso>
         )}
+        {/* DESDE UN PRESUPUESTO. Se elige el que se está trabajando y NOVA
+            arma su cronograma: cada versión tiene el suyo, haya o no obra. */}
+        <Titulo>Presupuestos</Titulo>
+        {sin124 && (
+          <Aviso>
+            Falta correr la migración 124: sin ella un presupuesto no puede tener cronograma propio.
+          </Aviso>
+        )}
+        {!misPres.length ? (
+          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>No hay presupuestos en curso.</div>
+        ) : (
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+            overflow: "hidden", marginBottom: 18 }}>
+            {misPres.map(p => {
+              const tiene = conCrono.has(p.id);
+              const estado = p.estado || "borrador";
+              return (
+                <button key={p.id} disabled={sin124} onClick={() => setLead(presupuestoComoDueno(p))}
+                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
+                    padding: "10px 13px", background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`,
+                    cursor: sin124 ? "default" : "pointer", fontFamily: colors.font, fontSize: 13.5, color: colors.ink }}>
+                  <GanttChartSquare size={15} color={tiene ? colors.brand : colors.muted} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nombre}</span>
+                    <span style={{ display: "block", fontSize: 11, color: colors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {nombreProyecto(p.lead_id) || "sin proyecto"}{Number(p.total) ? ` · $${fmt(p.total)}` : ""}
+                    </span>
+                  </span>
+                  {estado !== "borrador" && (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, background: colors.neutralSoft,
+                      borderRadius: 10, padding: "1px 7px", flexShrink: 0 }}>{estado === "no_aprobado" ? "NO APROBADO" : estado.toUpperCase()}</span>
+                  )}
+                  <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0, color: tiene ? colors.brand : colors.muted }}>
+                    {tiene ? "Ver cronograma" : "Armar con NOVA"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <Titulo>Proyectos</Titulo>
         {!mios.length ? <Centro>No tenés proyectos asignados.</Centro> : (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
             {mios.map(p => {
@@ -395,11 +466,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     );
   }
 
-  if (sinTablas) {
+  if (sinTablas || (sin124 && esDePresupuesto(lead))) {
     return (
       <div style={{ fontFamily: colors.font }}>
         <Volver onClick={() => setLead(null)} />
-        <Aviso>Falta correr la migración 076 para usar el cronograma.</Aviso>
+        <Aviso>{sinTablas
+          ? "Falta correr la migración 076 para usar el cronograma."
+          : "Falta correr la migración 124: sin ella un presupuesto no puede tener cronograma propio."}</Aviso>
       </div>
     );
   }
@@ -506,7 +579,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     if (!texto) return;
     setError("");
     const fila = {
-      lead_id: lead.id, obra_id: lead.obra_id || null,
+      ...filaDe(lead), obra_id: lead.obra_id || null,
       // Un hito pasa un día: no se le pregunta cuánto dura.
       nombre: texto, duracion: hito ? 1 : Math.max(1, Number(dias ?? nueva?.duracion) || 1),
       orden: actividades.length,
@@ -620,7 +693,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     let anterior = a.id;
     for (const [i, et] of resto.entries()) {
       const { data: creada, error: e2 } = await supabase.from("cronograma_actividades").insert({
-        lead_id: lead.id, obra_id: lead.obra_id || null,
+        ...filaDe(lead), obra_id: lead.obra_id || null,
         obra_actividad_id: a.obra_actividad_id,
         nombre: `${base} · ${et.nombre}`.slice(0, 120),
         duracion: et.duracion, etapa: et.etapa || "ejecucion",
@@ -709,7 +782,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     const filas = reales.map((g, i) => {
       const parte = total > 0 ? (plata[g.id] || 0) / total : 1 / reales.length;
       return {
-        lead_id: lead.id, obra_id: lead.obra_id || null,
+        ...filaDe(lead), obra_id: lead.obra_id || null,
         obra_actividad_id: g.id, nombre: String(g.nombre).slice(0, 120),
         duracion: Math.max(1, Math.round(dias * parte)),
         etapa: "ejecucion", peso_pct: 100, orden: i,
@@ -758,13 +831,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
    */
   async function vaciarCronograma() {
     const { data: previas, error } = await supabase.from("cronograma_actividades")
-      .select("id").eq("lead_id", lead.id);
+      .select("id").eq(dueno(lead).campo, lead.id);
     if (error) return { error: error.message };
     if (!previas?.length) return { borradas: 0 };
 
     await supabase.from("cronograma_dependencias").delete().in("actividad_id", previas.map(a => a.id));
     const { data: borradas, error: e2 } = await supabase.from("cronograma_actividades")
-      .delete().eq("lead_id", lead.id).select("id");
+      .delete().eq(dueno(lead).campo, lead.id).select("id");
     if (e2) return { error: e2.message };
     if ((borradas?.length || 0) < previas.length) {
       return { error: "No se pudo borrar el cronograma anterior: la base dejó filas sin tocar." };
@@ -1011,7 +1084,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
       : [];
     if (faltan.length) {
       const filas = faltan.map((g, i) => ({
-        lead_id: lead.id, obra_id: lead.obra_id || null,
+        ...filaDe(lead), obra_id: lead.obra_id || null,
         obra_actividad_id: g.id, nombre: String(g.nombre).slice(0, 120),
         duracion: 10, etapa: "ejecucion", peso_pct: 100,
         orden: actividades.length + i,
@@ -1119,7 +1192,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     // Al final de la lista: una etapa nueva es la que sigue. Si va antes se
     // sube con las flechas, que es un movimiento y no una decisión.
     const r = await crearFase({
-      leadId: lead.id, nombre,
+      leadId: lead, nombre,
       orden: fases.length ? Math.max(...fases.map(f => f.orden ?? 0)) + 1 : 0,
       quien: currentUser,
     });
@@ -1159,7 +1232,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     // donde están, así que no se pierde nada en el camino.
     for (const f of fases) await borrarFase(f.id);
     for (let i = 0; i < r.etapas.length; i++) {
-      const hecha = await crearFase({ leadId: lead.id, nombre: r.etapas[i].nombre, orden: i, quien: currentUser });
+      const hecha = await crearFase({ leadId: lead, nombre: r.etapas[i].nombre, orden: i, quien: currentUser });
       if (hecha.error) { setPensando(false); setError(hecha.error); return; }
       const e = await asignarFase(r.etapas[i].ids, hecha.fase.id);
       if (e) { setPensando(false); setError(e === SIN_101 ? SIN_101 : e); return; }
@@ -1348,9 +1421,192 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
     await cargar();
   }
 
+  /**
+   * NOVA arma el cronograma entero, de corrido: el plan por etapas, las
+   * barras guardadas y el orden. Lo mismo para una obra en curso que para un
+   * presupuesto: cambia de dónde lee el tamaño de la obra, no cómo la piensa.
+   *
+   * Recibe el plazo y el calendario en vez de leerlos de la pantalla: al
+   * armar un presupuesto recién elegido, los meses se escriben y se arma en
+   * el mismo click, y la pantalla todavía no los tiene.
+   */
+  async function armarConNova({ meses, dias, cal: c, comoVa = "", cubrir = false, paso = () => {} }) {
+    setError(""); setPensando(true);
+    const mp = await materiaDeLaObra();
+    if (!obra?.id && mp.length) {
+      paso(`El presupuesto: ${mp.length} ${mp.length === 1 ? "capítulo" : "capítulos"} con sus cantidades.`);
+    }
+    const r = await proponerPlan({
+      agrupaciones: mp, meses, dias,
+      nombreObra: lead.nombre, comoVa, cal: c,
+      cubrirPresupuesto: !!cubrir,
+    });
+    if (r.error) { setPensando(false); setError(r.error); return false; }
+    if (!obra?.id) r.plan = planDelPresupuesto(r.plan, mp);
+    paso(`El plan: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
+    if (r.plan.faltantes.length && cubrir) {
+      paso(`${r.plan.faltantes.length} ${obra?.id ? "agrupaciones" : "capítulos"} quedaron en "Sin ubicar": hay que mirarlos.`, true);
+    }
+    if (r.cortado) paso("La respuesta vino cortada: guardé lo que llegó entero.", true);
+
+    // Sin obra no hay control que vigilar: lo que se comprometa con las
+    // agrupaciones se decide cuando la obra exista.
+    const g = await guardarPlan({
+      lead, obra, plan: r.plan, quien: currentUser,
+      cubrePresupuesto: obra?.id ? !!cubrir : null,
+    });
+    if (g.error) { setPensando(false); setError(g.error); return false; }
+    paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la migración 101)" : ` en ${g.etapas} etapas`}.`);
+    if (g.sinCapitulo) paso("Falta correr la migración 123: las barras no recuerdan de qué capítulo salen, y armarlo de nuevo no las reemplaza.", true);
+    await anotarFuente();
+
+    const o = await guardarOrden({ actividades: g.creadas, dias, nombreObra: lead.nombre, cal: c });
+    if (o.error) paso(`El orden no se pudo: ${o.error} — las barras ya están, encadenalas vos o volvé a pedirlo.`, true);
+    else paso(`El orden: ${o.creadas} dependencias.`);
+
+    setPensando(false);
+    await Promise.all([cargar(), cargarFases()]);
+    setAviso("Cronograma armado. Revisalo abajo: lo que esté mal se corrige escribiendo encima.");
+    return true;
+  }
+
+  /**
+   * El primer cronograma de un presupuesto: se escribe el plazo y NOVA arma.
+   * Un solo paso, porque es lo que se vino a hacer.
+   */
+  async function armarPresupuesto() {
+    const meses = Math.round(Number(primero?.meses ?? lead.crono_meses) || 0);
+    if (meses < 1) { setError("Poné cuántos meses dura la obra: es contra ese número que NOVA arma."); return; }
+    const inicio = primero.inicio || lead.crono_inicio || hoy();
+    const laborables = primero.laborables || lead.crono_laborables || [1, 2, 3, 4, 5, 6];
+    const fin = finDeMeses(inicio, meses);
+    const err = await guardarPlazo(lead, { inicio, meses, fin, laborables });
+    if (err) { setError(err); return; }
+    setLead(l => ({ ...l, crono_inicio: inicio, crono_meses: meses, crono_fin: fin, crono_laborables: laborables }));
+    const c = calendario({ laborables, feriados: lead.crono_feriados || [] });
+    setPrimero(v => ({ ...v, pasos: [] }));
+    const paso = (texto, mal) => setPrimero(v => ({ ...v, pasos: [...(v?.pasos || []), { texto, mal }] }));
+    const ok = await armarConNova({
+      meses, dias: diasHastaFin(inicio, fin, c), cal: c,
+      comoVa: primero.comoVa || "", cubrir: !!primero.cubrir, paso,
+    });
+    if (ok) setConCrono(x => new Set(x).add(lead.id));
+  }
+
+  // Un presupuesto que todavía no tiene cronograma: lo único que hay que
+  // hacer es decir cuánto dura y dejar que NOVA lo arme.
+  const primeraVez = esDePresupuesto(lead) && editable && !actividades.length && !conCrono.has(lead.id);
+
   return (
     <div style={{ fontFamily: colors.font }}>
-      <Volver onClick={() => setLead(null)} />
+      <Volver onClick={() => { setPrimero({}); setArmando(null); setLead(null); }} />
+      {esDePresupuesto(lead) && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>{lead.nombre}</div>
+          <div style={{ fontSize: 12, color: colors.muted }}>
+            Cronograma del presupuesto
+            {lead.lead_id && proyectos.find(x => x.id === lead.lead_id) ? ` · ${proyectos.find(x => x.id === lead.lead_id).nombre}` : " · sin proyecto"}
+            {Number(lead.total) ? ` · $${fmt(lead.total)}` : ""}
+          </div>
+        </div>
+      )}
+
+      {/* EL PRIMER CRONOGRAMA DE UN PRESUPUESTO, EN UN SOLO PASO.
+          Se elige el presupuesto, se dice cuánto dura la obra, y NOVA arma
+          todo: etapas, trabajos con sus días sacados de las cantidades, y el
+          orden. Igual que en una obra en curso, pero leyendo el presupuesto
+          que se está trabajando. */}
+      {primeraVez && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`, borderRadius: colors.radiusMd,
+          padding: 14, marginBottom: 12, display: "grid", gap: 11 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink, display: "flex", alignItems: "center", gap: 6 }}>
+              <Sparkles size={15} color={colors.brand} /> Que NOVA arme el cronograma de este presupuesto
+            </div>
+            <div style={{ fontSize: 12, color: colors.muted, lineHeight: 1.5, marginTop: 3 }}>
+              Lee cada capítulo con sus cantidades, parte la obra en etapas, pone los trabajos con sus días
+              —también los que no son rubros, como el replanteo o la limpieza— y los encadena. Después se
+              corrige en la tabla.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div>
+              <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+                ¿CUÁNTOS MESES DURA?
+              </label>
+              <input type="number" min={1} max={120} autoFocus
+                value={primero.meses ?? lead.crono_meses ?? ""}
+                onChange={e => setPrimero(v => ({ ...v, meses: e.target.value }))}
+                placeholder="Ej: 6"
+                style={{ ...inputStyle, width: 96, padding: "7px 9px", fontSize: 13 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+                ARRANCA
+              </label>
+              <input type="date" value={primero.inicio || lead.crono_inicio || hoy()}
+                onChange={e => setPrimero(v => ({ ...v, inicio: e.target.value }))}
+                style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+                SE TRABAJA
+              </label>
+              <div style={{ display: "flex", gap: 3 }}>
+                {JORNADAS.map(j => {
+                  const elegida = primero.laborables || lead.crono_laborables || [1, 2, 3, 4, 5, 6];
+                  const puesta = JSON.stringify(elegida) === JSON.stringify(j.dias);
+                  return (
+                    <button key={j.id} title={j.pista} onClick={() => setPrimero(v => ({ ...v, laborables: j.dias }))}
+                      style={{ border: `1px solid ${puesta ? colors.brand : colors.border}`,
+                        background: puesta ? colors.brandSoft : "#fff", color: puesta ? colors.brand : colors.inkSoft,
+                        borderRadius: colors.radiusSm, padding: "6px 9px", fontSize: 11.5, fontWeight: puesta ? 700 : 400,
+                        cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                      {j.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+              CONTALE CÓMO VA ESTA OBRA — OPCIONAL
+            </label>
+            <textarea value={primero.comoVa || ""} rows={2}
+              onChange={e => setPrimero(v => ({ ...v, comoVa: e.target.value }))}
+              placeholder="Ej: hay que desmontar todo lo que hay adentro. Los muebles son importados y llegan en el mes 3."
+              style={{ ...inputStyle, width: "100%", fontSize: 12, lineHeight: 1.5, resize: "vertical", padding: "7px 9px" }} />
+          </div>
+          <label style={{ display: "flex", gap: 7, alignItems: "flex-start", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer" }}>
+            <input type="checkbox" checked={!!primero.cubrir} style={{ marginTop: 2 }}
+              onChange={e => setPrimero(v => ({ ...v, cubrir: e.target.checked }))} />
+            <span>
+              Que aparezca cada capítulo del presupuesto.{" "}
+              <span style={{ color: colors.muted }}>
+                Sirve para mostrarle al cliente cuándo se hace cada parte de lo que cotizó. Sin marcar, NOVA arma
+                como se construye la obra y puede juntar o partir capítulos.
+              </span>
+            </span>
+          </label>
+          {primero.pasos?.length > 0 && (
+            <div style={{ background: colors.bg, borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+              {primero.pasos.map((p, i) => (
+                <div key={i} style={{ fontSize: 12, color: p.mal ? colors.danger : colors.ink }}>
+                  {p.mal ? "·" : "✓"} {p.texto}
+                </div>
+              ))}
+            </div>
+          )}
+          <div>
+            <Button variant="primary" size="sm" disabled={pensando || !(Number(primero.meses ?? lead.crono_meses) >= 1)}
+              onClick={armarPresupuesto}>
+              <Sparkles size={13} /> {pensando ? "NOVA está armando la obra…" : "Que NOVA lo arme"}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* LAS DOS VISTAS DEL MISMO PLAN.
           El cronograma dice cuándo pasa cada cosa y el valorado cuánto cuesta
           ese cuándo. Salen de las mismas agrupaciones del control de obra y en
@@ -1368,7 +1624,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
 
       {vista === "valorado" ? (
         !obra ? (
-          <Aviso>Este proyecto todavía no tiene obra activa: el valorado sale de sus rubros.</Aviso>
+          <Aviso>{esDePresupuesto(lead)
+            ? "Es el cronograma de un presupuesto: el valorado se arma cuando la obra esté activa en el control."
+            : "Este proyecto todavía no tiene obra activa: el valorado sale de sus rubros."}</Aviso>
         ) : (
           <Suspense fallback={<Centro>Cargando…</Centro>}>
             <PanelValorado lead={lead} obra={{ id: lead.obra_id, nombre: lead.nombre, lead_id: lead.id }}
@@ -1429,7 +1687,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
           cronogramas no puede verse como un control de esta pantalla. Acá
           dice qué es, y dice dónde aplica, porque eso es justo lo que uno
           necesita saber antes de tocarlo. */}
-      {editable && (
+      {editable && !primeraVez && (
         <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
           padding: "10px 12px", marginBottom: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div>
@@ -1439,7 +1697,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
             <input type="date" value={lead.crono_inicio || hoy()}
               style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }}
               onChange={async e => {
-                const err = await guardarPlazo(lead.id, { inicio: e.target.value });
+                const err = await guardarPlazo(lead, { inicio: e.target.value });
                 if (err) { setError(err); return; }
                 setError("");
                 setLead(l => ({ ...l, crono_inicio: e.target.value }));
@@ -1464,7 +1722,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                 const arranque = lead.crono_inicio || hoy();
                 if (f && f < arranque) { setError("La fecha de terminación no puede ser antes del arranque."); return; }
                 const m = f ? Math.max(1, Math.round(mesesEntre(arranque, f))) : null;
-                const err = await guardarPlazo(lead.id, { fin: f, meses: m });
+                const err = await guardarPlazo(lead, { fin: f, meses: m });
                 if (err) { setError(err); return; }
                 setError("");
                 setLead(l => ({ ...l, crono_fin: f, crono_meses: m }));
@@ -1478,7 +1736,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
               style={{ width: 82, padding: "6px 9px", fontSize: 12 }}
               onCommit={async m => {
                 const f = m ? finDeMeses(lead.crono_inicio || hoy(), m) : null;
-                const err = await guardarPlazo(lead.id, { meses: m, fin: f });
+                const err = await guardarPlazo(lead, { meses: m, fin: f });
                 if (err) { setError(err); return; }
                 setError("");
                 setLead(l => ({ ...l, crono_meses: m, crono_fin: f }));
@@ -1499,7 +1757,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                 return (
                   <button key={j.id} title={j.pista}
                     onClick={async () => {
-                      const err = await guardarPlazo(lead.id, { laborables: j.dias });
+                      const err = await guardarPlazo(lead, { laborables: j.dias });
                       if (err) { setError(err); return; }
                       setError("");
                       setLead(l => ({ ...l, crono_laborables: j.dias }));
@@ -1516,7 +1774,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
             </div>
           </div>
           <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, flex: 1, minWidth: 220 }}>
-            <strong style={{ color: colors.inkSoft }}>El plazo del proyecto.</strong> Se escribe una sola vez acá y lo
+            <strong style={{ color: colors.inkSoft }}>{esDePresupuesto(lead) ? "El plazo de este presupuesto." : "El plazo del proyecto."}</strong> Se escribe una sola vez acá y lo
             usan este cronograma y el cronograma valorado del control de obra. Escribilo y apretá Enter.
             {diasDeContrato > 0 && <> Son <strong style={{ color: colors.inkSoft }}>{diasDeContrato} días de trabajo</strong>
               {" "}con la jornada puesta.</>}
@@ -1668,7 +1926,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                         const quedaba = Number(madre.peso_pct ?? 100);
                         const { data: creada, error: e1 } = await supabase.from("cronograma_actividades")
                           .insert({
-                            lead_id: lead.id, obra_id: lead.obra_id || null,
+                            ...filaDe(lead), obra_id: lead.obra_id || null,
                             obra_actividad_id: madre.obra_actividad_id,
                             nombre: `${base} · ${x.nombre}`.slice(0, 120),
                             duracion: x.dias, etapa: "ejecucion",
@@ -1765,7 +2023,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
               setPensando(false);
               if (r.error) { setError(r.error); return; }
               setMotivoVersion("");
-              setVersiones(await versionesDe(lead.id));
+              setVersiones(await versionesDe(lead));
             }}><CalendarClock size={13} /> Guardar esta versión</Button>
             <input value={motivoVersion} onChange={e => setMotivoVersion(e.target.value)}
               placeholder="¿Por qué? Ej: antes de la orden de cambio 3"
@@ -1816,7 +2074,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                       const err = await borrarVersion(v.id);
                       if (err) { setError(err); return; }
                       if (comparando?.id === v.id) setComparando(null);
-                      setVersiones(await versionesDe(lead.id));
+                      setVersiones(await versionesDe(lead));
                     }} style={{ background: "none", border: "none", color: colors.border,
                       cursor: "pointer", display: "flex" }}><Trash2 size={12} /></button>
                   )}
@@ -1942,7 +2200,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
           saber de obra —la estructura antes que la mampostería, las
           instalaciones antes del enlucido o hay que picar—. No sale de ningún
           dato: sale de haber hecho obras. */}
-      {editable && obra?.id && (
+      {editable && !primeraVez && (
         armando ? (
           /* ARMARLO ES UNA SOLA COSA Y SE HACE DE CORRIDO.
              Antes eran dos botones y un paso intermedio: NOVA proponía, uno
@@ -1985,7 +2243,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
             {/* SIN OBRA, SALE DEL PRESUPUESTO. El cronograma que va con la
                 cotización se arma antes de que la obra exista, y el
                 presupuesto que se está trabajando tiene todos los metros. */}
-            {!obra?.id && (
+            {!obra?.id && !esDePresupuesto(lead) && (
               <div>
                 <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 4 }}>
                   SALE DEL PRESUPUESTO
@@ -2075,42 +2333,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
               <Button variant="primary" size="sm" disabled={pensando || !lead.crono_meses}
                 onClick={async () => {
                   const paso = (texto, mal) => setArmando(v => ({ ...v, pasos: [...(v.pasos || []), { texto, mal }] }));
-                  setError(""); setPensando(true);
                   setArmando(v => ({ ...v, pasos: [] }));
-                  const mp = await materiaDeLaObra();
-                  const r = await proponerPlan({
-                    agrupaciones: mp, meses: lead.crono_meses, dias: diasDeContrato,
-                    nombreObra: lead.nombre, comoVa: armando.comoVa || "", cal,
-                    cubrirPresupuesto: !!armando.cubrir,
+                  await armarConNova({
+                    meses: lead.crono_meses, dias: diasDeContrato, cal,
+                    comoVa: armando.comoVa || "", cubrir: !!armando.cubrir, paso,
                   });
-                  if (r.error) { setPensando(false); setError(r.error); return; }
-                  if (!obra?.id) r.plan = planDelPresupuesto(r.plan, mp);
-                  paso(`El plan: ${r.plan.etapas.length} etapas y ${r.plan.barras} actividades.`);
-                  if (r.plan.faltantes.length && armando.cubrir) {
-                    paso(`${r.plan.faltantes.length} ${obra?.id ? "agrupaciones" : "capítulos"} quedaron en "Sin ubicar": hay que mirarlos.`, true);
-                  }
-                  if (r.cortado) paso("La respuesta vino cortada: guardé lo que llegó entero.", true);
-
-                  // Sin obra no hay control que vigilar: lo que se comprometa
-                  // con las agrupaciones se decide cuando la obra exista.
-                  const g = await guardarPlan({
-                    lead, obra, plan: r.plan, quien: currentUser,
-                    cubrePresupuesto: obra?.id ? !!armando.cubrir : null,
-                  });
-                  if (g.error) { setPensando(false); setError(g.error); return; }
-                  paso(`Guardado: ${g.creadas.length} barras${g.sinEtapas ? " (sin etapas: falta la migración 101)" : ` en ${g.etapas} etapas`}.`);
-                  if (g.sinCapitulo) paso("Falta correr la migración 123: las barras no recuerdan de qué capítulo salen, y armarlo de nuevo no las reemplaza.", true);
-                  await anotarFuente();
-
-                  const o = await guardarOrden({
-                    actividades: g.creadas, dias: diasDeContrato, nombreObra: lead.nombre, cal,
-                  });
-                  if (o.error) paso(`El orden no se pudo: ${o.error} — las barras ya están, encadenalas vos o volvé a pedirlo.`, true);
-                  else paso(`El orden: ${o.creadas} dependencias.`);
-
-                  setPensando(false);
-                  await Promise.all([cargar(), cargarFases()]);
-                  setAviso("Cronograma armado. Revisalo abajo: lo que esté mal se corrige escribiendo encima.");
                 }}>
                 {pensando ? "NOVA está armando la obra…" : todas.length ? "Armarlo de nuevo" : "Armarlo"}
               </Button>
@@ -2212,14 +2439,14 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                   onClick={() => { setArmando({ cubrir: false }); setError(""); }}>
                   <Sparkles size={13} /> Que NOVA lo arme
                 </Button>
-                <Button variant="secondary" size="sm" disabled={pensando || !obra?.id} onClick={async () => {
+                {obra?.id && <Button variant="secondary" size="sm" disabled={pensando} onClick={async () => {
                   if (!window.confirm(
                     "¿Armar el cronograma con las agrupaciones del control de obra?\n\n" +
                     "Una barra por agrupación, en el orden del control, encadenadas una detrás de otra. " +
                     "Las duraciones salen de repartir el plazo según lo que pesa cada una: son un punto de " +
                     "partida para corregir, no una estimación.")) return;
                   await armarDelControl();
-                }}>Armarlo del control de obra</Button>
+                }}>Armarlo del control de obra</Button>}
               </>
             ) : (
               <>
@@ -2242,7 +2469,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                         boxShadow: "0 8px 24px rgba(0,0,0,.12)", minWidth: 250, overflow: "hidden" }}>
                         {[
                           ["Encadenar todo en orden", "Una detrás de otra, en el orden que están", encadenarTodo],
-                          ["Ordenar como el control", "El orden de las agrupaciones del control de obra", async () => {
+                          obra?.id && ["Ordenar como el control", "El orden de las agrupaciones del control de obra", async () => {
                             if (!window.confirm(
                               "¿Poner las actividades en el mismo orden que las agrupaciones del control de obra?\n\n" +
                               "Dentro de cada rubro quedan por el momento en que ocurren: anticipo, fabricación, " +
@@ -2286,13 +2513,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                           // ahí una agrupación sin tiempo es plata que no se
                           // puede repartir en los meses. En las demás, lo
                           // único que importa del control son las órdenes.
-                          [cubrePresupuesto ? "Dejar de vigilar el presupuesto" : "Vigilar que estén todas las agrupaciones",
+                          obra?.id && [cubrePresupuesto ? "Dejar de vigilar el presupuesto" : "Vigilar que estén todas las agrupaciones",
                             cubrePresupuesto
                               ? "Vuelve a avisar solo de las órdenes de cambio"
                               : "Avisa si falta alguna agrupación del control. Para cuando el cronograma sostiene el valorado",
                             async () => {
                               const quiero = !cubrePresupuesto;
-                              const { error: e } = await supabase.from("leads")
+                              const { error: e } = await supabase.from(dueno(lead).tabla)
                                 .update({ crono_cubre: quiero }).eq("id", lead.id);
                               if (e) { setError(/column|schema cache/i.test(e.message) ? "Falta correr la migración 103." : e.message); return; }
                               setLead(l => ({ ...l, crono_cubre: quiero }));
@@ -2301,7 +2528,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                                 ? "Ahora avisa si falta alguna agrupación del presupuesto en el cronograma."
                                 : "Del control solo se avisan las órdenes de cambio.");
                             }],
-                        ].map(([label, pista, accion]) => (
+                        ].filter(Boolean).map(([label, pista, accion]) => (
                           <button key={label} onClick={async () => { setMenu(false); await accion(); }}
                             style={{ display: "block", width: "100%", textAlign: "left", background: "none",
                               border: "none", borderBottom: `1px solid ${colors.neutralSoft}`, padding: "9px 12px",
@@ -2703,7 +2930,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, ab
                 }
                 for (const x of r.agregar) {
                   const { data: creada, error: e } = await supabase.from("cronograma_actividades").insert({
-                    lead_id: lead.id, obra_id: lead.obra_id || null,
+                    ...filaDe(lead), obra_id: lead.obra_id || null,
                     obra_actividad_id: x.agrupacion_id, nombre: x.nombre,
                     duracion: x.duracion, etapa: "ejecucion", peso_pct: 100,
                     orden: actividades.length + 1,
@@ -3233,5 +3460,11 @@ const Aviso = ({ children }) => (
     border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 13, marginBottom: 12 }}>
     <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
     <span>{children}</span>
+  </div>
+);
+
+const Titulo = ({ children }) => (
+  <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, margin: "4px 0 6px" }}>
+    {String(children).toUpperCase()}
   </div>
 );
