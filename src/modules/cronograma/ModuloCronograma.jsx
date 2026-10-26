@@ -30,7 +30,7 @@ import { plataDelPlan } from "./plataDelPlan";
 import { fmt } from "../controlObra/calculos";
 import { numerosDeBarras } from "./numeros";
 import { capitulosComoAgrupaciones, planDelPresupuesto, presupuestoDeReferencia } from "./presupuestoComoObra";
-import { dueno, filaDe, esDePresupuesto, presupuestoComoDueno } from "./dueno";
+import { dueno, filaDe, claveDe, esDePresupuesto, presupuestoComoDueno } from "./dueno";
 import { esAdmin } from "../../lib/roles";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
@@ -69,6 +69,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   const [presupuestos, setPresupuestos] = useState([]);
   const [conCrono, setConCrono] = useState(() => new Set());
   const [sin124, setSin124] = useState(false);
+  const [leadsConCrono, setLeadsConCrono] = useState(() => new Set());
+  // Para no mostrar "NOVA lo arma" un instante antes de que lleguen las barras.
+  const [leidoDe, setLeidoDe] = useState(null);
+  // Quien prefiere armarlo a mano lo dice una vez y el recuadro se va.
+  const [aMano, setAMano] = useState(false);
   const [lead, setLead] = useState(null);
   const [actividades, setActividades] = useState([]);
   const [dependencias, setDependencias] = useState([]);
@@ -185,10 +190,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
       // LOS PRESUPUESTOS QUE SE ESTÁN TRABAJANDO, cada uno con su cronograma.
       // Los archivados no: son historia. Y cuáles ya tienen cronograma, para
       // que se vea de un vistazo cuál falta armar.
-      const [{ data: pres }, conAct] = await Promise.all([
+      const [{ data: pres }, conAct, deLeads] = await Promise.all([
         supabase.from("presupuestos").select("*").is("archivado_at", null).order("created_at", { ascending: false }),
         supabase.from("cronograma_actividades").select("presupuesto_id").not("presupuesto_id", "is", null),
+        supabase.from("cronograma_actividades").select("lead_id").not("lead_id", "is", null),
       ]);
+      setLeadsConCrono(new Set((deLeads.data || []).map(a => a.lead_id)));
       setPresupuestos(pres || []);
       setSin124(!!conAct.error);
       setConCrono(new Set((conAct.data || []).map(a => a.presupuesto_id)));
@@ -207,6 +214,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
       setSinTablas(/relation|does not exist|schema cache/i.test(e.message)); return;
     }
     setActividades(act || []);
+    setLeidoDe(claveDe(lead));
     if (lead.obra_id) {
       const { data: ags } = await supabase.from("obra_actividades")
         .select("id,nombre,codigo,orden,extra").eq("obra_id", lead.obra_id).order("orden");
@@ -381,6 +389,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
       .filter(p => p.lead_id ? (!nivelProyecto || !!nivelProyecto(p.lead_id)) : puedeTodo)
       .sort((a, b) => (a.estado === "borrador" || !a.estado ? 0 : 1) - (b.estado === "borrador" || !b.estado ? 0 : 1));
     const nombreProyecto = id => proyectos.find(x => x.id === id)?.nombre;
+    const obrasMias = mios.filter(p => !!p.obra_id);
+    const deAntes = mios.filter(p => !p.obra_id && leadsConCrono.has(p.id));
     return (
       <div style={{ fontFamily: colors.font }}>
         <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>Cronograma</div>
@@ -437,30 +447,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
           </div>
         )}
 
-        <Titulo>Proyectos</Titulo>
-        {!mios.length ? <Centro>No tenés proyectos asignados.</Centro> : (
-          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-            {mios.map(p => {
-              const enCurso = p.resultado === "ganado" || !!p.obra_id;
-              return (
-                <button key={p.id} onClick={() => setLead(p)}
-                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
-                    padding: "11px 13px", background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`,
-                    cursor: "pointer", fontFamily: colors.font, fontSize: 13.5, color: colors.ink }}>
-                  <GanttChartSquare size={15} color={enCurso ? colors.brand : colors.muted} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {p.nombre}
-                  </span>
-                  {/* Un cronograma para cotizar no es lo mismo que uno de una
-                      obra en marcha, y conviene no confundirlos de un vistazo. */}
-                  {!enCurso && (
-                    <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, background: colors.neutralSoft,
-                      borderRadius: 10, padding: "1px 7px", flexShrink: 0 }}>PARA COTIZAR</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        {/* LAS OBRAS EN EJECUCIÓN. Su cronograma sale del control de obra.
+            Los proyectos del pipeline no van acá: lo que se cotiza se arma
+            desde su presupuesto, arriba. */}
+        <Titulo>Obras en ejecución</Titulo>
+        {!obrasMias.length ? (
+          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>No tenés obras en ejecución.</div>
+        ) : <ListaProyectos lista={obrasMias} onElegir={setLead} conCrono={leadsConCrono} />}
+
+        {/* Lo que se armó antes en un proyecto sin obra no se esconde: es
+            trabajo de alguien. Pero no se ofrece para empezar uno nuevo. */}
+        {deAntes.length > 0 && (
+          <>
+            <Titulo>Armados antes en un proyecto sin obra</Titulo>
+            <ListaProyectos lista={deAntes} onElegir={setLead} conCrono={leadsConCrono} />
+          </>
         )}
       </div>
     );
@@ -1471,10 +1472,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   }
 
   /**
-   * El primer cronograma de un presupuesto: se escribe el plazo y NOVA arma.
+   * El primer cronograma de un presupuesto o de una obra: se escribe el plazo
+   * y NOVA arma.
    * Un solo paso, porque es lo que se vino a hacer.
    */
-  async function armarPresupuesto() {
+  async function armarPrimero() {
     const meses = Math.round(Number(primero?.meses ?? lead.crono_meses) || 0);
     if (meses < 1) { setError("Poné cuántos meses dura la obra: es contra ese número que NOVA arma."); return; }
     const inicio = primero.inicio || lead.crono_inicio || hoy();
@@ -1490,16 +1492,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
       meses, dias: diasHastaFin(inicio, fin, c), cal: c,
       comoVa: primero.comoVa || "", cubrir: !!primero.cubrir, paso,
     });
-    if (ok) setConCrono(x => new Set(x).add(lead.id));
+    if (!ok) return;
+    if (esDePresupuesto(lead)) setConCrono(x => new Set(x).add(lead.id));
+    else setLeadsConCrono(x => new Set(x).add(lead.id));
   }
 
-  // Un presupuesto que todavía no tiene cronograma: lo único que hay que
-  // hacer es decir cuánto dura y dejar que NOVA lo arme.
-  const primeraVez = esDePresupuesto(lead) && editable && !actividades.length && !conCrono.has(lead.id);
+  // Un presupuesto o una obra que todavía no tienen cronograma: lo único que
+  // hay que hacer es decir cuánto dura y dejar que NOVA lo arme. Quien
+  // prefiera armarlo a mano lo dice y el recuadro se va.
+  const primeraVez = editable && !aMano && (esDePresupuesto(lead) || !!obra?.id)
+    && leidoDe === claveDe(lead) && !actividades.length;
+  const dePres = esDePresupuesto(lead);
 
   return (
     <div style={{ fontFamily: colors.font }}>
-      <Volver onClick={() => { setPrimero({}); setArmando(null); setLead(null); }} />
+      <Volver onClick={() => { setPrimero({}); setArmando(null); setAMano(false); setLead(null); }} />
       {esDePresupuesto(lead) && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>{lead.nombre}</div>
@@ -1521,12 +1528,12 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
           padding: 14, marginBottom: 12, display: "grid", gap: 11 }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink, display: "flex", alignItems: "center", gap: 6 }}>
-              <Sparkles size={15} color={colors.brand} /> Que NOVA arme el cronograma de este presupuesto
+              <Sparkles size={15} color={colors.brand} /> Que NOVA arme el cronograma de {dePres ? "este presupuesto" : "esta obra"}
             </div>
             <div style={{ fontSize: 12, color: colors.muted, lineHeight: 1.5, marginTop: 3 }}>
-              Lee cada capítulo con sus cantidades, parte la obra en etapas, pone los trabajos con sus días
-              —también los que no son rubros, como el replanteo o la limpieza— y los encadena. Después se
-              corrige en la tabla.
+              Lee {dePres ? "cada capítulo del presupuesto" : "cada agrupación del control de obra"} con sus
+              cantidades, parte la obra en etapas, pone los trabajos con sus días —también los que no son
+              rubros, como el replanteo o la limpieza— y los encadena. Después se corrige en la tabla.
             </div>
           </div>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -1582,10 +1589,11 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
             <input type="checkbox" checked={!!primero.cubrir} style={{ marginTop: 2 }}
               onChange={e => setPrimero(v => ({ ...v, cubrir: e.target.checked }))} />
             <span>
-              Que aparezca cada capítulo del presupuesto.{" "}
+              {dePres ? "Que aparezca cada capítulo del presupuesto." : "Que aparezca cada agrupación del control."}{" "}
               <span style={{ color: colors.muted }}>
-                Sirve para mostrarle al cliente cuándo se hace cada parte de lo que cotizó. Sin marcar, NOVA arma
-                como se construye la obra y puede juntar o partir capítulos.
+                {dePres
+                  ? "Sirve para mostrarle al cliente cuándo se hace cada parte de lo que cotizó. Sin marcar, NOVA arma como se construye la obra y puede juntar o partir capítulos."
+                  : "Es lo que hace falta para que el valorado reparta toda la plata en el tiempo. Sin marcar, NOVA arma como se construye la obra y puede juntar o partir agrupaciones."}
               </span>
             </span>
           </label>
@@ -1598,11 +1606,18 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
               ))}
             </div>
           )}
-          <div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <Button variant="primary" size="sm" disabled={pensando || !(Number(primero.meses ?? lead.crono_meses) >= 1)}
-              onClick={armarPresupuesto}>
+              onClick={armarPrimero}>
               <Sparkles size={13} /> {pensando ? "NOVA está armando la obra…" : "Que NOVA lo arme"}
             </Button>
+            {/* LO MANUAL. Para el que ya lo tiene pensado: se agregan las
+                barras una por una, o se pega escrito y NOVA solo lo lee. */}
+            <button disabled={pensando} onClick={() => setAMano(true)}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                fontSize: 11.5, color: colors.inkSoft, textDecoration: "underline" }}>
+              Prefiero armarlo a mano
+            </button>
           </div>
         </div>
       )}
@@ -3466,5 +3481,29 @@ const Aviso = ({ children }) => (
 const Titulo = ({ children }) => (
   <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, margin: "4px 0 6px" }}>
     {String(children).toUpperCase()}
+  </div>
+);
+
+// Una lista de proyectos: el nombre y si ya tiene cronograma.
+const ListaProyectos = ({ lista, onElegir, conCrono }) => (
+  <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+    overflow: "hidden", marginBottom: 18 }}>
+    {lista.map(p => {
+      const tiene = conCrono.has(p.id);
+      return (
+        <button key={p.id} onClick={() => onElegir(p)}
+          style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9,
+            padding: "11px 13px", background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`,
+            cursor: "pointer", fontFamily: colors.font, fontSize: 13.5, color: colors.ink }}>
+          <GanttChartSquare size={15} color={tiene ? colors.brand : colors.muted} />
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {p.nombre}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0, color: tiene ? colors.brand : colors.muted }}>
+            {tiene ? "Ver cronograma" : "Armar con NOVA"}
+          </span>
+        </button>
+      );
+    })}
   </div>
 );
