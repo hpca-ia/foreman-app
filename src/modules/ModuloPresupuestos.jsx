@@ -711,6 +711,30 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   }
 
   /**
+   * Pasar rubros a los extras de su capítulo, o devolverlos a lo pedido.
+   *
+   * Un rubro que el cliente no había pedido puede estar ya cargado entre los
+   * demás —se importó así, o se agregó antes de que hubiera extras—. Borrarlo
+   * y volver a cargarlo como extra es perder su precio y su nota.
+   * No cambia el total: los extras también suman, solo se muestran aparte.
+   */
+  async function ponerEnExtras(ids, extra) {
+    if (!ids.length) return;
+    const antes = itemsRef.current;
+    const updated = antes.map(i => (ids.includes(i.id) ? { ...i, extra } : i));
+    itemsRef.current = updated;
+    setItems(updated);
+    setMoviendo([]);
+    const { error } = await supabase.from("presupuesto_items").update({ extra }).in("id", ids);
+    if (error) {
+      itemsRef.current = antes; setItems(antes);
+      alert(/column|schema cache/i.test(error.message)
+        ? "Para pasar rubros a extras falta correr en Supabase la migración 122 (extras del capítulo)."
+        : "No se pudo cambiar: " + error.message);
+    }
+  }
+
+  /**
    * Poner los rubros marcados en una etapa, o sacarles la que tenían.
    *
    * Aprovecha la misma selección que mover de capítulo: se marcan con ⇕ y se
@@ -1735,6 +1759,15 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       <button onClick={()=>ponerEnEtapa(null)}
                         style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",
                           fontFamily:"inherit",fontSize:11}}>sacarles la etapa</button>
+                      <span style={{fontSize:11.5,color:"var(--ink-soft)",marginLeft:6}}>…o</span>
+                      <button onClick={()=>ponerEnExtras(moviendo.map(x=>x.id),true)}
+                        style={{background:"#fff",border:"1px solid var(--brand)",borderRadius:7,padding:"4px 10px",
+                          color:"var(--brand)",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
+                        Pasar a extras
+                      </button>
+                      <button onClick={()=>ponerEnExtras(moviendo.map(x=>x.id),false)}
+                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",
+                          fontFamily:"inherit",fontSize:11}}>sacarlos de extras</button>
                     </div>
                   )}
                   <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
@@ -1847,7 +1880,15 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                             {/* Lo que hay que advertir de este rubro: que es
                                 aproximado, que falta el estudio, que la cotización
                                 no llegó. Se escribe a mano, no hay lista. */}
-                            <NotaDeRubro item={item} onGuardar={v=>actualizarItemMulti(item.id,{nota:v})}/>
+                            <div style={{display:"flex",alignItems:"flex-start",gap:4,flexWrap:"wrap"}}>
+                              <NotaDeRubro item={item} onGuardar={v=>actualizarItemMulti(item.id,{nota:v})}/>
+                              {/* Pasarlo a los extras del capítulo, o devolverlo. */}
+                              <button onClick={()=>ponerEnExtras([item.id],!item.extra)}
+                                title={item.extra?"Devolverlo a lo pedido":"Pasarlo a los extras de este capítulo"}
+                                style={{background:"none",border:"none",padding:"1px 4px",fontSize:10,color:item.extra?"var(--brand)":"var(--muted)",cursor:"pointer",fontFamily:"var(--font)"}}>
+                                {item.extra?"← sacar de extras":"→ extras"}
+                              </button>
+                            </div>
                               </div>
                             </div>
                           </td>
