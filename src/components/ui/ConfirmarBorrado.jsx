@@ -5,6 +5,7 @@ import Modal from "./Modal";
 import Button from "./Button";
 import { inputStyle } from "./Input";
 import { verificarPin } from "../../lib/sesion";
+import { igualParaConfirmar } from "../../lib/confirmarTexto";
 
 /**
  * Borrado definitivo con dos seguros: primero se revisa si algo depende del
@@ -62,7 +63,7 @@ export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, usua
   }
 
   const bloqueado = !!estado?.bloqueo;
-  const listo = texto.trim().toLowerCase() === (nombre || "").trim().toLowerCase() && (!usuarioId || /^\d{4,8}$/.test(pin));
+  const listo = igualParaConfirmar(texto, nombre) && (!usuarioId || /^\d{4,8}$/.test(pin));
 
   return (
     <Modal onClose={onCancelar} maxWidth={460}>
@@ -92,7 +93,7 @@ export default function ConfirmarBorrado({ titulo, nombre, revisar, borrar, usua
       {!bloqueado && estado !== null && (
         <>
           <label style={{ fontSize: 11, color: colors.inkSoft, fontWeight: 500, display: "block", marginBottom: 4 }}>
-            Escribe <strong>{nombre}</strong> para confirmar
+            Escribe <strong style={{ whiteSpace: "pre-wrap" }}>{nombre}</strong> para confirmar
           </label>
           <input value={texto} onChange={e => setTexto(e.target.value)} placeholder={nombre}
             style={{ ...inputStyle, marginBottom: 12 }} autoFocus />
