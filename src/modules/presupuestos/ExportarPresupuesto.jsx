@@ -89,6 +89,14 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const archivoRef = useRef(null);
+  // El nombre del proyecto, para el pie de cada hoja: el presupuesto solo
+  // guarda de cuál es.
+  const [proyectoNombre, setProyectoNombre] = useState("");
+  useEffect(() => {
+    if (!presupuesto.lead_id) { setProyectoNombre(""); return; }
+    supabase.from("leads").select("nombre").eq("id", presupuesto.lead_id).maybeSingle()
+      .then(({ data }) => setProyectoNombre(data?.nombre || ""));
+  }, [presupuesto.lead_id]);
 
   // Primero lo de fábrica, encima lo de la oficina, encima lo de este presupuesto.
   useEffect(() => {
@@ -306,7 +314,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
         : delCliente ? lineas(notasCliente)
         : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
-  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera, resumen,
+  const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera, resumen, proyecto: proyectoNombre,
     // Al que cotiza no se le cuenta qué negoció el cliente en la versión
     // anterior: es información de la otra mesa.
     carta: conCarta && formato !== "cotizar" ? carta : "" };

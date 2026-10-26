@@ -169,6 +169,7 @@ export default function RevisarPresupuesto({ items, capitulos, presupuesto = {},
       await exportarPDF({
         nombreArchivo,
         titulo: `Revisión — ${presupuesto.nombre || "Presupuesto"}`,
+        pie: { elemento: "Revisión interna del presupuesto", proyecto: presupuesto.nombre },
         subtitulo: `Documento de revisión interna, no es el presupuesto para el cliente · ${presupuesto.cliente_nombre ? presupuesto.cliente_nombre + " · " : ""}${comoSeVe}`,
         tono: { fuerte: [30, 30, 30], suave: [238, 238, 236] },
         resumen: [

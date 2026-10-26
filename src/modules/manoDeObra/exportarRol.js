@@ -106,6 +106,7 @@ export async function rolAPDF({ nomina, obra = "", periodo = {} }) {
   await exportarPDF({
     nombreArchivo: `Rol de pagos - ${obra} ${periodoEnPalabras(periodo)}`,
     titulo: "Rol de pagos",
+    pie: { elemento: `Rol de pagos · ${periodoEnPalabras(periodo)}`, proyecto: obra },
     subtitulo: `${obra} · ${periodoEnPalabras(periodo)}`,
     resumen: [
       { label: "Personas", valor: nomina.personas },

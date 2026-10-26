@@ -1,5 +1,6 @@
 import { cargarPDF } from "../../lib/exportar";
 import { rutaDeCadena, ordenDeTrazado } from "./rutasDeCadenas.js";
+import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
@@ -332,15 +333,16 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
 
       dibujarCadenas(donde, cajas, numeroDe);
 
-      // Pie: de qué obra es, qué hoja es y cuándo se emitió. Un cronograma
-      // suelto sin fecha de emisión es peligroso: no se sabe si es el vigente.
+      // La leyenda va en el medio del pie; qué es, de qué proyecto y cuándo
+      // se emitió lo pone pieDePdf al final, cuando ya se sabe cuántas hojas hay.
       doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
-      doc.text(`${nombre || ""} · emitido el ${larga(new Date().toISOString())}`, M, ALTO - 5);
       doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Flecha ámbar: la que traba  ·  Barra clara: lo que falta ejecutar",
         ANCHO / 2, ALTO - 5, { align: "center" });
-      doc.text(`${doc.internal.getNumberOfPages()}`, ANCHO - M, ALTO - 5, { align: "right" });
     }
   }
+
+  // Un cronograma suelto sin fecha de emisión es peligroso: no se sabe si es el vigente.
+  pieDePdf(doc, { elemento: "Cronograma", proyecto: nombre, margen: M, abajo: 5 });
 
   const archivo = `Cronograma - ${String(nombre || "obra").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim().slice(0, 40)}.pdf`;
   return mostrarPdf(doc, archivo);

@@ -420,6 +420,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       try {
         const doc = await construirPDF({
           titulo: `Caja Chica — ${cajaActiva.proyecto_nombre}`,
+          pie: { elemento: "Caja chica", proyecto: cajaActiva.proyecto_nombre },
           subtitulo: `Responsable: ${cajaActiva.responsable_nombre} · Saldo $${fmt(saldoActual)}`,
           resumen: [
             { label: "Recibido", valor: `$${fmt(cajaActiva.saldo_total)}` },

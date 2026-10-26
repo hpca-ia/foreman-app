@@ -114,6 +114,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
       return {
         nombreArchivo: `Caja Chica - ${caja.proyecto_nombre} - ${desde}${sufijo}`,
         titulo: soloAnexos ? `Anexos — Caja Chica ${caja.proyecto_nombre}` : `Caja Chica — ${caja.proyecto_nombre}`,
+        pie: { elemento: `${soloAnexos ? "Anexos de caja chica" : "Caja chica"} · período ${periodo}`, proyecto: caja.proyecto_nombre },
         subtitulo: `Responsable: ${caja.responsable_nombre} · Período ${periodo}`,
         indiceAdjuntos: soloAnexos,
         bloques: soloAnexos ? [] : bloques,

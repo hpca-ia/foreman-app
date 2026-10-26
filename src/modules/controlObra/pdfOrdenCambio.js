@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { pieDePdf } from "../../lib/piePdf";
 
 // Las órdenes de cambio en PDF, con el formato que la oficina ya firma.
 //
@@ -286,16 +287,8 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
 }
 
 /** El pie de todas las hojas, puesto al final, cuando ya se sabe cuántas hay. */
-function numerar(doc, etiqueta) {
-  const ancho = doc.internal.pageSize.getWidth();
-  const alto = doc.internal.pageSize.getHeight();
-  const paginas = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= paginas; i++) {
-    doc.setPage(i);
-    doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(...GRIS);
-    doc.text(seguro(etiqueta), 40, alto - 22);
-    doc.text(seguro(`${i} / ${paginas}`), ancho - 40, alto - 22, { align: "right" });
-  }
+function numerar(doc, elemento, proyecto) {
+  pieDePdf(doc, { elemento, proyecto, margen: 14, abajo: 7.8 });
 }
 
 /** Una sola orden: la que se manda mientras todavía se está discutiendo. */
@@ -303,7 +296,7 @@ export async function pdfDeOrden(datos) {
   const { jsPDF, autoTable } = await cargarPDF();
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   await pintarOrden({ doc, autoTable, ...datos });
-  numerar(doc, `${datos.codigo} · ${datos.proyecto || ""}`);
+  numerar(doc, `Orden de cambio ${datos.codigo || ""}`.trim(), datos.proyecto || datos.obra?.nombre);
   return doc;
 }
 
@@ -404,6 +397,6 @@ export async function pdfConsolidado({ ordenes = [], lineasPorOrden = {}, fotosP
     });
   }
 
-  numerar(doc, `Órdenes de cambio · ${proyecto || obra?.nombre || ""}`);
+  numerar(doc, "Órdenes de cambio", proyecto || obra?.nombre);
   return doc;
 }

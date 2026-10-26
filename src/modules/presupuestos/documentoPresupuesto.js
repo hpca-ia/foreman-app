@@ -28,6 +28,7 @@ async function cargarPDF() {
   autoTable = tabla.default;
 }
 import { money } from "../../lib/exportar";
+import { pieDePdf, momentoDeEmision } from "../../lib/piePdf";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
 import { subtotalesPorEtapa, tieneEtapas, SIN_ETAPA } from "./etapas";
 import { etiquetaUnidad } from "../../lib/unidades";
@@ -184,7 +185,7 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
  * @param aceptacion  espacio para que firme el cliente
  */
 export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], carta = "", resumen = false }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], carta = "", resumen = false, proyecto = "" }) {
   await cargarPDF();
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
@@ -597,15 +598,13 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
     }
   }
 
-  // ── Pie en cada página ──
+  // ── Pie en cada página: qué es, de qué proyecto y cuándo se emitió ──
   const paginas = doc.getNumberOfPages();
   for (let i = 1; i <= paginas; i++) {
     doc.setPage(i);
     doc.setDrawColor(...t.linea); doc.setLineWidth(0.4); doc.line(M, H - 38, W - M, H - 38);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...t.gris);
-    doc.text(`${tituloDoc} · ${base} · Versión ${version}`, M, H - 26);
-    doc.text(`Página ${i} de ${paginas}`, W - M, H - 26, { align: "right" });
   }
+  pieDePdf(doc, { elemento: `${tituloDoc} · ${base} · versión ${version}`, proyecto, margen: M * 25.4 / 72, abajo: 26 * 25.4 / 72, color: t.gris });
   return doc;
 }
 
@@ -622,7 +621,7 @@ const argb = c => "FF" + c.map(v => v.toString(16).padStart(2, "0")).join("").to
  * ExcelJS se carga recién al exportar: pesa, y el resto de la app no lo usa.
  */
 export async function excelPresupuesto({ presupuesto, capitulos, items, formato = "detallado", plantilla = "minimalista", logo, empresa = {},
-  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], resumen = false }) {
+  titulo, validez, conIva = true, notas = [], firma = {}, aceptacion = false, membrete, notasRubro = true, notasFuera = [], resumen = false, proyecto = "" }) {
   const ExcelJS = (await import("exceljs")).default;
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const caps = estructura({ capitulos, items });
@@ -645,7 +644,8 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     views: [{ showGridLines: false }],
     pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0,
       margins: { left: 0.6, right: 0.6, top: 0.6, bottom: 0.7, header: 0.3, footer: 0.3 } },
-    headerFooter: { oddFooter: `&L&8${tituloDoc} · ${base} · Versión ${version}&R&8Página &P de &N` },
+    // En el pie de Excel el "&" es un código: el de un nombre se escribe doble.
+    headerFooter: { oddFooter: `&L&8${[tituloDoc, String(base || ""), `versión ${version}`, proyecto && !String(base || "").toLowerCase().includes(String(proyecto).toLowerCase()) ? proyecto : ""].filter(Boolean).join(" · ").replace(/&/g, "&&")}&R&8Emitido el ${momentoDeEmision()} · Página &P de &N` },
   });
   ws.columns = [{ width: 7 }, { width: 58 }, { width: 9 }, { width: 11 }, { width: 13 }, { width: 16 }];
   const fuente = (extra = {}) => ({ name: "Calibri", size: 10, color: { argb: TEXTO }, ...extra });

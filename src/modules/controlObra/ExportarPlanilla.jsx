@@ -200,6 +200,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       await exportarPDF({
         nombreArchivo: `${obra.nombre} - ${nombrePlanilla}${soloAnexos ? " (anexos)" : ""}`,
         titulo: soloAnexos ? `Anexos — ${obra.nombre}` : `Control de Obra — ${obra.nombre}`,
+        pie: { elemento: `${soloAnexos ? "Anexos" : "Control de obra"} · ${nombrePlanilla}`, proyecto: obra.nombre },
         subtitulo: `${obra.cliente_nombre ? obra.cliente_nombre + " · " : ""}${nombrePlanilla}`,
         indiceAdjuntos: soloAnexos,
         resumen: soloAnexos ? [] : [

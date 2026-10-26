@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
@@ -116,13 +117,7 @@ export async function pdfRevision({ nombre, archivo, advertencias = [], quien },
     doc.text("La planilla no tiene nada que corregir: las sumas dan y la numeración es consistente.", M, y);
   }
 
-  const hojas = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= hojas; i++) {
-    doc.setPage(i);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...GRIS);
-    doc.text(seguro(`${nombre || ""} · revisión emitida el ${hoy()} desde FOREMAN`), M, ALTO - 9);
-    doc.text(`${i} de ${hojas}`, ANCHO - M, ALTO - 9, { align: "right" });
-  }
+  pieDePdf(doc, { elemento: "Revisión del presupuesto", proyecto: nombre, margen: M, abajo: 9 });
 
   const archivoPdf = `Revisión - ${(nombre || "presupuesto").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim()}.pdf`;
   if (modo === "base64") return { nombre: archivoPdf, contenido: doc.output("datauristring").split(",")[1] };

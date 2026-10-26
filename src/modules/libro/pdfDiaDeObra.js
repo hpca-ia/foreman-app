@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
@@ -195,16 +196,8 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
 }
 
 /** Numera las hojas al final, que es cuando se sabe cuántas son. */
-function numerar(doc, pie) {
-  const ancho = doc.internal.pageSize.getWidth();
-  const alto = doc.internal.pageSize.getHeight();
-  const hojas = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= hojas; i++) {
-    doc.setPage(i);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-    doc.text(seguro(pie), 40, alto - 26);
-    doc.text(`${i} de ${hojas}`, ancho - 40, alto - 26, { align: "right" });
-  }
+function numerar(doc, elemento, proyecto) {
+  pieDePdf(doc, { elemento, proyecto, margen: 14, abajo: 9 });
 }
 
 /**
@@ -219,7 +212,7 @@ export async function pdfDiaDeObra({ dia, obra, entradas, fotos, enlaces }, modo
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const logo = await logoParaPDF(logoEmpresa());
   await paginaDelDia(doc, { dia, obra, entradas, fotos, enlaces, logo });
-  numerar(doc, `${obra || ""} · libro de obra del ${String(dia.fecha).slice(0, 10)}`);
+  numerar(doc, `Libro de obra del ${comoSeLee(String(dia.fecha).slice(0, 10))}`, obra);
 
   const nombre = `Libro ${obra || "obra"} ${String(dia.fecha).slice(0, 10)}.pdf`;
   // El que se guarda al cerrar el día: se sube al depósito y queda colgado del
@@ -276,7 +269,7 @@ export async function pdfLibroDeObra({ obra, dias = [], traerDia }, modo = "abri
     const contenido = traerDia ? await traerDia(d) : { entradas: [], fotos: [], enlaces: {} };
     await paginaDelDia(doc, { dia: d, obra, logo, ...contenido });
   }
-  numerar(doc, `${obra || ""} · libro de obra`);
+  numerar(doc, "Libro de obra", obra);
 
   const nombre = `Libro de obra ${obra || ""}.pdf`.replace(/\s+/g, " ");
   if (modo === "blob") return doc.output("blob");

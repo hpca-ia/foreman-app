@@ -5,6 +5,8 @@
 // siempre significaba que quien entra en el teléfono a ver sus tareas del día
 // bajaba igual el motor de Excel y el de PDF: la mayor parte del peso, para
 // algo que usa una persona una vez por semana.
+import { pieDePdf } from "./piePdf";
+
 let XLSX, jsPDF, autoTable;
 const cargarExcel = async () => { XLSX = XLSX || await import("xlsx"); return XLSX; };
 export const cargarPDF = async () => {
@@ -50,7 +52,7 @@ export async function exportarExcel(nombreArchivo, hojas) {
  * @param adjuntos    [{titulo, url}] imágenes de facturas
  * @param indiceAdjuntos  agrega un índice de los anexos antes de las imágenes
  */
-export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso, tono }) {
+export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso, tono, pie }) {
   const FUERTE = tono?.fuerte || MARCA, SUAVE = tono?.suave || [231, 241, 239];
   await cargarPDF();
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -138,6 +140,8 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
     doc.addImage(img.dataUrl, "JPEG", 40, 56, img.width * escala, img.height * escala);
   }
 
+  // Qué es, de qué proyecto y cuándo se emitió, en cada hoja.
+  pieDePdf(doc, { elemento: pie?.elemento ?? titulo, proyecto: pie?.proyecto, margen: 14, abajo: 7 });
   return doc;
 }
 

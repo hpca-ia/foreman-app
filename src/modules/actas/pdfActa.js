@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
@@ -283,13 +284,7 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   }
 
   // Pie en todas las hojas: un acta suelta sin obra ni número no se archiva.
-  const hojas = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= hojas; i++) {
-    doc.setPage(i);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-    doc.text(`${obra || ""} · Acta N° ${acta.numero} · ${dia(acta.fecha)}`, M, ALTO - 9);
-    doc.text(`${i} de ${hojas}`, ANCHO - M, ALTO - 9, { align: "right" });
-  }
+  pieDePdf(doc, { elemento: `Acta N° ${acta.numero} del ${dia(acta.fecha)}`, proyecto: obra, margen: M, abajo: 9 });
 
   const nombre = `Acta ${acta.numero} - ${String(obra || "obra").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim().slice(0, 40)}.pdf`;
   // Para adjuntarlo al correo: el PDF se arma acá, en el navegador, porque es

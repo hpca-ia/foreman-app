@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { pieDePdf } from "../../lib/piePdf";
 // `logoParaPDF` carga y rasteriza cualquier imagen por URL, no solo logos:
 // sirve igual para meter un plano o la foto de una consulta en una hoja.
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
@@ -210,12 +211,6 @@ export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items 
   }
 
   // Pie con la página, para una hoja que se reparte y se vuelve a juntar.
-  const total = doc.internal.getNumberOfPages();
-  for (let p = 1; p <= total; p++) {
-    doc.setPage(p);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...GRIS);
-    doc.text(seguro(`${proyecto || ""} · plan del ${comoSeLee(desde)} al ${comoSeLee(hasta)}`), margen, 820);
-    doc.text(`${p} de ${total}`, ancho - margen, 820, { align: "right" });
-  }
+  pieDePdf(doc, { elemento: `Plan semanal del ${comoSeLee(desde)} al ${comoSeLee(hasta)}`, proyecto, margen: 14, abajo: 7.8 });
   return doc;
 }
