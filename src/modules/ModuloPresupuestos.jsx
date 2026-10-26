@@ -256,6 +256,11 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       cliente_id: pre.cliente_id, cliente_nombre: pre.cliente_nombre,
       honorarios_pct: pre.honorarios_pct, iva_pct: pre.iva_pct,
       ...(Array.isArray(pre.honorarios) ? { honorarios: pre.honorarios } : {}),
+      // Las notas del documento del cliente son parte del presupuesto, no de
+      // un envío: la v2 de un presupuesto del cliente se sigue pudiendo
+      // exportar en su formato.
+      ...(pre.exportacion?.notasCliente != null
+        ? { exportacion: { notasCliente: pre.exportacion.notasCliente, origenNotas: pre.exportacion.origenNotas || "cliente" } } : {}),
       estado: "borrador", created_by: currentUser.id,
       subtotal: pre.subtotal, honorarios_monto: pre.honorarios_monto,
       iva_monto: pre.iva_monto, total: pre.total,

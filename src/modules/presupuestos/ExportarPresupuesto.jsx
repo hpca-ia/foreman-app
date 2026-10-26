@@ -67,6 +67,13 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   // excluidas y no las incluidas: una nota que se escribe mañana sale, que es
   // lo que uno espera al escribirla.
   const [notasFuera, setNotasFuera] = useState([]);
+  // NUESTRO FORMATO O EL DEL CLIENTE.
+  // Un presupuesto que llegó en el documento de un cliente trae sus propias
+  // condiciones e instrucciones. Se le puede devolver con las suyas o con las
+  // de la oficina: mismo cuadro y mismo diseño, cambian las notas.
+  // notasCliente es null cuando el presupuesto no vino de un cliente.
+  const [notasCliente, setNotasCliente] = useState(null);
+  const [origenNotas, setOrigenNotas] = useState("nuestras");
   // LA MEMORIA DE CAMBIOS, adelante del presupuesto.
   const [carta, setCarta] = useState("");
   const [conCarta, setConCarta] = useState(false);
@@ -106,6 +113,10 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
       if (propia.notasRubro != null) setNotasRubro(propia.notasRubro !== false);
       if (propia.conNotas != null) setConNotas(propia.conNotas !== false);
       if (Array.isArray(propia.notasFuera)) setNotasFuera(propia.notasFuera.map(String));
+      if (propia.notasCliente != null) {
+        setNotasCliente(String(propia.notasCliente));
+        setOrigenNotas(propia.origenNotas === "cliente" ? "cliente" : "nuestras");
+      }
       if (propia.carta != null) setCarta(propia.carta);
       if (propia.conCarta != null) setConCarta(propia.conCarta === true);
       if (propia.desdeId != null) setDesdeId(String(propia.desdeId || ""));
@@ -164,6 +175,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     plantilla, formato, logo: logoSel, titulo: tituloTocado ? titulo : null, validez, conIva, membrete, firma, aceptacion,
     notas: marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera,
     carta, conCarta, desdeId,
+    ...(notasCliente != null ? { notasCliente, origenNotas } : {}),
   });
   // Lo que salió en el documento queda con el presupuesto.
   async function recordarEleccion() {
@@ -200,7 +212,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line
-  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera, carta, conCarta, desdeId]);
+  }, [cargado, plantilla, formato, logoSel, titulo, tituloTocado, validez, conIva, membrete, firma, aceptacion, marcadas, textos, particulares, paraCotizar, conM2, notasRubro, conNotas, notasFuera, carta, conCarta, desdeId, notasCliente, origenNotas]);
 
   async function nuevoLogo(e) {
     const file = e.target.files?.[0];
@@ -278,10 +290,14 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
   const porM2 = area > 0 && costoDirecto > 0 ? costoDirecto / area : 0;
   const fmtM = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const notaM2 = porM2 ? `Valor referencial del costo directo: $${fmtM(porM2)} por m², sobre un área de ${area.toLocaleString("es-EC", { maximumFractionDigits: 2 })} m², antes de honorarios e IVA.` : null;
+  const delCliente = notasCliente != null && origenNotas === "cliente";
   const notas = formato === "cotizar"
     ? lineas(paraCotizar)
     : !conNotas
         ? []
+        // En el formato del cliente salen sus notas y nada más: ni las de la
+        // oficina ni el costo por m², que su documento no traía.
+        : delCliente ? lineas(notasCliente)
         : [...catalogo.filter(x => marcadas.includes(x.id)).map(x => textos[x.id] ?? x.texto), ...lineas(particulares), ...(conM2 && notaM2 ? [notaM2] : [])];
 
   const opciones = { presupuesto, capitulos, items, formato, plantilla, empresa, titulo, validez, conIva, notas, firma, aceptacion, membrete, notasRubro, notasFuera,
@@ -517,8 +533,29 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                   </>
                 )}
 
+                {notasCliente != null && (
+                  <>
+                    <div style={etiqueta}>FORMATO</div>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                      {[["nuestras", "Nuestro formato"], ["cliente", "Formato del cliente"]].map(([v, t]) => (
+                        <button key={v} onClick={() => setOrigenNotas(v)}
+                          style={{ flex: 1, padding: "7px 10px", borderRadius: colors.radiusSm, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+                            border: `1.5px solid ${origenNotas === v ? colors.brand : colors.border}`,
+                            background: origenNotas === v ? colors.brand : colors.surface, color: origenNotas === v ? "#fff" : colors.inkSoft }}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 11, color: colors.muted, marginBottom: 12, lineHeight: 1.45 }}>
+                      {delCliente
+                        ? "Sale con las notas e instrucciones que traía el documento del cliente. El cuadro de rubros y el diseño son los de siempre."
+                        : "Sale con las notas y condiciones de la oficina. Las del cliente quedan guardadas para cuando las necesites."}
+                    </div>
+                  </>
+                )}
+
                 <div style={{ ...etiqueta, display: "flex", justifyContent: "space-between" }}>
-                  <span>NOTAS Y CONDICIONES</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
+                  <span>{delCliente ? "NOTAS DEL CLIENTE" : "NOTAS Y CONDICIONES"}</span><span style={{ fontWeight: 400 }}>{notas.length} en el documento</span>
                 </div>
                 {/* El interruptor de todo el capítulo. Lo que se elige abajo
                     queda guardado: se apaga para este envío y se vuelve a
@@ -574,6 +611,15 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                     )}
                   </div>
                 )}
+                {delCliente ? (
+                  <div style={{ opacity: conNotas ? 1 : 0.5 }}>
+                    <textarea value={notasCliente} onChange={e => setNotasCliente(e.target.value)}
+                      rows={Math.min(14, Math.max(4, lineas(notasCliente).length + 1))}
+                      placeholder="Las notas del documento del cliente, una por línea."
+                      style={{ ...campo, resize: "vertical", lineHeight: 1.5, fontSize: 12 }} />
+                    <div style={{ fontSize: 11, color: colors.muted, marginTop: 4 }}>Una por línea: cada línea sale numerada. Lo que cambies acá queda solo para este presupuesto.</div>
+                  </div>
+                ) : <>
                 {notaM2 ? (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: conM2 ? colors.ink : colors.muted, background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 9px", marginBottom: 10, cursor: "pointer", lineHeight: 1.4 }}>
                     <input type="checkbox" checked={conM2} onChange={e => setConM2(e.target.checked)} style={{ marginTop: 2 }} />
@@ -593,6 +639,7 @@ export default function ExportarPresupuesto({ presupuesto, capitulos, items, cur
                   onGuardarEnCatalogo={guardarEnCatalogo} onRetirar={retirar} onAgregar={agregarNota}
                   particulares={particulares} onParticulares={setParticulares} />
                 </div>
+                </>}
               </>
             )}
           </div>

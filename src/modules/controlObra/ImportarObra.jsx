@@ -16,6 +16,7 @@ import { interpretarPresupuesto, interpretarVariasHojas, aplicarDecisiones } fro
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
+import { partirPdf, deAVarias } from "../../lib/partirPdf";
 
 const n = v => Number(v) || 0;
 const CAP_CARGOS = "HONORARIOS Y CARGOS";
@@ -25,14 +26,51 @@ const CAP_CARGOS = "HONORARIOS Y CARGOS";
 // esta importación crea la obra directamente, sin pasar por Presupuestos.
 const PROMPT = `Replica este presupuesto de construcción TAL CUAL, sin resumir ni reagrupar.
 Devuelve SOLO JSON compacto, sin markdown:
-{"nombre":"","cliente":"","emisor":"","rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0}]}
+{"nombre":"","cliente":"","emisor":"","notas":["texto"],"rubros":[{"c":"CAPITULO","d":"descripcion","u":"unidad","q":0,"p":0,"t":0,"n":"nota del rubro"}]}
 Reglas:
 - "emisor" es la empresa que hizo el documento (quien cotiza); "cliente", a quién va dirigido.
 - Un objeto por rubro, en el MISMO ORDEN del documento.
 - "c" = el capítulo/sección al que pertenece ese rubro (repite el nombre en cada rubro).
 - Las filas de encabezado de capítulo y las de subtotal NO son rubros: no las incluyas.
 - "q" cantidad, "p" precio unitario, "t" total de la fila. Si falta "t", omítelo.
+- "n" = la nota, observación o instrucción escrita para ESE rubro (debajo de la fila, al lado, o con un asterisco o llamada que remite a él). Cópiala textual. Si el rubro no tiene nota, omite "n".
+- "notas" = todo texto fuera de la tabla de rubros que sea nota, observación, condición, exclusión, forma de pago, plazo, validez o instrucción del cliente. Una entrada por nota, TEXTUAL, en el orden del documento, sin su numeración. No incluyas el membrete, datos de contacto, firmas ni totales. Si no hay, [].
+- Las notas NO son rubros: no las pongas en "rubros".
 - No inventes rubros ni cambies descripciones.`;
+
+// Cuando el PDF se lee por páginas, cada una no sabe qué venía antes.
+const PROMPT_PAGINA = (i, total) => `${PROMPT}
+- Estás viendo SOLO la página ${i + 1} de ${total}. Si los primeros rubros continúan un capítulo cuyo título quedó en una página anterior y no se ve aquí, deja "c" vacío en esos rubros.${i > 0 ? `
+- "nombre", "cliente" y "emisor" déjalos vacíos si no aparecen en esta página.` : ""}`;
+
+// Notas que se repiten en cada página (un pie, una advertencia) entran una vez.
+const clave = t => normal(t).replace(/^[\d.)\-•*\s]+/, "");
+
+/** Las notas leídas, en una línea cada una (el export numera por línea) y sin repetir. */
+function notasDe(lista) {
+  const vistas = new Set();
+  return (Array.isArray(lista) ? lista : [])
+    .map(x => String(x ?? "").replace(/\s*\n\s*/g, " ").trim())
+    .filter(x => x && !vistas.has(clave(x)) && vistas.add(clave(x)));
+}
+
+/**
+ * Las páginas leídas por separado, de vuelta en un solo documento. Un rubro
+ * sin capítulo es la continuación del capítulo que venía de la página
+ * anterior.
+ */
+function juntarPaginas(paginas) {
+  const primera = k => paginas.map(p => String(p?.[k] || "").trim()).find(Boolean) || "";
+  let capitulo = "";
+  const rubros = [];
+  paginas.forEach(p => (p?.rubros || []).forEach(r => {
+    const c = String(r.c || r.capitulo || "").trim();
+    if (c) capitulo = c;
+    rubros.push({ ...r, c: c || capitulo });
+  }));
+  return { nombre: primera("nombre"), cliente: primera("cliente"), emisor: primera("emisor"),
+    notas: notasDe(paginas.flatMap(p => p?.notas || [])), rubros };
+}
 
 // Este mismo lector sirve para el presupuesto inicial, en Presupuestos: se lee
 // igual —formato aprendido, capítulos, revisión de errores, preguntas de
@@ -69,6 +107,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
   // Las hojas del libro de Excel: cuáles se leyeron y cuáles quedaron afuera.
   const [hojas, setHojas] = useState(null);
   const [nombre, setNombre] = useState("");
+  // Las notas, condiciones e instrucciones del documento, una por línea. Van
+  // al presupuesto tal cual, para que al exportarlo salga lo mismo.
+  const [notasDoc, setNotasDoc] = useState("");
   // Lo que NOVA pregunta antes de guardar: de dónde vienen los precios, de
   // qué cliente o proveedor, y las unidades que no se entienden.
   const [preguntas, setPreguntas] = useState(RESPUESTAS_VACIAS);
@@ -99,7 +140,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]); setDecisiones({});
     setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
     setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true);
-    setPreguntas(RESPUESTAS_VACIAS); setSugerencia({});
+    setPreguntas(RESPUESTAS_VACIAS); setSugerencia({}); setNotasDoc("");
   }
 
   // Lee las filas con un mapa de columnas y deja todo listo para la vista
@@ -177,23 +218,39 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     setLeyendo(true); setError("");
     const esImagen = file.type.startsWith("image/");
     const esPDF = file.type === "application/pdf";
-    let contenido;
-    if (esImagen || esPDF) {
-      setPaso("NOVA está leyendo el documento, puede tardar un par de minutos...");
+    const pedir = async contenido => parseJSONTolerante(textoDeNova(
+      await pedirNova({ model: LECTURA, max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal)) || "");
+    let parsed;
+    if (esPDF) {
+      setPaso("Abriendo el PDF...");
+      const paginas = await partirPdf(file);
+      let hechas = 0;
+      setPaso(`NOVA está leyendo ${paginas.length === 1 ? "la página" : `las ${paginas.length} páginas`}...`);
+      const leidas = await deAVarias(paginas, 4, async (b64, i) => {
+        const contenido = [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+          { type: "text", text: paginas.length === 1 ? PROMPT : PROMPT_PAGINA(i, paginas.length) },
+        ];
+        // Un corte suelto del servidor no tira abajo todo el documento: esa
+        // página se pide una vez más.
+        let r;
+        try { r = await pedir(contenido); }
+        catch (err) { if (err.name === "AbortError") throw err; r = await pedir(contenido); }
+        setPaso(`NOVA leyó ${++hechas} de ${paginas.length} páginas...`);
+        return r;
+      });
+      parsed = juntarPaginas(leidas);
+      const sinLeer = leidas.map((x, i) => (x ? null : i + 1)).filter(Boolean);
+      if (sinLeer.length && parsed.rubros.length) setError(`NOVA no pudo leer ${sinLeer.length === 1 ? `la página ${sinLeer[0]}` : `las páginas ${sinLeer.join(", ")}`}: revisa que no falten rubros o notas de ${sinLeer.length === 1 ? "esa página" : "esas páginas"}.`);
+    } else if (esImagen) {
+      setPaso("NOVA está leyendo la foto...");
       const b64 = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result.split(",")[1]); rd.readAsDataURL(file); });
-      contenido = [
-        esPDF ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-              : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
-        { type: "text", text: PROMPT },
-      ];
+      parsed = await pedir([{ type: "image", source: { type: "base64", media_type: file.type, data: b64 } }, { type: "text", text: PROMPT }]);
     } else {
       setPaso("NOVA está leyendo el Excel entero, puede tardar un par de minutos...");
       const txt = filas ? filas.map(f => f.map(c => String(c ?? "")).join(",")).join("\n").slice(0, 60000) : (await file.text()).slice(0, 60000);
-      contenido = [{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }];
+      parsed = await pedir([{ type: "text", text: `Presupuesto:\n\n${txt}\n\n${PROMPT}` }]);
     }
-
-    const data = await pedirNova({ model: LECTURA, max_tokens: 16000, messages: [{ role: "user", content: contenido }] }, señal);
-    const parsed = parseJSONTolerante(textoDeNova(data) || "");
     if (!parsed?.rubros?.length) {
       setError("NOVA no pudo leer el presupuesto. Si es muy grande, prueba subirlo por capítulos.");
       setLeyendo(false); setPaso(""); return;
@@ -210,7 +267,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       cantidad: n(r.q ?? r.cantidad),
       precio_unitario: n(r.p ?? r.precio_unitario),
       total: n(r.t ?? r.total) || n(r.q ?? r.cantidad) * n(r.p ?? r.precio_unitario),
+      nota: String(r.n ?? r.nota ?? "").trim() || null,
     })).filter(r => r.descripcion));
+    setNotasDoc(notasDe(parsed.notas).join("\n"));
     setSugerenciaIva("Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
     setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
     setSugerencia({ emisor: parsed.emisor || "", cliente: parsed.cliente || "" });
@@ -360,10 +419,14 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     const pctIva = incluyeIva ? 0 : n(ivaPct);
     const subtotal = r2(todos.reduce((s, r) => s + n(r.total), 0));
     const iva_monto = r2(subtotal * pctIva / 100);
+    // Las notas del documento del cliente se guardan APARTE de las nuestras:
+    // al exportar se elige con cuáles sale, el formato de la oficina o el del
+    // cliente. La del IVA es nuestra, y solo dice "Excel" si lo era.
+    const notasCliente = notasDe(notasDoc.split("\n"));
     const { data: pre, error: e1 } = await supabase.from("presupuestos").insert({
       nombre: nombre.trim(), cliente_id, cliente_nombre: cliente || "Sin cliente",
       honorarios_pct: 0, iva_pct: pctIva, estado: "borrador", created_by: currentUser.id,
-      notas: incluyeIva ? "Los precios del Excel original ya incluían IVA." : "",
+      notas: incluyeIva && filasExcel ? "Los precios del Excel original ya incluían IVA." : "",
       subtotal, honorarios_monto: 0, iva_monto, total: r2(subtotal + iva_monto),
     }).select().single();
     if (e1 || !pre) { setError("No se pudo crear el presupuesto: " + (e1?.message || "")); setGuardando(false); return; }
@@ -379,11 +442,21 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
         unidad: r.unidad === "glb" && r.capitulo === CAP_CARGOS ? "glb" : unidadRespondida(r, preguntas),
         cantidad: n(r.cantidad), precio_unitario: r2(n(r.precio_unitario)), total: r2(n(r.total)),
         orden: c * 1000 + pos[c],
+        ...(r.nota ? { nota: r.nota } : {}),
       };
     });
     for (let i = 0; i < filas.length; i += 100) {
       const { error: e2 } = await supabase.from("presupuesto_items").insert(filas.slice(i, i + 100));
       if (e2) { setError("Se creó el presupuesto pero fallaron algunos rubros: " + e2.message); setGuardando(false); return; }
+    }
+
+    // EL FORMATO DEL CLIENTE. Si su documento traía notas, el presupuesto
+    // sale de entrada con esas —es lo que el cliente espera ver—, y al
+    // exportar se puede cambiar a las de la oficina.
+    if (notasCliente.length) {
+      const { error: eExp } = await supabase.from("presupuestos")
+        .update({ exportacion: { origenNotas: "cliente", notasCliente: notasCliente.join("\n") } }).eq("id", pre.id);
+      if (eExp) faltan.push("026 (notas de exportación)");
     }
 
     const eFormato = await recordarFormato({ filas: filasExcel, mapa: mapaActual, archivo: archivo?.name, usuarioId: currentUser.id });
@@ -634,6 +707,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
                         {r.origen && r.origen !== "ajuste" && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>{r.origen === "agregado" ? "AGREGADO" : "CORREGIDO"}</span>}
                         {r.pendiente && <span style={{ fontSize: 9, fontWeight: 700, color: colors.warning, marginRight: 5 }}>SIN PRECIO</span>}
                         {r.descripcion}
+                        {r.nota && <span title={r.nota} style={{ display: "block", fontSize: 10.5, color: colors.warning, overflow: "hidden", textOverflow: "ellipsis" }}>⚠ {r.nota}</span>}
                       </span>
                       <span style={{ color: colors.muted, fontSize: 11 }}>{r._cargo != null ? r.unidad : unidadRespondida(r, preguntas)}</span>
                       <span style={{ color: colors.muted, textAlign: "right" }}>{fmt(r.cantidad)}</span>
@@ -649,6 +723,21 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
               );
             })}
           </div>
+
+          {/* LAS NOTAS DEL DOCUMENTO, A LA VISTA ANTES DE CREAR.
+              Lo que el cliente escribió (condiciones, exclusiones,
+              instrucciones) tiene que salir igual al exportar. */}
+          {paraPresupuesto && (notasDoc.trim() || final.rubros.some(r => r.nota)) && (
+            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
+              <label style={lbl}>NOTAS E INSTRUCCIONES DEL DOCUMENTO</label>
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
+                Una por línea, como las leyó NOVA. Quedan guardadas como el <strong>formato del cliente</strong>: al exportar eliges si el documento sale con estas notas o con las de la oficina.
+                {final.rubros.some(r => r.nota) && <> Además, <strong>{final.rubros.filter(r => r.nota).length} rubros</strong> traen su propia nota (⚠ en la lista de abajo): salen debajo de su rubro.</>}
+              </div>
+              <textarea value={notasDoc} onChange={e => setNotasDoc(e.target.value)} rows={Math.min(10, Math.max(3, notasDoc.split("\n").length + 1))}
+                style={{ ...inputStyle, resize: "vertical", fontSize: 12, lineHeight: 1.5 }} placeholder="Sin notas generales" />
+            </div>
+          )}
 
           {paraPresupuesto && (
             <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: colors.inkSoft, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12, cursor: "pointer" }}>
