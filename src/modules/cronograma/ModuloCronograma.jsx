@@ -2847,11 +2847,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
               const hojas = Math.ceil(totalDias / dias);
               return (
                 <button key={id} disabled={pensando} onClick={async () => {
-                  setPensando(true);
-                  await pdfCronograma({
-                    nombre: lead.nombre, plan, filas: filasParaPdf(), dependencias, cal, hoyISO, diasDeContrato,
-                  }, id);
-                  setPensando(false); setPdf(false);
+                  // Si algo falla al armarlo, se dice qué. Antes el botón se
+                  // quedaba pensando para siempre y del otro lado se veía
+                  // solamente que el PDF no bajaba.
+                  setPensando(true); setError("");
+                  try {
+                    await pdfCronograma({
+                      nombre: lead.nombre, plan, filas: filasParaPdf(), dependencias, cal, hoyISO, diasDeContrato,
+                    }, id);
+                    setPdf(false);
+                  } catch (e) {
+                    console.error("PDF del cronograma:", e);
+                    setError(`No se pudo armar el PDF: ${e?.message || e}. Mandá este mensaje para revisarlo.`);
+                  } finally {
+                    setPensando(false);
+                  }
                 }}
                   style={{ textAlign: "left", background: colors.bg, border: `1px solid ${colors.border}`,
                     borderRadius: 8, padding: "9px 11px", cursor: "pointer", fontFamily: colors.font }}>
