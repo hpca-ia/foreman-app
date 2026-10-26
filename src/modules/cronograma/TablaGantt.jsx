@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect, useEffect } from "react";
 import { Link2, Trash2, CalendarClock, ChevronRight, ChevronDown, ChevronUp, Scissors, X, List, ArrowDown, ArrowRight } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -9,6 +9,7 @@ import { fmt } from "../controlObra/calculos";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { porFases, tramoDe } from "./agruparPorFase";
 import { numerarBandas } from "./numeros";
+import { rutaDeCadena, ordenDeTrazado } from "./rutasDeCadenas";
 
 // La tabla del cronograma: cómo se lee.
 //
@@ -120,8 +121,15 @@ export default function TablaGantt({
   // todo, después del lienzo: en un cronograma de ocho meses eso son dos mil
   // píxeles a la derecha, así que para partir una actividad había que
   // desplazar hasta el final, apretar, y volver.
-  const COLS = "minmax(230px,1fr) 54px 112px 112px 52px 68px";
-  const IZQ = 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12;
+  //
+  // TABLA COMPACTA. Con las fechas y el colchón a la vista, la tabla se comía
+  // dos tercios del ancho y a las barras —que es lo que se viene a mirar— les
+  // quedaba una franja. Compacta deja nombre, días y botones: las fechas se
+  // leen en la barra y se escriben en la ficha. Queda elegida para la próxima.
+  const [compacta, setCompacta] = useState(() => { try { return localStorage.getItem("foreman_gantt_compacta") === "1"; } catch { return false; } });
+  const alternarCompacta = () => setCompacta(c => { try { localStorage.setItem("foreman_gantt_compacta", c ? "0" : "1"); } catch {} return !c; });
+  const COLS = compacta ? "minmax(230px,1fr) 54px 68px" : "minmax(230px,1fr) 54px 112px 112px 52px 68px";
+  const IZQ = compacta ? 230 + 54 + 68 + 2 * 7 + 12 : 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12;
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
   const anchoLienzo = Math.max(320, Math.round(diasTotales * zoom));
   const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
@@ -286,26 +294,36 @@ export default function TablaGantt({
 
     const medir = () => {
       const base = caja.getBoundingClientRect();
-      const donde = id => {
-        const el = caja.querySelector(`[data-barra="${id}"]`);
-        if (!el) return null;
+      // Todas las barras a la vista: de las que salen y entran flechas, y las
+      // que las flechas tienen que esquivar.
+      const donde = new Map(), cajas = [];
+      caja.querySelectorAll("[data-barra]").forEach(el => {
         const r = el.getBoundingClientRect();
-        if (!r.width && !r.height) return null;
-        return {
+        if (!r.width && !r.height) return;
+        const b = {
           x1: r.left - base.left + caja.scrollLeft,
           x2: r.right - base.left + caja.scrollLeft,
           y: r.top - base.top + caja.scrollTop + r.height / 2,
         };
-      };
-      const lineas = [];
-      dependencias.forEach(d => {
-        const de = donde(d.depende_de_id), a = donde(d.actividad_id);
-        if (!de || !a) return;
-        lineas.push({ id: d.id, tipo: d.tipo || "FC", de, a, traba: trabas.has(d.id) });
+        donde.set(String(el.dataset.barra), b);
+        cajas.push(b);
+      });
+      // El alto de una fila, para que las vueltas vayan por la línea entre
+      // filas: el paso más común entre una barra y la siguiente.
+      const ys = [...new Set(cajas.map(c => Math.round(c.y)))].sort((x, y) => x - y);
+      const pasos = ys.slice(1).map((y, k) => y - ys[k]).filter(d => d > 8).sort((x, y) => x - y);
+      const altoFila = pasos.length ? pasos[Math.floor(pasos.length / 2)] : 40;
+      const porTexto = new Map([...donde].map(([k, v]) => [k, v]));
+      const deps = dependencias.map(d => ({ ...d, depende_de_id: String(d.depende_de_id), actividad_id: String(d.actividad_id) }));
+      const verticales = [];
+      const lineas = ordenDeTrazado(deps, porTexto).map(({ d, de, a }) => {
+        const r = rutaDeCadena({ de, a, tipo: d.tipo || "FC", cajas, verticales,
+          S: 9, F: 6, paso: 2, separacion: 5, alto: altoFila, holgura: 140 });
+        return { id: d.id, ...r, y: a.y, traba: trabas.has(d.id) };
       });
       const ancho = caja.scrollWidth, alto = caja.scrollHeight;
       const firma = `${ancho}x${alto}|` + lineas
-        .map(l => `${l.id},${l.tipo},${l.traba ? 1 : 0},${Math.round(l.de.x1)},${Math.round(l.de.x2)},${Math.round(l.de.y)},${Math.round(l.a.x1)},${Math.round(l.a.x2)},${Math.round(l.a.y)}`)
+        .map(l => `${l.id},${l.traba ? 1 : 0},${l.puntos.map(p => `${Math.round(p[0])}:${Math.round(p[1])}`).join(" ")}`)
         .join(";");
       if (firma === firmaRef.current) return;
       firmaRef.current = firma;
@@ -318,11 +336,55 @@ export default function TablaGantt({
     return () => ro.disconnect();
     // Se vuelve a medir cuando cambia cualquier cosa que mueva una barra de
     // lugar: el zoom, una ficha abierta, una etapa plegada, la lista de rubros.
-  }, [verEnlaces, dependencias, todas, zoom, escala, abierta, plegados, verRubros, fases, anchoLienzo, IZQ]);
+  }, [verEnlaces, dependencias, todas, zoom, escala, abierta, plegados, verRubros, fases, anchoLienzo, IZQ, compacta]);
+
+  // RECORRERLO CON EL MOUSE. Se agarra el fondo del cronograma y se arrastra:
+  // a los costados corre el cronograma, arriba y abajo corre la página. No en
+  // la tabla de la izquierda ni en campos o botones, que tienen lo suyo. Si
+  // hubo arrastre, el clic que viene al soltar no abre nada.
+  const [arrastrando, setArrastrando] = useState(false);
+  const arrastre = useRef(null);
+  useEffect(() => {
+    const mover = e => {
+      const r = arrastre.current;
+      if (!r) return;
+      const dx = e.clientX - r.x, dy = e.clientY - r.y;
+      if (!r.movido && Math.abs(dx) + Math.abs(dy) < 4) return;
+      if (!r.movido) { r.movido = true; setArrastrando(true); }
+      cajaRef.current.scrollLeft = r.left - dx;
+      window.scrollTo(window.scrollX, r.top - dy);
+      e.preventDefault();
+    };
+    const soltar = () => {
+      const r = arrastre.current;
+      arrastre.current = null;
+      if (!r?.movido) return;
+      setArrastrando(false);
+      // El clic de soltar llega después: se lo traga una vez.
+      const comer = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener("click", comer, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", comer, { capture: true }), 0);
+    };
+    window.addEventListener("mousemove", mover);
+    window.addEventListener("mouseup", soltar);
+    return () => { window.removeEventListener("mousemove", mover); window.removeEventListener("mouseup", soltar); };
+  }, []);
+  const agarrar = e => {
+    if (e.button !== 0) return;
+    if (e.target.closest("input,button,select,textarea,a,label,.gantt-fijo,[contenteditable]")) return;
+    arrastre.current = { x: e.clientX, y: e.clientY, left: cajaRef.current.scrollLeft, top: window.scrollY, movido: false };
+  };
 
   return (
-    <div ref={cajaRef} style={{ position: "relative", background: colors.surface, border: `1px solid ${colors.border}`,
-      borderRadius: colors.radiusMd, overflowX: "auto" }}>
+    <div ref={cajaRef} onMouseDown={agarrar} className={compacta ? "gantt-compacta" : undefined}
+      style={{ position: "relative", background: colors.surface, border: `1px solid ${colors.border}`,
+      borderRadius: colors.radiusMd, overflowX: "auto", cursor: arrastrando ? "grabbing" : "grab",
+      userSelect: arrastrando ? "none" : undefined }}>
+      {/* En la tabla compacta, la 3.ª, 4.ª y 5.ª celda de cada fila fija
+          (empieza, termina y colchón) no se muestran. Las tres filas fijas
+          —encabezado, grupo y actividad— tienen las mismas seis celdas en el
+          mismo orden. */}
+      <style>{`.gantt-compacta .gantt-fijo > :nth-child(3), .gantt-compacta .gantt-fijo > :nth-child(4), .gantt-compacta .gantt-fijo > :nth-child(5) { display: none !important; } .gantt-fijo { cursor: default; }`}</style>
       {/* Debajo de la columna fija (zIndex 4) y encima del fondo: las líneas
           cruzan el cronograma y desaparecen bajo los nombres, que es donde
           estorbarían. */}
@@ -338,9 +400,18 @@ export default function TablaGantt({
       <div style={{ display: "grid", gridTemplateColumns: `${IZQ}px ${anchoLienzo}px`, gap: 7,
         padding: "8px 12px 8px 0", background: colors.bg, fontSize: 9, fontWeight: 700, color: colors.muted,
         letterSpacing: 0.3, width: "max-content", minWidth: "100%" }}>
-        <span style={{ display: "grid", gridTemplateColumns: COLS, gap: 7, position: "sticky", left: 0, zIndex: 3,
+        <span className="gantt-fijo" style={{ display: "grid", gridTemplateColumns: COLS, gap: 7, position: "sticky", left: 0, zIndex: 3,
           background: colors.bg, paddingLeft: 12, boxSizing: "border-box", borderRight: `1px solid ${colors.border}` }}>
-          <span>ACTIVIDAD</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            ACTIVIDAD
+            <button onClick={alternarCompacta}
+              title={compacta ? "Mostrar las fechas y el colchón en la tabla" : "Esconder las fechas y el colchón: más lugar para las barras"}
+              style={{ background: compacta ? colors.brandSoft : "none", border: `1px solid ${compacta ? "transparent" : colors.border}`, borderRadius: 4,
+                color: compacta ? colors.brand : colors.muted, cursor: "pointer", fontFamily: colors.font,
+                fontSize: 9, fontWeight: 700, letterSpacing: 0.3, padding: "2px 6px" }}>
+              {compacta ? "⇤ VER FECHAS" : "⇥ MÁS LUGAR A LAS BARRAS"}
+            </button>
+          </span>
           <span style={{ textAlign: "center" }}>DÍAS</span>
           <span>EMPIEZA</span>
           <span>TERMINA</span>
@@ -1211,30 +1282,16 @@ const BandaEtapa = ({ ui, fase, grupos, diasTotales, cal, numero }) => {
  * existe: tiene que rodear. Eso se ve enseguida en el dibujo y es justamente lo
  * que uno quiere ver.
  */
+// Una flecha ya trazada: la ruta la decide rutasDeCadenas, acá solo se dibuja.
 const Cadena = ({ l }) => {
-  const S = 9, F = 6, M = 3.2;
-  const { de, a } = l;
-  let d, flecha;
-  if (l.tipo === "FF") {
-    const x = Math.max(de.x2, a.x2) + S;
-    d = `M ${de.x2} ${de.y} H ${x} V ${a.y} H ${a.x2 + F}`;
-    flecha = `${a.x2 + F},${a.y - M} ${a.x2 + F},${a.y + M} ${a.x2},${a.y}`;
-  } else if (l.tipo === "CC") {
-    const x = Math.min(de.x1, a.x1) - S;
-    d = `M ${de.x1} ${de.y} H ${x} V ${a.y} H ${a.x1 - F}`;
-    flecha = `${a.x1 - F},${a.y - M} ${a.x1 - F},${a.y + M} ${a.x1},${a.y}`;
-  } else if (a.x1 - de.x2 >= S + F + 2) {
-    d = `M ${de.x2} ${de.y} H ${de.x2 + S} V ${a.y} H ${a.x1 - F}`;
-    flecha = `${a.x1 - F},${a.y - M} ${a.x1 - F},${a.y + M} ${a.x1},${a.y}`;
-  } else {
-    const ym = (de.y + a.y) / 2;
-    d = `M ${de.x2} ${de.y} H ${de.x2 + S} V ${ym} H ${a.x1 - S - F} V ${a.y} H ${a.x1 - F}`;
-    flecha = `${a.x1 - F},${a.y - M} ${a.x1 - F},${a.y + M} ${a.x1},${a.y}`;
-  }
+  const M = 3.2, F = 6;
+  const d = l.puntos.map((p, k) => `${k ? "L" : "M"} ${p[0]} ${p[1]}`).join(" ");
+  const base = l.haciaDerecha ? l.punta - F : l.punta + F;
+  const flecha = `${base},${l.y - M} ${base},${l.y + M} ${l.punta},${l.y}`;
   // La que traba, más fuerte: es la única que mueve la fecha si se adelanta.
   const color = l.traba ? colors.warning : colors.muted;
   return (
-    <g opacity={l.traba ? 0.95 : 0.5}>
+    <g opacity={l.traba ? 0.95 : 0.55}>
       <path d={d} fill="none" stroke={color} strokeWidth={l.traba ? 1.6 : 1}
         strokeLinejoin="round" strokeLinecap="round" />
       <polygon points={flecha} fill={color} />
@@ -1254,7 +1311,7 @@ const Fila = ({ ui, children, fondo }) => (
 // Por encima de todo lo que vive en el lienzo —barras, regla, la línea de
 // hoy—: lo que asome por su borde se lee como un error de dibujo.
 const Fijo = ({ ui, children, fondo }) => (
-  <div style={{ display: "grid", gridTemplateColumns: ui.COLS, gap: 7, alignItems: "center",
+  <div className="gantt-fijo" style={{ display: "grid", gridTemplateColumns: ui.COLS, gap: 7, alignItems: "center",
     position: "sticky", left: 0, zIndex: 4, background: fondo || colors.surface,
     paddingLeft: 12, boxSizing: "border-box", borderRight: `1px solid ${colors.border}` }}>
     {children}

@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { rutaDeCadena, ordenDeTrazado } from "./rutasDeCadenas.js";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
@@ -198,53 +199,41 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
    * retiro, y cuando hay traslape —la que sigue arranca antes de que termine
    * la anterior— rodean por abajo en vez de cruzar la barra de punta a punta.
    */
-  const dibujarCadenas = donde => {
-    if (!dependencias.length || donde.size < 2) return;
-    const S = 1.6, F = 1.1, P = 0.9;   // retiro, flecha y medio ancho de la punta
-    dependencias.forEach(d => {
-      const de = donde.get(d.depende_de_id), a2 = donde.get(d.actividad_id);
-      if (!de || !a2) return;
+  const dibujarCadenas = (donde, cajas, numeroDe) => {
+    if (!dependencias.length) return;
+    const F = 1.1, P = 0.9;   // largo y medio ancho de la punta
+    // POR DÓNDE VA CADA UNA lo decide rutasDeCadenas: cada bajada busca una
+    // columna que no cruce barras ni pise otra flecha, las cortas primero.
+    const verticales = [];
+    ordenDeTrazado(dependencias, donde).forEach(({ d, de, a }) => {
       const manda = trabas.has(d.id);
       const color = manda ? AMBAR : [170, 168, 163];
+      const { puntos, punta, haciaDerecha } = rutaDeCadena({ de, a, tipo: d.tipo || "FC", cajas, verticales, F, alto: FILA });
       doc.setDrawColor(...color);
       doc.setLineWidth(manda ? 0.32 : 0.18);
-
-      const tipo = d.tipo || "FC";
-      // "A la vez" y "terminan juntas" se atan por donde de verdad se atan:
-      // arranque con arranque, final con final. Dibujarlas todas como
-      // fin→comienzo diría una relación que no es la que está cargada.
-      const xSale = tipo === "CC" ? de.x1 : de.x2;
-      const xEntra = tipo === "FF" ? a2.x2 : a2.x1;
-      const haciaDerecha = tipo !== "FF";
-      const puntoX = haciaDerecha ? xEntra - F : xEntra + F;
-
-      if (tipo === "CC") {
-        const x = Math.min(xSale, xEntra) - S;
-        doc.line(xSale, de.y, x, de.y);
-        doc.line(x, de.y, x, a2.y);
-        doc.line(x, a2.y, puntoX, a2.y);
-      } else if (tipo === "FF") {
-        const x = Math.max(xSale, xEntra) + S;
-        doc.line(xSale, de.y, x, de.y);
-        doc.line(x, de.y, x, a2.y);
-        doc.line(x, a2.y, puntoX, a2.y);
-      } else if (xEntra - xSale >= S + F + 0.6) {
-        doc.line(xSale, de.y, xSale + S, de.y);
-        doc.line(xSale + S, de.y, xSale + S, a2.y);
-        doc.line(xSale + S, a2.y, puntoX, a2.y);
-      } else {
-        // El traslape: rodea por el medio de las dos filas.
-        const ym = (de.y + a2.y) / 2;
-        doc.line(xSale, de.y, xSale + S, de.y);
-        doc.line(xSale + S, de.y, xSale + S, ym);
-        doc.line(xSale + S, ym, xEntra - S - F, ym);
-        doc.line(xEntra - S - F, ym, xEntra - S - F, a2.y);
-        doc.line(xEntra - S - F, a2.y, puntoX, a2.y);
-      }
+      for (let k = 1; k < puntos.length; k++) doc.line(puntos[k - 1][0], puntos[k - 1][1], puntos[k][0], puntos[k][1]);
       doc.setFillColor(...color);
-      doc.triangle(puntoX, a2.y - P, puntoX, a2.y + P, xEntra, a2.y, "F");
+      const base = haciaDerecha ? punta - F : punta + F;
+      doc.triangle(base, a.y - P, base, a.y + P, punta, a.y, "F");
     });
+
+    // LA OTRA PUNTA EN OTRA HOJA. Antes esas flechas no se dibujaban y la
+    // barra parecía no depender de nada. Ahora lleva una marca chica: "de
+    // 4.5" si espera a una de otra hoja, "a 10.6" si otra de otra hoja la espera.
+    const vienen = new Map(), van = new Map();
+    dependencias.forEach(d => {
+      const de = donde.get(d.depende_de_id), a = donde.get(d.actividad_id);
+      if (a && !de && numeroDe.has(d.depende_de_id)) vienen.set(d.actividad_id, [...(vienen.get(d.actividad_id) || []), numeroDe.get(d.depende_de_id)]);
+      if (de && !a && numeroDe.has(d.actividad_id)) van.set(d.depende_de_id, [...(van.get(d.depende_de_id) || []), numeroDe.get(d.actividad_id)]);
+    });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(5); doc.setTextColor(...GRIS);
+    const lista = ns => ns.length > 3 ? `${ns.slice(0, 3).join(", ")}…` : ns.join(", ");
+    vienen.forEach((ns, id) => { const b = donde.get(id); doc.text(`de ${lista(ns)}`, b.x1 - 0.8, b.y + 0.9, { align: "right" }); });
+    van.forEach((ns, id) => { const b = donde.get(id); doc.text(`a ${lista(ns)}`, b.x2 + 0.8, b.y + 0.9); });
   };
+
+  // El número de cada actividad, para nombrar la otra punta cuando está en otra hoja.
+  const numeroDe = new Map(filas.filter(f => f.id != null && f.numero).map(f => [f.id, String(f.numero)]));
 
   let primera = true;
   for (let hojaAncho = 0; hojaAncho < hojasAncho; hojaAncho++) {
@@ -260,6 +249,9 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
       // Las cadenas se dibujan al final y no mientras se recorren las filas:
       // una flecha sale de una barra que todavía no se dibujó.
       const donde = new Map();
+      // Todas las barras de la hoja, también las cortadas por el borde: las
+      // flechas las esquivan aunque no salgan de ellas.
+      const cajas = [];
       const suyas = filas.slice(hojaAlto * filasPorHoja, (hojaAlto + 1) * filasPorHoja);
       suyas.forEach(f => {
         if (f.tipo === "etapa") {
@@ -312,6 +304,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
             if (f.id != null && d1 >= desdeDia && d2 <= desdeDia + diasHoja - 1) {
               donde.set(f.id, { x1: x, x2: x + ancho, y: y + FILA / 2 });
             }
+            cajas.push(f.hito ? { x1: x + MM_DIA / 2 - 1.6, x2: x + MM_DIA / 2 + 1.6, y: y + FILA / 2 } : { x1: x, x2: x + ancho, y: y + FILA / 2 });
             if (f.hito) {
               // Un hito es un rombo: una barra de un día se ve igual que un
               // trabajo cortito, y lo que uno busca al abrir un cronograma
@@ -337,7 +330,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
         y += FILA;
       });
 
-      dibujarCadenas(donde);
+      dibujarCadenas(donde, cajas, numeroDe);
 
       // Pie: de qué obra es, qué hoja es y cuándo se emitió. Un cronograma
       // suelto sin fecha de emisión es peligroso: no se sabe si es el vigente.
