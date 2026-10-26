@@ -7,6 +7,7 @@ import Button from "../../components/ui/Button";
 import ElegirProyecto from "../../components/ElegirProyecto";
 import { fmt } from "./calculos";
 import { sembrarExtras } from "./agrupacionesExtra";
+import { copiarCronogramaDelPresupuesto } from "../cronograma/cronogramaAObra";
 
 export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
   const [presupuestos, setPresupuestos] = useState([]);
@@ -99,7 +100,16 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
     });
 
     // Toda obra es un proyecto del pipeline, venga de un lead o de un presupuesto.
-    await asegurarProyecto(obra, currentUser);
+    const proyecto = await asegurarProyecto(obra, currentUser);
+
+    // EL CRONOGRAMA QUE SE COTIZÓ PASA A LA OBRA. Se copia al proyecto, sin
+    // pisar uno que ya tenga; el presupuesto conserva el suyo. Si falla, la
+    // obra ya está creada y se dice qué pasó: el cronograma se puede traer
+    // después desde su pantalla.
+    const crono = await copiarCronogramaDelPresupuesto({ presupuestoId: sel.id, leadId: proyecto?.id || lead.id, obraId: obra.id })
+      .catch(e => ({ error: e.message }));
+    if (crono.error) alert("La obra se creó, pero su cronograma no se pudo copiar del presupuesto: " + crono.error + "\nSe puede traer desde Cronograma.");
+    else if (crono.yaTenia) alert("La obra se creó. El proyecto ya tenía un cronograma, así que no se copió el del presupuesto: si querés usar ese, traelo desde Cronograma.");
 
     setGuardando(false);
     onCreada(obra);

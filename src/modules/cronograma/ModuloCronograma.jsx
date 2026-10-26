@@ -31,6 +31,8 @@ import { fmt } from "../controlObra/calculos";
 import { numerosDeBarras } from "./numeros";
 import { capitulosComoAgrupaciones, planDelPresupuesto, presupuestoDeReferencia } from "./presupuestoComoObra";
 import { dueno, filaDe, claveDe, esDePresupuesto, presupuestoComoDueno } from "./dueno";
+import { enganches } from "./copiaDeCronograma";
+import { copiarCronogramaDelPresupuesto } from "./cronogramaAObra";
 import { esAdmin } from "../../lib/roles";
 
 // El cronograma de la obra. Módulo propio, y a propósito.
@@ -236,6 +238,16 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
       setSinSenalar(!!eRub);
       setRubros(rub || []);
 
+      // LAS BARRAS QUE VINIERON DEL PRESUPUESTO, ENGANCHADAS A SU AGRUPACIÓN.
+      // Al activar la obra las agrupaciones no existían; cuando ya están, cada
+      // barra va con la que se quedó con la plata de su capítulo. Una vez, y
+      // solo las que no cuelgan de nada: lo enganchado a mano no se toca.
+      const eng = enganches(act || [], rub || []);
+      if (eng.length) {
+        await Promise.all(eng.map(x => supabase.from("cronograma_actividades").update({ obra_actividad_id: x.obra_actividad_id }).eq("id", x.id)));
+        setActividades((act || []).map(a => { const e = eng.find(x => x.id === a.id); return e ? { ...a, obra_actividad_id: e.obra_actividad_id } : a; }));
+      }
+
       const m = {};
       const caps = new Map();
       (rub || []).forEach(r => {
@@ -301,6 +313,51 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     // eslint-disable-next-line
   }, [abrir?.presupuestoId, cargando]);
   const [fuenteId, setFuenteId] = useState(null);
+
+  // TRAER EL CRONOGRAMA DE UN PRESUPUESTO AL PROYECTO.
+  //
+  // Al activar la obra se copia solo, salvo que el proyecto ya tuviera uno o
+  // que la obra no haya salido de un presupuesto. Para esos casos, acá: los
+  // presupuestos del proyecto que tienen cronograma propio, para traerlo.
+  const [conCronoPropio, setConCronoPropio] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    setConCronoPropio([]);
+    if (!lead?.id || esDePresupuesto(lead)) return;
+    (async () => {
+      const { data: ps } = await supabase.from("presupuestos").select("id,nombre,archivado_at").eq("lead_id", lead.id);
+      const ids = (ps || []).map(p => p.id);
+      if (!ids.length) return;
+      // Sin la 124 no hay presupuesto_id: no hay nada que traer.
+      const { data: bs, error } = await supabase.from("cronograma_actividades").select("presupuesto_id").in("presupuesto_id", ids);
+      if (!vivo || error) return;
+      const con = new Set((bs || []).map(b => b.presupuesto_id));
+      setConCronoPropio((ps || []).filter(p => con.has(p.id)));
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line
+  }, [lead?.id, lead?.duenoTipo]);
+
+  async function traerDelPresupuesto(p) {
+    const hay = actividades.length > 0;
+    if (hay && !window.confirm(`Este proyecto ya tiene un cronograma de ${actividades.length} barras.\n\n`
+      + `Se guarda una versión del actual y se reemplaza por el de "${p.nombre}". El avance y las fechas reales `
+      + `cargados en las barras de ahora quedan solo en esa versión.\n\n¿Reemplazarlo?`)) return;
+    setPensando(true); setError("");
+    if (hay) {
+      const v = await guardarVersion({ lead, obra: { id: lead.obra_id }, actividades: todas, dependencias, plan,
+        motivo: `Antes de traer el cronograma del presupuesto ${p.nombre}`, lineaBase: false, quien: currentUser });
+      if (v.error) { setPensando(false); setError("No se pudo guardar una versión del cronograma actual, así que no se reemplazó: " + v.error); return; }
+    }
+    const r = await copiarCronogramaDelPresupuesto({ presupuestoId: p.id, leadId: lead.id, obraId: lead.obra_id || null, reemplazar: hay })
+      .catch(e => ({ error: e.message }));
+    // El plazo pudo cambiar: se relee el proyecto entero, no solo las barras.
+    const { data: fresco } = await supabase.from("leads").select("*").eq("id", lead.id).maybeSingle();
+    if (fresco) setLead(l => ({ ...l, ...fresco }));
+    await Promise.all([cargar(), cargarFases()]);
+    setPensando(false);
+    if (r.error || r.faltaMigracion) setError(r.error || `Falta correr la migración ${r.faltaMigracion}.`);
+  }
   useEffect(() => {
     let vivo = true;
     setPresupuestosDelLead([]); setFuenteId(null);
@@ -1526,6 +1583,26 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
             {lead.lead_id && proyectos.find(x => x.id === lead.lead_id) ? ` · ${proyectos.find(x => x.id === lead.lead_id).nombre}` : " · sin proyecto"}
             {Number(lead.total) ? ` · $${fmt(lead.total)}` : ""}
           </div>
+        </div>
+      )}
+
+      {/* Traer el cronograma de un presupuesto del proyecto. Con el proyecto
+          vacío es lo primero que conviene; con uno armado, una opción. */}
+      {!esDePresupuesto(lead) && conCronoPropio.length > 0 && (
+        <div style={{ background: actividades.length ? colors.bg : colors.brandSoft, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 12, fontSize: 12, color: colors.inkSoft,
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 260px" }}>
+            {actividades.length
+              ? "Hay presupuestos de este proyecto con su propio cronograma. Traer uno reemplaza el de ahora (antes se guarda una versión):"
+              : <><strong style={{ color: colors.ink }}>Este proyecto no tiene cronograma</strong>, pero su presupuesto sí. Traelo y seguí desde ahí:</>}
+          </span>
+          {conCronoPropio.map(p => (
+            <Button key={p.id} variant={actividades.length ? "outline" : "primary"} size="sm" disabled={pensando}
+              onClick={() => traerDelPresupuesto(p)}>
+              Traer el de {p.nombre}
+            </Button>
+          ))}
         </div>
       )}
 
