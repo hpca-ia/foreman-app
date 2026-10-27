@@ -28,6 +28,23 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
   const decisionDe = (a, i) => guardada ? a.decision : decisiones[i];
   const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !decisionDe(a, i)).length;
 
+  // TODOS DE UNA VEZ. Un Excel con veinte errores eran veinte clics en "No
+  // aceptar". Se decide en bloque, pero mirando antes qué va a pasar en cada
+  // uno: lo que cambia es plata del presupuesto. Solo los errores; los avisos
+  // son opcionales y se dejan como están.
+  function todosLosErrores(valor) {
+    const idx = advertencias.map((a, i) => (a.nivel === "error" ? i : null)).filter(i => i != null);
+    if (!idx.length) return;
+    const lista = idx.slice(0, 12).map(i => {
+      const ef = efectos(advertencias[i]);
+      return `• ${String(advertencias[i].titulo).slice(0, 110)}\n   → ${valor === "corregir" ? ef.noAceptar : ef.aceptar}`;
+    }).join("\n");
+    const mas = idx.length > 12 ? `\n… y ${idx.length - 12} más.` : "";
+    const que = valor === "corregir" ? "Corregir" : "Aceptar tal como vienen";
+    if (!window.confirm(`${que} los ${idx.length} errores:\n\n${lista}${mas}\n\nCada uno se puede cambiar después, uno por uno. ¿Seguir?`)) return;
+    idx.forEach(i => onDecidir(i, valor));
+  }
+
   if (!advertencias.length) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8, background: colors.successSoft, borderRadius: colors.radiusMd, padding: "10px 12px", fontSize: 12, color: colors.success, fontWeight: 600 }}>
@@ -109,6 +126,24 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
               fontSize: 11.5, fontWeight: 600, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
             <Mail size={12} /> Mandárselo al que lo hizo
           </button>
+          {!guardada && onDecidir && errores > 0 && (
+            <>
+              <button onClick={() => todosLosErrores("corregir")} disabled={!!ocupado}
+                title="Corregir todos los errores de una vez; antes se muestra qué cambia en cada uno"
+                style={{ display: "flex", alignItems: "center", gap: 5, background: colors.danger, border: "none",
+                  borderRadius: colors.radiusSm, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, color: "#fff",
+                  cursor: "pointer", fontFamily: colors.font }}>
+                <X size={12} /> Corregir todos los errores
+              </button>
+              <button onClick={() => todosLosErrores("aceptar")} disabled={!!ocupado}
+                title="Dejar todos los errores como vienen en el Excel"
+                style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff", border: `1px solid ${colors.border}`,
+                  borderRadius: colors.radiusSm, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, color: colors.inkSoft,
+                  cursor: "pointer", fontFamily: colors.font }}>
+                <Check size={12} /> Aceptar todos como vienen
+              </button>
+            </>
+          )}
           {aviso && <span style={{ fontSize: 11.5, color: colors.success }}>{aviso}</span>}
           {falla && <span style={{ fontSize: 11.5, color: colors.danger }}>{falla}</span>}
         </div>
