@@ -301,6 +301,17 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                             <div style={{ display: "flex", gap: 5 }}>
                               <Button variant="primary" size="sm" disabled={ocupado || !(Number(form.monto) > 0)}
                                 onClick={async () => {
+                                  // PAGAR DE MÁS SE CONFIRMA, NO SE AVISA.
+                                  //
+                                  // Un aviso en ámbar que termina en "se guarda
+                                  // igual" no frena nada: así entró un segundo
+                                  // pago de $18,98 sobre una factura de $18,98
+                                  // a la que le faltaban 60 centavos, y la obra
+                                  // quedó diciendo que se pagó el doble.
+                                  if (Number(form.monto) > d.saldo + 0.005
+                                    && !window.confirm(`A este documento le faltan $${fmt(d.saldo)} y estás cargando $${fmt(Number(form.monto))}.\n\n`
+                                      + `De $${fmt(d.total)}, ya hay $${fmt(d.pagado)} pagados. Con este pago quedaría en $${fmt(d.pagado + Number(form.monto))}.\n\n`
+                                      + "¿Lo cargo igual?")) return;
                                   setOcupado(true); setAviso("");
                                   const r = await registrarPago(d, form, currentUser);
                                   setOcupado(false);
