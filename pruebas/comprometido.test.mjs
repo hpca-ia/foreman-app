@@ -300,3 +300,29 @@ test("lo cargado a un capítulo entero también entra por lo pagado", () => {
   });
   assert.equal(r._porCapitulo["ALBAÑILERÍA"].periodo, 1000);
 });
+
+// UNA NOTA DE CRÉDITO NO ESPERA NINGÚN PAGO.
+test("el vale baja el gasto del rubro en el momento, sin pago", () => {
+  const rubros = [{ id: 1, total_base: 1000, capitulo: "A", orden: 1 }];
+  const facturas = [
+    { id: 10, _planillaNumero: 1, total: 300, clase: "factura" },
+    { id: 11, _planillaNumero: 1, total: -100, clase: "nota_credito" },
+  ];
+  const asignaciones = [
+    { factura_id: 10, obra_rubro_id: 1, monto: 300 },
+    { factura_id: 11, obra_rubro_id: 1, monto: -100 },
+  ];
+  const pagos = [{ factura_id: 10, monto: 300 }];
+  const r = calcularControl({ rubros, facturas, asignaciones, pagos, planillaNumero: 1 });
+  assert.equal(Math.round(r[1].acumulado * 100) / 100, 200);
+  assert.equal(r._porPagar, 0);
+});
+
+test("lo facturado y no pagado sí queda como por pagar", () => {
+  const rubros = [{ id: 1, total_base: 1000, capitulo: "A", orden: 1 }];
+  const facturas = [{ id: 10, _planillaNumero: 1, total: 400, clase: "factura" }];
+  const asignaciones = [{ factura_id: 10, obra_rubro_id: 1, monto: 400 }];
+  const r = calcularControl({ rubros, facturas, asignaciones, pagos: [{ factura_id: 10, monto: 100 }], planillaNumero: 1 });
+  assert.equal(Math.round(r[1].acumulado * 100) / 100, 100);
+  assert.equal(r._porPagar, 300);
+});

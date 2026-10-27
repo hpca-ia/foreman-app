@@ -22,6 +22,8 @@
 // el de rubro estimado — salvo que la factura se haya asignado al rubro
 // directamente, que también se permite.
 
+import { esNotaDeCredito } from "./cuentasProveedor.js";
+
 const n = v => Number(v) || 0;
 
 export function fmt(v) {
@@ -96,6 +98,17 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   const proporcion = new Map();
   facturas.forEach(f => {
     const total = n(f.total);
+    // UNA NOTA DE CRÉDITO NO ESPERA NINGÚN PAGO: YA PASÓ.
+    //
+    // Devolvimos el material. No hay plata por salir —al revés, tenemos un
+    // vale a favor— y el rubro deja de cargar ese gasto en el momento, no el
+    // día que alguien le registre un pago que nunca va a existir.
+    //
+    // Midiéndola como a una factura, su proporción pagada daba cero: la baja
+    // del gasto no llegaba nunca al rubro, y encima los $105,06 aparecían en
+    // el aviso de "asignados a rubros que todavía no se pagaron", que es
+    // exactamente al revés de lo que son.
+    if (esNotaDeCredito(f.clase) || total < 0) { proporcion.set(f.id, 1); return; }
     if (!seLlevanPagos || !total) { proporcion.set(f.id, 1); return; }
     proporcion.set(f.id, Math.min(1, (pagadoDe.get(Number(f.id)) || 0) / total));
   });
