@@ -251,7 +251,15 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             haría que la obra parezca que tiene más plata disponible de la que
             tiene; sumarlo a invertido, que parezca más adelantada. */}
         {porRubro._anticipado > 0 && (
-          <Tarjeta label="Anticipado a proveedores" valor={porRubro._anticipado} color={colors.warning} />
+          <Tarjeta label="Anticipado a proveedores" valor={porRubro._anticipado} color={colors.warning}
+            onClick={vePlata ? () => setTab("proveedores") : null}
+            nota={"Plata que ya salió por algo que todavía no llegó. No cuenta como invertido.\n\n"
+              + facturas.filter(f => f.clase === "anticipo" && !f.facturada_con_id)
+                .map(f => `· ${f.razon_social || "sin proveedor"} — ${f.detalle || f.numero_factura || "sin detalle"} — $${fmt(f.total)}`)
+                .join("\n")
+              + "\n\nSalen de acá porque están cargados con la clase de documento «Anticipo a proveedor»:"
+              + " salió la plata y todavía no hay una factura que meta ese gasto al control."
+              + " Clic para verlos en Proveedores y cerrarlos cuando llegue su factura."} />
         )}
         <Tarjeta label="Saldo" valor={totales.saldo} color={totales.saldo < 0 ? colors.danger : colors.success} />
         {/* EL BENEFICIO, ARRIBA CON LO DEMÁS.
@@ -430,10 +438,18 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   );
 }
 
-function Tarjeta({ label, valor, color, sufijo = "", moneda = true }) {
+// `nota` es lo que dice la tarjeta cuando se le deja el puntero encima: de
+// qué documentos está hecho el número. Un número del que no se puede
+// averiguar el origen sin preguntarle a alguien no se puede usar para decidir.
+function Tarjeta({ label, valor, color, sufijo = "", moneda = true, nota = "", onClick = null }) {
   return (
-    <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px" }}>
-      <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.4 }}>{label.toUpperCase()}</div>
+    <div title={nota || undefined} onClick={onClick || undefined}
+      style={{ background: colors.surface, border: `1px solid ${onClick ? colors.warningBorder : colors.border}`,
+        borderRadius: colors.radiusMd, padding: "10px 12px",
+        cursor: onClick ? "pointer" : nota ? "help" : "default" }}>
+      <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.4 }}>
+        {label.toUpperCase()}{onClick && <span style={{ color: colors.warning }}> ›</span>}
+      </div>
       <div style={{ fontSize: 15, fontWeight: 700, color: color || colors.inkSoft, marginTop: 3 }}>
         {moneda ? `$${fmt(valor)}` : `${Number(valor || 0).toFixed(1)}${sufijo}`}
       </div>

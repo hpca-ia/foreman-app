@@ -47,6 +47,14 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
   const cuentas = cuentasPorProveedor(facturas, pagos);
   const totales = totalesPorPagar(cuentas);
   const proformasPendientes = facturas.filter(f => f.clase === "proforma" && !f.facturada_con_id);
+  // UN ANTICIPO NO SE LIQUIDABA DESDE NINGUNA PANTALLA.
+  //
+  // El control lo descuenta de lo invertido mientras no esté liquidado —es
+  // plata que salió por algo que todavía no llegó— y la liquidación no existía
+  // en ningún lado: el número se quedaba arriba para siempre, restando de lo
+  // invertido, sin forma de cerrarlo y sin decir de qué estaba hecho. Acá se
+  // lista y se cierra, igual que una proforma cuando llega su factura.
+  const anticiposPendientes = facturas.filter(f => f.clase === "anticipo" && !f.facturada_con_id);
 
   // LAS DE CAJA CHICA QUE FIGURAN COMO DEUDA, Y NO LO SON.
   //
@@ -142,6 +150,35 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
           <Button variant="primary" size="sm" style={{ marginTop: 8 }} disabled={guardando} onClick={marcarCajaPagada}>
             {guardando ? "Marcando…" : "Marcarlas como pagadas"}
           </Button>
+        </div>
+      )}
+
+      {anticiposPendientes.length > 0 && (
+        <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: colors.warning, marginBottom: 5 }}>
+            <AlertTriangle size={13} /> ANTICIPOS SIN LIQUIDAR · {anticiposPendientes.length}
+          </div>
+          <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 6 }}>
+            Están cargados con la clase <strong>«Anticipo a proveedor»</strong>: plata que ya salió por algo que
+            todavía no llegó. Por eso <strong>no cuentan como invertido</strong> y aparecen aparte en el control.
+            Si el documento ya es la factura de lo que se pagó, cerralo acá y el monto entra a invertido.
+          </div>
+          {anticiposPendientes.map(f => (
+            <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.ink, padding: "2px 0" }}>
+              <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                {f.razon_social || "Sin proveedor"} · {f.detalle || f.numero_factura || "—"} · {dia(f.fecha)}
+              </span>
+              <span style={{ fontWeight: 600 }}>${fmt(f.total)}</span>
+              {puedeRegistrar && (
+                <button onClick={async () => { await guardarDocumento(f.id, { clase: "factura" }); onCambio?.(); await cargar(); }}
+                  title="Este documento ya es la factura de lo que se anticipó: deja de ser un anticipo y su monto entra a invertido"
+                  style={{ border: `1px solid ${colors.border}`, background: "#fff", color: colors.inkSoft, borderRadius: 12,
+                    padding: "2px 9px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                  Ya es factura
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
