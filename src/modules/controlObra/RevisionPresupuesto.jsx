@@ -2,7 +2,9 @@ import { useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronRight, Check, X, FileText, Mail } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
-import { efectos } from "./leerPresupuesto";
+import { efectos, decisionDeFila, estaDecidida } from "./leerPresupuesto";
+
+const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Lo que la revisión encontró en el Excel. Se usa al importar —antes de crear
 // la obra, con Aceptar / No aceptar en cada punto— y después en la pestaña
@@ -26,7 +28,18 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
   const errores = advertencias.filter(a => a.nivel === "error").length;
   const avisos = advertencias.length - errores;
   const decisionDe = (a, i) => guardada ? a.decision : decisiones[i];
-  const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !decisionDe(a, i)).length;
+  const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !estaDecidida(a, decisionDe(a, i))).length;
+
+  // Decidir UNA fila de un error de filas, sin perder lo decidido en las otras.
+  // Si antes se había decidido en bloque ("aceptar"/"corregir"), eso se abre
+  // en una decisión por fila y se cambia solo ésta.
+  function decidirFila(i, a, id, op) {
+    const actual = decisiones[i];
+    const porFila = {};
+    (a.datos?.filas || []).forEach(f => { const d = decisionDeFila(actual, f); if (d != null) porFila[f] = d; });
+    if (op == null) delete porFila[id]; else porFila[id] = op;
+    onDecidir(i, Object.keys(porFila).length ? { porFila } : null);
+  }
 
   // TODOS DE UNA VEZ. Un Excel con veinte errores eran veinte clics en "No
   // aceptar". Se decide en bloque, pero mirando antes qué va a pasar en cada
@@ -40,7 +53,7 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
       return `• ${String(advertencias[i].titulo).slice(0, 110)}\n   → ${valor === "corregir" ? ef.noAceptar : ef.aceptar}`;
     }).join("\n");
     const mas = idx.length > 12 ? `\n… y ${idx.length - 12} más.` : "";
-    const que = valor === "corregir" ? "Corregir" : "Aceptar tal como vienen";
+    const que = valor === "corregir" ? "Corregir" : "Dejar como dice el Excel";
     if (!window.confirm(`${que} los ${idx.length} errores:\n\n${lista}${mas}\n\nCada uno se puede cambiar después, uno por uno. ¿Seguir?`)) return;
     idx.forEach(i => onDecidir(i, valor));
   }
@@ -140,7 +153,7 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
                 style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff", border: `1px solid ${colors.border}`,
                   borderRadius: colors.radiusSm, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, color: colors.inkSoft,
                   cursor: "pointer", fontFamily: colors.font }}>
-                <Check size={12} /> Aceptar todos como vienen
+                <Check size={12} /> Dejar todos como el Excel
               </button>
             </>
           )}
@@ -179,7 +192,8 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
         const color = a.nivel === "error" ? colors.danger : colors.warning;
         const ef = efectos(a);
         const decision = decisionDe(a, i);
-        const falta = a.nivel === "error" && !decision;
+        const falta = a.nivel === "error" && !estaDecidida(a, decision);
+        const deFilas = a.tipo === "suma_fila" && !guardada && onDecidir;
         return (
           <div key={i} style={{ borderTop: `1px solid ${colors.neutralSoft}`, background: colors.surface }}>
             <div onClick={() => a.filas.length && alternar(setAbiertas, i)}
@@ -191,7 +205,45 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
               {a.filas.length > 0 && <span style={{ fontSize: 10, color: colors.muted, flexShrink: 0 }}>{a.filas.length} fila{a.filas.length === 1 ? "" : "s"}</span>}
             </div>
 
-            {abierta && (
+            {/* LAS FILAS QUE NO MULTIPLICAN, DE A UNA. Cada una con lo que da
+                la cuenta y lo que dice el Excel, y las tres salidas. */}
+            {deFilas && (
+              <div style={{ padding: "2px 12px 10px 33px", display: "grid", gap: 6, maxHeight: 420, overflowY: "auto" }}>
+                {a.filas.map((f, j) => {
+                  const id = f.id ?? a.datos?.filas?.[j];
+                  const op = decisionDeFila(decision, id);
+                  const mano = op && typeof op === "object" ? op.mano : null;
+                  return (
+                    <div key={j} style={{ border: `1px solid ${op ? colors.border : colors.dangerBorder}`, borderRadius: colors.radiusSm, padding: "6px 8px", background: colors.bg }}>
+                      <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 5 }}>
+                        <span style={{ color: colors.muted, marginRight: 6 }}>Fila {f.fila}</span>{f.texto}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <Opcion activa={op === "calcular"} onClick={() => decidirFila(i, a, id, op === "calcular" ? null : "calcular")}
+                          icono={<Check size={12} />} texto={`Aceptar · cuenta $${plata(f.calculado)}`} />
+                        <Opcion activa={op === "excel"} onClick={() => decidirFila(i, a, id, op === "excel" ? null : "excel")}
+                          icono={<X size={12} />} texto={`No aceptar · Excel $${plata(f.excel)}`} peligro />
+                        <Opcion activa={mano != null} onClick={() => decidirFila(i, a, id, mano != null ? null : { mano: f.precio })}
+                          icono={<FileText size={12} />} texto="Corregir a mano" />
+                        {mano != null && (
+                          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: colors.inkSoft }}>
+                            precio unitario
+                            <input type="number" step="0.01" defaultValue={mano} autoFocus
+                              onBlur={e => decidirFila(i, a, id, { mano: Number(e.target.value) || 0 })}
+                              onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              style={{ ...inputStyle, width: 96, padding: "4px 6px", fontSize: 12 }} />
+                            <span style={{ color: colors.muted }}>= ${plata((Number(f.cantidad) || 0) * (Number(mano) || 0) * (1 + (Number(f.ivaPct) || 0) / 100))}</span>
+                          </label>
+                        )}
+                        {!op && <span style={{ fontSize: 10, fontWeight: 700, color: colors.danger }}>DECIDIR</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {!deFilas && abierta && (
               <div style={{ padding: "2px 12px 6px 33px" }}>
                 {filas.map((f, j) => (
                   <div key={j} style={{ fontSize: 11, color: colors.inkSoft, padding: "2px 0", display: "flex", gap: 8 }}>
@@ -209,7 +261,7 @@ export default function RevisionPresupuesto({ advertencias = [], guardada = fals
             )}
 
             {/* Las obras importadas antes de poder decidir no tienen nada que mostrar aquí. */}
-            {(guardada ? decision : onDecidir) && <div style={{ padding: "4px 12px 10px 33px" }}>
+            {(guardada ? decision : onDecidir) && !deFilas && <div style={{ padding: "4px 12px 10px 33px" }}>
               {guardada ? (
                 <Decidido a={a} ef={ef} />
               ) : (
@@ -246,6 +298,13 @@ function Opcion({ activa, onClick, icono, texto, peligro }) {
 }
 
 function Decidido({ a, ef }) {
+  // Las de filas se decidieron de a una: se cuenta qué se eligió.
+  if (a.decision && typeof a.decision === "object") {
+    const ops = (a.datos?.filas || []).map(f => decisionDeFila(a.decision, f));
+    const n = t => ops.filter(o => (t === "mano" ? o && typeof o === "object" : o === t)).length;
+    const partes = [n("calcular") && `${n("calcular")} con la cuenta`, n("excel") && `${n("excel")} con el total del Excel`, n("mano") && `${n("mano")} corregidas a mano`].filter(Boolean);
+    return <div style={{ fontSize: 11, lineHeight: 1.45, color: colors.inkSoft }}><strong>Decidido fila por fila:</strong> {partes.join(", ")}.</div>;
+  }
   const acepto = a.decision === "aceptar";
   const cuando = a.decidido_at ? new Date(a.decidido_at).toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" }) : "";
   return (

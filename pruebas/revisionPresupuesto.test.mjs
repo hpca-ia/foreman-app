@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { interpretarPresupuesto } from "../src/modules/controlObra/leerPresupuesto.js";
+import { interpretarPresupuesto, aplicarDecisiones, estaDecidida } from "../src/modules/controlObra/leerPresupuesto.js";
 
 // LA REVISIÓN TIENE QUE SEGUIR LADRANDO.
 //
@@ -12,7 +12,7 @@ const MAPA = { fila_encabezado: 1, col_item: 0, col_descripcion: 1, col_unidad: 
 const enc = ["RUBRO", "DESCRIPCION", "UNIDAD", "CANTIDAD", "P.UNITARIO", "TOTAL"];
 const de = (r, tipo) => (r.advertencias || []).find(a => a.tipo === tipo);
 
-test("una fila que no multiplica se denuncia, aunque el precio se corrija", () => {
+test("una fila que no multiplica se calcula, y se denuncia con lo que decía el Excel", () => {
   const hoja = [
     ["PRESUPUESTO", "", "", "", "", ""],
     enc,
@@ -27,12 +27,44 @@ test("una fila que no multiplica se denuncia, aunque el precio se corrija", () =
   const a = de(r, "suma_fila");
   assert.ok(a, "tiene que avisar que una fila no multiplica");
   assert.equal(a.nivel, "error");
-  // El precio que se importa queda corregido para que la fila cierre...
+  // UN PRESUPUESTO SE CALCULA: vale cantidad × precio, no el total escrito...
   const x = r.rubros.find(y => /Desalojo/.test(y.descripcion));
-  assert.equal(x.total, 300);
-  assert.equal(x.cantidad * x.precio_unitario, 300);
-  // ...pero el aviso dice el que venía escrito, que es lo que hay que corregir.
-  assert.match(a.filas[0].texto, /20/);
+  assert.equal(x.precio_unitario, 20);
+  assert.equal(x.total, 200);
+  // ...y el aviso dice las dos cosas, para decidir fila por fila.
+  assert.match(a.filas[0].texto, /200/);
+  assert.match(a.filas[0].texto, /300/);
+  assert.equal(a.filas[0].calculado, 200);
+  assert.equal(a.filas[0].excel, 300);
+});
+
+test("cada fila se decide: la cuenta, el Excel o un precio a mano", () => {
+  const hoja = [
+    ["PRESUPUESTO", "", "", "", "", ""],
+    enc,
+    ["", "PRELIMINARES", "", "", "", ""],
+    ["1", "Cerramiento", "ml", 100, 10, 1000],
+    ["2", "Replanteo", "m2", 50, 2, 100],
+    ["3", "Desalojo", "m3", 10, 20, 300],      // la cuenta da 200
+    ["4", "Limpieza", "m2", 20, 5, 150],       // la cuenta da 100
+    ["5", "Relleno", "m3", 4, 25, 120],        // la cuenta da 100
+  ];
+  const r = interpretarPresupuesto(hoja, { ...MAPA });
+  const i = r.advertencias.findIndex(a => a.tipo === "suma_fila");
+  const [f3, f4, f5] = r.advertencias[i].datos.filas;
+  const decisiones = { [i]: { porFila: { [f3]: "calcular", [f4]: "excel", [f5]: { mano: 27.5 } } } };
+  assert.ok(estaDecidida(r.advertencias[i], decisiones[i]));
+  assert.ok(!estaDecidida(r.advertencias[i], { porFila: { [f3]: "calcular" } }), "faltan filas por decidir");
+  const final = aplicarDecisiones(r, decisiones);
+  const de_ = d => final.rubros.find(y => y.descripcion === d);
+  assert.equal(de_("Desalojo").total, 200);
+  assert.equal(de_("Limpieza").total, 150);
+  assert.equal(de_("Limpieza").precio_unitario, 7.5);
+  assert.equal(de_("Relleno").precio_unitario, 27.5);
+  assert.equal(de_("Relleno").total, 110);
+  // Decidir en bloque sigue andando: "aceptar" es el Excel, "corregir" la cuenta.
+  assert.equal(aplicarDecisiones(r, { [i]: "aceptar" }).rubros.find(y => y.descripcion === "Desalojo").total, 300);
+  assert.equal(aplicarDecisiones(r, { [i]: "corregir" }).rubros.find(y => y.descripcion === "Desalojo").total, 200);
 });
 
 // Con el IVA en columna aparte, cantidad × precio nunca da el total: la regla
@@ -92,4 +124,23 @@ test("si el SUBTOTAL del Excel ya incluye los cargos, no se inventa un descuadre
   ];
   const r = interpretarPresupuesto(hoja, { ...MAPA });
   assert.equal(de(r, "suma_subtotal"), undefined, "rubros + cargos dan el subtotal: no hay nada que denunciar");
+});
+
+// Una fila mal sumada es UN error, no tres. El subtotal del capítulo suma lo
+// que el Excel escribió en las filas: si cuadra con eso, el capítulo está bien
+// y no se denuncia de nuevo lo que ya se decide en la fila.
+test("una fila mal sumada no se cuenta también como error del capítulo ni del total", () => {
+  const hoja = [
+    ["PRESUPUESTO", "", "", "", "", ""],
+    enc,
+    ["", "PRELIMINARES", "", "", "", 1400],
+    ["1", "Cerramiento", "ml", 100, 10, 1000],
+    ["2", "Replanteo", "m2", 50, 2, 100],
+    ["3", "Desalojo", "m3", 10, 20, 300],      // la cuenta da 200
+    ["", "TOTAL", "", "", "Valor total", 1400],
+  ];
+  const r = interpretarPresupuesto(hoja, { ...MAPA });
+  assert.ok(de(r, "suma_fila"));
+  assert.equal(de(r, "suma_capitulo"), undefined);
+  assert.equal(de(r, "suma_total"), undefined);
 });

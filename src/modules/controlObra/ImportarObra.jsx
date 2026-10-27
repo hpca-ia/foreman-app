@@ -12,7 +12,7 @@ import { guardarOriginal } from "../../lib/archivosPresupuesto";
 import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
-import { interpretarPresupuesto, interpretarVariasHojas, aplicarDecisiones, ivaMetidoEnTotales } from "./leerPresupuesto";
+import { interpretarPresupuesto, interpretarVariasHojas, aplicarDecisiones, ivaMetidoEnTotales, estaDecidida } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
@@ -307,7 +307,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
 
   // ── Lo que se va a crear: lo leído con las decisiones aplicadas ──
   const final = useMemo(() => aplicarDecisiones({ rubros, cargos, omitidas, advertencias }, decisiones), [rubros, cargos, omitidas, advertencias, decisiones]);
-  const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !decisiones[i]).length;
+  // Un error de filas está decidido cuando lo están todas sus filas.
+  const pendientes = advertencias.filter((a, i) => a.nivel === "error" && !estaDecidida(a, decisiones[i])).length;
   const decidir = (i, v) => setDecisiones(d => { const x = { ...d }; if (v) x[i] = v; else delete x[i]; return x; });
   const faltanPreguntas = faltanRespuestas(preguntas, final.rubros);
 

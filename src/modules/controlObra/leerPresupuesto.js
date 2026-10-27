@@ -442,21 +442,29 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
 
     if (esRubro(r)) {
       const total = m.col_total != null ? r.total : r.cant * r.precio;
-      // EL PRECIO TIENE QUE MULTIPLICAR.
+      // UN PRESUPUESTO SE CALCULA, NO SE COPIA.
       //
-      // Hay planillas donde las columnas de precio vienen combinadas y repiten
-      // el valor del grupo en cada renglón, mientras el total de cada uno sí es
-      // el suyo. Copiar ese precio deja rubros que no multiplican: cantidad por
-      // precio no da el total, y a partir de ahí nada cuadra —ni el control, ni
-      // una planilla, ni un reajuste—. Cuando no multiplica, manda el total,
-      // que es el número que el Excel suma.
+      // El total de un rubro es cantidad × precio. Se copiaba el total escrito
+      // en el Excel y, si no multiplicaba, se inventaba un precio para que
+      // diera: un total con IVA metido entraba con IVA, y un error de fórmula
+      // del Excel entraba como si fuera el precio. Ahora manda la cuenta; el
+      // total del Excel queda guardado para comparar, y si no coincide es un
+      // error que se decide fila por fila (vale la cuenta, vale el Excel, o se
+      // escribe el precio correcto).
+      //
+      // Sin precio pero con total —un global— no hay nada que multiplicar: el
+      // precio sale del total, como siempre.
       const factor = 1 + (ivaDeFila || 0) / 100;
       const esperado = r.cant * r.precio * factor;
       const multiplica = Math.abs(esperado - total) <= Math.max(0.02, Math.abs(total) * 0.005);
-      const precio = multiplica ? r.precio
-        : Math.round((total / factor / (r.cant || 1)) * 10000) / 10000;
-      return rubro(r, r.cant, precio, total, false, false,
-        multiplica ? null : { precio: r.precio, daba: Math.round(esperado * 100) / 100 });
+      if (multiplica) return rubro(r, r.cant, r.precio, total);
+      const calculado = Math.round(esperado * 100) / 100;
+      if (r.precio > 0 && r.cant > 0) {
+        return rubro(r, r.cant, r.precio, calculado, false, false,
+          { precio: r.precio, daba: calculado, excel: total });
+      }
+      const precio = Math.round((total / factor / (r.cant || 1)) * 10000) / 10000;
+      return rubro(r, r.cant, precio, total, false, false, { precio: r.precio, daba: calculado, excel: total });
     }
     if (r.cant && r.precio && r.totalVacio) return omitidas.push({ descripcion: r.desc, codigo: r.codigo, fila: r.fila, motivo: "sin_total", cant: r.cant, precio: r.precio, unidad: r.unidad, capitulo: cap?.nombre || "SIN CAPÍTULO" });
 
@@ -541,14 +549,20 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
 
   const suma = a => a.reduce((s, x) => s + x.total, 0);
   const sumaRubros = suma(rubros), sumaCargos = suma(cargos);
+  // CONTRA EL EXCEL, CON LO QUE EL EXCEL ESCRIBIÓ. Los rubros ahora valen la
+  // cuenta, pero los subtotales del Excel suman sus propios totales de fila:
+  // compararlos contra las cuentas contaría dos veces cada fila mal sumada —
+  // como error de fila y como error de capítulo—. Lo de cada fila se decide en
+  // su propio error; acá solo se busca lo que es del subtotal.
+  const sumaRubrosExcel = rubros.reduce((t, x) => t + (x.noMultiplica?.excel ?? x.total ?? 0), 0);
   const porCap = {};
-  rubros.forEach(x => { porCap[x.capitulo] = (porCap[x.capitulo] || 0) + x.total; });
+  rubros.forEach(x => { porCap[x.capitulo] = (porCap[x.capitulo] || 0) + (x.noMultiplica?.excel ?? x.total); });
   const conRubros = capitulos.filter(c => porCap[c.nombre] != null);
   const descuadres = conRubros
     .filter(c => c.declarado != null && Math.abs((porCap[c.nombre] || 0) - c.declarado) > 1)
     .map(c => ({ capitulo: c.nombre, excel: c.declarado, importado: porCap[c.nombre] || 0 }));
 
-  const advertencias = revisar({ rubros, omitidas, cargos, capitulos: conRubros, subtotalExcel, totalExcel, ivaExcel, sumaRubros, sumaCargos, descuadres, ivaEnFilas: m.ivaEnFilas, usarPrefijos });
+  const advertencias = revisar({ rubros, omitidas, cargos, capitulos: conRubros, subtotalExcel, totalExcel, ivaExcel, sumaRubros: sumaRubrosExcel, sumaCargos, descuadres, ivaEnFilas: m.ivaEnFilas, usarPrefijos });
 
   // LA BASE SIN IVA, dicha una vez y bien. Es sobre esto que se calculan los
   // honorarios y los costos indirectos; el total con IVA es otra cosa.
@@ -596,7 +610,8 @@ export function interpretarVariasHojas(hojas = [], opciones = {}) {
       const corregidas = l.r.rubros.filter(x => x.noMultiplica);
       const conLaTasa = corregidas.filter(x => {
         const esperado = (Number(x.cantidad) || 0) * (Number(x.noMultiplica.precio) || 0) * f;
-        return esperado > 0 && Math.abs(esperado - x.total) <= Math.max(0.02, Math.abs(x.total) * 0.005);
+        const delExcel = Number(x.noMultiplica.excel ?? x.total) || 0;
+        return esperado > 0 && Math.abs(esperado - delExcel) <= Math.max(0.02, Math.abs(delExcel) * 0.005);
       });
       return corregidas.length && conLaTasa.length === corregidas.length
         ? { ...l, r: leer(hojas[k], { ivaForzado: tasaDeOtras[0] }) } : l;
@@ -732,9 +747,16 @@ export function revisar({ rubros, omitidas, cargos, capitulos, subtotalExcel, to
   // Se corrige para poder trabajar Y se avisa, con el precio que venía escrito.
   const malas = rubros.filter(x => x.noMultiplica);
   if (malas.length) add("suma_fila", "error",
-    `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito. Se importa el total del Excel y se recalcula el precio unitario.`,
-    malas.map(x => ({ fila: F(x.fila), texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.noMultiplica.precio)} = $${plata(x.noMultiplica.daba)}, el Excel dice $${plata(x.total)}` })),
-    { filas: malas.map(x => x.fila), dif: malas.reduce((s, x) => s + x.noMultiplica.daba - x.total, 0) });
+    `${plural(malas.length, "fila", "filas")} donde cantidad × precio no da el total escrito en el Excel. Decidí en cada una: vale la cuenta, vale el Excel, o escribís el precio correcto.`,
+    malas.map(x => {
+      const delExcel = x.noMultiplica.excel ?? x.total;
+      return {
+        fila: F(x.fila), id: x.fila, cantidad: x.cantidad, precio: x.noMultiplica.precio,
+        calculado: x.noMultiplica.daba, excel: delExcel, ivaPct: x.iva_pct ?? null,
+        texto: `${etiqueta(x)}: ${x.cantidad} × $${plata(x.noMultiplica.precio)} = $${plata(x.noMultiplica.daba)}, el Excel dice $${plata(delExcel)}`,
+      };
+    }),
+    { filas: malas.map(x => x.fila), dif: malas.reduce((s, x) => s + (x.noMultiplica.excel ?? x.total) - x.noMultiplica.daba, 0) });
 
   // RUBROS EN CERO.
   //
@@ -863,9 +885,10 @@ export function efectos(a) {
         aceptar: `Vale el total del Excel: se agrega un ajuste por la diferencia.`,
         noAceptar: `Vale la suma real, $${plata(d.importado)}.` };
     case "suma_fila":
-      return { corrige: true,
-        aceptar: "Se importa el total escrito en el Excel.",
-        noAceptar: `Se corrige a cantidad × precio (${signo(d.dif)}).` };
+      // Se decide fila por fila; esto es lo que hacen los botones de "todos".
+      return { corrige: true, porFila: true,
+        aceptar: "En cada fila vale el total escrito en el Excel.",
+        noAceptar: `En cada fila vale cantidad × precio (${signo(-(d.dif || 0))} contra el Excel).` };
     case "fila_sin_total":
       return { corrige: true,
         aceptar: "No se importan, igual que en el Excel.",
@@ -885,6 +908,27 @@ export function efectos(a) {
   }
 }
 
+// LAS DIFERENCIAS DE FILA SE DECIDEN DE A UNA.
+//
+// Para un error de "suma_fila" la decisión no es una palabra: es qué vale en
+// cada fila. { porFila: { [fila]: "calcular" | "excel" | { mano: precio } } }.
+// "aceptar" y "corregir" a secas —los botones de "todos", y las decisiones
+// guardadas antes— valen para todas sus filas: aceptar es quedarse con el
+// Excel, corregir es la cuenta.
+export function decisionDeFila(decision, fila) {
+  if (decision && typeof decision === "object") return decision.porFila?.[fila] ?? null;
+  if (decision === "aceptar") return "excel";
+  if (decision === "corregir") return "calcular";
+  return null;
+}
+
+/** ¿Está decidida esta advertencia? Las de fila, cuando lo están todas sus filas. */
+export function estaDecidida(a, decision) {
+  if (!decision) return false;
+  if (a?.tipo !== "suma_fila" || typeof decision !== "object") return true;
+  return (a.datos?.filas || []).every(f => decisionDeFila(decision, f) != null);
+}
+
 /**
  * Aplica las decisiones ({ índice de advertencia: "aceptar" | "corregir" }) a
  * lo leído. Primero las correcciones de filas, después los ajustes de sumas,
@@ -896,10 +940,35 @@ export function aplicarDecisiones({ rubros, cargos, omitidas, advertencias = [] 
   let cs = cargos.map(c => ({ ...c }));
   const decide = (tipo, valor) => advertencias.map((a, i) => [a, i]).filter(([a, i]) => a.tipo === tipo && decisiones[i] === valor).map(([a]) => a);
   const suma = a => a.reduce((s, x) => s + x.total, 0);
+  // Lo que el Excel escribió en cada fila: los ajustes de subtotal cubren solo
+  // la diferencia del subtotal, no la de las filas, que se decide aparte.
+  const sumaExcel = a => a.reduce((s, x) => s + (x.noMultiplica?.excel ?? x.total), 0);
 
-  decide("suma_fila", "corregir").forEach(a => {
+  // Cada fila con su decisión. "calcular" es como ya viene leída (cantidad ×
+  // precio); "excel" toma el total escrito y saca el precio de él; "mano" es
+  // el precio que escribió quien importa.
+  advertencias.forEach((a, i) => {
+    if (a.tipo !== "suma_fila") return;
     const filas = new Set(a.datos?.filas || []);
-    rs = rs.map(r => filas.has(r.fila) ? { ...r, total: r2(r.cantidad * r.precio_unitario), origen: "corregido" } : r);
+    rs = rs.map(r => {
+      if (!filas.has(r.fila) || !r.noMultiplica) return r;
+      const op = decisionDeFila(decisiones[i], r.fila);
+      const f = 1 + (Number(r.iva_pct) || 0) / 100;
+      const cant = Number(r.cantidad) || 0;
+      if (op === "excel") {
+        const t = Number(r.noMultiplica.excel ?? r.total) || 0;
+        return { ...r, total: t, precio_unitario: Math.round((t / f / (cant || 1)) * 10000) / 10000 };
+      }
+      if (op && typeof op === "object" && op.mano != null) {
+        const p = Number(op.mano) || 0;
+        return { ...r, precio_unitario: p, total: r2(cant * p * f), origen: "corregido" };
+      }
+      if (op === "calcular") {
+        const p = Number(r.noMultiplica.precio) || 0;
+        return { ...r, precio_unitario: p, total: r2(cant * p * f) };
+      }
+      return r;
+    });
   });
   decide("fila_sin_total", "corregir").forEach(a => {
     const filas = new Set(a.datos?.filas || []);
@@ -926,16 +995,16 @@ export function aplicarDecisiones({ rubros, cargos, omitidas, advertencias = [] 
     const ultima = delCap.length ? Math.max(...delCap.map(r => r.fila)) : 0;
     const i = rs.findIndex(r => r.fila === ultima && r.capitulo === a.datos.capitulo);
     const antes = rs.length;
-    ajuste(a.datos.capitulo, a.datos.excel - suma(delCap), ultima + 0.5, "AJUSTE PARA CUADRAR CON EL SUBTOTAL DEL EXCEL");
+    ajuste(a.datos.capitulo, a.datos.excel - sumaExcel(delCap), ultima + 0.5, "AJUSTE PARA CUADRAR CON EL SUBTOTAL DEL EXCEL");
     // Queda al final de su capítulo, no al final del presupuesto.
     if (rs.length > antes && i >= 0) rs.splice(i + 1, 0, rs.pop());
   });
   decide("suma_subtotal", "aceptar").forEach(a => {
-    ajuste(CAP_AJUSTES, a.datos.excel - suma(rs), 1e9, "AJUSTE PARA CUADRAR CON EL SUBTOTAL GENERAL DEL EXCEL");
+    ajuste(CAP_AJUSTES, a.datos.excel - sumaExcel(rs), 1e9, "AJUSTE PARA CUADRAR CON EL SUBTOTAL GENERAL DEL EXCEL");
   });
   decide("suma_total", "aceptar").forEach(a => {
     // El total del Excel ya trae su IVA; el ajuste va sin IVA, como los rubros.
-    const dif = a.datos.excel - (a.datos.importado - suma(rubros) - suma(cargos) + suma(rs) + suma(cs));
+    const dif = a.datos.excel - (a.datos.importado - sumaExcel(rubros) - suma(cargos) + sumaExcel(rs) + suma(cs));
     ajuste(CAP_AJUSTES, a.datos.ivaPct ? dif / (1 + a.datos.ivaPct / 100) : dif, 1e9 + 1, "AJUSTE PARA CUADRAR CON EL TOTAL DEL EXCEL");
   });
 
