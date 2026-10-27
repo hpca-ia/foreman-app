@@ -97,3 +97,40 @@ export function noCotizados({ capitulos = [], items = [] }) {
       motivo: motivoNoCotiza(i.nota),
     }));
 }
+
+// LAS HOJAS DEL EXCEL ORIGINAL.
+//
+// Un presupuesto que vino en un libro de varias hojas —la casa principal, la
+// vivienda del cuidador, las obras exteriores— trae sus capítulos con el
+// nombre de la hoja adelante: "CASA PRINCIPAL · OBRAS PRELIMINARES". Cuánto
+// cuesta cada hoja es lo primero que pregunta el cliente, y sin esto había que
+// sumarlo a mano. El separador es el que pone el lector al importar.
+export const SEPARADOR_BLOQUE = " · ";
+
+/** La hoja (o bloque) de un capítulo: lo que va antes de " · ", o "". */
+export function bloqueDe(nombre) {
+  const t = String(nombre || "");
+  const i = t.indexOf(SEPARADOR_BLOQUE);
+  return i > 0 ? t.slice(0, i).trim() : "";
+}
+
+/**
+ * Los capítulos agrupados por hoja, con lo que suma cada una. Solo si hay dos
+ * hojas o más: con una sola, agrupar no dice nada. Los capítulos sin hoja
+ * forman su propio grupo ("Otros").
+ *
+ * @param caps [{ nombre, subtotal, subtotalBase?, subtotalExtras? }] en su orden
+ * @returns [{ nombre, capitulos: [nombres], subtotal, subtotalBase, subtotalExtras }] o null
+ */
+export function porBloques(caps = []) {
+  const nombres = [...new Set(caps.map(c => bloqueDe(c.nombre)))];
+  if (nombres.filter(Boolean).length < 2) return null;
+  return nombres.map(b => {
+    const suyos = caps.filter(c => bloqueDe(c.nombre) === b);
+    const suma = k => r2(suyos.reduce((s, c) => s + n(c[k] ?? (k === "subtotalBase" ? c.subtotal : 0)), 0));
+    return {
+      nombre: b || "Otros", capitulos: suyos.map(c => c.nombre),
+      subtotal: suma("subtotal"), subtotalBase: suma("subtotalBase"), subtotalExtras: suma("subtotalExtras"),
+    };
+  });
+}

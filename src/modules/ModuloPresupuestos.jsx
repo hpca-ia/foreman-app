@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, Fragment } from "react";
-import { esNoCotiza, motivoNoCotiza } from "./presupuestos/estructura";
+import { esNoCotiza, motivoNoCotiza, porBloques, bloqueDe, SEPARADOR_BLOQUE } from "./presupuestos/estructura";
 import TraerDeOtro from "./presupuestos/TraerDeOtro";
 import { correrMarcados, llevarMarcados } from "./presupuestos/moverEnGrupo";
 import { loQueSeArrastra, terminarArrastre } from "./presupuestos/arrastre";
@@ -2629,6 +2629,8 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
   });
   const total = filas.reduce((s, f) => s + f.total, 0);
   const conX = filas.some(f => f.extras);
+  // Las hojas del Excel original (si vino de varias): cuánto suma cada una.
+  const hojas = porBloques(filas.map(f => ({ nombre: f.nombre, subtotal: f.total, subtotalBase: f.base, subtotalExtras: f.extras })));
   const th = { padding: "5px 8px", fontSize: 10, color: "var(--ink-soft)", fontWeight: 600, borderBottom: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" };
   const td = { padding: "5px 8px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid var(--neutral-soft)" };
   return (
@@ -2667,7 +2669,24 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
             </tr></thead>
             <tbody>
               {filas.map((f, k) => (
-                <tr key={f.nombre} onClick={() => document.getElementById(`capitulo-${f.orden}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                <Fragment key={f.nombre}>
+                {/* La hoja del Excel original, con lo que suma, antes de sus capítulos. */}
+                {hojas && (k === 0 || bloqueDe(filas[k - 1].nombre) !== bloqueDe(f.nombre)) && (() => {
+                  const h = hojas.find(x => x.nombre === (bloqueDe(f.nombre) || "Otros"));
+                  return (
+                    <tr style={{ background: "var(--bg)" }}>
+                      {editable && <td style={{ ...td, borderBottom: "1px solid var(--border)" }} />}
+                      <td colSpan={2} style={{ ...td, textAlign: "left", fontWeight: 700, color: "var(--ink)", letterSpacing: 0.2, borderBottom: "1px solid var(--border)" }}>
+                        {h?.nombre} <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· {h?.capitulos.length} capítulos</span>
+                      </td>
+                      {conX && <td style={{ ...td, fontWeight: 700, borderBottom: "1px solid var(--border)" }}>${fmt(h?.subtotalBase)}</td>}
+                      {conX && <td style={{ ...td, fontWeight: 700, borderBottom: "1px solid var(--border)" }}>{h?.subtotalExtras ? `$${fmt(h.subtotalExtras)}` : "—"}</td>}
+                      <td style={{ ...td, fontWeight: 700, borderBottom: "1px solid var(--border)" }}>${fmt(h?.subtotal)}</td>
+                      <td style={{ ...td, color: "var(--muted)", fontSize: 11, borderBottom: "1px solid var(--border)" }}>{total > 0 && h ? `${(h.subtotal / total * 100).toLocaleString("es-EC", { maximumFractionDigits: 1 })} %` : ""}</td>
+                    </tr>
+                  );
+                })()}
+                <tr onClick={() => document.getElementById(`capitulo-${f.orden}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
                   draggable={editable}
                   onDragStart={e => { setArrastrada(f.nombre); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", f.nombre); }}
                   onDragEnd={() => { setArrastrada(null); setSobre(null); }}
@@ -2704,13 +2723,14 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
                   )}
                   <td style={{ ...td, textAlign: "left", color: "var(--muted)" }}>{f.orden}</td>
                   <td style={{ ...td, textAlign: "left", whiteSpace: "normal", color: "var(--brand)", fontWeight: 600 }}>
-                    {f.nombre} {!f.rubros && <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· sin rubros</span>}
+                    {hojas && bloqueDe(f.nombre) ? f.nombre.slice(f.nombre.indexOf(SEPARADOR_BLOQUE) + SEPARADOR_BLOQUE.length) : f.nombre} {!f.rubros && <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· sin rubros</span>}
                   </td>
                   {conX && <td style={td}>${fmt(f.base)}</td>}
                   {conX && <td style={{ ...td, color: f.extras ? "var(--ink)" : "var(--muted)" }}>{f.extras ? `$${fmt(f.extras)}` : "—"}</td>}
                   <td style={{ ...td, fontWeight: 600 }}>${fmt(f.total)}</td>
                   <td style={{ ...td, color: "var(--muted)", fontSize: 11 }}>{total > 0 ? `${(f.total / total * 100).toLocaleString("es-EC", { maximumFractionDigits: 1 })} %` : ""}</td>
                 </tr>
+                </Fragment>
               ))}
               <tr>
                 {editable && <td style={{ ...td, borderBottom: "none" }} />}

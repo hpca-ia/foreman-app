@@ -93,3 +93,23 @@ test("una nota cualquiera no marca al rubro como NO COTIZA", () => {
   const [c] = estructura({ capitulos, items: [{ capitulo: "OBRA GRIS", descripcion: "X", total: 1, nota: "precio cotizado ayer" }] });
   assert.equal(c.rubros[0].noCotiza, false);
 });
+
+// LAS HOJAS DEL EXCEL: cuánto cuesta cada una.
+import { porBloques, bloqueDe } from "../src/modules/presupuestos/estructura.js";
+
+test("los capítulos se agrupan por la hoja de donde vinieron", () => {
+  const caps = [
+    { nombre: "CASA PRINCIPAL · PRELIMINARES", subtotal: 100, subtotalBase: 100, subtotalExtras: 0 },
+    { nombre: "CASA PRINCIPAL · OBRA GRIS", subtotal: 300, subtotalBase: 250, subtotalExtras: 50 },
+    { nombre: "VIVIENDA CUIDADOR · OBRA GRIS", subtotal: 80, subtotalBase: 80, subtotalExtras: 0 },
+  ];
+  const b = porBloques(caps);
+  assert.deepEqual(b.map(x => [x.nombre, x.subtotal, x.subtotalBase, x.subtotalExtras]),
+    [["CASA PRINCIPAL", 400, 350, 50], ["VIVIENDA CUIDADOR", 80, 80, 0]]);
+  assert.equal(bloqueDe("PRELIMINARES"), "");
+});
+
+test("con una sola hoja no se agrupa", () => {
+  assert.equal(porBloques([{ nombre: "CASA · A", subtotal: 1 }, { nombre: "CASA · B", subtotal: 2 }]), null);
+  assert.equal(porBloques([{ nombre: "A", subtotal: 1 }]), null);
+});

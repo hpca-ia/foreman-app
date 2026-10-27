@@ -37,7 +37,10 @@ import { etiquetaUnidad } from "../../lib/unidades";
 // una prueba. Y había que poder probarla —se le escaparon la etapa y la nota
 // de cada rubro, y el PDF salió con la columna ETAPA en blanco sin que nada
 // avisara—.
-import { estructura, noCotizados } from "./estructura.js";
+import { estructura, noCotizados, porBloques, bloqueDe, SEPARADOR_BLOQUE } from "./estructura.js";
+
+// El nombre del capítulo sin la hoja adelante, para mostrarlo debajo de su hoja.
+const sinHoja = (nombre, hojas) => (hojas && bloqueDe(nombre) ? nombre.slice(nombre.indexOf(SEPARADOR_BLOQUE) + SEPARADOR_BLOQUE.length) : nombre);
 export { estructura, noCotizados };
 
 export const FORMATOS = {
@@ -192,6 +195,8 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const M = 48;
   const caps = estructura({ capitulos, items });
+  // Las hojas del Excel original, si vino de varias: cuánto cuesta cada una.
+  const hojasDoc = porBloques(caps);
   const tot = totalesDe(items, presupuesto, conIva);
   // El texto junto al logo lo escribe quien exporta, o no va: el logo ya dice
   // quién es. Sin membrete explícito, los datos de la empresa.
@@ -374,9 +379,21 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
     espaciado("RESUMEN GENERAL", M, y, { espacio: 1.2 });
     y += 8;
     const sum = k => r2(caps.reduce((s, c) => s + (c[k] || 0), 0));
-    const cuerpo = caps.map(c => conX
-      ? [c.numero, c.nombre.toUpperCase(), money(c.subtotalBase), c.hayExtras ? money(c.subtotalExtras) : "—", money(c.subtotal)]
-      : [c.numero, c.nombre.toUpperCase(), money(c.subtotal)]);
+    // Con varias hojas, cada una con lo que suma y debajo sus capítulos.
+    const cuerpo = [], deHoja = [];
+    caps.forEach((c, k) => {
+      if (hojasDoc && (k === 0 || bloqueDe(caps[k - 1].nombre) !== bloqueDe(c.nombre))) {
+        const h = hojasDoc.find(x => x.nombre === (bloqueDe(c.nombre) || "Otros"));
+        deHoja.push(cuerpo.length);
+        cuerpo.push(conX
+          ? ["", h.nombre.toUpperCase(), money(h.subtotalBase), h.subtotalExtras ? money(h.subtotalExtras) : "—", money(h.subtotal)]
+          : ["", h.nombre.toUpperCase(), money(h.subtotal)]);
+      }
+      const nom = sinHoja(c.nombre, hojasDoc).toUpperCase();
+      cuerpo.push(conX
+        ? [c.numero, nom, money(c.subtotalBase), c.hayExtras ? money(c.subtotalExtras) : "—", money(c.subtotal)]
+        : [c.numero, nom, money(c.subtotal)]);
+    });
     cuerpo.push(conX
       ? ["", "TOTAL", money(sum("subtotalBase")), money(sum("subtotalExtras")), money(sum("subtotal"))]
       : ["", "TOTAL", money(sum("subtotal"))]);
@@ -392,6 +409,10 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
         : { 0: { cellWidth: 36 }, 2: { cellWidth: 100, halign: "right" } },
       didParseCell: d => {
         if (d.section === "head" && d.column.index >= 2) d.cell.styles.halign = "right";
+        if (d.section === "body" && deHoja.includes(d.row.index)) {
+          d.cell.styles.fontStyle = "bold"; d.cell.styles.textColor = t.capTexto;
+          d.cell.styles.fillColor = t.capFondo || [244, 246, 245];
+        }
         if (d.section === "body" && d.row.index === cuerpo.length - 1) {
           d.cell.styles.fontStyle = "bold"; d.cell.styles.textColor = t.capTexto;
           d.cell.styles.lineWidth = { top: 0.8 }; d.cell.styles.lineColor = t.primario;
@@ -515,6 +536,8 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
     // antes del subtotal, que es la suma de los dos.
     const extras = r2(caps.reduce((s, c) => s + (c.subtotalExtras || 0), 0));
     const filas = [
+      // Lo que cuesta cada hoja del Excel original, antes de sumarlas.
+      ...(hojasDoc ? hojasDoc.map(h => [h.nombre, money(h.subtotal)]) : []),
       ...(extras ? [["Presupuesto", money(r2(tot.subtotal - extras))], ["Extras", money(extras)]] : []),
       ["Subtotal", money(tot.subtotal)],
       ...tot.honorarios.map(h => [etiquetaHonorario(h), money(h.monto)]),
@@ -625,6 +648,8 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
   const ExcelJS = (await import("exceljs")).default;
   const t = PLANTILLAS[plantilla] || PLANTILLAS.minimalista;
   const caps = estructura({ capitulos, items });
+  // Las hojas del Excel original, si vino de varias: cuánto cuesta cada una.
+  const hojasDoc = porBloques(caps);
   const tot = totalesDe(items, presupuesto, conIva);
   const cotizar = formato === "cotizar";
   const soloCapitulos = formato === "capitulos";
@@ -715,9 +740,18 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
       fila++;
     };
     filaResumen(cols, { cabeza: true });
-    caps.forEach(c => filaResumen(conX
-      ? [c.numero, c.nombre.toUpperCase(), null, c.subtotalBase, c.hayExtras ? c.subtotalExtras : null, c.subtotal]
-      : [c.numero, c.nombre.toUpperCase(), null, null, null, c.subtotal]));
+    caps.forEach((c, k) => {
+      if (hojasDoc && (k === 0 || bloqueDe(caps[k - 1].nombre) !== bloqueDe(c.nombre))) {
+        const h = hojasDoc.find(x => x.nombre === (bloqueDe(c.nombre) || "Otros"));
+        filaResumen(conX
+          ? [null, h.nombre.toUpperCase(), null, h.subtotalBase, h.subtotalExtras || null, h.subtotal]
+          : [null, h.nombre.toUpperCase(), null, null, null, h.subtotal], { total: true });
+      }
+      const nom = sinHoja(c.nombre, hojasDoc).toUpperCase();
+      filaResumen(conX
+        ? [c.numero, nom, null, c.subtotalBase, c.hayExtras ? c.subtotalExtras : null, c.subtotal]
+        : [c.numero, nom, null, null, null, c.subtotal]);
+    });
     const sum = k => r2(caps.reduce((s, c) => s + (c[k] || 0), 0));
     filaResumen(conX
       ? [null, "TOTAL", null, sum("subtotalBase"), sum("subtotalExtras"), sum("subtotal")]
@@ -741,6 +775,7 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
   fila++;
 
   const celdasSubtotal = [], celdasExtras = [];
+  const celdasDeCap = new Map();   // las celdas que suman cada capítulo (lo pedido y sus extras)
   caps.forEach(c => {
     const filaCap = fila;
     // Con extras, la fórmula del capítulo suma solo lo pedido: los extras
@@ -771,6 +806,7 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     ws.getCell(fila, 6).numFmt = "#,##0.00";
     ws.getCell(fila, 6).alignment = { horizontal: "right" };
     celdasSubtotal.push(`F${filaCap}`);
+    celdasDeCap.set(c.nombre, [`F${filaCap}`]);
     fila++;
     if (soloCapitulos) return;
 
@@ -788,6 +824,7 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
         ws.getCell(fila, 6).numFmt = "#,##0.00";
         ws.getCell(fila, 6).alignment = { horizontal: "right" };
         celdasSubtotal.push(`F${fila}`);
+        celdasDeCap.get(c.nombre)?.push(`F${fila}`);
         celdasExtras.push(`F${fila}`);
         fila++;
       }
@@ -859,6 +896,13 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
     }
     return `F${fila++}`;
   };
+  // Lo que cuesta cada hoja del Excel original: la suma de sus capítulos.
+  if (hojasDoc && !cotizar) {
+    hojasDoc.forEach(h => {
+      const celdas = h.capitulos.flatMap(n => celdasDeCap.get(n) || []);
+      lineaTotal(h.nombre, celdas.length ? celdas.join("+") : "0", h.subtotal);
+    });
+  }
   // Lo pedido y los extras, aparte, antes del subtotal que los suma.
   if (celdasExtras.length && !cotizar) {
     const extras = r2(caps.reduce((s, c) => s + (c.subtotalExtras || 0), 0));
