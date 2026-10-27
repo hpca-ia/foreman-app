@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, Fragment } from "react";
 import { esNoCotiza, motivoNoCotiza } from "./presupuestos/estructura";
+import TraerDeOtro from "./presupuestos/TraerDeOtro";
+import { loQueSeArrastra, terminarArrastre } from "./presupuestos/arrastre";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search, GanttChartSquare } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import ElegirProyecto from "../components/ElegirProyecto";
@@ -47,6 +49,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const [capitulosDB, setCapitulosDB] = useState([]);
   // capitulosActivos: [{nombre, orden}] ordenados
   const [capitulosActivos, setCapitulosActivos] = useState([]);
+  // El panel para traer rubros y capítulos de otro presupuesto, y el capítulo
+  // sobre el que se está soltando algo (para iluminarlo).
+  const [verTraer, setVerTraer] = useState(false);
+  const [sobreCap, setSobreCap] = useState(null);
   const [items, setItems] = useState([]);
   // Lo último de los rubros, para cambios seguidos (aplicar varias correcciones
   // de NOVA de una vez): cada uno parte del anterior, no de una copia vieja.
@@ -638,6 +644,83 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     // deja los dos guardados a mitad de camino.
     await guardarOrden(numerar(reordered, items));
     await guardarCapitulos(reordered);
+  }
+
+  /**
+   * Poner un capítulo en otro lugar de la lista: desde el resumen, con las
+   * flechas o arrastrándolo. Mismo cuidado que moverCapitulo: los rubros
+   * llevan su capítulo en el orden y se renumeran con él.
+   */
+  async function ubicarCapitulo(nombre, destino) {
+    const idx = capitulosActivos.findIndex(c => c.nombre === nombre);
+    if (idx < 0) return;
+    const d = Math.max(0, Math.min(capitulosActivos.length - 1, destino));
+    if (d === idx) return;
+    const lista = [...capitulosActivos];
+    const [cap] = lista.splice(idx, 1);
+    lista.splice(d, 0, cap);
+    const reordenados = lista.map((c, i) => ({ ...c, orden: i + 1 }));
+    setCapitulosActivos(reordenados);
+    await guardarOrden(numerar(reordenados, items));
+    await guardarCapitulos(reordenados);
+  }
+
+  // ── TRAER DE OTRO PRESUPUESTO ──
+  //
+  // Un presupuesto nuevo casi nunca empieza de cero: la carpintería de la obra
+  // anterior, el capítulo de instalaciones de la que se parece. Se copiaba a
+  // mano, rubro por rubro. Ahora se arrastran —o se traen con un botón— un
+  // rubro, varios o un capítulo entero, con sus cantidades, precios y notas.
+  // Es una COPIA: el otro presupuesto no se toca.
+  const filaCopiada = (r, capitulo, orden) => ({
+    presupuesto_id: presupuestoActivo.id, capitulo, rubro_id: r.rubro_id ?? null,
+    descripcion: r.descripcion, unidad: r.unidad || "", cantidad: Number(r.cantidad) || 0,
+    precio_unitario: centavos(r.precio_unitario),
+    precio_base: centavos(r.precio_base ?? r.precio_unitario),
+    utilidad_pct: Number(r.utilidad_pct) || 0,
+    total: centavos((Number(r.cantidad) || 0) * centavos(r.precio_unitario)),
+    orden,
+    ...(r.nota ? { nota: r.nota } : {}),
+    ...(r.extra ? { extra: true } : {}),
+  });
+
+  /** Copia rubros al final de un capítulo de este presupuesto. */
+  async function traerRubros(capitulo, rubros, caps = capitulosActivos, base = itemsRef.current) {
+    if (!presupuestoActivo || !rubros?.length) return;
+    const capOrden = caps.find(c => c.nombre === capitulo)?.orden;
+    if (!capOrden) return;
+    const delCap = base.filter(i => i.capitulo === capitulo);
+    const desde = delCap.length ? Math.max(...delCap.map(i => (Number(i.orden) || 0) % 1000)) + 1 : 0;
+    let filas = rubros.map((r, k) => filaCopiada(r, capitulo, capOrden * 1000 + desde + k));
+    let { data, error } = await supabase.from("presupuesto_items").insert(filas).select();
+    // Sin las columnas de nota o de extra (migraciones 033 y 122), entran sin eso.
+    if (error && /column|schema cache/i.test(error.message)) {
+      filas = filas.map(({ nota: _n, extra: _e, ...x }) => x);
+      ({ data, error } = await supabase.from("presupuesto_items").insert(filas).select());
+    }
+    if (error) { alert("No se pudieron traer los rubros: " + error.message); return; }
+    const ni = [...base, ...(data || [])];
+    itemsRef.current = ni;
+    setItems(ni);
+    recalcTotales(ni);
+  }
+
+  /**
+   * Copia un capítulo entero. Si ya hay uno con ese nombre, sus rubros se
+   * suman a ese; si no, el capítulo se crea después de `despuesDe` (o al final).
+   */
+  async function traerCapitulo(nombre, rubros, despuesDe = null) {
+    if (capitulosActivos.some(c => c.nombre === nombre)) return traerRubros(nombre, rubros);
+    const lista = [...capitulosActivos];
+    const pos = despuesDe != null && lista.some(c => c.nombre === despuesDe)
+      ? lista.findIndex(c => c.nombre === despuesDe) + 1 : lista.length;
+    lista.splice(pos, 0, { nombre });
+    const reordenados = lista.map((c, i) => ({ ...c, orden: i + 1 }));
+    setCapitulosActivos(reordenados);
+    const renumerados = numerar(reordenados, itemsRef.current);
+    await guardarOrden(renumerados);
+    await guardarCapitulos(reordenados);
+    await traerRubros(nombre, rubros, reordenados, renumerados);
   }
 
   async function agregarItem(capitulo, rubro) {
@@ -1675,7 +1758,21 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           )}
 
           {/* El resumen de los capítulos, como el que abre el documento. */}
-          {capitulosActivos.length>1&&!buscaArmar&&<ResumenCapitulos capitulos={capitulosActivos} items={items}/>}
+          {puedeEditar&&!bloqueado&&!buscaArmar&&(
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+              <button onClick={()=>setVerTraer(v=>!v)}
+                title="Copiar rubros o capítulos enteros de otro presupuesto, arrastrándolos"
+                style={{background:verTraer?"var(--brand)":"#fff",border:"1px solid var(--brand)",borderRadius:8,padding:"6px 12px",
+                  color:verTraer?"#fff":"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
+                ⇄ Traer de otro presupuesto
+              </button>
+            </div>
+          )}
+          {capitulosActivos.length>1&&!buscaArmar&&(
+            <ResumenCapitulos capitulos={capitulosActivos} items={items}
+              editable={puedeEditar&&!bloqueado} onUbicar={ubicarCapitulo}
+              onSoltarCapitulo={(p,despuesDe)=>traerCapitulo(p.nombre,p.rubros,despuesDe)}/>
+          )}
 
           {capitulosActivos.map((cap,capIdx)=>{
             // Lo pedido primero y los extras al final, como sale impreso.
@@ -1689,7 +1786,22 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             const capItems=buscaArmar?todosDelCap.filter(i=>coincideBusqueda(i)):todosDelCap;
             if(buscaArmar&&capItems.length===0) return null;
             return(
-              <div key={cap.nombre} id={`capitulo-${cap.orden}`} style={{marginBottom:10,background:"#fff",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden",scrollMarginTop:70}}>
+              <div key={cap.nombre} id={`capitulo-${cap.orden}`}
+                // SOLTAR ACÁ LO QUE VIENE DE OTRO PRESUPUESTO. Rubros sueltos
+                // entran a este capítulo; un capítulo entero queda justo
+                // después de este (o se suma a uno que se llame igual).
+                onDragOver={e=>{ if(!loQueSeArrastra()||bloqueado||!puedeEditar) return; e.preventDefault(); e.dataTransfer.dropEffect="copy"; if(sobreCap!==cap.nombre) setSobreCap(cap.nombre); }}
+                onDragLeave={e=>{ if(!e.currentTarget.contains(e.relatedTarget)) setSobreCap(null); }}
+                onDrop={e=>{ const p=loQueSeArrastra(); setSobreCap(null); if(!p) return; e.preventDefault(); terminarArrastre();
+                  if(p.tipo==="rubros") traerRubros(cap.nombre,p.rubros); else traerCapitulo(p.nombre,p.rubros,cap.nombre); }}
+                style={{marginBottom:10,background:"#fff",border:sobreCap===cap.nombre?"2px dashed var(--brand)":"1px solid var(--border)",borderRadius:10,overflow:"hidden",scrollMarginTop:70}}>
+                {sobreCap===cap.nombre&&(
+                  <div style={{background:"var(--brand)",color:"#fff",fontSize:11.5,fontWeight:600,padding:"5px 14px"}}>
+                    {loQueSeArrastra()?.tipo==="capitulo"
+                      ? (capitulosActivos.some(c=>c.nombre===loQueSeArrastra()?.nombre) ? `Soltá: sus rubros se suman a ${loQueSeArrastra()?.nombre}` : `Soltá: el capítulo queda después de ${cap.nombre}`)
+                      : `Soltá: ${loQueSeArrastra()?.rubros?.length===1?"el rubro entra":`los ${loQueSeArrastra()?.rubros?.length} rubros entran`} a ${cap.nombre}`}
+                  </div>
+                )}
                 {/* Capítulo header */}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"8px 14px",background:"var(--brand-soft)"}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flex:"1 1 320px",minWidth:0}}>
@@ -2286,6 +2398,13 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         </div>
       )}
 
+      {verTraer&&presupuestoActivo&&(
+        <TraerDeOtro actualId={presupuestoActivo.id} presupuestos={presupuestos}
+          capitulosDestino={capitulosActivos}
+          onTraerRubros={traerRubros} onTraerCapitulo={(n,r)=>traerCapitulo(n,r)}
+          onCerrar={()=>setVerTraer(false)}/>
+      )}
+
       {/* MODAL AGREGAR RUBRO */}
       {!showAdminBD&&modalRubro&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>setModalRubro(null)}>
@@ -2425,7 +2544,11 @@ function NoSeCotizan({ items, onMotivo, onQuitar, onPrecioCero }) {
 // pesa. Con extras, lo pedido y lo extra por separado. Tocar un capítulo lleva
 // hasta él, que en un presupuesto de quince capítulos es medio minuto de
 // scroll. Se puede plegar y queda así para la próxima.
-function ResumenCapitulos({ capitulos, items }) {
+function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onSoltarCapitulo }) {
+  // Arrastrar una fila la cambia de lugar; soltar un capítulo traído de otro
+  // presupuesto lo pone después de la fila donde se suelta.
+  const [arrastrada, setArrastrada] = useState(null);
+  const [sobre, setSobre] = useState(null);
   const [abierto, setAbierto] = useState(() => { try { return localStorage.getItem("foreman_resumen_caps") !== "0"; } catch { return true; } });
   const alternar = () => setAbierto(a => { try { localStorage.setItem("foreman_resumen_caps", a ? "0" : "1"); } catch {} return !a; });
   const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2449,6 +2572,7 @@ function ResumenCapitulos({ capitulos, items }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: conX ? 520 : 380 }}>
             <thead><tr>
+              {editable && <th style={{ ...th, width: 46 }} />}
               <th style={{ ...th, textAlign: "left", width: 34 }}>N°</th>
               <th style={{ ...th, textAlign: "left" }}>Capítulo</th>
               {conX && <th style={th}>Presupuesto</th>}
@@ -2457,9 +2581,30 @@ function ResumenCapitulos({ capitulos, items }) {
               <th style={{ ...th, width: 56 }}>Peso</th>
             </tr></thead>
             <tbody>
-              {filas.map(f => (
+              {filas.map((f, k) => (
                 <tr key={f.nombre} onClick={() => document.getElementById(`capitulo-${f.orden}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  style={{ cursor: "pointer" }} title="Ir al capítulo">
+                  draggable={editable}
+                  onDragStart={e => { setArrastrada(f.nombre); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", f.nombre); }}
+                  onDragEnd={() => { setArrastrada(null); setSobre(null); }}
+                  onDragOver={e => { if (!editable || (!arrastrada && !loQueSeArrastra())) return; e.preventDefault(); if (sobre !== f.nombre) setSobre(f.nombre); }}
+                  onDrop={e => {
+                    e.preventDefault(); setSobre(null);
+                    const externo = loQueSeArrastra();
+                    if (arrastrada) { onUbicar?.(arrastrada, k); setArrastrada(null); }   // ocupa el lugar de la fila donde se suelta
+                    else if (externo?.tipo === "capitulo") { terminarArrastre(); onSoltarCapitulo?.(externo, f.nombre); }
+                  }}
+                  style={{ cursor: editable ? "grab" : "pointer", opacity: arrastrada === f.nombre ? 0.4 : 1,
+                    boxShadow: sobre === f.nombre && arrastrada !== f.nombre ? "inset 0 -2px 0 var(--brand)" : "none" }}
+                  title={editable ? "Arrastrala para cambiarla de lugar · tocala para ir al capítulo" : "Ir al capítulo"}>
+                  {editable && (
+                    <td style={{ ...td, textAlign: "left", padding: "3px 4px" }} onClick={e => e.stopPropagation()}>
+                      <span style={{ color: "var(--muted)", marginRight: 2 }}>⠿</span>
+                      <button disabled={k === 0} onClick={() => onUbicar?.(f.nombre, k - 1)} title="Subir"
+                        style={{ background: "none", border: "none", padding: "0 2px", cursor: k === 0 ? "default" : "pointer", color: k === 0 ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▲</button>
+                      <button disabled={k === filas.length - 1} onClick={() => onUbicar?.(f.nombre, k + 1)} title="Bajar"
+                        style={{ background: "none", border: "none", padding: "0 2px", cursor: k === filas.length - 1 ? "default" : "pointer", color: k === filas.length - 1 ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▼</button>
+                    </td>
+                  )}
                   <td style={{ ...td, textAlign: "left", color: "var(--muted)" }}>{f.orden}</td>
                   <td style={{ ...td, textAlign: "left", whiteSpace: "normal", color: "var(--brand)", fontWeight: 600 }}>
                     {f.nombre} {!f.rubros && <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· sin rubros</span>}
@@ -2471,6 +2616,7 @@ function ResumenCapitulos({ capitulos, items }) {
                 </tr>
               ))}
               <tr>
+                {editable && <td style={{ ...td, borderBottom: "none" }} />}
                 <td style={{ ...td, borderBottom: "none" }} />
                 <td style={{ ...td, textAlign: "left", fontWeight: 700, borderBottom: "none" }}>TOTAL <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· costo directo, sin honorarios ni IVA</span></td>
                 {conX && <td style={{ ...td, fontWeight: 700, borderBottom: "none" }}>${fmt(filas.reduce((s, f) => s + f.base, 0))}</td>}
