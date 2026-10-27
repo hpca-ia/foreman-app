@@ -617,22 +617,38 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           // es exactamente el descuadre que apareció.
           const {data:ya} = await supabase.from("obra_asignaciones")
             .select("id,monto").eq("factura_id",gastoEditando.obra_factura_id);
-          for (const a of ya||[]) {
-            const m = (devuelve?-1:1) * Math.abs(Number(a.monto)||0);
-            if (m !== Number(a.monto)) await supabase.from("obra_asignaciones").update({monto:m}).eq("id",a.id);
+          // Y SI CAMBIÓ EL MONTO, TAMBIÉN. Corregir $4,90 a $3,90 dejaba el
+          // rubro cargado con los $4,90 viejos: el control contaba un dólar
+          // que la factura no dice, y "asignado" pasaba a ser más grande que
+          // el documento. Con una sola asignación se sabe cuánto va —todo—;
+          // repartido entre varios rubros no se sabe a cuál sacarle, y eso lo
+          // decide quien revisa, con el aviso de "sin asignar" delante.
+          if ((ya||[]).length === 1 && Number(ya[0].monto) !== monto) {
+            await supabase.from("obra_asignaciones").update({monto}).eq("id",ya[0].id);
+          } else {
+            for (const a of ya||[]) {
+              const m = (devuelve?-1:1) * Math.abs(Number(a.monto)||0);
+              if (m !== Number(a.monto)) await supabase.from("obra_asignaciones").update({monto:m}).eq("id",a.id);
+            }
           }
         }
         // El pago de caja chica vale lo que vale el documento. Sin esto, la
         // factura quedaba corregida y el pago seguía diciendo el monto viejo:
         // Proveedores mostraba una diferencia que no existía.
+        //
+        // SE BUSCA POR FACTURA, NO POR LA REFERENCIA. La referencia cambió de
+        // forma con el tiempo —las viejas dicen "CAJA" y las nuevas
+        // "CAJA-9"—, así que exigirla hacía que la corrección no encontrara
+        // el pago y lo dejara diciendo el monto viejo. Una factura de caja
+        // chica tiene un pago y es el suyo.
         if (devuelve) {
           // Si se corrige a devolución, el pago que se había registrado deja
           // de existir: no salió plata, volvió.
           await supabase.from("obra_pagos").delete()
-            .eq("factura_id",gastoEditando.obra_factura_id).eq("referencia",`CAJA-${cajaActiva.id}`);
+            .eq("factura_id",gastoEditando.obra_factura_id);
         } else {
           await supabase.from("obra_pagos").update({monto, fecha:gastoForm.fecha})
-            .eq("factura_id",gastoEditando.obra_factura_id).eq("referencia",`CAJA-${cajaActiva.id}`);
+            .eq("factura_id",gastoEditando.obra_factura_id);
         }
       }
 

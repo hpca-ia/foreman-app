@@ -9,6 +9,7 @@ import { fmt } from "./calculos";
 import {
   CLASES_DOC, FORMAS_PAGO, ETIQUETA_PAGO, pagosDeObra, registrarPago, borrarPago,
   guardarDocumento, pagadoPorFactura, estadoDe, cuentasPorProveedor, totalesPorPagar,
+  esNotaDeCredito,
 } from "./pagos";
 
 // A quién le debemos, cuánto, y qué proformas falta facturar.
@@ -56,8 +57,16 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
   // arrastra, y que en el peor caso se paga dos veces.
   //
   // Desde ahora entran pagadas. Esto es para las que ya estaban.
+  //
+  // UNA NOTA DE CRÉDITO NO ES UNA DEUDA Y NO SE PAGA. Es plata que volvió:
+  // entra en negativo y no lleva pago, a propósito —la base ni siquiera
+  // acepta un pago negativo—. Contándolas, el aviso decía "2 facturas figuran
+  // como deuda por $−105,06" —una deuda en negativo, que no quiere decir
+  // nada— y el botón no podía arreglarlo: las descartaba al insertar y el
+  // aviso volvía a aparecer para siempre.
   const cajaSinPago = facturas.filter(f =>
-    f.origen === "caja_chica" && f.clase !== "proforma" && (pagado[f.id] || 0) <= 0.005);
+    f.origen === "caja_chica" && f.clase !== "proforma" && !esNotaDeCredito(f.clase)
+    && (Number(f.total) || 0) > 0.005 && (pagado[f.id] || 0) <= 0.005);
 
   if (sinTablas) {
     return (
