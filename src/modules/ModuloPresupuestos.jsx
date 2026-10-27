@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, Fragment } from "react";
 import { esNoCotiza, motivoNoCotiza } from "./presupuestos/estructura";
 import TraerDeOtro from "./presupuestos/TraerDeOtro";
+import { correrMarcados, llevarMarcados } from "./presupuestos/moverEnGrupo";
 import { loQueSeArrastra, terminarArrastre } from "./presupuestos/arrastre";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search, GanttChartSquare } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
@@ -12,7 +13,7 @@ import AdminBD from "./AdminBD";
 import BaseRubros from "./presupuestos/BaseRubros";
 import PreguntasNova from "../components/PreguntasNova";
 import { reconocerExcel, recordarFormato } from "../lib/leerExcelPresupuesto";
-import { interpretarPresupuesto, interpretarVariasHojas } from "./controlObra/leerPresupuesto";
+import { interpretarPresupuesto, interpretarVariasHojas, ivaMetidoEnTotales } from "./controlObra/leerPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
@@ -660,6 +661,48 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     const [cap] = lista.splice(idx, 1);
     lista.splice(d, 0, cap);
     const reordenados = lista.map((c, i) => ({ ...c, orden: i + 1 }));
+    setCapitulosActivos(reordenados);
+    await guardarOrden(numerar(reordenados, items));
+    await guardarCapitulos(reordenados);
+  }
+
+  /**
+   * QUITAR EL IVA METIDO EN LOS RUBROS.
+   *
+   * Presupuestos importados antes de que se reconociera el IVA metido en el
+   * total de cada fila quedaron con el precio sin IVA y el total con IVA: no
+   * multiplican, y al sumarse el IVA al final se cobra dos veces. Esto deja
+   * cada total en cantidad × precio y, si el presupuesto no tenía IVA, le pone
+   * la tasa que traían las filas: el total final no cambia, el IVA queda una
+   * sola vez y donde va.
+   */
+  async function quitarIvaMetido(tasa) {
+    const f = 1 + tasa / 100;
+    const afectados = items.filter(i => {
+      const sin = (Number(i.cantidad) || 0) * (Number(i.precio_unitario) || 0);
+      return sin > 0 && Math.abs(sin * f - (Number(i.total) || 0)) <= Math.max(0.02, Math.abs(Number(i.total) || 0) * 0.005);
+    });
+    if (!afectados.length) return;
+    const ponerIva = !(Number(presupuestoActivo.iva_pct) > 0);
+    if (!window.confirm(`${afectados.length} rubros tienen el IVA del ${tasa} % metido en su total.\n\n`
+      + `Se deja cada total en cantidad × precio, sin IVA${ponerIva ? `, y el presupuesto pasa a sumar IVA del ${tasa} % al final (hoy no suma IVA)` : `. El presupuesto ya suma IVA del ${presupuestoActivo.iva_pct} % al final`}.\n\n¿Corregirlo?`)) return;
+    const ids = new Set(afectados.map(i => i.id));
+    const nuevos = items.map(i => (ids.has(i.id) ? { ...i, total: centavos((Number(i.cantidad) || 0) * (Number(i.precio_unitario) || 0)) } : i));
+    itemsRef.current = nuevos;
+    setItems(nuevos);
+    const res = await Promise.all(nuevos.filter(i => ids.has(i.id)).map(i => supabase.from("presupuesto_items").update({ total: i.total }).eq("id", i.id)));
+    const fallo = res.find(r => r.error);
+    if (fallo) { alert("No se pudieron corregir todos los rubros: " + fallo.error.message); return; }
+    if (ponerIva) await supabase.from("presupuestos").update({ iva_pct: tasa }).eq("id", presupuestoActivo.id);
+    await recalcTotales(nuevos, ponerIva ? { iva_pct: tasa } : {});
+  }
+
+  /** Guardar la lista de capítulos en un orden nuevo (por nombre). */
+  async function reordenarCapitulos(nombres) {
+    const porNombre = new Map(capitulosActivos.map(c => [c.nombre, c]));
+    if (nombres.length !== capitulosActivos.length || nombres.some(n => !porNombre.has(n))) return;
+    if (nombres.every((n, i) => capitulosActivos[i].nombre === n)) return;
+    const reordenados = nombres.map((n, i) => ({ ...porNombre.get(n), orden: i + 1 }));
     setCapitulosActivos(reordenados);
     await guardarOrden(numerar(reordenados, items));
     await guardarCapitulos(reordenados);
@@ -1757,6 +1800,25 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             </div>
           )}
 
+          {/* IVA METIDO EN LOS TOTALES: se avisa y se arregla con un botón. */}
+          {(() => {
+            if (!puedeEditar || bloqueado || buscaArmar) return null;
+            const tasa = ivaMetidoEnTotales(items.map(i => ({ cantidad: i.cantidad, precio: i.precio_unitario, total: i.total })));
+            if (tasa == null) return null;
+            return (
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",background:"var(--warning-soft)",border:"1px solid var(--warning-border)",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12.5,color:"var(--ink)"}}>
+                <span style={{flex:"1 1 320px",lineHeight:1.5}}>
+                  <strong>Los totales de los rubros traen IVA del {tasa} % adentro:</strong> cantidad × precio no da el total.
+                  Como el IVA se suma al final del presupuesto, así se cobra dos veces.
+                </span>
+                <button onClick={()=>quitarIvaMetido(tasa)}
+                  style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 13px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
+                  Quitar el IVA de los rubros
+                </button>
+              </div>
+            );
+          })()}
+
           {/* El resumen de los capítulos, como el que abre el documento. */}
           {puedeEditar&&!bloqueado&&!buscaArmar&&(
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
@@ -1770,7 +1832,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           )}
           {capitulosActivos.length>1&&!buscaArmar&&(
             <ResumenCapitulos capitulos={capitulosActivos} items={items}
-              editable={puedeEditar&&!bloqueado} onUbicar={ubicarCapitulo}
+              editable={puedeEditar&&!bloqueado} onUbicar={ubicarCapitulo} onReordenar={reordenarCapitulos}
               onSoltarCapitulo={(p,despuesDe)=>traerCapitulo(p.nombre,p.rubros,despuesDe)}/>
           )}
 
@@ -2544,11 +2606,18 @@ function NoSeCotizan({ items, onMotivo, onQuitar, onPrecioCero }) {
 // pesa. Con extras, lo pedido y lo extra por separado. Tocar un capítulo lleva
 // hasta él, que en un presupuesto de quince capítulos es medio minuto de
 // scroll. Se puede plegar y queda así para la próxima.
-function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onSoltarCapitulo }) {
+function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReordenar, onSoltarCapitulo }) {
   // Arrastrar una fila la cambia de lugar; soltar un capítulo traído de otro
   // presupuesto lo pone después de la fila donde se suelta.
   const [arrastrada, setArrastrada] = useState(null);
   const [sobre, setSobre] = useState(null);
+  // VARIOS A LA VEZ. Se marcan y se mueven juntos —con los botones de la barra
+  // o arrastrando cualquiera de ellos— sin cambiar su orden entre ellos.
+  const [marcados, setMarcados] = useState([]);
+  const nombres = [...capitulos].sort((a, b) => a.orden - b.orden).map(c => c.nombre);
+  const vigentes = marcados.filter(n => nombres.includes(n));
+  const marcar = n => setMarcados(m => (m.includes(n) ? m.filter(x => x !== n) : [...m, n]));
+  const mover = lista => onReordenar?.(lista);
   const [abierto, setAbierto] = useState(() => { try { return localStorage.getItem("foreman_resumen_caps") !== "0"; } catch { return true; } });
   const alternar = () => setAbierto(a => { try { localStorage.setItem("foreman_resumen_caps", a ? "0" : "1"); } catch {} return !a; });
   const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2568,11 +2637,27 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onSolt
         <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>Resumen de capítulos <span style={{ fontWeight: 400, color: "var(--muted)" }}>({filas.length})</span></span>
         <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>{!abierto && <strong>${fmt(total)} · </strong>}{abierto ? "ocultar ▴" : "ver ▾"}</span>
       </button>
+      {abierto && editable && vigentes.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "7px 14px", background: "var(--brand-soft)", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+          <span style={{ flex: "1 1 180px", color: "var(--brand)" }}>
+            <strong>{vigentes.length}</strong> {vigentes.length === 1 ? "capítulo marcado" : "capítulos marcados"} — se mueven juntos
+          </span>
+          {[
+            ["⤒ Al principio", () => mover(llevarMarcados(nombres, vigentes, nombres.find(n => !vigentes.includes(n)) ?? null))],
+            ["▲ Subir", () => mover(correrMarcados(nombres, vigentes, -1))],
+            ["▼ Bajar", () => mover(correrMarcados(nombres, vigentes, 1))],
+            ["⤓ Al final", () => mover(llevarMarcados(nombres, vigentes, null))],
+          ].map(([t, fn]) => (
+            <button key={t} onClick={fn} style={{ background: "#fff", border: "1px solid var(--brand)", borderRadius: 6, padding: "3px 9px", color: "var(--brand)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)" }}>{t}</button>
+          ))}
+          <button onClick={() => setMarcados([])} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 11.5, cursor: "pointer", fontFamily: "var(--font)" }}>desmarcar</button>
+        </div>
+      )}
       {abierto && (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: conX ? 520 : 380 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: conX ? 560 : 420 }}>
             <thead><tr>
-              {editable && <th style={{ ...th, width: 46 }} />}
+              {editable && <th style={{ ...th, width: 64 }} />}
               <th style={{ ...th, textAlign: "left", width: 34 }}>N°</th>
               <th style={{ ...th, textAlign: "left" }}>Capítulo</th>
               {conX && <th style={th}>Presupuesto</th>}
@@ -2590,7 +2675,17 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onSolt
                   onDrop={e => {
                     e.preventDefault(); setSobre(null);
                     const externo = loQueSeArrastra();
-                    if (arrastrada) { onUbicar?.(arrastrada, k); setArrastrada(null); }   // ocupa el lugar de la fila donde se suelta
+                    if (arrastrada && vigentes.includes(arrastrada) && vigentes.length > 1) {
+                      // Se arrastró uno de los marcados: van todos. Si se suelta
+                      // más abajo de donde estaban, quedan después de esa fila;
+                      // más arriba, antes.
+                      const primero = Math.min(...vigentes.map(n => nombres.indexOf(n)));
+                      const baja = k > primero;
+                      const siguiente = nombres.slice(k + 1).find(n => !vigentes.includes(n)) ?? null;
+                      mover(llevarMarcados(nombres, vigentes, baja ? siguiente : f.nombre));
+                      setArrastrada(null);
+                    }
+                    else if (arrastrada) { onUbicar?.(arrastrada, k); setArrastrada(null); }   // ocupa el lugar de la fila donde se suelta
                     else if (externo?.tipo === "capitulo") { terminarArrastre(); onSoltarCapitulo?.(externo, f.nombre); }
                   }}
                   style={{ cursor: editable ? "grab" : "pointer", opacity: arrastrada === f.nombre ? 0.4 : 1,
@@ -2598,6 +2693,8 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onSolt
                   title={editable ? "Arrastrala para cambiarla de lugar · tocala para ir al capítulo" : "Ir al capítulo"}>
                   {editable && (
                     <td style={{ ...td, textAlign: "left", padding: "3px 4px" }} onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={vigentes.includes(f.nombre)} onChange={() => marcar(f.nombre)}
+                        title="Marcar para mover varios juntos" style={{ margin: "0 3px 0 0", verticalAlign: "middle" }} />
                       <span style={{ color: "var(--muted)", marginRight: 2 }}>⠿</span>
                       <button disabled={k === 0} onClick={() => onUbicar?.(f.nombre, k - 1)} title="Subir"
                         style={{ background: "none", border: "none", padding: "0 2px", cursor: k === 0 ? "default" : "pointer", color: k === 0 ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▲</button>
