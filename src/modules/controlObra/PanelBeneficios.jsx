@@ -6,7 +6,8 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
-import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totales, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
+import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
+import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -46,9 +47,15 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
 
   // Los enlaces a las proformas guardadas, firmados al cargar la pantalla.
   const [enlaces, setEnlaces] = useState({});
+  const [avisoOrdenes, setAvisoOrdenes] = useState("");
 
   const cargar = useCallback(async () => {
     if (!obra?.id) return;
+    // Lo que dejan las órdenes de cambio se pone al día antes de leer: una
+    // orden aprobada desde el portal no pasa por la oficina, y sin esto su
+    // beneficio aparecería recién cuando alguien abra las órdenes.
+    const sync = await sincronizarBeneficios(obra.id);
+    setAvisoOrdenes(sync.error || "");
     const r = await beneficiosDe(obra.id);
     if (r.error) { setError(r.error); return; }
     setGuardados(r.beneficios);
@@ -56,7 +63,11 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const t = totales(guardados);
+  const porOrigen = totalesPorOrigen(guardados);
+  const t = porOrigen.obra;
+  const tc = porOrigen.compras;
+  const to = porOrigen.ordenes;
+  const hayOrdenes = guardados.some(esDeOrden);
 
   const r = compararContraPresupuesto(items, rubros);
   // Renglones sin precio: títulos de sección, opcionales, notas al pie que
@@ -515,23 +526,66 @@ Rubros de la obra: ${lista}`;
           )}
         </div>
 
-        {t.cuantos > 0 && (
+        {avisoOrdenes && (
+          <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 8 }}>
+            {avisoOrdenes} Hasta entonces, lo que dejan las órdenes de cambio no aparece acá.
+          </div>
+        )}
+
+        {/* COMPRAR MEJOR Y COBRAR UN ADICIONAL, APARTE.
+            El beneficio de una compra es comprar abajo de lo presupuestado; el
+            de una orden de cambio es lo que se cobra arriba de lo que cuesta.
+            En un solo número, una obra que compra mal parece sana porque
+            cobró bien los adicionales. Se muestran los dos, y la suma. */}
+        {(tc.cuantos > 0 || tc.cuantosPrevistos > 0) && (
+          <div style={{ marginBottom: 10 }}>
+            {hayOrdenes && <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>COMPRANDO MEJOR</div>}
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+              {tc.cuantos > 0 && <>
+                <Tarjeta label="PRESUPUESTADO" valor={tc.presupuestado} />
+                <Tarjeta label="COSTÓ" valor={tc.real} />
+                <Tarjeta label="SE AHORRÓ" valor={tc.ahorro} color={colors.success}
+                  icono={<TrendingDown size={11} color={colors.success} />} />
+                <Tarjeta label="SE PASÓ" valor={tc.sobreprecio} color={colors.danger}
+                  icono={<TrendingUp size={11} color={colors.danger} />} />
+                <Tarjeta label={hayOrdenes ? "NETO DE LAS COMPRAS" : "NETO DE LA OBRA"} valor={tc.neto} color={tc.neto >= 0 ? colors.success : colors.danger} />
+              </>}
+              {/* LO PREVISTO, APARTE. Es plata que todavía no existe: sumarla al
+                  neto es lo que hace que una obra parezca rentable hasta el
+                  último mes. Pero tampoco se calla: adelantar el beneficio de un
+                  rubro es lo que deja decidir con tiempo dónde se puede gastar
+                  más. */}
+              {tc.cuantosPrevistos > 0 && (
+                <Tarjeta label={`PREVISTO · ${tc.cuantosPrevistos} sin comprar`} valor={tc.previsto} color={colors.warning} />
+              )}
+            </div>
+          </div>
+        )}
+
+        {hayOrdenes && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
+              ÓRDENES DE CAMBIO · LO COBRADO CONTRA LO QUE CUESTA
+            </div>
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+              {to.cuantos > 0 && <>
+                <Tarjeta label="COBRADO" valor={to.presupuestado} />
+                <Tarjeta label="COSTÓ" valor={to.real} />
+                <Tarjeta label="MARGEN COBRADO" valor={to.neto} color={to.neto >= 0 ? colors.success : colors.danger} />
+              </>}
+              {/* Una orden aprobada deja su margen PREVISTO: la cotización no
+                  es una compra. Se confirma partida por partida al comprarla. */}
+              {to.cuantosPrevistos > 0 && (
+                <Tarjeta label={`PREVISTO · ${to.cuantosPrevistos} sin comprar`} valor={to.previsto} color={colors.warning} />
+              )}
+            </div>
+          </div>
+        )}
+
+        {hayOrdenes && t.cuantos > 0 && tc.cuantos > 0 && to.cuantos > 0 && (
           <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
-            <Tarjeta label="PRESUPUESTADO" valor={t.presupuestado} />
-            <Tarjeta label="COSTÓ" valor={t.real} />
-            <Tarjeta label="SE AHORRÓ" valor={t.ahorro} color={colors.success}
-              icono={<TrendingDown size={11} color={colors.success} />} />
-            <Tarjeta label="SE PASÓ" valor={t.sobreprecio} color={colors.danger}
-              icono={<TrendingUp size={11} color={colors.danger} />} />
             <Tarjeta label="NETO DE LA OBRA" valor={t.neto} color={t.neto >= 0 ? colors.success : colors.danger} />
-            {/* LO PREVISTO, APARTE. Es plata que todavía no existe: sumarla al
-                neto es lo que hace que una obra parezca rentable hasta el
-                último mes. Pero tampoco se calla: adelantar el beneficio de un
-                rubro es lo que deja decidir con tiempo dónde se puede gastar
-                más. */}
-            {t.cuantosPrevistos > 0 && (
-              <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin comprar`} valor={t.previsto} color={colors.warning} />
-            )}
+            {t.cuantosPrevistos > 0 && <Tarjeta label="PREVISTO DE LA OBRA" valor={t.previsto} color={colors.warning} />}
           </div>
         )}
 
@@ -600,12 +654,13 @@ Rubros de la obra: ${lista}`;
                       {b.fecha}{rub ? ` · ${rub.numero} ${rub.descripcion.slice(0, 40)}` : " · sin rubro"}
                       {b.proveedor ? ` · ${b.proveedor}` : ""}
                       {b.origen === "manual" ? " · a mano" : ""}
+                      {esDeOrden(b) ? " · orden de cambio: lo cobrado contra su cotización" : ""}
                       {esPrevisto(b) ? " · todavía no se compró" : ""}
                       {b.nota ? ` · ${b.nota}` : ""}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0, fontSize: 11, color: colors.muted }}>
-                    ${fmt(b.presupuestado)} → ${fmt(b.real)}
+                    {esDeOrden(b) ? "cobrado " : ""}${fmt(b.presupuestado)} → {esDeOrden(b) ? "costó " : ""}${fmt(b.real)}
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700,
                     opacity: esPrevisto(b) ? 0.55 : 1,
@@ -636,6 +691,12 @@ Rubros de la obra: ${lista}`;
                     </button>
                   )}
                   <button onClick={async () => {
+                    // Lo previsto de una orden sale de su costo: borrado acá,
+                    // vuelve a aparecer la próxima vez. Se corrige en la orden.
+                    if (esDeOrden(b) && esPrevisto(b)) {
+                      window.alert("Este beneficio sale del costo de una partida de la orden de cambio. Para quitarlo, borrá o corregí el costo de esa partida en Órdenes de cambio.");
+                      return;
+                    }
                     if (!window.confirm(`¿Borrar "${b.descripcion}" de los beneficios?`)) return;
                     const err = await borrarBeneficio(b.id);
                     if (err) { setError(err); return; }

@@ -12,7 +12,12 @@ import {
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
 } from "./ordenesDeCambio";
-import { pdfDeOrden, pdfConsolidado } from "./pdfOrdenCambio";
+import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
+import {
+  leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
+  enlacesDeCotizaciones, sincronizarBeneficios,
+} from "./cotizacionesOrden";
+import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea } from "./cuentaOrdenCambio.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
 
 // Las órdenes de cambio de una obra.
@@ -22,7 +27,7 @@ import ModalOrdenCambio from "./ModalOrdenCambio";
 // le agregan y quitan líneas; al mandarlo queda "enviada" y ya se puede citar
 // por su número; al aprobarse, y recién ahí, sus líneas entran al control.
 
-const LINEA_VACIA = { descripcion: "", especificacion: "", rubro_codigo: "", unidad: "", cantidad: 1, precio_unitario: "", tipo: "aumenta", capitulo: "", obra_rubro_id: "" };
+const LINEA_VACIA = { descripcion: "", especificacion: "", rubro_codigo: "", unidad: "", cantidad: 1, precio_unitario: "", costo_unitario: "", tipo: "aumenta", capitulo: "", obra_rubro_id: "" };
 // Los tipos que la oficina ya usa en sus órdenes. Se puede escribir otro.
 const TIPOS = [
   "Requerimiento cliente",
@@ -58,6 +63,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // Quién firma cada orden, por orden_id. Es la lista del CAPÍTULO IV y es la
   // misma de la que sale el envío: no se escribe dos veces.
   const [aprobadores, setAprobadores] = useState({});
+  // Las cotizaciones de cada orden, por orden_id, y sus enlaces para abrirlas.
+  const [cotizaciones, setCotizaciones] = useState({});
+  const [enlacesCot, setEnlacesCot] = useState({});
+  // Los beneficios que dejaron las órdenes: la liquidación interna los usa
+  // para saber qué partidas ya se compraron y a cuánto.
+  const [beneficiosOC, setBeneficiosOC] = useState([]);
+  // Lo que falta para que el costo se guarde: la migración 125, casi siempre.
+  const [avisoCosto, setAvisoCosto] = useState("");
+  const [leyendoCot, setLeyendoCot] = useState(null);   // { ordenId, paso }
+  const [verRenglones, setVerRenglones] = useState(null);
+  const [verLiquidacion, setVerLiquidacion] = useState(false);
+  const cotRef = useRef(null);
+  const cotPara = useRef(null);
 
   const puedeEditar = puede?.("obras.crear") !== false;
   // UNA CELDA QUE SE PUEDE ESCRIBIR TIENE QUE PARECERLO.
@@ -81,6 +99,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     const todas = Object.values(r.fotos || {}).flat();
     if (todas.length) setEnlaces(await enlacesDeSoportes(todas));
     setAprobadores(await aprobacionesDeOrdenes((r.ordenes || []).map(o => o.id)));
+
+    // LA COTIZACIÓN Y LO QUE DEJA. Se recalcula acá, al abrir, porque una
+    // orden también se aprueba sola desde el portal cuando firman todos, y
+    // ahí no pasa por la oficina: si el beneficio naciera solo al aprobar
+    // desde acá, las que aprueba el cliente no llegarían nunca a la obra.
+    const c = await cotizacionesDe((r.ordenes || []).map(o => o.id));
+    setCotizaciones(c.porOrden);
+    setEnlacesCot(await enlacesDeCotizaciones(Object.values(c.porOrden).flat()));
+    const sync = await sincronizarBeneficios(obra.id);
+    setAvisoCosto(c.error || sync.error || "");
+    const { data: bs } = await supabase.from("obra_beneficios").select("*")
+      .eq("obra_id", obra.id).not("orden_cambio_id", "is", null);
+    setBeneficiosOC(bs || []);
   }, [obra.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -187,6 +218,67 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     return true;
   }
 
+  /**
+   * Subir la cotización de una orden que ya existe.
+   *
+   * La orden se escribe el día del problema y la cotización llega una semana
+   * después; o es una orden vieja, aprobada antes de que esto existiera, y
+   * hay que cargarle el costo para poder liquidarla. En un borrador sin
+   * partidas, los renglones entran como partidas; en el resto se guarda el
+   * papel y el costo se pone partida por partida.
+   */
+  async function subirCotizacion(o, original) {
+    if (!original) return;
+    setLeyendoCot({ ordenId: o.id, paso: "" }); setAviso("");
+    try {
+      const leida = await leerConNova(original, rubros, paso => setLeyendoCot({ ordenId: o.id, paso: paso || "" }));
+      const rc = await guardarCotizacion(o.id, leida.archivo, leida, currentUser);
+      if (rc.error) throw new Error(rc.error);
+      const suyas = lineas[o.id] || [];
+      const vacia = !suyas.some(l => l.tipo !== "quita");
+      if (puedeEditar && o.estado !== "aprobada" && vacia) {
+        const err = await agregarPartidas(o, rc.cotizacion, suyas);
+        if (err) throw new Error(err);
+      }
+      if (leida.cortado) setAviso("La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel.");
+    } catch (e) {
+      setAviso(e.message);
+    }
+    setLeyendoCot(null);
+    await cargar(); onCambio?.();
+  }
+
+  /** Los renglones de una cotización, como partidas de la orden con su costo. */
+  async function agregarPartidas(o, c, yaPuestas) {
+    const puestas = [...yaPuestas];
+    for (const p of partidasDeCotizacion(c.items || [])) {
+      const r = await agregarLinea(o.id, { ...p, orden: puestas.length, cotizacion_id: c.id }, puestas);
+      if (r.error) return r.error;
+      puestas.push(r.linea);
+    }
+    return null;
+  }
+
+  /**
+   * Tomar los costos de la cotización, renglón por renglón, en orden.
+   *
+   * Solo cuando hay tantas adiciones como renglones: emparejar por posición
+   * listas de distinto largo le pondría el costo de una cosa a otra, y ese
+   * error no se ve hasta la liquidación.
+   */
+  async function tomarCostos(o, c) {
+    const adiciones = (lineas[o.id] || []).filter(l => l.tipo !== "quita");
+    await hacer(async () => {
+      for (const [i, l] of adiciones.entries()) {
+        const it = c.items[i];
+        const cant = Number(l.cantidad) || Number(it.cantidad) || 1;
+        const r = await guardarLinea(l.id, { costo_unitario: Math.round((Number(it.monto) / cant) * 10000) / 10000 });
+        if (r.error) return r.error;
+      }
+      return null;
+    });
+  }
+
   if (sinTablas) {
     return (
       <div style={{ fontSize: 12.5, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 14 }}>
@@ -261,17 +353,116 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             }}>
             <FileText size={13} /> {consolidando ? "Armando…" : "Consolidado en PDF"}
           </Button>
+          {/* La liquidación interna, aparte del consolidado y nunca dentro de
+              él: el consolidado lo firma el cliente, y lo que cuesta cada
+              orden es de la oficina. */}
+          <Button variant={verLiquidacion ? "primary" : "outline"} size="sm" onClick={() => setVerLiquidacion(v => !v)}>
+            Liquidación interna
+          </Button>
         </div>
       )}
 
+      {avisoCosto && (
+        <div style={{ fontSize: 12, color: colors.warning, background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`,
+          borderRadius: colors.radiusMd, padding: "8px 12px", margin: "8px 0" }}>
+          {avisoCosto} Mientras tanto las órdenes funcionan igual, pero su cotización y su costo no se guardan y no llegan a Beneficios.
+        </div>
+      )}
+
+      {verLiquidacion && (() => {
+        const liq = liquidacionInterna({ ordenes, lineasPorOrden: lineas, beneficios: beneficiosOC, cotizaciones, subtotalesDe: subtotales, codigoDe });
+        const plata = v => `${Number(v) < 0 ? "−" : ""}$${fmt(Math.abs(Number(v) || 0))}`;
+        const th = { textAlign: "right", padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700 };
+        const td = { textAlign: "right", padding: "5px 6px", whiteSpace: "nowrap" };
+        return (
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "11px 13px", margin: "8px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Liquidación interna de las órdenes de cambio</div>
+                <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5 }}>
+                  Lo cobrado en cada orden aprobada contra lo que cuesta. El costo es el real si la partida ya se
+                  compró y el de la cotización si no. <strong>No sale al cliente.</strong>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" disabled={!liq.filas.length}
+                onClick={async () => {
+                  try {
+                    const doc = await pdfLiquidacionInterna({ liquidacion: liq, obra, proyecto });
+                    doc.save(`Liquidación interna ODC - ${proyecto || obra.nombre}.pdf`);
+                  } catch (e) { setAviso("No se pudo armar la liquidación: " + e.message); }
+                }}>
+                <Download size={13} /> PDF interno
+              </Button>
+            </div>
+            {!liq.filas.length ? (
+              <div style={{ fontSize: 12, color: colors.muted }}>Todavía no hay órdenes aprobadas.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 640 }}>
+                  <thead>
+                    <tr style={{ background: colors.bg }}>
+                      <th style={{ ...th, textAlign: "left" }}>ORDEN</th>
+                      <th style={th}>TOTAL ODC</th>
+                      <th style={th}>COBRADO CON COSTO</th>
+                      <th style={th}>COSTO COTIZADO</th>
+                      <th style={th}>COSTO REAL</th>
+                      <th style={th}>MARGEN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liq.filas.map(f => (
+                      <tr key={f.id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
+                        <td style={{ padding: "5px 6px" }}>
+                          <span style={{ fontWeight: 700, color: colors.muted, fontSize: 11 }}>{f.codigo}</span> {f.titulo}
+                          <div style={{ fontSize: 10.5, color: colors.muted }}>
+                            {[f.proveedores.join(", "),
+                              f.sinCosto ? `${f.sinCosto} partida${f.sinCosto === 1 ? "" : "s"} sin costo` : "",
+                              f.comprados ? `${f.comprados} ya comprada${f.comprados === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}
+                          </div>
+                        </td>
+                        <td style={td}>{plata(f.total)}</td>
+                        <td style={td}>{f.conCosto ? plata(f.cobradoConCosto) : "—"}</td>
+                        <td style={td}>{f.conCosto ? plata(f.costoCotizado) : "—"}</td>
+                        <td style={td}>{f.costoReal != null ? plata(f.costoReal) : "—"}</td>
+                        <td style={{ ...td, fontWeight: 700, color: !f.conCosto ? colors.muted : f.margen < 0 ? colors.danger : colors.success }}>
+                          {f.conCosto ? `${plata(f.margen)}${f.pct != null ? ` · ${f.pct}%` : ""}` : "sin costo"}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: `2px solid ${colors.border}`, fontWeight: 700 }}>
+                      <td style={{ padding: "6px" }}>Total</td>
+                      <td style={td}>{plata(liq.total.total)}</td>
+                      <td style={td}>{plata(liq.total.cobradoConCosto)}</td>
+                      <td style={td}>{plata(liq.total.costoCotizado)}</td>
+                      <td style={td} />
+                      <td style={{ ...td, color: liq.total.margen < 0 ? colors.danger : colors.success }}>
+                        {plata(liq.total.margen)}{liq.total.pct != null ? ` · ${liq.total.pct}%` : ""}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                {liq.total.ordenesSinCosto > 0 && (
+                  <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
+                    {liq.total.ordenesSinCosto} orden{liq.total.ordenesSinCosto === 1 ? "" : "es"} con partidas sin costo: su margen
+                    no se sabe y no entra en el total. Subí la cotización o escribí el costo en cada partida.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {aviso && <div style={{ fontSize: 12, color: colors.danger, margin: "8px 0" }}>{aviso}</div>}
+      <input ref={cotRef} type="file" accept="image/*,.pdf,.xlsx,.xlsm,.xls" style={{ display: "none" }}
+        onChange={e => { const f2 = e.target.files?.[0]; e.target.value = ""; if (f2 && cotPara.current) subirCotizacion(cotPara.current, f2); }} />
 
       {/* Una orden nueva: lo mínimo para poder empezar a listar qué cambia. */}
       {nueva === true && (
         <ModalOrdenCambio obra={obra} proyecto={proyecto} rubros={rubros} currentUser={currentUser}
           puedeAprobar={puedeEditar}
           onCerrar={() => setNueva(null)}
-          onCreada={async orden => { setNueva(null); await cargar(); setAbierta(orden.id); }} />
+          onCreada={async (orden, avisoCot) => { setNueva(null); await cargar(); setAbierta(orden.id); if (avisoCot) setAviso(avisoCot); }} />
       )}
 
       {nueva && nueva !== true && (
@@ -486,6 +677,92 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   )}
                 </div>
 
+                {/* LA COTIZACIÓN DEL PROVEEDOR, GUARDADA CON LA ORDEN.
+                    Es el papel que dice cuánto cuesta lo que se cobra: con él
+                    se liquida la obra y se discute con el proveedor. Se puede
+                    subir también a una orden aprobada, para cargarle el costo
+                    a las que se aprobaron antes de que esto existiera. No sale
+                    en el documento ni en el correo: es de la oficina. */}
+                {(() => {
+                  const cots = cotizaciones[o.id] || [];
+                  const adiciones = suyas.filter(l => l.tipo !== "quita");
+                  const leyendoEsta = leyendoCot?.ordenId === o.id;
+                  if (!cots.length && !puedeEditar) return null;
+                  return (
+                    <div style={{ marginBottom: 9 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+                        COTIZACIÓN DEL PROVEEDOR{cots.length ? ` · ${cots.length}` : ""} <span style={{ fontWeight: 600 }}>· INTERNA, NO SALE AL CLIENTE</span>
+                      </div>
+                      {cots.map(c => (
+                        <div key={c.id} style={{ background: colors.bg, borderRadius: 7, padding: "6px 9px", marginBottom: 5, fontSize: 11.5 }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            {enlacesCot[c.id]
+                              ? <a href={enlacesCot[c.id]} target="_blank" rel="noreferrer" style={{ color: colors.brand, fontWeight: 600 }}>
+                                  <FileText size={11} style={{ verticalAlign: -1 }} /> {c.archivo_nombre || "Abrir la cotización"}
+                                </a>
+                              : <span style={{ color: colors.muted }}>{c.archivo_nombre || "Sin archivo"}</span>}
+                            {puedeEditar ? (
+                              <input defaultValue={c.proveedor || ""} key={`pv${c.id}-${c.proveedor}`} placeholder="Proveedor"
+                                onBlur={e => e.target.value.trim() !== (c.proveedor || "") && hacer(() => guardarProveedor(c.id, e.target.value))}
+                                style={{ ...celda, width: 170 }} />
+                            ) : <span style={{ color: colors.ink }}>{c.proveedor || "Proveedor sin nombre"}</span>}
+                            <span style={{ color: colors.muted }}>{(c.items || []).length} renglones · ${fmt(c.total)}</span>
+                            <button onClick={() => setVerRenglones(v => v === c.id ? null : c.id)}
+                              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                              {verRenglones === c.id ? "ocultar lo leído" : "ver lo leído"}
+                            </button>
+                            {puedeEditar && o.estado !== "aprobada" && (c.items || []).length > 0 && (
+                              <button onClick={() => hacer(() => agregarPartidas(o, c, suyas))} disabled={ocupado}
+                                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                                agregar sus renglones como partidas
+                              </button>
+                            )}
+                            {puedeEditar && adiciones.length > 0 && adiciones.length === (c.items || []).length && (
+                              <button onClick={() => tomarCostos(o, c)} disabled={ocupado}
+                                title="Le pone a cada adición el costo del renglón que está en su misma posición"
+                                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                                tomar los costos en orden
+                              </button>
+                            )}
+                            {puedeEditar && (
+                              <button onClick={() => { if (window.confirm("¿Quitar esta cotización? Se borra el archivo. Los costos que ya se pusieron en las partidas se quedan.")) hacer(() => borrarCotizacion(c)); }}
+                                title="Quitar la cotización"
+                                style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 0, marginLeft: "auto" }}>
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
+                          {verRenglones === c.id && (
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 5 }}>
+                              <tbody>
+                                {(c.items || []).map((x, k) => (
+                                  <tr key={k} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
+                                    <td style={{ padding: "3px 4px", color: colors.ink }}>{x.descripcion}</td>
+                                    <td style={{ padding: "3px 4px", textAlign: "right", color: colors.muted, whiteSpace: "nowrap" }}>{fmt(x.cantidad)} {x.unidad}</td>
+                                    <td style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>${fmt(x.monto)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      ))}
+                      {puedeEditar && (
+                        <button onClick={() => { cotPara.current = o; cotRef.current?.click(); }} disabled={!!leyendoCot}
+                          onDragOver={ev => { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; }}
+                          onDrop={ev => { ev.preventDefault(); const f2 = [...(ev.dataTransfer?.files || [])][0]; if (f2) subirCotizacion(o, f2); }}
+                          style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px",
+                            color: colors.inkSoft, fontSize: 12, cursor: leyendoCot ? "wait" : "pointer", fontFamily: colors.font,
+                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                          <FileText size={13} />
+                          {leyendoEsta ? `NOVA está leyendo… ${leyendoCot.paso || ""}`
+                            : cots.length ? "Subir otra cotización" : "Subir la cotización del proveedor (PDF, foto o Excel)"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
                   CAPÍTULO II · ADICIONES Y REDUCCIONES
                 </div>
@@ -496,8 +773,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 520 }}>
                       <thead>
                         <tr style={{ background: colors.bg }}>
-                          {["", "Item", "Rubro", "Descripción", "Unid", "Cant", "P. unit", "Total", ""].map((h, i) => (
-                            <th key={h + i} style={{ textAlign: i >= 5 && i <= 7 ? "right" : i === 4 ? "center" : "left",
+                          {["", "Item", "Rubro", "Descripción", "Unid", "Cant", "P. unit", "Total", "Costo u.", ""].map((h, i) => (
+                            <th key={h + i} title={i === 8 ? "Lo que cuesta según la cotización del proveedor. Interno: no sale en el documento." : undefined}
+                              style={{ textAlign: i >= 5 && i <= 8 ? "right" : i === 4 ? "center" : "left",
                               padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700 }}>{h.toUpperCase()}</th>
                           ))}
                         </tr>
@@ -505,7 +783,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       <tbody>
                         {[["aumenta", "ADICIONES", sub.adiciones], ["quita", "REDUCCIONES", sub.reducciones]].map(([tipo, titulo, monto]) => (
                           <Fragment key={tipo}>
-                            <tr><td colSpan={9} style={{ background: colors.neutralSoft, padding: "3px 6px", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: colors.inkSoft }}>{titulo}</td></tr>
+                            <tr><td colSpan={10} style={{ background: colors.neutralSoft, padding: "3px 6px", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, color: colors.inkSoft }}>{titulo}</td></tr>
                             {suyas.filter(l => (tipo === "quita" ? l.tipo === "quita" : l.tipo !== "quita")).map((l, i, grupo) => (
                               <tr key={l.id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
                                 {/* SUBIRLA Y BAJARLA. El que aprueba la orden
@@ -574,6 +852,32 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                   ) : fmt(l.precio_unitario)}
                                 </td>
                                 <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>${fmt((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0))}</td>
+                                {/* EL COSTO SE PUEDE CORREGIR AUNQUE ESTÉ APROBADA:
+                                    no cambia nada de lo que se firmó —es lo
+                                    que cuesta, no lo que se cobra— y es justo
+                                    lo que hay que cargarle a una orden vieja
+                                    para poder liquidarla. */}
+                                <td style={{ padding: "5px 6px", textAlign: "right", whiteSpace: "nowrap" }}>
+                                  {l.tipo === "quita" ? null : puedeEditar ? (
+                                    <input type="number" step="0.01" defaultValue={l.costo_unitario ?? ""} key={`k${l.id}-${l.costo_unitario}`}
+                                      placeholder="—"
+                                      onBlur={e => {
+                                        const v = e.target.value;
+                                        const antes = l.costo_unitario ?? "";
+                                        if (v === "" ? antes === "" : Number(v) === Number(antes) && antes !== "") return;
+                                        hacer(async () => (await guardarLinea(l.id, { costo_unitario: v })).error || null);
+                                      }}
+                                      style={{ ...celda, width: 76, textAlign: "right" }} />
+                                  ) : (tieneCosto(l) ? fmt(l.costo_unitario) : "—")}
+                                  {tieneCosto(l) && (() => {
+                                    const m = precioDeLinea(l) - costoDeLinea(l);
+                                    return (
+                                      <div style={{ fontSize: 9.5, color: m < 0 ? colors.danger : m > 0 ? colors.success : colors.muted }}>
+                                        {m < 0 ? "−" : "+"}${fmt(Math.abs(m))}
+                                      </div>
+                                    );
+                                  })()}
+                                </td>
                                 <td style={{ padding: "5px 6px", textAlign: "right" }}>
                                   {editable && (
                                     <button onClick={() => hacer(() => borrarLinea(l.id))} disabled={ocupado} title="Quitar esta línea"
@@ -587,6 +891,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             <tr>
                               <td colSpan={7} style={{ padding: "4px 6px", textAlign: "right", fontSize: 11, fontWeight: 700, color: colors.inkSoft }}>SUBTOTAL {titulo}</td>
                               <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: 700 }}>${fmt(monto)}</td>
+                              <td />
                               <td />
                             </tr>
                           </Fragment>
@@ -740,6 +1045,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             <input type="number" step="0.01" value={linea.precio_unitario} onChange={e => setLinea(l => ({ ...l, precio_unitario: e.target.value }))}
                               placeholder="P.U." style={{ ...inputStyle, padding: "7px 9px", fontSize: 12 }} />
                           </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <input type="number" step="0.01" value={linea.costo_unitario} onChange={e => setLinea(l => ({ ...l, costo_unitario: e.target.value }))}
+                              placeholder="Costo u." style={{ ...inputStyle, padding: "7px 9px", fontSize: 12, width: 120 }} />
+                            <span style={{ fontSize: 10.5, color: colors.muted }}>
+                              Lo que cuesta cada unidad según el proveedor. Interno: no sale en el documento. Vacío si no se sabe.
+                            </span>
+                          </div>
                           {/* Lo que casi nunca hace falta, fuera del camino.
                               La especificación la usa una obra de cada diez y
                               el número de rubro lo pone el control: tenerlos
@@ -804,6 +1116,20 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
                   </span>
                 </div>
+                {(() => {
+                  const m = margenDeOrden(suyas);
+                  if (!m.conCosto && !m.sinCosto) return null;
+                  return (
+                    <div style={{ fontSize: 11.5, color: colors.inkSoft, marginTop: -4, marginBottom: 8 }}>
+                      {m.conCosto ? (
+                        <>Margen interno: <strong style={{ color: m.margen < 0 ? colors.danger : colors.success }}>
+                          {m.margen < 0 ? "−" : ""}${fmt(Math.abs(m.margen))}{m.pct != null ? ` · ${m.pct}%` : ""}
+                        </strong> sobre ${fmt(m.cobrado)} cobrados, contra ${fmt(m.costo)} de costo.</>
+                      ) : "Margen interno: no se sabe."}
+                      {m.sinCosto > 0 && <span style={{ color: colors.warning }}> {m.sinCosto} adición{m.sinCosto === 1 ? "" : "es"} sin costo.</span>}
+                    </div>
+                  );
+                })()}
 
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
                   CAPÍTULO III · IMPACTO EN CRONOGRAMA

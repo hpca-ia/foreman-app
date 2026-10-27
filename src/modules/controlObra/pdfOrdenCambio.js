@@ -400,3 +400,70 @@ export async function pdfConsolidado({ ordenes = [], lineasPorOrden = {}, fotosP
   numerar(doc, "Órdenes de cambio", proyecto || obra?.nombre);
   return doc;
 }
+
+/**
+ * La liquidación INTERNA de las órdenes de cambio: lo cobrado contra lo que
+ * costó.
+ *
+ * Es otro documento y no una hoja más del consolidado, a propósito: el
+ * consolidado lo firma el cliente, y que por un descuido le llegue lo que nos
+ * costó cada orden es entregarle la negociación de la próxima. Este lleva
+ * "uso interno" en la cabecera y en el pie, y nunca se adjunta a nada.
+ */
+export async function pdfLiquidacionInterna({ liquidacion, obra, proyecto }) {
+  const { jsPDF, autoTable } = await cargarPDF();
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const margen = 40;
+  const $ = v => (v == null ? "-" : `${Number(v) < 0 ? "- " : ""}$${plata(Math.abs(Number(v)))}`);
+
+  doc.setFont("helvetica", "bold").setFontSize(17).setTextColor(...TINTA);
+  doc.text(seguro("LIQUIDACIÓN INTERNA · ÓRDENES DE CAMBIO"), margen, 54);
+  doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(...GRIS);
+  doc.text(seguro(`${proyecto || obra?.nombre || ""}  |  ${new Date().toLocaleDateString("es-EC")}`), margen, 70);
+  doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(...ROJO);
+  doc.text(seguro("USO INTERNO — NO ENTREGAR AL CLIENTE"), margen, 84);
+
+  const { filas, total } = liquidacion;
+  tabla(autoTable, doc, {
+    startY: 98,
+    head: [["N°", "TÍTULO", "PROVEEDOR", "TOTAL ODC", "COBRADO CON COSTO", "COSTO COTIZADO", "COSTO REAL", "COSTO VIGENTE", "MARGEN", "%"]],
+    body: filas.map(f => [
+      f.codigo,
+      `${f.titulo || ""}${f.sinCosto ? `\n${f.sinCosto} partida(s) sin costo` : ""}`,
+      f.proveedores.join(", ") || "-",
+      $(f.total),
+      f.conCosto ? $(f.cobradoConCosto) : "-",
+      f.conCosto ? $(f.costoCotizado) : "-",
+      $(f.costoReal),
+      f.conCosto ? $(f.costo) : "-",
+      f.conCosto ? $(f.margen) : "sin costo",
+      f.pct != null ? `${f.pct}%` : "-",
+    ]),
+    foot: [["", "TOTAL", "", $(total.total), $(total.cobradoConCosto), $(total.costoCotizado), "", $(total.costo), $(total.margen),
+      total.pct != null ? `${total.pct}%` : "-"]],
+    theme: "grid",
+    headStyles: { fillColor: TINTA, textColor: [255, 255, 255], fontSize: 7, fontStyle: "bold" },
+    footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39], fontSize: 8.5, fontStyle: "bold", halign: "right" },
+    styles: { fontSize: 8, cellPadding: 4, lineColor: [229, 231, 235], textColor: [17, 24, 39] },
+    columnStyles: {
+      0: { cellWidth: 44, fontStyle: "bold" },
+      1: { cellWidth: "auto" },
+      2: { cellWidth: 100, textColor: GRIS },
+      3: { cellWidth: 68, halign: "right" }, 4: { cellWidth: 72, halign: "right" },
+      5: { cellWidth: 68, halign: "right" }, 6: { cellWidth: 64, halign: "right" },
+      7: { cellWidth: 68, halign: "right" }, 8: { cellWidth: 66, halign: "right", fontStyle: "bold" },
+      9: { cellWidth: 38, halign: "right" },
+    },
+    didParseCell: d => {
+      if (d.section === "body" && d.column.index === 8 && filas[d.row.index]?.margen < 0) d.cell.styles.textColor = ROJO;
+    },
+    margin: { left: margen, right: margen },
+  });
+
+  const y = doc.lastAutoTable.finalY + 14;
+  doc.setFont("helvetica", "italic").setFontSize(7.5).setTextColor(...GRIS);
+  doc.text(seguro("Margen = lo cobrado en las partidas con costo, menos su costo. El costo vigente es el real si la partida ya se compró y el de la cotización si no. Las reducciones no tienen cotización y no entran."), margen, y, { maxWidth: doc.internal.pageSize.getWidth() - margen * 2 });
+
+  numerar(doc, "Liquidación interna — uso interno", proyecto || obra?.nombre);
+  return doc;
+}

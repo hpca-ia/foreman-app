@@ -42,6 +42,7 @@ export const ESTADOS_ORDEN = {
 };
 
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
+const SIN_125 = "Falta correr la migración 125 en Supabase para guardar el costo de la partida.";
 
 export async function cargarOrdenes(obraId) {
   const { data, error } = await supabase.from("ordenes_cambio")
@@ -133,6 +134,12 @@ export async function guardarOrden(id, campos) {
  */
 export async function borrarOrden(id) {
   await supabase.from("obra_rubros").delete().eq("orden_cambio_id", id);
+  // Lo que la orden prometía de beneficio se va con ella. Lo ya comprado se
+  // queda —fue plata de verdad— y pierde la referencia a la orden sola.
+  await supabase.from("obra_beneficios").delete().eq("orden_cambio_id", id).eq("estado", "previsto");
+  const { data: cots } = await supabase.from("orden_cambio_cotizaciones").select("archivo_path").eq("orden_id", id);
+  const papeles = (cots || []).map(c => c.archivo_path).filter(Boolean);
+  if (papeles.length) await supabase.storage.from("task-files").remove(papeles);
   await supabase.from("obra_rubros").update({ anulado_por_oc: null }).eq("anulado_por_oc", id);
   const { data: fotos } = await supabase.from("orden_cambio_fotos").select("storage_path").eq("orden_id", id);
   const rutas = (fotos || []).map(f => f.storage_path).filter(Boolean);
@@ -150,7 +157,7 @@ export function siguienteItem(lineas = [], tipo) {
 
 export async function agregarLinea(ordenId, linea, yaPuestas = []) {
   const tipo = linea.tipo === "quita" ? "quita" : "aumenta";
-  const { data, error } = await supabase.from("orden_cambio_lineas").insert({
+  const fila = {
     orden_id: ordenId, tipo,
     item: linea.item?.trim() || siguienteItem(yaPuestas, tipo),
     rubro_codigo: linea.rubro_codigo?.trim() || null,
@@ -163,7 +170,19 @@ export async function agregarLinea(ordenId, linea, yaPuestas = []) {
     precio_unitario: Number(linea.precio_unitario) || 0,
     orden: Number(linea.orden) || 0,
     obra_rubro_id: linea.obra_rubro_id || null,
-  }).select().single();
+  };
+  // El costo y la cotización de donde salió son de la 125. Sin ella la
+  // partida entra igual —sin la partida no hay orden— y se avisa que el costo
+  // no quedó guardado.
+  const tieneCosto = linea.costo_unitario !== undefined && linea.costo_unitario !== null && linea.costo_unitario !== "";
+  if (tieneCosto) fila.costo_unitario = Number(linea.costo_unitario) || 0;
+  if (linea.cotizacion_id) fila.cotizacion_id = Number(linea.cotizacion_id);
+  let { data, error } = await supabase.from("orden_cambio_lineas").insert(fila).select().single();
+  if (error && falta(error) && (tieneCosto || fila.cotizacion_id)) {
+    const { costo_unitario, cotizacion_id, ...sinCosto } = fila;
+    ({ data, error } = await supabase.from("orden_cambio_lineas").insert(sinCosto).select().single());
+    if (!error) return { linea: data, sinCosto: true };
+  }
   return error ? { error: error.message } : { linea: data };
 }
 
@@ -190,8 +209,13 @@ export async function guardarLinea(id, campos) {
   if (campos.unidad != null) limpio.unidad = String(campos.unidad).trim() || null;
   if (campos.cantidad != null) limpio.cantidad = Number(campos.cantidad) || 0;
   if (campos.precio_unitario != null) limpio.precio_unitario = Number(campos.precio_unitario) || 0;
+  // Vacío borra el costo: "no sé lo que cuesta" no es lo mismo que cero.
+  if (campos.costo_unitario !== undefined) {
+    limpio.costo_unitario = campos.costo_unitario === "" || campos.costo_unitario === null ? null : Number(campos.costo_unitario) || 0;
+  }
   if (!Object.keys(limpio).length) return {};
   const { error } = await supabase.from("orden_cambio_lineas").update(limpio).eq("id", id);
+  if (error && falta(error) && "costo_unitario" in limpio) return { error: SIN_125 };
   return error ? { error: error.message } : {};
 }
 

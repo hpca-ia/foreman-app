@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son justo lo que no puede estar mal.
-export { totales, esPrevisto, netoPorRubro } from "./cuentaBeneficios.js";
+export { totales, esPrevisto, netoPorRubro, esDeOrden, totalesPorOrigen } from "./cuentaBeneficios.js";
 
 // Los beneficios de la obra: lo presupuestado contra lo que de verdad costó.
 //

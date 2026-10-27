@@ -50,3 +50,23 @@ export function netoPorRubro(beneficios = []) {
   });
   return mapa;
 }
+
+/** ¿Sale de una orden de cambio? Ese beneficio es de cobrar, no de comprar. */
+export const esDeOrden = b => b?.origen === "orden_cambio" || !!b?.orden_cambio_id;
+
+/**
+ * Los totales, separados por de dónde sale la plata.
+ *
+ * COMPRAR MEJOR Y COBRAR UN ADICIONAL NO SON LO MISMO. El beneficio de una
+ * compra es comprar abajo de lo presupuestado; el de una orden de cambio es lo
+ * que se le cobra al cliente arriba de lo que cuesta. Sumados en un solo
+ * número, una obra que compra mal puede parecer sana porque cobró bien los
+ * adicionales, y eso es justo lo que este panel tiene que dejar ver.
+ */
+export function totalesPorOrigen(beneficios = []) {
+  return {
+    compras: totales(beneficios.filter(b => !esDeOrden(b))),
+    ordenes: totales(beneficios.filter(esDeOrden)),
+    obra: totales(beneficios),
+  };
+}

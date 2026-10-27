@@ -7,6 +7,7 @@ import { exportarExcel } from "../../lib/exportar";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
+import { esDeCajaChica, SIGLA_CAJA } from "./origenGasto";
 import { Mini } from "./PanelFacturas";
 
 // El libro de facturas de la obra: todas, o las de una planilla, con filtros.
@@ -26,6 +27,13 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
   const [rubro, setRubro] = useState("");
   const [texto, setTexto] = useState("");
   const [soloSueltas, setSoloSueltas] = useState(!!sueltasAlEntrar);
+  // POR QUÉ PUERTA ENTRÓ EL GASTO.
+  //
+  // Una factura de compra trae su rubro decidido desde el pedido; un gasto de
+  // caja chica entra "por asignar" y el rubro se lo pone después quien revisa,
+  // leyendo un detalle escrito a mano. Son los que hay que repasar, y repasarlos
+  // es poder verlos juntos.
+  const [soloCaja, setSoloCaja] = useState(false);
   const [modal, setModal] = useState(null);
 
   const nombrePlanilla = id => {
@@ -70,6 +78,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     if (tipo && (f.tipo || "otro") !== tipo) return false;
     if (rubro && !(rubrosDe[f.id] || []).some(r => r.id === Number(rubro))) return false;
     if (soloSueltas && (asignadoA[f.id] || 0) + 0.01 >= (Number(f.total) || 0)) return false;
+    if (soloCaja && !esDeCajaChica(f)) return false;
     if (q && ![f.detalle, f.justificacion, f.razon_social, f.numero_factura, f.ruc, f.numero_cheque].some(c => pelado(c).includes(q))) return false;
     return true;
   });
@@ -78,9 +87,9 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
   const alRubro = rubro
     ? asignaciones.filter(a => a.obra_rubro_id === Number(rubro) && vistas.some(f => f.id === a.factura_id)).reduce((s, a) => s + (Number(a.monto) || 0), 0)
     : 0;
-  const hayFiltro = proveedor || tipo || rubro || texto || soloSueltas;
+  const hayFiltro = proveedor || tipo || rubro || texto || soloSueltas || soloCaja;
 
-  function limpiar() { setProveedor(""); setTipo(""); setRubro(""); setTexto(""); setSoloSueltas(false); }
+  function limpiar() { setProveedor(""); setTipo(""); setRubro(""); setTexto(""); setSoloSueltas(false); setSoloCaja(false); }
 
   async function eliminar(f) {
     if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"}?`)) return;
@@ -97,20 +106,22 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
       rubro && `Rubro: ${(() => { const r = rubros.find(x => x.id === Number(rubro)); return r ? `${r.numero} ${r.descripcion}` : ""; })()}`,
       texto && `Concepto: "${texto}"`,
       soloSueltas && "Solo sin asignar",
+      soloCaja && "Solo caja chica",
     ].filter(Boolean).join(" · ");
     const filas = [
       [`FACTURAS — ${obra.nombre}`],
       [alcanceTxt, filtros],
       [],
       ["N°", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
-       "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "RUBRO ASIGNADO", "SIN ASIGNAR"],
+       "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "ORIGEN", "RUBRO ASIGNADO", "SIN ASIGNAR"],
     ];
     vistas.forEach((f, i) => {
       const suelto = Math.max(0, Math.round(((Number(f.total) || 0) - (asignadoA[f.id] || 0)) * 100) / 100);
       filas.push([i + 1, f.fecha, nombrePlanilla(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
         f.detalle || "", f.justificacion || "",
         Number(f.subtotal_0) || 0, Number(f.subtotal_5) || 0, Number(f.subtotal_15) || 0, Number(f.iva) || 0, Number(f.total) || 0,
-        tipoLabel(f.tipo), (rubrosDe[f.id] || []).map(r => `${r.numero} ${r.descripcion}`).join(" · ") || "SIN ASIGNAR", suelto]);
+        tipoLabel(f.tipo), esDeCajaChica(f) ? SIGLA_CAJA : "COMPRA",
+        (rubrosDe[f.id] || []).map(r => `${r.numero} ${r.descripcion}`).join(" · ") || "SIN ASIGNAR", suelto]);
     });
     filas.push([]);
     filas.push(["", "", "", "", "", "", "", "", "TOTALES", resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", resumen.sinAsignar]);
@@ -167,6 +178,11 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
           <input type="checkbox" checked={soloSueltas} onChange={e => setSoloSueltas(e.target.checked)} />
           Solo sin asignar
+        </label>
+        <label title="Los que compró alguien en obra y pagó al momento: el rubro se lo puso después quien revisó el gasto."
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
+          <input type="checkbox" checked={soloCaja} onChange={e => setSoloCaja(e.target.checked)} />
+          Solo caja chica
         </label>
         {hayFiltro && <Button variant="secondary" size="sm" onClick={limpiar}>Limpiar filtros</Button>}
         <Button variant="outline" size="sm" onClick={descargar} disabled={!vistas.length} style={{ marginLeft: "auto" }}>

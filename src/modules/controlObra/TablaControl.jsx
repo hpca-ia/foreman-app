@@ -3,6 +3,8 @@ import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { fmt, gastosDe } from "./calculos";
 import { netoPorRubro } from "./cuentaBeneficios.js";
+import { esDeCajaChica, cajaChicaPorRubro, cajaChicaPorCapitulo } from "./origenGasto";
+import MarcaCaja from "./MarcaCaja";
 
 // Una columna más que antes: el avance de OBRA al lado del económico. Son dos
 // preguntas distintas —cuánta obra hay hecha y cuánta plata se consumió— y la
@@ -15,7 +17,7 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
-function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null, beneficio = 0 }) {
+function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null, beneficio = 0, deCaja = 0 }) {
   // Sacado del contrato por una orden de cambio: se lee tachado y en gris. Que
   // siga a la vista es el punto — alguien tiene que poder ver que ese trabajo
   // estaba y ya no está, sin ir a buscar la orden.
@@ -44,6 +46,11 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = n
             {beneficio > 0 ? "+" : "−"}${fmt(Math.abs(beneficio))}
           </span>
         )}
+        {/* CUÁNTO DE ESTE NÚMERO VINO DE CAJA CHICA.
+            Un rubro cuyo gasto es todo caja chica es un rubro cuyos rubros los
+            eligió alguien revisando detalles escritos a mano en el celular.
+            Puede estar perfecto, pero se mira distinto. */}
+        {Math.abs(deCaja) > 0.009 && <MarcaCaja monto={deCaja} de={acc.acumulado} />}
       </span>
       <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{r.unidad}</span>
       <span style={{ textAlign: "right", color: colors.muted, fontSize: 11 }}>{fmt(r.cantidad)}</span>
@@ -118,6 +125,7 @@ function Gastos({ gastos, sangria }) {
             padding: `5px 14px 5px ${sangria + 14}px`, fontSize: 11.5, color: colors.inkSoft }}>
           <span style={{ color: colors.muted, minWidth: 64 }}>{String(g.fecha || "").slice(0, 10)}</span>
           <span style={{ color: colors.ink, fontWeight: 500 }}>{g.proveedor}</span>
+          {esDeCajaChica(g.factura) && <MarcaCaja />}
           {g.numero && <span style={{ color: colors.muted }}>{g.numero}</span>}
           {g.detalle && (
             <span style={{ color: colors.muted, flex: 1, minWidth: 100, overflow: "hidden",
@@ -150,6 +158,13 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   // Solo lo ya comprado: un beneficio previsto sale de una proforma y todavía
   // puede no pasar.
   const beneficioDe = netoPorRubro(beneficios);
+  // Lo que cada rubro recibió por la puerta de la caja chica.
+  const deCajaDe = cajaChicaPorRubro(facturas, asignaciones);
+  // Y lo que se cargó al capítulo entero, que por rubro no aparece en ningún
+  // lado: es así como entra la mayoría de los gastos de caja chica.
+  const deCajaCap = cajaChicaPorCapitulo(facturas, asignaciones);
+  const cajaDelGrupo = g => (g.rubros || []).reduce((t, r) => t + (deCajaDe[r.id] || 0), 0)
+    + (modo === "capitulo" ? (deCajaCap[g.capitulo] || 0) : 0);
   // Qué renglón está abierto mostrando sus gastos. Uno a la vez: abrir varios
   // llena la pantalla de listas y se pierde la tabla, que es lo que se vino a
   // mirar.
@@ -239,6 +254,13 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     {g.codigo && <span style={{ opacity: 0.6 }}>{g.codigo}</span>}
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.capitulo}</span>
                     <span style={{ fontWeight: 400, opacity: 0.7 }}>({g.rubros.length})</span>
+                    {/* CUÁNTO DE ESTE CAPÍTULO SE PAGÓ DE CAJA CHICA.
+                        Mirar el control y ver dónde se acumula la caja chica
+                        es lo que permite preguntarse si está bien asignada:
+                        un capítulo que casi no se compró y sin embargo tiene
+                        mil dólares de caja chica, probablemente los tenga
+                        prestados de otro. */}
+                    {Math.abs(cajaDelGrupo(g)) > 0.009 && <MarcaCaja monto={cajaDelGrupo(g)} de={g.acumulado} />}
                     {/* Esto se gastó sin estar contratado: salarios, oficina,
                         logística. Que se vea distinto es el punto. */}
                     {g.sinPresupuesto && (
@@ -286,6 +308,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     style={{ cursor: "pointer" }} title="Ver de qué gastos está hecho este número">
                     <FilaRubro rubro={r} porRubro={porRubro} sangria={14} onAvance={onAvance}
                       beneficio={beneficioDe[r.id] || 0}
+                      deCaja={deCajaDe[r.id] || 0}
                       comprometido={comprometido?.porRubro?.[r.id] || 0} />
                     {verGastos === `r${r.id}` && (
                       <Gastos sangria={14}

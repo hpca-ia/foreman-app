@@ -2,6 +2,8 @@ import { Paperclip, Pencil, Trash2 } from "lucide-react";
 import { abrirArchivo } from "../../lib/archivos";
 import { colors } from "../../theme/colors";
 import { fmt, TIPOS_GASTO } from "./calculos";
+import { esDeCajaChica } from "./origenGasto";
+import MarcaCaja from "./MarcaCaja";
 
 // Una factura como se lee en la lista: proveedor y número arriba, fecha, tipo
 // y detalle abajo, y lo que falta asignar en ámbar. La usan la planilla, el
@@ -18,6 +20,10 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
         <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {f.razon_social || "Sin proveedor"}
           {f.numero_factura && <span style={{ color: colors.muted, fontWeight: 400, marginLeft: 6 }}>#{f.numero_factura}</span>}
+          {/* Por qué puerta entró: una factura de compra pasó por un pedido y
+              una aprobación; un gasto de caja chica lo compró alguien en obra
+              y el rubro se lo pusieron después. */}
+          {esDeCajaChica(f) && <MarcaCaja />}
           {/* LO QUE DIJO EL SRI, DONDE SE PAGA.
               La revisión se hace al cargar la factura, pero la pregunta "¿esta
               se puede pagar?" aparece después, en esta lista, y para entonces
