@@ -50,3 +50,33 @@ test("el lector reconoce el IVA metido en el total y deja el precio sin IVA", ()
   const sinIva = r2([[100, 9.5], [250, 1.2], [250, 1.8], [40, 12], [12, 185], [180, 16.5]].reduce((s, [c, p]) => s + c * p, 0));
   assert.ok(Math.abs(r.baseSinIva - sinIva) <= 0.05, `base ${r.baseSinIva} contra ${sinIva}`);
 });
+
+// UN LIBRO CON VARIAS HOJAS. Se tomaba la tasa de la primera hoja: si esa
+// tenía pocas filas, el presupuesto entero entraba como si no hubiera IVA.
+import { interpretarVariasHojas } from "../src/modules/controlObra/leerPresupuesto.js";
+
+test("con varias hojas, el IVA metido se reconoce aunque la primera hoja sea chica", () => {
+  const chica = [
+    ["PRESUPUESTO", "", "", "", "", ""], enc,
+    ["", "VIVIENDA DEL CUIDADOR", "", "", "", ""],
+    fila(1, "Contrapiso", "m2", 40, 14.2),
+    fila(2, "Cubierta", "m2", 45, 31.5),
+  ];
+  const grande = [
+    ["PRESUPUESTO", "", "", "", "", ""], enc,
+    ["", "PRELIMINARES", "", "", "", ""],
+    fila(1, "Cerramiento", "ml", 437.17, 17.16),
+    fila(2, "Trazo de ejes", "u", 1, 477.4),
+    fila(3, "Replanteo", "m2", 2086.29, 1.05),
+    fila(4, "Desalojo", "m3", 312.9435, 10.44),
+    fila(5, "Relleno", "m3", 161.311, 35.38),
+    fila(6, "Mejoramiento", "m3", 232.05, 37.45),
+  ];
+  const r = interpretarVariasHojas([
+    { nombre: "CUIDADOR", filas: chica, mapa: { ...MAPA } },
+    { nombre: "CASA PRINCIPAL", filas: grande, mapa: { ...MAPA } },
+  ]);
+  assert.equal(r.ivaPorFila, 15);
+  // Los ocho precios, sin IVA, también los de la hoja chica.
+  assert.deepEqual(r.rubros.map(x => x.precio_unitario), [14.2, 31.5, 17.16, 477.4, 1.05, 10.44, 35.38, 37.45]);
+});

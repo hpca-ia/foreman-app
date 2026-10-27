@@ -257,7 +257,7 @@ export function mapaQueCuadra(filasTodas, m) {
   };
 }
 
-export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false, bloque: bloqueInicial = null } = {}) {
+export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false, bloque: bloqueInicial = null, ivaForzado = null } = {}) {
   // `respetarMapa` salta el saneo automático: lo usa quien corrige la lectura
   // a mano desde la pantalla. El saneo existe para cuando NOVA se equivoca,
   // pero si la persona está mirando su propio Excel y dice de qué columna sale
@@ -280,7 +280,9 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
     return ivaMetidoEnTotales(filasTodas.slice(desde).map(f => ({ cantidad: f[m.col_cantidad], precio: f[m.col_precio], total: f[m.col_total] })));
   })();
   m.ivaEnFilas = revisado.iva || (ivaMetido != null ? { pct: ivaMetido, enElTotal: true } : precioQueCuadra(filasTodas, m));
-  const ivaDeFila = revisado.iva ? revisado.iva.pct : ivaMetido;
+  // `ivaForzado`: la tasa que reconocieron las otras hojas del mismo libro, para
+  // una hoja con muy pocas filas como para reconocerla sola.
+  const ivaDeFila = revisado.iva ? revisado.iva.pct : (ivaMetido ?? ivaForzado);
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;
 
@@ -579,10 +581,27 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
  * capítulos.
  */
 export function interpretarVariasHojas(hojas = [], opciones = {}) {
-  const leidas = hojas.map(h => ({
-    nombre: h.nombre,
-    r: interpretarPresupuesto(h.filas, h.mapa, { ...opciones, bloque: hojas.length > 1 ? h.nombre : null }),
-  }));
+  const leer = (h, extra = {}) => interpretarPresupuesto(h.filas, h.mapa, { ...opciones, bloque: hojas.length > 1 ? h.nombre : null, ...extra });
+  let leidas = hojas.map(h => ({ nombre: h.nombre, r: leer(h) }));
+
+  // Una hoja con pocas filas no alcanza para reconocer la tasa sola, y sus
+  // precios quedaban "corregidos" con el IVA adentro. Si las otras hojas la
+  // reconocen y en ésta cada fila que no multiplicaba da justo con esa tasa,
+  // se vuelve a leer con ella.
+  const tasaDeOtras = [...new Set(leidas.map(({ r }) => r.ivaPorFila).filter(t => t != null))];
+  if (tasaDeOtras.length === 1) {
+    const f = 1 + tasaDeOtras[0] / 100;
+    leidas = leidas.map((l, k) => {
+      if (l.r.ivaPorFila != null) return l;
+      const corregidas = l.r.rubros.filter(x => x.noMultiplica);
+      const conLaTasa = corregidas.filter(x => {
+        const esperado = (Number(x.cantidad) || 0) * (Number(x.noMultiplica.precio) || 0) * f;
+        return esperado > 0 && Math.abs(esperado - x.total) <= Math.max(0.02, Math.abs(x.total) * 0.005);
+      });
+      return corregidas.length && conLaTasa.length === corregidas.length
+        ? { ...l, r: leer(hojas[k], { ivaForzado: tasaDeOtras[0] }) } : l;
+    });
+  }
 
   const sumar = (xs, campo) => xs.reduce((t, x) => t + (Number(x[campo]) || 0), 0);
   const unir = campo => leidas.flatMap(({ nombre, r }) =>
@@ -596,8 +615,21 @@ export function interpretarVariasHojas(hojas = [], opciones = {}) {
   const totales = leidas.map(({ r }) => Number(r.totalExcel) || 0);
   const hayTotales = totales.some(t => t > 0);
 
+  // EL IVA DE CADA FILA, DE TODAS LAS HOJAS. Se tomaba el de la primera: si
+  // esa hoja no lo reconocía —pocas filas, una portada—, el presupuesto entero
+  // entraba como si no hubiera IVA en las filas, con los totales con IVA, y
+  // después se le sumaba otra vez. Vale la tasa que reconozcan las hojas si
+  // no se contradicen; si ninguna la reconoce, se mira todo junto.
+  const tasas = [...new Set(leidas.map(({ r }) => r.ivaPorFila).filter(t => t != null))];
+  const ivaPorFila = tasas.length === 1 ? tasas[0]
+    : tasas.length === 0 ? ivaMetidoEnTotales(rubros.map(x => ({ cantidad: x.cantidad, precio: x.precio_unitario, total: x.total })))
+    : null;
+  const baseSinIva = ivaPorFila == null ? null
+    : Math.round(rubros.reduce((t, x) => t + (Number(x.total) || 0) / (1 + ivaPorFila / 100), 0) * 100) / 100;
+
   return {
     ...leidas[0]?.r,
+    ivaPorFila, baseSinIva,
     rubros, cargos,
     omitidas: unir("omitidas"),
     capitulos: [...new Set(rubros.map(x => x.capitulo))],
