@@ -44,7 +44,11 @@ export const CLASES_DOC = {
   nota_credito:  { label: "Nota de crédito (devolución)", pista: "Plata que vuelve: se devolvió material o se cobró de más. Entra en negativo y baja lo gastado" },
 };
 
-export const FORMAS_PAGO = ["transferencia", "cheque", "efectivo", "otro"];
+// CON QUÉ SE PAGÓ. "nota de crédito" es una forma de pago como cualquier
+// otra: la factura se saldó con un vale que ya teníamos, no salió plata del
+// banco. Sin esta opción había que anotarlo en la referencia, a mano, y el
+// vale quedaba usado en un lado y disponible en el otro.
+export const FORMAS_PAGO = ["transferencia", "cheque", "efectivo", "nota de crédito", "otro"];
 
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 const n = v => Number(v) || 0;
