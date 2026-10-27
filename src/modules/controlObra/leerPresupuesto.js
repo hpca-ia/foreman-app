@@ -984,7 +984,15 @@ export function aplicarDecisiones({ rubros, cargos, omitidas, advertencias = [] 
   decide("cargo_porcentaje", "corregir").forEach(a => {
     cs = cs.map(c => c.fila === a.datos?.fila ? { ...c, total: a.datos.esperado, origen: "corregido" } : c);
   });
-  rs.sort((x, y) => x.fila - y.fila);
+  // EL ORDEN DEL EXCEL, HOJA POR HOJA. Se ordenaba solo por número de fila,
+  // y con varias hojas cada una vuelve a empezar en la fila 1: la fila 10 de
+  // la segunda hoja quedaba pegada a la fila 10 de la primera y los capítulos
+  // salían mezclados. Primero va el capítulo, en el orden en que se leyó, y
+  // dentro de él la fila.
+  const ordenCap = new Map();
+  rubros.forEach(r => { if (!ordenCap.has(r.capitulo)) ordenCap.set(r.capitulo, ordenCap.size); });
+  const lugar = r => ordenCap.get(r.capitulo) ?? ordenCap.size;
+  rs.sort((x, y) => (lugar(x) - lugar(y)) || (x.fila - y.fila));
 
   const ajuste = (capitulo, monto, fila, descripcion) => {
     if (Math.abs(monto) < 0.005) return;

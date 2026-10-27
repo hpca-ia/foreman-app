@@ -80,3 +80,26 @@ test("con varias hojas, el IVA metido se reconoce aunque la primera hoja sea chi
   // Los ocho precios, sin IVA, también los de la hoja chica.
   assert.deepEqual(r.rubros.map(x => x.precio_unitario), [14.2, 31.5, 17.16, 477.4, 1.05, 10.44, 35.38, 37.45]);
 });
+
+// EL ORDEN DE LAS HOJAS. Cada hoja empieza en la fila 1: ordenar solo por fila
+// mezclaba los capítulos de una hoja con los de otra.
+import { aplicarDecisiones } from "../src/modules/controlObra/leerPresupuesto.js";
+
+test("con varias hojas, el presupuesto queda en el orden del Excel", () => {
+  const sinIva = (n, d, c, p) => [String(n), d, "u", c, p, r2(c * p)];
+  const hoja1 = [["PRESUPUESTO", "", "", "", "", ""], enc,
+    ["", "PRELIMINARES", "", "", "", ""], sinIva(1, "Cerramiento", 10, 2), sinIva(2, "Replanteo", 5, 3),
+    ["", "OBRA GRIS", "", "", "", ""], sinIva(3, "Excavación", 4, 12), sinIva(4, "Plintos", 2, 185)];
+  const hoja2 = [["PRESUPUESTO", "", "", "", "", ""], enc,
+    ["", "CUBIERTA", "", "", "", ""], sinIva(1, "Estructura", 3, 50), sinIva(2, "Teja", 30, 9),
+    ["", "ACABADOS", "", "", "", ""], sinIva(3, "Pintura", 80, 4)];
+  const r = interpretarVariasHojas([
+    { nombre: "CASA", filas: hoja1, mapa: { ...MAPA } },
+    { nombre: "CUIDADOR", filas: hoja2, mapa: { ...MAPA } },
+  ]);
+  const final = aplicarDecisiones(r, {});
+  assert.deepEqual([...new Set(final.rubros.map(x => x.capitulo))],
+    ["CASA · PRELIMINARES", "CASA · OBRA GRIS", "CUIDADOR · CUBIERTA", "CUIDADOR · ACABADOS"]);
+  assert.deepEqual(final.rubros.map(x => x.descripcion),
+    ["Cerramiento", "Replanteo", "Excavación", "Plintos", "Estructura", "Teja", "Pintura"]);
+});
