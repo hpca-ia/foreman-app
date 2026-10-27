@@ -616,8 +616,9 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       {/* Avisar de una reunión: al del equipo que la tiene y a los de afuera
           que vengan. Va con el .ics adjunto, así al cliente le queda en su
           propio calendario sin entrar a FOREMAN. */}
+      {/* El fondo no cierra: se sale por Cerrar. */}
       {avisar && (
-        <div onClick={() => setAvisar(null)}
+        <div
           style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: "#fff", borderRadius: colors.radiusMd, padding: 16, width: 340, maxWidth: "100%", boxShadow: "0 12px 40px rgba(15,23,42,0.2)" }}>

@@ -34,6 +34,9 @@ const VACIA = {
 };
 // "aumenta" y no "agrega": es el valor que guarda la base y el que suma
 // `subtotales`. Con el otro, la vista previa de totales mostraba cero.
+// Las columnas de una partida: flechas, tipo, descripción, unidad, cantidad,
+// precio unitario, total y borrar. Las comparten los títulos y los renglones.
+const COLUMNAS = "14px 88px 1fr 52px 64px 84px 80px 22px";
 const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "", obra_rubro_id: "", rubro_codigo: "" });
 
 const TIPOS = ["Requerimiento del cliente", "Vicio oculto", "Cambio de especificación", "Error de proyecto", "Condición del terreno"];
@@ -67,6 +70,22 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
     return [...mapa.entries()];
   }, [rubros]);
   const cotizacionRef = useRef(null);
+
+  // CANCELAR TAMBIÉN PIERDE TRABAJO, SOLO QUE A PROPÓSITO.
+  //
+  // Nada de esto existe en la base hasta que se guarda: el título, la
+  // justificación, las partidas y las fotos viven en memoria. Si ya hay algo
+  // escrito, Cancelar pregunta una vez; con la pantalla vacía no pregunta
+  // nada, porque no hay nada que perder.
+  const hayAlgoEscrito = () =>
+    Object.entries(VACIA).some(([k, v]) => String(f[k] ?? "") !== String(v)) ||
+    fotos.length > 0 ||
+    lineas.some(l => String(l.descripcion || "").trim() || String(l.precio_unitario || "").trim());
+
+  const cancelar = () => {
+    if (hayAlgoEscrito() && !window.confirm("¿Descartar esta orden de cambio?\n\nLo escrito —el argumento, las partidas y las fotos— no se guardó todavía y no se puede recuperar.")) return;
+    onCerrar();
+  };
 
   /**
    * PEGAR, ARRASTRAR O ELEGIR: las tres cosas terminan en la misma lectura.
@@ -299,7 +318,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12.5 };
 
   return (
-    <Modal onClose={onCerrar} maxWidth={720}>
+    <Modal maxWidth={720}>
       <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 2 }}>Nueva orden de cambio</div>
       <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 12 }}>
         {proyecto || obra?.nombre} · se numera sola al guardar
@@ -491,8 +510,18 @@ Si el texto ya está bien escrito, devolvelo igual.`,
             eso tiene que estar en la misma pantalla. */}
         <div>
           <label style={lbl}>CAPÍTULO II · PARTIDAS</label>
+          {/* Los títulos de las columnas. Sin ellos, el precio unitario era
+              un casillero con "P.U." en gris que desaparecía apenas se
+              escribía, y lo único que se leía como plata era el total de
+              abajo: parecía que la orden no pedía el unitario. */}
+          <div style={{ display: "grid", gridTemplateColumns: COLUMNAS, gap: 5, marginBottom: 3 }}>
+            {["", "", "Descripción", "Unid", "Cant", "P. unit", "Total", ""].map((h, k) => (
+              <span key={k} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3, color: colors.muted,
+                textAlign: k >= 4 && k <= 6 ? "right" : "left" }}>{h.toUpperCase()}</span>
+            ))}
+          </div>
           {lineas.map((l, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 88px 1fr 58px 70px 90px 26px", gap: 5, marginBottom: 5, alignItems: "center" }}>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: COLUMNAS, gap: 5, marginBottom: 5, alignItems: "center" }}>
               {/* EL ORDEN DE LAS PARTIDAS ES EL ORDEN EN QUE SE LEE LA OBRA.
                   NOVA las carga en el orden en que vienen en la proforma del
                   proveedor, que es el de él: primero lo que factura más fácil.
@@ -612,9 +641,13 @@ Si el texto ya está bien escrito, devolvelo igual.`,
               <input value={l.unidad} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, unidad: e.target.value } : x))}
                 placeholder="und" style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }} />
               <input type="number" step="0.01" value={l.cantidad} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, cantidad: e.target.value } : x))}
-                placeholder="cant" style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }} />
+                placeholder="cant" style={{ ...mini, padding: "6px 5px", fontSize: 11.5, textAlign: "right" }} />
               <input type="number" step="0.01" value={l.precio_unitario} onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, precio_unitario: e.target.value } : x))}
-                placeholder="P.U." style={{ ...mini, padding: "6px 5px", fontSize: 11.5 }} />
+                placeholder="0.00" style={{ ...mini, padding: "6px 5px", fontSize: 11.5, textAlign: "right" }} />
+              <span style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", whiteSpace: "nowrap",
+                color: l.tipo === "quita" ? colors.danger : colors.ink }}>
+                {l.tipo === "quita" ? "−" : ""}${fmt((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0))}
+              </span>
               <button onClick={() => setLineas(v => v.length === 1 ? [LINEA()] : v.filter((_, k) => k !== i))}
                 style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 2 }}>
                 <Trash2 size={12} />
@@ -679,7 +712,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
             Guardar y aprobar
           </Button>
         )}
-        <Button variant="secondary" onClick={onCerrar}>Cancelar</Button>
+        <Button variant="secondary" onClick={cancelar}>Cancelar</Button>
       </div>
       <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
         {!conMonto.length

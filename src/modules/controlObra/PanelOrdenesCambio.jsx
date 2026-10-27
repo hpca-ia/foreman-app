@@ -1051,9 +1051,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       })}
 
       {/* Mandarla: a la gente del proyecto que ya está cargada, o a quien se
-          escriba. El documento lo arma el servidor con lo que dice la base. */}
+          escriba. El documento lo arma el servidor con lo que dice la base.
+          El fondo no cierra: acá se eligen destinatarios y se escribe el
+          cuerpo del correo, y se sale por Cancelar. */}
       {mandando && (
-        <div onClick={() => setMandando(null)}
+        <div
           style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: "#fff", borderRadius: colors.radiusMd, padding: 18, width: "min(460px, 100%)", maxHeight: "85vh", overflowY: "auto" }}>

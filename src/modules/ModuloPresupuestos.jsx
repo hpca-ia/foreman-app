@@ -2507,9 +2507,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           onCerrar={()=>setVerTraer(false)}/>
       )}
 
-      {/* MODAL AGREGAR RUBRO */}
+      {/* MODAL AGREGAR RUBRO. El fondo no cierra: se sale por la ×. */}
       {!showAdminBD&&modalRubro&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>setModalRubro(null)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}>
           <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:520,width:"100%",maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.15)"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div>
