@@ -80,6 +80,35 @@ export function sanearMapa(filas, mapa) {
 }
 
 /**
+ * ¿EL TOTAL DE CADA FILA TRAE EL IVA ADENTRO, sin que haya columna de IVA?
+ *
+ * Hay planillas con el precio unitario sin IVA y un total que es cantidad ×
+ * precio × 1,15: el IVA está metido en el total y no aparece en ninguna otra
+ * columna. Ningún precio "cuadra", así que no se detectaba, y el presupuesto
+ * entraba con el precio sin IVA y el total con IVA —y al sumarle el IVA al
+ * final, lo cobraba dos veces—.
+ *
+ * Es IVA si en casi todas las filas el total es cantidad × precio más un
+ * recargo PAREJO de entre 5 % y 25 %. Una diferencia que cambia de fila en
+ * fila no es un impuesto: es otra cosa, y no se toca.
+ *
+ * @param filas [{ cantidad, precio, total }]
+ * @returns la tasa (15, 12…) o null
+ */
+export function ivaMetidoEnTotales(filas = []) {
+  const razones = filas
+    .map(f => ({ c: num(f.cantidad), p: num(f.precio), t: num(f.total) }))
+    .filter(x => x.c > 0 && x.p > 0 && x.t > 0)
+    .map(x => x.t / (x.c * x.p) - 1)
+    .sort((a, b) => a - b);
+  if (razones.length < 5) return null;
+  const medio = razones[Math.floor(razones.length / 2)];
+  const pareja = razones.filter(v => Math.abs(v - medio) <= 0.004).length >= razones.length * 0.8;
+  if (!pareja || medio < 0.05 || medio > 0.25) return null;
+  return Math.round(medio * 1000) / 10;
+}
+
+/**
  * ¿De qué columna sale el total de cada fila?
  *
  * Muchos presupuestos traen el precio unitario sin IVA, el IVA aparte y el
@@ -243,8 +272,15 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
   // El IVA que viene en su propia columna: el precio unitario queda limpio y
   // la tasa se guarda con cada rubro, para que los honorarios y los
   // indirectos se calculen sobre el costo directo y no sobre el impuesto.
-  m.ivaEnFilas = revisado.iva || precioQueCuadra(filasTodas, m);
-  const ivaDeFila = revisado.iva ? revisado.iva.pct : null;
+  // Y si no hay columna con IVA pero el total lo trae metido (cantidad ×
+  // precio × 1,15 en cada fila), es lo mismo: la tasa se reconoce igual.
+  const ivaMetido = revisado.iva ? null : (() => {
+    if (m.col_cantidad == null || m.col_precio == null || m.col_total == null) return null;
+    const desde = (m.fila_encabezado ?? 0) + 1;
+    return ivaMetidoEnTotales(filasTodas.slice(desde).map(f => ({ cantidad: f[m.col_cantidad], precio: f[m.col_precio], total: f[m.col_total] })));
+  })();
+  m.ivaEnFilas = revisado.iva || (ivaMetido != null ? { pct: ivaMetido, enElTotal: true } : precioQueCuadra(filasTodas, m));
+  const ivaDeFila = revisado.iva ? revisado.iva.pct : ivaMetido;
   const val = (f, c) => (c == null ? "" : f[c]);
   const inicio = (m.fila_encabezado ?? 0) + 1;
 

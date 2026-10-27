@@ -12,7 +12,7 @@ import { guardarOriginal } from "../../lib/archivosPresupuesto";
 import { asegurarProyecto } from "../../lib/proyectoDeObra";
 import { reconocerExcel, recordarFormato, pedirNova, parseJSONTolerante } from "../../lib/leerExcelPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadRespondida, unidadParaBase } from "../../lib/preguntasNova";
-import { interpretarPresupuesto, interpretarVariasHojas, aplicarDecisiones } from "./leerPresupuesto";
+import { interpretarPresupuesto, interpretarVariasHojas, aplicarDecisiones, ivaMetidoEnTotales } from "./leerPresupuesto";
 import RevisionPresupuesto from "./RevisionPresupuesto";
 import EditorColumnas from "./EditorColumnas";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
@@ -33,6 +33,7 @@ Reglas:
 - "c" = el capítulo/sección al que pertenece ese rubro (repite el nombre en cada rubro).
 - Las filas de encabezado de capítulo y las de subtotal NO son rubros: no las incluyas.
 - "q" cantidad, "p" precio unitario, "t" total de la fila. Si falta "t", omítelo.
+- Si el documento trae dos precios unitarios (sin IVA y con IVA), "p" es el SIN IVA. "t" es el total de la fila tal como está escrito, aunque incluya IVA.
 - "n" = la nota, observación o instrucción escrita para ESE rubro (debajo de la fila, al lado, o con un asterisco o llamada que remite a él). Cópiala textual. Si el rubro no tiene nota, omite "n".
 - "notas" = todo texto fuera de la tabla de rubros que sea nota, observación, condición, exclusión, forma de pago, plazo, validez o instrucción del cliente. Una entrada por nota, TEXTUAL, en el orden del documento, sin su numeración. No incluyas el membrete, datos de contacto, firmas ni totales. Si no hay, [].
 - Las notas NO son rubros: no las pongas en "rubros".
@@ -147,6 +148,8 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     setRubros([]); setCargos([]); setOmitidas([]); setControl(null); setAdvertencias([]); setDecisiones({});
     setFilasExcel(null); setMapaActual(null); setOrigenMapa(null); setVerColumnas(false);
     setIncluyeIva(null); setSugerenciaIva(""); setIncluirCargos(true);
+    // La tasa del archivo anterior no puede quedar puesta para el siguiente.
+    setIvaPorFila(null); setBaseSinIva(null);
     setPreguntas(RESPUESTAS_VACIAS); setSugerencia({}); setNotasDoc(""); setResumenDoc([]);
   }
 
@@ -281,7 +284,17 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     setResumenDoc((Array.isArray(parsed.resumen) ? parsed.resumen : [])
       .map(x => ({ capitulo: String(x?.c ?? x?.capitulo ?? "").trim().toUpperCase(), total: n(x?.t ?? x?.total) }))
       .filter(x => x.capitulo && x.total));
-    setSugerenciaIva("Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
+    // EL IVA METIDO EN EL TOTAL, también leído por NOVA: precio sin IVA y
+    // total con IVA en cada fila. Se reconoce igual que en un Excel.
+    const leidos = parsed.rubros.map(r => ({ cantidad: n(r.q ?? r.cantidad), precio: n(r.p ?? r.precio_unitario), total: n(r.t ?? r.total) }));
+    const tasa = ivaMetidoEnTotales(leidos);
+    if (tasa != null) {
+      setIvaPorFila(tasa); setIvaPct(tasa); setIncluyeIva(true);
+      setBaseSinIva(r2(leidos.reduce((s2, x) => s2 + (x.total || x.cantidad * x.precio) / (1 + tasa / 100), 0)));
+    } else { setIvaPorFila(null); setBaseSinIva(null); }
+    setSugerenciaIva(tasa != null
+      ? `El total de cada fila trae IVA del ${tasa} %.`
+      : "Revisa el documento: si su total no suma IVA, los valores vienen sin IVA.");
     setNombre(parsed.nombre || file.name.replace(/\.[^.]+$/, ""));
     setSugerencia({ emisor: parsed.emisor || "", cliente: parsed.cliente || "" });
     setPreguntas({ ...RESPUESTAS_VACIAS, cliente: parsed.cliente || "" });
@@ -433,13 +446,27 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
       }
     }
 
+    // EL IVA DE CADA FILA SALE DE LA FILA Y SE SUMA UNA VEZ, AL FINAL.
+    // Cuando el Excel trae el precio sin IVA y el total con IVA (en su columna
+    // o metido en el total), el rubro entraba con el precio sin IVA y el total
+    // con IVA: no multiplicaba, y al sumarle el IVA del presupuesto se cobraba
+    // dos veces. En un presupuesto todo va sin IVA —precio, cantidad y
+    // total— y el IVA, con la tasa del Excel, va al final.
+    const ivaFila = ivaPorFila != null ? n(ivaPorFila) : null;
+    const fIva = ivaFila != null ? 1 + ivaFila / 100 : 1;
+    const sinIvaDeFila = r => (ivaFila == null ? r
+      : { ...r, total: n(r.cantidad) > 0 && n(r.precio_unitario) > 0 ? r2(n(r.cantidad) * n(r.precio_unitario)) : r2(n(r.total) / fIva) });
     const todos = [
-      ...final.rubros,
-      ...(incluirCargos ? final.cargos.map(c => ({ capitulo: CAP_CARGOS, descripcion: c.descripcion, unidad: "glb", cantidad: 1, precio_unitario: c.total, total: c.total })) : []),
+      ...final.rubros.map(sinIvaDeFila),
+      ...(incluirCargos ? final.cargos.map(c => {
+        const t = r2(n(c.total) / fIva);
+        return { capitulo: CAP_CARGOS, descripcion: c.descripcion, unidad: "glb", cantidad: 1, precio_unitario: t, total: t };
+      }) : []),
     ];
     // Si los precios ya traían IVA, el presupuesto no se lo vuelve a sumar: el
-    // total tiene que ser el mismo del Excel.
-    const pctIva = incluyeIva ? 0 : n(ivaPct);
+    // total tiene que ser el mismo del Excel. Con IVA por fila, ya se sacó de
+    // cada rubro y se suma acá, con la tasa del Excel.
+    const pctIva = ivaFila != null ? ivaFila : incluyeIva ? 0 : n(ivaPct);
     const subtotal = r2(todos.reduce((s, r) => s + n(r.total), 0));
     const iva_monto = r2(subtotal * pctIva / 100);
     // Las notas del documento del cliente se guardan APARTE de las nuestras:
@@ -449,7 +476,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
     const { data: pre, error: e1 } = await supabase.from("presupuestos").insert({
       nombre: nombre.trim(), cliente_id, cliente_nombre: cliente || "Sin cliente",
       honorarios_pct: 0, iva_pct: pctIva, estado: "borrador", created_by: currentUser.id,
-      notas: incluyeIva && filasExcel ? "Los precios del Excel original ya incluían IVA." : "",
+      notas: incluyeIva && filasExcel && ivaFila == null ? "Los precios del Excel original ya incluían IVA." : "",
       subtotal, honorarios_monto: 0, iva_monto, total: r2(subtotal + iva_monto),
     }).select().single();
     if (e1 || !pre) { setError("No se pudo crear el presupuesto: " + (e1?.message || "")); setGuardando(false); return; }
@@ -632,8 +659,14 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
                 <div style={{ fontSize: 11.5, color: colors.inkSoft, background: colors.surface,
                   border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm,
                   padding: "8px 10px", marginBottom: 9, lineHeight: 1.55 }}>
-                  Tu Excel trae el IVA en una columna aparte, al <strong>{ivaPorFila} %</strong>. Los rubros entran
-                  con el precio unitario <strong>sin IVA</strong>, tal como los escribiste, y el total con IVA.
+                  {paraPresupuesto ? (
+                    <>Tu archivo trae el IVA en cada fila, al <strong>{ivaPorFila} %</strong>: el total de la fila es cantidad × precio
+                    con IVA. Los rubros entran <strong>sin IVA</strong> —precio, cantidad y total— y el IVA se suma
+                    <strong> una sola vez, al final</strong> del presupuesto.</>
+                  ) : (
+                    <>Tu Excel trae el IVA en cada fila, al <strong>{ivaPorFila} %</strong>. Los rubros entran
+                    con el precio unitario <strong>sin IVA</strong>, tal como los escribiste, y el total con IVA.</>
+                  )}
                   <div style={{ marginTop: 5 }}>
                     Costo directo sin IVA <strong>${fmt(baseSinIva + (incluirCargos ? sumaTodosCargos / (1 + ivaPorFila / 100) : 0))}</strong>
                     {" · "}IVA ${fmt((baseSinIva + (incluirCargos ? sumaTodosCargos / (1 + ivaPorFila / 100) : 0)) * ivaPorFila / 100)}
@@ -644,6 +677,9 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
                   </div>
                 </div>
               )}
+              {/* Si el archivo ya dice cuál es el IVA, no se pregunta: elegir
+                  "sumarle IVA" ahí lo volvía a sumar. */}
+              {ivaPorFila == null && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {[[true, "Sí, ya incluyen IVA"], [false, "No, sumarle IVA"]].map(([v, t]) => (
                   <button key={t} onClick={() => setIncluyeIva(v)}
@@ -660,6 +696,7 @@ export default function ImportarObra({ currentUser, onVolver, onCreada, destino 
                   </label>
                 )}
               </div>
+              )}
             </div>
 
             <PreguntasNova rubros={final.rubros} respuestas={preguntas} onCambiar={setPreguntas} sugerencia={sugerencia}
