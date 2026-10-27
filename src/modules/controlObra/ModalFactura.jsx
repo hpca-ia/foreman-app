@@ -302,17 +302,21 @@ Rubros: ${listaRubros}`,
    */
   async function revisarEnSri(claveDada, rucDado) {
     const clave = String(claveDada ?? form.clave_acceso ?? "").replace(/\D/g, "");
-    if (clave.length !== 49) {
+    const ruc = String(rucDado ?? form.ruc ?? "").replace(/\D/g, "");
+    // CON EL RUC SOLO TAMBIÉN SE PREGUNTA. No se revisa el comprobante —para
+    // eso hace falta la clave— pero sí quién es el proveedor, que es lo que
+    // decide si su cuenta queda junta o partida en tres.
+    if (clave.length !== 49 && ruc.length !== 13) {
       setSri({ estado: "sin_clave", hallazgos: [{ nivel: "aviso", regla: "clave",
-        dice: "No se leyó la clave de acceso de 49 dígitos, así que no se pudo consultar al SRI.",
-        hacer: "Está impresa debajo del código de barras, como NÚMERO DE AUTORIZACIÓN. Copiala en el campo y volvé a revisar." }] });
+        dice: "No se leyó la clave de acceso de 49 dígitos ni hay un RUC cargado, así que no se pudo consultar al SRI.",
+        hacer: "La clave está impresa debajo del código de barras, como NÚMERO DE AUTORIZACIÓN. Con el RUC solo, el SRI igual dice quién es el proveedor." }] });
       return;
     }
     setRevisandoSri(true);
     try {
       const r = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sri: { clave, ruc: rucDado || form.ruc || "" } }),
+        body: JSON.stringify({ sri: { clave, ruc } }),
       });
       const d = await r.json().catch(() => null);
       if (!r.ok || !d || d.error) {
@@ -325,8 +329,18 @@ Rubros: ${listaRubros}`,
         // el XML autorizado es el documento, el papel es una copia impresa.
         if (d.comprobante?.ruc) {
           setForm(f => ({ ...f, ruc: d.comprobante.ruc,
-            razon_social: f.razon_social || d.comprobante.razonSocial || "",
             numero_factura: d.comprobante.numero || f.numero_factura, clave_acceso: clave }));
+        }
+        // EL NOMBRE DEL SRI MANDA.
+        //
+        // El del papel viene escrito de cuatro formas —"AVIANCA ECUADOR
+        // S.A.", "Avianca Ecuador S.A.", "AVIANCA ECUADOR, S.A."— y cada
+        // forma arma su propia cuenta de proveedor: la misma aerolínea
+        // aparecía dos veces, con la deuda partida en dos. El catastro tiene
+        // un solo nombre y es el legal. Antes solo se usaba cuando el campo
+        // estaba vacío, que es justo cuando no hacía falta.
+        if (d.proveedor?.razonSocial) {
+          setForm(f => ({ ...f, ruc: d.proveedor.numeroRuc || f.ruc, razon_social: d.proveedor.razonSocial }));
         }
       }
     } catch (e) {
@@ -680,6 +694,7 @@ Rubros: ${listaRubros}`,
               <div style={{ fontSize: 12, fontWeight: 700, color: tono, flex: 1 }}>
                 {grave ? "⚠ Esta factura no sustenta el gasto"
                   : limpio ? "✓ Revisada en el SRI: todo en orden"
+                    : sri.estado === "solo_ruc" ? `Proveedor confirmado en el SRI · el comprobante no se revisó`
                     : sri.estado === "sin_clave" ? "No se pudo revisar en el SRI"
                       : sri.estado === "sin_respuesta" ? "El SRI no contestó"
                         : `Revisada en el SRI · ${sri.hallazgos.length} ${sri.hallazgos.length === 1 ? "cosa para mirar" : "cosas para mirar"}`}

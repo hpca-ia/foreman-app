@@ -22,6 +22,10 @@ import {
 // golpeó el rubro entero, pero el resto todavía tiene que salir de caja.
 
 const PAGO_VACIO = { monto: "", fecha: new Date().toISOString().split("T")[0], forma: "transferencia", referencia: "", nota: "" };
+const estiloChip = {
+  border: `1px solid ${colors.border}`, background: "#fff", color: colors.inkSoft, borderRadius: 12,
+  padding: "1px 8px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
+};
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
 export default function PanelProveedores({ obra, facturas = [], currentUser, puede, onCambio }) {
@@ -122,6 +126,10 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
         {dato("FACTURADO", totales.facturado)}
         {dato("PAGADO", totales.pagado, colors.success)}
         {dato("POR PAGAR", totales.saldo, totales.saldo > 0 ? colors.danger : colors.muted)}
+        {/* EL CRÉDITO NO ES UNA DEUDA MENOS: ES PLATA NUESTRA EN LA CASA DEL
+            PROVEEDOR. Vale como efectivo hasta que se use en una compra, y
+            por eso se muestra como lo que es, en su propio renglón. */}
+        {totales.credito > 0.005 && dato("CRÉDITO A FAVOR", totales.credito, colors.success)}
         {totales.porFacturar > 0 && (
           <div>
             <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>PROFORMAS SIN FACTURA</div>
@@ -231,6 +239,12 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                 <div style={{ fontSize: 15, fontWeight: 700, color: c.saldo > 0 ? colors.danger : colors.success }}>
                   {c.saldo > 0 ? `debemos $${fmt(c.saldo)}` : "al día"}
                 </div>
+                {c.credito > 0.005 && (
+                  <div title="Notas de crédito sin usar: plata nuestra que está en la casa de este proveedor. Se usa en la próxima compra."
+                    style={{ fontSize: 11.5, fontWeight: 700, color: colors.success }}>
+                    tenemos ${fmt(c.credito)} a favor
+                  </div>
+                )}
               </div>
             </div>
 
@@ -254,10 +268,53 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                           </button>
                         )}
                         <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>${fmt(d.total)}</span>
-                        {d.clase !== "proforma" && chip(d.estado)}
+                        {d.clase !== "proforma" && !esNotaDeCredito(d.clase) && d.total >= 0 && chip(d.estado)}
                       </div>
 
-                      {d.clase !== "proforma" && (
+                      {esNotaDeCredito(d.clase) || d.total < 0 ? (
+                        <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                          {d.facturada_con_id ? (
+                            <>
+                              <span>Ya se usó{(() => {
+                                const en = c.documentos.find(x => Number(x.id) === Number(d.facturada_con_id));
+                                return en ? `: se aplicó a ${en.numero_factura || en.detalle || dia(en.fecha)}` : "";
+                              })()}.</span>
+                              {puedeRegistrar && (
+                                <button onClick={async () => { await guardarDocumento(d.id, { facturada_con_id: null }); await cargar(); onCambio?.(); }}
+                                  title="Volver a contarla como crédito disponible"
+                                  style={estiloChip}>vuelve a estar a favor</button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <span>Crédito a favor por <strong style={{ color: colors.success }}>${fmt(Math.abs(d.total))}</strong>.
+                                No es deuda ni pago: vale hasta que se use en una compra.</span>
+                              {/* DÓNDE SE USÓ, NO SOLO QUE SE USÓ. Un vale que se
+                                  gastó y no dice en qué factura es un vale que
+                                  nadie puede cruzar con el papel del proveedor. */}
+                              {puedeRegistrar && (
+                                <select defaultValue="" onChange={async e => {
+                                  const id = Number(e.target.value);
+                                  if (!id) return;
+                                  await guardarDocumento(d.id, { facturada_con_id: id });
+                                  await cargar(); onCambio?.();
+                                }}
+                                  title="¿En qué compra de este proveedor se usó este crédito?"
+                                  style={{ ...estiloChip, maxWidth: 230 }}>
+                                  <option value="">se usó en…</option>
+                                  {c.documentos
+                                    .filter(x => Number(x.total) > 0 && x.clase !== "proforma")
+                                    .map(x => (
+                                      <option key={x.id} value={x.id}>
+                                        {x.numero_factura || x.detalle || "sin número"} · ${fmt(x.total)} · {dia(x.fecha)}
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ) : d.clase !== "proforma" && (
                         <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
                           pagado ${fmt(d.pagado)} · falta <strong style={{ color: d.saldo > 0 ? colors.danger : colors.success }}>${fmt(d.saldo)}</strong>
                           {d.total > 0 && ` · ${Math.round(d.pct * 100)}%`}
@@ -280,7 +337,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                         </div>
                       ))}
 
-                      {puedeRegistrar && d.clase !== "proforma" && d.saldo > 0.005 && (
+                      {puedeRegistrar && d.clase !== "proforma" && !esNotaDeCredito(d.clase) && d.saldo > 0.005 && (
                         pagando === d.id ? (
                           <div style={{ background: colors.bg, borderRadius: 8, padding: 8, marginTop: 5, display: "grid", gap: 5 }}>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>

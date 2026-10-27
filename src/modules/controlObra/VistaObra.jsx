@@ -261,6 +261,25 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               + " salió la plata y todavía no hay una factura que meta ese gasto al control."
               + " Clic para verlos en Proveedores y cerrarlos cuando llegue su factura."} />
         )}
+        {/* LAS NOTAS DE CRÉDITO, ARRIBA CON LO DEMÁS.
+            Un vale del proveedor es plata nuestra que está en su casa: no es
+            una deuda menos ni un gasto menos, es efectivo guardado afuera, y
+            vale hasta que se use en una compra. Escondido en la lista de un
+            proveedor, nadie se acuerda de usarlo —que es exactamente lo que
+            el proveedor espera—. */}
+        {(() => {
+          const vales = facturas.filter(f => (f.clase === "nota_credito" || Number(f.total) < 0) && !f.facturada_con_id);
+          const suma = vales.reduce((t, f) => t + Math.abs(Number(f.total) || 0), 0);
+          if (suma <= 0.005) return null;
+          return (
+            <Tarjeta label="Notas de crédito" valor={suma} color={colors.success}
+              onClick={vePlata ? () => setTab("proveedores") : null}
+              nota={"Crédito a favor sin usar: plata nuestra que está en la casa del proveedor.\n\n"
+                + vales.map(f => `· ${f.razon_social || "sin proveedor"} — ${f.detalle || f.numero_factura || "sin detalle"} — $${fmt(Math.abs(f.total))}`).join("\n")
+                + "\n\nNo es deuda ni gasto: vale hasta que se use en una compra."
+                + " Clic para verlas en Proveedores y marcar en qué factura se usaron."} />
+          );
+        })()}
         <Tarjeta label="Saldo" valor={totales.saldo} color={totales.saldo < 0 ? colors.danger : colors.success} />
         {/* EL BENEFICIO, ARRIBA CON LO DEMÁS.
             Es la plata que de verdad queda, y es la única de estas cifras que

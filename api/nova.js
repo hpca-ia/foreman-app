@@ -45,6 +45,32 @@ export const config = {
  */
 async function revisarEnSri(req, res) {
   const { clave, ruc } = req.body.sri || {};
+
+  // SIN CLAVE DE ACCESO TODAVÍA SE PUEDE PREGUNTAR QUIÉN ES.
+  //
+  // La revisión del comprobante necesita la clave de 49 dígitos; el catastro
+  // del RUC no. Y preguntar quién es el del RUC vale por sí solo: el nombre
+  // que trae el papel está escrito de cuatro formas distintas —"AVIANCA
+  // ECUADOR S.A.", "Avianca Ecuador S.A.", "AVIANCA ECUADOR, S.A."— y el
+  // nombre es lo que junta o parte la cuenta de un proveedor.
+  //
+  // Se contesta aparte y se dice que es aparte: inventar un veredicto del
+  // comprobante sin haberlo consultado sería mentir en el renglón donde más
+  // caro sale.
+  const claveLimpia = String(clave || "").replace(/\D/g, "");
+  if (claveLimpia.length !== 49) {
+    const soloRuc = await consultarRuc(ruc);
+    if (soloRuc?.error) return res.status(200).json({ estado: "sin_respuesta", hallazgos: [],
+      error: soloRuc.error });
+    return res.status(200).json({
+      estado: "solo_ruc", proveedor: soloRuc.ruc, hallazgos: [{
+        nivel: "aviso", regla: "clave",
+        dice: "No se revisó el comprobante: falta la clave de acceso de 49 dígitos.",
+        hacer: "Está impresa debajo del código de barras, como NÚMERO DE AUTORIZACIÓN. Copiala y volvé a revisar.",
+      }],
+    });
+  }
+
   const [auth, catastro, ajuste] = await Promise.all([
     autorizacionDe(clave),
     consultarRuc(ruc || String(clave || "").slice(10, 23)),
