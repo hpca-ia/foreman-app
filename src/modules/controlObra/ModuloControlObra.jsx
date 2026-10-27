@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Upload, AlertTriangle, Trash2 } from "lucide-react";
+import { Plus, Upload, AlertTriangle, Trash2, Users } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -8,6 +8,7 @@ import ActivarObra from "./ActivarObra";
 import ImportarObra from "./ImportarObra";
 import VistaObra from "./VistaObra";
 import BorrarObra from "./BorrarObra";
+import ProveedoresDeTodo from "./ProveedoresDeTodo";
 
 export default function ModuloControlObra({ currentUser, puede, nivelObra = () => null, entraATodo = false }) {
   // Lo que se puede hacer en una obra sale del proyecto al que pertenece: quien
@@ -102,6 +103,18 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
     return <ActivarObra currentUser={currentUser} onCancelar={() => setVista("lista")} onCreada={async o => { await fetchObras(); setObraActiva(o); setVista("obra"); }} />;
   }
 
+  // LOS PROVEEDORES, FUERA DE LA OBRA.
+  //
+  // Vive acá y no adentro de una obra porque la pregunta es justamente la que
+  // una obra no puede contestar: cuánto le compramos a este proveedor en todo,
+  // sumando los proyectos.
+  if (vista === "proveedores") {
+    return <ProveedoresDeTodo obras={obras} nombreDeObra={id => {
+      const o = obras.find(x => x.id === id);
+      return o ? (proyectos[o.lead_id] || o.nombre) : "";
+    }} onVolver={() => setVista("lista")} />;
+  }
+
   if (vista === "importar") {
     return <ImportarObra currentUser={currentUser} onVolver={() => setVista("lista")} onCreada={async o => { await fetchObras(); setObraActiva(o); setVista("obra"); }} />;
   }
@@ -120,6 +133,9 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
           {/* Activar una obra o subirla desde un Excel es crear la línea base
               del control: lo hace quien tiene ese permiso, no cualquiera que
               entre a mirar cómo va su obra. */}
+          <Button variant="outline" size="md" onClick={() => setVista("proveedores")}>
+            <Users size={14} /> Proveedores
+          </Button>
           {puede?.("obras.crear") !== false && <>
           <Button variant="outline" size="md" onClick={() => setVista("activar")}>
             <Plus size={14} /> Desde un presupuesto
