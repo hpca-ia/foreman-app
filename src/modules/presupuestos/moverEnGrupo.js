@@ -47,3 +47,61 @@ export function llevarMarcados(nombres, marcados, destino) {
   const k = destino == null ? resto.length : resto.indexOf(destino);
   return [...resto.slice(0, k < 0 ? resto.length : k), ...bloque, ...resto.slice(k < 0 ? resto.length : k)];
 }
+
+// ── LAS HOJAS DEL EXCEL, COMO BLOQUES ──
+//
+// Un presupuesto que vino de un libro de varias hojas se trabaja igual que el
+// libro: cada hoja con sus capítulos juntos, y las hojas una detrás de la
+// otra. Mover un capítulo lo mueve dentro de su hoja —nunca entre los de
+// otra—, y las hojas se mueven enteras. La hoja de un capítulo es lo que va
+// antes de " · " en su nombre.
+
+const SEP = " · ";
+const hojaDe = n => { const i = String(n).indexOf(SEP); return i > 0 ? String(n).slice(0, i) : ""; };
+
+/** Las hojas en el orden en que aparecen. */
+export const hojasEnOrden = nombres => [...new Set(nombres.map(hojaDe))];
+
+/**
+ * Los capítulos con cada hoja junta, sin cambiar el orden de las hojas ni el
+ * de los capítulos dentro de cada una. `orden` fija el orden de las hojas (si
+ * no se da, el de su primera aparición).
+ */
+export function juntarPorHoja(nombres, orden = hojasEnOrden(nombres)) {
+  const todas = [...orden, ...hojasEnOrden(nombres).filter(h => !orden.includes(h))];
+  return todas.flatMap(h => nombres.filter(n => hojaDe(n) === h));
+}
+
+/** Correr los marcados un lugar, cada uno dentro de su hoja. */
+export function correrEnSuHoja(nombres, marcados, dir) {
+  const orden = hojasEnOrden(nombres);
+  const lista = juntarPorHoja(nombres, orden);
+  return orden.flatMap(h => {
+    const suyos = lista.filter(n => hojaDe(n) === h);
+    return correrMarcados(suyos, marcados.filter(m => hojaDe(m) === h), dir);
+  });
+}
+
+/** Llevar los marcados al principio (destino "inicio") o al final de su hoja. */
+export function llevarEnSuHoja(nombres, marcados, destino) {
+  const orden = hojasEnOrden(nombres);
+  const lista = juntarPorHoja(nombres, orden);
+  return orden.flatMap(h => {
+    const suyos = lista.filter(n => hojaDe(n) === h);
+    const mios = marcados.filter(m => hojaDe(m) === h);
+    if (!mios.length) return suyos;
+    return llevarMarcados(suyos, mios, destino === "inicio" ? suyos.find(n => !mios.includes(n)) ?? null : null);
+  });
+}
+
+/** Una hoja entera un lugar para arriba (-1) o para abajo (1). */
+export function moverHoja(nombres, hoja, dir) {
+  const orden = hojasEnOrden(nombres);
+  const i = orden.indexOf(hoja), j = i + dir;
+  if (i < 0 || j < 0 || j >= orden.length) return juntarPorHoja(nombres, orden);
+  [orden[i], orden[j]] = [orden[j], orden[i]];
+  return juntarPorHoja(nombres, orden);
+}
+
+/** ¿Los dos capítulos son de la misma hoja? Para no soltar uno entre los de otra. */
+export const mismaHoja = (a, b) => hojaDe(a) === hojaDe(b);

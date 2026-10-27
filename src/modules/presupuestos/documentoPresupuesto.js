@@ -130,7 +130,7 @@ const MARCA_PDF = "Nota:";
 const muestraNota = (notasRubro, fuera) => r =>
   notasRubro && !fuera.has(String(r.id ?? r.numero ?? ""));
 
-function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
+function tabla(caps, formato, incluirNota = () => true, conEtapas = false, hojas = null) {
   if (formato === "capitulos") {
     // Un capítulo repartido entre etapas no se puede rotular con una sola: se
     // dice que está repartido, que es la verdad y además es el aviso de que
@@ -153,10 +153,20 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
   const fila = (num, desc, unidad, cant, pu, total, etapa) => (conEtapas
     ? [num, desc, etapa, unidad, cant, pu, total]
     : [num, desc, unidad, cant, pu, total]);
-  caps.forEach(c => {
+  // CADA HOJA DEL EXCEL, COMO UNA SECCIÓN: su nombre arriba de sus
+  // capítulos y su subtotal abajo. Los capítulos van sin repetir la hoja.
+  const deHoja = [], deSubHoja = [];
+  const hojaDe = c => hojas?.find(h => h.nombre === (bloqueDe(c.nombre) || "Otros"));
+  caps.forEach((c, k) => {
+    if (hojas && (k === 0 || bloqueDe(caps[k - 1].nombre) !== bloqueDe(c.nombre))) {
+      deHoja.push(filas.length);
+      // Una sola celda a lo ancho: con una por columna el fondo quedaba con
+      // rayas blancas en las uniones.
+      filas.push([{ content: hojaDe(c)?.nombre.toUpperCase() || "", colSpan: conEtapas ? 7 : 6 }]);
+    }
     deCapitulo.push(filas.length);
     // Con extras, el capítulo dice lo pedido y los extras dicen lo suyo.
-    filas.push(fila(c.numero, c.nombre.toUpperCase(), "", "", "", conPrecio ? money(c.hayExtras ? c.subtotalBase : c.subtotal) : "", ""));
+    filas.push(fila(c.numero, sinHoja(c.nombre, hojas).toUpperCase(), "", "", "", conPrecio ? money(c.hayExtras ? c.subtotalBase : c.subtotal) : "", ""));
     c.rubros.forEach((r, k) => {
       if (r.extra && !c.rubros[k - 1]?.extra) {
         deExtras.push(filas.length);
@@ -173,12 +183,17 @@ function tabla(caps, formato, incluirNota = () => true, conEtapas = false) {
         conPrecio ? money(r.precio_unitario) : "", conPrecio ? money(r.total) : "",
         String(r.etapa || "").trim()));
     });
+    if (hojas && (k === caps.length - 1 || bloqueDe(caps[k + 1].nombre) !== bloqueDe(c.nombre))) {
+      const h = hojaDe(c);
+      deSubHoja.push(filas.length);
+      filas.push(fila("", `SUBTOTAL ${h?.nombre.toUpperCase() || ""}`, "", "", "", conPrecio ? money(h?.subtotal) : "", ""));
+    }
   });
   return {
     columnas: conEtapas
       ? ["N°", "Descripción", "Etapa", "Unidad", "Cantidad", "P. unitario", "Total"]
       : ["N°", "Descripción", "Unidad", "Cantidad", "P. unitario", "Total"],
-    filas, deCapitulo, deExtras, deNoCotiza,
+    filas, deCapitulo, deExtras, deNoCotiza, deHoja, deSubHoja,
   };
 }
 
@@ -426,7 +441,7 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   // ¿Este presupuesto se cobra por etapas? Lo dicen los rubros, no una opción:
   // si hay dos etapas puestas, el documento tiene que decirlo.
   const conEtapas = tieneEtapas(items);
-  const tb = tabla(caps, formato, muestraNota(notasRubro, new Set((notasFuera || []).map(String))), conEtapas);
+  const tb = tabla(caps, formato, muestraNota(notasRubro, new Set((notasFuera || []).map(String))), conEtapas, hojasDoc);
   const soloCaps = formato === "capitulos";
   // CON LA COLUMNA DE ETAPA, TODO SE CORRE UNO. La descripción es la única que
   // se estira; las demás tienen su ancho porque son números y una columna de
@@ -453,6 +468,17 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
         const desde = soloCaps ? (conEtapas ? 3 : 2) : (conEtapas ? 4 : 3);
         if (d.column.index >= desde) d.cell.styles.halign = "right";
         if (!soloCaps && d.column.index === 2) d.cell.styles.halign = "center";
+      }
+      // La hoja: banda del color de la plantilla, letra blanca. Su subtotal:
+      // en negrita, con raya arriba, cerrando la sección.
+      if (d.section === "body" && tb.deHoja?.includes(d.row.index)) {
+        d.cell.styles.fillColor = t.primario; d.cell.styles.textColor = [255, 255, 255];
+        d.cell.styles.fontStyle = "bold"; d.cell.styles.fontSize = 9;
+        d.cell.styles.lineWidth = 0;   // una banda entera, sin rayas entre celdas
+      }
+      if (d.section === "body" && tb.deSubHoja?.includes(d.row.index)) {
+        d.cell.styles.fontStyle = "bold"; d.cell.styles.textColor = t.capTexto;
+        d.cell.styles.lineWidth = { top: 0.8, bottom: 0.4 }; d.cell.styles.lineColor = t.primario;
       }
       if (d.section === "body" && tb.deCapitulo.includes(d.row.index)) {
         d.cell.styles.fillColor = t.capFondo || false;
@@ -776,14 +802,25 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
 
   const celdasSubtotal = [], celdasExtras = [];
   const celdasDeCap = new Map();   // las celdas que suman cada capítulo (lo pedido y sus extras)
-  caps.forEach(c => {
+  caps.forEach((c, kCap) => {
+    // LA HOJA DEL EXCEL ORIGINAL abre su sección.
+    if (hojasDoc && !soloCapitulos && (kCap === 0 || bloqueDe(caps[kCap - 1].nombre) !== bloqueDe(c.nombre))) {
+      const h = hojasDoc.find(x => x.nombre === (bloqueDe(c.nombre) || "Otros"));
+      ws.mergeCells(fila, 1, fila, 6);
+      const x = ws.getCell(fila, 1);
+      x.value = (h?.nombre || "").toUpperCase();
+      x.font = fuente({ bold: true, color: { argb: "FFFFFFFF" } });
+      x.fill = relleno(t.primario);
+      ws.getRow(fila).height = 18;
+      fila++;
+    }
     const filaCap = fila;
     // Con extras, la fórmula del capítulo suma solo lo pedido: los extras
     // tienen su fila con su propia suma, y contarlos en las dos duplicaría.
     const nBase = c.rubros.filter(r => !r.extra).length;
     const rubroIni = fila + 1, rubroFin = fila + (c.hayExtras ? nBase : c.rubros.length);
     ws.getCell(fila, 1).value = c.numero;
-    ws.getCell(fila, 2).value = soloCapitulos ? c.nombre : c.nombre.toUpperCase();
+    ws.getCell(fila, 2).value = soloCapitulos ? c.nombre : sinHoja(c.nombre, hojasDoc).toUpperCase();
     if (soloCapitulos) {
       ws.mergeCells(fila, 2, fila, 5);
       ws.getCell(fila, 6).value = c.subtotal;
@@ -849,6 +886,21 @@ export async function excelPresupuesto({ presupuesto, capitulos, items, formato 
       if (r.descripcion.length > 62) ws.getRow(fila).height = 15 * Math.ceil(r.descripcion.length / 62);
       fila++;
     });
+    // Y la cierra con su subtotal: la suma de las celdas de sus capítulos.
+    if (hojasDoc && !soloCapitulos && (kCap === caps.length - 1 || bloqueDe(caps[kCap + 1].nombre) !== bloqueDe(c.nombre))) {
+      const h = hojasDoc.find(x => x.nombre === (bloqueDe(c.nombre) || "Otros"));
+      const celdas = (h?.capitulos || []).flatMap(n => celdasDeCap.get(n) || []);
+      ws.getCell(fila, 2).value = `SUBTOTAL ${(h?.nombre || "").toUpperCase()}`;
+      ws.getCell(fila, 6).value = { formula: celdas.length ? celdas.join("+") : "0", result: cotizar ? 0 : (h?.subtotal || 0) };
+      for (let j = 1; j <= 6; j++) {
+        const x = ws.getCell(fila, j);
+        x.font = fuente({ bold: true, color: { argb: argb(t.capTexto) } });
+        x.border = { top: linea(PRIMARIO, "medium"), bottom: linea(LINEA) };
+      }
+      ws.getCell(fila, 6).numFmt = "#,##0.00";
+      ws.getCell(fila, 6).alignment = { horizontal: "right" };
+      fila += 2;
+    }
   });
 
   // ── Los rubros que no se cotizan, al pie del cuadro, con el porqué ──

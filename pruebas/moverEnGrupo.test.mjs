@@ -37,3 +37,31 @@ test("no se pierde ni se duplica ninguno", () => {
   const r = llevarMarcados(L, ["A", "D", "F"], "C");
   assert.deepEqual([...r].sort(), [...L].sort());
 });
+
+// LAS HOJAS COMO BLOQUES: un capítulo se mueve dentro de su hoja y las hojas
+// se mueven enteras.
+import { juntarPorHoja, correrEnSuHoja, llevarEnSuHoja, moverHoja } from "../src/modules/presupuestos/moverEnGrupo.js";
+
+const H = ["CASA · A", "CASA · B", "CASA · C", "CUIDADOR · D", "CUIDADOR · E", "EXTERIOR · F"];
+
+test("una hoja desordenada se junta sin cambiar el orden de las hojas", () => {
+  assert.deepEqual(juntarPorHoja(["CASA · A", "CUIDADOR · D", "CASA · B", "CUIDADOR · E"]),
+    ["CASA · A", "CASA · B", "CUIDADOR · D", "CUIDADOR · E"]);
+});
+
+test("un capítulo no se pasa a otra hoja al subirlo o bajarlo", () => {
+  assert.deepEqual(correrEnSuHoja(H, ["CUIDADOR · D"], -1), H);          // ya es el primero de su hoja
+  assert.deepEqual(correrEnSuHoja(H, ["CASA · C"], 1), H);               // ya es el último de su hoja
+  assert.deepEqual(correrEnSuHoja(H, ["CUIDADOR · E"], -1),
+    ["CASA · A", "CASA · B", "CASA · C", "CUIDADOR · E", "CUIDADOR · D", "EXTERIOR · F"]);
+});
+
+test("al principio y al final, de su hoja", () => {
+  assert.deepEqual(llevarEnSuHoja(H, ["CASA · C"], "inicio"), ["CASA · C", "CASA · A", "CASA · B", "CUIDADOR · D", "CUIDADOR · E", "EXTERIOR · F"]);
+  assert.deepEqual(llevarEnSuHoja(H, ["CUIDADOR · D"], "final"), ["CASA · A", "CASA · B", "CASA · C", "CUIDADOR · E", "CUIDADOR · D", "EXTERIOR · F"]);
+});
+
+test("una hoja se mueve entera, con sus capítulos en su orden", () => {
+  assert.deepEqual(moverHoja(H, "CUIDADOR", -1), ["CUIDADOR · D", "CUIDADOR · E", "CASA · A", "CASA · B", "CASA · C", "EXTERIOR · F"]);
+  assert.deepEqual(moverHoja(H, "EXTERIOR", 1), H);
+});

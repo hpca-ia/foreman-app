@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, Fragment } from "react";
 import { esNoCotiza, motivoNoCotiza, porBloques, bloqueDe, SEPARADOR_BLOQUE } from "./presupuestos/estructura";
 import TraerDeOtro from "./presupuestos/TraerDeOtro";
-import { correrMarcados, llevarMarcados } from "./presupuestos/moverEnGrupo";
+import { correrMarcados, llevarMarcados, juntarPorHoja, correrEnSuHoja, llevarEnSuHoja, moverHoja, mismaHoja, hojasEnOrden } from "./presupuestos/moverEnGrupo";
 import { loQueSeArrastra, terminarArrastre } from "./presupuestos/arrastre";
 import { Trash2, Copy, Database, Archive, ArchiveRestore, Search, GanttChartSquare } from "lucide-react";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
@@ -431,7 +431,21 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     // se liberaba arriba, así que con dos agregados la lista quedaba 1, 8, 9.
     // Un hueco obliga a quien mira el presupuesto a preguntarse si falta un
     // capítulo, y eso en un documento que se le manda al cliente no va.
-    const consecutivos = lista.every((c, i) => Number(c.orden) === i + 1);
+    // CADA HOJA JUNTA. Un presupuesto que vino de un libro de varias hojas
+    // tiene sus capítulos agrupados por hoja; si quedaron mezclados —se
+    // importaba ordenando solo por número de fila, y cada hoja empieza en la
+    // 1—, se juntan acá, en el orden en que aparece cada hoja.
+    let juntadas = false;
+    if (porBloques(lista.map(c => ({ nombre: c.nombre, subtotal: 0 })))) {
+      const juntos = juntarPorHoja(lista.map(c => c.nombre));
+      if (juntos.some((n, i) => n !== lista[i].nombre)) {
+        lista = juntos.map((n, i) => ({ ...lista.find(c => c.nombre === n), orden: i + 1 }));
+        juntadas = true;
+      }
+    }
+    // Si se juntaron, hay que guardar aunque la numeración ya sea 1, 2, 3…: los
+    // rubros llevan el número viejo de su capítulo.
+    const consecutivos = !juntadas && lista.every((c, i) => Number(c.orden) === i + 1);
     const enderezada = consecutivos ? lista : lista.map((c, i) => ({ nombre: c.nombre, orden: i + 1 }));
     setCapitulosActivos(enderezada);
 
@@ -1837,6 +1851,29 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           )}
 
           {capitulosActivos.map((cap,capIdx)=>{
+            // LA HOJA DEL EXCEL, como una sección del presupuesto: su banda va
+            // antes de su primer capítulo, con lo que suma y para moverla entera.
+            const hojasEd = porBloques(capitulosActivos.map(c=>({ nombre:c.nombre, subtotal: items.filter(i=>i.capitulo===c.nombre).reduce((s,i)=>s+(Number(i.total)||0),0) })));
+            const abreHoja = hojasEd && !buscaArmar && (capIdx===0 || bloqueDe(capitulosActivos[capIdx-1].nombre)!==bloqueDe(cap.nombre));
+            const hojaAca = abreHoja ? hojasEd.find(h=>h.nombre===(bloqueDe(cap.nombre)||"Otros")) : null;
+            const ordenHojas = abreHoja ? hojasEnOrden(capitulosActivos.map(c=>c.nombre)) : [];
+            const jHoja = ordenHojas.indexOf(bloqueDe(cap.nombre));
+            const banda = abreHoja && hojaAca && (
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",margin:capIdx===0?"0 0 8px":"18px 0 8px",padding:"10px 14px",
+                background:"var(--brand)",color:"#fff",borderRadius:10}}>
+                {puedeEditar&&!bloqueado&&(
+                  <span style={{display:"flex",flexDirection:"column",gap:1}}>
+                    <button disabled={jHoja<=0} onClick={()=>reordenarCapitulos(moverHoja(capitulosActivos.map(c=>c.nombre),bloqueDe(cap.nombre),-1))} title="Subir la hoja entera"
+                      style={{background:"none",border:"none",padding:0,lineHeight:1,fontSize:10,color:jHoja<=0?"rgba(255,255,255,.35)":"#fff",cursor:jHoja<=0?"default":"pointer"}}>▲</button>
+                    <button disabled={jHoja>=ordenHojas.length-1} onClick={()=>reordenarCapitulos(moverHoja(capitulosActivos.map(c=>c.nombre),bloqueDe(cap.nombre),1))} title="Bajar la hoja entera"
+                      style={{background:"none",border:"none",padding:0,lineHeight:1,fontSize:10,color:jHoja>=ordenHojas.length-1?"rgba(255,255,255,.35)":"#fff",cursor:jHoja>=ordenHojas.length-1?"default":"pointer"}}>▼</button>
+                  </span>
+                )}
+                <span style={{fontSize:14,fontWeight:800,letterSpacing:.4,flex:1,minWidth:0}}>{hojaAca.nombre}</span>
+                <span style={{fontSize:11.5,opacity:.8}}>{hojaAca.capitulos.length} capítulos</span>
+                <span style={{fontSize:14,fontWeight:700}}>${fmt(hojaAca.subtotal)}</span>
+              </div>
+            );
             // Lo pedido primero y los extras al final, como sale impreso.
             const todosDelCap=items.filter(i=>i.capitulo===cap.nombre).sort((a,b)=>(!!a.extra-!!b.extra)||(a.orden-b.orden));
             const capExtras=todosDelCap.filter(i=>i.extra).reduce((s,i)=>s+(Number(i.total)||0),0);
@@ -1848,7 +1885,9 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             const capItems=buscaArmar?todosDelCap.filter(i=>coincideBusqueda(i)):todosDelCap;
             if(buscaArmar&&capItems.length===0) return null;
             return(
-              <div key={cap.nombre} id={`capitulo-${cap.orden}`}
+              <Fragment key={cap.nombre}>
+              {banda}
+              <div id={`capitulo-${cap.orden}`}
                 // SOLTAR ACÁ LO QUE VIENE DE OTRO PRESUPUESTO. Rubros sueltos
                 // entran a este capítulo; un capítulo entero queda justo
                 // después de este (o se suma a uno que se llame igual).
@@ -2184,6 +2223,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                   </div>
                 )}
               </div>
+              </Fragment>
             );
           })}
 
@@ -2645,10 +2685,11 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
             <strong>{vigentes.length}</strong> {vigentes.length === 1 ? "capítulo marcado" : "capítulos marcados"} — se mueven juntos
           </span>
           {[
-            ["⤒ Al principio", () => mover(llevarMarcados(nombres, vigentes, nombres.find(n => !vigentes.includes(n)) ?? null))],
-            ["▲ Subir", () => mover(correrMarcados(nombres, vigentes, -1))],
-            ["▼ Bajar", () => mover(correrMarcados(nombres, vigentes, 1))],
-            ["⤓ Al final", () => mover(llevarMarcados(nombres, vigentes, null))],
+            // Con hojas, cada capítulo se mueve dentro de la suya.
+            [hojas ? "⤒ Al principio de su hoja" : "⤒ Al principio", () => mover(hojas ? llevarEnSuHoja(nombres, vigentes, "inicio") : llevarMarcados(nombres, vigentes, nombres.find(n => !vigentes.includes(n)) ?? null))],
+            ["▲ Subir", () => mover(hojas ? correrEnSuHoja(nombres, vigentes, -1) : correrMarcados(nombres, vigentes, -1))],
+            ["▼ Bajar", () => mover(hojas ? correrEnSuHoja(nombres, vigentes, 1) : correrMarcados(nombres, vigentes, 1))],
+            [hojas ? "⤓ Al final de su hoja" : "⤓ Al final", () => mover(hojas ? llevarEnSuHoja(nombres, vigentes, "final") : llevarMarcados(nombres, vigentes, null))],
           ].map(([t, fn]) => (
             <button key={t} onClick={fn} style={{ background: "#fff", border: "1px solid var(--brand)", borderRadius: 6, padding: "3px 9px", color: "var(--brand)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)" }}>{t}</button>
           ))}
@@ -2675,7 +2716,18 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
                   const h = hojas.find(x => x.nombre === (bloqueDe(f.nombre) || "Otros"));
                   return (
                     <tr style={{ background: "var(--bg)" }}>
-                      {editable && <td style={{ ...td, borderBottom: "1px solid var(--border)" }} />}
+                      {editable && (() => {
+                        // La hoja entera, para arriba o para abajo.
+                        const orden = hojasEnOrden(nombres), clave = bloqueDe(f.nombre), j = orden.indexOf(clave);
+                        return (
+                          <td style={{ ...td, textAlign: "left", padding: "3px 4px", borderBottom: "1px solid var(--border)" }}>
+                            <button disabled={j <= 0} onClick={() => mover(moverHoja(nombres, clave, -1))} title="Subir la hoja entera"
+                              style={{ background: "none", border: "none", padding: "0 3px", cursor: j <= 0 ? "default" : "pointer", color: j <= 0 ? "var(--border)" : "var(--brand)", fontSize: 11, fontWeight: 700 }}>▲</button>
+                            <button disabled={j >= orden.length - 1} onClick={() => mover(moverHoja(nombres, clave, 1))} title="Bajar la hoja entera"
+                              style={{ background: "none", border: "none", padding: "0 3px", cursor: j >= orden.length - 1 ? "default" : "pointer", color: j >= orden.length - 1 ? "var(--border)" : "var(--brand)", fontSize: 11, fontWeight: 700 }}>▼</button>
+                          </td>
+                        );
+                      })()}
                       <td colSpan={2} style={{ ...td, textAlign: "left", fontWeight: 700, color: "var(--ink)", letterSpacing: 0.2, borderBottom: "1px solid var(--border)" }}>
                         {h?.nombre} <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>· {h?.capitulos.length} capítulos</span>
                       </td>
@@ -2690,10 +2742,12 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
                   draggable={editable}
                   onDragStart={e => { setArrastrada(f.nombre); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", f.nombre); }}
                   onDragEnd={() => { setArrastrada(null); setSobre(null); }}
-                  onDragOver={e => { if (!editable || (!arrastrada && !loQueSeArrastra())) return; e.preventDefault(); if (sobre !== f.nombre) setSobre(f.nombre); }}
+                  onDragOver={e => { if (!editable || (!arrastrada && !loQueSeArrastra())) return; if (arrastrada && hojas && !mismaHoja(arrastrada, f.nombre)) return; e.preventDefault(); if (sobre !== f.nombre) setSobre(f.nombre); }}
                   onDrop={e => {
                     e.preventDefault(); setSobre(null);
                     const externo = loQueSeArrastra();
+                    // Con hojas, un capítulo no se suelta entre los de otra hoja.
+                    if (arrastrada && hojas && !mismaHoja(arrastrada, f.nombre)) { setArrastrada(null); return; }
                     if (arrastrada && vigentes.includes(arrastrada) && vigentes.length > 1) {
                       // Se arrastró uno de los marcados: van todos. Si se suelta
                       // más abajo de donde estaban, quedan después de esa fila;
@@ -2701,7 +2755,8 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
                       const primero = Math.min(...vigentes.map(n => nombres.indexOf(n)));
                       const baja = k > primero;
                       const siguiente = nombres.slice(k + 1).find(n => !vigentes.includes(n)) ?? null;
-                      mover(llevarMarcados(nombres, vigentes, baja ? siguiente : f.nombre));
+                      const lista = llevarMarcados(nombres, vigentes, baja ? siguiente : f.nombre);
+                      mover(hojas ? juntarPorHoja(lista, hojasEnOrden(nombres)) : lista);
                       setArrastrada(null);
                     }
                     else if (arrastrada) { onUbicar?.(arrastrada, k); setArrastrada(null); }   // ocupa el lugar de la fila donde se suelta
@@ -2715,10 +2770,18 @@ function ResumenCapitulos({ capitulos, items, editable = false, onUbicar, onReor
                       <input type="checkbox" checked={vigentes.includes(f.nombre)} onChange={() => marcar(f.nombre)}
                         title="Marcar para mover varios juntos" style={{ margin: "0 3px 0 0", verticalAlign: "middle" }} />
                       <span style={{ color: "var(--muted)", marginRight: 2 }}>⠿</span>
-                      <button disabled={k === 0} onClick={() => onUbicar?.(f.nombre, k - 1)} title="Subir"
-                        style={{ background: "none", border: "none", padding: "0 2px", cursor: k === 0 ? "default" : "pointer", color: k === 0 ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▲</button>
-                      <button disabled={k === filas.length - 1} onClick={() => onUbicar?.(f.nombre, k + 1)} title="Bajar"
-                        style={{ background: "none", border: "none", padding: "0 2px", cursor: k === filas.length - 1 ? "default" : "pointer", color: k === filas.length - 1 ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▼</button>
+                      {(() => {
+                        // Con hojas, el tope es el borde de su hoja, no el de la lista.
+                        const arriba = k === 0 || (hojas && !mismaHoja(filas[k - 1].nombre, f.nombre));
+                        const abajo = k === filas.length - 1 || (hojas && !mismaHoja(filas[k + 1].nombre, f.nombre));
+                        const correr = dir => (hojas ? mover(correrEnSuHoja(nombres, [f.nombre], dir)) : onUbicar?.(f.nombre, k + dir));
+                        return (<>
+                          <button disabled={arriba} onClick={() => correr(-1)} title="Subir"
+                            style={{ background: "none", border: "none", padding: "0 2px", cursor: arriba ? "default" : "pointer", color: arriba ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▲</button>
+                          <button disabled={abajo} onClick={() => correr(1)} title="Bajar"
+                            style={{ background: "none", border: "none", padding: "0 2px", cursor: abajo ? "default" : "pointer", color: abajo ? "var(--border)" : "var(--ink-soft)", fontSize: 10 }}>▼</button>
+                        </>);
+                      })()}
                     </td>
                   )}
                   <td style={{ ...td, textAlign: "left", color: "var(--muted)" }}>{f.orden}</td>
