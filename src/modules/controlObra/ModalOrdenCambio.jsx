@@ -6,10 +6,9 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
-import { pedirANova, JUICIO, LECTURA, textoDeNova } from "../../lib/modelos";
-import { leerCotizacion } from "./leerProforma.js";
-import { hojaComoTexto } from "./beneficios";
-import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
+import { pedirANova, JUICIO, textoDeNova } from "../../lib/modelos";
+import { leerConNova, guardarCotizacion } from "./cotizacionesOrden";
+import { partidasDeCotizacion, totalDeCotizacion, margenDeOrden } from "./cuentaOrdenCambio.js";
 
 // Una orden de cambio entera, de una sola vez.
 //
@@ -37,7 +36,9 @@ const VACIA = {
 // Las columnas de una partida: flechas, tipo, descripción, unidad, cantidad,
 // precio unitario, total y borrar. Las comparten los títulos y los renglones.
 const COLUMNAS = "14px 88px 1fr 52px 64px 84px 80px 22px";
-const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "", obra_rubro_id: "", rubro_codigo: "" });
+// El costo vacío es "no se sabe": una partida escrita a mano no tiene
+// cotización, y suponerle costo cero la haría parecer pura ganancia.
+const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 1, precio_unitario: "", costo_unitario: "", obra_rubro_id: "", rubro_codigo: "" });
 
 const TIPOS = ["Requerimiento del cliente", "Vicio oculto", "Cambio de especificación", "Error de proyecto", "Condición del terreno"];
 
@@ -53,6 +54,10 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [ocupadoNova, setOcupadoNova] = useState(false);
   const [errorNova, setErrorNova] = useState("");
   const [leyendo, setLeyendo] = useState("");
+  // La cotización leída: el archivo y lo que NOVA sacó de él. Espera en
+  // memoria hasta que la orden existe, igual que las fotos, y se guarda con
+  // ella: es el papel que dice cuánto cuesta lo que se está cobrando.
+  const [cotizacion, setCotizacion] = useState(null);
   const [encima, setEncima] = useState(false);
   const [verPresupuesto, setVerPresupuesto] = useState(false);
   // Qué partida está eligiendo un rubro del presupuesto para copiarle el precio.
@@ -134,45 +139,14 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   }
 
   async function leerArchivoDeCotizacion(original) {
-    let file = original;
-    if (!file) return;
+    if (!original) return;
     setLeyendo("leyendo"); setErrorNova("");
     try {
-      if (/^image\//.test(file.type || "")) file = await comprimirImagen(file);
-      const pesa = noEntraElArchivo(
-        /\.(xlsx|xlsm|xls)$/i.test(file.name || "") ? null : "x".repeat(Math.round(file.size * 1.37)), file);
-      if (pesa) throw new Error(pesa);
-
-      const lista = (rubros || []).filter(r => !r.oculto && !r.anulado_por_oc).slice(0, 220)
-        .map(r => `${r.id}:${String(r.descripcion || "").slice(0, 60)}`).join(" | ");
-
-      const { items, cortado } = await leerCotizacion(file, {
-        lista, modelo: LECTURA, hojaComoTexto,
-        onPaso: p2 => setLeyendo(p2 || "leyendo"),
-        pedir: async cuerpo => {
-          const { res, data } = await pedirANova(cuerpo);
-          if (!res.ok || data?.error) {
-            throw new Error(data?.error?.message || data?.error
-              || (res.status === 504 ? "NOVA se demoró más de un minuto leyendo y el servidor la cortó. Probá con menos hojas."
-                : `El servidor se cortó leyendo el archivo (${res.status}).`));
-          }
-          return { texto: textoDeNova(data) || "", cortado: data?.stop_reason === "max_tokens" };
-        },
-      });
-
-      const utiles = items.filter(x => x.descripcion && Number(x.monto));
-      if (!utiles.length) throw new Error("NOVA no encontró renglones con precios en la cotización.");
-      setLineas(utiles.map(x => ({
-        tipo: "aumenta",
-        descripcion: String(x.descripcion).slice(0, 160),
-        unidad: x.unidad || "u",
-        cantidad: Number(x.cantidad) || 1,
-        // El precio unitario sale del total, que es el número que el proveedor
-        // suma: si la proforma trae el unitario y el total, el que vale es el
-        // que multiplica.
-        precio_unitario: Math.round((Number(x.monto) / (Number(x.cantidad) || 1)) * 100) / 100,
-        obra_rubro_id: "",
-      })));
+      const { proveedor, items, cortado, archivo } = await leerConNova(original, rubros, p2 => setLeyendo(p2 || "leyendo"));
+      const partidas = partidasDeCotizacion(items);
+      if (!partidas.length) throw new Error("NOVA no encontró renglones con precios en la cotización.");
+      setLineas(partidas);
+      setCotizacion({ archivo, proveedor: proveedor || "", items });
       if (cortado) setErrorNova("La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel.");
     } catch (err) {
       setErrorNova(err.message);
@@ -232,6 +206,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
   const sub = subtotales(conMonto.map(l => ({
     ...l, cantidad: Number(l.cantidad) || 0, precio_unitario: Number(l.precio_unitario) || 0,
   })));
+  const margen = margenDeOrden(conMonto.map(l => ({ ...l, costo_unitario: l.costo_unitario === "" ? null : l.costo_unitario })));
 
   // Guardar y, de una, hacer lo que corresponda. El que puede aprobar suele
   // ser el mismo que la escribe —una orden la redacta quien la decidió— y
@@ -273,6 +248,17 @@ Si el texto ya está bien escrito, devolvelo igual.`,
       }));
     }
 
+    // LA COTIZACIÓN, ANTES QUE LAS PARTIDAS: cada partida que salió de ella
+    // apunta a ella. Si no se puede guardar, la orden sigue —es el documento
+    // que se firma— y se avisa qué faltó.
+    let avisoCotizacion = "";
+    let cotizacionId = null;
+    if (cotizacion) {
+      const rc = await guardarCotizacion(orden.id, cotizacion.archivo, cotizacion, currentUser);
+      if (rc.error) avisoCotizacion = `La orden se guardó, pero la cotización no: ${rc.error}`;
+      else cotizacionId = rc.cotizacion.id;
+    }
+
     const puestas = [];
     // EL ORDEN SE GUARDA. Se leía con `order=orden` y nadie lo escribía, así
     // que todas las partidas quedaban en cero y el orden salía por casualidad
@@ -291,10 +277,13 @@ Si el texto ya está bien escrito, devolvelo igual.`,
         unidad: l.unidad || "u",
         cantidad: Number(l.cantidad) || 0,
         precio_unitario: Number(l.precio_unitario) || 0,
+        costo_unitario: l.tipo === "quita" ? null : (l.costo_unitario === "" ? null : l.costo_unitario),
+        cotizacion_id: l.tipo !== "quita" && l.costo_unitario !== "" && l.costo_unitario != null ? cotizacionId : null,
       };
       const res = await agregarLinea(orden.id, linea, puestas);
       if (res?.error) { setError(res.error); setGuardando(false); return; }
-      puestas.push(linea);
+      if (res?.sinCosto && !avisoCotizacion) avisoCotizacion = "La orden se guardó sin el costo de las partidas: falta correr la migración 125 en Supabase.";
+      puestas.push({ ...linea, id: res.linea?.id });
     }
 
     for (const [i, archivo] of fotos.entries()) {
@@ -311,7 +300,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
     }
 
     setGuardando(false);
-    onCreada?.(orden);
+    onCreada?.(orden, avisoCotizacion);
   }
 
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
@@ -387,6 +376,20 @@ Si el texto ya está bien escrito, devolvelo igual.`,
             Llena las líneas de abajo; después las revisás.
           </span>
         </div>
+        {cotizacion && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: colors.bg,
+            borderRadius: colors.radiusSm, padding: "6px 10px", fontSize: 11.5 }}>
+            <span style={{ fontWeight: 700, color: colors.inkSoft }}>Cotización:</span>
+            <span style={{ color: colors.ink }}>{cotizacion.archivo?.name || "archivo"}</span>
+            <input value={cotizacion.proveedor} onChange={e => setCotizacion(c => ({ ...c, proveedor: e.target.value }))}
+              placeholder="Proveedor" style={{ ...mini, padding: "3px 7px", fontSize: 11.5, width: 180 }} />
+            <span style={{ color: colors.muted }}>{cotizacion.items.length} renglones · ${fmt(totalDeCotizacion(cotizacion.items))}</span>
+            <span style={{ color: colors.muted, flexBasis: "100%", fontSize: 10.5 }}>
+              Se guarda con la orden: es el respaldo de lo que cuesta. Cada partida nace con el precio igual al
+              costo; subile el precio para ponerle el margen.
+            </span>
+          </div>
+        )}
 
         <div>
           <label style={lbl}>CAPÍTULO I · ARGUMENTOS</label>
@@ -652,6 +655,30 @@ Si el texto ya está bien escrito, devolvelo igual.`,
                 style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex", padding: 2 }}>
                 <Trash2 size={12} />
               </button>
+              {/* EL COSTO, DEBAJO DEL PRECIO Y APARTE DE ÉL.
+                  El precio es lo que se cobra, y se corrige para ponerle el
+                  margen. El costo es lo que dijo el proveedor. En la misma
+                  casilla, ponerle margen al precio borraba lo que cuesta, y
+                  al liquidar la obra nadie sabía cuánto dejó la orden. No va
+                  en el documento: es de la oficina. */}
+              {l.tipo !== "quita" && (
+                <div style={{ gridColumn: "3 / -1", display: "flex", gap: 7, alignItems: "center", marginTop: -2, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.3 }}>COSTO U.</span>
+                  <input type="number" step="0.01" value={l.costo_unitario ?? ""}
+                    onChange={e => setLineas(v => v.map((x, k) => k === i ? { ...x, costo_unitario: e.target.value } : x))}
+                    placeholder="no se sabe" style={{ ...mini, padding: "3px 6px", fontSize: 11, width: 90, textAlign: "right" }} />
+                  {l.costo_unitario !== "" && l.costo_unitario != null && (() => {
+                    const cobro = (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0);
+                    const margen = cobro - (Number(l.cantidad) || 0) * (Number(l.costo_unitario) || 0);
+                    return (
+                      <span style={{ fontSize: 10.5, color: margen < 0 ? colors.danger : margen > 0 ? colors.success : colors.muted }}>
+                        margen {margen < 0 ? "−" : ""}${fmt(Math.abs(margen))}{cobro ? ` · ${Math.round((margen / cobro) * 1000) / 10}%` : ""}
+                        {margen === 0 && " · se está cobrando al costo"}
+                      </span>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           ))}
           <button onClick={() => setLineas(v => [...v, LINEA()])}
@@ -663,6 +690,16 @@ Si el texto ya está bien escrito, devolvelo igual.`,
 
         {conMonto.length > 0 && (
           <div style={{ display: "flex", gap: 16, background: colors.bg, borderRadius: 8, padding: "9px 12px", flexWrap: "wrap" }}>
+            {margen.conCosto > 0 && (
+              <div title="Lo que se cobra contra lo que cuesta, en las partidas con costo. No sale en el documento.">
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+                  MARGEN{margen.sinCosto ? ` · ${margen.sinCosto} SIN COSTO` : ""}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: margen.margen < 0 ? colors.danger : colors.success }}>
+                  {margen.margen < 0 ? "−" : ""}${fmt(Math.abs(margen.margen))}{margen.pct != null ? ` · ${margen.pct}%` : ""}
+                </div>
+              </div>
+            )}
             {/* `subtotales` devuelve adiciones/reducciones, no agrega/quita.
                 Leyendo los nombres equivocados daban undefined → 0, y el
                 cuadro mostraba "AGREGA $0 · QUITA $0 · NETO $465,40": tres
