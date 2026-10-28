@@ -138,3 +138,14 @@ test("cuarenta mil de diésel en una factura de cincuenta no cuadra", () => {
   assert.equal(cuadraConLaFactura({ total: -17 }, [{ total: -15.18 }]), true, "una nota de crédito también cuadra");
   assert.equal(cuadraConLaFactura({ total: 0 }, [{ total: 5 }]), true, "sin total no hay contra qué comparar");
 });
+
+import { estadoBodega } from "../src/modules/controlObra/itemsComprados.js";
+
+test("qué le pasa a cada factura con la bodega", () => {
+  assert.equal(estadoBodega({ archivo_url: null }), "sin_papel");
+  assert.equal(estadoBodega({ archivo_url: "a", renglones_estado: "ilegible" }), "ilegible");
+  assert.equal(estadoBodega({ archivo_url: "a", renglones_estado: "no_cuadra" }), "no_cuadra");
+  assert.equal(estadoBodega({ archivo_url: "a", renglones_estado: "leida" }), "leida");
+  assert.equal(estadoBodega({ archivo_url: "a" }), "por_leer");
+  assert.equal(estadoBodega({ archivo_url: null, clase: "anticipo" }), null, "un anticipo no es una compra");
+});

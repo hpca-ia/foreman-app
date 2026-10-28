@@ -5,6 +5,7 @@ import { fmt, TIPOS_GASTO } from "./calculos";
 import { esDeCajaChica } from "./origenGasto";
 import { esNotaDeCredito } from "./pagos";
 import MarcaCaja from "./MarcaCaja";
+import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 
 // QUÉ ES ESTE PAPEL, DICHO EN LA FILA.
 //
@@ -38,6 +39,10 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
   // Dos cosas muy distintas con el mismo aspecto.
   const revisable = ["factura", "nota_venta", "nota_credito"].includes(f.clase || "factura");
   const sinRevisar = revisable && !f.sri_estado;
+  // Y SI LA BODEGA PUDO CONTAR LO QUE TRAE. Una factura sin papel, ilegible o
+  // que no cuadra no suma a "Qué se compró": tiene que decirlo donde se la
+  // abre para arreglarla.
+  const bodega = PROBLEMAS_BODEGA[estadoBodega(f)];
   return (
     <div style={{ padding: "10px 14px", borderBottom: `1px solid ${colors.neutralSoft}`, display: "flex", alignItems: "center", gap: 10 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -52,6 +57,7 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
             "Plata a favor de la obra: material devuelto o cobrado de más. Baja el gasto y se usa en una compra posterior.")}
           {anticipo && chip("ANTICIPO · sin factura", colors.warning, colors.warningSoft,
             "La plata salió y el comprobante todavía no se emite. No cuenta como obra ejecutada hasta que llegue su factura.")}
+          {bodega && chip(bodega.corto, colors.inkSoft, colors.neutralSoft, bodega.hacer)}
           {f.clase === "proforma" && chip("PROFORMA", colors.warning, colors.warningSoft,
             "Todavía hay que pedir el documento definitivo.")}
           {/* LO QUE DIJO EL SRI, DONDE SE PAGA.

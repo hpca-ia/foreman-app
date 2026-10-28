@@ -292,3 +292,32 @@ export function dotacionContraPersonal(grupos = [], personas = 0) {
     };
   }).sort((a, b) => (b.de_mas || 0) - (a.de_mas || 0) || b.cantidad - a.cantidad);
 }
+
+/**
+ * Qué le pasa a esta factura con la bodega.
+ *
+ *   sin_papel  · no tiene archivo: no hay nada que leer
+ *   ilegible   · NOVA no pudo sacar renglones
+ *   no_cuadra  · se leyó, pero los renglones no dan su total
+ *   por_leer   · tiene papel y todavía no se leyó
+ *   leida      · está en la cuenta
+ *   null       · no le corresponde (un anticipo no es una compra)
+ */
+export function estadoBodega(f) {
+  if (!f || f.clase === "anticipo") return null;
+  if (!f.archivo_url) return "sin_papel";
+  if (f.renglones_estado === "ilegible") return "ilegible";
+  if (f.renglones_estado === "no_cuadra") return "no_cuadra";
+  if (f.renglones_estado === "leida") return "leida";
+  return "por_leer";
+}
+
+/** Las que la bodega no pudo contar, con lo que hay que hacer en cada caso. */
+export const PROBLEMAS_BODEGA = {
+  sin_papel: { corto: "SIN ARCHIVO", titulo: "Sin archivo",
+    hacer: "No tiene la foto ni el PDF: no se sabe qué se compró. Abrila y subí el papel." },
+  ilegible: { corto: "NO SE LEYÓ", titulo: "No se pudieron leer",
+    hacer: "NOVA no pudo sacar los renglones: un recibo a mano o una foto borrosa. Subí una foto mejor o volvé a intentar." },
+  no_cuadra: { corto: "NO CUADRA", titulo: "No cuadran con su total",
+    hacer: "Los renglones leídos no dan el total de la factura, así que quedaron fuera de la suma. Volvé a leerla o revisá el papel." },
+};

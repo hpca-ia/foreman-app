@@ -4,8 +4,8 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
-import { agrupar, claveDe, dotacionContraPersonal, facturasPorLeer } from "./itemsComprados";
-import { renglonesDeObra, personalDeObra, leerLasQueFaltan } from "./renglones";
+import { agrupar, claveDe, dotacionContraPersonal, facturasPorLeer, estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
+import { renglonesDeObra, personalDeObra, leerLasQueFaltan, leerRenglones } from "./renglones";
 
 // Qué se compró en la obra, sumado, y la dotación contra la gente.
 //
@@ -22,6 +22,12 @@ const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDat
 const num = v => (Math.round(v * 100) / 100).toLocaleString("es-EC");
 const caja = { background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 };
 
+const Enlace = ({ onClick, children }) => (
+  <button onClick={onClick}
+    style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: colors.font,
+      fontSize: 12.5, color: colors.brand, textDecoration: "underline" }}>{children}</button>
+);
+
 export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const [renglones, setRenglones] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
@@ -31,7 +37,8 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const [fallas, setFallas] = useState([]);
   const [abierta, setAbierta] = useState(null);       // familia abierta
   const [buscar, setBuscar] = useState("");
-  const [verSinPapel, setVerSinPapel] = useState(false);
+  const [verLista, setVerLista] = useState(null);     // sin_papel | ilegible | no_cuadra
+  const [releyendo, setReleyendo] = useState(null);   // id de la factura
   const parar = useRef(false);
 
   const cargar = useCallback(async () => {
@@ -45,15 +52,31 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const dotacion = useMemo(() => dotacionContraPersonal(grupos, gente.total), [grupos, gente.total]);
   const porLeer = facturasPorLeer(facturas);
   const conPapel = facturas.filter(f => f.archivo_url && f.clase !== "anticipo").length;
-  const ilegibles = facturas.filter(f => f.renglones_estado === "ilegible").length;
-  const noCuadran = facturas.filter(f => f.renglones_estado === "no_cuadra").length;
-  const sinPapel = facturas.filter(f => !f.archivo_url);
+  const conProblema = useMemo(() => {
+    const m = { sin_papel: [], ilegible: [], no_cuadra: [] };
+    facturas.forEach(f => { const e = estadoBodega(f); if (m[e]) m[e].push(f); });
+    return m;
+  }, [facturas]);
+  const ilegibles = conProblema.ilegible.length;
+  const noCuadran = conProblema.no_cuadra.length;
 
   const visibles = useMemo(() => {
     const q = claveDe(buscar);
     if (!q) return grupos;
     return grupos.filter(g => g.variantes.some(v => q.split(" ").every(p => v.clave.includes(p))));
   }, [grupos, buscar]);
+
+  function abrirLista(cual) { setVerLista(v => (v === cual ? null : cual)); }
+
+  // Una sola, a pedido: la que se leyó mal antes de un arreglo, o la que
+  // tiene ahora una foto mejor. Las ilegibles no se reintentan solas.
+  async function releer(f) {
+    setReleyendo(f.id);
+    const r = await leerRenglones(f);
+    setReleyendo(null);
+    if (r.error) setFallas([{ factura: f, error: r.error }]);
+    await cargar(); onCambio?.();
+  }
 
   async function leerTodas() {
     parar.current = false; setFallas([]);
@@ -77,15 +100,9 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
         <div style={{ flex: 1, minWidth: 240, fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5 }}>
           <strong style={{ color: colors.ink }}>{conPapel - porLeer.length - ilegibles - noCuadran} de {conPapel}</strong> facturas con papel ya tienen sus renglones.
           {porLeer.length > 0 && <> Faltan <strong>{porLeer.length}</strong>.</>}
-          {ilegibles > 0 && <> {ilegibles} no se pudieron leer (recibos a mano, fotos borrosas).</>}
-          {noCuadran > 0 && <> {noCuadran} se leyeron con renglones que no cuadran con su total y quedaron fuera de la suma.</>}
-          {sinPapel.length > 0 && (
-            <> <button onClick={() => setVerSinPapel(v => !v)}
-              style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: colors.font,
-                fontSize: 12.5, color: colors.brand, textDecoration: "underline" }}>
-              {sinPapel.length} no {sinPapel.length === 1 ? "tiene" : "tienen"} archivo
-            </button> y no se pueden leer.</>
-          )}
+          {ilegibles > 0 && <> <Enlace onClick={() => abrirLista("ilegible")}>{ilegibles} no se {ilegibles === 1 ? "pudo" : "pudieron"} leer</Enlace> (recibos a mano, fotos borrosas).</>}
+          {noCuadran > 0 && <> <Enlace onClick={() => abrirLista("no_cuadra")}>{noCuadran} no {noCuadran === 1 ? "cuadra" : "cuadran"} con su total</Enlace> y {noCuadran === 1 ? "quedó" : "quedaron"} fuera de la suma.</>}
+          {conProblema.sin_papel.length > 0 && <> <Enlace onClick={() => abrirLista("sin_papel")}>{conProblema.sin_papel.length} no {conProblema.sin_papel.length === 1 ? "tiene" : "tienen"} archivo</Enlace> y no se pueden leer.</>}
         </div>
         {leyendo ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -98,13 +115,14 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
           </Button>
         )}
       </div>
-      {/* LAS QUE NO TIENEN PAPEL. Decir "6 no tienen archivo" y no decir
-          cuáles es mandar a alguien a revisar ochenta facturas. */}
-      {verSinPapel && sinPapel.length > 0 && (
+      {/* LAS QUE LA BODEGA NO PUDO CONTAR. Decir "6 no tienen archivo" y no
+          decir cuáles es mandar a alguien a revisar ochenta facturas. */}
+      {verLista && conProblema[verLista]?.length > 0 && (
         <div style={{ ...caja, fontSize: 12 }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Sin archivo</div>
-          {sinPapel.map(f => (
-            <div key={f.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderTop: `1px solid ${colors.border}` }}>
+          <div style={{ fontWeight: 600, marginBottom: 2 }}>{PROBLEMAS_BODEGA[verLista].titulo}</div>
+          <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>{PROBLEMAS_BODEGA[verLista].hacer}</div>
+          {conProblema[verLista].map(f => (
+            <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", borderTop: `1px solid ${colors.border}` }}>
               <span style={{ width: 70, color: colors.muted }}>{dia(f.fecha)}</span>
               <span style={{ flex: 1 }}>
                 {f.razon_social || "Sin proveedor"}
@@ -112,10 +130,15 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
               </span>
               <span style={{ width: 90, color: colors.muted }}>{f.origen === "caja_chica" ? "caja chica" : "planilla"}</span>
               <span style={{ width: 80, textAlign: "right" }}>${fmt(Number(f.total))}</span>
+              {verLista !== "sin_papel" && (
+                <Button variant="outline" size="sm" disabled={!!releyendo || !!leyendo} onClick={() => releer(f)}>
+                  {releyendo === f.id ? "Leyendo…" : "Volver a leer"}
+                </Button>
+              )}
             </div>
           ))}
           <div style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
-            Para que entren a la cuenta, abrí cada una en Facturas y subí la foto o el PDF.
+            También aparecen marcadas en Facturas, con el filtro «Solo las que la bodega no leyó».
           </div>
         </div>
       )}

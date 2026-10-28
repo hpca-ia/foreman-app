@@ -8,6 +8,7 @@ import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
 import { esDeCajaChica, SIGLA_CAJA } from "./origenGasto";
+import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 import { Mini } from "./PanelFacturas";
 
 // El libro de facturas de la obra: todas, o las de una planilla, con filtros.
@@ -34,6 +35,10 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
   // leyendo un detalle escrito a mano. Son los que hay que repasar, y repasarlos
   // es poder verlos juntos.
   const [soloCaja, setSoloCaja] = useState(false);
+  // LAS QUE LA BODEGA NO PUDO CONTAR: sin archivo, ilegibles o que no
+  // cuadran. Es acá donde se arreglan —se abre la factura y se sube el papel—,
+  // así que es acá donde hay que poder verlas juntas.
+  const [soloBodega, setSoloBodega] = useState(false);
   const [modal, setModal] = useState(null);
 
   const nombrePlanilla = id => {
@@ -79,6 +84,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     if (rubro && !(rubrosDe[f.id] || []).some(r => r.id === Number(rubro))) return false;
     if (soloSueltas && (asignadoA[f.id] || 0) + 0.01 >= (Number(f.total) || 0)) return false;
     if (soloCaja && !esDeCajaChica(f)) return false;
+    if (soloBodega && !PROBLEMAS_BODEGA[estadoBodega(f)]) return false;
     if (q && ![f.detalle, f.justificacion, f.razon_social, f.numero_factura, f.ruc, f.numero_cheque].some(c => pelado(c).includes(q))) return false;
     return true;
   });
@@ -87,9 +93,10 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
   const alRubro = rubro
     ? asignaciones.filter(a => a.obra_rubro_id === Number(rubro) && vistas.some(f => f.id === a.factura_id)).reduce((s, a) => s + (Number(a.monto) || 0), 0)
     : 0;
-  const hayFiltro = proveedor || tipo || rubro || texto || soloSueltas || soloCaja;
+  const hayFiltro = proveedor || tipo || rubro || texto || soloSueltas || soloCaja || soloBodega;
+  const sinContar = facturas.filter(f => PROBLEMAS_BODEGA[estadoBodega(f)]).length;
 
-  function limpiar() { setProveedor(""); setTipo(""); setRubro(""); setTexto(""); setSoloSueltas(false); setSoloCaja(false); }
+  function limpiar() { setProveedor(""); setTipo(""); setRubro(""); setTexto(""); setSoloSueltas(false); setSoloCaja(false); setSoloBodega(false); }
 
   async function eliminar(f) {
     if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"}?`)) return;
@@ -107,6 +114,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
       texto && `Concepto: "${texto}"`,
       soloSueltas && "Solo sin asignar",
       soloCaja && "Solo caja chica",
+      soloBodega && "Solo las que la bodega no leyó",
     ].filter(Boolean).join(" · ");
     const filas = [
       [`FACTURAS — ${obra.nombre}`],
@@ -184,6 +192,13 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
           <input type="checkbox" checked={soloCaja} onChange={e => setSoloCaja(e.target.checked)} />
           Solo caja chica
         </label>
+        {sinContar > 0 && (
+          <label title="Sin archivo, ilegibles o con renglones que no cuadran con su total: no suman a «Qué se compró»."
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.inkSoft, cursor: "pointer" }}>
+            <input type="checkbox" checked={soloBodega} onChange={e => setSoloBodega(e.target.checked)} />
+            Solo las que la bodega no leyó ({sinContar})
+          </label>
+        )}
         {hayFiltro && <Button variant="secondary" size="sm" onClick={limpiar}>Limpiar filtros</Button>}
         <Button variant="outline" size="sm" onClick={descargar} disabled={!vistas.length} style={{ marginLeft: "auto" }}>
           <FileSpreadsheet size={13} /> Excel de este listado
