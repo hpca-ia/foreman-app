@@ -66,9 +66,17 @@ export function estadoDeCaja({ fondos = [], facturas = [], pagos: todos = [] }) 
   const gasto = facturas.filter(f => f.clase !== "proforma" && !esVale(f));
   const facturado = r2(gasto.reduce((t, f) => t + n(f.total), 0));
   const porPagar = r2(gasto.reduce((t, f) => t + Math.max(0, n(f.total) - (pagadoDe[f.id] || 0)), 0));
+  // EL VALE VALE LO QUE LE QUEDA. Lo usado sale de los pagos hechos con él:
+  // contarlo entero decía que el proveedor todavía nos debe una plata que ya
+  // gastamos en la compra siguiente.
+  const usadoDe = {};
+  todos.forEach(p => {
+    if (p?.nota_credito_id == null) return;
+    usadoDe[p.nota_credito_id] = (usadoDe[p.nota_credito_id] || 0) + n(p.monto);
+  });
   const credito = r2(facturas
     .filter(f => esVale(f) && !f.facturada_con_id)
-    .reduce((t, f) => t + Math.abs(n(f.total)), 0));
+    .reduce((t, f) => t + Math.max(0, Math.abs(n(f.total)) - (usadoDe[f.id] || 0)), 0));
   const anticipado = r2(gasto
     .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
     .reduce((t, f) => t + n(f.total), 0));

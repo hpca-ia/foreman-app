@@ -1,11 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet } from "lucide-react";
+import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet, Pencil } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { PARAMETROS, RECARGOS, calcularNomina } from "./nomina";
 import { rolAExcel, rolAPDF } from "./exportarRol";
+import { rolesDeLaObra, cerrarRol } from "./rolGuardado";
+import { seSolapan, periodoTexto } from "./rolPagado";
+import EditorDias from "./EditorDias";
+import PanelRolesCerrados from "./PanelRolesCerrados";
 
 // Mano de obra: quién vino, cuántas horas, y cuánto se le paga.
 //
@@ -38,6 +42,14 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   const [error, setError] = useState("");
   const [periodo, setPeriodo] = useState({ desde: "", hasta: hoy() });
   const [exportando, setExportando] = useState(false);
+  const [roles, setRoles] = useState([]);
+  const [errorRoles, setErrorRoles] = useState("");
+  // Lo que se le descuenta a cada uno en este rol. No sale de ningún lado: lo
+  // sabe quien lleva la caja, y se escribe antes de cerrar.
+  const [descuentos, setDescuentos] = useState({});
+  const [abiertoDesc, setAbiertoDesc] = useState(null);
+  const [diasDe, setDiasDe] = useState(null);
+  const [cerrando, setCerrando] = useState(false);
 
   useEffect(() => {
     supabase.from("leads").select("id,nombre,resultado,obra_id").order("nombre")
@@ -59,6 +71,9 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
     const mapa = {};
     (dias || []).forEach(d => { (mapa[d.personal_id] = mapa[d.personal_id] || []).push(d); });
     setAsistencia(mapa);
+    const r = await rolesDeLaObra(lead.id);
+    setRoles(r.roles);
+    setErrorRoles(r.error || "");
   }, [lead?.id, periodo.desde, periodo.hasta]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -105,7 +120,18 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   }
 
   const delDia = id => (asistencia[id] || []).find(d => d.fecha === fecha);
-  const nomina = calcularNomina({ personal, asistencia, par: PARAMETROS });
+  const nomina = calcularNomina({ personal, asistencia, extras: descuentos, par: PARAMETROS });
+  const pisado = roles.find(r => seSolapan(r, periodo));
+
+  async function cerrar() {
+    if (!window.confirm(`¿Cerrar el rol ${periodoTexto(periodo)} por $${fmt(nomina.aPagar)}? Desde ahí sus números no cambian aunque se corrija la asistencia.`)) return;
+    setCerrando(true); setError("");
+    const r = await cerrarRol({ lead, periodo, nomina, parametros: PARAMETROS, roles, quien: currentUser });
+    setCerrando(false);
+    if (r.error) { setError(r.error); return; }
+    setDescuentos({}); setAbiertoDesc(null); setDiasDe(null);
+    await cargar();
+  }
 
   async function marcar(p, campos) {
     const ya = delDia(p.id);
@@ -122,14 +148,19 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   async function agregarPersona() {
     if (!nuevo?.nombre?.trim()) return;
     setError("");
-    const { error: e } = await supabase.from("obra_personal").insert({
-      lead_id: lead.id, obra_id: lead.obra_id || null,
+    const datos = {
       nombre: nuevo.nombre.trim(), cedula: nuevo.cedula?.trim() || null,
       cargo: nuevo.cargo?.trim() || null,
       salario_mensual: Number(nuevo.salario) || 0,
       acumula_fondos: !!nuevo.fondos,
       fecha_ingreso: nuevo.ingreso || hoy(),
-    });
+    };
+    // El mismo formulario sirve para corregir: un salario o una cédula mal
+    // escritos se arreglan acá. Los roles ya cerrados no cambian —guardan su
+    // propia copia—; el que está en curso toma el dato nuevo.
+    const { error: e } = nuevo.id
+      ? await supabase.from("obra_personal").update(datos).eq("id", nuevo.id)
+      : await supabase.from("obra_personal").insert({ ...datos, lead_id: lead.id, obra_id: lead.obra_id || null });
     if (e) { setError(e.message); return; }
     setNuevo(null); await cargar();
   }
@@ -256,9 +287,29 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                   catch (e) { setError("No se pudo armar el Excel: " + e.message); }
                   setExportando(false);
                 }}><FileSpreadsheet size={13} /> Excel</Button>
+                {editable && !pisado && (
+                  <Button variant="primary" size="sm" disabled={cerrando || !periodo.desde} onClick={cerrar}>
+                    <Check size={13} /> {cerrando ? "Cerrando…" : "Cerrar rol"}
+                  </Button>
+                )}
               </div>
             )}
           </div>
+
+          {pisado && (
+            <div style={{ marginBottom: 10 }}>
+              <Aviso>
+                Este período se pisa con el rol {periodoTexto(pisado)}, que ya está cerrado. Lo de abajo es solo una vista:
+                para pagar, elegí fechas que no se crucen, o reabrí ese rol si todavía nadie cobró.
+              </Aviso>
+            </div>
+          )}
+          {errorRoles && <div style={{ fontSize: 12, color: colors.warning, marginBottom: 8 }}>{errorRoles}</div>}
+
+          {diasDe && personal.find(p => p.id === diasDe) && (
+            <EditorDias persona={personal.find(p => p.id === diasDe)} dias={asistencia[diasDe] || []}
+              lead={lead} periodo={periodo} quien={currentUser} onCambio={cargar} onCerrar={() => setDiasDe(null)} />
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 12 }}>
             <Tarjeta label="Sueldos y extras" valor={nomina.ingresos} />
@@ -278,24 +329,59 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                 <span style={{ textAlign: "right" }}>DESCUENTOS</span>
                 <span style={{ textAlign: "right" }}>A PAGAR</span>
               </div>
-              {nomina.lineas.map(l => (
-                <div key={l.persona.id} style={{ display: "grid", gridTemplateColumns: "minmax(150px,1.4fr) 50px 90px 90px 90px 90px",
-                  gap: 7, padding: "8px 12px", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12, alignItems: "center" }}>
-                  <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.persona.nombre}</span>
+              {nomina.lineas.map(l => {
+                const id = l.persona.id;
+                const desc = descuentos[id] || {};
+                return (
+                <div key={id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(150px,1.4fr) 50px 90px 90px 90px 90px",
+                  gap: 7, padding: "8px 12px", fontSize: 12, alignItems: "center" }}>
+                  {/* El nombre abre sus días: ahí se corrige un día mal anotado. */}
+                  <button onClick={() => setDiasDe(diasDe === id ? null : id)} disabled={!editable}
+                    title={editable ? "Ver y corregir sus días del período" : undefined}
+                    style={{ textAlign: "left", background: "none", border: "none", padding: 0, fontFamily: colors.font, fontSize: 12,
+                      color: diasDe === id ? colors.brand : colors.ink, cursor: editable ? "pointer" : "default",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: editable ? "underline dotted" : "none" }}>
+                    {l.persona.nombre}
+                  </button>
                   <span style={{ textAlign: "center", color: colors.inkSoft }}>{l.asistencia.dias}</span>
                   <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(l.sueldoPeriodo)}</span>
                   <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(l.totalExtras)}</span>
-                  <span style={{ textAlign: "right", color: colors.muted }}>−${fmt(l.descuentos)}</span>
+                  <button onClick={() => setAbiertoDesc(abiertoDesc === id ? null : id)} disabled={!editable || !!pisado}
+                    title="Anticipo, préstamos, quirografarios y multas"
+                    style={{ textAlign: "right", background: "none", border: "none", padding: 0, fontFamily: colors.font, fontSize: 12,
+                      color: colors.muted, cursor: editable && !pisado ? "pointer" : "default", textDecoration: editable && !pisado ? "underline dotted" : "none" }}>
+                    −${fmt(l.descuentos)}
+                  </button>
                   <span style={{ textAlign: "right", fontWeight: 700, color: colors.ink }}>${fmt(l.aPagar)}</span>
                 </div>
-              ))}
+                {abiertoDesc === id && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, padding: "0 12px 10px" }}>
+                    {[["anticipos", "Anticipo 1ª quincena"], ["prestamos", "Préstamos"], ["quirografarios", "Quirografarios"], ["multas", "Multas"]].map(([k, label]) => (
+                      <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, fontWeight: 600, color: colors.muted }}>
+                        {label}
+                        <input type="number" min="0" step="0.01" value={desc[k] ?? ""} placeholder="0"
+                          onChange={e => setDescuentos(x => ({ ...x, [id]: { ...x[id], [k]: e.target.value } }))}
+                          style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+                      </label>
+                    ))}
+                    <div style={{ gridColumn: "1 / -1", fontSize: 10.5, color: colors.muted }}>
+                      Aporte IESS calculado: ${fmt(l.aporte)}. Lo que escribas acá queda guardado al cerrar el rol.
+                    </div>
+                  </div>
+                )}
+                </div>
+                );
+              })}
             </div>
           </div>
           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.55 }}>
             Las cuentas son las de tu planilla: sueldo = salario ÷ 30 × días, hora extra sobre salario ÷ 240,
             décimo tercero ÷ 12, décimo cuarto básico ÷ 360 × días, vacaciones ÷ 24, fondos 8,33% y aporte 9,45%.
-            Los anticipos y préstamos se cargan al cerrar el rol.
+            Tocá un nombre para corregir sus días, y los descuentos para cargar anticipo, préstamos o multas antes de cerrar.
           </div>
+
+          <PanelRolesCerrados roles={roles} lead={lead} editable={editable} quien={currentUser} onCambio={cargar} />
         </>
       )}
 
@@ -322,7 +408,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                 Acumula fondos de reserva
               </label>
               <div style={{ display: "flex", gap: 6 }}>
-                <Button variant="primary" size="sm" onClick={agregarPersona}><Check size={13} /> Guardar</Button>
+                <Button variant="primary" size="sm" onClick={agregarPersona}><Check size={13} /> {nuevo.id ? "Guardar cambios" : "Guardar"}</Button>
                 <Button variant="secondary" size="sm" onClick={() => setNuevo(null)}><X size={13} /> Cancelar</Button>
               </div>
             </div>
@@ -344,7 +430,15 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                   </div>
                 </div>
                 {editable && (
-                  <button onClick={async () => {
+                  <button title="Corregir sus datos" onClick={() => setNuevo({
+                    id: p.id, nombre: p.nombre || "", cedula: p.cedula || "", cargo: p.cargo || "",
+                    salario: p.salario_mensual ?? "", fondos: !!p.acumula_fondos, ingreso: p.fecha_ingreso || hoy(),
+                  })} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 3 }}>
+                    <Pencil size={13} />
+                  </button>
+                )}
+                {editable && (
+                  <button title="Dar de baja" onClick={async () => {
                     // Se da de baja, no se borra: su asistencia y sus roles
                     // pasados tienen que seguir existiendo.
                     if (!window.confirm(`¿Dar de baja a ${p.nombre}? Lo anotado hasta hoy no se borra.`)) return;

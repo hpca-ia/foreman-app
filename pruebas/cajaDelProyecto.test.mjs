@@ -129,3 +129,15 @@ test("lo que queda libre descuenta lo que ya se debe", () => {
   assert.equal(e.porPagar, 300);
   assert.equal(e.libre, 300);
 });
+
+test("el vale ya usado deja de contar como crédito a favor", () => {
+  const facturas = [
+    { id: 1, total: 97.05, clase: "factura" },
+    { id: 2, total: -99.97, clase: "nota_credito" },
+  ];
+  const pagos = [{ factura_id: 1, monto: 97.05, nota_credito_id: 2 }];
+  const e = estadoDeCaja({ fondos: [{ monto: 1000 }], facturas, pagos });
+  assert.equal(e.credito, 2.92);     // lo que le queda al vale
+  assert.equal(e.pagado, 0);         // no salió plata del banco
+  assert.equal(e.porPagar, 0);       // la factura quedó saldada
+});
