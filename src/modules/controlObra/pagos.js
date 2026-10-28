@@ -26,7 +26,11 @@ import { supabase } from "../../lib/supabase";
 export const CLASES_DOC = {
   factura:       { label: "Factura",        pista: "El documento definitivo, con crédito tributario" },
   nota_venta:    { label: "Nota de venta",  pista: "Régimen simplificado: es gasto válido y NO da crédito tributario" },
-  recibo:        { label: "Recibo",         pista: "Un respaldo simple: honorarios, un servicio suelto" },
+  recibo:        { label: "Recibo",         pista: "Un respaldo simple: honorarios, un servicio suelto, una compra sin factura. Es gasto y se cuenta lo que trae" },
+  // UN PASAJE ES UN GASTO DE LA OBRA como cualquier otro, y trae sus propios
+  // renglones: la tarifa, las tasas, el impuesto. Cargado como "factura" se
+  // pierde que fue un viaje, y cargado como "otro" no se sabe qué fue.
+  pasaje:        { label: "Pasaje aéreo",   pista: "Boleto de avión: tarifa, tasas e impuestos. Cuenta como gasto de logística" },
   proforma:      { label: "Proforma",       pista: "Todavía hay que pedir el documento definitivo" },
   // UN ANTICIPO NO ES OBRA HECHA. Sale plata para que el proveedor arranque
   // una fabricación o una importación, y el material todavía no llegó. Cuenta
@@ -43,6 +47,13 @@ export const CLASES_DOC = {
   // olvida suma un gasto donde tenía que restar.
   nota_credito:  { label: "Nota de crédito (devolución)", pista: "Plata que vuelve: se devolvió material o se cobró de más. Entra en negativo y baja lo gastado" },
 };
+
+// LO QUE SE PUEDE CARGAR DESDE CAJA CHICA. Una caja chica paga en el momento:
+// no hay proforma que esperar ni anticipo que liquidar.
+export const CLASES_CAJA = ["factura", "nota_venta", "recibo", "pasaje", "nota_credito"];
+
+/** La clase del documento a partir del tipo de un gasto de caja chica. */
+export const claseDeGasto = tipo => (CLASES_CAJA.includes(tipo) ? tipo : "recibo");
 
 // CON QUÉ SE PAGÓ. "nota de crédito" es una forma de pago como cualquier
 // otra: la factura se saldó con un vale que ya teníamos, no salió plata del

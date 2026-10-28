@@ -7,6 +7,7 @@ import { exportarExcel } from "../../lib/exportar";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
+import RevisionLectura from "./RevisionLectura";
 import { esDeCajaChica, SIGLA_CAJA } from "./origenGasto";
 import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 import { Mini } from "./PanelFacturas";
@@ -143,6 +144,9 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
 
   return (
     <div>
+      {/* LA MISMA REVISIÓN QUE EN QUÉ SE COMPRÓ. Acá es donde se arreglan: cada
+          documento de las listas se abre para subirle el papel. */}
+      <RevisionLectura facturas={facturas} onLeido={onCambio} onAbrir={f => setModal({ factura: f })} />
       {/* Filtros: en el teléfono se apilan de a dos, en la computadora van en una fila. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 10 }}>
         <div>

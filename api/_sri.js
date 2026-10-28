@@ -63,6 +63,18 @@ const todos = (xml, etiqueta) => {
   return [...String(xml).matchAll(re)].map(m => m[1].trim());
 };
 
+/** Cuánto IVA cobra el XML, sumando los totales por impuesto con tarifa. */
+export function ivaDelXml(xml) {
+  // Sin el bloque, no se sabe: null, para que valga lo cargado a mano.
+  const bloque = dentro(xml, "totalConImpuestos");
+  if (!bloque) return null;
+  return todos(bloque, "totalImpuesto").reduce((t, imp) => {
+    if (dentro(imp, "codigo") !== "2") return t;
+    if (["0", "6", "7"].includes(dentro(imp, "codigoPorcentaje"))) return t;
+    return t + (Number(dentro(imp, "valor")) || 0);
+  }, 0);
+}
+
 /**
  * El comprobante como lo tiene el SRI.
  *
@@ -112,6 +124,10 @@ export async function autorizacionDe(clave) {
         identificacionComprador: dentro(xml, "identificacionComprador"),
         razonSocialComprador: dentro(xml, "razonSocialComprador"),
         importeTotal: Number(dentro(xml, "importeTotal")) || 0,
+        // EL IVA QUE DE VERDAD SE COBRÓ, de los totales por impuesto del XML.
+        // Código 2 es IVA; el porcentaje 0, 6 (no objeto) y 7 (exento) no
+        // cobran nada. Es lo que mira la regla de los negocios populares.
+        ivaCobrado: ivaDelXml(xml),
         detalles: todos(xml, "descripcion").slice(0, 40),
       },
     };
@@ -159,8 +175,9 @@ const mismoDia = (emision, autorizacion) => {
  * @param comprobante  los campos del XML autorizado
  * @param autorizacion { estado, ambiente, fechaAutorizacion }
  * @param rucPropio    el RUC de la empresa, para ver si la factura es nuestra
+ * @param montos       { iva } como se cargó: vale cuando el XML no lo dice
  */
-export function hallazgosDe({ ruc, comprobante, autorizacion, rucPropio }) {
+export function hallazgosDe({ ruc, comprobante, autorizacion, rucPropio, montos }) {
   const h = [];
   const grave = (regla, dice, hacer) => h.push({ nivel: "grave", regla, dice, hacer });
   const aviso = (regla, dice, hacer) => h.push({ nivel: "aviso", regla, dice, hacer });
@@ -240,6 +257,13 @@ export function hallazgosDe({ ruc, comprobante, autorizacion, rucPropio }) {
     }
   }
 
+  // 5b. UN NEGOCIO POPULAR NO COBRA IVA. El RIMPE de negocios populares
+  //     factura con tarifa 0% (o emite notas de venta): si el documento trae
+  //     IVA, ese IVA no se debía cobrar y no da crédito tributario. Pagarlo es
+  //     pagarle al proveedor un impuesto que no le corresponde. Va fuera del
+  //     catastro: la leyenda del comprobante alcanza para saberlo.
+  reglaNegocioPopular({ ruc, comprobante, montos }).forEach(x => h.push(x));
+
   // 6. Emisión y autorización, el mismo día.
   const igual = mismoDia(comprobante?.fechaEmision, autorizacion?.fechaAutorizacion);
   if (igual === false) {
@@ -248,6 +272,35 @@ export function hallazgosDe({ ruc, comprobante, autorizacion, rucPropio }) {
   }
 
   return h;
+}
+
+/**
+ * ¿Es RIMPE Negocio Popular? Lo dice el catastro (régimen y categoría) o la
+ * leyenda impresa en el comprobante, que es "CONTRIBUYENTE NEGOCIO POPULAR -
+ * RÉGIMEN RIMPE". Basta con uno de los dos.
+ */
+export function esNegocioPopular(ruc, comprobante) {
+  const catastro = limpiarTexto(`${ruc?.regimen || ""} ${ruc?.categoria || ""} ${ruc?.tipoContribuyente || ""}`);
+  const leyenda = limpiarTexto(comprobante?.contribuyenteRimpe);
+  return /NEGOCIO\S*\s+POPULAR/.test(catastro) || /NEGOCIO\S*\s+POPULAR/.test(leyenda);
+}
+
+/**
+ * La regla del negocio popular, sola: también se usa cuando no hay clave de
+ * acceso y del comprobante solo se sabe lo que se cargó a mano.
+ *
+ * El IVA sale del XML autorizado si está; si no, de lo cargado.
+ */
+export function reglaNegocioPopular({ ruc, comprobante, montos }) {
+  if (!esNegocioPopular(ruc, comprobante)) return [];
+  const delXml = comprobante && comprobante.ivaCobrado != null ? Number(comprobante.ivaCobrado) : null;
+  const iva = delXml != null ? delXml : Math.abs(Number(montos?.iva) || 0);
+  if (!(iva > 0.009)) return [];
+  return [{
+    nivel: "grave", regla: "negocio_popular",
+    dice: `El proveedor es RIMPE NEGOCIO POPULAR y el documento cobra $${iva.toFixed(2)} de IVA. Un negocio popular factura con tarifa 0%.`,
+    hacer: "No pagues ese IVA: no se debía cobrar y no da crédito tributario. Pedile que anule el documento y lo emita en tarifa 0% (o como nota de venta).",
+  }];
 }
 
 /** El resumen de los hallazgos, que es lo que se guarda y lo que se mira. */

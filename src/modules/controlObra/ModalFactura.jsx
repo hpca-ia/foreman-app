@@ -174,11 +174,17 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: LECTURA, max_tokens: 4000,
-          system: `Eres NOVA. Lees facturas de construcción de Ecuador y devuelves SOLO JSON, sin markdown:
-{"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","clave_acceso":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
+          system: `Eres NOVA. Lees comprobantes de gasto de una constructora de Ecuador —facturas, notas de venta, notas de crédito, recibos (también escritos a mano) y pasajes aéreos— y devuelves SOLO JSON, sin markdown:
+{"clase":"factura|nota_venta|nota_credito|recibo|pasaje","fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","clave_acceso":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
  "items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"iva":15,"rubro_id":null}]}
 
 subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.
+
+"clase" es qué documento es: factura (dice FACTURA, con RUC y clave de
+acceso), nota_venta (dice NOTA DE VENTA: RIMPE o régimen simplificado),
+nota_credito (dice NOTA DE CRÉDITO: una devolución), recibo (un recibo simple,
+muchas veces escrito a mano) o pasaje (un boleto aéreo). Los montos van
+siempre como están impresos, positivos.
 
 "clave_acceso" son los 49 dígitos seguidos que aparecen como NÚMERO DE
 AUTORIZACIÓN o CLAVE DE ACCESO, normalmente debajo del código de barras.
@@ -255,6 +261,11 @@ Rubros: ${listaRubros}`,
         iva: editando && n(f.total) ? f.iva : n(p.iva),
         total: editando && n(f.total) ? f.total : n(p.total),
         tipo: conservar(f.tipo, p.tipo),
+        // QUÉ DOCUMENTO ES, si NOVA lo reconoce y nadie lo eligió todavía.
+        // Al editar manda lo guardado: cambiarle la clase a una factura ya
+        // cargada cambia cómo cuenta (una nota de crédito resta).
+        clase: !editando && ["factura", "nota_venta", "nota_credito", "recibo", "pasaje"].includes(p.clase)
+          && (f.clase || "factura") === "factura" ? p.clase : f.clase,
       }));
       // LOS RENGLONES DE LA FACTURA.
       //
@@ -298,7 +309,10 @@ Rubros: ${listaRubros}`,
       // todavía puede devolvérsela al proveedor. Un día después, ya pagada, lo
       // único que queda es el problema.
       const clave = String(p.clave_acceso || "").replace(/\D/g, "");
-      if (clave.length === 49) await revisarEnSri(clave, p.ruc);
+      // Y SIN CLAVE, CON EL RUC: una nota de venta de papel no la trae, y es
+      // justo donde aparece el negocio popular que cobra un IVA que no debe.
+      const rucLeido = String(p.ruc || "").replace(/\D/g, "");
+      if (clave.length === 49 || rucLeido.length === 13) await revisarEnSri(clave, p.ruc, { iva: n(p.iva) });
     } catch {
       setError("NOVA no pudo leer el archivo. Llena los datos a mano.");
     }
@@ -313,7 +327,7 @@ Rubros: ${listaRubros}`,
    * se paga igual pero el SRI desconoce el IVA y el costo, y eso se descubre
    * en una revisión, un año después, cuando ya no hay a quién reclamarle.
    */
-  async function revisarEnSri(claveDada, rucDado) {
+  async function revisarEnSri(claveDada, rucDado, montosDados) {
     const clave = String(claveDada ?? form.clave_acceso ?? "").replace(/\D/g, "");
     const ruc = String(rucDado ?? form.ruc ?? "").replace(/\D/g, "");
     // CON EL RUC SOLO TAMBIÉN SE PREGUNTA. No se revisa el comprobante —para
@@ -329,7 +343,9 @@ Rubros: ${listaRubros}`,
     try {
       const r = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sri: { clave, ruc } }),
+        // EL IVA CARGADO VIAJA CON LA CONSULTA: si el proveedor es negocio
+        // popular y no hay XML que mirar, es lo único que dice si cobró IVA.
+        body: JSON.stringify({ sri: { clave, ruc, montos: montosDados || { iva: n(form.iva) } } }),
       });
       const d = await r.json().catch(() => null);
       if (!r.ok || !d || d.error) {

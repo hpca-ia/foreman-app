@@ -1,6 +1,6 @@
 // api/nova.js — Vercel Serverless Function
 import { sesionValida, rest } from "./_supabase.js";
-import { consultarRuc, autorizacionDe, hallazgosDe, veredicto } from "./_sri.js";
+import { consultarRuc, autorizacionDe, hallazgosDe, veredicto, reglaNegocioPopular } from "./_sri.js";
 
 const json = async r => { try { return await r.json(); } catch { return null; } };
 import { JUICIO, LECTURA } from "./_modelos.js";
@@ -44,7 +44,7 @@ export const config = {
  * se dice así, en vez de devolver un "todo bien" que no se revisó.
  */
 async function revisarEnSri(req, res) {
-  const { clave, ruc } = req.body.sri || {};
+  const { clave, ruc, montos } = req.body.sri || {};
 
   // SIN CLAVE DE ACCESO TODAVÍA SE PUEDE PREGUNTAR QUIÉN ES.
   //
@@ -62,8 +62,11 @@ async function revisarEnSri(req, res) {
     const soloRuc = await consultarRuc(ruc);
     if (soloRuc?.error) return res.status(200).json({ estado: "sin_respuesta", hallazgos: [],
       error: soloRuc.error });
+    // Sin clave igual se sabe si es negocio popular, y si lo cargado trae IVA.
+    // Es justo el caso de las notas de venta de papel, que no tienen clave.
+    const popular = reglaNegocioPopular({ ruc: soloRuc.ruc, comprobante: null, montos });
     return res.status(200).json({
-      estado: "solo_ruc", proveedor: soloRuc.ruc, hallazgos: [{
+      estado: popular.length ? "grave" : "solo_ruc", proveedor: soloRuc.ruc, hallazgos: [...popular, {
         nivel: "aviso", regla: "clave",
         dice: "No se revisó el comprobante: falta la clave de acceso de 49 dígitos.",
         hacer: "Está impresa debajo del código de barras, como NÚMERO DE AUTORIZACIÓN. Copiala y volvé a revisar.",
@@ -83,6 +86,7 @@ async function revisarEnSri(req, res) {
     comprobante: auth?.comprobante || null,
     autorizacion: auth || null,
     rucPropio: ajuste?.[0]?.valor?.ruc || null,
+    montos,
   });
   return res.status(200).json({
     estado: veredicto(hallazgos), hallazgos,

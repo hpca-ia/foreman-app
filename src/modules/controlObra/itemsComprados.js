@@ -17,8 +17,9 @@
 export const FORMATO = "cantidad | unidad | descripción | precio unitario | IVA %";
 
 export const PROMPT_ITEMS = [
-  "Sos un asistente que lee facturas de compra de Ecuador para una constructora.",
-  "Devolvé UNA LÍNEA POR ÍTEM del detalle de la factura, con este formato exacto:",
+  "Sos un asistente que lee comprobantes de compra de Ecuador para una constructora:",
+  "facturas, notas de venta, notas de crédito, recibos (también escritos a mano) y pasajes aéreos.",
+  "Devolvé UNA LÍNEA POR ÍTEM del detalle del documento, con este formato exacto:",
   FORMATO,
   "Sin encabezados, sin markdown, sin numerar, sin texto antes ni después.",
   "La descripción va tal como está impresa, sin abreviar y sin traducir.",
@@ -28,7 +29,10 @@ export const PROMPT_ITEMS = [
   "El precio unitario va SIN IVA, como está impreso en el detalle.",
   "IVA % es la tarifa de ESE renglón: 0, 5 o 15. Las facturas la marcan junto al ítem",
   "o separan los subtotales por tarifa. Si no se puede saber, dejalo vacío: vacío es mejor que adivinar.",
-  "Si la factura no se puede leer, devolvé exactamente: ILEGIBLE",
+  "En un recibo escrito a mano, leé lo que se entienda; si no tiene detalle, una línea con el concepto y el monto.",
+  "En un pasaje aéreo, UNA línea por boleto (ruta y pasajero) con la tarifa sin impuestos; las tasas y",
+  "cargos aeroportuarios van en otra línea, con IVA % vacío si no está impreso.",
+  "Si el documento no se puede leer, devolvé exactamente: ILEGIBLE",
 ].join("\n");
 
 /**

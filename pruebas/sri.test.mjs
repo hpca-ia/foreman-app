@@ -83,3 +83,52 @@ test("cuando la actividad sí tiene que ver, no molesta", () => {
   assert.equal(reglas(h).includes("actividad"), false);
   assert.equal(veredicto(h), "ok");
 });
+
+// ─── RIMPE NEGOCIO POPULAR: tarifa 0% ──────────────────────────────────────
+import { esNegocioPopular, reglaNegocioPopular, ivaDelXml } from "../api/_sri.js";
+
+const popular = { ...ruc, regimen: "RIMPE", categoria: "NEGOCIO POPULAR" };
+
+test("un negocio popular que cobra IVA: grave", () => {
+  const h = hallazgosDe({ ...base, ruc: popular,
+    comprobante: { ...comprobante, contribuyenteRimpe: "CONTRIBUYENTE NEGOCIO POPULAR - RÉGIMEN RIMPE", ivaCobrado: 4.5 } });
+  const r = h.find(x => x.regla === "negocio_popular");
+  assert.equal(r?.nivel, "grave");
+  assert.match(r.dice, /4\.50/);
+  assert.equal(veredicto(h), "grave");
+});
+
+test("un negocio popular en tarifa 0%: nada que decir", () => {
+  const h = hallazgosDe({ ...base, ruc: popular,
+    comprobante: { ...comprobante, contribuyenteRimpe: "CONTRIBUYENTE NEGOCIO POPULAR - RÉGIMEN RIMPE", ivaCobrado: 0 } });
+  assert.ok(!h.some(x => x.regla === "negocio_popular"));
+});
+
+test("el XML manda sobre lo cargado a mano", () => {
+  assert.deepEqual(reglaNegocioPopular({ ruc: popular, comprobante: { ivaCobrado: 0 }, montos: { iva: 3 } }), []);
+});
+
+test("sin clave de acceso, el IVA cargado alcanza", () => {
+  const h = reglaNegocioPopular({ ruc: popular, comprobante: null, montos: { iva: 3 } });
+  assert.equal(h[0]?.regla, "negocio_popular");
+});
+
+test("un RIMPE emprendedor sí puede cobrar IVA", () => {
+  const emprendedor = { ...ruc, regimen: "RIMPE", categoria: "EMPRENDEDOR" };
+  assert.equal(esNegocioPopular(emprendedor, null), false);
+  assert.deepEqual(reglaNegocioPopular({ ruc: emprendedor, comprobante: null, montos: { iva: 3 } }), []);
+});
+
+test("la leyenda del comprobante alcanza aunque el catastro no conteste", () => {
+  assert.equal(esNegocioPopular(null, { contribuyenteRimpe: "CONTRIBUYENTE NEGOCIO POPULAR - RÉGIMEN RIMPE" }), true);
+});
+
+test("el IVA del XML: solo el que tiene tarifa", () => {
+  const xml = `<totalConImpuestos>
+    <totalImpuesto><codigo>2</codigo><codigoPorcentaje>0</codigoPorcentaje><baseImponible>10.00</baseImponible><valor>0.00</valor></totalImpuesto>
+    <totalImpuesto><codigo>2</codigo><codigoPorcentaje>4</codigoPorcentaje><baseImponible>20.00</baseImponible><valor>3.00</valor></totalImpuesto>
+    <totalImpuesto><codigo>3</codigo><codigoPorcentaje>3011</codigoPorcentaje><baseImponible>5.00</baseImponible><valor>1.00</valor></totalImpuesto>
+  </totalConImpuestos>`;
+  assert.equal(ivaDelXml(xml), 3);
+  assert.equal(ivaDelXml("<factura></factura>"), null, "sin el bloque no se sabe");
+});

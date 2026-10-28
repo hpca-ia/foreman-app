@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { proponerCierre, cerrarCaja, cargarCierres, reabrirCierre } from "./cajaChica/cierres";
+import { efectivoGastado, valesPorUsar } from "./cajaChica/efectivo";
 import { porFecha, deLaVuelta } from "./cajaChica/lista";
 import { inputStyle } from "../components/ui/Input";
 import { Trash2 } from "lucide-react";
@@ -18,6 +19,7 @@ import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 import CampoProveedor from "../components/CampoProveedor";
 import { LECTURA, textoDeNova } from "../lib/modelos";
 import { leerRenglones } from "./controlObra/renglones";
+import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -33,6 +35,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   // la mitad de la respuesta.
   const [buscaGasto, setBuscaGasto] = useState({ texto: "", min: "", max: "" });
   const [anticipos, setAnticipos] = useState([]);
+  // Los pagos que el control tiene de las facturas de esta caja. Sirven para
+  // una sola cosa: saber cuánto queda de cada nota de crédito, porque un vale
+  // se puede repartir entre dos compras.
+  const [pagosObra, setPagosObra] = useState([]);
+  // Con qué vale se paga el gasto que se está cargando: { [notaFacturaId]: monto }.
+  const [conVale, setConVale] = useState({});
   // Las vueltas ya rendidas de esta caja. Una caja chica no es una cuenta que
   // corre para siempre: va por vueltas, y el abono nuevo es el acuse de que la
   // anterior se rindió.
@@ -135,6 +143,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false});
     setGastos(data||[]);
     await fetchDestinos(data||[]);
+    // Los pagos de esas facturas: de ahí sale cuánto queda de cada vale.
+    const ids = (data||[]).map(g=>g.obra_factura_id).filter(Boolean);
+    if (ids.length) {
+      const { data: ps } = await supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").in("factura_id", ids);
+      setPagosObra(ps||[]);
+    } else setPagosObra([]);
   }
 
   /**
@@ -268,13 +282,67 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
    * ajusta a mano: sumar o restar la diferencia funciona hasta que alguien
    * edita dos veces seguidas y ahí el saldo se despega para siempre.
    */
+  // Los gastos como vienen, para poder sumar el efectivo. Es una función
+  // aparte nada más para que las dos cuentas —la caja y el cierre— usen la
+  // misma lectura y no se separen nunca.
+  async function traerGastosParaSumar(consulta) {
+    const { data } = await consulta;
+    return { data: data || [] };
+  }
+
+  // Lo que se está pagando con vales en el formulario, y con cuáles.
+  const valeRenglones = () => Object.entries(conVale)
+    .map(([id, m]) => ({ nota_credito_id: Number(id), monto: Math.round((Number(m) || 0) * 100) / 100 }))
+    .filter(x => x.monto > 0.004);
+  const totalConVale = () => Math.round(valeRenglones().reduce((t, x) => t + x.monto, 0) * 100) / 100;
+  const conValeCampos = () => {
+    const filas = valeRenglones();
+    if (!filas.length) return {};
+    return { pagado_con_nota: totalConVale(), nota_credito_id: filas[0].nota_credito_id };
+  };
+
+  /**
+   * Los pagos de una factura de caja chica: lo que salió del bolsillo y lo
+   * que salió de un vale.
+   *
+   * La factura queda saldada por los dos juntos, y solo el primero mueve la
+   * plata de la caja. Sin esto, pagar con un vale se veía como si el vale
+   * hubiera vuelto en billetes y la compra se hubiera pagado entera en
+   * efectivo: el total daba igual y ninguna de las dos líneas era cierta.
+   */
+  async function registrarPagos(facturaId, monto) {
+    const filas = valeRenglones();
+    const conVales = Math.min(totalConVale(), Math.abs(monto));
+    const base = {
+      obra_id: cajaActiva.obra_id, factura_id: facturaId, fecha: gastoForm.fecha,
+      registrado_por: currentUser.id, registrado_nombre: currentUser.name,
+    };
+    const pagos = [];
+    const efectivo = Math.round((Math.abs(monto) - conVales) * 100) / 100;
+    if (efectivo > 0.004) pagos.push({ ...base, monto: efectivo,
+      nota: `Pagado de caja chica${cajaActiva.nombre ? ` «${cajaActiva.nombre}»` : ""}`,
+      referencia: `CAJA-${cajaActiva.id}` });
+    filas.forEach(f => pagos.push({ ...base, monto: f.monto, forma: "nota de crédito",
+      nota_credito_id: f.nota_credito_id, nota: "Pagado con nota de crédito" }));
+    if (!pagos.length) return null;
+    const { error } = await supabase.from("obra_pagos").insert(pagos);
+    if (error && /column|schema cache/i.test(error.message)) return "Falta correr la migración 126 (pagos con nota de crédito).";
+    return error ? error.message : null;
+  }
+
   async function recalcularSaldos(cajaId) {
     const [{ data: ants }, { data: gs }] = await Promise.all([
       supabase.from("cajas_anticipos").select("monto").eq("caja_id", cajaId),
-      supabase.from("cajas_gastos").select("monto").eq("caja_id", cajaId),
+      traerGastosParaSumar(supabase.from("cajas_gastos").select("*").eq("caja_id", cajaId)),
     ]);
     const total = (ants || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
-    const gastado = (gs || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    // LO QUE SALIÓ DE LA CAJA, NO LO QUE SE GASTÓ.
+    //
+    // Un vale no devuelve billetes y lo pagado con un vale no los saca: las
+    // dos cosas se compensaban en el total —por eso nunca saltó un
+    // descuadre— pero el disponible decía que el responsable tiene plata que
+    // no tiene.
+    const gastado = efectivoGastado(gs || []);
     const campos = {
       saldo_total: Math.round(total * 100) / 100,
       saldo_gastado: Math.round(gastado * 100) / 100,
@@ -369,10 +437,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
    */
   async function recalcularCierre(cierreId) {
     const [{ data: gs }, { data: ants }] = await Promise.all([
-      supabase.from("cajas_gastos").select("monto").eq("cierre_id", cierreId),
+      traerGastosParaSumar(supabase.from("cajas_gastos").select("*").eq("cierre_id", cierreId)),
       supabase.from("cajas_anticipos").select("monto").eq("cierre_id", cierreId),
     ]);
-    const gastado = (gs || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    const gastado = efectivoGastado(gs || []);
     const abonado = (ants || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
     const r2 = v => Math.round(v * 100) / 100;
     await supabase.from("cajas_cierres").update({
@@ -481,7 +549,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       // en una lista de ciento sesenta es trabajo que el modelo puede hacer.
       // Propone; quien carga confirma.
       const paraNova = rubrosObra.slice(0, 220).map(r => `${r.id}:${r.descripcion.slice(0, 60)}`).join(" | ");
-      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|recibo|otro","rubro_id":null}. "numero_factura" es el número impreso de la factura (formato 001-001-000000123). "monto" es el TOTAL a pagar. "rubro_id" es el id del rubro de esta lista al que corresponde el gasto, o null si no estás seguro: null es una respuesta válida y es mejor que adivinar, porque un gasto cargado al rubro equivocado se descubre meses después. Rubros: ' + paraNova}];
+      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|nota_venta|recibo|pasaje|nota_credito","rubro_id":null}. "tipo" es qué documento es: factura (electrónica o impresa, con RUC y clave de acceso), nota_venta (régimen simplificado o RIMPE, dice NOTA DE VENTA), recibo (un recibo simple o escrito a mano), pasaje (boleto aéreo) o nota_credito (devolución). "numero_factura" es el número impreso del documento (formato 001-001-000000123), si lo tiene. "monto" es el TOTAL a pagar. "rubro_id" es el id del rubro de esta lista al que corresponde el gasto, o null si no estás seguro: null es una respuesta válida y es mejor que adivinar, porque un gasto cargado al rubro equivocado se descubre meses después. Rubros: ' + paraNova}];
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:LECTURA,max_tokens:700,messages:[{role:"user",content}]})});
       if (!res.ok) { setNovaError(`NOVA no respondió (error ${res.status}). Llena los datos a mano.`); setNovaLeyendo(false); return; }
       const d=await res.json();
@@ -596,6 +664,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         ...(gastoEditando.estado === "devuelto"
           ? { estado: "pendiente", devuelto_motivo: null }
           : {}),
+        // Lo pagado con vales se vuelve a escribir entero: si se sacó, queda
+        // en cero y el gasto vuelve a salir todo de la caja.
+        pagado_con_nota: totalConVale() || null,
+        nota_credito_id: valeRenglones()[0]?.nota_credito_id ?? null,
       };
       const {error:errEdit}=await supabase.from("cajas_gastos").update(campos).eq("id",gastoEditando.id);
       // Corregir el monto de un gasto que ya está dentro de un cierre mueve el
@@ -610,6 +682,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           fecha:gastoForm.fecha, razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
           numero_factura:gastoForm.numero_factura||null, detalle:gastoForm.descripcion,
           justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
+          clase:claseDeGasto(tipoGasto),
           ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
         }).eq("id",gastoEditando.obra_factura_id);
         if (conRubros.length) {
@@ -654,8 +727,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           await supabase.from("obra_pagos").delete()
             .eq("factura_id",gastoEditando.obra_factura_id);
         } else {
-          await supabase.from("obra_pagos").update({monto, fecha:gastoForm.fecha})
-            .eq("factura_id",gastoEditando.obra_factura_id);
+          // SE REHACEN LOS DOS. Cambiar con qué vale se pagó no es corregir
+          // un monto: es otra forma de pago, y dejar el pago viejo al lado
+          // del nuevo deja la factura pagada dos veces.
+          await supabase.from("obra_pagos").delete().eq("factura_id",gastoEditando.obra_factura_id);
+          const errPagos = await registrarPagos(gastoEditando.obra_factura_id, monto);
+          if (errPagos) setNovaError("La corrección se guardó, pero los pagos no: " + errPagos);
         }
       }
 
@@ -674,6 +751,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
 
     const{data,error:errGasto}=await supabase.from("cajas_gastos").insert({
       caja_id:cajaActiva.id,descripcion:gastoForm.descripcion,proveedor:gastoForm.proveedor,ruc:gastoForm.ruc||null,numero_factura:gastoForm.numero_factura||null,monto,
+      ...conValeCampos(),
       proyecto_nombre:cajaActiva.proyecto_nombre,fecha:gastoForm.fecha,
       tipo:tipoGasto,archivo_url:archivoUrl,archivo_nombre:archivoNombre,notas:gastoForm.notas,
       subido_por:currentUser.id,subido_por_nombre:currentUser.name
@@ -695,6 +773,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         const {data:facturaObra, error:errObra} = await supabase.from("obra_facturas").insert({
           obra_id:cajaActiva.obra_id, planilla_id:planillaAbierta?.id||null,
           fecha:gastoForm.fecha, tipo_documento:devuelve ? "NOTA DE CREDITO" : (gastoForm.tipo||"factura").toUpperCase(),
+          // QUÉ DOCUMENTO ES, con la misma palabra que usa Control de Obra.
+          // Sin esto todo gasto de caja chica entraba como "factura", aunque
+          // fuera un recibo o un pasaje.
+          clase:devuelve ? "nota_credito" : claseDeGasto(gastoForm.tipo),
           razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
           numero_factura:gastoForm.numero_factura||null, archivo_hash:archivoHash||null,
           duplicado_de:dupsGasto.exactos[0]?.id||null,
@@ -729,14 +811,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           // salida que registrar, y la base ni siquiera acepta un pago en
           // negativo. Lo que la devolución hace es bajar el gasto, y eso ya
           // lo hace la factura con su monto negativo.
-          const {error:errPago} = devuelve ? {} : await supabase.from("obra_pagos").insert({
-            obra_id:cajaActiva.obra_id, factura_id:facturaObra.id,
-            monto, fecha:gastoForm.fecha,
-            nota:`Pagado de caja chica${cajaActiva.nombre?` «${cajaActiva.nombre}»`:""}`,
-            referencia:`CAJA-${cajaActiva.id}`,
-            registrado_por:currentUser.id, registrado_nombre:currentUser.name,
-          });
-          if (errPago) setNovaError("El gasto entró al control, pero no quedó marcado como pagado: " + errPago.message);
+          //
+          // Y LO PAGADO CON UN VALE SE REGISTRA CONTRA EL VALE, no contra la
+          // caja: esa plata no salió del bolsillo del responsable, salió de
+          // un crédito que el proveedor nos debía. Son dos pagos y la factura
+          // queda saldada igual.
+          const errPago = devuelve ? null : await registrarPagos(facturaObra.id, monto);
+          if (errPago) setNovaError("El gasto entró al control, pero no quedó marcado como pagado: " + errPago);
           // Lo que eligió quien cargó el gasto entra como asignación real.
           const filas = conRubros
             .map(r=>aAsignacion(facturaObra.id, r))
@@ -752,7 +833,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       const saldos = await recalcularSaldos(cajaActiva.id);
       setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
       setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
-      setRubrosGasto([]);
+      setRubrosGasto([]); setConVale({});
       setArchivoGasto(null);setArchivoPreview(null);fetchCajas();
       const disponible = saldos?.saldo_disponible ?? 0;
       if(disponible<=(cajaActiva.limite_alerta||50)) await avisarReposicion(disponible);
@@ -1022,16 +1103,63 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                 Caja de gastos generales: no se asigna a rubros de obra.
               </div>
             )}
+            {/* ¿SE PAGÓ ALGO CON UN VALE?
+                Una nota de crédito del mismo proveedor es plata que él nos
+                debía: lo que se paga con ella NO sale del efectivo de la
+                caja. Solo aparecen los vales de este proveedor —un vale de
+                KYWI no paga una factura de otro— y solo cuando quedan. */}
+            {(() => {
+              if (gastoEditando?.cierre_id) return null;
+              const { vales } = valesPorUsar(gastos, pagosObra);
+              const pelar = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+              const suyos = vales.filter(v => (gastoForm.ruc && v.ruc)
+                ? String(v.ruc).replace(/\D/g,"") === String(gastoForm.ruc).replace(/\D/g,"")
+                : pelar(v.proveedor) && pelar(v.proveedor) === pelar(gastoForm.proveedor));
+              if (!suyos.length || Number(gastoForm.monto) <= 0) return null;
+              const usado = totalConVale();
+              const efectivo = Math.max(0, Math.round((Number(gastoForm.monto) - usado) * 100) / 100);
+              return (
+                <div style={{background:"var(--success-soft)",border:"1px solid var(--success-border)",borderRadius:10,padding:"10px 12px"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--success)",marginBottom:3}}>
+                    Este proveedor nos debe {suyos.length===1?"una nota de crédito":`${suyos.length} notas de crédito`}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--ink-soft)",marginBottom:7,lineHeight:1.45}}>
+                    Lo que se pague con el vale no sale del efectivo de la caja. Poné cuánto se usó de cada uno.
+                  </div>
+                  {suyos.map(v => (
+                    <div key={v.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
+                      <input type="number" step="0.01" value={conVale[v.obra_factura_id] ?? ""}
+                        onChange={e=>setConVale(c=>({...c,[v.obra_factura_id]:e.target.value}))}
+                        placeholder="0,00" style={{...iS,width:100,padding:"5px 8px",fontSize:12,textAlign:"right"}}/>
+                      <span style={{fontSize:11.5,color:"var(--ink-soft)",flex:1,minWidth:150}}>
+                        de <strong>${fmt(v.disponible)}</strong> que quedan · {v.descripcion?String(v.descripcion).slice(0,40):v.numero_factura||"nota de crédito"}
+                      </span>
+                      <button type="button" onClick={()=>setConVale(c=>({...c,[v.obra_factura_id]:Math.min(v.disponible, Math.max(0, Number(gastoForm.monto) - (totalConVale() - (Number(conVale[v.obra_factura_id])||0))))}))}
+                        style={{background:"#fff",border:"1px solid var(--border)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"var(--brand)",fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
+                        usar
+                      </button>
+                    </div>
+                  ))}
+                  {usado > 0 && (
+                    <div style={{fontSize:11.5,color:"var(--ink)",borderTop:"1px solid var(--success-border)",paddingTop:6,marginTop:4}}>
+                      Con vale <strong>${fmt(usado)}</strong> · en efectivo <strong>${fmt(efectivo)}</strong>
+                      {usado > Number(gastoForm.monto) + 0.004 && (
+                        <span style={{color:"var(--danger)"}}> — es más que el gasto</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Tipo</label>
                 <select value={gastoForm.tipo} onChange={e=>setGastoForm(p=>({...p,tipo:e.target.value}))} style={iS}>
-                  <option value="factura">Factura</option><option value="recibo">Recibo</option>
-                  {/* UNA NOTA DE CRÉDITO ES PLATA QUE VUELVE A LA CAJA.
-                      Se devolvió material, el proveedor cobró de más. El
-                      documento no es un gasto: es un vale que se vuelve a
-                      gastar. Entra restando, así que el saldo disponible sube. */}
-                  <option value="nota_credito">Nota de crédito (devolución)</option>
-                  <option value="otro">Otro</option>
+                  {/* Los mismos documentos que en Control de Obra, con el mismo
+                      nombre: el gasto entra allá como ese documento. Una nota
+                      de crédito es plata que vuelve a la caja: entra restando. */}
+                  {CLASES_CAJA.map(id => <option key={id} value={id}>{CLASES_DOC[id].label}</option>)}
+                  {/* "Otro" queda solo para los gastos viejos que lo tienen. */}
+                  {gastoForm.tipo === "otro" && <option value="otro">Otro</option>}
                 </select></div>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Fecha</label>
                 <input type="date" value={gastoForm.fecha} onChange={e=>setGastoForm(p=>({...p,fecha:e.target.value}))} style={iS}/></div>
@@ -1057,6 +1185,24 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
               </div>
             ))}
           </div>
+          {/* LOS VALES, AL LADO DEL EFECTIVO Y SIN MEZCLARSE.
+              Una nota de crédito es plata nuestra, pero no son billetes: se
+              gasta en la próxima compra con ESE proveedor y no sirve para
+              pagarle a otro. Sumada al disponible, el responsable rinde
+              contra un número que no tiene en el bolsillo. */}
+          {(() => {
+            const { vales, total } = valesPorUsar(gastos, pagosObra);
+            if (total <= 0.005) return null;
+            return (
+              <div style={{background:"var(--success-soft)",border:"1px solid var(--success-border)",borderRadius:10,
+                padding:"9px 13px",marginBottom:12,fontSize:12,color:"var(--ink-soft)",lineHeight:1.5}}>
+                Además del efectivo, esta caja tiene <strong style={{color:"var(--success)"}}>${fmt(total)}</strong> en{" "}
+                {vales.length===1?"una nota de crédito":`${vales.length} notas de crédito`} sin usar:{" "}
+                {vales.map(v=>`${v.proveedor||"proveedor"} $${fmt(v.disponible)}`).join(" · ")}.
+                {" "}No son billetes: se usan en la próxima compra con ese proveedor, marcándolas al cargar el gasto.
+              </div>
+            );
+          })()}
           {cajaActiva.saldo_disponible<=cajaActiva.limite_alerta&&(
             <div style={{background:"var(--danger-soft)",border:"1.5px solid var(--danger-border)",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
               <span style={{fontSize:18}}>⚠️</span>
@@ -1358,6 +1504,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                         tipo:g.tipo||"factura",notas:g.notas||"",presupuesto_id:""});
                       setRubrosGasto([]); setArchivoGasto(null); setArchivoPreview(null);
                       setDupsGasto({exactos:[],posibles:[]}); setNovaError("");
+                      // Lo que ya se había pagado con vales vuelve al
+                      // formulario: si no, corregir la fecha de un gasto le
+                      // borraría el vale y lo pasaría todo a efectivo.
+                      setConVale(Object.fromEntries(pagosObra
+                        .filter(x => x.factura_id === g.obra_factura_id && x.nota_credito_id != null)
+                        .map(x => [x.nota_credito_id, x.monto])));
                       setSubVista("gasto");
                     }}
                       style={{background:"none",border:"1px solid var(--border)",borderRadius:6,padding:"3px 8px",color:"var(--ink-soft)",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block",fontFamily:"var(--font)"}}>
