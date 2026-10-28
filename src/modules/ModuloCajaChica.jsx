@@ -17,6 +17,7 @@ import BuscadorDeGastos from "../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 import CampoProveedor from "../components/CampoProveedor";
 import { LECTURA, textoDeNova } from "../lib/modelos";
+import { leerRenglones } from "./controlObra/renglones";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -700,6 +701,11 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         }).select().single();
         if (facturaObra) {
           await supabase.from("cajas_gastos").update({obra_factura_id:facturaObra.id}).eq("id",data.id);
+          // QUÉ SE COMPRÓ, para la bodega. La lectura de arriba saca solo el
+          // total; los renglones se piden aparte y sin esperar: quien carga
+          // está en la obra con el celular y no tiene por qué quedarse mirando.
+          // Si falla, queda para "leer las que faltan" en Control de Obra.
+          if (archivoGasto) leerRenglones(facturaObra, archivoGasto).catch(()=>{});
           // UN GASTO DE CAJA CHICA YA ESTÁ PAGADO, Y HAY QUE DECIRLO.
           //
           // Esto es lo que es una caja chica: alguien compró y pagó en el

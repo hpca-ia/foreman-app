@@ -149,3 +149,112 @@ export function agrupar(items = []) {
     variantes: f.variantes.sort((a, b) => b.total - a.total),
   })).sort((a, b) => b.total - a.total);
 }
+
+/**
+ * Los renglones que ya leyó la pantalla de la factura, en el formato de acá.
+ *
+ * Al cargar una factura NOVA ya saca los renglones para repartirla entre
+ * rubros: vienen con `monto` (lo que suma el renglón) y no con precio
+ * unitario. Volver a mandarle el PDF solo para pedir otro formato sería pagar
+ * dos veces por la misma lectura.
+ */
+export function desdeLecturaDeFactura(items = []) {
+  return items
+    .map(x => ({
+      cantidad: Number(x.cantidad) || 0,
+      unidad: String(x.unidad || "u").trim().toLowerCase().slice(0, 12) || "u",
+      descripcion: String(x.descripcion || "").trim(),
+      total: r2(Number(x.monto ?? x.total) || 0),
+    }))
+    .filter(x => x.descripcion && (x.cantidad || x.total))
+    .map(x => ({ ...x, precio_unitario: x.cantidad ? Math.round((x.total / x.cantidad) * 10000) / 10000 : null }));
+}
+
+/**
+ * Las filas que se guardan, con el signo de la factura.
+ *
+ * Una nota de crédito que devuelve dos cascos tiene que RESTAR dos cascos. La
+ * factura ya está guardada en negativo, así que el signo sale de su total y no
+ * de lo que diga el papel, que siempre imprime positivo.
+ */
+export function filasDeRenglones(factura, items = []) {
+  const signo = (Number(factura?.total) || 0) < 0 ? -1 : 1;
+  return items
+    .filter(i => String(i.descripcion || "").trim())
+    .map((i, k) => ({
+      factura_id: factura.id,
+      obra_id: factura.obra_id,
+      orden: k,
+      cantidad: signo * Math.abs(Number(i.cantidad) || 0),
+      unidad: i.unidad || "u",
+      descripcion: String(i.descripcion).trim().slice(0, 200),
+      precio_unitario: i.precio_unitario == null ? null : Math.abs(Number(i.precio_unitario) || 0),
+      total: r2(signo * Math.abs(Number(i.total) || 0)),
+      clave: claveDe(i.descripcion),
+      familia: familiaDe(i.descripcion),
+    }));
+}
+
+/**
+ * Las facturas que faltan leer.
+ *
+ * Fuera las que no tienen papel (no hay nada que leer), las ya leídas, las que
+ * NOVA no pudo leer (reintentarlas solas es pagar cada vez por la misma
+ * respuesta) y los ANTICIPOS: un anticipo es plata adelantada, no una compra.
+ * Lo que se compró viene en la factura que lo liquida, y contar los dos
+ * duplicaría los cascos.
+ */
+export function facturasPorLeer(facturas = []) {
+  return facturas.filter(f => f.archivo_url && !f.renglones_estado && f.clase !== "anticipo");
+}
+
+// LA DOTACIÓN: lo que se le da a cada persona y no se gasta en una semana.
+//
+// Un casco por persona, un chaleco, un par de botas. Guantes y mascarillas no
+// están: se gastan, y diez trabajadores usan cien pares de guantes sin que
+// nadie se lleve nada. Compararlos contra la gente daría una alerta cada
+// semana, y a la tercera nadie la lee.
+//
+// Las claves son la familia como la arma familiaDe: minúscula, sin tilde.
+export const DOTACION = {
+  casco:   { nombre: "Cascos",   porPersona: 1 },
+  chaleco: { nombre: "Chalecos", porPersona: 1 },
+  botas:   { nombre: "Botas",    porPersona: 1 },
+  bota:    { nombre: "Botas",    porPersona: 1 },
+  arnes:   { nombre: "Arneses",  porPersona: 1 },
+  overol:  { nombre: "Overoles", porPersona: 2 },
+  gafas:   { nombre: "Gafas",    porPersona: 2 },
+  lentes:  { nombre: "Gafas",    porPersona: 2 },
+};
+
+/**
+ * La dotación comprada contra la gente que pasó por la obra.
+ *
+ * Se cuenta a TODOS los que pasaron, no solo a los de hoy: el que se fue en
+ * marzo se llevó su casco, y comparar contra los ocho que quedan haría parecer
+ * de más algo que se entregó bien.
+ *
+ * `de_mas` es lo que pasa de una por persona. No es un robo: puede ser
+ * reposición o gente de un subcontratista que no está en la nómina. Es la
+ * pregunta que hay que hacer, no la respuesta.
+ */
+export function dotacionContraPersonal(grupos = [], personas = 0) {
+  const porNombre = new Map();
+  for (const g of grupos) {
+    const regla = DOTACION[g.familia];
+    if (!regla) continue;
+    const ya = porNombre.get(regla.nombre) || { nombre: regla.nombre, porPersona: regla.porPersona, cantidad: 0, total: 0, familias: [] };
+    ya.cantidad += g.cantidad;
+    ya.total += g.total;
+    ya.familias.push(g.familia);
+    porNombre.set(regla.nombre, ya);
+  }
+  return [...porNombre.values()].map(x => {
+    const esperado = personas * x.porPersona;
+    const cantidad = r2(x.cantidad);
+    return {
+      ...x, cantidad, total: r2(x.total), esperado,
+      de_mas: personas ? Math.max(0, r2(cantidad - esperado)) : null,
+    };
+  }).sort((a, b) => (b.de_mas || 0) - (a.de_mas || 0) || b.cantidad - a.cantidad);
+}

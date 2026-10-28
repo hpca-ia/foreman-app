@@ -25,6 +25,7 @@ import { comprometidoPorGrupo } from "./calculos";
 // es cortesía; no mandar el código es la cerradura.
 const PanelFondos = lazy(() => import("./PanelFondos"));
 const PanelProveedores = lazy(() => import("./PanelProveedores"));
+const PanelComprado = lazy(() => import("./PanelComprado"));
 const Cargando = () => <div style={{ textAlign: "center", color: colors.muted, padding: "30px 0", fontSize: 12.5 }}>Cargando…</div>;
 
 export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn = null }) {
@@ -351,6 +352,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
         <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
+        <button onClick={() => setTab("comprado")} style={tabS(tab === "comprado")}>Qué se compró</button>
         {/* Entrar a la obra no es lo mismo que ver con qué plata se hace: un
             residente controla el avance sin tener por qué saber cuánto
             anticipó el cliente ni cuánto se le debe a cada proveedor. */}
@@ -428,6 +430,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar}
               sueltasAlEntrar={!!entrarEn?.sueltas} />
+          )}
+          {tab === "comprado" && (
+            <Suspense fallback={<Cargando />}>
+              <PanelComprado obra={obra} facturas={facturas} onCambio={cargar} />
+            </Suspense>
           )}
           {tab === "proveedores" && vePlata && (
             <Suspense fallback={<Cargando />}>

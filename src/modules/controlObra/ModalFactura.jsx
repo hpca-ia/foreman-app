@@ -15,6 +15,8 @@ import CampoProveedor from "../../components/CampoProveedor";
 import { comprasSinFacturar, engancharFactura } from "../compras/compras";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { FORMAS_PAGO, registrarPago, valesDisponibles } from "./pagos";
+import { guardarRenglones, leerRenglones } from "./renglones";
+import { desdeLecturaDeFactura } from "./itemsComprados";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -570,6 +572,18 @@ Rubros: ${listaRubros}`,
           return;
         }
       }
+    }
+
+    // LO QUE TRAE LA FACTURA, RENGLÓN POR RENGLÓN: es lo que cuenta la bodega.
+    //
+    // Si NOVA ya la leyó en esta pantalla, se guarda eso: volver a mandarle el
+    // PDF sería pagar dos veces la misma lectura. Si se subió un papel y no
+    // trajo renglones, se le piden aparte, sin hacer esperar a nadie. Si falla,
+    // la factura ya está guardada y queda para "leer las que faltan".
+    if (facturaId) {
+      const laFactura = { id: facturaId, obra_id: obra.id, total: payload.total };
+      if (items.length) guardarRenglones(laFactura, desdeLecturaDeFactura(items)).catch(() => {});
+      else if (archivo && payload.clase !== "anticipo") leerRenglones(laFactura, archivo).catch(() => {});
     }
 
     // EL AVISO DE UNA FACTURA QUE EL SRI NO ACEPTA.
