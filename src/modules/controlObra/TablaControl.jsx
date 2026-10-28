@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { fmt, gastosDe } from "./calculos";
+import { fmt, gastosDe, gastosSueltos } from "./calculos";
 import { netoPorRubro } from "./cuentaBeneficios.js";
 import { esDeCajaChica, cajaChicaPorRubro, cajaChicaPorCapitulo } from "./origenGasto";
 import MarcaCaja from "./MarcaCaja";
@@ -108,7 +108,7 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = n
  * que dice la factura, y quien revisa tiene que poder distinguirlo sin abrirla:
  * contra un número prorrateado no se reclama nada.
  */
-function Gastos({ gastos, sangria }) {
+function Gastos({ gastos, sangria, pagadoDe = {} }) {
   if (!gastos.length) {
     return (
       <div style={{ padding: `6px 14px 8px ${sangria + 14}px`, fontSize: 11, color: colors.muted,
@@ -131,6 +131,7 @@ function Gastos({ gastos, sangria }) {
             <span style={{ color: colors.muted, flex: 1, minWidth: 100, overflow: "hidden",
               textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.detalle}</span>
           )}
+          {g.agrupacion && <span style={{ color: colors.brand, fontSize: 10.5 }}>{g.agrupacion}</span>}
           {g.planilla != null && <span style={{ color: colors.muted, fontSize: 10.5 }}>planilla {g.planilla}</span>}
           {!g.exacto && (
             <span title="Repartido a prorrata desde una agrupación: no es un monto que diga la factura"
@@ -140,6 +141,25 @@ function Gastos({ gastos, sangria }) {
             <span title="Cargado al capítulo entero, sin repartir entre sus rubros"
               style={{ color: colors.muted, fontSize: 10 }}>al capítulo</span>
           )}
+          {/* POR QUÉ ESTE RENGLÓN NO ESTÁ EN LA COLUMNA DE ARRIBA.
+              Invertido es la plata puesta y facturada. Un anticipo no está
+              facturado y lo que falta pagar todavía no salió: los dos se ven
+              acá, se dicen, y así la lista explica el número en vez de
+              contradecirlo. */}
+          {g.anticipo && (
+            <span title="Es un anticipo: la plata salió y todavía no está facturada, así que no cuenta como invertido"
+              style={{ color: colors.warning, fontSize: 10, fontWeight: 600 }}>anticipo · no cuenta todavía</span>
+          )}
+          {!g.anticipo && (() => {
+            const total = Number(g.factura?.total) || 0;
+            const falta = Math.round((total - (pagadoDe[g.factura?.id] || 0)) * 100) / 100;
+            if (!(falta > 0.009) || total <= 0) return null;
+            const parte = Math.round(g.monto * (falta / total) * 100) / 100;
+            return (
+              <span title="Lo que falta pagar de esta factura entra al control cuando se pague"
+                style={{ color: colors.warning, fontSize: 10 }}>faltan ${fmt(parte)} por pagar</span>
+            );
+          })()}
           <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.ink }}>${fmt(g.monto)}</span>
         </div>
       ))}
@@ -148,7 +168,8 @@ function Gastos({ gastos, sangria }) {
 }
 
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null,
-  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [], onAvance = null, beneficios = [] }) {
+  fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [], actividades = [], pagos = [],
+  onAvance = null, beneficios = [] }) {
   // EL BENEFICIO, PEGADO AL RUBRO.
   //
   // Vive en su propia pestaña porque ahí se carga, pero la pregunta "¿este
@@ -160,6 +181,10 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   const beneficioDe = netoPorRubro(beneficios);
   // Lo que cada rubro recibió por la puerta de la caja chica.
   const deCajaDe = cajaChicaPorRubro(facturas, asignaciones);
+  // Lo pagado de cada factura, para poder decir en cada renglón qué parte
+  // todavía no entró al control.
+  const pagadoDe = {};
+  pagos.forEach(p => { pagadoDe[p.factura_id] = (pagadoDe[p.factura_id] || 0) + (Number(p.monto) || 0); });
   // Y lo que se cargó al capítulo entero, que por rubro no aparece en ningún
   // lado: es así como entra la mayoría de los gastos de caja chica.
   const deCajaCap = cajaChicaPorCapitulo(facturas, asignaciones);
@@ -303,6 +328,20 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <span style={{ textAlign: "right" }}>{g.base > 0 ? `${(g.pct * 100).toFixed(0)}%` : "—"}</span>
                 </div>
 
+                {/* UN GRUPO SIN RUBROS TAMBIÉN SE ABRE.
+                    "GASTOS SIN PRESUPUESTO (0)" mostraba mil dólares y, al
+                    hacerle clic, no pasaba nada: no tiene rubros que
+                    desplegar porque esa plata se cargó contra agrupaciones
+                    —viáticos, logística, honorarios—, no contra el contrato.
+                    El número estaba y no había forma de preguntarle de dónde
+                    venía. Ahora se abre con sus gastos, uno por uno. */}
+                {abierto && !g.rubros.length && (
+                  <Gastos sangria={14} pagadoDe={pagadoDe}
+                    gastos={modo === "actividad"
+                      ? gastosDe({ actividadId: Number(String(g.clave).slice(1)) }, { facturas, asignaciones, rubros })
+                      : gastosSueltos({ facturas, asignaciones, rubros, actividades })} />
+                )}
+
                 {abierto && g.rubros.map(r => (
                   <div key={r.id} onClick={() => setVerGastos(v => (v === `r${r.id}` ? null : `r${r.id}`))}
                     style={{ cursor: "pointer" }} title="Ver de qué gastos está hecho este número">
@@ -311,7 +350,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                       deCaja={deCajaDe[r.id] || 0}
                       comprometido={comprometido?.porRubro?.[r.id] || 0} />
                     {verGastos === `r${r.id}` && (
-                      <Gastos sangria={14}
+                      <Gastos sangria={14} pagadoDe={pagadoDe}
                         gastos={gastosDe({ rubroId: r.id }, { facturas, asignaciones, rubros })} />
                     )}
                   </div>

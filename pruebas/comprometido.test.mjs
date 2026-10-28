@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar, gastosDe }
+import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar, gastosDe, resumenPlanilla, gastosSueltos }
   from "../src/modules/controlObra/calculos.js";
 
 // Cuánta plata hay hablada contra la obra. Todo lo de acá salió de un número
@@ -325,4 +325,55 @@ test("lo facturado y no pagado sí queda como por pagar", () => {
   const r = calcularControl({ rubros, facturas, asignaciones, pagos: [{ factura_id: 10, monto: 100 }], planillaNumero: 1 });
   assert.equal(Math.round(r[1].acumulado * 100) / 100, 100);
   assert.equal(r._porPagar, 300);
+});
+
+// LA PLANILLA, EN TRES MONTONES.
+test("la planilla separa gasto, anticipos y crédito", () => {
+  const facturas = [
+    { id: 1, total: 1000, clase: "factura" },
+    { id: 2, total: 5000, clase: "anticipo" },
+    { id: 3, total: -105.06, clase: "nota_credito" },
+  ];
+  const r = resumenPlanilla({ facturas, asignaciones: [] });
+  assert.equal(r.gasto, 1000);
+  assert.equal(r.anticipos, 5000);
+  assert.equal(r.credito, 105.06);
+  assert.equal(r.cuantosAnticipos, 1);
+  assert.equal(r.cuantasNotas, 1);
+  // El total sigue cuadrando contra el libro: gasto + anticipos − crédito.
+  assert.equal(r.total, 5894.94);
+});
+
+test("un anticipo ya liquidado es gasto como cualquier factura", () => {
+  const r = resumenPlanilla({ facturas: [{ id: 2, total: 5000, clase: "anticipo", facturada_con_id: 9 }], asignaciones: [] });
+  assert.equal(r.anticipos, 0);
+  assert.equal(r.gasto, 5000);
+});
+
+test("de qué está hecho GASTOS SIN PRESUPUESTO", () => {
+  const facturas = [
+    { id: 1, razon_social: "Autoparking SA", fecha: "2026-10-02", total: 1.4 },
+    { id: 2, razon_social: "AVIANCA", fecha: "2026-10-15", total: 213.68 },
+    { id: 3, razon_social: "KYWI", fecha: "2026-10-10", total: 72.69 },
+  ];
+  const asignaciones = [
+    { factura_id: 1, obra_actividad_id: 192, monto: 1.4 },
+    { factura_id: 2, obra_actividad_id: 191, monto: 213.68 },
+    { factura_id: 3, obra_rubro_id: 77, monto: 72.69 },          // tiene rubro: no es suelto
+  ];
+  const rubros = [{ id: 77, actividad_id: 50 }];
+  const actividades = [{ id: 192, nombre: "LOGÍSTICA" }, { id: 191, nombre: "VIÁTICOS" }];
+  const g = gastosSueltos({ facturas, asignaciones, rubros, actividades });
+  assert.deepEqual(g.map(x => [x.proveedor, x.monto, x.agrupacion]),
+    [["AVIANCA", 213.68, "VIÁTICOS"], ["Autoparking SA", 1.4, "LOGÍSTICA"]]);
+});
+
+test("lo de una agrupación que sí tiene rubros no es suelto", () => {
+  const g = gastosSueltos({
+    facturas: [{ id: 1, total: 10 }],
+    asignaciones: [{ factura_id: 1, obra_actividad_id: 7, monto: 10 }],
+    rubros: [{ id: 3, actividad_id: 7 }],
+    actividades: [{ id: 7, nombre: "ALBAÑILERÍA" }],
+  });
+  assert.deepEqual(g, []);
 });

@@ -66,15 +66,44 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
         </div>
       )}
 
-      {/* Resumen del período */}
+      {/* RESUMEN DEL PERÍODO, EN LOS MONTONES QUE SON.
+          Un anticipo y una nota de crédito no son gasto facturado, y sumarlos
+          en un solo "total" es lo que hace que la planilla no cuadre contra el
+          control: el control cuenta invertido lo facturado y pagado, nada más.
+          Separados, el corte cierra y se ve qué quedó vivo para el siguiente. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginBottom: 14 }}>
-        <Mini label="Facturas" valor={resumen.cantidad} moneda={false} />
+        <Mini label="Documentos" valor={resumen.cantidad} moneda={false} />
+        <Mini label="Gasto facturado" valor={resumen.gasto} />
+        {resumen.anticipos > 0.005 && <Mini label="Anticipos sin factura" valor={resumen.anticipos} color={colors.warning} />}
+        {resumen.credito > 0.005 && <Mini label="Notas de crédito" valor={resumen.credito} color={colors.success} />}
         <Mini label="Base 0%" valor={resumen.subtotal_0} />
         <Mini label="Base 5%" valor={resumen.subtotal_5} />
         <Mini label="Base 15%" valor={resumen.subtotal_15} />
         <Mini label="IVA" valor={resumen.iva} />
         <Mini label="Total" valor={resumen.total} destacado />
       </div>
+
+      {/* LO QUE NO CIERRA CON LA PLANILLA. Las dos cosas siguen vivas después
+          del corte: el anticipo hasta que llegue su factura, el vale hasta que
+          se use en una compra, que puede caer en otro período. */}
+      {(resumen.anticipos > 0.005 || resumen.credito > 0.005) && (
+        <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+          padding: "9px 12px", fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.6, marginBottom: 12 }}>
+          {resumen.anticipos > 0.005 && (
+            <div>
+              <strong style={{ color: colors.warning }}>${fmt(resumen.anticipos)} en {resumen.cuantosAnticipos === 1 ? "un anticipo" : `${resumen.cuantosAnticipos} anticipos`}</strong>:
+              {" "}la plata salió y <strong>todavía no está facturada</strong>. No cuenta como invertido ni cierra con esta
+              planilla: queda vivo hasta que llegue la factura, aunque sea en otro período.
+            </div>
+          )}
+          {resumen.credito > 0.005 && (
+            <div>
+              <strong style={{ color: colors.success }}>${fmt(resumen.credito)} en {resumen.cuantasNotas === 1 ? "una nota de crédito" : `${resumen.cuantasNotas} notas de crédito`}</strong>:
+              {" "}plata nuestra a favor en la casa del proveedor. Se usa en una compra, que también puede caer en otra planilla.
+            </div>
+          )}
+        </div>
+      )}
 
       {sinPlanilla.length > 0 && planillaActual && (
         <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>
@@ -105,11 +134,11 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
   );
 }
 
-export function Mini({ label, valor, moneda = true, destacado }) {
+export function Mini({ label, valor, moneda = true, destacado, color }) {
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
       <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.3 }}>{label.toUpperCase()}</div>
-      <div style={{ fontSize: 13, fontWeight: destacado ? 700 : 600, color: destacado ? colors.ink : colors.inkSoft, marginTop: 2 }}>
+      <div style={{ fontSize: 13, fontWeight: destacado ? 700 : 600, color: color || (destacado ? colors.ink : colors.inkSoft), marginTop: 2 }}>
         {moneda ? `$${fmt(valor)}` : valor}
       </div>
     </div>

@@ -387,7 +387,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               </div>
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} beneficios={beneficios}
                 comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
-                facturas={facturas} asignaciones={asignaciones} rubros={rubros}
+                facturas={facturas} asignaciones={asignaciones} rubros={rubros} actividades={actividades} pagos={pagos}
                 onAvance={puede && !puede("facturas.registrar") ? null : guardarAvance} />
 
               {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.

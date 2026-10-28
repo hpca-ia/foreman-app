@@ -542,7 +542,58 @@ export function totalesObra(grupos = []) {
 /**
  * Resumen de una planilla: cuánto entró, cuánto quedó sin asignar,
  * desglose de IVA por tasa y por tipo de gasto (como la hoja RESUMEN GASTO).
+ *
+ * TRES MONTONES, NO UNO. En el período entran tres cosas distintas y sumarlas
+ * en un solo "total" es lo que hace que la planilla no cuadre con el control:
+ *
+ *   · gasto      — las facturas: plata que salió y está facturada. Es lo único
+ *                  que el control cuenta como invertido.
+ *   · anticipos  — plata que salió y TODAVÍA NO ESTÁ FACTURADA. Existe, pesa
+ *                  en la caja y no es obra hecha: se cierra sola el día que
+ *                  llega la factura, que puede ser en otra planilla.
+ *   · credito    — notas de crédito: plata nuestra que quedó a favor en la
+ *                  casa del proveedor. No es gasto ni es deuda, y se usa en
+ *                  una compra que también puede caer en otra planilla.
+ *
+ * Y `total` sigue siendo la suma de los documentos, que es lo que cuadra
+ * contra el libro: gasto + anticipos − credito.
  */
+/**
+ * DE QUÉ ESTÁ HECHO "GASTOS SIN PRESUPUESTO".
+ *
+ * Ese bloque junta lo que se cargó contra una agrupación que no tiene rubros
+ * —viáticos, logística, oficina, honorarios—: plata real, fuera del contrato.
+ * Como no cuelga de ningún rubro, la tabla no tenía ninguna fila que abrir y
+ * el número se quedaba ahí, sin forma de averiguar de dónde venía. Un número
+ * del que no se puede preguntar nada no se puede discutir ni corregir.
+ *
+ * @returns los mismos renglones que `gastosDe`, con el nombre de su agrupación.
+ */
+export function gastosSueltos({ facturas = [], asignaciones = [], rubros = [], actividades = [] }) {
+  const porFactura = new Map(facturas.map(f => [f.id, f]));
+  const conRubros = new Set(rubros.filter(r => r.actividad_id != null && !r.anulado_por_oc)
+    .map(r => Number(r.actividad_id)));
+  const nombreDe = new Map(actividades.map(a => [Number(a.id), a.nombre]));
+
+  return asignaciones
+    .filter(a => a.obra_rubro_id == null && !a.capitulo && a.obra_actividad_id != null
+      && !conRubros.has(Number(a.obra_actividad_id)))
+    .map(a => {
+      const f = porFactura.get(a.factura_id);
+      if (!f) return null;
+      return {
+        factura: f, fecha: f.fecha, proveedor: f.razon_social || "—",
+        numero: f.numero_factura || "", detalle: f.detalle || "",
+        planilla: f._planillaNumero ?? null,
+        anticipo: f.clase === "anticipo" && !f.facturada_con_id,
+        agrupacion: nombreDe.get(Number(a.obra_actividad_id)) || "",
+        monto: n(a.monto), exacto: true,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.monto - a.monto);
+}
+
 export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
   const porFactura = {};
   asignaciones.forEach(a => {
@@ -552,6 +603,8 @@ export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
   const r = {
     cantidad: facturas.length,
     total: 0, asignado: 0, sinAsignar: 0,
+    gasto: 0, anticipos: 0, credito: 0,
+    cuantosAnticipos: 0, cuantasNotas: 0,
     subtotal_0: 0, subtotal_5: 0, subtotal_15: 0, iva: 0,
     porTipo: {},
   };
@@ -560,6 +613,9 @@ export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
     const total = n(f.total);
     const asignado = Math.min(porFactura[f.id] || 0, total);
     r.total += total;
+    if (f.clase === "anticipo" && !f.facturada_con_id) { r.anticipos += total; r.cuantosAnticipos += 1; }
+    else if (esNotaDeCredito(f.clase) || total < 0) { r.credito += Math.abs(total); r.cuantasNotas += 1; }
+    else r.gasto += total;
     r.asignado += asignado;
     r.sinAsignar += total - asignado;
     r.subtotal_0 += n(f.subtotal_0);
@@ -570,6 +626,9 @@ export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
     r.porTipo[tipo] = (r.porTipo[tipo] || 0) + total;
   });
 
+  ["total", "asignado", "sinAsignar", "gasto", "anticipos", "credito"].forEach(k => {
+    r[k] = Math.round(r[k] * 100) / 100;
+  });
   return r;
 }
 
@@ -715,6 +774,10 @@ export function gastosDe({ rubroId = null, capitulo = null, actividadId = null }
       factura: f, fecha: f.fecha, proveedor: f.razon_social || "—",
       numero: f.numero_factura || "", detalle: f.detalle || "",
       planilla: f._planillaNumero ?? null,
+      // Un anticipo está en la lista y NO está en la columna: es plata que
+      // salió por algo que no llegó. Sin decirlo, la suma de los renglones no
+      // da el número de arriba y parece un error del sistema.
+      anticipo: f.clase === "anticipo" && !f.facturada_con_id,
     };
 
     if (a.obra_rubro_id != null) {

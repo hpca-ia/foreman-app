@@ -19,13 +19,25 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
   const [nombre, setNombre] = useState("");
 
   const total = {}, cuantas = {}, sinAsignar = {};
+  // LO QUE NO CIERRA CON EL CORTE.
+  //
+  // Un anticipo es plata que salió y todavía no está facturada; una nota de
+  // crédito es plata nuestra a favor en la casa del proveedor. Ninguno de los
+  // dos termina con la planilla —el anticipo vive hasta que llegue su factura,
+  // el vale hasta que se use en una compra, que puede ser de otro período— y
+  // cerrar un corte sin decirlo es cerrarlo sabiendo que algo quedó abierto y
+  // no dejar constancia de qué.
+  const anticipos = {}, credito = {};
   facturas.forEach(f => {
     if (!f.planilla_id) return;
+    const monto = Number(f.total) || 0;
     const asignado = asignaciones.filter(a => a.factura_id === f.id).reduce((s, a) => s + (Number(a.monto) || 0), 0);
-    const suelto = Math.round(((Number(f.total) || 0) - asignado) * 100) / 100;
-    total[f.planilla_id] = (total[f.planilla_id] || 0) + (Number(f.total) || 0);
+    const suelto = Math.round((monto - asignado) * 100) / 100;
+    total[f.planilla_id] = (total[f.planilla_id] || 0) + monto;
     cuantas[f.planilla_id] = (cuantas[f.planilla_id] || 0) + 1;
     if (suelto > 0.009) sinAsignar[f.planilla_id] = (sinAsignar[f.planilla_id] || 0) + 1;
+    if (f.clase === "anticipo" && !f.facturada_con_id) anticipos[f.planilla_id] = (anticipos[f.planilla_id] || 0) + monto;
+    if ((f.clase === "nota_credito" || monto < 0) && !f.facturada_con_id) credito[f.planilla_id] = (credito[f.planilla_id] || 0) + Math.abs(monto);
   });
 
   const abiertaAhora = planillas.find(p => p.estado === "abierta");
@@ -52,9 +64,15 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
   async function cerrarPlanilla(p) {
     setError("");
     const sueltas = sinAsignar[p.id] || 0;
-    const aviso = sueltas > 0
+    const aviso = (sueltas > 0
       ? `\n\nOJO: ${sueltas} factura(s) de esta planilla todavía no están asignadas a ningún rubro y no se están contando en el control.`
-      : "";
+      : "")
+      + ((anticipos[p.id] || 0) > 0.005
+        ? `\n\nQUEDA VIVO: $${fmt(anticipos[p.id])} en anticipos. La plata salió y todavía no está facturada: no cuenta como invertido y sigue abierto después de este corte, hasta que llegue la factura.`
+        : "")
+      + ((credito[p.id] || 0) > 0.005
+        ? `\n\nQUEDA A FAVOR: $${fmt(credito[p.id])} en notas de crédito. Es plata nuestra en la casa del proveedor y se usa en una compra, que puede caer en otra planilla.`
+        : "");
     if (!window.confirm(`¿Cerrar ${p.nombre || "la planilla N°" + p.numero}?${aviso}`)) return;
     const { error: e } = await supabase.from("planillas")
       .update({ estado: "cerrada", fecha_cierre: new Date().toISOString(), fecha_hasta: new Date().toISOString().split("T")[0] })
@@ -137,6 +155,18 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
             <span>{p.fecha_desde || "—"}{p.fecha_hasta ? ` → ${p.fecha_hasta}` : " → en curso"}</span>
             <span>{cuantas[p.id] || 0} factura{(cuantas[p.id] || 0) === 1 ? "" : "s"}</span>
             <span>Facturado <strong style={{ color: colors.ink, fontSize: 13 }}>${fmt(total[p.id] || 0)}</strong></span>
+            {(anticipos[p.id] || 0) > 0.005 && (
+              <span title="Plata que salió y todavía no está facturada: no cuenta como invertido y sigue viva después del corte"
+                style={{ color: colors.warning }}>
+                ${fmt(anticipos[p.id])} en anticipos sin factura
+              </span>
+            )}
+            {(credito[p.id] || 0) > 0.005 && (
+              <span title="Notas de crédito sin usar: plata nuestra a favor en la casa del proveedor. Se usa en una compra, que puede caer en otra planilla"
+                style={{ color: colors.success }}>
+                ${fmt(credito[p.id])} a favor en notas de crédito
+              </span>
+            )}
           </div>
         </div>
 
