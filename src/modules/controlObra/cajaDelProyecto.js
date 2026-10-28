@@ -76,10 +76,16 @@ export function estadoDeCaja({ fondos = [], facturas = [], pagos: todos = [] }) 
   const pagado = r2(pagos.reduce((t, p) => t + n(p.monto), 0));
   const seLlevanPagos = pagos.length > 0;
   const gastado = seLlevanPagos ? pagado : facturado;
+  const saldo = r2(entrado - salido - gastado);
   return {
     entrado, salido, gastado, facturado, pagado, credito, anticipado,
-    porPagar, seLlevanPagos,
-    saldo: r2(entrado - salido - gastado),
+    porPagar, seLlevanPagos, saldo,
+    // LO QUE QUEDA DE VERDAD PARA COMPROMETER.
+    //
+    // El saldo es lo que hay en la cuenta; parte de eso ya tiene dueño: son
+    // facturas firmadas que todavía no se pagaron. Con el saldo a secas
+    // delante se decide gastar plata que ya está gastada.
+    libre: r2(saldo - porPagar),
   };
 }
 

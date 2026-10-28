@@ -116,6 +116,21 @@ export default function PanelFondos({ obra, planillas = [], facturas = [], curre
         )}
       </div>
 
+      {/* LO QUE QUEDA Y LO QUE YA TIENE DUEÑO.
+          "Pagado" es lo que salió del banco —el anticipo incluido, porque
+          salió— y lo que se debe todavía no salió: está en la caja y ya está
+          comprometido. Con el saldo a secas delante se decide gastar plata
+          que ya está gastada. */}
+      {caja.porPagar > 0.005 && (
+        <div style={{ fontSize: 12, color: colors.inkSoft, background: colors.bg, border: `1px solid ${colors.border}`,
+          borderRadius: colors.radiusMd, padding: "9px 12px", marginTop: -6, marginBottom: 12, lineHeight: 1.55 }}>
+          De los <strong>${fmt(caja.saldo)}</strong> que quedan en caja, <strong style={{ color: colors.warning }}>${fmt(caja.porPagar)}</strong> ya
+          están comprometidos con proveedores —facturas recibidas y todavía sin pagar—. Libre para comprometer:{" "}
+          <strong style={{ color: caja.libre < 0 ? colors.danger : colors.success }}>${fmt(caja.libre)}</strong>.
+          {caja.anticipado > 0.005 && <> Lo pagado incluye <strong>${fmt(caja.anticipado)}</strong> de anticipos: esa plata ya salió, aunque su factura no haya llegado.</>}
+        </div>
+      )}
+
       {caja.seLlevanPagos && (
         <div style={{ fontSize: 11, color: colors.muted, marginTop: -8, marginBottom: 12, lineHeight: 1.45 }}>
           La caja cuenta <strong>lo que salió</strong>, no lo facturado: una factura de la que se pagó un

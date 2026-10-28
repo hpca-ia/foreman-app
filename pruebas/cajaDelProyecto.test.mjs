@@ -117,3 +117,15 @@ test("un pago de más no cancela la deuda de otra factura", () => {
   });
   assert.equal(e.porPagar, 200);
 });
+
+test("lo que queda libre descuenta lo que ya se debe", () => {
+  const e = estadoDeCaja({
+    fondos: [{ monto: 1000 }],
+    facturas: [{ id: 1, total: 400, clase: "factura" }, { id: 2, total: 300, clase: "factura" }],
+    pagos: [{ factura_id: 1, monto: 400 }],
+  });
+  assert.equal(e.pagado, 400);
+  assert.equal(e.saldo, 600);
+  assert.equal(e.porPagar, 300);
+  assert.equal(e.libre, 300);
+});
