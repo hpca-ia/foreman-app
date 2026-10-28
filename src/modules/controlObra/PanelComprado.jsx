@@ -31,6 +31,7 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const [fallas, setFallas] = useState([]);
   const [abierta, setAbierta] = useState(null);       // familia abierta
   const [buscar, setBuscar] = useState("");
+  const [verSinPapel, setVerSinPapel] = useState(false);
   const parar = useRef(false);
 
   const cargar = useCallback(async () => {
@@ -45,7 +46,7 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const porLeer = facturasPorLeer(facturas);
   const conPapel = facturas.filter(f => f.archivo_url && f.clase !== "anticipo").length;
   const ilegibles = facturas.filter(f => f.renglones_estado === "ilegible").length;
-  const sinPapel = facturas.filter(f => !f.archivo_url).length;
+  const sinPapel = facturas.filter(f => !f.archivo_url);
 
   const visibles = useMemo(() => {
     const q = claveDe(buscar);
@@ -76,7 +77,13 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
           <strong style={{ color: colors.ink }}>{conPapel - porLeer.length - ilegibles} de {conPapel}</strong> facturas con papel ya tienen sus renglones.
           {porLeer.length > 0 && <> Faltan <strong>{porLeer.length}</strong>.</>}
           {ilegibles > 0 && <> {ilegibles} no se pudieron leer (recibos a mano, fotos borrosas).</>}
-          {sinPapel > 0 && <> {sinPapel} no tienen archivo y no se pueden leer.</>}
+          {sinPapel.length > 0 && (
+            <> <button onClick={() => setVerSinPapel(v => !v)}
+              style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                fontSize: 12.5, color: colors.brand, textDecoration: "underline" }}>
+              {sinPapel.length} no {sinPapel.length === 1 ? "tiene" : "tienen"} archivo
+            </button> y no se pueden leer.</>
+          )}
         </div>
         {leyendo ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -89,6 +96,27 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
           </Button>
         )}
       </div>
+      {/* LAS QUE NO TIENEN PAPEL. Decir "6 no tienen archivo" y no decir
+          cuáles es mandar a alguien a revisar ochenta facturas. */}
+      {verSinPapel && sinPapel.length > 0 && (
+        <div style={{ ...caja, fontSize: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Sin archivo</div>
+          {sinPapel.map(f => (
+            <div key={f.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderTop: `1px solid ${colors.border}` }}>
+              <span style={{ width: 70, color: colors.muted }}>{dia(f.fecha)}</span>
+              <span style={{ flex: 1 }}>
+                {f.razon_social || "Sin proveedor"}
+                {f.numero_factura ? <span style={{ color: colors.muted }}> · {f.numero_factura}</span> : ""}
+              </span>
+              <span style={{ width: 90, color: colors.muted }}>{f.origen === "caja_chica" ? "caja chica" : "planilla"}</span>
+              <span style={{ width: 80, textAlign: "right" }}>${fmt(Number(f.total))}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
+            Para que entren a la cuenta, abrí cada una en Facturas y subí la foto o el PDF.
+          </div>
+        </div>
+      )}
       {leyendo && (
         <div style={{ height: 4, background: colors.border, borderRadius: 2, margin: "-6px 0 12px", overflow: "hidden" }}>
           <div style={{ height: "100%", width: `${(leyendo.hechas / Math.max(1, leyendo.de)) * 100}%`, background: colors.brand, transition: "width .3s" }} />
