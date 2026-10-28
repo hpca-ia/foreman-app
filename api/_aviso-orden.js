@@ -27,7 +27,9 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Solo POST" });
   if (!configurado()) return res.status(503).json({ error: "Falta SUPABASE_SECRET_KEY" });
 
-  const { orden_id, destinatarios, cuerpo, aprobadores } = req.body || {};
+  const { orden_id, destinatarios, cuerpo, aprobadores, de } = req.body || {};
+  // La respuesta va a quien la mandó, no a la casilla de avisos.
+  const responderA = de?.email ? [de.email] : null;
   const correos = (Array.isArray(destinatarios) ? destinatarios : []).map(x => String(x).trim()).filter(Boolean);
   // QUIÉNES TIENEN QUE APROBAR, cada uno con su llave. Si vienen, la orden sale
   // de a un correo por persona con su propio enlace; si no, sale como antes, a
@@ -310,7 +312,7 @@ export default async function handler(req, res) {
         ? bloqueDeFirma(`${APP}/?odc=${fila.token}`, { ...quien, limite: fecha(orden.fecha_limite_aprobacion) })
         : "";
       const r2 = await enviarCorreo({
-        to: [quien.email], subject: asunto, html: html.replace("<!--FIRMA-->", suyo), adjuntos,
+        to: [quien.email], subject: asunto, html: html.replace("<!--FIRMA-->", suyo), adjuntos, responderA,
       });
       if (fila?.id) {
         await rest(`orden_cambio_aprobaciones?id=eq.${fila.id}`, {
@@ -327,7 +329,7 @@ export default async function handler(req, res) {
     }
     // Y a los que solo miran, sin botón: una copia igual, sin enlace de firma.
     if (correos.length) {
-      await enviarCorreo({ to: correos, subject: asunto, html: html.replace("<!--FIRMA-->", ""), adjuntos });
+      await enviarCorreo({ to: correos, subject: asunto, html: html.replace("<!--FIRMA-->", ""), adjuntos, responderA });
     }
     const fallaron = envios.filter(e => e.error);
     return res.status(200).json({
@@ -342,6 +344,7 @@ export default async function handler(req, res) {
     subject: asunto,
     html: html.replace("<!--FIRMA-->", ""),
     adjuntos,
+    responderA,
   });
   return r.ok ? res.status(200).json({ ok: true, enviadoA: r.enviadoA }) : res.status(500).json({ error: r.error });
 }

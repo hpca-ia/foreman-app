@@ -328,7 +328,15 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
 
   const r = await fetch("/api/aviso?de=orden", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ orden_id: orden.id, destinatarios: limpios, cuerpo, aprobadores: firman }),
+    // QUIÉN LA MANDA, para que la respuesta le llegue a él.
+    //
+    // El remitente es una casilla de avisos que nadie lee. Una orden de cambio
+    // se discute —"esto no es así", "¿de dónde sale ese precio?"— y el cliente
+    // contesta apretando Responder, como contesta todo el mundo. Sin esto esa
+    // respuesta se perdía, y además un correo que no se puede responder tiene
+    // más chance de terminar en no deseados.
+    body: JSON.stringify({ orden_id: orden.id, destinatarios: limpios, cuerpo, aprobadores: firman,
+      de: quien?.email ? { nombre: quien.name || "", email: quien.email } : null }),
   });
   const datos = await r.json().catch(() => ({}));
   if (!r.ok) return { error: datos.error || "No se pudo mandar el correo." };
