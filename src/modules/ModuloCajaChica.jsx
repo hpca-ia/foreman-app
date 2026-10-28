@@ -590,6 +590,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
         ruc:gastoForm.ruc||null, numero_factura:gastoForm.numero_factura||null, monto,
         fecha:gastoForm.fecha, tipo:tipoGasto, notas:gastoForm.notas,
         ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
+        // CORREGIDO VUELVE A LA FILA, no queda devuelto para siempre. El que
+        // lo devolvió tiene que volver a mirarlo: para eso vuelve a quedar
+        // pendiente, con el motivo ya borrado.
+        ...(gastoEditando.estado === "devuelto"
+          ? { estado: "pendiente", devuelto_motivo: null }
+          : {}),
       };
       const {error:errEdit}=await supabase.from("cajas_gastos").update(campos).eq("id",gastoEditando.id);
       // Corregir el monto de un gasto que ya está dentro de un cierre mueve el
@@ -755,9 +761,44 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     return true;
   }
 
+  /**
+   * DEVOLVER UN GASTO MAL CARGADO.
+   *
+   * Administración tenía dos salidas y las dos eran malas: aprobar algo que
+   * está mal —la foto ilegible, el proveedor equivocado, el monto que no es
+   * el del papel— o dejarlo pendiente para siempre, sin que quien lo cargó se
+   * entere de por qué. Devolverlo es la tercera, y es la que se usa en la
+   * obra: vuelve con el motivo escrito y no se da por bueno hasta que lo
+   * corrijan.
+   *
+   * El gasto no desaparece mientras tanto: la plata salió igual. Lo que queda
+   * en duda es el documento, no la salida.
+   */
+  async function devolverGasto(g) {
+    const motivo = window.prompt(
+      `¿Por qué se devuelve este gasto?\n\n${g.descripcion || ""} · $${fmt(g.monto)}\n\n`
+      + "Lo va a leer quien lo cargó, y es lo único que va a tener para arreglarlo.");
+    if (motivo === null) return;
+    if (!motivo.trim()) { alert("Sin motivo no se devuelve: quien lo cargó no sabría qué corregir."); return; }
+    const { error } = await supabase.from("cajas_gastos").update({
+      estado: "devuelto", devuelto_motivo: motivo.trim(),
+      devuelto_por: currentUser.id, devuelto_nombre: currentUser.name,
+      devuelto_at: new Date().toISOString(),
+    }).eq("id", g.id);
+    if (error) {
+      alert(/column|schema cache/i.test(error.message)
+        ? "Falta correr la migración 127 en Supabase para poder devolver gastos."
+        : "No se pudo devolver: " + error.message);
+      return;
+    }
+    setGastos(prev => prev.map(x => x.id === g.id
+      ? { ...x, estado: "devuelto", devuelto_motivo: motivo.trim(), devuelto_nombre: currentUser.name }
+      : x));
+  }
+
   async function aprobarGasto(id) {
-    await supabase.from("cajas_gastos").update({estado:"aprobado",aprobado_por:currentUser.id,aprobado_por_nombre:currentUser.name}).eq("id",id);
-    setGastos(prev=>prev.map(g=>g.id===id?{...g,estado:"aprobado"}:g));
+    await supabase.from("cajas_gastos").update({estado:"aprobado",aprobado_por:currentUser.id,aprobado_por_nombre:currentUser.name,devuelto_motivo:null}).eq("id",id);
+    setGastos(prev=>prev.map(g=>g.id===id?{...g,estado:"aprobado",devuelto_motivo:null}:g));
   }
 
   const cajaValida = !!nuevaCajaForm.responsable_id && (!!nuevaCajaForm.obra_id || !!nuevaCajaForm.proyecto_nombre?.trim());
@@ -1067,6 +1108,15 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                     </div>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       <button onClick={async()=>{
+                        // UNA VUELTA NO SE RINDE CON GASTOS DEVUELTOS ADENTRO.
+                        // Un gasto devuelto es uno que administración dijo que
+                        // está mal cargado: cerrarlo es firmar que se revisó
+                        // todo, y eso todavía no es cierto.
+                        const devueltos = gastos.filter(g => !g.cierre_id && g.estado === "devuelto"
+                          && String(g.fecha||"").slice(0,10) <= cerrando.hasta);
+                        if (devueltos.length && !window.confirm(
+                          `Hay ${devueltos.length} ${devueltos.length===1?"gasto devuelto":"gastos devueltos"} en esta vuelta: `
+                          + "están mal cargados y todavía no se corrigieron.\n\n¿Cerrarla igual?")) return;
                         const r = await cerrarCaja({ caja:cajaActiva, hasta:cerrando.hasta, nota:cerrando.nota,
                           quien:currentUser, anticipos, gastos, cierres });
                         if (r.error) { alert(r.error); return; }
@@ -1111,7 +1161,11 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                   style={{background:"none",border:"none",color:"var(--brand)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
                   {String(c.id)===String(viendoCierre)?"ocultar":"ver sus gastos"}
                 </button>
-                {i===0&&puede?.("borrar.definitivo")&&(
+                {/* REABRIR CUALQUIERA, no solo la última. Las vueltas de más
+                    se hacen en cadena —se cerró una, entró un gasto atrasado,
+                    se cerró otra— y deshacerlas en orden obliga a tocar la
+                    buena para llegar a la mala. */}
+                {puede?.("borrar.definitivo")&&(
                   <button onClick={async()=>{
                     if(!window.confirm(`¿Reabrir el cierre ${c.numero}?\n\nSus gastos vuelven a quedar por rendir.`))return;
                     const e = await reabrirCierre(c);
@@ -1234,7 +1288,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           </div>
           :gastosFiltrados.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>Ningún gasto con ese proveedor o ese monto.</div>
           :gastosFiltrados.map(g=>(
-            <div key={g.id} style={{background:"#fff",border:`1px solid ${g.estado==="aprobado"?"var(--success-border)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
+            <div key={g.id} style={{background:"#fff",border:`1px solid ${g.estado==="devuelto"?"var(--danger)":g.estado==="aprobado"?"var(--success-border)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
@@ -1247,6 +1301,14 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                       no pasan —y entonces la caja dice que está todo cargado
                       mientras la obra no sabe nada de esa plata—. Acá se ve,
                       que es donde uno se hace la pregunta. */}
+                  {/* EL MOTIVO, DONDE SE VE EL GASTO. Devolver sin decir por
+                      qué es mandar a alguien a adivinar. */}
+                  {g.estado==="devuelto"&&(
+                    <div style={{fontSize:11,color:"var(--danger)",background:"var(--danger-soft)",border:"1px solid var(--danger-border)",borderRadius:8,padding:"6px 9px",marginTop:5,lineHeight:1.45}}>
+                      <strong>Devuelto{g.devuelto_nombre?` por ${g.devuelto_nombre}`:""}:</strong> {g.devuelto_motivo||"sin motivo"}
+                      <div style={{color:"var(--ink-soft)",marginTop:2}}>Corregilo y vuelve a quedar pendiente de aprobación.</div>
+                    </div>
+                  )}
                   {cajaActiva?.obra_id&&(
                     !g.obra_factura_id
                       ? <div style={{fontSize:10.5,color:"var(--danger)",fontWeight:700,marginTop:3}}>
@@ -1276,8 +1338,18 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                   {Number(g.monto) < 0 && (
                     <div style={{fontSize:9.5,color:"var(--success)",fontWeight:700,letterSpacing:0.3}}>DEVOLUCIÓN</div>
                   )}
-                  <div style={{fontSize:10,color:g.estado==="aprobado"?"var(--success)":"var(--warning)",fontWeight:600,marginTop:2}}>{g.estado}</div>
-                  {admin&&g.estado==="pendiente"&&<button onClick={()=>aprobarGasto(g.id)} style={{background:"var(--success)",border:"none",borderRadius:6,padding:"3px 8px",color:"#fff",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block"}}>✓ Aprobar</button>}
+                  <div style={{fontSize:10,color:g.estado==="devuelto"?"var(--danger)":g.estado==="aprobado"?"var(--success)":"var(--warning)",fontWeight:600,marginTop:2}}>{g.estado}</div>
+                  {admin&&g.estado!=="aprobado"&&<button onClick={()=>aprobarGasto(g.id)} style={{background:"var(--success)",border:"none",borderRadius:6,padding:"3px 8px",color:"#fff",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block"}}>✓ Aprobar</button>}
+                  {/* DEVOLVER: está mal cargado y vuelve a quien lo cargó, con
+                      el motivo escrito. Se puede devolver uno ya aprobado —el
+                      error aparece después, al revisar la planilla— y eso lo
+                      saca de "rendido" hasta que se arregle. */}
+                  {admin&&g.estado!=="devuelto"&&(
+                    <button onClick={()=>devolverGasto(g)}
+                      style={{background:"none",border:"1px solid var(--danger)",borderRadius:6,padding:"3px 8px",color:"var(--danger)",fontSize:10,cursor:"pointer",marginTop:4,fontWeight:600,display:"block",fontFamily:"var(--font)"}}>
+                      ↩ Devolver
+                    </button>
+                  )}
                   {(admin||g.subido_por===currentUser.id)&&(
                     <button onClick={()=>{
                       setGastoEditando(g);

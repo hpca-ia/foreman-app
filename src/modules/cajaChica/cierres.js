@@ -16,58 +16,10 @@ const n = v => Number(v) || 0;
 const redondo = v => Math.round(v * 100) / 100;
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 
-/**
- * ¿Se puede cerrar, y hasta qué día conviene?
- *
- * Se habilita cuando hay un abono posterior al último cierre: ese abono es la
- * reposición, y reponer es el acto de dar por rendida la vuelta anterior.
- *
- * La fecha propuesta es el día ANTERIOR al abono, no el de hoy. Lo que se
- * rinde es lo que se gastó con el fondo viejo; un gasto hecho con la plata
- * nueva es de la vuelta que recién empieza, y meterlo en la rendición anterior
- * hace que los números no cierren contra el recibo que firmó el responsable.
- *
- * @returns {{ puede, desde, hasta, abono, gastos, totalGastado, totalAbonado, saldo }}
- */
-export function proponerCierre({ anticipos = [], gastos = [], cierres = [] }) {
-  const abiertos = x => !x.cierre_id;
-  const ultimo = cierres.length
-    ? cierres.reduce((a, b) => (a.numero >= b.numero ? a : b))
-    : null;
-
-  // El abono que habilita: el más nuevo de los que todavía no se cerraron.
-  const sueltos = anticipos.filter(abiertos)
-    .slice().sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
-  const abono = sueltos.length ? sueltos[sueltos.length - 1] : null;
-
-  // Hasta el día anterior al abono. Si no hay fecha —un abono viejo sin
-  // cargarla— hasta hoy, que es lo único cierto que queda.
-  const hoy = new Date().toISOString().slice(0, 10);
-  let hasta = hoy;
-  if (abono?.fecha) {
-    const f = new Date(`${String(abono.fecha).slice(0, 10)}T12:00:00`);
-    f.setDate(f.getDate() - 1);
-    hasta = f.toISOString().slice(0, 10);
-  }
-
-  const entran = gastos.filter(g => abiertos(g) && String(g.fecha || "").slice(0, 10) <= hasta);
-  const abonosQueEntran = sueltos.filter(a => String(a.fecha || "").slice(0, 10) <= hasta);
-  const totalGastado = redondo(entran.reduce((t, g) => t + n(g.monto), 0));
-  const totalAbonado = redondo(abonosQueEntran.reduce((t, a) => t + n(a.monto), 0));
-
-  return {
-    // Hay algo que rendir solo si hay un abono nuevo: el que repone es quien
-    // da por buena la vuelta anterior.
-    puede: !!abono && !!entran.length,
-    desde: ultimo?.hasta || null,
-    hasta,
-    abono,
-    gastos: entran,
-    totalGastado,
-    totalAbonado,
-    saldo: redondo(totalAbonado - totalGastado),
-  };
-}
+// La regla de cuándo hay una vuelta para cerrar vive aparte, sin base de
+// datos, para poder probarla. Se re-exporta para no mover las pantallas.
+export { proponerCierre } from "./vuelta.js";
+import { proponerCierre } from "./vuelta.js";
 
 /**
  * Cerrarla. Marca lo que ya pasó y guarda la foto.
