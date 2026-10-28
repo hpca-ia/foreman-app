@@ -176,7 +176,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
           model: LECTURA, max_tokens: 4000,
           system: `Eres NOVA. Lees facturas de construcción de Ecuador y devuelves SOLO JSON, sin markdown:
 {"fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","clave_acceso":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
- "items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"rubro_id":null}]}
+ "items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"iva":15,"rubro_id":null}]}
 
 subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.
 
@@ -196,6 +196,8 @@ inventar; la factura ya dice qué trae y cuánto cuesta cada cosa. Copiá eso.
   "descripcion" el renglón como está impreso, corto.
   "cantidad" y "unidad" si están; si no, 0 y "".
   "monto" lo que suma ESE renglón, sin IVA —la base, igual que los subtotales—.
+  "iva" la tarifa de ESE renglón: 0, 5 o 15. Una factura puede mezclar
+  tarifas; si no se distingue cuál lleva el renglón, null.
   "rubro_id" el rubro de la lista al que corresponde ESE renglón, o null si no
   estás seguro. Null es una respuesta válida y es mejor que adivinar: quien
   carga la factura lo elige en dos segundos, y un rubro equivocado se
@@ -272,6 +274,7 @@ Rubros: ${listaRubros}`,
             cantidad: n(x.cantidad),
             unidad: String(x.unidad || "").trim().slice(0, 10),
             monto: Math.round(n(x.monto) * 100) / 100,
+            iva: x.iva ?? null,
             // Solo si el rubro existe de verdad: un id inventado asignaría
             // plata a un renglón que nadie puede encontrar.
             destino: rubros.some(r => r.id === Number(x.rubro_id)) ? `rubro:${Number(x.rubro_id)}` : null,

@@ -4,7 +4,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
-import { agrupar, claveDe, dotacionContraPersonal, facturasPorLeer, estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
+import { agrupar, conIva, claveDe, dotacionContraPersonal, facturasPorLeer, estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 import { renglonesDeObra, personalDeObra, leerLasQueFaltan, leerRenglones } from "./renglones";
 
 // Qué se compró en la obra, sumado, y la dotación contra la gente.
@@ -48,7 +48,10 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   const porId = useMemo(() => new Map(facturas.map(f => [String(f.id), f])), [facturas]);
-  const grupos = useMemo(() => agrupar(renglones), [renglones]);
+  // CON IVA, cada renglón con su tarifa: es como lo cuenta el control y lo
+  // que salió de la caja. Sin IVA, esta pantalla y el control nunca cuadran.
+  const valorados = useMemo(() => conIva(renglones, facturas), [renglones, facturas]);
+  const grupos = useMemo(() => agrupar(valorados), [valorados]);
   const dotacion = useMemo(() => dotacionContraPersonal(grupos, gente.total), [grupos, gente.total]);
   const porLeer = facturasPorLeer(facturas);
   const conPapel = facturas.filter(f => f.archivo_url && f.clase !== "anticipo").length;
@@ -197,7 +200,9 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
       {/* TODO LO COMPRADO, por familia. */}
       <div style={caja}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>Qué se compró</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
+            Qué se compró <span style={{ fontWeight: 400, color: colors.muted, fontSize: 11.5 }}>· valores con IVA</span>
+          </div>
           <input value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Buscar: casco, cemento, cuerda…"
             style={{ ...inputStyle, width: 220, fontSize: 12 }} />
         </div>
@@ -227,7 +232,7 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
                     <span style={{ width: 90 }} />
                     <span style={{ width: 90, textAlign: "right" }}>${fmt(v.total)}</span>
                   </div>
-                  {renglones.filter(r => (r.clave || claveDe(r.descripcion)) === v.clave).map(r => {
+                  {valorados.filter(r => (r.clave || claveDe(r.descripcion)) === v.clave).map(r => {
                     const f = porId.get(String(r.factura_id));
                     return (
                       <div key={r.id} style={{ display: "flex", fontSize: 11, color: colors.muted, paddingLeft: 12 }}>

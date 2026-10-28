@@ -14,7 +14,7 @@
 
 /** Una línea por ítem. Pedirle JSON se cae con facturas largas: un corchete
  *  que falta tira toda la factura, y además es el triple de tokens. */
-export const FORMATO = "cantidad | unidad | descripción | precio unitario";
+export const FORMATO = "cantidad | unidad | descripción | precio unitario | IVA %";
 
 export const PROMPT_ITEMS = [
   "Sos un asistente que lee facturas de compra de Ecuador para una constructora.",
@@ -25,6 +25,9 @@ export const PROMPT_ITEMS = [
   "La cantidad y el precio van con punto decimal y sin símbolo de moneda.",
   "Si la unidad no está impresa, poné u.",
   "NO incluyas subtotales, descuentos, IVA ni el total: solo lo que se compró.",
+  "El precio unitario va SIN IVA, como está impreso en el detalle.",
+  "IVA % es la tarifa de ESE renglón: 0, 5 o 15. Las facturas la marcan junto al ítem",
+  "o separan los subtotales por tarifa. Si no se puede saber, dejalo vacío: vacío es mejor que adivinar.",
   "Si la factura no se puede leer, devolvé exactamente: ILEGIBLE",
 ].join("\n");
 
@@ -53,6 +56,13 @@ export const numero = t => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/** 0, 5 o 15. Cualquier otra cosa es que no se sabe. */
+export const tasaDe = t => {
+  if (t == null || String(t).trim() === "") return null;
+  const v = numero(t);
+  return [0, 5, 15].includes(v) ? v : null;
+};
+
 /**
  * Lo que contestó NOVA, a renglones.
  *
@@ -73,6 +83,7 @@ export function interpretarItems(texto) {
       unidad: (p[1] || "u").toLowerCase().slice(0, 12),
       descripcion: p[2],
       precio_unitario: numero(p[3]),
+      iva_tasa: tasaDe(p[4]),
     }))
     .filter(x => x.descripcion && (x.cantidad || x.precio_unitario))
     .map(x => ({ ...x, total: Math.round(x.cantidad * x.precio_unitario * 100) / 100 }));
@@ -184,6 +195,7 @@ export function desdeLecturaDeFactura(items = []) {
       unidad: String(x.unidad || "u").trim().toLowerCase().slice(0, 12) || "u",
       descripcion: String(x.descripcion || "").trim(),
       total: r2(Number(x.monto ?? x.total) || 0),
+      iva_tasa: tasaDe(x.iva),
     }))
     .filter(x => x.descripcion && (x.cantidad || x.total))
     .map(x => ({ ...x, precio_unitario: x.cantidad ? Math.round((x.total / x.cantidad) * 10000) / 10000 : null }));
@@ -209,6 +221,7 @@ export function filasDeRenglones(factura, items = []) {
       descripcion: String(i.descripcion).trim().slice(0, 200),
       precio_unitario: i.precio_unitario == null ? null : Math.abs(Number(i.precio_unitario) || 0),
       total: r2(signo * Math.abs(Number(i.total) || 0)),
+      iva_tasa: i.iva_tasa ?? null,
       clave: claveDe(i.descripcion),
       familia: familiaDe(i.descripcion),
     }));
@@ -321,3 +334,51 @@ export const PROBLEMAS_BODEGA = {
   no_cuadra: { corto: "NO CUADRA", titulo: "No cuadran con su total",
     hacer: "Los renglones leídos no dan el total de la factura, así que quedaron fuera de la suma. Volvé a leerla o revisá el papel." },
 };
+
+/** La tarifa de la factura si tiene una sola; null si mezcla o no se sabe. */
+export function tasaUnicaDe(f) {
+  const con = [[0, f?.subtotal_0], [5, f?.subtotal_5], [15, f?.subtotal_15]]
+    .filter(([, v]) => Math.abs(Number(v) || 0) > 0.009);
+  return con.length === 1 ? con[0][0] : null;
+}
+
+/**
+ * Los renglones con IVA, que es como los cuenta el control y lo que salió de
+ * la caja.
+ *
+ * Cada renglón lleva SU tarifa: la que leyó NOVA, o la de la factura si tiene
+ * una sola. Una factura que mezcla 15% y 0% no puede repartir el IVA en
+ * proporción: le cargaría impuesto a lo que no lo pagó.
+ *
+ * Después se ajusta para que los renglones de cada factura sumen su total.
+ * Eso absorbe los descuentos (NOVA no los pone como renglón), los redondeos y
+ * la caja chica, que carga todo el monto como base 15%. El ajuste se aplica
+ * solo si es chico: si la lectura se quedó corta —le faltan renglones— estirar
+ * los que hay inflaría cada uno, y es mejor que la suma quede corta y se vea.
+ *
+ * `base` queda con el valor sin IVA.
+ */
+export function conIva(renglones = [], facturas = []) {
+  const porId = new Map(facturas.map(f => [String(f.id), f]));
+  const grupos = new Map();
+  renglones.forEach(r => {
+    const k = String(r.factura_id);
+    (grupos.get(k) || grupos.set(k, []).get(k)).push(r);
+  });
+  const salida = [];
+  for (const [id, rs] of grupos) {
+    const f = porId.get(id);
+    const unica = tasaUnicaDe(f);
+    const brutos = rs.map(r => {
+      const base = Number(r.total) || 0;
+      const tasa = r.iva_tasa != null ? Number(r.iva_tasa) : unica;
+      return tasa == null ? base : base * (1 + tasa / 100);
+    });
+    const suma = brutos.reduce((t, v) => t + v, 0);
+    const totalF = Number(f?.total) || 0;
+    const ajuste = suma && totalF ? totalF / suma : 1;
+    const k = ajuste >= 0.8 && ajuste <= 1.25 ? ajuste : 1;
+    rs.forEach((r, i) => salida.push({ ...r, base: Number(r.total) || 0, total: r2(brutos[i] * k) }));
+  }
+  return salida;
+}

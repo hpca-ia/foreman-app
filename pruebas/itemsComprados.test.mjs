@@ -5,7 +5,7 @@ import { interpretarItems, claveDe, familiaDe, agrupar } from "../src/modules/co
 test("una línea por ítem, con su total", () => {
   const r = interpretarItems("12 | u | CASCO TIPO I CLASE G BLANCO | 8.50\n2 | rollo | CUERDA PP TRENZADA 10MM | 24.00");
   assert.equal(r.length, 2);
-  assert.deepEqual(r[0], { cantidad: 12, unidad: "u", descripcion: "CASCO TIPO I CLASE G BLANCO", precio_unitario: 8.5, total: 102 });
+  assert.deepEqual(r[0], { cantidad: 12, unidad: "u", descripcion: "CASCO TIPO I CLASE G BLANCO", precio_unitario: 8.5, iva_tasa: null, total: 102 });
   assert.equal(r[1].total, 48);
 });
 
@@ -84,7 +84,7 @@ test("los renglones de la pantalla de la factura sacan su precio unitario", () =
     { descripcion: "TRANSPORTE", cantidad: 0, unidad: "", monto: 15 },
   ]);
   assert.equal(r.length, 2);
-  assert.deepEqual(r[0], { cantidad: 10, unidad: "u", descripcion: "CASCO BLANCO", total: 85, precio_unitario: 8.5 });
+  assert.deepEqual(r[0], { cantidad: 10, unidad: "u", descripcion: "CASCO BLANCO", total: 85, iva_tasa: null, precio_unitario: 8.5 });
   assert.equal(r[1].precio_unitario, null, "sin cantidad no hay precio unitario que inventar");
 });
 
@@ -148,4 +148,48 @@ test("qué le pasa a cada factura con la bodega", () => {
   assert.equal(estadoBodega({ archivo_url: "a", renglones_estado: "leida" }), "leida");
   assert.equal(estadoBodega({ archivo_url: "a" }), "por_leer");
   assert.equal(estadoBodega({ archivo_url: null, clase: "anticipo" }), null, "un anticipo no es una compra");
+});
+
+import { conIva, tasaDe, tasaUnicaDe } from "../src/modules/controlObra/itemsComprados.js";
+
+test("NOVA dice la tarifa de cada renglón; lo que no es 0, 5 o 15 no se sabe", () => {
+  const r = interpretarItems("10 | u | CEMENTO | 8.00 | 15\n1 | u | ALCOHOL | 2.00 | 5\n1 | u | FLETE | 10 | \n1 | u | X | 1 | 12");
+  assert.deepEqual(r.map(x => x.iva_tasa), [15, 5, null, null]);
+  assert.equal(tasaDe("15%"), 15);
+});
+
+test("una factura con una sola tarifa: todos sus renglones la llevan", () => {
+  const f = { id: 1, subtotal_15: 100, iva: 15, total: 115 };
+  assert.equal(tasaUnicaDe(f), 15);
+  const r = conIva([{ factura_id: 1, total: 60 }, { factura_id: 1, total: 40 }], [f]);
+  assert.deepEqual(r.map(x => x.total), [69, 46]);
+  assert.equal(r[0].base, 60);
+});
+
+test("15% y 0% en la misma factura: el impuesto va solo a lo que lo pagó", () => {
+  const f = { id: 1, subtotal_0: 50, subtotal_15: 100, iva: 15, total: 165 };
+  assert.equal(tasaUnicaDe(f), null);
+  const r = conIva([
+    { factura_id: 1, total: 100, iva_tasa: 15 },
+    { factura_id: 1, total: 50, iva_tasa: 0 },
+  ], [f]);
+  assert.deepEqual(r.map(x => x.total), [115, 50]);
+});
+
+test("caja chica carga todo como base 15%: igual suma lo que se pagó", () => {
+  const f = { id: 1, subtotal_15: 23, iva: 0, total: 23 };
+  const r = conIva([{ factura_id: 1, total: 20 }], [f]);
+  assert.equal(r[0].total, 23);
+});
+
+test("un descuento que no vino como renglón se absorbe; una lectura corta no se estira", () => {
+  const conDescuento = conIva([{ factura_id: 1, total: 110 }], [{ id: 1, subtotal_15: 100, iva: 15, total: 115 }]);
+  assert.equal(conDescuento[0].total, 115);
+  const corta = conIva([{ factura_id: 2, total: 20 }], [{ id: 2, subtotal_15: 100, iva: 15, total: 115 }]);
+  assert.equal(corta[0].total, 23, "le faltan renglones: no se infla el que hay");
+});
+
+test("una nota de crédito con IVA sigue restando", () => {
+  const r = conIva([{ factura_id: 1, total: -17 }], [{ id: 1, subtotal_15: -17, iva: -2.55, total: -19.55 }]);
+  assert.equal(r[0].total, -19.55);
 });
