@@ -23,6 +23,15 @@ export default function TraerDeOtro({ actualId, presupuestos = [], capitulosDest
   const [cargando, setCargando] = useState(false);
   const [aviso, setAviso] = useState("");
 
+  // Y SE CIERRA CON ESCAPE. Una pantalla que se abre encima de otra se cierra
+  // con Escape en todos lados; acá, además, es el seguro de que siempre haya
+  // una salida aunque algo tape el botón.
+  useEffect(() => {
+    const alTecla = e => { if (e.key === "Escape") onCerrar(); };
+    window.addEventListener("keydown", alTecla);
+    return () => window.removeEventListener("keydown", alTecla);
+  }, [onCerrar]);
+
   const lista = useMemo(() => presupuestos
     .filter(p => p.id !== actualId && !p.archivado_at)
     .filter(p => !busca.trim() || normal(`${p.nombre} ${p.cliente_nombre || ""}`).includes(normal(busca)))
@@ -85,12 +94,23 @@ export default function TraerDeOtro({ actualId, presupuestos = [], capitulosDest
       background: "#fff", borderLeft: "1px solid var(--border)", boxShadow: "-12px 0 32px rgba(0,0,0,0.12)",
       display: "flex", flexDirection: "column", fontFamily: "var(--font)" }}>
       <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "grid", gap: 8 }}>
+        {/* EL TÍTULO NO PUEDE EMPUJAR A LA SALIDA FUERA DE LA PANTALLA.
+            Sin `minWidth: 0`, un nombre largo —y los presupuestos tienen
+            nombres largos— no se encoge: estira la fila, y el "← otro" y la ×
+            se van por el borde derecho del panel, donde no se los ve ni se
+            los puede apretar. El panel quedaba abierto sin forma de cerrarlo.
+            Ahora el nombre se corta con puntos suspensivos y la salida no se
+            mueve de su lugar. */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", flex: 1 }}>
+          <div title={elegido?.nombre || ""}
+            style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", flex: 1, minWidth: 0,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {elegido ? <>De <span style={{ color: "var(--brand)" }}>{elegido.nombre}</span></> : "Traer de otro presupuesto"}
           </div>
-          {elegido && <button onClick={() => setElegido(null)} style={{ ...boton, color: "var(--ink-soft)" }}>← otro</button>}
-          <button onClick={onCerrar} title="Cerrar" style={{ background: "var(--neutral-soft)", border: "none", borderRadius: 6, width: 28, height: 28, cursor: "pointer", fontSize: 15, color: "var(--ink-soft)" }}>×</button>
+          {elegido && <button onClick={() => setElegido(null)} style={{ ...boton, color: "var(--ink-soft)", flexShrink: 0 }}>← otro</button>}
+          <button onClick={onCerrar} title="Cerrar (Esc)"
+            style={{ background: "var(--neutral-soft)", border: "none", borderRadius: 6, width: 28, height: 28,
+              cursor: "pointer", fontSize: 15, color: "var(--ink-soft)", flexShrink: 0 }}>×</button>
         </div>
         <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
           {elegido
@@ -120,7 +140,7 @@ export default function TraerDeOtro({ actualId, presupuestos = [], capitulosDest
         {aviso && <div style={{ fontSize: 12, color: "var(--success, #15803d)" }}>✓ {aviso}</div>}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0", minHeight: 0 }}>
         {!elegido && lista.map(p => (
           <button key={p.id} onClick={() => setElegido(p)}
             style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid var(--neutral-soft)", padding: "9px 14px", cursor: "pointer", fontFamily: "var(--font)" }}>
@@ -165,6 +185,18 @@ export default function TraerDeOtro({ actualId, presupuestos = [], capitulosDest
             </div>
           );
         })}
+      </div>
+
+      {/* LA SALIDA, TAMBIÉN ABAJO. Después de bajar por treinta rubros, la ×
+          del encabezado quedó arriba de todo: cerrar no debería costar un
+          scroll de vuelta. */}
+      <div style={{ borderTop: "1px solid var(--border)", padding: "9px 14px" }}>
+        <button onClick={onCerrar}
+          style={{ width: "100%", background: "var(--neutral-soft)", border: "none", borderRadius: 8,
+            padding: "8px 0", fontSize: 12.5, fontWeight: 600, color: "var(--ink-soft)",
+            cursor: "pointer", fontFamily: "var(--font)" }}>
+          Cerrar
+        </button>
       </div>
     </div>
   );
