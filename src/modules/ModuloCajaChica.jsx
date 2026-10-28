@@ -8,6 +8,7 @@ import { supabase } from "../lib/supabase";
 import { subirArchivo, abrirArchivo } from "../lib/archivos";
 import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
+import { valesDisponibles } from "./controlObra/cuentasProveedor";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
 import ReporteCaja from "./cajaChica/ReporteCaja";
 import SelectorActividad from "./cajaChica/SelectorActividad";
@@ -41,6 +42,12 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
   const [pagosObra, setPagosObra] = useState([]);
   // Con qué vale se paga el gasto que se está cargando: { [notaFacturaId]: monto }.
   const [conVale, setConVale] = useState({});
+  // LOS VALES SON DE LA OBRA, NO DE LA CAJA.
+  //
+  // Una nota de crédito la tiene el proveedor a favor de la obra: da igual
+  // qué caja hizo la devolución y cuál hace la compra siguiente. Mirando solo
+  // los de esta caja, el vale quedaba invisible para el que podía usarlo.
+  const [valesDeLaObra, setValesDeLaObra] = useState([]);
   // Las vueltas ya rendidas de esta caja. Una caja chica no es una cuenta que
   // corre para siempre: va por vueltas, y el abono nuevo es el acuse de que la
   // anterior se rindió.
@@ -329,6 +336,29 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     if (error && /column|schema cache/i.test(error.message)) return "Falta correr la migración 126 (pagos con nota de crédito).";
     return error ? error.message : null;
   }
+
+  // Los vales que este proveedor le debe a la obra, con lo que les queda.
+  const rucGasto = String(gastoForm?.ruc || "").replace(/\D/g, "");
+  const nombreGasto = String(gastoForm?.proveedor || "").trim();
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const obraId = cajaActiva?.obra_id;
+      if (subVista !== "gasto" || !obraId || (!rucGasto && !nombreGasto)) { setValesDeLaObra([]); return; }
+      let q = supabase.from("obra_facturas")
+        .select("id,total,clase,fecha,numero_factura,detalle,facturada_con_id,ruc,razon_social")
+        .eq("obra_id", obraId).lt("total", 0);
+      q = rucGasto ? q.eq("ruc", rucGasto) : q.eq("razon_social", nombreGasto);
+      const { data: notas } = await q;
+      if (!vivo) return;
+      if (!notas?.length) { setValesDeLaObra([]); return; }
+      const { data: ps } = await supabase.from("obra_pagos")
+        .select("monto,nota_credito_id").in("nota_credito_id", notas.map(x => x.id));
+      if (!vivo) return;
+      setValesDeLaObra(valesDisponibles(notas, ps || []));
+    })();
+    return () => { vivo = false; };
+  }, [subVista, cajaActiva?.obra_id, rucGasto, nombreGasto]);
 
   async function recalcularSaldos(cajaId) {
     const [{ data: ants }, { data: gs }] = await Promise.all([
@@ -1113,11 +1143,11 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
               // compras que están adentro del cierre 1, y marcarlo es
               // justamente lo que hace que esa vuelta cuente el efectivo que
               // de verdad salió. El total del cierre se vuelve a sumar solo.
-              const { vales } = valesPorUsar(gastos, pagosObra);
-              const pelar = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
-              const suyos = vales.filter(v => (gastoForm.ruc && v.ruc)
-                ? String(v.ruc).replace(/\D/g,"") === String(gastoForm.ruc).replace(/\D/g,"")
-                : pelar(v.proveedor) && pelar(v.proveedor) === pelar(gastoForm.proveedor));
+              //
+              // Y se buscan en TODA LA OBRA: el vale lo tiene el proveedor a
+              // favor de la obra, no de una caja. Da igual qué caja hizo la
+              // devolución y cuál hace la compra.
+              const suyos = valesDeLaObra;
               if (!suyos.length || Number(gastoForm.monto) <= 0) return null;
               const usado = totalConVale();
               const efectivo = Math.max(0, Math.round((Number(gastoForm.monto) - usado) * 100) / 100);
@@ -1131,13 +1161,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                   </div>
                   {suyos.map(v => (
                     <div key={v.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
-                      <input type="number" step="0.01" value={conVale[v.obra_factura_id] ?? ""}
-                        onChange={e=>setConVale(c=>({...c,[v.obra_factura_id]:e.target.value}))}
+                      <input type="number" step="0.01" value={conVale[v.id] ?? ""}
+                        onChange={e=>setConVale(c=>({...c,[v.id]:e.target.value}))}
                         placeholder="0,00" style={{...iS,width:100,padding:"5px 8px",fontSize:12,textAlign:"right"}}/>
                       <span style={{fontSize:11.5,color:"var(--ink-soft)",flex:1,minWidth:150}}>
-                        de <strong>${fmt(v.disponible)}</strong> que quedan · {v.descripcion?String(v.descripcion).slice(0,40):v.numero_factura||"nota de crédito"}
+                        de <strong>${fmt(v.disponible)}</strong> que quedan · {v.detalle?String(v.detalle).slice(0,40):v.numero_factura||"nota de crédito"}
                       </span>
-                      <button type="button" onClick={()=>setConVale(c=>({...c,[v.obra_factura_id]:Math.min(v.disponible, Math.max(0, Number(gastoForm.monto) - (totalConVale() - (Number(conVale[v.obra_factura_id])||0))))}))}
+                      <button type="button" onClick={()=>setConVale(c=>({...c,[v.id]:Math.min(v.disponible, Math.max(0, Number(gastoForm.monto) - (totalConVale() - (Number(conVale[v.id])||0))))}))}
                         style={{background:"#fff",border:"1px solid var(--border)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"var(--brand)",fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>
                         usar
                       </button>
@@ -1202,7 +1232,8 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                 Además del efectivo, esta caja tiene <strong style={{color:"var(--success)"}}>${fmt(total)}</strong> en{" "}
                 {vales.length===1?"una nota de crédito":`${vales.length} notas de crédito`} sin usar:{" "}
                 {vales.map(v=>`${v.proveedor||"proveedor"} $${fmt(v.disponible)}`).join(" · ")}.
-                {" "}No son billetes: se usan en la próxima compra con ese proveedor, marcándolas al cargar el gasto.
+                {" "}No son billetes: se usan en la próxima compra con ese proveedor —desde esta caja o desde cualquier otra
+                de la obra—, marcándolas al cargar el gasto.
               </div>
             );
           })()}
