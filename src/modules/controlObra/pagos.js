@@ -69,6 +69,11 @@ export async function registrarPago(factura, datos, quien) {
     fecha: datos.fecha || new Date().toISOString().split("T")[0],
     monto, forma: datos.forma || null, referencia: datos.referencia?.trim() || null,
     nota: datos.nota?.trim() || null,
+    // CON QUÉ VALE SE PAGÓ. Un pago con nota de crédito no salió del banco:
+    // salió del crédito que teníamos a favor, y ese crédito deja de estar
+    // disponible por ese monto. Sin esto había que marcar el vale usado a mano
+    // en otra pantalla, y nadie podía saber en qué factura se fue.
+    ...(datos.nota_credito_id ? { nota_credito_id: Number(datos.nota_credito_id) } : {}),
     registrado_por: quien?.id ?? null, registrado_nombre: quien?.name || null,
   }).select().single();
   if (error) return { error: falta(error) ? "Falta correr la migración 060." : error.message };
@@ -90,5 +95,5 @@ export async function guardarDocumento(facturaId, campos) {
 // para poder probarla. Se re-exporta desde acá para no mover las pantallas.
 export {
   esNotaDeCredito, pagadoPorFactura, estadoDe, ETIQUETA_PAGO,
-  cuentasPorProveedor, totalesPorPagar,
+  cuentasPorProveedor, totalesPorPagar, usadoPorNota, creditoDisponible, valesDisponibles,
 } from "./cuentasProveedor.js";

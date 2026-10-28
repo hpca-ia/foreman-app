@@ -35,7 +35,7 @@ export default function ProveedoresDeTodo({ obras = [], nombreDeObra, onVolver }
       if (!ids.length) { setFacturas([]); setPagos([]); setCargando(false); return; }
       const [{ data: fs }, { data: ps }] = await Promise.all([
         supabase.from("obra_facturas").select("*").in("obra_id", ids),
-        supabase.from("obra_pagos").select("factura_id,monto").in("obra_id", ids),
+        supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").in("obra_id", ids),
       ]);
       if (!vivo) return;
       setFacturas(fs || []); setPagos(ps || []); setCargando(false);

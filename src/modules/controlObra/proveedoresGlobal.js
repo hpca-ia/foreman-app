@@ -8,7 +8,7 @@
 //
 // Sin base de datos, para poder probarlo.
 
-import { esNotaDeCredito } from "./cuentasProveedor.js";
+import { esNotaDeCredito, usadoPorNota } from "./cuentasProveedor.js";
 
 const n = v => Number(v) || 0;
 const r2 = v => Math.round(v * 100) / 100;
@@ -30,6 +30,8 @@ export const claveProveedor = f =>
 export function proveedoresDeTodo(facturas = [], pagos = [], nombreObra = () => "") {
   const pagado = {};
   pagos.forEach(p => { pagado[p.factura_id] = (pagado[p.factura_id] || 0) + n(p.monto); });
+  // Lo que ya se gastó de cada vale: un vale usado en parte vale el resto.
+  const usado = usadoPorNota(pagos);
 
   const mapa = new Map();
   facturas.forEach(f => {
@@ -61,7 +63,7 @@ export function proveedoresDeTodo(facturas = [], pagos = [], nombreObra = () => 
     if (vale) {
       // El vale sin usar es plata nuestra en su casa. No es una compra ni una
       // deuda menos: es crédito a favor hasta que se use.
-      const libre = f.facturada_con_id ? 0 : Math.abs(total);
+      const libre = f.facturada_con_id ? 0 : Math.max(0, Math.abs(total) - (usado[f.id] || 0));
       c.credito += libre; o.credito += libre;
       return;
     }

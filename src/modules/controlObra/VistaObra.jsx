@@ -138,7 +138,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     // Lo pagado de cada factura: hace falta para poder preguntar en voz alta
     // cuánto de lo "invertido" es en realidad plata adelantada por algo que
     // todavía no llegó.
-    const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto").eq("obra_id", obra.id);
+    // `nota_credito_id` viene porque un pago hecho con un vale no movió plata:
+    // la caja del proyecto no lo cuenta como salida.
+    const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").eq("obra_id", obra.id);
     setPagos(pg || []);
     const { data: ben } = await supabase.from("obra_beneficios")
       .select("obra_rubro_id,descripcion,presupuestado,real,estado").eq("obra_id", obra.id);

@@ -81,3 +81,12 @@ test("una obra en cero no revienta", () => {
   const r = estadoDeCaja({});
   assert.deepEqual([r.entrado, r.gastado, r.saldo, r.porPagar], [0, 0, 0, 0]);
 });
+
+// Un pago con una nota de crédito salda la factura y no mueve plata.
+test("el vale no sale de la caja del proyecto", () => {
+  const facturas = [{ id: 1, total: 1000 }];
+  const pagos = [{ factura_id: 1, monto: 900 }, { factura_id: 1, monto: 100, nota_credito_id: 7 }];
+  const e = estadoDeCaja({ fondos: [{ monto: 1000 }], facturas, pagos });
+  assert.equal(e.pagado, 900);
+  assert.equal(e.saldo, 100);
+});

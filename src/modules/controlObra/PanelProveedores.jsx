@@ -9,7 +9,7 @@ import { fmt } from "./calculos";
 import {
   CLASES_DOC, FORMAS_PAGO, ETIQUETA_PAGO, pagosDeObra, registrarPago, borrarPago,
   guardarDocumento, pagadoPorFactura, estadoDe, cuentasPorProveedor, totalesPorPagar,
-  esNotaDeCredito,
+  esNotaDeCredito, valesDisponibles,
 } from "./pagos";
 
 // A quién le debemos, cuánto, y qué proformas falta facturar.
@@ -21,7 +21,7 @@ import {
 // Gastado y pagado no son lo mismo: una factura con un anticipo del 40% ya
 // golpeó el rubro entero, pero el resto todavía tiene que salir de caja.
 
-const PAGO_VACIO = { monto: "", fecha: new Date().toISOString().split("T")[0], forma: "transferencia", referencia: "", nota: "" };
+const PAGO_VACIO = { monto: "", fecha: new Date().toISOString().split("T")[0], forma: "transferencia", referencia: "", nota: "", nota_credito_id: "" };
 const estiloChip = {
   border: `1px solid ${colors.border}`, background: "#fff", color: colors.inkSoft, borderRadius: 12,
   padding: "1px 8px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
@@ -325,7 +325,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: colors.inkSoft, padding: "2px 0 2px 10px" }}>
                           <span style={{ color: colors.muted }}>{dia(p.fecha)}</span>
                           <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
-                            {p.forma || "pago"}{p.referencia ? ` · ${p.referencia}` : ""}{p.nota ? ` · ${p.nota}` : ""}
+                            {p.forma || "pago"}{p.nota_credito_id ? " (no salió del banco)" : ""}{p.referencia ? ` · ${p.referencia}` : ""}{p.nota ? ` · ${p.nota}` : ""}
                           </span>
                           <span style={{ fontWeight: 600 }}>${fmt(p.monto)}</span>
                           {puedeRegistrar && (
@@ -348,13 +348,39 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                                 style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
                             </div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 5 }}>
-                              <select value={form.forma} onChange={e => setForm(f => ({ ...f, forma: e.target.value }))}
+                              <select value={form.forma}
+                                onChange={e => setForm(f => ({ ...f, forma: e.target.value,
+                                  nota_credito_id: e.target.value === "nota de crédito"
+                                    ? (valesDisponibles(c.documentos, pagos)[0]?.id ?? "") : "" }))}
                                 style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }}>
                                 {FORMAS_PAGO.map(x => <option key={x} value={x}>{x}</option>)}
                               </select>
                               <input value={form.referencia} onChange={e => setForm(f => ({ ...f, referencia: e.target.value }))}
                                 placeholder="N° de cheque o comprobante" style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
                             </div>
+                            {/* CON QUÉ VALE. Pagar con una nota de crédito no es
+                                "otra forma de pago": es gastar un crédito que
+                                teníamos, y hay que decir cuál para que deje de
+                                estar disponible por ese monto. */}
+                            {form.forma === "nota de crédito" && (() => {
+                              const libres = valesDisponibles(c.documentos, pagos);
+                              if (!libres.length) {
+                                return <div style={{ fontSize: 11, color: colors.warning }}>
+                                  Este proveedor no tiene ninguna nota de crédito sin usar.
+                                </div>;
+                              }
+                              return (
+                                <select value={form.nota_credito_id || libres[0].id}
+                                  onChange={e => setForm(f => ({ ...f, nota_credito_id: e.target.value }))}
+                                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }}>
+                                  {libres.map(v => (
+                                    <option key={v.id} value={v.id}>
+                                      {v.numero_factura || v.detalle || "sin número"} · quedan ${fmt(v.disponible)}
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
                             <div style={{ display: "flex", gap: 5 }}>
                               <Button variant="primary" size="sm" disabled={ocupado || !(Number(form.monto) > 0)}
                                 onClick={async () => {
@@ -370,7 +396,10 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                                       + `De $${fmt(d.total)}, ya hay $${fmt(d.pagado)} pagados. Con este pago quedaría en $${fmt(d.pagado + Number(form.monto))}.\n\n`
                                       + "¿Lo cargo igual?")) return;
                                   setOcupado(true); setAviso("");
-                                  const r = await registrarPago(d, form, currentUser);
+                                  const vale = form.forma === "nota de crédito"
+                                    ? (form.nota_credito_id || valesDisponibles(c.documentos, pagos)[0]?.id || null)
+                                    : null;
+                                  const r = await registrarPago(d, { ...form, nota_credito_id: vale }, currentUser);
                                   setOcupado(false);
                                   if (r.error) { setAviso(r.error); return; }
                                   setPagando(null); setForm(PAGO_VACIO); await cargar();

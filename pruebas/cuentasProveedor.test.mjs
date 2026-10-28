@@ -47,3 +47,37 @@ test("cada proveedor tiene su propio crédito", () => {
   assert.equal(cs.find(c => c.ruc === "1790727203001").credito, 0);
   assert.equal(cs.find(c => c.ruc === "0990123456001").credito, 99.97);
 });
+
+import { creditoDisponible, valesDisponibles } from "../src/modules/controlObra/cuentasProveedor.js";
+
+const vale = { id: 2, clase: "nota_credito", total: -150 };
+
+test("un vale usado en parte sigue valiendo el resto", () => {
+  assert.equal(creditoDisponible(vale, [{ factura_id: 7, monto: 100, nota_credito_id: 2 }]), 50);
+});
+
+test("usado entero deja de valer", () => {
+  assert.equal(creditoDisponible(vale, [{ factura_id: 7, monto: 150, nota_credito_id: 2 }]), 0);
+  assert.equal(creditoDisponible({ ...vale, facturada_con_id: 7 }, []), 0);
+});
+
+test("el pago de otra factura no toca el vale", () => {
+  assert.equal(creditoDisponible(vale, [{ factura_id: 7, monto: 100 }]), 150);
+});
+
+test("la cuenta del proveedor descuenta lo usado del vale", () => {
+  const [c] = cuentasPorProveedor(
+    [{ id: 1, ruc: "9", clase: "factura", total: 500 }, { id: 2, ruc: "9", clase: "nota_credito", total: -150 }],
+    [{ factura_id: 1, monto: 100, nota_credito_id: 2 }]);
+  assert.equal(c.credito, 50);
+  assert.equal(c.creditoUsado, 100);
+  // El vale pagó parte de la factura: lo que falta es lo que falta de verdad.
+  assert.equal(c.saldo, 400);
+});
+
+test("los vales que se pueden usar, con cuánto les queda", () => {
+  const vs = valesDisponibles(
+    [{ id: 2, clase: "nota_credito", total: -150 }, { id: 3, clase: "nota_credito", total: -20 }, { id: 4, clase: "factura", total: 90 }],
+    [{ monto: 20, nota_credito_id: 3 }]);
+  assert.deepEqual(vs.map(v => [v.id, v.disponible]), [[2, 150]]);
+});

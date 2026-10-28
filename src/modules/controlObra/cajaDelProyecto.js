@@ -5,6 +5,16 @@
 
 const n = v => Number(v) || 0;
 
+// UN PAGO CON UNA NOTA DE CRÉDITO NO SALIÓ DEL BANCO.
+//
+// La factura queda saldada —para el proveedor está pagada— pero la plata no se
+// movió: se gastó un vale que ya teníamos. Contándolo como salida, la caja del
+// proyecto decía que salió plata dos veces: la del día que compramos lo que
+// después devolvimos, y otra vez al usar el vale.
+//
+// Para la caja cuentan los pagos que movieron plata. Para el proveedor, todos.
+const deLaCaja = pagos => pagos.filter(p => p?.nota_credito_id == null);
+
 /**
  * El estado de la caja del proyecto: LA PLATA, no los papeles.
  *
@@ -30,7 +40,8 @@ const n = v => Number(v) || 0;
  * es el comportamiento de antes y es el correcto mientras los pagos no se
  * lleven.
  */
-export function estadoDeCaja({ fondos = [], facturas = [], pagos = [] }) {
+export function estadoDeCaja({ fondos = [], facturas = [], pagos: todos = [] }) {
+  const pagos = deLaCaja(todos);
   const entrado = fondos.filter(f => n(f.monto) > 0).reduce((t, f) => t + n(f.monto), 0);
   const salido = fondos.filter(f => n(f.monto) < 0).reduce((t, f) => t - n(f.monto), 0);
   const facturado = facturas.filter(f => f.clase !== "proforma").reduce((t, f) => t + n(f.total), 0);
@@ -54,7 +65,8 @@ export function estadoDeCaja({ fondos = [], facturas = [], pagos = [] }) {
  * hasta que alguien las asigne es cómo el saldo de la pantalla deja de ser el
  * saldo del banco.
  */
-export function porPlanilla({ planillas = [], facturas = [], fondos = [], pagos = [] }) {
+export function porPlanilla({ planillas = [], facturas = [], fondos = [], pagos: todos = [] }) {
+  const pagos = deLaCaja(todos);
   const orden = [...planillas].sort((a, b) => a.numero - b.numero);
   const gastoDe = new Map();
   let huerfanas = 0;

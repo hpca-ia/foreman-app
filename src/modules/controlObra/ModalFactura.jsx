@@ -14,7 +14,7 @@ import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
 import { comprasSinFacturar, engancharFactura } from "../compras/compras";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
-import { FORMAS_PAGO, registrarPago } from "./pagos";
+import { FORMAS_PAGO, registrarPago, valesDisponibles } from "./pagos";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -47,6 +47,14 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // Lo que ya se pagó de esta factura, en el momento de cargarla: es cuando se
   // sabe, porque quien la carga tiene el comprobante en la mano.
   const [pagado, setPagado] = useState({ monto: "", forma: "transferencia" });
+  // LOS VALES DE ESTE PROVEEDOR, ACÁ MISMO.
+  //
+  // Una factura de $1.000 se paga $900 por transferencia y $100 con una nota
+  // de crédito que el proveedor nos debía. Eso pasa al cargar la factura, con
+  // el papel delante: mandarlo a otra pantalla es que no se registre, y el
+  // vale se queda "a favor" para siempre mientras la factura figura impaga.
+  const [vales, setVales] = useState([]);
+  const [conVale, setConVale] = useState({ monto: "", nota_credito_id: "" });
   // Los renglones de la factura, leídos por NOVA. Cada uno puede ir a un rubro
   // distinto: una factura de ferretería sirve a tres capítulos.
   const [items, setItems] = useState([]);
@@ -350,6 +358,28 @@ Rubros: ${listaRubros}`,
     setRevisandoSri(false);
   }
 
+  // Los vales que le quedan a este proveedor en esta obra. Se buscan por RUC
+  // —que es lo que de verdad lo identifica— y si no hay, por nombre.
+  const rucProveedor = String(form.ruc || "").replace(/\D/g, "");
+  const nombreProveedor = String(form.razon_social || "").trim();
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      if (editando || !obra?.id || (!rucProveedor && !nombreProveedor)) { setVales([]); return; }
+      let q = supabase.from("obra_facturas")
+        .select("id,total,clase,fecha,numero_factura,detalle,facturada_con_id,ruc,razon_social")
+        .eq("obra_id", obra.id).lt("total", 0);
+      q = rucProveedor ? q.eq("ruc", rucProveedor) : q.eq("razon_social", nombreProveedor);
+      const { data: notas } = await q;
+      if (!vivo || !notas?.length) { if (vivo) setVales([]); return; }
+      const { data: pg } = await supabase.from("obra_pagos")
+        .select("monto,nota_credito_id").in("nota_credito_id", notas.map(x => x.id));
+      if (!vivo) return;
+      setVales(valesDisponibles(notas, pg || []));
+    })();
+    return () => { vivo = false; };
+  }, [editando, obra?.id, rucProveedor, nombreProveedor]);
+
   function agregar(tipo, id) {
     if (id == null || repartos.some(r => r.tipo === tipo && r.id === id)) return;
     const restante = Math.max(n(form.total) - repartos.reduce((s, r) => s + n(r.monto), 0), 0);
@@ -505,6 +535,22 @@ Rubros: ${listaRubros}`,
       if (r?.error) {
         setGuardando(false);
         setError("La factura se guardó, pero el pago no: " + r.error);
+        return;
+      }
+    }
+
+    // LO QUE SE PAGÓ CON EL VALE. Es un pago más —la factura queda saldada—
+    // pero no movió plata: descuenta del crédito a favor de este proveedor.
+    if (!editando && n(conVale.monto) > 0 && (conVale.nota_credito_id || vales[0])) {
+      const cual = conVale.nota_credito_id || vales[0].id;
+      const r = await registrarPago(
+        { id: facturaId, obra_id: obra.id },
+        { monto: n(conVale.monto), fecha: payload.fecha, forma: "nota de crédito",
+          nota_credito_id: cual, nota: "Pagada con nota de crédito" },
+        currentUser);
+      if (r?.error) {
+        setGuardando(false);
+        setError("La factura se guardó, pero el pago con la nota de crédito no: " + r.error);
         return;
       }
     }
@@ -833,6 +879,37 @@ Rubros: ${listaRubros}`,
               </span>
             </div>
           </div>
+          {/* Y SI UNA PARTE SE PAGÓ CON UN VALE. No salió del banco: salió del
+              crédito que este proveedor nos debía, y ese crédito deja de estar
+              disponible por ese monto. Los dos pagos saldan la factura. */}
+          {vales.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 8, alignItems: "center", marginTop: 7 }}>
+              <input type="number" step="0.01" value={conVale.monto}
+                onChange={e => setConVale(v => ({ ...v, monto: e.target.value, nota_credito_id: v.nota_credito_id || vales[0].id }))}
+                placeholder="0,00" style={{ ...mini, textAlign: "right" }} />
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11.5, color: colors.inkSoft }}>con la nota de crédito</span>
+                <select value={conVale.nota_credito_id || vales[0].id}
+                  onChange={e => setConVale(v => ({ ...v, nota_credito_id: e.target.value }))}
+                  style={{ ...mini, width: "auto", maxWidth: 260 }}>
+                  {vales.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.numero_factura || v.detalle || "sin número"} · quedan ${fmt(v.disponible)}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => {
+                  const elegido = vales.find(v => String(v.id) === String(conVale.nota_credito_id)) || vales[0];
+                  const falta = Math.max(0, n(form.total) - n(pagado.monto));
+                  setConVale({ nota_credito_id: elegido.id, monto: Math.min(elegido.disponible, falta || elegido.disponible) });
+                }}
+                  style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+                    padding: "4px 9px", fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
+                  usar el vale
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

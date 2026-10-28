@@ -8,6 +8,31 @@
 const n = v => Number(v) || 0;
 const r2 = v => Math.round(v * 100) / 100;
 
+/** Cuánto se gastó de cada nota de crédito, por su id. */
+export function usadoPorNota(pagos = []) {
+  const mapa = {};
+  pagos.forEach(p => {
+    if (p?.nota_credito_id == null) return;
+    mapa[p.nota_credito_id] = (mapa[p.nota_credito_id] || 0) + n(p.monto);
+  });
+  return mapa;
+}
+
+/** Lo que todavía vale una nota de crédito: lo suyo menos lo ya usado. */
+export function creditoDisponible(nota, pagos = []) {
+  if (!nota) return 0;
+  if (nota.facturada_con_id) return 0;
+  const vale = Math.abs(n(nota.total));
+  return r2(Math.max(0, vale - (usadoPorNota(pagos)[nota.id] || 0)));
+}
+
+/** Las notas de crédito de un proveedor que todavía valen algo. */
+export function valesDisponibles(documentos = [], pagos = []) {
+  return documentos
+    .filter(d => (esNotaDeCredito(d.clase) || n(d.total) < 0) && creditoDisponible(d, pagos) > 0.005)
+    .map(d => ({ ...d, disponible: creditoDisponible(d, pagos) }));
+}
+
 /** Los documentos que RESTAN en vez de sumar. */
 export const esNotaDeCredito = clase => clase === "nota_credito";
 
@@ -51,6 +76,8 @@ export const ETIQUETA_PAGO = {
  */
 export function cuentasPorProveedor(facturas = [], pagos = []) {
   const pagado = pagadoPorFactura(pagos);
+  // Lo que ya se gastó de cada vale: los pagos que se hicieron con él.
+  const usadoDe = usadoPorNota(pagos);
   const cuentas = new Map();
 
   facturas.forEach(f => {
@@ -83,8 +110,12 @@ export function cuentasPorProveedor(facturas = [], pagos = []) {
       //
       // Usada —apuntando a la factura donde se aplicó— deja de estar a favor:
       // ya se gastó.
-      if (f.facturada_con_id) c.creditoUsado += Math.abs(e.total);
-      else c.credito += Math.abs(e.total);
+      const vale = Math.abs(e.total);
+      // Usado en parte: lo que queda sigue a favor. Un vale de $150 del que se
+      // usaron $100 no es un vale gastado, son $50 que todavía valen.
+      const usado = f.facturada_con_id ? vale : Math.min(vale, usadoDe[f.id] || 0);
+      c.creditoUsado += usado;
+      c.credito += vale - usado;
     } else {
       c.facturado += e.total;
       c.pagado += e.pagado;
