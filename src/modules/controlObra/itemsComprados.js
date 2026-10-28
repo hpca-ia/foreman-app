@@ -382,3 +382,21 @@ export function conIva(renglones = [], facturas = []) {
   }
   return salida;
 }
+
+/**
+ * Cuántas PERSONAS hay en las filas de Mano de obra, no cuántas filas.
+ *
+ * Cada vez que alguien sale y vuelve a entrar se crea una fila nueva: en el
+ * aeropuerto había 23 filas para 9 personas, y la dotación se comparaba contra
+ * 23. Se junta por el nombre (sin tildes ni mayúsculas) y no por la cédula,
+ * porque una cédula mal copiada junta a dos personas distintas en una.
+ *
+ * Una persona está activa si alguna de sus filas lo está.
+ */
+export function personasDistintas(filas = []) {
+  const clave = p => SIN_ACENTO(String(p.nombre || "").toLowerCase()).replace(/[^a-z0-9]+/g, " ").trim()
+    || `cedula:${p.cedula || p.id}`;
+  const m = new Map();
+  filas.forEach(p => { const k = clave(p); m.set(k, m.get(k) || !!p.activo); });
+  return { total: m.size, activos: [...m.values()].filter(Boolean).length };
+}

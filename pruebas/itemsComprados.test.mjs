@@ -193,3 +193,23 @@ test("una nota de crédito con IVA sigue restando", () => {
   const r = conIva([{ factura_id: 1, total: -17 }], [{ id: 1, subtotal_15: -17, iva: -2.55, total: -19.55 }]);
   assert.equal(r[0].total, -19.55);
 });
+
+import { personasDistintas } from "../src/modules/controlObra/itemsComprados.js";
+
+test("el que salió y volvió a entrar es una persona, no dos", () => {
+  const r = personasDistintas([
+    { nombre: "SÁNCHEZ S OLEDISPA ABAD SEBASTIAN", activo: false },
+    { nombre: "Sanchez S Oledispa Abad Sebastian", activo: false },
+    { nombre: "SÁNCHEZ S OLEDISPA ABAD SEBASTIAN", activo: true },
+    { nombre: "TELLO ORTIZ CARLOS INOCENCIO", activo: false },
+  ]);
+  assert.deepEqual(r, { total: 2, activos: 1 });
+});
+
+test("dos personas con la misma cédula mal copiada siguen siendo dos", () => {
+  const r = personasDistintas([
+    { nombre: "VIVAS ALVAREZ JULIO ALBERTO", cedula: "0952763563", activo: true },
+    { nombre: "VIVAS MENDOZA BIENVENIDO MARION", cedula: "0952763563", activo: true },
+  ]);
+  assert.equal(r.total, 2);
+});

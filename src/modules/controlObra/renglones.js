@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { enlaceArchivo } from "../../lib/archivos";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import { LECTURA, pedirANova, porQueFallo, textoDeNova } from "../../lib/modelos";
-import { PROMPT_ITEMS, interpretarItems, filasDeRenglones, facturasPorLeer, cuadraConLaFactura } from "./itemsComprados";
+import { PROMPT_ITEMS, interpretarItems, filasDeRenglones, facturasPorLeer, cuadraConLaFactura, personasDistintas } from "./itemsComprados";
 
 // Los renglones de cada factura: guardarlos, leerlos con NOVA, y leer de una
 // vez las que ya estaban cargadas antes de que esto existiera.
@@ -140,7 +140,6 @@ export async function renglonesDeObra(obraId) {
  */
 export async function personalDeObra(leadId) {
   if (!leadId) return { total: 0, activos: 0 };
-  const { data } = await supabase.from("obra_personal").select("id,activo").eq("lead_id", leadId);
-  const gente = data || [];
-  return { total: gente.length, activos: gente.filter(p => p.activo).length };
+  const { data } = await supabase.from("obra_personal").select("id,nombre,cedula,activo").eq("lead_id", leadId);
+  return personasDistintas(data || []);
 }
