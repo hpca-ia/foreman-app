@@ -48,7 +48,7 @@ export async function exportarExcel(nombreArchivo, hojas) {
  * @param titulo      título del documento
  * @param subtitulo   línea bajo el título (obra, período…)
  * @param resumen     [{label, valor}] tarjetas de totales
- * @param bloques     [{titulo, columnas, filas, anchos?, filasDestacadas?, destacarSinNegrita?}]
+ * @param bloques     [{titulo, columnas, filas, anchos?, filasDestacadas?, destacarSinNegrita?, nota?}]
  * @param adjuntos    [{titulo, url}] imágenes de facturas
  * @param indiceAdjuntos  agrega un índice de los anexos antes de las imágenes
  */
@@ -106,7 +106,19 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
         }
       },
     });
-    y = doc.lastAutoTable.finalY + 22;
+    y = doc.lastAutoTable.finalY + 8;
+    // LA CONDICIÓN, DEBAJO DE SU CUADRO.
+    //
+    // Hay cuadros que no se entienden solos: un anticipo y una nota de crédito
+    // no son gastos como los otros, y quien recibe el documento —el cliente—
+    // no tiene por qué deducirlo de la palabra del encabezado. Se escribe.
+    if (b.nota) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...TINTA);
+      const lineas = doc.splitTextToSize(b.nota, 515);
+      doc.text(lineas, 40, y);
+      y += lineas.length * 9 + 4;
+    }
+    y += 14;
     if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 42; }
   }
 

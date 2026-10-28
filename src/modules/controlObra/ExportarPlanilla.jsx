@@ -34,6 +34,23 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
   const asigPeriodo = asignaciones.filter(a => delPeriodo.some(f => f.id === a.factura_id));
   const resumen = resumenPlanilla({ facturas: delPeriodo, asignaciones: asigPeriodo });
 
+  // LOS TRES MONTONES, TAMBIÉN EN EL DOCUMENTO QUE RECIBE EL CLIENTE.
+  //
+  // Mezclados en una sola lista, un anticipo se lee como una compra y una nota
+  // de crédito aparece como un renglón en negativo, que es la forma más rápida
+  // de que alguien pregunte si está mal sumado. Van aparte, cada uno con su
+  // condición escrita, y las notas de crédito en POSITIVO: es plata a favor,
+  // no un gasto con el signo cambiado.
+  const esAnticipo = f => f.clase === "anticipo" && !f.facturada_con_id;
+  const esVale = f => (f.clase === "nota_credito" || (Number(f.total) || 0) < 0) && !f.facturada_con_id;
+  const facturado = delPeriodo.filter(f => !esAnticipo(f) && !esVale(f));
+  const anticiposLista = delPeriodo.filter(esAnticipo);
+  const valesLista = delPeriodo.filter(esVale);
+  const NOTA_ANTICIPO = "Gasto sin factura: la plata ya se entregó al proveedor y el comprobante definitivo todavía no se emite. "
+    + "Suma al total de la planilla y no se cuenta como obra ejecutada hasta que llegue su factura.";
+  const NOTA_VALE = "Crédito a favor de la obra: material devuelto o cobrado de más. Se muestra en positivo porque es plata a favor, "
+    + "y se descuenta del total de la planilla. Se aplica a una compra posterior, que puede caer en otro período.";
+
   const rubroDe = id => rubros.find(r => r.id === id);
   const rubrosDeFactura = fid => asignaciones.filter(a => a.factura_id === fid)
     .map(a => { const r = rubroDe(a.obra_rubro_id); return r ? `${r.numero} ${r.descripcion}` : "?"; }).join(" · ");
@@ -69,7 +86,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       ["N°", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
        "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "RUBRO ASIGNADO", "ORIGEN"],
     ];
-    delPeriodo.forEach((f, i) => {
+    facturado.forEach((f, i) => {
       filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
         f.detalle || "", f.justificacion || "",
         Number(f.subtotal_0) || 0, Number(f.subtotal_5) || 0, Number(f.subtotal_15) || 0,
@@ -77,8 +94,36 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
         rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
     });
     filas.push([]);
-    filas.push(["", "", "", "", "", "", "", "", "TOTALES",
+    filas.push(["", "", "", "", "", "", "", "", "GASTO FACTURADO", "", "", "", "", resumen.gasto, "", "", ""]);
+
+    if (anticiposLista.length) {
+      filas.push([]);
+      filas.push(["ANTICIPOS — GASTO SIN FACTURA"]);
+      filas.push([NOTA_ANTICIPO]);
+      anticiposLista.forEach((f, i) => {
+        filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", "",
+          f.detalle || "", "sin factura", "", "", "", "", Number(f.total) || 0, "Anticipo",
+          rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
+      });
+      filas.push(["", "", "", "", "", "", "", "", "TOTAL ANTICIPOS", "", "", "", "", resumen.anticipos, "", "", ""]);
+    }
+
+    if (valesLista.length) {
+      filas.push([]);
+      filas.push(["NOTAS DE CRÉDITO — A FAVOR DE LA OBRA"]);
+      filas.push([NOTA_VALE]);
+      valesLista.forEach((f, i) => {
+        filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", "",
+          f.detalle || "", "a favor", "", "", "", "", Math.abs(Number(f.total) || 0), "Nota de crédito",
+          rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
+      });
+      filas.push(["", "", "", "", "", "", "", "", "TOTAL A FAVOR", "", "", "", "", resumen.credito, "", "", ""]);
+    }
+
+    filas.push([]);
+    filas.push(["", "", "", "", "", "", "", "", "TOTAL DE LA PLANILLA",
       resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", ""]);
+    filas.push(["", "", "", "", "", "", "", "", "= gasto facturado + anticipos − notas de crédito"]);
     return filas;
   }
 
@@ -116,10 +161,19 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       ["Subtotal base 15%", resumen.subtotal_15],
       ["Subtotal general", resumen.subtotal_0 + resumen.subtotal_5 + resumen.subtotal_15],
       ["IVA", resumen.iva],
-      [todoElProyecto ? "TOTAL FACTURADO" : "TOTAL PLANILLA", resumen.total],
-      [],
-      ["Por tipo de gasto", ""],
+      ["GASTO FACTURADO", resumen.gasto],
     ];
+    if (resumen.anticipos > 0.005) {
+      filas.push(["ANTICIPOS — gasto sin factura", resumen.anticipos]);
+      filas.push([NOTA_ANTICIPO, ""]);
+    }
+    if (resumen.credito > 0.005) {
+      filas.push(["NOTAS DE CRÉDITO — a favor de la obra", resumen.credito]);
+      filas.push([NOTA_VALE, ""]);
+    }
+    filas.push([todoElProyecto ? "TOTAL FACTURADO" : "TOTAL DE LA PLANILLA", resumen.total]);
+    filas.push([]);
+    filas.push(["Por tipo de gasto", ""]);
     Object.entries(resumen.porTipo).forEach(([t, v]) => filas.push([tipoLabel(t), v]));
     if (resumen.sinAsignar > 0.009) {
       filas.push([]);
@@ -176,16 +230,58 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
         });
       }
 
-      if (delPeriodo.length) {
+      if (facturado.length) {
+        const columnas = todoElProyecto
+          ? ["Fecha", "Planilla", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"]
+          : ["Fecha", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"];
+        const fila = f => [f.fecha, ...(todoElProyecto ? [planillaDe(f.planilla_id)] : []), f.razon_social || "—", f.numero_factura || "—",
+          (f.detalle || "").slice(0, 60), rubrosDeFactura(f.id) || "SIN ASIGNAR", money(Math.abs(Number(f.total) || 0))];
+        const alaDerecha = { [todoElProyecto ? 6 : 5]: { halign: "right" } };
+        const filasFact = facturado.map(fila);
+        filasFact.push([...Array(columnas.length - 2).fill(""), "GASTO FACTURADO", money(resumen.gasto)]);
         bloquesControl.push({
           titulo: todoElProyecto ? "Compendio de facturas — todo el proyecto" : "Compendio de facturas",
-          columnas: todoElProyecto
-            ? ["Fecha", "Planilla", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"]
-            : ["Fecha", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"],
-          filas: delPeriodo.map(f => [f.fecha, ...(todoElProyecto ? [planillaDe(f.planilla_id)] : []), f.razon_social || "—", f.numero_factura || "—",
-            (f.detalle || "").slice(0, 60), rubrosDeFactura(f.id) || "SIN ASIGNAR", money(f.total)]),
-          anchos: { [todoElProyecto ? 6 : 5]: { halign: "right" } },
+          columnas, filas: filasFact, anchos: alaDerecha,
+          filasDestacadas: [filasFact.length - 1],
         });
+
+        // ANTICIPOS Y NOTAS DE CRÉDITO, CADA UNO CON SU CONDICIÓN ESCRITA.
+        // El documento se entrega: quien lo lee tiene que entender por qué un
+        // renglón sin factura suma y por qué uno a favor resta, sin tener que
+        // preguntarlo.
+        if (anticiposLista.length) {
+          const f2 = anticiposLista.map(fila);
+          f2.push([...Array(columnas.length - 2).fill(""), "TOTAL ANTICIPOS", money(resumen.anticipos)]);
+          bloquesControl.push({
+            titulo: "Anticipos — gasto sin factura",
+            columnas, filas: f2, anchos: alaDerecha, filasDestacadas: [f2.length - 1],
+            nota: NOTA_ANTICIPO,
+          });
+        }
+        if (valesLista.length) {
+          const f3 = valesLista.map(fila);
+          f3.push([...Array(columnas.length - 2).fill(""), "TOTAL A FAVOR", money(resumen.credito)]);
+          bloquesControl.push({
+            titulo: "Notas de crédito — a favor de la obra",
+            columnas, filas: f3, anchos: alaDerecha, filasDestacadas: [f3.length - 1],
+            nota: NOTA_VALE,
+          });
+        }
+
+        if (anticiposLista.length || valesLista.length) {
+          bloquesControl.push({
+            titulo: "Total de la planilla",
+            columnas: ["Concepto", "Valor"],
+            filas: [
+              ["Gasto facturado", money(resumen.gasto)],
+              ...(anticiposLista.length ? [["Anticipos (gasto sin factura)", money(resumen.anticipos)]] : []),
+              ...(valesLista.length ? [["Notas de crédito a favor", `− ${money(resumen.credito)}`]] : []),
+              ["TOTAL DE LA PLANILLA", money(resumen.total)],
+            ],
+            anchos: { 0: { cellWidth: 300 }, 1: { halign: "right" } },
+            filasDestacadas: [1 + (anticiposLista.length ? 1 : 0) + (valesLista.length ? 1 : 0)],
+          });
+        }
       }
 
       // Los archivos son privados: se pide un enlace temporal para cada uno.
@@ -207,6 +303,8 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
           { label: "Presupuesto", valor: `$${money(totales.base)}` },
           { label: "Este período", valor: `$${money(totales.periodo)}`, color: [15, 61, 62] },
           { label: "Invertido", valor: `$${money(totales.acumulado)}` },
+          ...(resumen.anticipos > 0.005 ? [{ label: "Anticipos sin factura", valor: `$${money(resumen.anticipos)}`, color: [180, 83, 9] }] : []),
+          ...(resumen.credito > 0.005 ? [{ label: "Crédito a favor", valor: `$${money(resumen.credito)}`, color: [21, 128, 61] }] : []),
           { label: "Saldo", valor: `$${money(totales.saldo)}`, color: totales.saldo < 0 ? [185, 28, 28] : [21, 128, 61] },
           { label: "Avance", valor: `${(totales.pct * 100).toFixed(1)}%` },
         ],
