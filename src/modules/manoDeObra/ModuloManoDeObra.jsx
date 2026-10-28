@@ -1,13 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet, Pencil } from "lucide-react";
+import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet, Pencil, CalendarDays } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { PARAMETROS, RECARGOS, calcularNomina } from "./nomina";
 import { rolAExcel, rolAPDF } from "./exportarRol";
-import { rolesDeLaObra, cerrarRol } from "./rolGuardado";
-import { seSolapan, periodoTexto } from "./rolPagado";
+import { rolesDeLaObra, cerrarRol, imprimirRecibos } from "./rolGuardado";
+import { seSolapan, periodoTexto, lineasParaGuardar } from "./rolPagado";
 import EditorDias from "./EditorDias";
 import PanelRolesCerrados from "./PanelRolesCerrados";
 
@@ -123,6 +123,31 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   const nomina = calcularNomina({ personal, asistencia, extras: descuentos, par: PARAMETROS });
   const pisado = roles.find(r => seSolapan(r, periodo));
 
+  // Los recibos del rol en curso, antes de cerrarlo: para revisarlos con la
+  // gente o imprimirlos. Los que se firman son los del rol cerrado.
+  async function recibos(lineasNomina) {
+    setExportando(true); setError("");
+    try {
+      const lineas = lineasParaGuardar({ lineas: lineasNomina }, null);
+      await imprimirRecibos({ rol: { ...periodo, parametros: PARAMETROS }, lineas, lead });
+    } catch (e) { setError("No se pudo armar el recibo: " + e.message); }
+    setExportando(false);
+  }
+
+  function editarPersona(p) {
+    setNuevo({
+      id: p.id, nombre: p.nombre || "", cedula: p.cedula || "", cargo: p.cargo || "",
+      salario: p.salario_mensual ?? "", fondos: !!p.acumula_fondos, ingreso: p.fecha_ingreso || hoy(),
+    });
+    setSolapa("gente");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function verDias(id) {
+    setSolapa("rol");
+    setDiasDe(id);
+  }
+
   async function cerrar() {
     if (!window.confirm(`¿Cerrar el rol ${periodoTexto(periodo)} por $${fmt(nomina.aPagar)}? Desde ahí sus números no cambian aunque se corrija la asistencia.`)) return;
     setCerrando(true); setError("");
@@ -223,6 +248,12 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                           </span>
                         )}
                       </div>
+                      {editable && (
+                        <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+                          <Accion icono={CalendarDays} onClick={() => verDias(p.id)}>Corregir días</Accion>
+                          <Accion icono={Pencil} onClick={() => editarPersona(p)}>Editar datos</Accion>
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {[[1, "Vino"], [0.5, "½ día"], [0, "Faltó"]].map(([v, label]) => (
@@ -287,6 +318,10 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                   catch (e) { setError("No se pudo armar el Excel: " + e.message); }
                   setExportando(false);
                 }}><FileSpreadsheet size={13} /> Excel</Button>
+                <Button variant="outline" size="sm" disabled={exportando} onClick={() => recibos(nomina.lineas)}
+                  title="Un recibo por persona, con el formato del rol de la oficina">
+                  <Printer size={13} /> Recibos
+                </Button>
                 {editable && !pisado && (
                   <Button variant="primary" size="sm" disabled={cerrando || !periodo.desde} onClick={cerrar}>
                     <Check size={13} /> {cerrando ? "Cerrando…" : "Cerrar rol"}
@@ -336,14 +371,18 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                 <div key={id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ display: "grid", gridTemplateColumns: "minmax(150px,1.4fr) 50px 90px 90px 90px 90px",
                   gap: 7, padding: "8px 12px", fontSize: 12, alignItems: "center" }}>
-                  {/* El nombre abre sus días: ahí se corrige un día mal anotado. */}
-                  <button onClick={() => setDiasDe(diasDe === id ? null : id)} disabled={!editable}
-                    title={editable ? "Ver y corregir sus días del período" : undefined}
-                    style={{ textAlign: "left", background: "none", border: "none", padding: 0, fontFamily: colors.font, fontSize: 12,
-                      color: diasDe === id ? colors.brand : colors.ink, cursor: editable ? "pointer" : "default",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: editable ? "underline dotted" : "none" }}>
-                    {l.persona.nombre}
-                  </button>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: diasDe === id ? colors.brand : colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {l.persona.nombre}
+                    </div>
+                    {/* Lo que se hace con cada persona, a la vista: escondido
+                        detrás del nombre nadie lo encontraba. */}
+                    <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+                      <Accion icono={Printer} onClick={() => recibos([l])} disabled={exportando}>Recibo</Accion>
+                      {editable && <Accion icono={CalendarDays} onClick={() => setDiasDe(diasDe === id ? null : id)} activa={diasDe === id}>Días</Accion>}
+                      {editable && <Accion icono={Pencil} onClick={() => editarPersona(l.persona)}>Editar datos</Accion>}
+                    </div>
+                  </div>
                   <span style={{ textAlign: "center", color: colors.inkSoft }}>{l.asistencia.dias}</span>
                   <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(l.sueldoPeriodo)}</span>
                   <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(l.totalExtras)}</span>
@@ -378,7 +417,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.55 }}>
             Las cuentas son las de tu planilla: sueldo = salario ÷ 30 × días, hora extra sobre salario ÷ 240,
             décimo tercero ÷ 12, décimo cuarto básico ÷ 360 × días, vacaciones ÷ 24, fondos 8,33% y aporte 9,45%.
-            Tocá un nombre para corregir sus días, y los descuentos para cargar anticipo, préstamos o multas antes de cerrar.
+            Tocá el monto de descuentos de una persona para cargar anticipo, préstamos o multas antes de cerrar.
           </div>
 
           <PanelRolesCerrados roles={roles} lead={lead} editable={editable} quien={currentUser} onCambio={cargar} />
@@ -479,5 +518,16 @@ function Tarjeta({ label, valor, color }) {
       <div style={{ fontSize: 9.5, color: colors.muted, fontWeight: 700, letterSpacing: 0.4 }}>{label.toUpperCase()}</div>
       <div style={{ fontSize: 17, fontWeight: 700, color: color || colors.ink, marginTop: 2 }}>${fmt(valor)}</div>
     </div>
+  );
+}
+
+function Accion({ icono: Icono, onClick, disabled, activa, children }) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+      style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", padding: 0,
+        fontFamily: colors.font, fontSize: 10.5, fontWeight: 600, color: activa ? colors.brand : colors.inkSoft,
+        cursor: disabled ? "default" : "pointer" }}>
+      <Icono size={11} /> {children}
+    </button>
   );
 }

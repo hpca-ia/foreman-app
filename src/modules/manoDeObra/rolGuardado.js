@@ -1,5 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { subirArchivo } from "../../lib/archivos";
+import { loadFromStorage } from "../../lib/storage";
+import { recibosAPDF } from "./exportarRol";
 import { registrarPago } from "../controlObra/pagos";
 import {
   lineasParaGuardar, seSolapan, estadoDelRol, agruparPagos, gastoDelPago, periodoTexto,
@@ -123,4 +125,19 @@ export async function pagarLineas({ rol, lineas, soporte, factura = {}, pago, ar
   }).eq("id", rol.id);
 
   return errores.length ? { error: errores.join(" · ") } : {};
+}
+
+/**
+ * Los recibos con el formato MODELO ROL, de un rol cerrado o del que está en
+ * curso. Busca lo que el recibo dice además de los números: la empresa y el
+ * inicio de la obra.
+ */
+export async function imprimirRecibos({ rol, lineas, lead }) {
+  let inicio = null;
+  if (lead?.obra_id) {
+    const { data } = await supabase.from("obras").select("fecha_inicio").eq("id", lead.obra_id).maybeSingle();
+    inicio = data?.fecha_inicio || null;
+  }
+  const empresa = loadFromStorage("foreman_empresa", {}) || {};
+  await recibosAPDF({ rol, lineas, obra: { nombre: lead?.nombre || "", inicio }, empresa: { nombre: empresa.nombre || "", direccion: empresa.direccion || "" } });
 }

@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { Printer, ChevronDown, ChevronRight, Check, X, Upload, Undo2 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { loadFromStorage } from "../../lib/storage";
 import { FORMAS_PAGO } from "../controlObra/pagos";
-import { recibosAPDF } from "./exportarRol";
-import { reabrirRol, pagarLineas } from "./rolGuardado";
+import { reabrirRol, pagarLineas, imprimirRecibos } from "./rolGuardado";
 import { SOPORTES, periodoTexto, porPagar, resumenDePago } from "./rolPagado";
 
 // Los roles cerrados: el recibo de cada uno, y quién ya cobró.
@@ -27,19 +24,22 @@ export default function PanelRolesCerrados({ roles, lead, editable, quien, onCam
   const [trabajando, setTrabajando] = useState(false);
   const [error, setError] = useState("");
 
-  if (!roles.length) return null;
+  if (!roles.length) {
+    return (
+      <div style={{ marginTop: 22 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink, marginBottom: 2 }}>Roles cerrados</div>
+        <div style={{ fontSize: 12, color: colors.muted, lineHeight: 1.55 }}>
+          Todavía no cerraste ningún rol en esta obra. Al tocar <b>Cerrar rol</b> arriba, el rol aparece acá: desde acá se
+          registra el pago de cada persona y ese pago entra como gasto a Control de obra.
+        </div>
+      </div>
+    );
+  }
 
   async function imprimir(rol, lineas) {
     setError("");
-    try {
-      let inicio = null;
-      if (lead.obra_id) {
-        const { data } = await supabase.from("obras").select("fecha_inicio").eq("id", lead.obra_id).maybeSingle();
-        inicio = data?.fecha_inicio || null;
-      }
-      const empresa = loadFromStorage("foreman_empresa", {}) || {};
-      await recibosAPDF({ rol, lineas, obra: { nombre: lead.nombre, inicio }, empresa: { nombre: empresa.nombre || "", direccion: empresa.direccion || "" } });
-    } catch (e) { setError("No se pudo armar el recibo: " + e.message); }
+    try { await imprimirRecibos({ rol, lineas, lead }); }
+    catch (e) { setError("No se pudo armar el recibo: " + e.message); }
   }
 
   async function reabrir(rol) {
