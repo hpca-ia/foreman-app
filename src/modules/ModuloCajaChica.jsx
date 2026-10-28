@@ -1109,7 +1109,10 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                 caja. Solo aparecen los vales de este proveedor —un vale de
                 KYWI no paga una factura de otro— y solo cuando quedan. */}
             {(() => {
-              if (gastoEditando?.cierre_id) return null;
+              // También en un gasto ya rendido: los vales de KYWI se usaron en
+              // compras que están adentro del cierre 1, y marcarlo es
+              // justamente lo que hace que esa vuelta cuente el efectivo que
+              // de verdad salió. El total del cierre se vuelve a sumar solo.
               const { vales } = valesPorUsar(gastos, pagosObra);
               const pelar = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
               const suyos = vales.filter(v => (gastoForm.ruc && v.ruc)
