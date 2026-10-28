@@ -569,6 +569,31 @@ export function totalesObra(grupos = []) {
  *
  * @returns los mismos renglones que `gastosDe`, con el nombre de su agrupación.
  */
+/**
+ * PEDIDOS VIVOS QUE A LO MEJOR YA SE COMPRARON.
+ *
+ * Un pedido deja de estar comprometido cuando se lo marca comprado o cuando se
+ * engancha su factura. Si nadie hace ninguna de las dos cosas, la factura entra
+ * al control y el pedido sigue pesando: la misma plata contada dos veces, y no
+ * hay forma de notarlo mirando un total.
+ *
+ * Se busca por monto: una factura cargada, sin pedido enganchado, por lo mismo
+ * que dice el pedido. No se arregla solo —cerrar el pedido de otro es decidir
+ * por él— pero se avisa dónde mirar.
+ *
+ * @param detalle  los pedidos vivos de `comprometidoPorGrupo`
+ * @param facturas las facturas de la obra
+ */
+export function quizaYaSeCompro(detalle = [], facturas = []) {
+  const candidatas = facturas.filter(f => f.clase !== "proforma" && n(f.total) > 0);
+  const aviso = {};
+  detalle.forEach(d => {
+    const igual = candidatas.find(f => Math.abs(n(f.total) - n(d.monto)) < 0.01);
+    if (igual) aviso[d.id] = igual;
+  });
+  return aviso;
+}
+
 export function gastosSueltos({ facturas = [], asignaciones = [], rubros = [], actividades = [] }) {
   const porFactura = new Map(facturas.map(f => [f.id, f]));
   const conRubros = new Set(rubros.filter(r => r.actividad_id != null && !r.anulado_por_oc)

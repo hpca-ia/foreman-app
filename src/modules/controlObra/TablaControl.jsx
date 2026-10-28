@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { fmt, gastosDe, gastosSueltos } from "./calculos";
+import { fmt, gastosDe, gastosSueltos, quizaYaSeCompro } from "./calculos";
 import { netoPorRubro } from "./cuentaBeneficios.js";
 import { esDeCajaChica, cajaChicaPorRubro, cajaChicaPorCapitulo } from "./origenGasto";
 import MarcaCaja from "./MarcaCaja";
@@ -234,6 +234,9 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
     pendiente_aprobacion: "esperando visto", aprobada: "aprobada", comprada: "comprada",
     requiere_info: "devuelta",
   };
+  // Pedidos vivos que ya tienen una factura cargada por el mismo monto: la
+  // misma plata contada dos veces, comprometida y gastada.
+  const yaFacturado = quizaYaSeCompro(comprometido?.detalle || [], facturas);
   const desgloseComprometido = Object.entries(comprometido?.porEstado || {})
     .sort((a, b) => b[1] - a[1])
     .map(([e, v]) => `$${fmt(v)} ${ETIQUETA[e] || e}`)
@@ -454,6 +457,21 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                       <span style={{ color: d.destino === "SIN ASIGNAR" ? colors.warning : colors.muted,
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                         title={d.destino}>{d.destino}</span>
+                      {/* YA TIENE SU FACTURA Y SIGUE COMPROMETIDO.
+                          Un pedido deja de pesar cuando se lo marca comprado o
+                          cuando se engancha su factura. Si no se hace ninguna
+                          de las dos, la factura entra al control y el pedido
+                          sigue ahí: la misma plata contada dos veces, y no hay
+                          forma de notarlo mirando un total. */}
+                      {yaFacturado[d.id] && (
+                        <span style={{ gridColumn: "1 / -1", fontSize: 10.5, color: colors.warning, marginTop: -2 }}
+                          title="Cerrá el pedido en Compras, o enganchale esta factura al editarla: hasta entonces el control cuenta esta plata dos veces">
+                          ⚠ Ya hay una factura cargada por ${fmt(yaFacturado[d.id].total)} —{" "}
+                          {yaFacturado[d.id].razon_social || "sin proveedor"}
+                          {yaFacturado[d.id].detalle ? ` · ${String(yaFacturado[d.id].detalle).slice(0, 50)}` : ""}:
+                          {" "}si es esta compra, el control la está contando dos veces.
+                        </span>
+                      )}
                     </div>
                   ))}
                   <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6, lineHeight: 1.5 }}>

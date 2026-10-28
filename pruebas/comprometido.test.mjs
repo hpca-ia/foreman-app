@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar, gastosDe, resumenPlanilla, gastosSueltos }
+import { comprometidoPorGrupo, montoDeSolicitud, solicitudesDeLaObra, calcularControl, agrupar, gastosDe, resumenPlanilla, gastosSueltos, quizaYaSeCompro }
   from "../src/modules/controlObra/calculos.js";
 
 // Cuánta plata hay hablada contra la obra. Todo lo de acá salió de un número
@@ -376,4 +376,20 @@ test("lo de una agrupación que sí tiene rubros no es suelto", () => {
     actividades: [{ id: 7, nombre: "ALBAÑILERÍA" }],
   });
   assert.deepEqual(g, []);
+});
+
+test("avisa qué pedido vivo ya tiene una factura por el mismo monto", () => {
+  const detalle = [{ id: 12, monto: 161, descripcion: "Impresora" }, { id: 18, monto: 1725, descripcion: "Residente" }];
+  const facturas = [
+    { id: 77, total: 161, razon_social: "CASTRO ORTEGA JOSE JAVIER", detalle: "Impresora EPSON L355" },
+    { id: 90, total: 900, clase: "proforma" },
+  ];
+  const r = quizaYaSeCompro(detalle, facturas);
+  assert.equal(r[12].id, 77);
+  assert.equal(r[18], undefined);
+});
+
+test("una proforma no cuenta como factura ya cargada", () => {
+  const r = quizaYaSeCompro([{ id: 1, monto: 500 }], [{ id: 9, total: 500, clase: "proforma" }]);
+  assert.deepEqual(r, {});
 });
