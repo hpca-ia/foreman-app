@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { enlaceArchivo } from "../../lib/archivos";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import { LECTURA, pedirANova, porQueFallo, textoDeNova } from "../../lib/modelos";
-import { PROMPT_ITEMS, interpretarItems, filasDeRenglones, facturasPorLeer } from "./itemsComprados";
+import { PROMPT_ITEMS, interpretarItems, filasDeRenglones, facturasPorLeer, cuadraConLaFactura } from "./itemsComprados";
 
 // Los renglones de cada factura: guardarlos, leerlos con NOVA, y leer de una
 // vez las que ya estaban cargadas antes de que esto existiera.
@@ -20,7 +20,11 @@ const SIN_MIGRACION = "Falta correr la migración 127 para guardar los renglones
  * duplicar sus cascos.
  */
 export async function guardarRenglones(factura, items = [], estado) {
-  const filas = filasDeRenglones(factura, items);
+  // Si no cuadra con su total, la lectura está mal: no entra a la cuenta y la
+  // factura queda marcada para que alguien la mire.
+  const cuadra = cuadraConLaFactura(factura, items);
+  const filas = cuadra ? filasDeRenglones(factura, items) : [];
+  if (!cuadra) estado = "no_cuadra";
   const { error: e1 } = await supabase.from("obra_factura_items").delete().eq("factura_id", factura.id);
   if (e1) return { error: falta(e1) ? SIN_MIGRACION : e1.message };
   if (filas.length) {

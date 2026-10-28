@@ -16,9 +16,17 @@ test("no inventa ítems con las líneas vacías ni con la basura", () => {
 });
 
 test("lee el número como lo escribe una factura ecuatoriana", () => {
-  const r = interpretarItems("1.250 | u | TORNILLO | $ 1.234,56");
+  const r = interpretarItems("1250 | u | TORNILLO | $ 1.234,56");
   assert.equal(r[0].cantidad, 1250);
   assert.equal(r[0].precio_unitario, 1234.56);
+});
+
+test("16.062 galones son dieciséis, no dieciséis mil", () => {
+  const r = interpretarItems("16.062 | gal | DIESEL PREMIUM | 2.7070\n2 | u | BOTELLON 20 LITROS | 3.913\n1 | u | PASE | 1,234.50");
+  assert.equal(r[0].cantidad, 16.062);
+  assert.equal(r[0].total, 43.48);
+  assert.equal(r[1].precio_unitario, 3.913);
+  assert.equal(r[2].precio_unitario, 1234.5);
 });
 
 test("el mismo ítem escrito al revés es el mismo ítem", () => {
@@ -67,7 +75,7 @@ test("un renglón sin nombre no arma una familia vacía", () => {
 });
 
 // ─── Lo que se guarda y la dotación contra la gente ───────────────────────
-import { desdeLecturaDeFactura, filasDeRenglones, facturasPorLeer, dotacionContraPersonal } from "../src/modules/controlObra/itemsComprados.js";
+import { desdeLecturaDeFactura, filasDeRenglones, facturasPorLeer, dotacionContraPersonal, cuadraConLaFactura } from "../src/modules/controlObra/itemsComprados.js";
 
 test("los renglones de la pantalla de la factura sacan su precio unitario", () => {
   const r = desdeLecturaDeFactura([
@@ -122,4 +130,11 @@ test("10 personas y 23 cascos: 13 de más", () => {
 test("sin gente cargada no hay comparación inventada", () => {
   const d = dotacionContraPersonal(agrupar([{ cantidad: 5, unidad: "u", descripcion: "CASCO", total: 40 }]), 0);
   assert.equal(d[0].de_mas, null);
+});
+
+test("cuarenta mil de diésel en una factura de cincuenta no cuadra", () => {
+  assert.equal(cuadraConLaFactura({ total: 50 }, [{ total: 43479.83 }]), false);
+  assert.equal(cuadraConLaFactura({ total: 50 }, [{ total: 43.48 }]), true);
+  assert.equal(cuadraConLaFactura({ total: -17 }, [{ total: -15.18 }]), true, "una nota de crédito también cuadra");
+  assert.equal(cuadraConLaFactura({ total: 0 }, [{ total: 5 }]), true, "sin total no hay contra qué comparar");
 });

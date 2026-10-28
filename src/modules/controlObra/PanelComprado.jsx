@@ -46,6 +46,7 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const porLeer = facturasPorLeer(facturas);
   const conPapel = facturas.filter(f => f.archivo_url && f.clase !== "anticipo").length;
   const ilegibles = facturas.filter(f => f.renglones_estado === "ilegible").length;
+  const noCuadran = facturas.filter(f => f.renglones_estado === "no_cuadra").length;
   const sinPapel = facturas.filter(f => !f.archivo_url);
 
   const visibles = useMemo(() => {
@@ -74,9 +75,10 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
           suma completa; hay que decir sobre cuántas se hizo. */}
       <div style={{ ...caja, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 240, fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5 }}>
-          <strong style={{ color: colors.ink }}>{conPapel - porLeer.length - ilegibles} de {conPapel}</strong> facturas con papel ya tienen sus renglones.
+          <strong style={{ color: colors.ink }}>{conPapel - porLeer.length - ilegibles - noCuadran} de {conPapel}</strong> facturas con papel ya tienen sus renglones.
           {porLeer.length > 0 && <> Faltan <strong>{porLeer.length}</strong>.</>}
           {ilegibles > 0 && <> {ilegibles} no se pudieron leer (recibos a mano, fotos borrosas).</>}
+          {noCuadran > 0 && <> {noCuadran} se leyeron con renglones que no cuadran con su total y quedaron fuera de la suma.</>}
           {sinPapel.length > 0 && (
             <> <button onClick={() => setVerSinPapel(v => !v)}
               style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: colors.font,

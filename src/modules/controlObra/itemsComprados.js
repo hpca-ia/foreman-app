@@ -28,9 +28,28 @@ export const PROMPT_ITEMS = [
   "Si la factura no se puede leer, devolvé exactamente: ILEGIBLE",
 ].join("\n");
 
-const numero = t => {
-  const limpio = String(t || "").replace(/[^\d.,-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".");
-  const n = Number(limpio);
+/**
+ * Un número como viene en la respuesta.
+ *
+ * EL PUNTO SOLO ES DECIMAL. Las facturas de Ecuador traen cantidades y precios
+ * con tres y cuatro decimales —16.062 galones de diésel a 2.7070— y leer
+ * "16.062" como dieciséis mil es lo que convirtió cincuenta dólares de diésel
+ * en cuarenta y tres mil. A NOVA se le pide punto decimal; el punto se toma
+ * como miles solo si hay más de uno (1.234.567) o si después viene una coma
+ * (1.234,56).
+ */
+export const numero = t => {
+  let s = String(t || "").replace(/[^\d.,-]/g, "");
+  const punto = s.lastIndexOf("."), coma = s.lastIndexOf(",");
+  if (punto >= 0 && coma >= 0) {
+    const [miles, dec] = punto > coma ? [",", "."] : [".", ","];
+    s = s.split(miles).join("").replace(dec, ".");
+  } else if (coma >= 0) {
+    s = (s.match(/,/g).length > 1) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if ((s.match(/\./g) || []).length > 1) {
+    s = s.replace(/\./g, "");
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : 0;
 };
 
@@ -206,6 +225,21 @@ export function filasDeRenglones(factura, items = []) {
  */
 export function facturasPorLeer(facturas = []) {
   return facturas.filter(f => f.archivo_url && !f.renglones_estado && f.clase !== "anticipo");
+}
+
+/**
+ * ¿Los renglones pueden ser de esta factura?
+ *
+ * Los renglones van sin IVA y sin descuentos, así que pueden sumar algo menos
+ * o algo más que el total. Lo que no pueden es sumar el doble: eso es una
+ * lectura equivocada, y un renglón de cuarenta mil dólares en una factura de
+ * cincuenta arruina la suma de toda la obra. Esas no entran a la cuenta.
+ */
+export function cuadraConLaFactura(factura, items = []) {
+  const total = Math.abs(Number(factura?.total) || 0);
+  if (!total) return true;
+  const suma = items.reduce((t, i) => t + Math.abs(Number(i.total) || 0), 0);
+  return suma <= total * 1.5 + 1;
 }
 
 // LA DOTACIÓN: lo que se le da a cada persona y no se gasta en una semana.
