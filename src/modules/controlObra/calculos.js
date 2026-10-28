@@ -596,7 +596,11 @@ export function quizaYaSeCompro(detalle = [], facturas = []) {
 
 export function gastosSueltos({ facturas = [], asignaciones = [], rubros = [], actividades = [] }) {
   const porFactura = new Map(facturas.map(f => [f.id, f]));
-  const conRubros = new Set(rubros.filter(r => r.actividad_id != null && !r.anulado_por_oc)
+  // La misma regla que usa el control para repartir: una agrupación con
+  // rubros reparte entre ellos; una sin rubros no tiene dónde caer. Si acá se
+  // filtrara distinto —por ejemplo salteando los rubros anulados por una orden
+  // de cambio—, la lista mostraría gastos que el número de arriba no cuenta.
+  const conRubros = new Set(rubros.filter(r => r.actividad_id != null)
     .map(r => Number(r.actividad_id)));
   const nombreDe = new Map(actividades.map(a => [Number(a.id), a.nombre]));
 
