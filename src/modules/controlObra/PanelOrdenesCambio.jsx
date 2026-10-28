@@ -17,7 +17,7 @@ import {
   leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
   enlacesDeCotizaciones, sincronizarBeneficios,
 } from "./cotizacionesOrden";
-import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea } from "./cuentaOrdenCambio.js";
+import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen } from "./cuentaOrdenCambio.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
 
 // Las órdenes de cambio de una obra.
@@ -56,7 +56,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // En qué orden está abierto el formulario de agregar línea. Cerrado, la
   // tabla de arriba es lo único que se ve.
   const [agregandoEn, setAgregandoEn] = useState(null);
-  const [mandando, setMandando] = useState(null); // { orden, correos, cuerpo }
+  const [mandando, setMandando] = useState(null);
+  // El margen que se le pone de una vez a cada orden, por orden.
+  const [pctMargen, setPctMargen] = useState({}); // { orden, correos, cuerpo }
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
   const [invitados, setInvitados] = useState([]);
@@ -1127,6 +1129,36 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         </strong> sobre ${fmt(m.cobrado)} cobrados, contra ${fmt(m.costo)} de costo.</>
                       ) : "Margen interno: no se sabe."}
                       {m.sinCosto > 0 && <span style={{ color: colors.warning }}> {m.sinCosto} adición{m.sinCosto === 1 ? "" : "es"} sin costo.</span>}
+                      {/* EL PRECIO SALE DEL COSTO MÁS EL MARGEN, DE UNA VEZ.
+                          Lo que NOVA leyó de la cotización es lo que cuesta;
+                          el precio lo pone la oficina, y casi siempre es el
+                          mismo porcentaje para toda la orden. Renglón por
+                          renglón es donde se cuela la partida cobrada al
+                          costo entre veinte. */}
+                      {editable && m.conCosto > 0 && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
+                          <span>Precio = costo +</span>
+                          <input type="number" step="1" value={pctMargen[o.id] ?? ""}
+                            onChange={e => setPctMargen(v => ({ ...v, [o.id]: e.target.value }))}
+                            placeholder="15" style={{ ...inputStyle, padding: "3px 6px", fontSize: 11.5, width: 64, textAlign: "right" }} />
+                          <span>%</span>
+                          <button disabled={(pctMargen[o.id] ?? "") === "" || ocupado}
+                            onClick={() => hacer(async () => {
+                              for (const l of conMargen(suyas, pctMargen[o.id])) {
+                                const antes = suyas.find(x => x.id === l.id);
+                                if (Number(antes.precio_unitario) === Number(l.precio_unitario)) continue;
+                                const r = await guardarLinea(l.id, { precio_unitario: l.precio_unitario });
+                                if (r.error) return r.error;
+                              }
+                              return null;
+                            })}
+                            style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 7,
+                              padding: "3px 9px", fontSize: 11, fontWeight: 600, color: colors.brand,
+                              cursor: "pointer", fontFamily: colors.font }}>
+                            Aplicar a las {m.conCosto} con costo
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

@@ -131,3 +131,21 @@ test("los beneficios de compras y los de órdenes se cuentan aparte", () => {
   assert.equal(t.ordenes.previsto, 200);
   assert.equal(t.obra.neto, 220);
 });
+
+test("el precio sale del costo más el margen", async () => {
+  const { conMargen } = await import("../src/modules/controlObra/cuentaOrdenCambio.js");
+  const lineas = [
+    { tipo: "aumenta", cantidad: 2, costo_unitario: 100, precio_unitario: 100 },
+    { tipo: "aumenta", cantidad: 1, costo_unitario: 33.33, precio_unitario: 33.33 },
+    { tipo: "aumenta", cantidad: 1, costo_unitario: "", precio_unitario: 50 },   // sin costo: no se toca
+    { tipo: "quita", cantidad: 1, costo_unitario: 10, precio_unitario: 10 },     // reducción: no se toca
+  ];
+  const r = conMargen(lineas, 15);
+  assert.deepEqual(r.map(l => l.precio_unitario), [115, 38.33, 50, 10]);
+});
+
+test("margen cero deja el precio al costo", async () => {
+  const { conMargen } = await import("../src/modules/controlObra/cuentaOrdenCambio.js");
+  const r = conMargen([{ tipo: "aumenta", cantidad: 1, costo_unitario: 80, precio_unitario: 120 }], 0);
+  assert.equal(r[0].precio_unitario, 80);
+});

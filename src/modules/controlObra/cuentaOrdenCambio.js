@@ -69,6 +69,25 @@ export function partidasDeCotizacion(items = []) {
   });
 }
 
+/**
+ * EL PRECIO SALE DEL COSTO MÁS EL MARGEN.
+ *
+ * Lo que NOVA lee de la cotización es lo que CUESTA. El precio lo pone la
+ * oficina, y casi siempre es el mismo porcentaje para toda la orden: hacerlo
+ * renglón por renglón, con la calculadora al lado, es donde se cuela el error
+ * que después nadie encuentra —una partida cobrada al costo entre veinte—.
+ *
+ * Solo toca las adiciones con costo conocido: una partida sin costo no tiene
+ * de dónde sacar el precio, y una reducción no se cotiza.
+ */
+export function conMargen(lineas = [], pct) {
+  const p = n(pct);
+  return lineas.map(l => {
+    if (l.tipo === "quita" || !tieneCosto(l)) return l;
+    return { ...l, precio_unitario: c2(n(l.costo_unitario) * (1 + p / 100)) };
+  });
+}
+
 /** El total de la cotización, sumado de sus renglones. */
 export const totalDeCotizacion = (items = []) => c2(items.reduce((t, x) => t + n(x.monto), 0));
 

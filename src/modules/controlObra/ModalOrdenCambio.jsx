@@ -8,7 +8,7 @@ import { fmt } from "./calculos";
 import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
 import { pedirANova, JUICIO, textoDeNova } from "../../lib/modelos";
 import { leerConNova, guardarCotizacion } from "./cotizacionesOrden";
-import { partidasDeCotizacion, totalDeCotizacion, margenDeOrden } from "./cuentaOrdenCambio.js";
+import { partidasDeCotizacion, totalDeCotizacion, margenDeOrden, conMargen } from "./cuentaOrdenCambio.js";
 
 // Una orden de cambio entera, de una sola vez.
 //
@@ -62,6 +62,10 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
   const [verPresupuesto, setVerPresupuesto] = useState(false);
   // Qué partida está eligiendo un rubro del presupuesto para copiarle el precio.
   const [tomando, setTomando] = useState(null);
+  // El margen que se le pone a toda la orden de una vez. Lo que NOVA leyó es
+  // lo que cuesta; el precio lo pone la oficina, y casi siempre es el mismo
+  // porcentaje para todas las partidas.
+  const [pctMargen, setPctMargen] = useState("");
   const [busca, setBusca] = useState("");
 
   // Los rubros vivos, agrupados por capítulo y en el orden del presupuesto.
@@ -687,6 +691,22 @@ Si el texto ya está bien escrito, devolvelo igual.`,
             <Plus size={11} style={{ verticalAlign: -1 }} /> Otra partida
           </button>
         </div>
+
+        {/* PONERLE EL MARGEN A TODA LA ORDEN DE UNA VEZ.
+            Renglón por renglón, con la calculadora al lado, es donde se cuela
+            la partida cobrada al costo entre veinte. */}
+        {margen.conCosto > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 11.5, color: colors.inkSoft }}>
+            <span>Precio = costo +</span>
+            <input type="number" step="1" value={pctMargen} onChange={e => setPctMargen(e.target.value)}
+              placeholder="15" style={{ ...mini, padding: "3px 6px", fontSize: 11.5, width: 64, textAlign: "right" }} />
+            <span>%</span>
+            <Button variant="outline" size="sm" disabled={pctMargen === ""}
+              onClick={() => setLineas(v => conMargen(v, pctMargen))}>
+              Aplicar a las {margen.conCosto} partidas con costo
+            </Button>
+          </div>
+        )}
 
         {conMonto.length > 0 && (
           <div style={{ display: "flex", gap: 16, background: colors.bg, borderRadius: 8, padding: "9px 12px", flexWrap: "wrap" }}>
