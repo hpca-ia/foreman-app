@@ -15,6 +15,14 @@ const n = v => Number(v) || 0;
 // Para la caja cuentan los pagos que movieron plata. Para el proveedor, todos.
 const deLaCaja = pagos => pagos.filter(p => p?.nota_credito_id == null);
 
+const r2 = v => Math.round(n(v) * 100) / 100;
+
+// UNA NOTA DE CRÉDITO NO ES UNA FACTURA EN NEGATIVO. Es un vale a favor: no
+// se le debe a nadie y no se paga. Mezclada con las facturas, bajaba la deuda
+// con los proveedores —acá decía $4.900,39 y Proveedores, bien, $5.005,45— y
+// desaparecía de la vista.
+const esVale = f => f?.clase === "nota_credito" || n(f?.total) < 0;
+
 /**
  * El estado de la caja del proyecto: LA PLATA, no los papeles.
  *
@@ -30,9 +38,13 @@ const deLaCaja = pagos => pagos.filter(p => p?.nota_credito_id == null);
  *
  * Entonces:
  *   · pagado  — lo que de verdad salió. Es lo que mueve el saldo.
- *   · porPagar — facturado menos pagado. La deuda con los proveedores.
- *   · gastado  — todo lo facturado, que es el costo de la obra y se sigue
- *     mostrando: es lo que compara contra el presupuesto.
+ *   · porPagar — lo que falta pagar de CADA documento, sumado. No se resta un
+ *     total contra otro: una factura pagada de más no cancela la deuda de
+ *     otra, y una nota de crédito no es una deuda al revés.
+ *   · facturado — el costo documentado: las facturas, los recibos y los
+ *     anticipos. Las notas de crédito no van acá.
+ *   · credito — los vales sin usar: plata nuestra en la casa del proveedor.
+ *   · anticipado — plata que salió por algo que todavía no está facturado.
  *
  * Sin ningún pago registrado —una obra que todavía no usa Proveedores— el
  * pagado sería cero y la caja se vería perfecta, que sería mentir al revés.
@@ -44,15 +56,30 @@ export function estadoDeCaja({ fondos = [], facturas = [], pagos: todos = [] }) 
   const pagos = deLaCaja(todos);
   const entrado = fondos.filter(f => n(f.monto) > 0).reduce((t, f) => t + n(f.monto), 0);
   const salido = fondos.filter(f => n(f.monto) < 0).reduce((t, f) => t - n(f.monto), 0);
-  const facturado = facturas.filter(f => f.clase !== "proforma").reduce((t, f) => t + n(f.total), 0);
-  const pagado = pagos.reduce((t, p) => t + n(p.monto), 0);
+
+  // Lo pagado de cada documento, para poder decir lo que falta de CADA uno.
+  // La resta de los dos totales daba otra cosa: le restaba a la deuda los
+  // vales a favor —que no son deuda— y cualquier pago de más.
+  const pagadoDe = {};
+  todos.forEach(p => { pagadoDe[p.factura_id] = (pagadoDe[p.factura_id] || 0) + n(p.monto); });
+
+  const gasto = facturas.filter(f => f.clase !== "proforma" && !esVale(f));
+  const facturado = r2(gasto.reduce((t, f) => t + n(f.total), 0));
+  const porPagar = r2(gasto.reduce((t, f) => t + Math.max(0, n(f.total) - (pagadoDe[f.id] || 0)), 0));
+  const credito = r2(facturas
+    .filter(f => esVale(f) && !f.facturada_con_id)
+    .reduce((t, f) => t + Math.abs(n(f.total)), 0));
+  const anticipado = r2(gasto
+    .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
+    .reduce((t, f) => t + n(f.total), 0));
+
+  const pagado = r2(pagos.reduce((t, p) => t + n(p.monto), 0));
   const seLlevanPagos = pagos.length > 0;
   const gastado = seLlevanPagos ? pagado : facturado;
   return {
-    entrado, salido, gastado, facturado, pagado,
-    porPagar: Math.max(0, Math.round((facturado - pagado) * 100) / 100),
-    seLlevanPagos,
-    saldo: entrado - salido - gastado,
+    entrado, salido, gastado, facturado, pagado, credito, anticipado,
+    porPagar, seLlevanPagos,
+    saldo: r2(entrado - salido - gastado),
   };
 }
 

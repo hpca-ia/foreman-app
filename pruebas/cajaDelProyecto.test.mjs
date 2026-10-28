@@ -90,3 +90,30 @@ test("el vale no sale de la caja del proyecto", () => {
   assert.equal(e.pagado, 900);
   assert.equal(e.saldo, 100);
 });
+
+test("la deuda se suma documento por documento, y el vale no la baja", () => {
+  const facturas = [
+    { id: 1, total: 11500, clase: "factura" },
+    { id: 2, total: 213.68, clase: "factura" },
+    { id: 3, total: -105.06, clase: "nota_credito" },
+    { id: 4, total: 5000, clase: "anticipo" },
+    { id: 5, total: 900, clase: "proforma" },
+  ];
+  const pagos = [{ factura_id: 1, monto: 7000 }, { factura_id: 4, monto: 5000 }];
+  const e = estadoDeCaja({ fondos: [{ monto: 71455.24 }], facturas, pagos });
+  assert.equal(e.porPagar, 4713.68);      // 4500 de la primera + 213.68 de la segunda
+  assert.equal(e.credito, 105.06);        // el vale, aparte
+  assert.equal(e.anticipado, 5000);
+  assert.equal(e.facturado, 16713.68);    // sin la proforma y sin el vale
+  assert.equal(e.pagado, 12000);
+  assert.equal(e.saldo, 59455.24);
+});
+
+test("un pago de más no cancela la deuda de otra factura", () => {
+  const e = estadoDeCaja({
+    fondos: [{ monto: 1000 }],
+    facturas: [{ id: 1, total: 100, clase: "factura" }, { id: 2, total: 200, clase: "factura" }],
+    pagos: [{ factura_id: 1, monto: 150 }],
+  });
+  assert.equal(e.porPagar, 200);
+});

@@ -46,7 +46,9 @@ export default function PanelFondos({ obra, planillas = [], facturas = [], curre
     // cuál tenía razón.
     const ids = facturas.map(f => f.id).filter(Boolean);
     if (ids.length) {
-      const { data: ps } = await supabase.from("obra_pagos").select("factura_id,monto,fecha").in("factura_id", ids);
+      // `nota_credito_id` viene porque un pago hecho con un vale no movió plata:
+      // la caja no lo cuenta como salida.
+      const { data: ps } = await supabase.from("obra_pagos").select("factura_id,monto,fecha,nota_credito_id").in("factura_id", ids);
       setPagos(ps || []);
     } else setPagos([]);
     setCargando(false);
@@ -106,13 +108,21 @@ export default function PanelFondos({ obra, planillas = [], facturas = [], curre
         {caja.porPagar > 0 && (
           <Tarjeta label="Por pagar a proveedores" valor={caja.porPagar} color={colors.warning} />
         )}
+        {/* EL VALE, DONDE SE VE LA PLATA. Es plata nuestra guardada en la casa
+            del proveedor: no está en la caja y tampoco se perdió. Antes se
+            restaba de la deuda, que es el único lugar donde no es. */}
+        {caja.credito > 0.005 && (
+          <Tarjeta label="Crédito a favor" valor={caja.credito} color={colors.success} />
+        )}
       </div>
 
       {caja.seLlevanPagos && (
         <div style={{ fontSize: 11, color: colors.muted, marginTop: -8, marginBottom: 12, lineHeight: 1.45 }}>
           La caja cuenta <strong>lo que salió</strong>, no lo facturado: una factura de la que se pagó un
-          anticipo sacó el anticipo, y el resto es deuda. Lo facturado en total va en Control de Obra como
-          costo: <strong>${fmt(caja.facturado)}</strong>.
+          anticipo sacó el anticipo, y el resto es deuda. El costo documentado de la obra
+          es <strong>${fmt(caja.facturado)}</strong>
+          {caja.anticipado > 0.005 && <>, de los cuales <strong>${fmt(caja.anticipado)}</strong> son anticipos todavía sin factura</>}.
+          {caja.credito > 0.005 && <> Las notas de crédito no son deuda ni gasto: son <strong>${fmt(caja.credito)}</strong> a favor, y se usan en una compra.</>}
         </div>
       )}
 
