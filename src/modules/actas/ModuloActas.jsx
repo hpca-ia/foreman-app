@@ -11,6 +11,7 @@ import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, 
   conformidadDe, llaveDeAsistente, enlaceDeFirma } from "./actas";
 import { pdfActa } from "./pdfActa";
 import { pedirElVisto } from "./pedirVisto";
+import { repetidos, comoQuedan, correosCompartidos, cuantosDeVerdad } from "./repetidos";
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
 import { crearTareas, paraTarea, estadoDeTareas, yaSeHizo } from "./aTareas";
@@ -174,6 +175,11 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
     // Las filas que alguien agregó y no llenó. Existen en la base y no son
     // asistentes: ni se cuentan, ni salen en el PDF, ni reciben nada.
     const conNombre = cont.asistentes.filter(a => String(a.nombre || "").trim());
+    // El conteo cuenta PERSONAS, no renglones: una persona repetida tres veces
+    // sumaba tres asistentes y tres copias del acta.
+    const cuantos = cuantosDeVerdad(cont.asistentes);
+    const duplicados = repetidos(cont.asistentes);
+    const compartidos = correosCompartidos(cont.asistentes);
     const vacias = cont.asistentes.filter(a => !String(a.nombre || "").trim());
     const arrastrados = cont.compromisos.filter(c => c.viene_de);
     /**
@@ -752,9 +758,10 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                 se sabe a cuántos les va a llegar, que es justo lo que uno mira
                 antes de apretar Enviar. */}
             <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
-              Asistentes · {conNombre.filter(a => a.asistio).length} de {conNombre.length} vinieron
+              Asistentes · {cuantos.vinieron} de {cuantos.personas} vinieron
               <span style={{ fontWeight: 400, color: colors.muted }}>
-                {" · "}{conNombre.filter(a => a.recibe && String(a.email || "").trim()).length} reciben el acta
+                {" · "}{cuantos.reciben} {cuantos.reciben === 1 ? "copia" : "copias"} del acta
+                {cuantos.sinCorreo ? ` · ${cuantos.sinCorreo} sin correo` : ""}
               </span>
             </div>
             {editable && convocados.length > 0 && (
@@ -796,6 +803,65 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               nada. Peor, no avisa — la pantalla se va como si todo estuviera
               bien. Un formulario que se llena tiene que tener un botón que
               diga "Guardar", y el botón tiene que decir si falta algo. */}
+          {/* LA MISMA PERSONA, DOS VECES.
+              La lista se arma de tres lados —los convocados que entran solos,
+              el que alguien agrega a mano, el que llega tarde— y ninguno mira
+              si esa persona ya estaba. Queda repetida y, peor, repetida con
+              valores que se contradicen: la misma persona marcada como que vino
+              y como que no. Un acta es la prueba de quién estuvo: si dice las
+              dos cosas, no prueba ninguna. */}
+          {sePuede && duplicados.length > 0 && (
+            <div style={{ fontSize: 11.5, color: colors.warning, background: colors.warningSoft,
+              border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusSm,
+              padding: "7px 10px", marginBottom: 7, lineHeight: 1.5 }}>
+              {duplicados.map(g => {
+                const { queda, sobran } = comoQuedan(g);
+                const sePelean = g.some(a => !!a.asistio !== !!queda.asistio);
+                return (
+                  <div key={queda.id} style={{ marginBottom: 3 }}>
+                    <strong>{queda.nombre}</strong> está {g.length} veces
+                    {sePelean ? ", y las filas no dicen lo mismo sobre si vino" : ""}.{" "}
+                    <button onClick={async () => {
+                      // SE ESCRIBE DERECHO A LA BASE, no pasando por el estado
+                      // de la pantalla: `cambiarAsistente` guarda con retardo y
+                      // lee lo que había antes, así que juntar y borrar en el
+                      // mismo gesto perdería lo que acaba de quedar escrito.
+                      setOcupado(true); setError("");
+                      const { error: e } = await guardarFila("acta_asistentes", {
+                        id: queda.id, nombre: queda.nombre || "", empresa: queda.empresa || null,
+                        cargo: queda.cargo || null, email: queda.email || null,
+                        asistio: !!queda.asistio, recibe: !!queda.recibe,
+                      });
+                      if (e) { setOcupado(false); setError(`No se pudo juntar: ${e}`); return; }
+                      for (const a of sobran) await quitarFila("acta_asistentes", "asistentes", a.id);
+                      await cargarActa(abierta.id);
+                      setOcupado(false);
+                      setAviso(`${queda.nombre} quedó en una sola fila${queda.asistio ? ", marcada como que vino" : ""}.`);
+                    }}
+                      style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
+                        fontFamily: colors.font, fontSize: 11.5, color: colors.brand, textDecoration: "underline" }}>
+                      juntarlas en una
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* DOS PERSONAS EN LA MISMA CASILLA. No se juntan —son dos— pero el
+              acta sale de a un correo por dirección: a esa casilla le llega una
+              sola copia, con el enlace de conformidad de una sola de las dos. */}
+          {compartidos.length > 0 && (
+            <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 7, lineHeight: 1.5 }}>
+              {compartidos.map(x => (
+                <div key={x.email}>
+                  {x.gente.map(a => a.nombre).join(" y ")} comparten <strong>{x.email}</strong>: les va a llegar
+                  una sola copia, y el enlace de conformidad va a quedar a nombre de uno solo.
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* LAS DOS CASILLAS, DICHAS. Eran dos cuadraditos sin rótulo —uno al
               principio de la fila y otro al final— y nadie puede adivinar que
               el primero es "vino a la reunión" y el segundo "le llega el acta".
