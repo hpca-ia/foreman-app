@@ -325,6 +325,46 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     ? (aprobadores[mandando.orden.id] || []).filter(a => !a.envio_at && correoValido(a.email))
     : [];
 
+  /**
+   * QUIÉN FIRMA Y QUIÉN RECIBE COPIA, resuelto una sola vez.
+   *
+   * El cuadro de envío tiene cuatro listas que se parecen —la gente del
+   * proyecto, los que ya están en el cuadro de revisión, los que se escriben a
+   * mano y los "otros correos"— y cada una significa algo distinto. Antes esta
+   * cuenta vivía adentro del botón Enviar, así que la pantalla no podía decir
+   * qué iba a pasar: se apretaba y se averiguaba después, cuando el correo ya
+   * había salido.
+   *
+   * Firmar no es un detalle de forma: el que firma recibe SU enlace y la orden
+   * no entra al presupuesto hasta que él apruebe. Agregar a alguien de más en
+   * esa lista es dejar la orden esperando una firma que nadie pidió.
+   */
+  function armarEnvio(m) {
+    if (!m) return { firman: [], copias: [] };
+    const sueltos = String(m.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
+    const elegidos = new Set((m.aQuien || []).map(String));
+    const enCapitulo = enElCuadro.filter(a => elegidos.has(String(a.id)));
+    const deAfuera = (m.externos || [])
+      .map(x => ({ nombre: String(x.nombre || "").trim(), email: String(x.email || "").trim().toLowerCase(),
+        rol: String(x.empresa || "").trim() }))
+      .filter(x => correoValido(x.email));
+    const porCorreo = new Map();
+    for (const a of [
+      ...enCapitulo.filter(a => a.aprueba !== false)
+        .map(a => ({ id: a.id, nombre: a.nombre || "", empresa: a.empresa || "", rol: a.rol || "", email: String(a.email).trim().toLowerCase() })),
+      ...invitados.filter(i => (m.firman || []).includes(i.email))
+        .map(i => ({ nombre: i.nombre, email: i.email, rol: i.rol || "" })),
+      ...deAfuera,
+    ]) if (!porCorreo.has(a.email)) porCorreo.set(a.email, a);
+    const firman = [...porCorreo.values()];
+    const queFirman = new Set(firman.map(a => a.email));
+    const copias = [...new Set([
+      ...m.correos, ...sueltos,
+      ...enCapitulo.filter(a => a.aprueba === false).map(a => String(a.email).trim().toLowerCase()),
+    ])].filter(c => !queFirman.has(c));
+    return { firman, copias };
+  }
+
   const chip = estado => {
     const e = ESTADOS_ORDEN[estado] || ESTADOS_ORDEN.borrador;
     const c = { muted: colors.muted, warning: colors.warning, success: colors.success, danger: colors.danger }[e.color];
@@ -1377,8 +1417,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         traer los de siempre
                       </button>
                       <span style={{ fontSize: 10.5, color: colors.muted }}>
-                        De esta lista sale el envío. Tildá <strong>aprueba</strong> a los que tienen que firmar:
-                        la orden entra al presupuesto cuando firman todos ellos. Los demás reciben copia.
+                        De esta lista sale el envío <strong>y el cuadro de firmas del PDF</strong>, con el nombre y la
+                        empresa de cada uno. Tildá <strong>aprueba</strong> a los que tienen que firmar: la orden entra
+                        al presupuesto cuando firman todos ellos. Los demás reciben copia.
+                        {" "}Pueden ser del proyecto o de afuera — el que firma en papel no tiene por qué estar cargado
+                        en ningún lado.
                       </span>
                     </div>
                   )}
@@ -1498,6 +1541,15 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                           // "OC-03 - Edificio" no dice de qué era: el título
                           // es lo único que lo distingue de las otras ocho.
                           doc.save(`${nombreDelArchivo(o)}.pdf`);
+                          // EL CUADRO DE FIRMAS SALE DE ESA LISTA. Sin nadie
+                          // cargado el PDF no sale mal —quedan los tres
+                          // renglones genéricos para llenar a mano— pero eso se
+                          // descubre con el papel impreso delante del cliente.
+                          if (!(aprobadores[o.id] || []).length) {
+                            setAviso("El PDF salió con el cuadro de firmas en blanco: esta orden no tiene a nadie en "
+                              + "CAPÍTULO IV. Cargalos ahí —'traer los de siempre' o 'Agregar quien firma'— y el cuadro "
+                              + "sale con el nombre y la empresa de cada uno, listo para firmar.");
+                          }
                         } catch (e) { setAviso("No se pudo armar el PDF: " + e.message); }
                         setBajando(null);
                       }}>
@@ -1563,8 +1615,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       y hay que dejarlo escrito: por eso pregunta QUIÉN la
                       aprobó. Poner ahí el nombre del que aprieta el botón deja
                       en el documento que el contratante que la aceptó sos vos. */}
+                  {/* DISCRETO, PORQUE ES LA EXCEPCIÓN. Puesto como botón
+                      principal al lado de "Enviar al cliente", parecía el
+                      camino normal: se lee "ya la aprobaron" en una orden que
+                      todavía no salió y uno se pregunta quién la aprobó. El
+                      camino normal es mandarla y que firmen por su enlace —eso
+                      la aprueba solo—; esto es para cuando la aceptaron en una
+                      reunión o por WhatsApp y hay que dejarlo escrito. */}
                   {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && (
-                    <Button variant="primary" size="sm" disabled={ocupado}
+                    <button disabled={ocupado}
+                      title="Solo si la aprobaron por fuera de FOREMAN. Si firman por el enlace del correo, la orden se aprueba sola."
+                      style={{ background: "none", border: "none", padding: "0 4px", cursor: "pointer",
+                        fontFamily: colors.font, fontSize: 11.5, color: colors.muted, textDecoration: "underline" }}
                       onClick={() => {
                         const quien = window.prompt(
                           `¿Quién aprobó la ${codigoDe(o)}?\n\nEl nombre de quien la aceptó del lado del cliente. `
@@ -1574,8 +1636,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         if (!String(quien).trim()) { setAviso("Sin el nombre de quien la aprobó no se puede registrar: el documento tiene que decir quién aceptó."); return; }
                         hacer(() => aprobarOrden(o, suyas, currentUser, { aprobada_por: String(quien).trim() }));
                       }}>
-                      <Check size={12} /> Ya la aprobaron
-                    </Button>
+                      ya la aprobaron por fuera
+                    </button>
                   )}
                   {puedeEditar && o.estado === "aprobada" && (
                     <Button variant="secondary" size="sm" disabled={ocupado}
@@ -1738,6 +1800,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 se lee en el documento al lado de su aprobación — "aprobado
                 por fulano" sin decir de qué empresa no prueba nada. */}
             <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>QUIEN FIRMA Y NO ESTÁ EN LA LISTA</label>
+            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5, margin: "2px 0 0" }}>
+              El que agregues acá <strong>firma</strong>: recibe su propio enlace para aprobar u objetar, entra al cuadro
+              de firmas del PDF, y la orden no entra al presupuesto hasta que apruebe. Si solo tiene que enterarse,
+              va en <em>otros correos</em>.
+            </div>
             {(mandando.externos || []).map((x, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr 22px", gap: 5, marginTop: 4 }}>
                 <input value={x.nombre} placeholder="Nombre"
@@ -1766,6 +1833,38 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               onChange={e => setMandando(m => ({ ...m, sueltos: e.target.value }))}
               style={{ ...inputStyle, marginTop: 4, marginBottom: 8 }} />
 
+            {/* QUÉ VA A PASAR AL APRETAR ENVIAR.
+                Este cuadro tiene cuatro listas que se parecen —la gente del
+                proyecto, los que ya están en el cuadro de revisión, los que se
+                escriben a mano y los "otros correos"— y cada una significa algo
+                distinto. Sin esto había que apretar para averiguar qué se había
+                armado, y para entonces el correo ya salió. */}
+            {(() => {
+              const { firman, copias } = armarEnvio(mandando);
+              if (!firman.length && !copias.length) return null;
+              return (
+                <div style={{ margin: "4px 0 10px", padding: "8px 10px", borderRadius: 7,
+                  background: firman.length ? colors.brandSoft : colors.warningSoft,
+                  border: `1px solid ${firman.length ? colors.border : colors.warningBorder}` }}>
+                  <div style={{ fontSize: 11.5, color: colors.ink, lineHeight: 1.55 }}>
+                    {firman.length > 0 ? (
+                      <>
+                        <strong>Firman {firman.length}:</strong> {firman.map(a => a.nombre || a.email).join(", ")}.
+                        {" "}Cada uno recibe su propio enlace y la orden entra al presupuesto cuando aprueban todos.
+                      </>
+                    ) : (
+                      <strong>Nadie la firma: va solo como información y no se va a poder aprobar.</strong>
+                    )}
+                  </div>
+                  {copias.length > 0 && (
+                    <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
+                      Copia para {copias.length}: {copias.join(", ")} — la reciben sin botón de aprobar.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>NOTA (OPCIONAL)</label>
             <textarea rows={2} value={mandando.cuerpo} onChange={e => setMandando(m => ({ ...m, cuerpo: e.target.value }))}
               placeholder="Lo que quieras decirles antes del cuadro" style={{ ...inputStyle, marginTop: 4, resize: "vertical" }} />
@@ -1773,44 +1872,14 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
               <Button variant="primary" size="sm" disabled={ocupado}
                 onClick={async () => {
-                  const sueltos = String(mandando.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
-                  const todos = [...new Set([...mandando.correos, ...sueltos])];
-                  const hayExternos = (mandando.externos || []).some(x => String(x.email || "").includes("@"));
-                  // Solo los que se marcaron en esta tanda.
-                  const elegidos = new Set((mandando.aQuien || []).map(String));
-                  const enCapitulo = enElCuadro.filter(a => elegidos.has(String(a.id)));
-                  if (!todos.length && !hayExternos && !enCapitulo.length) { setAviso("Elegí a quién mandársela."); return; }
-                  // Los que firman reciben SU enlace; los demás, una copia.
-                  const firman = (mandando.firman || []);
-                  const deAfuera = (mandando.externos || [])
-                    .map(x => ({ nombre: String(x.nombre || "").trim(), email: String(x.email || "").trim().toLowerCase(),
-                      rol: String(x.empresa || "").trim() }))
-                    .filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(x.email));
-                  // LOS DEL CAPÍTULO IV FIRMAN SIN QUE HAYA QUE VOLVER A
-                  // MARCARLOS. Ahí se llenaron su nombre, su empresa y su
-                  // correo justamente para esto; pedir que además se los
-                  // tilde acá es la clase de paso que se olvida, y la orden
-                  // sale como informativa sin que nadie pueda aprobarla.
-                  // Va el `id` para que el servidor use esa fila y no cree
-                  // otra: dos filas de la misma persona son dos enlaces y una
-                  // orden que nunca termina de estar firmada por todos.
-                  const delCapitulo = enCapitulo.filter(a => a.aprueba !== false)
-                    .map(a => ({ id: a.id, nombre: a.nombre || "", empresa: a.empresa || "",
-                      rol: a.rol || "", email: String(a.email).trim().toLowerCase() }));
-                  // Los del cuadro que no aprueban reciben la copia, sin botón.
-                  const copiasCapitulo = enCapitulo.filter(a => a.aprueba === false)
-                    .map(a => String(a.email).trim().toLowerCase());
-                  const porCorreo = new Map();
-                  for (const a of [...delCapitulo,
-                    ...invitados.filter(i => firman.includes(i.email))
-                      .map(i => ({ nombre: i.nombre, email: i.email, rol: i.rol || "" })),
-                    ...deAfuera]) {
-                    if (!porCorreo.has(a.email)) porCorreo.set(a.email, a);
-                  }
-                  const quienesFirman = [...porCorreo.values()];
-                  const correosQueFirman = new Set(quienesFirman.map(a => a.email));
-                  const soloCopia = [...new Set([...todos, ...copiasCapitulo])]
-                    .filter(c => !correosQueFirman.has(c));
+                  const { firman: quienesFirman, copias: soloCopia } = armarEnvio(mandando);
+                  if (!quienesFirman.length && !soloCopia.length) { setAviso("Elegí a quién mandársela."); return; }
+                  // UNA ORDEN SIN NADIE QUE LA FIRME NO SE APRUEBA NUNCA: sale
+                  // de puro informativa y se queda esperando para siempre, sin
+                  // que nada lo diga. Si es a propósito, se dice que sí.
+                  if (!quienesFirman.length && !window.confirm(
+                    "Nadie está marcado para firmarla.\n\nVa a salir solo como información: nadie va a recibir el enlace "
+                    + "para aprobarla, y la orden no va a entrar nunca al presupuesto.\n\n¿Mandarla igual?")) return;
                   setOcupado(true);
                   const r = await enviarOrden(mandando.orden, soloCopia, mandando.cuerpo, currentUser, quienesFirman);
                   setOcupado(false);
