@@ -633,6 +633,27 @@ async function decidirAprobacion(req, res, tarea) {
     }),
   }).catch(() => {});
 
+  // ── EL VISTO INTERNO DE UNA ORDEN DE CAMBIO ───────────────────────────────
+  //
+  // Lo que se aprueba acá NO es que el cliente aceptó: es que el precio puede
+  // salir de la oficina. Son dos cosas distintas y confundirlas es lo que hacía
+  // que alguien se registrara a sí mismo como el contratante que aprobó.
+  if (tarea.orden_cambio_id) {
+    const ordenes = await json(await rest(`ordenes_cambio?id=eq.${tarea.orden_cambio_id}&select=*`));
+    const orden = ordenes?.[0];
+    if (orden) {
+      await rest(`ordenes_cambio?id=eq.${orden.id}`, {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify(aprueba
+          ? { visto_at: ahora, visto_por: quien?.id ?? null, visto_nombre: quien?.nombre || null, visto_comentario: limpio }
+          // Devuelta: el visto no queda, y lo que hay que corregir sí.
+          : { visto_at: null, visto_por: null, visto_nombre: null, visto_comentario: limpio }),
+      });
+      await avisarDelVistoDeLaOrden(orden, tarea, { aprueba, nota: limpio, quien });
+    }
+    return res.status(200).json({ ok: true, orden: true, aprueba: !!aprueba });
+  }
+
   if (!tarea.compra_id) return res.status(200).json({ ok: true });
 
   // ── LA COMPRA AVANZA ──────────────────────────────────────────────────────
@@ -689,6 +710,47 @@ async function decidirAprobacion(req, res, tarea) {
   await avisarAlQueSigue(nueva, compra, { aprueba, nota: limpio, quien });
 
   return res.status(200).json({ ok: true, estado });
+}
+
+/**
+ * El visto de la orden, de vuelta a quien la armó.
+ *
+ * Con el visto dado, lo que falta es mandarla al cliente — y eso lo hace la
+ * oficina, no el Director desde el teléfono: la lista de a quién se le manda
+ * se arma en la pantalla de la orden. Sin este correo, el visto quedaba dado y
+ * la orden esperando a que alguien entrara a mirar si ya estaba.
+ */
+async function avisarDelVistoDeLaOrden(orden, tarea, { aprueba, nota, quien }) {
+  try {
+    const paraId = tarea.aprob_no_para || tarea.created_by;
+    if (!paraId) return;
+    const u = (await json(await rest(`usuarios?id=eq.${paraId}&select=nombre,email,activo`)))[0];
+    if (!u?.email || u.activo === false) return;
+    const codigo = orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`;
+    await enviarCorreo({
+      to: [u.email],
+      subject: `${aprueba ? "Visto dado" : "Devuelta"}: ${codigo} · ${orden.titulo || ""}`,
+      html: plantilla({
+        titulo: `${codigo} · ${orden.titulo || ""}`,
+        subtitulo: aprueba ? "Lista para mandar al cliente" : "Hay que corregirla antes de mandarla",
+        cuerpo: `
+          <p style="margin:0 0 12px;font-size:14px;color:#111827">
+            <strong>${quien?.nombre || "El Director"}</strong>
+            ${aprueba ? "le dio el visto a esta orden de cambio." : "la devolvió antes de que salga al cliente."}
+          </p>
+          ${nota ? `<div style="font-size:13.5px;color:#111827;line-height:1.6;padding:12px 14px;background:${aprueba ? "#F4F7F6" : "#FFFBEB"};
+            border:1px solid ${aprueba ? "#CFE0DC" : "#FCD34D"};border-radius:8px;margin:0 0 12px">${String(nota).replace(/[&<>]/g, c2 => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c2]))}</div>` : ""}
+          <p style="margin:0 0 14px;font-size:13px;color:#6B7280">
+            ${aprueba
+              ? "El precio ya puede salir de la oficina. En Órdenes de cambio, 'Enviar al cliente' les manda a cada uno su enlace para aprobarla."
+              : "Mientras no se corrija, no sale: una vez que el cliente ve un precio, bajarlo es una negociación y subirlo es imposible."}
+          </p>
+          <a href="${process.env.APP_URL || "https://foreman-app-ebon.vercel.app"}" style="display:inline-block;background:#0F3D3E;
+            color:#fff;text-decoration:none;padding:10px 18px;border-radius:7px;font-size:14px;font-weight:700">Abrir FOREMAN</a>`,
+        pie: "Correo automático de FOREMAN · HCA Studio.",
+      }),
+    });
+  } catch { /* el aviso no puede tumbar el visto: lo que importa ya se guardó */ }
 }
 
 /** El correo del que sigue: corto, con lo que tiene que hacer. */

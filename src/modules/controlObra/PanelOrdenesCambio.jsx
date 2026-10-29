@@ -8,7 +8,7 @@ import { fmt } from "./calculos";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
-  pedirVisto, darVisto,
+  pedirElVistoAlDirector, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
   insistirConLaOrden, genteDeOtrosProyectos,
@@ -563,12 +563,31 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       <input ref={cotRef} type="file" accept="image/*,.pdf,.xlsx,.xlsm,.xls" style={{ display: "none" }}
         onChange={e => { const f2 = e.target.files?.[0]; e.target.value = ""; if (f2 && cotPara.current) subirCotizacion(cotPara.current, f2); }} />
 
-      {/* Una orden nueva: lo mínimo para poder empezar a listar qué cambia. */}
+      {/* Una orden nueva: lo mínimo para poder empezar a listar qué cambia.
+
+          `puedeAprobar` es quién decide que el precio SALGA, que no es lo mismo
+          que quién puede editar la orden. Acá iba `puedeEditar`: cualquiera que
+          pudiera escribirla podía también mandarla al cliente sin que nadie la
+          mirara. */}
       {nueva === true && (
         <ModalOrdenCambio obra={obra} proyecto={proyecto} rubros={rubros} currentUser={currentUser}
-          puedeAprobar={puedeEditar}
+          puedeAprobar={esDirector}
           onCerrar={() => setNueva(null)}
-          onCreada={async (orden, avisoCot) => { setNueva(null); await cargar(); setAbierta(orden.id); if (avisoCot) setAviso(avisoCot); }} />
+          onCreada={async (orden, avisoCot, opciones) => {
+            setNueva(null); await cargar(); setAbierta(orden.id);
+            if (avisoCot) setAviso(avisoCot);
+            // "Guardar y enviar al cliente" abre el envío de una: guardar,
+            // cerrar, buscarla en la lista y abrirla para recién ahí mandarla
+            // son cuatro pasos para algo que ya se decidió al escribirla.
+            if (opciones?.mandar) {
+              const r = await aprobacionesDeOrdenes([orden.id]);
+              setMandando({
+                orden, cuerpo: "",
+                correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email),
+                aQuien: (r[orden.id] || []).filter(a => a.aprueba !== false && !a.envio_at).map(a => String(a.id)),
+              });
+            }
+          }} />
       )}
 
       {nueva && nueva !== true && (
@@ -1492,8 +1511,29 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       negociación y subirlo es imposible. */}
                   {puedeEditar && suyas.length > 0 && !o.visto_at && !esDirector && (
                     <Button variant="outline" size="sm" disabled={ocupado}
-                      onClick={() => hacer(() => pedirVisto(o.id))}>
-                      {o.visto_pedido_at ? "Aprobación pedida" : "Pedir aprobación al Director"}
+                      onClick={async () => {
+                        // CON LA ORDEN ADJUNTA. Marcar una fecha no es pedir
+                        // nada: el Director se enteraba si alguien se acordaba
+                        // de escribirle. Ahora le llega el PDF y lo contesta
+                        // desde el teléfono.
+                        setOcupado(true); setAviso("");
+                        let pdf = null;
+                        try {
+                          const doc = await pdfDeOrden({
+                            orden: o, lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
+                            codigo: codigoDe(o), subtotales: sub,
+                            resumenContrato: o.mostrar_contrato ? resumen : null,
+                            aprobadores: aprobadores[o.id] || [],
+                          });
+                          pdf = { nombre: `${nombreDelArchivo(o)}.pdf`, contenido: doc.output("datauristring").split(",")[1] };
+                        } catch { /* sin PDF el pedido sale igual */ }
+                        const r = await pedirElVistoAlDirector({ ...o, lead_id: obra?.lead_id ?? null }, currentUser, pdf);
+                        setOcupado(false);
+                        await cargar();
+                        setAviso(r?.error ? `No se pudo pedir el visto: ${r.error}`
+                          : r?.aviso || `Le pediste el visto a ${r?.pedidoA || "el Director"}: le llegó la orden en PDF y la aprueba desde el correo.`);
+                      }}>
+                      {o.visto_pedido_at ? "Volver a pedir el visto" : "Pedir el visto al Director"}
                     </Button>
                   )}
                   {puedeEditar && suyas.length > 0 && (
@@ -1516,13 +1556,25 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       <Mail size={12} /> Enviar al cliente
                     </Button>
                   )}
+                  {/* REGISTRAR QUE EL CLIENTE YA LA APROBÓ, que no es lo mismo
+                      que aprobarla uno. Si firmaron por el enlace del correo,
+                      esto pasa solo. Esto es para cuando la aprobaron por fuera
+                      —en una reunión, por WhatsApp, con una firma en el papel—
+                      y hay que dejarlo escrito: por eso pregunta QUIÉN la
+                      aprobó. Poner ahí el nombre del que aprieta el botón deja
+                      en el documento que el contratante que la aceptó sos vos. */}
                   {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && (
                     <Button variant="primary" size="sm" disabled={ocupado}
                       onClick={() => {
-                        if (!window.confirm(`¿Aprobar la ${codigoDe(o)}?\n\nSus adiciones entran al control de obra y lo que reduce queda tachado del presupuesto.`)) return;
-                        hacer(() => aprobarOrden(o, suyas, currentUser, { aprobada_por: currentUser?.name || "" }));
+                        const quien = window.prompt(
+                          `¿Quién aprobó la ${codigoDe(o)}?\n\nEl nombre de quien la aceptó del lado del cliente. `
+                          + "Queda escrito en el documento y en el control de obra.",
+                          o.contratante_nombre || "");
+                        if (quien === null) return;
+                        if (!String(quien).trim()) { setAviso("Sin el nombre de quien la aprobó no se puede registrar: el documento tiene que decir quién aceptó."); return; }
+                        hacer(() => aprobarOrden(o, suyas, currentUser, { aprobada_por: String(quien).trim() }));
                       }}>
-                      <Check size={12} /> Aprobar
+                      <Check size={12} /> Ya la aprobaron
                     </Button>
                   )}
                   {puedeEditar && o.estado === "aprobada" && (

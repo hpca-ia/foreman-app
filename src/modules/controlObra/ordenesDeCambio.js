@@ -101,6 +101,62 @@ export async function pedirVisto(ordenId) {
   return error ? (falta(error) ? "Falta correr la migración 078." : error.message) : null;
 }
 
+/**
+ * PEDIR EL VISTO DE VERDAD: con una tarea, un correo y la orden adjunta.
+ *
+ * Marcar una fecha en la orden no es pedir nada. El Director se enteraba
+ * porque alguien se acordaba de escribirle, y mientras tanto el precio no sale
+ * y el trabajo no se ejecuta. Es el mismo agujero que tenía el acta.
+ *
+ * Va por la misma puerta que el visto de una compra: una tarea de aprobación
+ * con su llave, el correo con el PDF, y dos botones que se contestan desde el
+ * teléfono. Lo que se aprueba acá es que el precio puede salir al cliente —no
+ * que el cliente lo aceptó—, que es la confusión que había.
+ *
+ * @param pdf  { nombre, contenido } el PDF de la orden, armado por la pantalla
+ *   (acá no hay librería de PDF ni los enlaces firmados de los soportes).
+ */
+export async function pedirElVistoAlDirector(orden, quien, pdf = null) {
+  const e = await pedirVisto(orden.id);
+  if (e) return { error: e };
+
+  // Quién da el visto: el Director. Si hubiera más de uno, el primero activo;
+  // sin ninguno no hay a quién pedírselo y vale la pena decirlo.
+  const { data: duenos } = await supabase.from("usuarios")
+    .select("id,nombre,email,rol,activo").eq("rol", "owner").eq("activo", true);
+  const director = (duenos || []).find(u => String(u.email || "").trim());
+  if (!director) return { error: "No hay un Director con correo cargado a quien pedirle el visto." };
+
+  // La tarea es el registro y el aviso: aparece en su tablero, entra al
+  // resumen de la mañana y es la que lleva la llave del enlace del correo.
+  const { data: tarea, error: errT } = await supabase.from("tasks").insert({
+    title: `Dar el visto: ${codigoDe(orden)} · ${orden.titulo || ""}`.slice(0, 200),
+    lead_id: orden.lead_id ?? null, assignee_id: director.id,
+    type: "Gestión", status: "en-progreso",
+    priority: orden.fecha_limite_aprobacion ? "urgente" : "media",
+    due_date: orden.fecha_limite_aprobacion ? String(orden.fecha_limite_aprobacion).slice(0, 10) : null,
+    notes: `Orden de cambio ${codigoDe(orden)}. Aprobar acá es dejar que el precio salga al cliente, `
+      + "no que el cliente lo haya aceptado.",
+    created_by: quien?.id ?? null,
+    es_aprobacion: true, aprobacion_estado: "pendiente",
+    orden_cambio_id: orden.id,
+    // Si la devuelve, le toca a quien la armó.
+    aprob_no_para: quien?.id ?? null,
+  }).select().single();
+  if (errT) {
+    return { error: /column|schema cache/i.test(errT.message)
+      ? "Falta correr la migración 133 para pedir el visto por correo." : errT.message };
+  }
+
+  const r = await fetch("/api/aviso?de=aprobar", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tareaId: tarea.id, adjunto: pdf, conAdjuntos: false }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (d?.error) return { ok: true, aviso: `La tarea quedó en el tablero de ${director.nombre}, pero el correo no salió: ${d.error}` };
+  return { ok: true, pedidoA: director.nombre };
+}
+
 export async function darVisto(orden, quien, comentario) {
   const { error } = await supabase.from("ordenes_cambio").update({
     visto_at: new Date().toISOString(),

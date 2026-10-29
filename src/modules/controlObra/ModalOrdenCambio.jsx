@@ -5,7 +5,7 @@ import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
-import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, aprobarOrden, darVisto } from "./ordenesDeCambio";
+import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, pedirElVistoAlDirector } from "./ordenesDeCambio";
 import { pedirANova, JUICIO, textoDeNova } from "../../lib/modelos";
 import { leerConNova, guardarCotizacion } from "./cotizacionesOrden";
 import { partidasDeCotizacion, totalDeCotizacion, margenDeOrden, conMargen } from "./cuentaOrdenCambio.js";
@@ -228,8 +228,13 @@ Si el texto ya está bien escrito, devolvelo igual.`,
     // después ya es un resumen de memoria.
     //
     // Aprobar sí las necesita: aprobar es mandar plata al presupuesto.
-    if (despues === "aprobar" && !conMonto.length) {
-      setError("Para aprobarla tiene que tener partidas: aprobar es meter esos montos al presupuesto."); return;
+    // Pedir el visto y mandarla sí las necesitan: lo que se revisa y lo que
+    // viaja es un precio, y una orden sin partidas no tiene ninguno.
+    if (despues && !conMonto.length) {
+      setError(despues === "mandar"
+        ? "Para mandarla tiene que tener partidas: lo que el cliente aprueba es el precio."
+        : "Para pedir el visto tiene que tener partidas: lo que se revisa es el precio antes de que salga.");
+      return;
     }
     setGuardando(true); setError("");
 
@@ -294,17 +299,31 @@ Si el texto ya está bien escrito, devolvelo igual.`,
       await subirSoporte(orden, archivo, "", currentUser, i);
     }
 
-    if (despues === "aprobar") {
-      // Las líneas tal como quedaron guardadas: aprobar necesita el
-      // obra_rubro_id de las reducciones para tachar el rubro del presupuesto.
-      const err = await aprobarOrden({ ...orden }, puestas, currentUser, { aprobada_por: currentUser?.name || "" });
-      if (err) { setError("La orden se guardó, pero no se pudo aprobar: " + err); setGuardando(false); return; }
-    } else if (despues === "visto") {
-      await darVisto({ ...orden }, currentUser, "");
+    let aviso = avisoCotizacion;
+    if (despues === "pedir-visto") {
+      // EL PDF VIAJA CON EL PEDIDO. Lo que se revisa es el cuadro de partidas
+      // con su precio, y pedirle al Director que entre a buscarlo es lo que
+      // hacía que el visto tardara tres días. Sin fotos: todavía están
+      // subiéndose y el documento se vuelve a armar completo cuando se manda.
+      let pdf = null;
+      try {
+        const { pdfDeOrden } = await import("./pdfOrdenCambio");
+        const doc = await pdfDeOrden({
+          orden: { ...orden }, lineas: puestas, fotos: [], enlaces: {}, obra, proyecto,
+          codigo: orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`,
+          subtotales: subtotales(puestas), resumenContrato: null, aprobadores: [],
+        });
+        pdf = { nombre: `${orden.codigo || `OC-${orden.numero}`}.pdf`, contenido: doc.output("datauristring").split(",")[1] };
+      } catch { /* sin PDF el pedido sale igual: el detalle va en el cuerpo */ }
+
+      const r = await pedirElVistoAlDirector({ ...orden, lead_id: obra?.lead_id ?? null }, currentUser, pdf);
+      aviso = r?.error
+        ? `La orden se guardó, pero el visto no se pudo pedir: ${r.error}`
+        : r?.aviso || `Le pediste el visto a ${r?.pedidoA || "el Director"}: le llegó la orden en PDF y la puede aprobar desde el correo.`;
     }
 
     setGuardando(false);
-    onCreada?.(orden, avisoCotizacion);
+    onCreada?.(orden, aviso, { mandar: despues === "mandar" });
   }
 
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
@@ -756,27 +775,37 @@ Si el texto ya está bien escrito, devolvelo igual.`,
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginTop: 10 }}>{error}</div>}
 
+      {/* TRES CAMINOS Y NADA MÁS, porque son los tres que existen.
+          Acá había un "Guardar y aprobar" que no es ninguno de los tres:
+          aprobar una orden es registrar que el CLIENTE la aceptó, y aprobarse
+          uno mismo lo que uno acaba de escribir deja en el papel que el
+          contratante que la aprobó sos vos. Eso sigue existiendo —hace falta
+          cuando el cliente la firmó por fuera— pero vive en la orden ya
+          guardada, que es donde se registra algo que pasó, y no acá. */}
       <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-        <Button variant="primary" onClick={() => guardar()} disabled={guardando}>
-          {guardando ? "Guardando…" : conMonto.length ? "Guardar la orden" : "Guardar como borrador"}
+        <Button variant={conMonto.length ? "secondary" : "primary"} onClick={() => guardar()} disabled={guardando}>
+          {guardando ? "Guardando…" : "Guardar"}
         </Button>
-        {/* Para quien puede aprobar: de una. Una orden la redacta quien la
-            decidió, y guardar, cerrar, buscarla en la lista, abrirla y recién
-            ahí aprobarla son cuatro pasos para confirmar algo que ya quedó
-            decidido al escribirla. */}
+        {/* El visto es interno y es sobre el precio: una vez que el cliente lo
+            vio, bajarlo es una negociación y subirlo es imposible. */}
+        {!puedeAprobar && (
+          <Button variant="primary" onClick={() => guardar("pedir-visto")} disabled={guardando || !conMonto.length}>
+            Guardar y pedir el visto
+          </Button>
+        )}
         {puedeAprobar && (
-          <Button variant="outline" onClick={() => guardar("aprobar")} disabled={guardando}>
-            Guardar y aprobar
+          <Button variant="primary" onClick={() => guardar("mandar")} disabled={guardando || !conMonto.length}>
+            Guardar y enviar al cliente
           </Button>
         )}
         <Button variant="secondary" onClick={cancelar}>Cancelar</Button>
       </div>
       <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
         {!conMonto.length
-          ? "Guardar NO la envía a nadie. Queda como borrador en la lista de la obra y la seguís armando cuando tengas la cotización: el argumento no se pierde."
+          ? "Guardar NO la envía a nadie: queda en construcción, en la lista de la obra, y la seguís armando cuando llegue la cotización. El argumento no se pierde."
           : puedeAprobar
-            ? "Guardar NO la envía. Aprobada, sus adiciones entran al control de obra y lo que reduce queda tachado del presupuesto. Si preferís que la vea alguien antes, guardala y desde la lista pedís el visto o se la mandás."
-            : "Guardar NO la envía. Después se decide qué hacer con ella: bajar el PDF, pedirle el visto al Director, o mandársela al cliente."}
+            ? "Guardar la deja en construcción. Enviar al cliente le manda a cada uno que firma su propio enlace para aprobarla o devolverla con comentarios; la orden entra al presupuesto cuando firman todos."
+            : "Guardar la deja en construcción. Pedir el visto le manda la orden en PDF al Director, que la aprueba desde el correo; recién después se envía al cliente."}
       </div>
     </Modal>
   );
