@@ -18,7 +18,7 @@ import {
   leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
   enlacesDeCotizaciones, sincronizarBeneficios, guardarIva, gastosDe, guardarGasto, borrarGasto,
 } from "./cotizacionesOrden";
-import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos } from "./cuentaOrdenCambio.js";
+import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos, costosConOtroIva } from "./cuentaOrdenCambio.js";
 import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
 import { costoDeLaOrden, gastoLimpio, queFaltaSaber } from "./costoDeLaOrden.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
@@ -978,18 +978,29 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                     const v = Number(e.target.value) || 0;
                                     if (v === (Number(c.iva) || 0)) return;
                                     setOcupado(true);
-                                    const err = await guardarIva(c.id, v);
+                                    let err = await guardarIva(c.id, v);
+                                    let dicho = "";
                                     if (!err) {
                                       // El margen cambia con el IVA: los costos
                                       // que salieron de esta proforma se
-                                      // recalculan solos, si no el número de la
+                                      // reescalan, si no el número de la
                                       // pantalla queda del porcentaje viejo.
-                                      await ponerLosCostos(o, { ...c, iva: v }, suyas.map(l =>
-                                        (l.cotizacion_id === c.id ? { ...l, costo_unitario: null } : l)));
+                                      // Y lo que pasó se dice: un cambio de IVA
+                                      // que no movió nada tiene que verse.
+                                      const cambios = costosConOtroIva(suyas, c.id, c.iva, v);
+                                      for (const x of cambios) {
+                                        const r = await guardarLinea(x.id, { costo_unitario: x.costo_unitario });
+                                        if (r.error) { err = `El IVA se guardó, pero no el costo de una partida: ${r.error}`; break; }
+                                      }
+                                      if (!err) {
+                                        dicho = cambios.length
+                                          ? `Con el IVA en ${v}%, se recalculó el costo de ${cambios.length} ${cambios.length === 1 ? "partida" : "partidas"} de esta proforma.`
+                                          : "El IVA se guardó, pero ninguna partida tiene su costo atado a esta proforma: revisá la columna COSTO U.";
+                                      }
                                     }
                                     setOcupado(false);
                                     await cargar(); onCambio?.();
-                                    if (err) setAviso(err);
+                                    setAviso(err || dicho);
                                   }}
                                   style={{ ...celda, width: 52, textAlign: "right" }} />
                                 %
@@ -1462,6 +1473,16 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             {cuenta.margen < 0 ? "−" : ""}${fmt(Math.abs(cuenta.margen))}{cuenta.pct != null ? ` · ${cuenta.pct}%` : ""}
                           </strong>,
                           { borderTop: `1px solid ${colors.border}`, marginTop: 4, paddingTop: 5, fontWeight: 700 })}
+                        {/* SOBRE QUÉ SE MIDE. El margen es el de las partidas
+                            con costo, igual que en la liquidación: si eso no
+                            es todo lo cobrado, se dice, para que nadie reste
+                            de cabeza y llegue a otro número. */}
+                        {Math.abs(cuenta.cobradoConCosto - cuenta.cobrado) > 0.004 && (
+                          <div style={{ fontSize: 10.5, color: colors.muted, textAlign: "right" }}>
+                            sobre ${fmt(cuenta.cobradoConCosto)} de partidas con costo
+                            {cuenta.reducciones ? " · las reducciones no entran al margen" : ""}
+                          </div>
+                        )}
                       </div>
                       {falta && (
                         <div style={{ fontSize: 11, color: cuenta.sinCosto ? colors.warning : colors.muted, marginTop: 5, lineHeight: 1.45 }}>

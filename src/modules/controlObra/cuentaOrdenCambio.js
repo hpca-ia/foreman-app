@@ -85,6 +85,30 @@ export function partidasDeCotizacion(items = [], iva = 0) {
 }
 
 /**
+ * LOS COSTOS DE UNA PROFORMA, CON OTRO IVA.
+ *
+ * Cuando se corrige el IVA de una proforma ya cargada, el costo de sus
+ * partidas tiene que moverse con él. Volver a emparejar los renglones no
+ * sirve: si alguien renombró una partida, el emparejamiento falla, el costo se
+ * queda con el IVA viejo y la pantalla no dice nada; y el emparejamiento por
+ * nombre puede agarrar una partida que salió de OTRA proforma.
+ *
+ * Entonces se reescala lo que ya está: solo las partidas atadas a esta
+ * proforma, y por la razón entre los dos IVA. Si alguien ajustó a mano el
+ * costo de una de ellas, el ajuste se respeta: se le cambia el impuesto, no el
+ * número.
+ *
+ * @returns [{ id, costo_unitario }] las partidas a corregir
+ */
+export function costosConOtroIva(lineas = [], cotizacionId, ivaViejo = 0, ivaNuevo = 0) {
+  const factor = (1 + n(ivaViejo) / 100) / (1 + n(ivaNuevo) / 100);
+  return lineas
+    .filter(l => l.tipo !== "quita" && tieneCosto(l) && l.cotizacion_id != null
+      && Number(l.cotizacion_id) === Number(cotizacionId))
+    .map(l => ({ id: l.id, costo_unitario: Math.round(n(l.costo_unitario) * factor * 10000) / 10000 }));
+}
+
+/**
  * EL COSTO DE CADA PARTIDA, SACADO DE LA COTIZACIÓN.
  *
  * Esto era un enlace subrayado que decía "tomar los costos en orden" y que

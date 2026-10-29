@@ -18,12 +18,25 @@
 // TODO VA SIN IVA, porque la orden se cobra sin IVA. Medir un precio sin IVA
 // contra un costo con IVA se lleva quince puntos sin que nada lo diga.
 
+import { margenDeOrden } from "./cuentaOrdenCambio.js";
+
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
 
-const tieneCosto = l => l?.costo_unitario !== null && l?.costo_unitario !== undefined && l?.costo_unitario !== "";
-
 /**
+ * EL MISMO MARGEN QUE LA LIQUIDACIÓN, MÁS LOS GASTOS.
+ *
+ * El margen sale de margenDeOrden, y no de una cuenta propia: había dos, y la
+ * caja de la orden decía $1.200 · 60% donde la liquidación decía $200 · 20%
+ * para la misma orden. La diferencia era sumar al cobrado las partidas sin
+ * costo —su precio entraba entero y su costo no entraba nunca— y restar las
+ * reducciones sin restar lo que se ahorra al no hacerlas. Las dos cosas
+ * inventan un número. Dos pantallas que no cuadran son peor que una que no
+ * existe: nadie sabe a cuál creerle.
+ *
+ * Entonces: lo que se cobra en total se dice (es lo que firma el cliente),
+ * pero el margen se mide solo sobre las partidas que tienen costo.
+ *
  * @param lineas  las partidas de la orden
  * @param gastos  las filas de orden_cambio_gastos
  * @returns la cuenta entera, lista para dibujar
@@ -33,33 +46,35 @@ export function costoDeLaOrden({ lineas = [], gastos = [] } = {}) {
   const reducciones = lineas.filter(l => l.tipo === "quita");
 
   // Lo cobrado es la diferencia sobre el contrato: lo que se agrega menos lo
-  // que se quita. Una orden que saca más de lo que pone cobra en negativo, y
-  // su margen también.
+  // que se quita. Es lo que firma el cliente, y no es la base del margen.
   const cobrado = c2(adiciones.reduce((t, l) => t + n(l.cantidad) * n(l.precio_unitario), 0)
     - reducciones.reduce((t, l) => t + n(l.cantidad) * n(l.precio_unitario), 0));
 
-  const conCosto = adiciones.filter(tieneCosto);
-  const dePartidas = c2(conCosto.reduce((t, l) => t + n(l.cantidad) * n(l.costo_unitario), 0));
+  const m = margenDeOrden(lineas);
 
   const sueltos = c2(gastos.reduce((t, g) => t + n(g.monto), 0));
   const pagados = c2(gastos.filter(g => g.estado === "real").reduce((t, g) => t + n(g.monto), 0));
 
-  const costo = c2(dePartidas + sueltos);
-  const margen = c2(cobrado - costo);
+  const costo = c2(m.costo + sueltos);
+  const margen = c2(m.cobrado - costo);
 
   return {
     cobrado,
-    costo, dePartidas, sueltos, pagados,
+    // Sobre lo que se mide el margen: el precio de las partidas con costo.
+    // Si es menor que lo cobrado, hay partidas sin costo o reducciones.
+    cobradoConCosto: m.cobrado,
+    costo, dePartidas: m.costo, sueltos, pagados,
     // Cuánto de lo que se gastó ya salió de verdad: una liquidación hecha solo
     // de cotizaciones es una liquidación de antes de la obra.
     porPagar: c2(sueltos - pagados),
     margen,
-    pct: cobrado ? Math.round((margen / cobrado) * 1000) / 10 : null,
+    pct: m.cobrado ? Math.round((margen / m.cobrado) * 1000) / 10 : null,
     // ¿Se puede creer este número? No si hay partidas sin costo.
-    sinCosto: adiciones.length - conCosto.length,
-    conCosto: conCosto.length,
+    sinCosto: m.sinCosto,
+    conCosto: m.conCosto,
+    reducciones: reducciones.length,
     cuantosGastos: gastos.length,
-    sabido: adiciones.length > 0 && conCosto.length === adiciones.length,
+    sabido: adiciones.length > 0 && m.sinCosto === 0,
   };
 }
 
@@ -82,7 +97,7 @@ export function queFaltaSaber(cuenta) {
   if (!cuenta.cobrado && !cuenta.costo) return "Todavía no tiene partidas ni gastos.";
   if (cuenta.sinCosto) {
     return `${cuenta.sinCosto} ${cuenta.sinCosto === 1 ? "partida" : "partidas"} sin costo: `
-      + "el margen que se ve es el de las demás, no el de la orden.";
+      + `el margen que se ve es el de las otras ${cuenta.conCosto}, no el de la orden entera.`;
   }
   if (!cuenta.costo) return "Todavía no se le cargó ningún costo: no se sabe qué deja.";
   if (cuenta.porPagar > 0 && cuenta.pagados > 0) {
