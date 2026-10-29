@@ -159,11 +159,12 @@ export async function sincronizarBeneficios(obraId) {
   if (e1) return { error: falta(e1) ? null : e1.message };
   const ids = (ordenes || []).map(o => o.id);
 
-  const [ls, cs, rs, bs] = await Promise.all([
+  const [ls, cs, rs, bs, gs] = await Promise.all([
     ids.length ? supabase.from("orden_cambio_lineas").select("*").in("orden_id", ids) : { data: [] },
     cotizacionesDe(ids),
     supabase.from("obra_rubros").select("id,descripcion,orden_cambio_id").eq("obra_id", obraId).not("orden_cambio_id", "is", null),
     supabase.from("obra_beneficios").select("*").eq("obra_id", obraId).not("orden_cambio_id", "is", null),
+    gastosDe(ids),
   ]);
   if (cs.error) return { error: cs.error };
   if (bs.error) return { error: falta(bs.error) ? SIN_125 : bs.error.message };
@@ -174,7 +175,7 @@ export async function sincronizarBeneficios(obraId) {
 
   const plan = planDeBeneficios({
     obraId, ordenes: ordenes || [], lineasPorOrden, rubros: rs.data || [],
-    cotizaciones: cs.porOrden, existentes: bs.data || [], codigoDe,
+    cotizaciones: cs.porOrden, gastosPorOrden: gs.porOrden, existentes: bs.data || [], codigoDe,
   });
 
   if (plan.borrar.length) {
@@ -190,4 +191,42 @@ export async function sincronizarBeneficios(obraId) {
     if (error) return { error: falta(error) ? SIN_125 : error.message };
   }
   return { cambios: plan.borrar.length + plan.actualizar.length + plan.insertar.length };
+}
+
+// ── LOS GASTOS DE UNA ORDEN ─────────────────────────────────────────────────
+//
+// Lo que cuesta la orden y no es el costo de una partida: el flete, la mano de
+// obra propia, el andamio, la segunda proforma. Sin esto, esa plata no tenía
+// dónde ir y el margen de la pantalla era más alto que el de verdad — y con
+// ese número se pone el precio de la próxima orden.
+
+export const SIN_135 = "Falta correr la migración 135 para cargarle gastos a una orden de cambio.";
+
+/** Los gastos de varias órdenes, por orden. */
+export async function gastosDe(ordenIds = []) {
+  if (!ordenIds.length) return { porOrden: {} };
+  const { data, error } = await supabase.from("orden_cambio_gastos")
+    .select("*").in("orden_id", ordenIds).order("created_at");
+  if (error) return { porOrden: {}, error: falta(error) ? SIN_135 : error.message };
+  const porOrden = {};
+  for (const g of data || []) (porOrden[g.orden_id] = porOrden[g.orden_id] || []).push(g);
+  return { porOrden };
+}
+
+export async function guardarGasto(ordenId, gasto, quien) {
+  const { id, ...campos } = gasto;
+  const q = id
+    ? supabase.from("orden_cambio_gastos").update(campos).eq("id", id)
+    : supabase.from("orden_cambio_gastos").insert({
+      ...campos, orden_id: ordenId,
+      creado_por: quien?.id ?? null, creado_nombre: quien?.name || null,
+    });
+  const { data, error } = await q.select().single();
+  if (error) return { error: falta(error) ? SIN_135 : error.message };
+  return { gasto: data };
+}
+
+export async function borrarGasto(id) {
+  const { error } = await supabase.from("orden_cambio_gastos").delete().eq("id", id);
+  return error ? error.message : null;
 }

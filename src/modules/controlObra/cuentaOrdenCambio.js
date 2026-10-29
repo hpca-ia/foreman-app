@@ -204,9 +204,11 @@ export const ordenCuenta = o => o?.estado === "aprobada" && !o.anulada && o.ejec
  * es una compra que ya pasó, con su costo real, y ninguna corrección del costo
  * cotizado puede pisarlo. Solo se mueve lo que todavía es promesa.
  */
-export function planDeBeneficios({ obraId, ordenes = [], lineasPorOrden = {}, rubros = [], cotizaciones = {}, existentes = [], codigoDe }) {
+export function planDeBeneficios({ obraId, ordenes = [], lineasPorOrden = {}, rubros = [], cotizaciones = {}, gastosPorOrden = {}, existentes = [], codigoDe }) {
   const porLinea = new Map(existentes.filter(b => b.orden_cambio_linea_id).map(b => [Number(b.orden_cambio_linea_id), b]));
+  const porGasto = new Map(existentes.filter(b => b.orden_cambio_gasto_id).map(b => [Number(b.orden_cambio_gasto_id), b]));
   const queridas = new Set();
+  const queridosGastos = new Set();
   const insertar = [], actualizar = [];
 
   for (const o of ordenes) {
@@ -244,10 +246,48 @@ export function planDeBeneficios({ obraId, ordenes = [], lineasPorOrden = {}, ru
     }
   }
 
-  // Lo previsto de una partida que ya no cuenta —se deshizo la aprobación, se
-  // anuló la orden, se le quitó el costo— se va. Lo confirmado se queda.
+  // ── LOS GASTOS QUE NO SON PARTIDAS ────────────────────────────────────────
+  //
+  // El flete, la mano de obra propia, el andamio. Entran SIN PRECIO: no se le
+  // cobró nada al cliente por eso, así que lo presupuestado es cero y lo real
+  // es lo que salió. Sin esto, la página de Beneficios mostraba más utilidad de
+  // la que la obra tiene — y con ese número se pone el precio de la próxima.
+  for (const o of ordenes) {
+    if (!ordenCuenta(o)) continue;
+    const codigo = codigoDe(o);
+    for (const g of gastosPorOrden[o.id] || []) {
+      queridosGastos.add(Number(g.id));
+      const fila = {
+        obra_id: obraId,
+        obra_rubro_id: null,
+        descripcion: `${codigo} · ${g.descripcion}`.slice(0, 200),
+        cantidad: 1,
+        unidad: null,
+        presupuestado: 0,
+        real: n(g.monto),
+        proveedor: g.proveedor || null,
+        orden_cambio_id: o.id,
+        orden_cambio_gasto_id: g.id,
+      };
+      const ya = porGasto.get(Number(g.id));
+      if (!ya) { insertar.push({ ...fila, origen: "orden_cambio", estado: "previsto" }); continue; }
+      if (ya.estado !== "previsto") continue;
+      const cambia = Object.keys(fila).some(k => {
+        const a2 = ya[k], b2 = fila[k];
+        return typeof b2 === "number" ? Math.abs(n(a2) - b2) > 0.004 : (a2 ?? null) !== (b2 ?? null);
+      });
+      if (cambia) actualizar.push({ id: ya.id, campos: fila });
+    }
+  }
+
+  // Lo previsto de una partida o de un gasto que ya no cuenta —se deshizo la
+  // aprobación, se anuló la orden, se le quitó el costo, se borró el gasto— se
+  // va. Lo confirmado se queda.
   const borrar = existentes
-    .filter(b => b.orden_cambio_id && b.estado === "previsto" && !queridas.has(Number(b.orden_cambio_linea_id)))
+    .filter(b => b.orden_cambio_id && b.estado === "previsto"
+      && (b.orden_cambio_gasto_id
+        ? !queridosGastos.has(Number(b.orden_cambio_gasto_id))
+        : !queridas.has(Number(b.orden_cambio_linea_id))))
     .map(b => b.id);
 
   return { insertar, actualizar, borrar };
@@ -263,7 +303,7 @@ export function planDeBeneficios({ obraId, ordenes = [], lineasPorOrden = {}, ru
  * confirmado) y el de la cotización si todavía no. Se dicen los dos para que
  * se vea cuánto de la liquidación es todavía una promesa.
  */
-export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, beneficios = [], cotizaciones = {}, subtotalesDe, codigoDe }) {
+export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, beneficios = [], cotizaciones = {}, gastosPorOrden = {}, subtotalesDe, codigoDe }) {
   const confirmados = new Map(beneficios
     .filter(b => b.orden_cambio_linea_id && b.estado !== "previsto")
     .map(b => [Number(b.orden_cambio_linea_id), b]));
@@ -287,6 +327,11 @@ export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, benefici
         if (b) { costoVigente += n(b.real); costoReal += n(b.real); comprados += 1; }
         else costoVigente += costoDeLinea(l);
       }
+      // Lo que cuesta la orden y no es una partida: el flete, la mano de obra
+      // propia, el alquiler. Sin esto el margen de la liquidación es el de las
+      // compras, no el de la orden.
+      const sueltos = (gastosPorOrden[o.id] || []).reduce((t, g) => t + n(g.monto), 0);
+      costoVigente += sueltos;
       const margen = m.cobrado - costoVigente;
       return {
         id: o.id,
@@ -297,7 +342,8 @@ export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, benefici
         aprobada: o.estado === "aprobada",
         total: c2(subtotalesDe(lineas).total),
         cobradoConCosto: m.cobrado,
-        costoCotizado: m.costo,
+        costoCotizado: c2(m.costo + sueltos),
+        gastosSueltos: c2(sueltos),
         costoReal: comprados ? c2(costoReal) : null,
         costo: c2(costoVigente),
         margen: c2(margen),

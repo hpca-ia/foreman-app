@@ -153,3 +153,36 @@ test("margen cero deja el precio al costo", async () => {
   const r = conMargen([{ tipo: "aumenta", cantidad: 1, costo_unitario: 80, precio_unitario: 120 }], 0);
   assert.equal(r[0].precio_unitario, 80);
 });
+
+test("un gasto que no es partida baja el margen de la liquidación", () => {
+  const l = liquidacionInterna({
+    ordenes: [orden], lineasPorOrden: lineas, cotizaciones, subtotalesDe, codigoDe, beneficios: [],
+    gastosPorOrden: { 5: [{ id: 1, descripcion: "Flete", monto: 50 }] },
+  });
+  const f = l.filas[0];
+  assert.equal(f.gastosSueltos, 50);
+  assert.equal(f.costo, 150);        // 100 de la partida + 50 del flete
+  assert.equal(f.margen, -30);       // 120 cobrados con costo contra 150
+});
+
+test("el gasto entra a beneficios sin precio: es costo que no se le cobró a nadie", async () => {
+  const p = planDeBeneficios({
+    obraId: 1, ordenes: [orden], lineasPorOrden: lineas, rubros, cotizaciones, existentes: [], codigoDe,
+    gastosPorOrden: { 5: [{ id: 9, descripcion: "Flete del generador", monto: 50, proveedor: "Transportes X" }] },
+  });
+  const fila = p.insertar.find(x => x.orden_cambio_gasto_id === 9);
+  assert.ok(fila);
+  assert.equal(fila.presupuestado, 0);
+  assert.equal(fila.real, 50);
+  assert.equal(fila.obra_rubro_id, null);
+  assert.equal(fila.estado, "previsto");
+});
+
+test("si se borra el gasto, su beneficio previsto se va", () => {
+  const p = planDeBeneficios({
+    obraId: 1, ordenes: [orden], lineasPorOrden: lineas, rubros, cotizaciones, codigoDe,
+    gastosPorOrden: {},
+    existentes: [{ id: 77, orden_cambio_id: 5, orden_cambio_gasto_id: 9, estado: "previsto" }],
+  });
+  assert.ok(p.borrar.includes(77));
+});

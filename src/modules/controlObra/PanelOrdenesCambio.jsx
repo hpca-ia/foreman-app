@@ -16,10 +16,11 @@ import {
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
 import {
   leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
-  enlacesDeCotizaciones, sincronizarBeneficios, guardarIva,
+  enlacesDeCotizaciones, sincronizarBeneficios, guardarIva, gastosDe, guardarGasto, borrarGasto,
 } from "./cotizacionesOrden";
 import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos } from "./cuentaOrdenCambio.js";
 import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
+import { costoDeLaOrden, gastoLimpio, queFaltaSaber } from "./costoDeLaOrden.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
 
 // Las órdenes de cambio de una obra.
@@ -69,6 +70,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [aprobadores, setAprobadores] = useState({});
   // Las cotizaciones de cada orden, por orden_id, y sus enlaces para abrirlas.
   const [cotizaciones, setCotizaciones] = useState({});
+  // Lo que cuesta la orden y no es una partida: fletes, mano de obra, alquileres.
+  const [gastos, setGastos] = useState({});
+  const [nuevoGasto, setNuevoGasto] = useState(null);
   const [enlacesCot, setEnlacesCot] = useState({});
   // Los beneficios que dejaron las órdenes: la liquidación interna los usa
   // para saber qué partidas ya se compraron y a cuánto.
@@ -117,6 +121,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     // desde acá, las que aprueba el cliente no llegarían nunca a la obra.
     const c = await cotizacionesDe((r.ordenes || []).map(o => o.id));
     setCotizaciones(c.porOrden);
+    const g = await gastosDe((r.ordenes || []).map(o => o.id));
+    setGastos(g.porOrden);
     setEnlacesCot(await enlacesDeCotizaciones(Object.values(c.porOrden).flat()));
     const sync = await sincronizarBeneficios(obra.id);
     setAvisoCosto(c.error || sync.error || "");
@@ -453,6 +459,25 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 {totalVigente < 0 ? "−" : "+"}${fmt(Math.abs(totalVigente))}
               </div>
             </div>
+            {/* LO QUE DEJAN, A LA VISTA. Era el número que había que ir a
+                buscar detrás de un botón que decía "Liquidación interna", y es
+                el que contesta la única pregunta que uno se hace mirando esta
+                pantalla: de todo esto, cuánto queda. */}
+            {(() => {
+              const liq = liquidacionInterna({ ordenes, lineasPorOrden: lineas, beneficios: beneficiosOC,
+                cotizaciones, gastosPorOrden: gastos, subtotalesDe: subtotales, codigoDe });
+              if (!liq.total.cobradoConCosto && !liq.enCamino.cobradoConCosto) return null;
+              const m = liq.total.margen;
+              return (
+                <div title="Lo cobrado menos lo que cuesta, en las órdenes aprobadas. Interno: no sale al cliente.">
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>DEJAN</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: m < 0 ? colors.danger : colors.success }}>
+                    {m < 0 ? "−" : ""}${fmt(Math.abs(m))}
+                    {liq.total.pct != null && <span style={{ fontSize: 11, fontWeight: 600 }}> · {liq.total.pct}%</span>}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
           <Button variant="primary" size="sm" disabled={consolidando}
             onClick={async () => {
@@ -472,7 +497,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               él: el consolidado lo firma el cliente, y lo que cuesta cada
               orden es de la oficina. */}
           <Button variant={verLiquidacion ? "primary" : "outline"} size="sm" onClick={() => setVerLiquidacion(v => !v)}>
-            Liquidación interna
+            {verLiquidacion ? "Ocultar" : "Cuánto deja cada orden"}
           </Button>
         </div>
       )}
@@ -560,7 +585,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       )}
 
       {verLiquidacion && (() => {
-        const liq = liquidacionInterna({ ordenes, lineasPorOrden: lineas, beneficios: beneficiosOC, cotizaciones, subtotalesDe: subtotales, codigoDe });
+        const liq = liquidacionInterna({ ordenes, lineasPorOrden: lineas, beneficios: beneficiosOC,
+          cotizaciones, gastosPorOrden: gastos, subtotalesDe: subtotales, codigoDe });
         const plata = v => `${Number(v) < 0 ? "−" : ""}$${fmt(Math.abs(Number(v) || 0))}`;
         const th = { textAlign: "right", padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700 };
         const td = { textAlign: "right", padding: "5px 6px", whiteSpace: "nowrap" };
@@ -1385,25 +1411,134 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
                   </span>
                 </div>
+                {/* ── LO QUE DEJA ESTA ORDEN ───────────────────────────────
+                    Cobrado contra costado, en un cuadro y no en un renglón de
+                    texto. Es el número con el que se pone el precio de la
+                    próxima orden, y estaba escrito como una nota al pie.
+
+                    El costo son dos cosas: lo que cuestan las partidas, que
+                    sale de la proforma, y los gastos que no son partidas —el
+                    flete, la mano de obra propia, el andamio—, que antes no
+                    tenían dónde ir y hacían que el margen se viera más alto
+                    que el de verdad. */}
                 {(() => {
-                  const m = margenDeOrden(suyas);
-                  if (!m.conCosto && !m.sinCosto) return null;
+                  const suyosGastos = gastos[o.id] || [];
+                  const cuenta = costoDeLaOrden({ lineas: suyas, gastos: suyosGastos });
+                  if (!cuenta.cobrado && !cuenta.costo && !suyas.length) return null;
+                  const falta = queFaltaSaber(cuenta);
+                  const linea = (k, v, extra = {}) => (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0", ...extra }}>
+                      <span>{k}</span><span style={{ whiteSpace: "nowrap" }}>{v}</span>
+                    </div>
+                  );
                   return (
-                    <div style={{ fontSize: 11.5, color: colors.inkSoft, marginTop: -4, marginBottom: 8 }}>
-                      {m.conCosto ? (
-                        <>Margen interno: <strong style={{ color: m.margen < 0 ? colors.danger : colors.success }}>
-                          {m.margen < 0 ? "−" : ""}${fmt(Math.abs(m.margen))}{m.pct != null ? ` · ${m.pct}%` : ""}
-                        </strong> sobre ${fmt(m.cobrado)} cobrados, contra ${fmt(m.costo)} de costo.</>
-                      ) : "Margen interno: no se sabe."}
-                      {m.sinCosto > 0 && <span style={{ color: colors.warning }}> {m.sinCosto} adición{m.sinCosto === 1 ? "" : "es"} sin costo.</span>}
+                    <div style={{ background: colors.bg, border: `1px solid ${colors.border}`,
+                      borderRadius: colors.radiusSm, padding: "9px 11px", marginBottom: 9 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
+                        LO QUE DEJA ESTA ORDEN · INTERNO, NO SALE AL CLIENTE
+                      </div>
+                      <div style={{ fontSize: 12, color: colors.ink, maxWidth: 420 }}>
+                        {linea("Se le cobra al cliente", `$${fmt(cuenta.cobrado)}`)}
+                        {linea("Cuesta", `$${fmt(cuenta.costo)}`)}
+                        <div style={{ fontSize: 11, color: colors.muted, paddingLeft: 10 }}>
+                          {linea(`· las partidas${cuenta.sinCosto ? ` (${cuenta.conCosto} de ${cuenta.conCosto + cuenta.sinCosto})` : ""}`, `$${fmt(cuenta.dePartidas)}`)}
+                          {linea(`· otros gastos${cuenta.cuantosGastos ? ` (${cuenta.cuantosGastos})` : ""}`, `$${fmt(cuenta.sueltos)}`)}
+                        </div>
+                        {linea("Margen",
+                          <strong style={{ color: cuenta.margen < 0 ? colors.danger : colors.success }}>
+                            {cuenta.margen < 0 ? "−" : ""}${fmt(Math.abs(cuenta.margen))}{cuenta.pct != null ? ` · ${cuenta.pct}%` : ""}
+                          </strong>,
+                          { borderTop: `1px solid ${colors.border}`, marginTop: 4, paddingTop: 5, fontWeight: 700 })}
+                      </div>
+                      {falta && (
+                        <div style={{ fontSize: 11, color: cuenta.sinCosto ? colors.warning : colors.muted, marginTop: 5, lineHeight: 1.45 }}>
+                          {falta}
+                        </div>
+                      )}
+
+                      {/* LOS GASTOS, UNO POR UNO. */}
+                      {suyosGastos.length > 0 && (
+                        <div style={{ marginTop: 7 }}>
+                          {suyosGastos.map(g => (
+                            <div key={g.id} style={{ display: "flex", gap: 7, alignItems: "center",
+                              padding: "3px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 11.5 }}>
+                              <span style={{ flex: 1, minWidth: 0, color: colors.ink }}>
+                                {g.descripcion}
+                                {g.proveedor ? <span style={{ color: colors.muted }}> · {g.proveedor}</span> : null}
+                                {Number(g.iva) > 0 ? <span style={{ color: colors.muted }}> · se le sacó el IVA {fmt(g.iva)}%</span> : null}
+                              </span>
+                              {/* COTIZADO Y PAGADO NO SON LO MISMO: una
+                                  liquidación hecha solo de cotizaciones es una
+                                  liquidación de antes de la obra. */}
+                              {puedeEditar ? (
+                                <button onClick={() => hacer(async () => (await guardarGasto(o.id, { id: g.id, estado: g.estado === "real" ? "cotizado" : "real" }))?.error || null)}
+                                  title={g.estado === "real" ? "Ya se pagó. Tocá para volverlo a cotizado." : "Todavía es una cotización. Tocá cuando se pague."}
+                                  style={{ border: "none", borderRadius: 20, padding: "1px 8px", fontSize: 9.5, fontWeight: 700,
+                                    cursor: "pointer", fontFamily: colors.font,
+                                    background: g.estado === "real" ? colors.successSoft : colors.neutralSoft,
+                                    color: g.estado === "real" ? colors.success : colors.muted }}>
+                                  {g.estado === "real" ? "PAGADO" : "COTIZADO"}
+                                </button>
+                              ) : null}
+                              <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>${fmt(g.monto)}</span>
+                              {puedeEditar && (
+                                <button onClick={() => hacer(() => borrarGasto(g.id))}
+                                  style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: 0, display: "flex" }}>
+                                  <Trash2 size={11} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {puedeEditar && (nuevoGasto?.ordenId === o.id ? (
+                        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 80px 62px", gap: 5, marginTop: 7 }}>
+                          <input autoFocus value={nuevoGasto.descripcion} placeholder="Qué se gastó"
+                            onChange={e => setNuevoGasto(g => ({ ...g, descripcion: e.target.value }))}
+                            style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                          <input value={nuevoGasto.proveedor} placeholder="A quién"
+                            onChange={e => setNuevoGasto(g => ({ ...g, proveedor: e.target.value }))}
+                            style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                          <input type="number" step="0.01" value={nuevoGasto.monto} placeholder="Monto"
+                            onChange={e => setNuevoGasto(g => ({ ...g, monto: e.target.value }))}
+                            style={{ ...inputStyle, padding: "6px 8px", fontSize: 12, textAlign: "right" }} />
+                          <input type="number" step="0.5" value={nuevoGasto.iva} placeholder="IVA %"
+                            title="Si el monto que escribiste tiene IVA adentro, poné el porcentaje: se guarda sin IVA, porque la orden cobra sin IVA."
+                            onChange={e => setNuevoGasto(g => ({ ...g, iva: e.target.value }))}
+                            style={{ ...inputStyle, padding: "6px 8px", fontSize: 12, textAlign: "right" }} />
+                          <div style={{ gridColumn: "1 / -1", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                            <Button variant="primary" size="sm" disabled={ocupado || !nuevoGasto.descripcion.trim() || !Number(nuevoGasto.monto)}
+                              onClick={async () => {
+                                const limpio = gastoLimpio(nuevoGasto);
+                                setNuevoGasto(null);
+                                await hacer(async () => (await guardarGasto(o.id, limpio, currentUser))?.error || null);
+                              }}>
+                              Agregar el gasto
+                            </Button>
+                            <Button variant="secondary" size="sm" onClick={() => setNuevoGasto(null)}>Cancelar</Button>
+                            <span style={{ fontSize: 10.5, color: colors.muted }}>
+                              Si el monto tiene IVA adentro, poné el porcentaje: se guarda sin IVA, como el precio.
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={() => setNuevoGasto({ ordenId: o.id, descripcion: "", proveedor: "", monto: "", iva: "" })}
+                          style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 7, padding: "4px 9px",
+                            color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font, marginTop: 7 }}>
+                          + Agregar un gasto (flete, mano de obra, alquiler…)
+                        </button>
+                      ))}
+
                       {/* EL PRECIO SALE DEL COSTO MÁS EL MARGEN, DE UNA VEZ.
-                          Lo que NOVA leyó de la cotización es lo que cuesta;
-                          el precio lo pone la oficina, y casi siempre es el
-                          mismo porcentaje para toda la orden. Renglón por
-                          renglón es donde se cuela la partida cobrada al
-                          costo entre veinte. */}
-                      {editable && m.conCosto > 0 && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 5 }}>
+                          Lo que NOVA leyó de la cotización es lo que cuesta; el
+                          precio lo pone la oficina, y casi siempre es el mismo
+                          porcentaje para toda la orden. Renglón por renglón es
+                          donde se cuela la partida cobrada al costo entre
+                          veinte. */}
+                      {editable && cuenta.conCosto > 0 && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8,
+                          fontSize: 11.5, color: colors.inkSoft }}>
                           <span>Precio = costo +</span>
                           <input type="number" step="1" value={pctMargen[o.id] ?? ""}
                             onChange={e => setPctMargen(v => ({ ...v, [o.id]: e.target.value }))}
@@ -1422,7 +1557,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 7,
                               padding: "3px 9px", fontSize: 11, fontWeight: 600, color: colors.brand,
                               cursor: "pointer", fontFamily: colors.font }}>
-                            Aplicar a las {m.conCosto} con costo
+                            Aplicar a las {cuenta.conCosto} con costo
                           </button>
                         </div>
                       )}
