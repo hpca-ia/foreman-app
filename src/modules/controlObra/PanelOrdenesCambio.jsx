@@ -539,6 +539,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     fontSize: 12.5, fontWeight: 700, color: colors.brand, textAlign: "left" }}>
                   {codigoDe(p.orden)} · {p.orden.titulo || "sin título"}
                 </button>
+                {/* LO QUE YO YA HICE, DICHO PRIMERO.
+                    Uno aprueba desde el correo, en el teléfono, y después abre
+                    FOREMAN y ve la orden en la lista de las que esperan: lo
+                    primero que piensa es que su aprobación no se guardó. Lo que
+                    falta es la firma del otro, y eso es lo que hay que decir. */}
+                {p.firmaron.some(f => String(f.email || "").toLowerCase() === String(currentUser?.email || "").toLowerCase()) && (
+                  <div style={{ fontSize: 11.5, color: colors.success, fontWeight: 600 }}>
+                    Vos ya la aprobaste
+                    {p.faltan.length
+                      ? ` · falta ${p.faltan.map(f => f.nombre || f.email).join(" y ")}`
+                      : p.objetaron.length ? " · pero hay una objeción sin resolver" : ""}
+                  </div>
+                )}
                 <div style={{ fontSize: 11.5, lineHeight: 1.5,
                   color: p.vencida || p.trabada ? colors.danger : colors.muted }}>
                   {comoSeDice(p)}
@@ -1579,6 +1592,32 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
                   CAPÍTULO IV · REVISIÓN Y APROBACIÓN
                 </div>
+                {/* CÓMO VA LA FIRMA, EN UN RENGLÓN.
+                    La lista de abajo lo dice persona por persona, pero la
+                    pregunta que uno se hace al abrir una orden es una sola: ¿ya
+                    está, o falta alguien? Y si uno ya aprobó desde el correo,
+                    verla todavía sin aprobar hace dudar de que se haya
+                    guardado. */}
+                {(() => {
+                  const firman = (aprobadores[o.id] || []).filter(a2 => a2.aprueba !== false);
+                  if (!firman.length || o.estado === "aprobada") return null;
+                  const yaEstan = firman.filter(a2 => a2.aprobado_at);
+                  const faltan = firman.filter(a2 => !a2.aprobado_at && !a2.observacion);
+                  const objetaron = firman.filter(a2 => !a2.aprobado_at && a2.observacion);
+                  const mio = yaEstan.some(a2 => String(a2.email || "").toLowerCase() === String(currentUser?.email || "").toLowerCase());
+                  if (!yaEstan.length && !objetaron.length) return null;
+                  return (
+                    <div style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5,
+                      color: objetaron.length ? colors.danger : colors.success }}>
+                      {mio ? <strong>Vos ya la aprobaste. </strong> : null}
+                      Firmaron {yaEstan.length} de {firman.length}
+                      {faltan.length ? ` · falta ${faltan.map(a2 => a2.nombre || a2.email).join(" y ")}` : ""}
+                      {objetaron.length
+                        ? ` · ${objetaron.map(a2 => a2.nombre || a2.email).join(" y ")} objetó: la orden no entra al presupuesto hasta resolverlo`
+                        : faltan.length ? "" : " · entra sola al presupuesto"}
+                    </div>
+                  );
+                })()}
                 {/* QUIÉN FIRMA, CON SU CORREO: ES LA MISMA LISTA QUE SE MANDA.
                     Antes eran tres nombres sueltos que alguien tecleaba después
                     de que el otro dijera que sí por teléfono. Eso no es una

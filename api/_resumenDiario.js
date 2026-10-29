@@ -55,12 +55,13 @@ async function ordenesSinFirmar() {
   return ordenes.map(o => {
     const suyas = (firmas || []).filter(f => f.orden_id === o.id);
     const faltan = suyas.filter(f => !f.aprobado_at && !f.observacion);
+    const firmaron = suyas.filter(f => f.aprobado_at);
     const objetaron = suyas.filter(f => !f.aprobado_at && f.observacion);
     const monto = (lineas || []).filter(l => l.orden_id === o.id)
       .reduce((t, l) => t + (l.tipo === "quita" ? -1 : 1) * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0), 0);
     const envio = suyas.map(f => String(f.envio_at || "").slice(0, 10)).filter(Boolean).sort()[0];
     return {
-      o, monto, faltan, objetaron,
+      o, monto, faltan, objetaron, firmaron,
       obra: (obras || []).find(x => x.id === o.obra_id)?.nombre || "",
       dias: dias(envio || o.enviada_at || o.fecha),
       vencida: !!(o.fecha_limite_aprobacion && String(o.fecha_limite_aprobacion).slice(0, 10) < hoy),
@@ -72,13 +73,18 @@ async function ordenesSinFirmar() {
 
 const plata = v => `$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const bloqueDeOrdenes = lista => (lista.length ? `
+const bloqueDeOrdenes = (lista, correo = "") => (lista.length ? `
   <div style="font-size:11px;font-weight:700;color:#B91C1C;letter-spacing:.4px;margin:20px 0 6px">
     ÓRDENES DE CAMBIO SIN FIRMAR · ${lista.length} · ${plata(lista.reduce((t, p) => t + p.monto, 0))} esperando
   </div>
   ${lista.slice(0, 8).map(p => `<div style="font-size:13px;color:#374151;padding:3px 0">
     ${esc(p.o.codigo || `OC-${String(p.o.numero).padStart(2, "0")}`)} ${esc(p.o.titulo || "")}
     <span style="color:#9CA3AF">· ${esc(p.obra)} · ${plata(p.monto)}</span>
+    ${/* LO QUE YO YA FIRMÉ, DICHO. Uno aprueba desde el correo y al otro día
+          ve la orden en la lista de las que esperan: lo primero que piensa es
+          que su aprobación no se guardó. */ ""}
+    ${correo && p.firmaron.some(f => String(f.email || "").toLowerCase() === correo)
+      ? '<span style="color:#15803D">· vos ya la aprobaste</span>' : ""}
     <span style="color:${p.vencida ? "#B91C1C" : "#B45309"}">
       · ${p.objetaron.length
         ? `objetada por ${esc(p.objetaron.map(f => f.nombre || f.email).join(", "))}`
@@ -124,7 +130,7 @@ function cuerpoDelCorreo(s) {
       </table>` : "",
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
     // Las órdenes que el cliente no firma, a quien puede levantar el teléfono.
-    s.esAdmin ? bloqueDeOrdenes(s.ordenes || []) : "",
+    s.esAdmin ? bloqueDeOrdenes(s.ordenes || [], String(s.usuario?.email || "").trim().toLowerCase()) : "",
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
       && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length
