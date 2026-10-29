@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw, Camera, Download, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Mail, Check, X, FileText, RotateCcw, Camera, Download, ChevronDown, ChevronRight, Clock, Send } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -11,6 +11,7 @@ import {
   pedirVisto, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
+  insistirConLaOrden,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
 import {
@@ -18,6 +19,7 @@ import {
   enlacesDeCotizaciones, sincronizarBeneficios,
 } from "./cotizacionesOrden";
 import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen } from "./cuentaOrdenCambio.js";
+import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
 
 // Las órdenes de cambio de una obra.
@@ -76,6 +78,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [leyendoCot, setLeyendoCot] = useState(null);   // { ordenId, paso }
   const [verRenglones, setVerRenglones] = useState(null);
   const [verLiquidacion, setVerLiquidacion] = useState(false);
+  const [insistiendo, setInsistiendo] = useState(null);   // id de la orden a la que se le está insistiendo
+  const [verPendientes, setVerPendientes] = useState(true);
   const cotRef = useRef(null);
   const cotPara = useRef(null);
 
@@ -141,6 +145,14 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const totalVigente = ordenes
     .filter(o => !o.anulada && o.estado === "aprobada")
     .reduce((t, o) => t + subtotales(lineas[o.id] || []).total, 0);
+
+  // Las que esperan una firma, con el monto de sus partidas puesto: la plata
+  // parada es lo que ordena la lista de a quién llamar primero.
+  const porFirmar = pendientes(
+    ordenes.map(o => ({ ...o, monto: subtotales(lineas[o.id] || []).total })),
+    aprobadores,
+  );
+  const esperando = resumenPendientes(porFirmar);
 
   // LOS DE SIEMPRE.
   //
@@ -361,6 +373,81 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           <Button variant={verLiquidacion ? "primary" : "outline"} size="sm" onClick={() => setVerLiquidacion(v => !v)}>
             Liquidación interna
           </Button>
+        </div>
+      )}
+
+      {/* ── LO QUE EL CLIENTE NO FIRMA ──────────────────────────────────────
+          Una orden enviada y sin aprobar es trabajo que no se ejecuta, o peor:
+          trabajo ya ejecutado que nadie se comprometió a pagar. El problema no
+          es que falte la firma: es que no se sabe que falta. El residente la
+          mandó hace tres semanas, el fiscalizador nunca la abrió, y nadie se
+          enteró hasta que hubo que cobrarla.
+
+          Acá está la lista para insistir, con cuántos días lleva cada una y
+          cuánta plata hay parada. Y el botón que insiste, que hasta ahora era
+          un WhatsApp del que no quedaba constancia. */}
+      {porFirmar.length > 0 && (
+        <div style={{ background: colors.surface, border: `1px solid ${esperando.vencidas ? colors.dangerBorder : colors.warningBorder}`,
+          borderLeft: `3px solid ${esperando.vencidas ? colors.danger : colors.warning}`,
+          borderRadius: colors.radiusMd, padding: "10px 12px", margin: "8px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", cursor: "pointer" }}
+            onClick={() => setVerPendientes(v => !v)}>
+            <Clock size={14} color={esperando.vencidas ? colors.danger : colors.warning} />
+            <div style={{ fontSize: 12, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 180 }}>
+              Esperando firma · {esperando.cuantas} {esperando.cuantas === 1 ? "orden" : "órdenes"}
+              <span style={{ fontWeight: 400, color: colors.muted }}>
+                {" · "}${fmt(Math.abs(esperando.monto))} sin aprobar
+                {esperando.dias ? ` · la más vieja hace ${esperando.dias} ${esperando.dias === 1 ? "día" : "días"}` : ""}
+                {esperando.vencidas ? ` · ${esperando.vencidas} con el plazo vencido` : ""}
+              </span>
+            </div>
+            <span style={{ fontSize: 11, color: colors.brand }}>{verPendientes ? "ocultar" : "ver"}</span>
+          </div>
+
+          {verPendientes && porFirmar.map(p => (
+            <div key={p.orden.id} style={{ display: "flex", gap: 9, alignItems: "flex-start",
+              padding: "7px 0", borderTop: `1px solid ${colors.border}`, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <button onClick={() => setAbierta(p.orden.id)}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                    fontSize: 12.5, fontWeight: 700, color: colors.brand, textAlign: "left" }}>
+                  {codigoDe(p.orden)} · {p.orden.titulo || "sin título"}
+                </button>
+                <div style={{ fontSize: 11.5, lineHeight: 1.5,
+                  color: p.vencida || p.trabada ? colors.danger : colors.muted }}>
+                  {comoSeDice(p)}
+                  {p.firmaron.length ? ` · ya firmaron ${p.firmaron.length} de ${p.cuantos}` : ""}
+                  {/* ABIERTO Y SIN CONTESTAR NO ES LO MISMO QUE NO ABIERTO: la
+                      primera es una decisión que no toman, la segunda un correo
+                      que no llegó, y se resuelven distinto. */}
+                  {p.faltan.some(f => f.visto_at) ? " · lo abrió y no contestó" : ""}
+                  {p.faltan.some(f => ["bounced", "complained", "failed"].includes(String(f.envio_estado || "").toLowerCase()))
+                    ? " · el correo rebotó: hay que corregir la dirección" : ""}
+                </div>
+                {p.sinFirmantes && (
+                  <div style={{ fontSize: 11, color: colors.warning, marginTop: 2 }}>
+                    Nadie cargado para firmarla: esto no se le reclama al cliente, se arregla acá.
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap", paddingTop: 2 }}>
+                {p.monto < 0 ? "−" : "+"}${fmt(Math.abs(p.monto))}
+              </div>
+              {puedeEditar && p.seMando && p.faltan.length > 0 && (
+                <Button variant="outline" size="sm" disabled={insistiendo === p.orden.id}
+                  onClick={async () => {
+                    setInsistiendo(p.orden.id); setAviso("");
+                    const r = await insistirConLaOrden(p.orden, p.faltan, currentUser);
+                    setInsistiendo(null);
+                    if (r?.error) { setAviso(`No se pudo insistir: ${r.error}`); return; }
+                    setAviso(`Se le insistió a ${r.insistidoA.join(", ")}. Queda registrado el envío.`);
+                    await cargar();
+                  }}>
+                  <Send size={12} /> {insistiendo === p.orden.id ? "Mandando…" : "Insistir"}
+                </Button>
+              )}
+            </div>
+          ))}
         </div>
       )}
 

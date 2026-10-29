@@ -24,6 +24,75 @@ const bloque = (titulo, color, filas) => (filas.length
 
 
 
+/**
+ * LAS ÓRDENES DE CAMBIO QUE EL CLIENTE NO FIRMA.
+ *
+ * Es plata nuestra parada en la casilla de otro. Una orden enviada y sin
+ * aprobar es trabajo que no se ejecuta —o peor, trabajo ya ejecutado que nadie
+ * se comprometió a pagar— y lo que pasa es que nadie se acuerda de insistir:
+ * el residente la mandó hace tres semanas y ahí quedó.
+ *
+ * Va en el correo de la mañana de quien puede hacer algo al respecto, porque
+ * insistir es la mitad del trabajo de cobrar un adicional. La lista completa,
+ * con el botón para insistir, está en Órdenes de cambio de cada obra.
+ */
+async function ordenesSinFirmar() {
+  const ordenes = await json(await rest(
+    "ordenes_cambio?estado=eq.enviada&anulada=not.is.true&select=id,numero,codigo,titulo,obra_id,enviada_at,fecha,fecha_limite_aprobacion"));
+  if (!ordenes?.length) return [];
+  const ids = ordenes.map(o => o.id).join(",");
+  const [firmas, lineas, obras] = await Promise.all([
+    json(await rest(`orden_cambio_aprobaciones?orden_id=in.(${ids})&select=orden_id,nombre,email,aprobado_at,observacion,envio_at,visto_at`)),
+    json(await rest(`orden_cambio_lineas?orden_id=in.(${ids})&select=orden_id,tipo,cantidad,precio_unitario`)),
+    json(await rest(`obras?id=in.(${[...new Set(ordenes.map(o => o.obra_id).filter(Boolean))].join(",") || 0})&select=id,nombre`)),
+  ]);
+  const hoy = hoyISO();
+  const dias = desde => {
+    const d = String(desde || "").slice(0, 10);
+    if (!d) return 0;
+    return Math.max(0, Math.round((new Date(`${hoy}T12:00:00`) - new Date(`${d}T12:00:00`)) / 86400000));
+  };
+  return ordenes.map(o => {
+    const suyas = (firmas || []).filter(f => f.orden_id === o.id);
+    const faltan = suyas.filter(f => !f.aprobado_at && !f.observacion);
+    const objetaron = suyas.filter(f => !f.aprobado_at && f.observacion);
+    const monto = (lineas || []).filter(l => l.orden_id === o.id)
+      .reduce((t, l) => t + (l.tipo === "quita" ? -1 : 1) * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0), 0);
+    const envio = suyas.map(f => String(f.envio_at || "").slice(0, 10)).filter(Boolean).sort()[0];
+    return {
+      o, monto, faltan, objetaron,
+      obra: (obras || []).find(x => x.id === o.obra_id)?.nombre || "",
+      dias: dias(envio || o.enviada_at || o.fecha),
+      vencida: !!(o.fecha_limite_aprobacion && String(o.fecha_limite_aprobacion).slice(0, 10) < hoy),
+    };
+  })
+    .filter(p => p.faltan.length || p.objetaron.length)
+    .sort((a2, b2) => (a2.vencida === b2.vencida ? b2.dias - a2.dias : a2.vencida ? -1 : 1));
+}
+
+const plata = v => `$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const bloqueDeOrdenes = lista => (lista.length ? `
+  <div style="font-size:11px;font-weight:700;color:#B91C1C;letter-spacing:.4px;margin:20px 0 6px">
+    ÓRDENES DE CAMBIO SIN FIRMAR · ${lista.length} · ${plata(lista.reduce((t, p) => t + p.monto, 0))} esperando
+  </div>
+  ${lista.slice(0, 8).map(p => `<div style="font-size:13px;color:#374151;padding:3px 0">
+    ${esc(p.o.codigo || `OC-${String(p.o.numero).padStart(2, "0")}`)} ${esc(p.o.titulo || "")}
+    <span style="color:#9CA3AF">· ${esc(p.obra)} · ${plata(p.monto)}</span>
+    <span style="color:${p.vencida ? "#B91C1C" : "#B45309"}">
+      · ${p.objetaron.length
+        ? `objetada por ${esc(p.objetaron.map(f => f.nombre || f.email).join(", "))}`
+        : p.vencida
+          ? `plazo vencido, ${p.dias} ${p.dias === 1 ? "día" : "días"} esperando`
+          : `${p.dias} ${p.dias === 1 ? "día" : "días"} esperando a ${esc(p.faltan.map(f => f.nombre || f.email).join(", "))}`}
+    </span>
+  </div>`).join("")}
+  ${lista.length > 8 ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${lista.length - 8} más.</div>` : ""}
+  <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
+    Insistir es la mitad del trabajo de cobrar un adicional: en Órdenes de cambio de cada obra hay un botón que
+    les vuelve a mandar el correo con su enlace.
+  </div>` : "");
+
 function cuerpoDelCorreo(s) {
   return [
     bloque("ATRASADO", "#B91C1C", s.atrasadas),
@@ -54,6 +123,8 @@ function cuerpoDelCorreo(s) {
         </tr>`).join("")}
       </table>` : "",
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
+    // Las órdenes que el cliente no firma, a quien puede levantar el teléfono.
+    s.esAdmin ? bloqueDeOrdenes(s.ordenes || []) : "",
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
       && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length
@@ -109,8 +180,14 @@ export async function mandarResumen(soloPara = null) {
     }
   }
 
+  // Una sola consulta para todos los sobres: la lista es la misma, y pedirla
+  // por persona sería la misma pregunta cinco veces.
+  let ordenes = [];
+  try { ordenes = await ordenesSinFirmar(); } catch { /* el resumen sale igual */ }
+
   const enviados = [];
   for (const s of sobres) {
+    s.ordenes = s.esAdmin ? ordenes : [];
     const r = await enviarCorreo({ to: s.usuario.email, subject: asunto(s), html: tituloDelCorreo(s) });
     if (r.ok) enviados.push(s.usuario.email);
   }

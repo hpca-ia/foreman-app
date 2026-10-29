@@ -84,10 +84,25 @@ async function mandarActa(req, res) {
 
   if (!Array.isArray(para) || !para.length) return res.status(400).json({ error: "No hay a quién mandársela." });
 
+  const r = await enviarActa({ actaId, para, adjunto, conAnexos, prueba });
+  return res.status(r.codigo).json(r.cuerpo);
+}
+
+/**
+ * EL ENVÍO, APARTE DEL PEDIDO.
+ *
+ * Lo mismo lo pide la pantalla del acta —con el PDF recién armado— y la página
+ * donde el director le da el visto desde el correo, que no tiene sesión y saca
+ * el PDF del depósito. Dos caminos, un solo envío: si fueran dos, el día que
+ * cambie el pie del correo o la regla de los anexos solo cambiaría uno.
+ *
+ * @returns { codigo, cuerpo } para contestar tal cual.
+ */
+export async function enviarActa({ actaId, para, adjunto, conAnexos, prueba }) {
   const id = Number(actaId);
-  if (!id) return res.status(400).json({ error: "El acta no es válida." });
+  if (!id) return { codigo: 400, cuerpo: { error: "El acta no es válida." } };
   const acta = await uno("obra_actas", `id=eq.${id}&select=*`);
-  if (!acta) return res.status(404).json({ error: "No encontré el acta." });
+  if (!acta) return { codigo: 404, cuerpo: { error: "No encontré el acta." } };
 
   const [lead, asistentes, temas, compromisos] = await Promise.all([
     uno("leads", `id=eq.${acta.lead_id}&select=nombre`),
@@ -394,12 +409,15 @@ async function mandarActa(req, res) {
   // Todas mal es un error: el acta no se mandó y no puede quedar marcada como
   // enviada. Algunas mal es otra cosa: la mayoría la tiene, y lo que hace
   // falta es saber a quién hay que buscar por otro lado.
-  if (!salieron.length) return res.status(502).json({ error: explicacion || "No se pudo enviar el acta." });
-  return res.status(200).json({
-    enviados: salieron.length, entregados: salieron,
-    estado: envios[0]?.estado || null, id: envios[0]?.id || null,
-    ...(explicacion ? { aviso: explicacion, fallaron: fallaron.map(e => e.dir) } : {}),
-  });
+  if (!salieron.length) return { codigo: 502, cuerpo: { error: explicacion || "No se pudo enviar el acta." } };
+  return {
+    codigo: 200,
+    cuerpo: {
+      enviados: salieron.length, entregados: salieron,
+      estado: envios[0]?.estado || null, id: envios[0]?.id || null,
+      ...(explicacion ? { aviso: explicacion, fallaron: fallaron.map(e => e.dir) } : {}),
+    },
+  };
 }
 
 /**

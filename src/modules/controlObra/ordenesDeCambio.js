@@ -351,6 +351,38 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
   return { ok: true, enviadoA: datos.enviadoA || limpios };
 }
 
+/**
+ * INSISTIR: el mismo correo, otra vez, solo a quien no contestó.
+ *
+ * Una orden enviada y sin firmar es trabajo que no se ejecuta —o peor, trabajo
+ * ya ejecutado que nadie se comprometió a pagar—. Y lo que pasa en la práctica
+ * no es que el cliente se niegue: es que el correo quedó sepultado, o lo abrió
+ * en el auto y se olvidó. Insistir es la mitad del trabajo de cobrar un
+ * adicional, y hasta ahora había que hacerlo por WhatsApp, sin que quedara
+ * registrado que se insistió.
+ *
+ * Va solo a los que faltan: al que ya firmó, un recordatorio de algo que
+ * cumplió le enseña a ignorar los correos de FOREMAN.
+ *
+ * El enlace de cada uno es el mismo de siempre —el servidor no cambia la
+ * llave al volver a mandar—, así que el cliente puede apretar el botón del
+ * correo viejo o el del nuevo y los dos abren.
+ */
+export async function insistirConLaOrden(orden, faltan = [], quien, texto = null) {
+  const firman = (faltan || [])
+    .map(f => ({ id: f.id, nombre: f.nombre, email: f.email, rol: f.rol, empresa: f.empresa }))
+    .filter(f => f.email);
+  if (!firman.length) return { error: "No queda nadie a quien insistirle: ya firmaron todos." };
+
+  const cuerpo = texto || "Les recordamos que esta orden de cambio sigue sin aprobación. "
+    + "Mientras no esté aprobada, este trabajo no se ejecuta y el plazo de obra corre igual. "
+    + "Si algo del detalle no está bien, escribilo en el enlace: queda como constancia y lo resolvemos.";
+
+  const r = await enviarOrden(orden, [], cuerpo, quien, firman);
+  if (r?.error) return r;
+  return { ok: true, insistidoA: firman.map(f => f.nombre || f.email) };
+}
+
 // ── Los soportes gráficos del CAPÍTULO I ─────────────────────────────────
 //
 // La foto de lo que se encontró y el plano con la solución. Van al depósito

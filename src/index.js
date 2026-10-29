@@ -31,8 +31,38 @@ const llaveLibro = new URLSearchParams(window.location.search).get('libro');
 // La orden de cambio, para quien la aprueba. El fiscalizador y el contratante
 // no tienen cuenta, y mientras no firmen el trabajo no se ejecuta.
 const llaveOdc = new URLSearchParams(window.location.search).get('odc');
+// La compra, para quien le da el visto. Acá sí hay cuenta del otro lado —el
+// que aprueba es del equipo— pero está caminando por una obra con el teléfono
+// en la mano: lo que tiene abierto es el correo. Pedirle que entre a FOREMAN
+// para decir un sí que ya estaba decidido es lo que hacía esperar al material.
+const llaveAprobar = new URLSearchParams(window.location.search).get('aprobar');
+// El acta, para quien le da el visto. Se aprueba a las nueve de la noche
+// leyéndola en el teléfono: ahí no hay FOREMAN abierto, hay correo.
+const llaveVisto = new URLSearchParams(window.location.search).get('visto');
 
-if (llaveOdc) {
+if (llaveVisto) {
+  const Visto = React.lazy(() => import('./portal/VistoDelActa'));
+  const devolviendo = new URLSearchParams(window.location.search).get('d') === '1';
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <Visto token={llaveVisto} devolviendo={devolviendo} />
+      </React.Suspense>
+    </React.StrictMode>
+  );
+} else if (llaveAprobar) {
+  const Aprobar = React.lazy(() => import('./portal/AprobarCompra'));
+  // El correo trae dos botones: el de devolver abre la misma página con el
+  // motivo ya a la vista.
+  const devolviendo = new URLSearchParams(window.location.search).get('d') === '1';
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <Aprobar token={llaveAprobar} devolviendo={devolviendo} />
+      </React.Suspense>
+    </React.StrictMode>
+  );
+} else if (llaveOdc) {
   const FirmaOdc = React.lazy(() => import('./portal/AprobarOrdenDeCambio'));
   root.render(
     <React.StrictMode>

@@ -288,10 +288,9 @@ export default async function handler(req, res) {
   if (firman.length) {
     const envios = [];
     for (const quien of firman) {
-      const token = (randomUUID() + randomUUID()).replace(/-/g, "");
       const campos = {
         orden_id: orden.id, nombre: quien.nombre || null, email: quien.email,
-        rol: quien.rol || null, empresa: quien.empresa || null, aprueba: true, token,
+        rol: quien.rol || null, empresa: quien.empresa || null, aprueba: true,
       };
       // SI YA ESTABA EN EL CAPÍTULO IV, ES ESA FILA.
       //
@@ -300,8 +299,19 @@ export default async function handler(req, res) {
       // orden que no se aplica nunca porque le falta una firma que es la misma
       // que ya dio. Se busca por id —el que mandó el panel— o por correo.
       const yaEsta = quien.id
-        ? await uno(`orden_cambio_aprobaciones?id=eq.${quien.id}&orden_id=eq.${orden.id}&select=id&limit=1`)
-        : await uno(`orden_cambio_aprobaciones?orden_id=eq.${orden.id}&email=eq.${encodeURIComponent(quien.email)}&envio_at=is.null&select=id&limit=1`);
+        ? await uno(`orden_cambio_aprobaciones?id=eq.${quien.id}&orden_id=eq.${orden.id}&select=id,token&limit=1`)
+        : await uno(`orden_cambio_aprobaciones?orden_id=eq.${orden.id}&email=eq.${encodeURIComponent(quien.email)}&select=id,token&limit=1`);
+      // LA LLAVE NO CAMBIA AL VOLVER A MANDAR.
+      //
+      // Insistir con una orden es mandarle el mismo correo otra vez a quien no
+      // contestó, y el cliente que recibe el recordatorio tiene los dos en la
+      // casilla: va a apretar cualquiera de los dos, casi siempre el que
+      // encuentra primero. Si el envío nuevo cambiara la llave, el enlace del
+      // correo viejo dejaría de abrir, y para quien lo aprieta eso es "el
+      // sistema de ellos no funciona".
+      //
+      // Solo se crea una llave cuando todavía no hay: la primera vez.
+      campos.token = yaEsta?.token || (randomUUID() + randomUUID()).replace(/-/g, "");
       const fila = (await json(await rest(
         yaEsta ? `orden_cambio_aprobaciones?id=eq.${yaEsta.id}` : "orden_cambio_aprobaciones", {
           method: yaEsta ? "PATCH" : "POST", headers: { Prefer: "return=representation" },

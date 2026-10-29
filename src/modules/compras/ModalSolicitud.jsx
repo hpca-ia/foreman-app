@@ -316,6 +316,11 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     return moverA(s, "pendiente_aprobacion", {
       quien: currentUser, comentario: comentario || null, paraQuien: quien,
       titulo: `Aprobar compra: ${s.descripcion}`,
+      // A QUIÉN LE TOCA DESPUÉS, resuelto acá. El que aprueba lo va a hacer
+      // desde el correo, y el servidor no conoce al equipo: no sabe quién es
+      // el asistente de compras ni el gerente del proyecto. Esa regla vive en
+      // esta pantalla y de acá sale, para que no haya dos.
+      siguientes: { ok: personaDeCompras(), no: s.solicitante_id },
     });
   });
 
@@ -379,6 +384,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     return moverA(viva, aQuienPidio ? "requiere_info" : "pendiente_aprobacion", {
       quien: currentUser, comentario: comentario.trim(),
       paraQuien: aQuienPidio ? viva.solicitante_id : (viva.aprobador_id || gerenteDelProyecto()),
+      siguientes: { ok: personaDeCompras(), no: viva.solicitante_id },
       titulo: aQuienPidio
         ? `Compras pregunta: ${viva.descripcion}`
         : `Revisar el visto: ${viva.descripcion}`,

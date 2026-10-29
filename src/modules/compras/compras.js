@@ -276,7 +276,7 @@ export async function comentarSolicitud(solicitud, { quien, texto }) {
  * le llega el correo y entra a su resumen de la mañana, sin inventar un segundo
  * sistema de alertas que después nadie mira.
  */
-export async function moverA(solicitud, estado, { quien, comentario, paraQuien, titulo, extra = {} }) {
+export async function moverA(solicitud, estado, { quien, comentario, paraQuien, titulo, extra = {}, siguientes = null }) {
   const campos = { estado, ...extra };
   // La fecha del PRIMER pedido de visto: reenviar una devuelta no reinicia la
   // cuenta de cuánto tardó en aprobarse.
@@ -334,13 +334,71 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
   }).select();
 
   // El correo lo manda el servidor, igual que cualquier tarea encargada.
-  if (tarea?.id) {
+  //
+  // Con una excepción: cuando lo que se pide es un VISTO, el correo no puede
+  // ser "Verla en FOREMAN →". El que aprueba está en una obra con el teléfono
+  // en la mano y lo que tiene abierto es el correo; si para decidir hay que
+  // entrar a una aplicación y acordarse de una contraseña, el material espera
+  // dos días por un sí que ya estaba decidido. Ese correo lleva la solicitud
+  // en PDF, las proformas adjuntas y dos botones.
+  if (tarea?.id && estado === "pendiente_aprobacion") {
+    await pedirElVistoPorCorreo(solicitud, tarea, siguientes);
+  } else if (tarea?.id) {
     fetch("/api/aviso?de=tarea", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tareaId: tarea.id }),
     }).catch(() => {});
   }
   return { ok: true };
+}
+
+/**
+ * El pedido de visto, por correo, con el documento adjunto.
+ *
+ * El PDF se arma ACÁ, en el navegador, porque es donde está la librería; sale
+ * en base64 y viaja con el pedido. Las proformas las baja el servidor del
+ * depósito, que es donde viven.
+ *
+ * A QUIÉN LE TOCA DESPUÉS VIAJA RESUELTO. Al aprobar le toca a compras, al
+ * devolver a quien la pidió, y esa regla la conoce la pantalla de la solicitud
+ * —sabe quién es el asistente de compras y quién el gerente del proyecto—. Si
+ * el servidor la volviera a decidir serían dos verdades que se separan el día
+ * que cambie el equipo.
+ *
+ * Y si algo de esto falla, la solicitud ya se movió: la tarea está en el
+ * tablero de quien tiene que aprobar y el correo se puede volver a mandar. Un
+ * correo que no sale no puede trabar una compra.
+ */
+async function pedirElVistoPorCorreo(solicitud, tarea, siguientes) {
+  let adjunto = null;
+  try {
+    const [{ pdfSolicitud }, lead, historial, adjuntos] = await Promise.all([
+      import("./pdfSolicitud"),
+      solicitud.lead_id
+        ? supabase.from("leads").select("nombre").eq("id", solicitud.lead_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      historialDe(solicitud.id),
+      adjuntosDe(solicitud.id),
+    ]);
+    adjunto = await pdfSolicitud({
+      solicitud, obra: lead?.data?.nombre || null,
+      pidio: solicitud.solicitante_nombre, historial, adjuntos,
+    }, "base64");
+  } catch { /* sin PDF el correo sale igual: el resumen va en el cuerpo */ }
+
+  try {
+    const r = await fetch("/api/aviso?de=aprobar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tareaId: tarea.id, adjunto,
+        okPara: siguientes?.ok ?? null, noPara: siguientes?.no ?? solicitud.solicitante_id ?? null,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    return { ok: !d?.error, error: d?.error || null };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // ── Los papeles de la solicitud ──────────────────────────────────────────

@@ -10,6 +10,7 @@ import { actasDe, contenidoDe, abrirActa, guardarActa, borrarActa, guardarFila, 
   correosDe, ESTADOS, ESTADO_COMPROMISO, SIN_106, subirAdjunto,
   conformidadDe, llaveDeAsistente, enlaceDeFirma } from "./actas";
 import { pdfActa } from "./pdfActa";
+import { pedirElVisto } from "./pedirVisto";
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
 import { crearTareas, paraTarea, estadoDeTareas, yaSeHizo } from "./aTareas";
@@ -239,8 +240,24 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               porque alguien se acuerda de avisarle por teléfono. */}
           {sePuede && !puedeEnviar && abierta.estado === "borrador" && (
             <Button variant="primary" size="sm" disabled={ocupado} onClick={async () => {
-              await tocarActa({ estado: "lista" });
-              setAviso("Pedido el visto. El director la revisa y la envía.");
+              if (!await tocarActa({ estado: "lista" })) return;
+              // Y SE LE AVISA, QUE ERA LO QUE FALTABA. El botón dejaba el acta
+              // "lista" y nadie se enteraba: el director lo sabía si alguien se
+              // acordaba de escribirle. Ahora le llega el acta en PDF y la
+              // aprueba desde el correo, en el teléfono.
+              setOcupado(true);
+              const r = await pedirElVisto({ acta: abierta, obra: lead?.nombre, cont, enlaces });
+              setOcupado(false);
+              if (!r.ok) {
+                setAviso("");
+                setError(`El acta quedó lista, pero el aviso no salió: ${r.error}. `
+                  + "Avisale vos, o volvé a apretar el botón.");
+                return;
+              }
+              setError("");
+              setAviso(`Pedido el visto a ${r.enviadoA.join(", ") || "quien la aprueba"}. `
+                + "Le llegó el acta en PDF y la puede aprobar desde el correo."
+                + (r.sinPdf ? " El PDF no entró en el correo por su tamaño: queda guardado y sale con el acta." : ""));
             }}><Check size={13} /> Pedir el visto</Button>
           )}
           {sePuede && !puedeEnviar && abierta.estado === "lista" && (
@@ -248,6 +265,21 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               await tocarActa({ estado: "borrador" });
               setAviso("Volvió a borrador: se puede seguir escribiendo.");
             }}>Seguir escribiéndola</Button>
+          )}
+          {/* VOLVER A PEDIRLO. Un acta que quedó "lista" espera a una persona,
+              y esa persona puede no haber visto el correo —o puede no haber
+              existido el correo, porque antes pedir el visto no avisaba a
+              nadie—. Sin este botón el acta se queda esperando para siempre y
+              la única salida es devolverla a borrador y volver a empezar. */}
+          {sePuede && !puedeEnviar && abierta.estado === "lista" && (
+            <Button variant="primary" size="sm" disabled={ocupado} onClick={async () => {
+              setOcupado(true);
+              const r = await pedirElVisto({ acta: abierta, obra: lead?.nombre, cont, enlaces });
+              setOcupado(false);
+              if (!r.ok) { setError(`No salió el aviso: ${r.error}`); return; }
+              setError("");
+              setAviso(`Se le volvió a pedir el visto a ${r.enviadoA.join(", ") || "quien la aprueba"}.`);
+            }}><Send size={13} /> Volver a pedir el visto</Button>
           )}
           {sePuede && puedeEnviar && (abierta.estado === "borrador" || abierta.estado === "lista") && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
@@ -296,6 +328,21 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
         </div>
 
         {aviso && <div style={{ fontSize: 12, color: colors.brand, marginBottom: 10, whiteSpace: "pre-line" }}>{aviso}</div>}
+
+        {/* LO QUE HAY QUE CORREGIR, A LA VISTA.
+            Si el acta volvió del visto, el motivo llegó por correo a quien la
+            escribió — y un correo se lee una vez. Acá queda, en la pantalla
+            donde se corrige, hasta que se vuelva a pedir el visto. */}
+        {abierta.visto_nota && abierta.estado !== "enviada" && (
+          <div style={{ ...caja, borderColor: colors.warning, background: colors.warningSoft, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: colors.warning, letterSpacing: 0.3, marginBottom: 4 }}>
+              VOLVIÓ DEL VISTO — HAY QUE CORREGIR ESTO
+            </div>
+            <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55, whiteSpace: "pre-line" }}>
+              {abierta.visto_nota}
+            </div>
+          </div>
+        )}
 
         {revision && (
           <div style={{ ...caja, borderColor: colors.brand }}>
@@ -698,8 +745,17 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                 Decía "7 de 7" con las siete filas en blanco: contaba renglones
                 de formulario, no personas. Alguien lee ese número, ve que los
                 campos están vacíos y no sabe cuál de las dos cosas creer. */}
+            {/* DOS NÚMEROS, PORQUE SON DOS COSAS.
+                Quién vino es lo que el acta prueba; a quién se le manda es otra
+                decisión —al que faltó también se le manda, y a veces a alguien
+                que no estuvo en la reunión—. Con un solo número ("5 de 7") no
+                se sabe a cuántos les va a llegar, que es justo lo que uno mira
+                antes de apretar Enviar. */}
             <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
-              Asistentes · {conNombre.filter(a => a.asistio).length} de {conNombre.length}
+              Asistentes · {conNombre.filter(a => a.asistio).length} de {conNombre.length} vinieron
+              <span style={{ fontWeight: 400, color: colors.muted }}>
+                {" · "}{conNombre.filter(a => a.recibe && String(a.email || "").trim()).length} reciben el acta
+              </span>
             </div>
             {editable && convocados.length > 0 && (
               /* TRAERLOS A ESTA ACTA, no solo a las que vengan.
@@ -740,9 +796,21 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               nada. Peor, no avisa — la pantalla se va como si todo estuviera
               bien. Un formulario que se llena tiene que tener un botón que
               diga "Guardar", y el botón tiene que decir si falta algo. */}
+          {/* LAS DOS CASILLAS, DICHAS. Eran dos cuadraditos sin rótulo —uno al
+              principio de la fila y otro al final— y nadie puede adivinar que
+              el primero es "vino a la reunión" y el segundo "le llega el acta".
+              Son las dos decisiones de este bloque y son independientes. */}
+          {cont.asistentes.length > 0 && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 9.5,
+              fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+              <span style={{ width: 13, textAlign: "center" }}>¿VINO?</span>
+              <span style={{ flex: 1, paddingLeft: 24 }}>QUIÉN</span>
+              <span>LE LLEGA EL ACTA</span>
+            </div>
+          )}
           {cont.asistentes.map(a => (
             <div key={a.id} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
-              <input type="checkbox" checked={!!a.asistio} disabled={!sePuede} title="¿Vino?"
+              <input type="checkbox" checked={!!a.asistio} disabled={!sePuede} title="¿Vino a la reunión?"
                 onChange={e => cambiarAsistente(a.id, { asistio: e.target.checked })} />
               <input value={a.nombre || ""} disabled={!sePuede} placeholder="Nombre"
                 onChange={e => cambiarAsistente(a.id, { nombre: e.target.value })}
@@ -765,10 +833,14 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               <input value={a.email || ""} disabled={!sePuede} placeholder="correo@…" type="email"
                 onChange={e => cambiarAsistente(a.id, { email: e.target.value })}
                 style={{ ...inputStyle, flex: "1 1 150px", minWidth: 120, fontSize: 12, padding: "5px 8px", height: 28 }} />
-              <label title="Recibe el acta por correo" style={{ fontSize: 10.5, color: colors.muted, display: "flex", gap: 3, alignItems: "center" }}>
+              {/* MARCADO Y SIN CORREO NO ES QUE LE LLEGA: es que no le llega y
+                  nadie se entera. Lo dice la casilla, en el momento. */}
+              <label title={String(a.email || "").trim() ? "Le llega el acta por correo" : "Falta el correo: marcado así, no le va a llegar"}
+                style={{ fontSize: 10.5, display: "flex", gap: 3, alignItems: "center",
+                  color: a.recibe && !String(a.email || "").trim() ? colors.warning : colors.muted }}>
                 <input type="checkbox" checked={!!a.recibe} disabled={!sePuede}
                   onChange={e => cambiarAsistente(a.id, { recibe: e.target.checked })} />
-                recibe
+                {a.recibe && !String(a.email || "").trim() ? "falta el correo" : "le llega"}
               </label>
               {/* QUE ESTA PERSONA PASE A LOS DE SIEMPRE.
                   En una reunión entra gente que viene una vez —un proveedor
@@ -810,6 +882,18 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               <Button variant={cont.asistentes.length ? "secondary" : "primary"} size="sm"
                 onClick={() => agregar("acta_asistentes", { nombre: "", asistio: true, recibe: true }, "asistentes")}>
                 <Plus size={12} /> Agregar asistente
+              </Button>
+              {/* ALGUIEN DE AFUERA QUE NO VINO Y TIENE QUE SABER.
+                  El gerente del cliente que no fue a la reunión, el proyectista
+                  que decide sobre lo que se habló, el abogado. A todos ellos se
+                  les manda el acta igual, y hasta ahora había que agregarlos
+                  como asistentes y acordarse de destildar "¿vino?" — con lo que
+                  el acta decía que estuvieron en una reunión a la que no fueron.
+                  Eso no es un detalle: el acta es la prueba de quién estuvo. */}
+              <Button variant="secondary" size="sm"
+                title="Entra a la lista para recibir el acta, pero el acta no va a decir que asistió"
+                onClick={() => agregar("acta_asistentes", { nombre: "", asistio: false, recibe: true }, "asistentes")}>
+                <Plus size={12} /> Agregar a alguien que no vino
               </Button>
               <Button variant="primary" size="sm" disabled={ocupado || !sinGuardar.size} onClick={guardarAsistentes}>
                 {ocupado ? "Guardando…" : sinGuardar.size ? `Guardar ${sinGuardar.size === 1 ? "el cambio" : `los ${sinGuardar.size} cambios`}` : "Guardado"}
