@@ -1,4 +1,5 @@
 import { cargarPDF } from "../../lib/exportar";
+import { encajar } from "../../lib/encajar";
 import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
@@ -174,18 +175,21 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     const anchoFoto = (ancho - M * 2 - 14) / 2;
     for (let i = 0; i < conFoto.length; i += 2) {
       const fila = conFoto.slice(i, i + 2);
-      const altos = fila.map(({ img }) => Math.min((anchoFoto * img.height) / img.width, 150));
+      // ENTERA Y SIN DEFORMAR: el ancho de la columna con el alto recortado al
+      // tope aplastaba toda foto vertical, que es como se saca casi toda foto
+      // de obra. Se recortan los dos lados en la misma proporción.
+      const cajas = fila.map(({ img }) => encajar(img, { ancho: anchoFoto, alto: 150 }));
       const pies = fila.map(({ f }) => (f.descripcion
         ? doc.splitTextToSize(seguro(f.descripcion), anchoFoto) : []));
       const altoPie = Math.max(0, ...pies.map(l => l.length * 9));
-      const necesita = Math.max(...altos) + altoPie + 16;
+      const necesita = Math.max(...cajas.map(c2 => c2.h)) + altoPie + 16;
       if (y + necesita > alto - 50) { doc.addPage(); y = 44; }
       fila.forEach(({ img }, k) => {
         const x = M + k * (anchoFoto + 14);
-        doc.addImage(img.dataUrl, "JPEG", x, y, anchoFoto, altos[k]);
+        doc.addImage(img.dataUrl, "JPEG", x + cajas[k].dx, y, cajas[k].w, cajas[k].h);
         if (pies[k].length) {
           doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-          doc.text(pies[k], x, y + altos[k] + 9);
+          doc.text(pies[k], x, y + cajas[k].h + 9);
         }
       });
       y += necesita;

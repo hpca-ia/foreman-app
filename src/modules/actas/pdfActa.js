@@ -2,6 +2,7 @@ import { cargarPDF } from "../../lib/exportar";
 import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
+import { encajar } from "../../lib/encajar";
 import { logoEmpresa } from "../../lib/marca";
 
 // El acta en PDF: el que se imprime, se firma y se archiva.
@@ -211,18 +212,22 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     const anchoFoto = (ANCHO - M * 2 - 6) / 2;
     for (let i = 0; i < conFoto.length; i += 2) {
       const fila = conFoto.slice(i, i + 2);
-      const altos = fila.map(({ img }) => Math.min((anchoFoto * img.height) / img.width, 70));
+      // CADA FOTO ENTERA Y SIN DEFORMAR. Antes se le daba el ancho de la
+      // columna y el alto recortado al tope: una foto vertical —que es como se
+      // saca casi toda foto de obra— salía gorda y baja. `encajar` recorta los
+      // dos lados en la misma proporción y la centra en su columna.
+      const cajas = fila.map(({ img }) => encajar(img, { ancho: anchoFoto, alto: 70 }));
       const pies = fila.map(({ f }) => (f.descripcion
         ? doc.splitTextToSize(String(f.descripcion), anchoFoto) : []));
       const altoPie = Math.max(0, ...pies.map(l => l.length * 3.6));
-      const necesita = Math.max(...altos) + altoPie + 7;
+      const necesita = Math.max(...cajas.map(c => c.h)) + altoPie + 7;
       if (y + necesita > ALTO - 24) { doc.addPage(); y = 18; }
       fila.forEach(({ img }, k) => {
         const x = M + k * (anchoFoto + 6);
-        doc.addImage(img.dataUrl, "JPEG", x, y, anchoFoto, altos[k]);
+        doc.addImage(img.dataUrl, "JPEG", x + cajas[k].dx, y, cajas[k].w, cajas[k].h);
         if (pies[k].length) {
           doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-          doc.text(pies[k], x, y + altos[k] + 3.5);
+          doc.text(pies[k], x, y + cajas[k].h + 3.5);
         }
       });
       y += necesita;
