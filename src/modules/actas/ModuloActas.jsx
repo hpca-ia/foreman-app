@@ -106,12 +106,39 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
   // escrito no falla: cierra la puerta en silencio.
   const puedeEnviar = puede ? puede("actas.aprobar") : true;
 
+  /**
+   * SI SE TOCA DESPUÉS DEL VISTO, EL VISTO SE CAE.
+   *
+   * El visto se da sobre un texto: el director lee el acta —ahora en el PDF
+   * que le llega al teléfono— y dice que eso puede salir con el nombre de la
+   * empresa. Si después alguien corrige un tema, agrega un compromiso o cambia
+   * quién vino, lo que saldría no es lo que él aprobó, y el visto estaría
+   * respaldando un documento que nunca leyó.
+   *
+   * No hace falta pedirle permiso a nadie para corregir: el acta se sigue
+   * escribiendo como siempre. Lo que pasa es que vuelve a quedar "lista para
+   * revisar" y hay que volver a pedir el visto, que es un botón.
+   *
+   * Un acta ENVIADA no entra acá: esa está trabada y no se edita.
+   */
+  async function elVistoSeCae() {
+    if (abierta?.estado !== "revisada") return;
+    const campos = { estado: "lista", revisada_at: null, revisada_por: null, revisada_nombre: null };
+    await guardarActa(abierta.id, campos);
+    setAbierta(a => ({ ...a, ...campos }));
+    setActas(as => as.map(x => (x.id === abierta.id ? { ...x, ...campos } : x)));
+    setAviso("El acta cambió después del visto, así que el visto se cayó: hay que volver a pedirlo. "
+      + "Lo que se manda tiene que ser lo que se aprobó.");
+  }
+
   async function tocarActa(campos) {
     const e = await guardarActa(abierta.id, campos);
     if (e) { setError(e); return false; }
     setError("");
     setAbierta(a => ({ ...a, ...campos }));
     setActas(as => as.map(x => (x.id === abierta.id ? { ...x, ...campos } : x)));
+    // El cambio de estado es lo contrario de una corrección: no se cae solo.
+    if (!("estado" in campos)) await elVistoSeCae();
     return true;
   }
 
@@ -119,6 +146,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
     const { fila: puesta, error: e } = await guardarFila(tabla, { ...fila, acta_id: abierta.id, orden: cont[lista].length });
     if (e) { setError(e); return; }
     setError(""); setCont(c => ({ ...c, [lista]: [...c[lista], puesta] }));
+    await elVistoSeCae();
   }
 
   async function tocarFila(tabla, lista, id, campos) {
@@ -126,12 +154,14 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
     if (e) { setError(e); return; }
     setError("");
     setCont(c => ({ ...c, [lista]: c[lista].map(x => (x.id === id ? { ...x, ...campos } : x)) }));
+    await elVistoSeCae();
   }
 
   async function quitarFila(tabla, lista, id) {
     const e = await borrarFila(tabla, id);
     if (e) { setError(e); return; }
     setCont(c => ({ ...c, [lista]: c[lista].filter(x => x.id !== id) }));
+    await elVistoSeCae();
   }
 
   // ── Elegir proyecto ──────────────────────────────────────────────────────
@@ -218,7 +248,24 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
         }} texto={`Actas · ${lead.nombre}`} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 12 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Acta N° {abierta.numero}</div>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: colors.ink }}>Acta N° {abierta.numero}</div>
+            {/* QUIÉN LA ESCRIBIÓ Y QUIÉN LE DIO EL VISTO.
+                Los dos nombres estaban guardados desde el principio y no se
+                mostraban en ningún lado: ni en la pantalla ni en el PDF. Son
+                las dos firmas que hacen que el acta sea de alguien — quien la
+                redactó responde por lo que dice, quien le dio el visto responde
+                por que salga con el nombre de la empresa— y un documento que no
+                dice de quién es no se le puede reclamar a nadie. */}
+            {(abierta.creado_nombre || abierta.revisada_nombre) && (
+              <div style={{ fontSize: 11, color: colors.muted, marginTop: 1 }}>
+                {abierta.creado_nombre ? `La escribió ${abierta.creado_nombre}` : ""}
+                {abierta.revisada_nombre
+                  ? ` · Visto de ${abierta.revisada_nombre}${abierta.revisada_at ? ` el ${dia(String(abierta.revisada_at).slice(0, 10))}` : ""}`
+                  : abierta.estado === "lista" ? " · esperando el visto" : ""}
+              </div>
+            )}
+          </div>
           <Chip estado={abierta.estado} />
           <div style={{ flex: 1 }} />
           {/* VERLO ANTES DE MANDARLO. Una falta de ortografía en un acta
@@ -784,6 +831,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                 }
                 setOcupado(false);
                 await cargarActa(abierta.id);
+                await elVistoSeCae();
                 setAviso(`${faltan.length} ${faltan.length === 1 ? "convocado agregado" : "convocados agregados"}.`);
               }}>
                 <Users size={12} /> Traer los de siempre
@@ -834,6 +882,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
                       });
                       if (e) { setOcupado(false); setError(`No se pudo juntar: ${e}`); return; }
                       for (const a of sobran) await quitarFila("acta_asistentes", "asistentes", a.id);
+                      await elVistoSeCae();
                       await cargarActa(abierta.id);
                       setOcupado(false);
                       setAviso(`${queda.nombre} quedó en una sola fila${queda.asistio ? ", marcada como que vino" : ""}.`);
@@ -1362,6 +1411,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       if (!solito) setOcupado(false);
       if (fallaron.length) { setError(fallaron[0]); return; }
       setSinGuardar(new Set());
+      await elVistoSeCae();
       if (!solito) setAviso("Asistentes guardados.");
     }
 

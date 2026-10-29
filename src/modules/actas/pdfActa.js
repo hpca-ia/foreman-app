@@ -261,6 +261,27 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
     if (vinieron.length % 2 === 1) y += 28;
   }
 
+  // ── De quién es este documento ──
+  //
+  // Quien la redactó responde por lo que dice; quien le dio el visto responde
+  // por que haya salido con el nombre de la empresa. Los dos nombres estaban
+  // guardados desde el principio y no aparecían en ninguna parte: un acta que
+  // no dice de quién es no se le puede reclamar a nadie, y es justo lo que se
+  // pregunta el que la recibe seis meses después.
+  if (acta.creado_nombre || acta.revisada_nombre) {
+    if (y > ALTO - 30) { doc.addPage(); y = 18; }
+    y += 4;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...GRIS);
+    const quien = [
+      acta.creado_nombre ? `Redactada por ${acta.creado_nombre}` : "",
+      acta.revisada_nombre
+        ? `revisada y aprobada por ${acta.revisada_nombre}${acta.revisada_at ? ` el ${dia(String(acta.revisada_at).slice(0, 10))}` : ""}`
+        : "",
+    ].filter(Boolean).join("  ·  ");
+    doc.text(quien, M, y);
+    y += 6;
+  }
+
   // ── Anexos: nombrados, aunque no estén pegados al papel ──
   if (adjuntos.length) {
     if (y > ALTO - 40) { doc.addPage(); y = 18; }
