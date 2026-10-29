@@ -21,6 +21,7 @@ import {
 import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos, costosConOtroIva } from "./cuentaOrdenCambio.js";
 import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
 import { costoDeLaOrden, gastoLimpio, queFaltaSaber } from "./costoDeLaOrden.js";
+import { vigenciaDe, plazosQueAvisan } from "./vigenciaDeOrden.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
 
 // Las órdenes de cambio de una obra.
@@ -73,6 +74,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // Lo que cuesta la orden y no es una partida: fletes, mano de obra, alquileres.
   const [gastos, setGastos] = useState({});
   const [nuevoGasto, setNuevoGasto] = useState(null);
+  const [plazoAbierto, setPlazoAbierto] = useState(null);
   const [enlacesCot, setEnlacesCot] = useState({});
   // Los beneficios que dejaron las órdenes: la liquidación interna los usa
   // para saber qué partidas ya se compraron y a cuánto.
@@ -164,6 +166,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     aprobadores,
   );
   const esperando = resumenPendientes(porFirmar);
+  // Los alquileres que se pasan de plazo o están por pasarse.
+  const avisanPlazo = plazosQueAvisan(ordenes);
 
   // LOS DE SIEMPRE.
   //
@@ -499,6 +503,48 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           <Button variant={verLiquidacion ? "primary" : "outline"} size="sm" onClick={() => setVerLiquidacion(v => !v)}>
             {verLiquidacion ? "Ocultar" : "Cuánto deja cada orden"}
           </Button>
+        </div>
+      )}
+
+      {/* ── LO QUE SE ESTÁ PASANDO DE PLAZO ─────────────────────────────────
+          El generador se alquiló por quince días y hoy es el diecisiete: sigue
+          en la obra, el proveedor sigue facturando, y la orden que lo cubría se
+          quedó en quince. Eso no se descubre solo — se descubre con la factura
+          del mes siguiente, o no se descubre y se paga. */}
+      {avisanPlazo.length > 0 && (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.dangerBorder}`,
+          borderLeft: `3px solid ${colors.danger}`, borderRadius: colors.radiusMd, padding: "10px 12px", margin: "8px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+            <Clock size={14} color={colors.danger} />
+            <div style={{ fontSize: 12, fontWeight: 700, color: colors.ink }}>
+              {avisanPlazo.some(x => x.v.vencida) ? "Se pasó el plazo de lo alquilado" : "Está por vencer un plazo"}
+            </div>
+          </div>
+          {avisanPlazo.map(({ orden: o2, v }) => (
+            <div key={o2.id} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "5px 0",
+              borderTop: `1px solid ${colors.border}`, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <button onClick={() => setAbierta(o2.id)}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                    fontSize: 12.5, fontWeight: 700, color: colors.brand, textAlign: "left" }}>
+                  {codigoDe(o2)} · {o2.titulo || "sin título"}
+                </button>
+                <div style={{ fontSize: 11.5, color: v.vencida ? colors.danger : colors.warning, lineHeight: 1.5 }}>
+                  {v.texto}.{" "}
+                  {v.vencida
+                    ? "Lo que siga costando no está en ninguna orden: extendela o devolvé el equipo."
+                    : "Si va a seguir, conviene pedir la extensión ahora."}
+                </div>
+              </div>
+              {puedeEditar && (
+                <Button variant="outline" size="sm" disabled={ocupado}
+                  title="Ya se devolvió o ya terminó: deja de avisar, y las fechas quedan"
+                  onClick={() => hacer(() => guardarOrden(o2.id, { cubre_cerrado_at: new Date().toISOString() }))}>
+                  Ya se devolvió
+                </Button>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -1594,6 +1640,77 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             Aplicar a las {cuenta.conCosto} con costo
                           </button>
                         </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── ¿ESTA ORDEN TIENE PLAZO? ─────────────────────────────
+                    Un alquiler no es un trabajo que se hace y se termina: el
+                    día dieciséis el generador sigue en la obra y el proveedor
+                    sigue facturando. Decir hasta cuándo cubre lo cotizado es lo
+                    único que convierte eso en un aviso en vez de en una factura
+                    sorpresa dos meses después. */}
+                {(() => {
+                  const v = vigenciaDe(o);
+                  const abierto = plazoAbierto === o.id || !!o.cubre_hasta;
+                  if (!editable && !v) return null;
+                  return (
+                    <div style={{ marginBottom: 9 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
+                        PLAZO DE LO COTIZADO
+                      </div>
+                      {!abierto ? (
+                        <button onClick={() => setPlazoAbierto(o.id)}
+                          style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 7, padding: "4px 9px",
+                            color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
+                          + Esta orden cubre un período (alquiler, arriendo de equipo…)
+                        </button>
+                      ) : (
+                        <>
+                          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr", gap: 6 }}>
+                            <input defaultValue={o.cubre_que || ""} readOnly={!editable} placeholder="Qué se alquila: generador 20KVA"
+                              onBlur={e => editable && e.target.value !== (o.cubre_que || "")
+                                && hacer(() => guardarOrden(o.id, { cubre_que: e.target.value.trim() || null }))}
+                              style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                            <label style={{ fontSize: 10, color: colors.muted }}>
+                              Desde
+                              <input type="date" defaultValue={String(o.cubre_desde || "").slice(0, 10)} readOnly={!editable}
+                                onBlur={e => editable && e.target.value !== String(o.cubre_desde || "").slice(0, 10)
+                                  && hacer(() => guardarOrden(o.id, { cubre_desde: e.target.value || null }))}
+                                style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                            </label>
+                            <label style={{ fontSize: 10, color: colors.muted }}>
+                              Hasta
+                              <input type="date" defaultValue={String(o.cubre_hasta || "").slice(0, 10)} readOnly={!editable}
+                                onBlur={e => editable && e.target.value !== String(o.cubre_hasta || "").slice(0, 10)
+                                  && hacer(() => guardarOrden(o.id, { cubre_hasta: e.target.value || null, cubre_cerrado_at: null }))}
+                                style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
+                            </label>
+                          </div>
+                          <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.5,
+                            color: v?.vencida ? colors.danger : v?.porVencer ? colors.warning : colors.muted }}>
+                            {v
+                              ? `${v.texto}${v.cuantos ? ` · son ${v.cuantos} días` : ""}.`
+                              : o.cubre_cerrado_at
+                                ? "Ya se devolvió: no avisa más. Las fechas quedan, que son las que explican el cobro."
+                                : "Pasado ese día, lo que siga costando no está en ninguna orden. FOREMAN avisa tres días antes y todos los días después."}
+                          </div>
+                          {editable && o.cubre_hasta && !o.cubre_cerrado_at && (
+                            <button onClick={() => hacer(() => guardarOrden(o.id, { cubre_cerrado_at: new Date().toISOString() }))}
+                              style={{ background: "none", border: "none", padding: "4px 0 0", cursor: "pointer", fontFamily: colors.font,
+                                fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                              ya se devolvió
+                            </button>
+                          )}
+                          {editable && o.cubre_cerrado_at && (
+                            <button onClick={() => hacer(() => guardarOrden(o.id, { cubre_cerrado_at: null }))}
+                              style={{ background: "none", border: "none", padding: "4px 0 0", cursor: "pointer", fontFamily: colors.font,
+                                fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                              sigue alquilado
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   );

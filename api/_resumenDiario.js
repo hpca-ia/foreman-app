@@ -73,6 +73,49 @@ async function ordenesSinFirmar() {
 
 const plata = v => `$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * LO ALQUILADO QUE SE PASA DE PLAZO.
+ *
+ * El generador se alquiló por quince días y hoy es el diecisiete: sigue en la
+ * obra y el proveedor sigue facturando. Lo que se paga de más no está en
+ * ninguna orden de cambio, y no se descubre solo — se descubre con la factura
+ * del mes siguiente, o no se descubre y se come el margen entero.
+ *
+ * Avisa tres días antes, para poder devolverlo o pedir la extensión con tiempo,
+ * y todos los días después, porque cada uno es plata que ya salió.
+ */
+async function plazosDeLasOrdenes() {
+  const hoy = hoyISO();
+  const ordenes = await json(await rest(
+    "ordenes_cambio?cubre_hasta=not.is.null&cubre_cerrado_at=is.null&anulada=not.is.true"
+    + "&select=id,numero,codigo,titulo,obra_id,cubre_que,cubre_desde,cubre_hasta"));
+  if (!ordenes?.length) return [];
+  const obras = await json(await rest(
+    `obras?id=in.(${[...new Set(ordenes.map(o => o.obra_id).filter(Boolean))].join(",") || 0})&select=id,nombre`));
+  const dias = (a, b) => Math.round((new Date(`${String(b).slice(0, 10)}T12:00:00`)
+    - new Date(`${String(a).slice(0, 10)}T12:00:00`)) / 86400000);
+  return ordenes
+    .map(o => ({ o, faltan: dias(hoy, o.cubre_hasta), obra: (obras || []).find(x => x.id === o.obra_id)?.nombre || "" }))
+    .filter(x => x.faltan <= 3)
+    .sort((a, b) => a.faltan - b.faltan);
+}
+
+const bloqueDePlazos = lista => (lista.length ? `
+  <div style="font-size:11px;font-weight:700;color:#B91C1C;letter-spacing:.4px;margin:20px 0 6px">
+    ALQUILERES QUE SE PASAN DE PLAZO · ${lista.length}
+  </div>
+  ${lista.map(({ o, faltan, obra }) => `<div style="font-size:13px;color:#374151;padding:3px 0">
+    ${esc(o.codigo || `OC-${String(o.numero).padStart(2, "0")}`)} ${esc(o.cubre_que || o.titulo || "")}
+    <span style="color:#9CA3AF">· ${esc(obra)}</span>
+    <span style="color:${faltan < 0 ? "#B91C1C" : "#B45309"}">
+      · ${faltan < 0 ? `se pasó ${-faltan} ${-faltan === 1 ? "día" : "días"}`
+        : faltan === 0 ? "vence hoy" : `vence en ${faltan} ${faltan === 1 ? "día" : "días"}`}
+    </span>
+  </div>`).join("")}
+  <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
+    Lo que siga costando después de esa fecha no está en ninguna orden: hay que extenderla o devolver el equipo.
+  </div>` : "");
+
 const bloqueDeOrdenes = (lista, correo = "") => (lista.length ? `
   <div style="font-size:11px;font-weight:700;color:#B91C1C;letter-spacing:.4px;margin:20px 0 6px">
     ÓRDENES DE CAMBIO SIN FIRMAR · ${lista.length} · ${plata(lista.reduce((t, p) => t + p.monto, 0))} esperando
@@ -131,6 +174,8 @@ function cuerpoDelCorreo(s) {
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
     // Las órdenes que el cliente no firma, a quien puede levantar el teléfono.
     s.esAdmin ? bloqueDeOrdenes(s.ordenes || [], String(s.usuario?.email || "").trim().toLowerCase()) : "",
+    // Lo alquilado que se pasa de plazo: cada día es plata que ya salió.
+    s.esAdmin ? bloqueDePlazos(s.plazos || []) : "",
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
       && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length
@@ -190,10 +235,13 @@ export async function mandarResumen(soloPara = null) {
   // por persona sería la misma pregunta cinco veces.
   let ordenes = [];
   try { ordenes = await ordenesSinFirmar(); } catch { /* el resumen sale igual */ }
+  let plazos = [];
+  try { plazos = await plazosDeLasOrdenes(); } catch { /* el resumen sale igual */ }
 
   const enviados = [];
   for (const s of sobres) {
     s.ordenes = s.esAdmin ? ordenes : [];
+    s.plazos = s.esAdmin ? plazos : [];
     const r = await enviarCorreo({ to: s.usuario.email, subject: asunto(s), html: tituloDelCorreo(s) });
     if (r.ok) enviados.push(s.usuario.email);
   }
