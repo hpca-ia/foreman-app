@@ -70,6 +70,70 @@ export function partidasDeCotizacion(items = []) {
 }
 
 /**
+ * EL COSTO DE CADA PARTIDA, SACADO DE LA COTIZACIÓN.
+ *
+ * Esto era un enlace subrayado que decía "tomar los costos en orden" y que
+ * aparecía solo cuando había tantas adiciones como renglones. Quien sube una
+ * cotización ya dijo lo que quería decir —"esto es lo que me cuesta"— y pedirle
+ * además que encuentre un enlace gris es como se llega a una orden de cambio
+ * con la cotización adentro y el margen sin saberse: fue lo que pasó con la
+ * OC-01 de Plaza Lagos, cotizada en $1.389,75 contra $1.726,64 cobrados, con el
+ * beneficio invisible porque el costo nunca bajó a la partida.
+ *
+ * SE EMPAREJA POR LO QUE DICE, Y SI NO, POR POSICIÓN. El nombre es lo que de
+ * verdad ata un renglón de la proforma con una partida de la orden: casi
+ * siempre la partida se escribió copiando ese renglón. La posición solo se usa
+ * cuando las dos listas tienen el mismo largo, porque emparejar por posición
+ * listas de distinto largo le pone el costo de una cosa a otra, y ese error no
+ * se ve hasta la liquidación —o hasta que se cobró de menos—.
+ *
+ * Lo que no se puede emparejar se dice. Una orden con dos partidas sin costo no
+ * tiene margen, y el margen que no se sabe no es cero.
+ *
+ * @returns { pone: [{id, costo_unitario, como}], sinCosto, sinUsar }
+ */
+export function emparejarCostos(lineas = [], items = []) {
+  const limpio = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const adiciones = lineas.filter(l => l.tipo !== "quita");
+  const utiles = (items || []).filter(x => x?.descripcion && n(x.monto));
+  const libres = utiles.map((x, i) => ({ ...x, i, usado: false }));
+  const pone = [];
+
+  const costoDe = (l, x) => {
+    // El unitario sale del total, que es el número que el proveedor suma.
+    const cant = n(l.cantidad) || n(x.cantidad) || 1;
+    return Math.round((n(x.monto) / cant) * 10000) / 10000;
+  };
+
+  // 1. Por nombre: el que de verdad ata los dos papeles.
+  for (const l of adiciones) {
+    const nom = limpio(l.descripcion);
+    if (!nom) continue;
+    const x = libres.find(y => !y.usado && limpio(y.descripcion) === nom);
+    if (!x) continue;
+    x.usado = true;
+    pone.push({ id: l.id, costo_unitario: costoDe(l, x), como: "por el nombre" });
+  }
+
+  // 2. Por posición, solo si lo que queda calza exacto de los dos lados.
+  const faltan = adiciones.filter(l => !pone.some(p => p.id === l.id));
+  const sobran = libres.filter(x => !x.usado);
+  if (faltan.length && faltan.length === sobran.length) {
+    faltan.forEach((l, k) => {
+      sobran[k].usado = true;
+      pone.push({ id: l.id, costo_unitario: costoDe(l, sobran[k]), como: "por su posición en la proforma" });
+    });
+  }
+
+  return {
+    pone,
+    sinCosto: adiciones.filter(l => !pone.some(p => p.id === l.id) && !tieneCosto(l)).map(l => l.descripcion),
+    sinUsar: libres.filter(x => !x.usado).map(x => x.descripcion),
+  };
+}
+
+/**
  * EL PRECIO SALE DEL COSTO MÁS EL MARGEN.
  *
  * Lo que NOVA lee de la cotización es lo que CUESTA. El precio lo pone la
@@ -187,7 +251,14 @@ export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, benefici
     .filter(b => b.orden_cambio_linea_id && b.estado !== "previsto")
     .map(b => [Number(b.orden_cambio_linea_id), b]));
 
-  const filas = [...ordenes].filter(o => o.estado === "aprobada" && !o.anulada)
+  // LAS QUE TODAVÍA NO SE APROBARON TAMBIÉN SE LIQUIDAN, APARTE.
+  //
+  // Una orden cotizada y todavía no aprobada ya tiene su margen a la vista: es
+  // justo cuando sirve mirarlo, porque todavía se puede cambiar el precio. No
+  // entra al control de obra ni a los beneficios —el cliente no la aceptó— pero
+  // la idea de lo que deja existe desde que llega la proforma, y esconderla
+  // hasta la firma es mirar la plata cuando ya no se puede hacer nada.
+  const filas = [...ordenes].filter(o => !o.anulada && o.estado !== "rechazada")
     .sort((a, b) => (a.numero || 0) - (b.numero || 0))
     .map(o => {
       const lineas = lineasPorOrden[o.id] || [];
@@ -205,6 +276,8 @@ export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, benefici
         codigo: codigoDe(o),
         titulo: o.titulo,
         ejecucion: o.ejecucion,
+        estado: o.estado,
+        aprobada: o.estado === "aprobada",
         total: c2(subtotalesDe(lineas).total),
         cobradoConCosto: m.cobrado,
         costoCotizado: m.costo,
@@ -219,16 +292,29 @@ export function liquidacionInterna({ ordenes = [], lineasPorOrden = {}, benefici
       };
     });
 
-  const suma = k => c2(filas.reduce((t, f) => t + n(f[k]), 0));
-  const cobradoConCosto = suma("cobradoConCosto");
-  const margen = suma("margen");
+  // EL TOTAL ES EL DE LAS APROBADAS, que es la plata que de verdad está. Lo
+  // que todavía se discute se dice aparte: sumarlo adentro convierte un número
+  // que se puede llevar a una reunión en una esperanza.
+  const aprobadas = filas.filter(f => f.aprobada);
+  const enCamino = filas.filter(f => !f.aprobada);
+  const sumar = (lista, k) => c2(lista.reduce((t, f) => t + n(f[k]), 0));
+  const cobradoConCosto = sumar(aprobadas, "cobradoConCosto");
+  const margen = sumar(aprobadas, "margen");
+  const cobradoEnCamino = sumar(enCamino, "cobradoConCosto");
+  const margenEnCamino = sumar(enCamino, "margen");
   return {
     filas,
     total: {
-      total: suma("total"), cobradoConCosto, costoCotizado: suma("costoCotizado"),
-      costo: suma("costo"), margen,
+      total: sumar(aprobadas, "total"), cobradoConCosto, costoCotizado: sumar(aprobadas, "costoCotizado"),
+      costo: sumar(aprobadas, "costo"), margen,
       pct: cobradoConCosto ? Math.round((margen / cobradoConCosto) * 1000) / 10 : null,
       ordenesSinCosto: filas.filter(f => f.sinCosto > 0).length,
+    },
+    enCamino: {
+      cuantas: enCamino.length,
+      total: sumar(enCamino, "total"), cobradoConCosto: cobradoEnCamino,
+      costo: sumar(enCamino, "costo"), margen: margenEnCamino,
+      pct: cobradoEnCamino ? Math.round((margenEnCamino / cobradoEnCamino) * 1000) / 10 : null,
     },
   };
 }

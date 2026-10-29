@@ -18,7 +18,7 @@ import {
   leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
   enlacesDeCotizaciones, sincronizarBeneficios,
 } from "./cotizacionesOrden";
-import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen } from "./cuentaOrdenCambio.js";
+import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos } from "./cuentaOrdenCambio.js";
 import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
 
@@ -267,16 +267,53 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
       if (rc.error) throw new Error(rc.error);
       const suyas = lineas[o.id] || [];
       const vacia = !suyas.some(l => l.tipo !== "quita");
+      let hecho = "";
       if (puedeEditar && o.estado !== "aprobada" && vacia) {
         const err = await agregarPartidas(o, rc.cotizacion, suyas);
         if (err) throw new Error(err);
+        hecho = `Entraron ${(rc.cotizacion.items || []).length} partidas con su costo.`;
+      } else if (puedeEditar) {
+        // EL COSTO BAJA SOLO A LAS PARTIDAS.
+        //
+        // Antes esto era un enlace gris que decía "tomar los costos en orden",
+        // y si no se lo apretaba la cotización quedaba adentro de la orden con
+        // el margen sin saberse. Pasó con la OC-01 de Plaza Lagos: cotizada en
+        // $1.389,75 contra $1.726,64 cobrados, y el beneficio invisible.
+        //
+        // Quien sube una cotización ya dijo lo que quería decir —"esto es lo
+        // que me cuesta"—. Lo que no se puede emparejar no se inventa: se dice.
+        hecho = await ponerLosCostos(o, rc.cotizacion, suyas);
       }
-      if (leida.cortado) setAviso("La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel.");
+      setAviso([hecho, leida.cortado
+        ? "La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel." : ""]
+        .filter(Boolean).join(" "));
     } catch (e) {
       setAviso(e.message);
     }
     setLeyendoCot(null);
     await cargar(); onCambio?.();
+  }
+
+  /**
+   * Los costos de la cotización, puestos en las partidas que les tocan.
+   *
+   * @returns el texto de qué hizo, para decirlo en la pantalla.
+   */
+  async function ponerLosCostos(o, cot, suyas) {
+    const { pone, sinCosto, sinUsar } = emparejarCostos(suyas, cot.items || []);
+    for (const x of pone) {
+      const r = await guardarLinea(x.id, { costo_unitario: x.costo_unitario, cotizacion_id: cot.id });
+      if (r.error) return `No se pudo guardar el costo: ${r.error}`;
+    }
+    const porNombre = pone.filter(x => x.como === "por el nombre").length;
+    return [
+      pone.length
+        ? `NOVA le puso el costo a ${pone.length} ${pone.length === 1 ? "partida" : "partidas"}`
+          + `${porNombre === pone.length ? " emparejándolas por el nombre" : porNombre ? "" : " por su posición en la proforma"}.`
+        : "NOVA leyó la cotización pero no pudo emparejar ningún renglón con las partidas.",
+      sinCosto.length ? `Quedan sin costo: ${sinCosto.join(", ")} — ponéselo a mano en la columna COSTO U.` : "",
+      sinUsar.length ? `Renglones de la proforma que no están en la orden: ${sinUsar.join(", ")}.` : "",
+    ].filter(Boolean).join(" ");
   }
 
   /** Los renglones de una cotización, como partidas de la orden con su costo. */
@@ -290,25 +327,6 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     return null;
   }
 
-  /**
-   * Tomar los costos de la cotización, renglón por renglón, en orden.
-   *
-   * Solo cuando hay tantas adiciones como renglones: emparejar por posición
-   * listas de distinto largo le pondría el costo de una cosa a otra, y ese
-   * error no se ve hasta la liquidación.
-   */
-  async function tomarCostos(o, c) {
-    const adiciones = (lineas[o.id] || []).filter(l => l.tipo !== "quita");
-    await hacer(async () => {
-      for (const [i, l] of adiciones.entries()) {
-        const it = c.items[i];
-        const cant = Number(l.cantidad) || Number(it.cantidad) || 1;
-        const r = await guardarLinea(l.id, { costo_unitario: Math.round((Number(it.monto) / cant) * 10000) / 10000 });
-        if (r.error) return r.error;
-      }
-      return null;
-    });
-  }
 
   if (sinTablas) {
     return (
@@ -552,8 +570,10 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               <div style={{ flex: 1, minWidth: 200 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Liquidación interna de las órdenes de cambio</div>
                 <div style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5 }}>
-                  Lo cobrado en cada orden aprobada contra lo que cuesta. El costo es el real si la partida ya se
-                  compró y el de la cotización si no. <strong>No sale al cliente.</strong>
+                  Lo cobrado en cada orden contra lo que cuesta. El costo es el real si la partida ya se compró y el
+                  de la cotización si no. Las que todavía no aprobó el cliente van aparte: su margen ya existe
+                  —es cuando sirve mirarlo, porque todavía se puede cambiar el precio— pero no es plata del
+                  contrato hasta que firmen. <strong>No sale al cliente.</strong>
                 </div>
               </div>
               <Button variant="outline" size="sm" disabled={!liq.filas.length}
@@ -583,9 +603,14 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   </thead>
                   <tbody>
                     {liq.filas.map(f => (
-                      <tr key={f.id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
+                      <tr key={f.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`, opacity: f.aprobada ? 1 : 0.75 }}>
                         <td style={{ padding: "5px 6px" }}>
                           <span style={{ fontWeight: 700, color: colors.muted, fontSize: 11 }}>{f.codigo}</span> {f.titulo}
+                          {!f.aprobada && (
+                            <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.warning, marginLeft: 5 }}>
+                              {(ESTADOS_ORDEN[f.estado] || ESTADOS_ORDEN.borrador).label.toUpperCase()} · NO ES PLATA DEL CONTRATO TODAVÍA
+                            </span>
+                          )}
                           <div style={{ fontSize: 10.5, color: colors.muted }}>
                             {[f.proveedores.join(", "),
                               f.sinCosto ? `${f.sinCosto} partida${f.sinCosto === 1 ? "" : "s"} sin costo` : "",
@@ -613,6 +638,15 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     </tr>
                   </tbody>
                 </table>
+                {liq.enCamino.cuantas > 0 && (
+                  <div style={{ fontSize: 11.5, color: colors.inkSoft, marginTop: 7, lineHeight: 1.5 }}>
+                    <strong>{liq.enCamino.cuantas} {liq.enCamino.cuantas === 1 ? "orden todavía sin aprobar" : "órdenes todavía sin aprobar"}</strong>
+                    {liq.enCamino.cobradoConCosto
+                      ? `: dejarían ${plata(liq.enCamino.margen)}${liq.enCamino.pct != null ? ` · ${liq.enCamino.pct}%` : ""} sobre ${plata(liq.enCamino.cobradoConCosto)}.`
+                      : " todavía sin costo cargado: no se sabe qué dejan."}
+                    {" "}No entran en el total de arriba ni en Beneficios hasta que el cliente las apruebe.
+                  </div>
+                )}
                 {liq.total.ordenesSinCosto > 0 && (
                   <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>
                     {liq.total.ordenesSinCosto} orden{liq.total.ordenesSinCosto === 1 ? "" : "es"} con partidas sin costo: su margen
@@ -901,12 +935,22 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                 agregar sus renglones como partidas
                               </button>
                             )}
-                            {puedeEditar && adiciones.length > 0 && adiciones.length === (c.items || []).length && (
-                              <button onClick={() => tomarCostos(o, c)} disabled={ocupado}
-                                title="Le pone a cada adición el costo del renglón que está en su misma posición"
-                                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
-                                tomar los costos en orden
-                              </button>
+                            {/* VISIBLE SOLO CUANDO FALTA, Y COMO BOTÓN. Al
+                                subir la cotización los costos bajan solos; esto
+                                es para la cotización que ya estaba cargada de
+                                antes, o para volver a intentarlo después de
+                                corregir el nombre de una partida. */}
+                            {puedeEditar && adiciones.some(l => !tieneCosto(l)) && (c.items || []).length > 0 && (
+                              <Button variant="outline" size="sm" disabled={ocupado}
+                                onClick={async () => {
+                                  setOcupado(true);
+                                  const texto = await ponerLosCostos(o, c, suyas);
+                                  setOcupado(false);
+                                  await cargar(); onCambio?.();
+                                  setAviso(texto);
+                                }}>
+                                Poner los costos en las partidas
+                              </Button>
                             )}
                             {puedeEditar && (
                               <button onClick={() => { if (window.confirm("¿Quitar esta cotización? Se borra el archivo. Los costos que ya se pusieron en las partidas se quedan.")) hacer(() => borrarCotizacion(c)); }}

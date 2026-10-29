@@ -109,8 +109,12 @@ test("la liquidación usa el costo real si ya se compró, y avisa lo que no tien
     ordenes: [orden, { id: 6, numero: 4, estado: "enviada" }], lineasPorOrden: lineas, cotizaciones, subtotalesDe, codigoDe,
     beneficios: [{ orden_cambio_linea_id: 11, estado: "confirmado", real: 90 }],
   });
-  assert.equal(l.filas.length, 1);                  // solo las aprobadas
-  const f = l.filas[0];
+  // La enviada también se liquida —su margen ya existe— pero aparte: el total
+  // es el de las aprobadas, que es la plata que de verdad está.
+  assert.equal(l.filas.length, 2);
+  assert.equal(l.enCamino.cuantas, 1);
+  assert.equal(l.enCamino.margen, 0);               // esa no tiene partidas
+  const f = l.filas.find(x => x.aprobada);
   assert.equal(f.total, 620);
   assert.equal(f.costoCotizado, 100);
   assert.equal(f.costoReal, 90);
