@@ -326,6 +326,46 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     : [];
 
   /**
+   * LA GENTE DE LA ORDEN, EN UNA SOLA LISTA CON UNA SOLA DECISIÓN.
+   *
+   * Había cuatro listas y dos casillas por persona —"se le manda" y "aprueba"—
+   * y eso presentaba como dos cosas lo que es una: el que firma es el que
+   * aprueba, y el resto solo la ve. No existe un tercer estado.
+   *
+   * Entonces cada persona tiene un solo interruptor con dos posiciones:
+   * APRUEBA —recibe su enlace, firma el cuadro del PDF y la orden no entra al
+   * presupuesto hasta que conteste— o SOLO LA VE —le llega el documento, sin
+   * botón—. Y afuera de la lista, nadie.
+   */
+  function genteDeLaOrden(orden) {
+    const filas = [];
+    const puesto = new Set();
+    // Los que ya están en el cuadro de revisión de esta orden, con lo suyo.
+    for (const a of (aprobadores[orden.id] || [])) {
+      const email = String(a.email || "").trim().toLowerCase();
+      if (!correoValido(email) || puesto.has(email)) continue;
+      puesto.add(email);
+      filas.push({
+        id: a.id, nombre: a.nombre || "", empresa: a.empresa || "", rol: a.rol || "", email,
+        // Al que ya le salió la suya no se le vuelve a mandar por error.
+        ya: !!a.envio_at, firmo: !!a.aprobado_at, objeto: !!a.observacion,
+        modo: a.envio_at ? "no" : (a.aprueba === false ? "ve" : "aprueba"),
+      });
+    }
+    // Y el resto del directorio del proyecto, apagado: no todas las órdenes le
+    // interesan a los quince, y mandársela a todos es como se consigue que
+    // dejen de abrirlas.
+    for (const i of invitados) {
+      const email = String(i.email || "").trim().toLowerCase();
+      if (!correoValido(email) || puesto.has(email)) continue;
+      puesto.add(email);
+      filas.push({ id: null, nombre: i.nombre || "", empresa: i.empresa || "", rol: i.rol || "", email,
+        modo: i.recibe_ordenes ? "ve" : "no" });
+    }
+    return filas;
+  }
+
+  /**
    * QUIÉN FIRMA Y QUIÉN RECIBE COPIA, resuelto una sola vez.
    *
    * El cuadro de envío tiene cuatro listas que se parecen —la gente del
@@ -341,27 +381,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
    */
   function armarEnvio(m) {
     if (!m) return { firman: [], copias: [] };
-    const sueltos = String(m.sueltos || "").split(/[,;\s]+/).filter(x => x.includes("@"));
-    const elegidos = new Set((m.aQuien || []).map(String));
-    const enCapitulo = enElCuadro.filter(a => elegidos.has(String(a.id)));
-    const deAfuera = (m.externos || [])
-      .map(x => ({ nombre: String(x.nombre || "").trim(), email: String(x.email || "").trim().toLowerCase(),
-        rol: String(x.empresa || "").trim() }))
-      .filter(x => correoValido(x.email));
-    const porCorreo = new Map();
-    for (const a of [
-      ...enCapitulo.filter(a => a.aprueba !== false)
-        .map(a => ({ id: a.id, nombre: a.nombre || "", empresa: a.empresa || "", rol: a.rol || "", email: String(a.email).trim().toLowerCase() })),
-      ...invitados.filter(i => (m.firman || []).includes(i.email))
-        .map(i => ({ nombre: i.nombre, email: i.email, rol: i.rol || "" })),
-      ...deAfuera,
-    ]) if (!porCorreo.has(a.email)) porCorreo.set(a.email, a);
-    const firman = [...porCorreo.values()];
+    const gente = (m.gente || []).filter(g => correoValido(g.email));
+    const firman = gente.filter(g => g.modo === "aprueba")
+      .map(g => ({ id: g.id || undefined, nombre: g.nombre || "", empresa: g.empresa || "", rol: g.rol || "", email: g.email }));
     const queFirman = new Set(firman.map(a => a.email));
-    const copias = [...new Set([
-      ...m.correos, ...sueltos,
-      ...enCapitulo.filter(a => a.aprueba === false).map(a => String(a.email).trim().toLowerCase()),
-    ])].filter(c => !queFirman.has(c));
+    const sueltos = String(m.sueltos || "").split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(correoValido);
+    const copias = [...new Set([...gente.filter(g => g.modo === "ve").map(g => g.email), ...sueltos])]
+      .filter(c => !queFirman.has(c));
     return { firman, copias };
   }
 
@@ -619,14 +645,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             // "Guardar y enviar al cliente" abre el envío de una: guardar,
             // cerrar, buscarla en la lista y abrirla para recién ahí mandarla
             // son cuatro pasos para algo que ya se decidió al escribirla.
-            if (opciones?.mandar) {
-              const r = await aprobacionesDeOrdenes([orden.id]);
-              setMandando({
-                orden, cuerpo: "",
-                correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email),
-                aQuien: (r[orden.id] || []).filter(a => a.aprueba !== false && !a.envio_at).map(a => String(a.id)),
-              });
-            }
+            if (opciones?.mandar) setMandando({ orden, cuerpo: "", sueltos: "", gente: genteDeLaOrden(orden) });
           }} />
       )}
 
@@ -1418,8 +1437,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       </button>
                       <span style={{ fontSize: 10.5, color: colors.muted }}>
                         De esta lista sale el envío <strong>y el cuadro de firmas del PDF</strong>, con el nombre y la
-                        empresa de cada uno. Tildá <strong>aprueba</strong> a los que tienen que firmar: la orden entra
-                        al presupuesto cuando firman todos ellos. Los demás reciben copia.
+                        empresa de cada uno. Tildá <strong>aprueba</strong> a los que la firman: firmar y aprobar son lo
+                        mismo, y la orden entra al presupuesto cuando aprueban todos ellos. Los demás solo la ven.
                         {" "}Pueden ser del proyecto o de afuera — el que firma en papel no tiene por qué estar cargado
                         en ningún lado.
                       </span>
@@ -1599,11 +1618,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         // proyecto: no todos tienen que recibir TODAS las
                         // órdenes, y mandarle quince correos a quien no le
                         // toca es como se consigue que dejen de abrirlos.
-                        setMandando({
-                          orden: o, cuerpo: "",
-                          correos: invitados.filter(i => i.recibe_ordenes).map(i => i.email),
-                          aQuien: (aprobadores[o.id] || []).filter(a => a.aprueba !== false && !a.envio_at).map(a => String(a.id)),
-                        });
+                        setMandando({ orden: o, cuerpo: "", sueltos: "", gente: genteDeLaOrden(o) });
                       }}>
                       <Mail size={12} /> Enviar al cliente
                     </Button>
@@ -1709,126 +1724,77 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             </div>
             <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5 }}>
               Va el documento completo: las líneas, la diferencia y el nuevo valor del contrato.
-              Marcá <strong>aprueba</strong> a los que tienen que firmarla: cada uno recibe su propio enlace y,
-              cuando firman todos, la orden entra sola al presupuesto como adicional.
+              A cada uno, una de dos: <strong>aprueba</strong> —recibe su propio enlace, firma, y la orden entra sola
+              al presupuesto cuando aprueban todos— o <strong>solo la ve</strong>, que recibe el documento y nada más.
             </div>
 
-            {/* A QUIÉN DE LA LISTA SE LE MANDA ESTA ORDEN.
-                El cuadro de revisión tiene a toda la gente del proyecto —son
-                quince— y una orden de cambio no le interesa a los quince.
-                Mandársela a todos es como se consigue que dejen de abrirla, y
-                la que sí tenían que leer se pierde entre las otras ocho. Se
-                elige, y los que firman vienen marcados. */}
-            {enElCuadro.length > 0 && (
-              <div style={{ marginBottom: 10, background: colors.neutralSoft,
-                border: `1px solid ${colors.border}`, borderRadius: 7, padding: "8px 10px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
-                    A QUIÉN SE LE MANDA ({(mandando.aQuien || []).length} de {enElCuadro.length})
-                  </span>
-                  <button onClick={() => setMandando(m => ({ ...m,
-                    aQuien: (m.aQuien || []).length === enElCuadro.length ? [] : enElCuadro.map(a => String(a.id)) }))}
-                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
-                      fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
-                    {(mandando.aQuien || []).length === enElCuadro.length ? "ninguno" : "todos"}
-                  </button>
-                </div>
-                {enElCuadro.map(a => {
-                  const va = (mandando.aQuien || []).includes(String(a.id));
-                  return (
-                    <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0",
-                      fontSize: 12, color: va ? colors.ink : colors.muted, cursor: "pointer" }}>
-                      <input type="checkbox" checked={va}
-                        onChange={() => setMandando(m => ({ ...m,
-                          aQuien: va ? (m.aQuien || []).filter(x => x !== String(a.id)) : [...(m.aQuien || []), String(a.id)] }))} />
-                      <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
-                        color: a.aprueba === false ? colors.muted : colors.brand }}>
-                        {a.aprueba === false ? "COPIA" : "FIRMA"}
-                      </span>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {a.nombre || a.email}{a.empresa ? ` · ${a.empresa}` : ""}
-                        <span style={{ color: colors.muted, fontSize: 11 }}> {a.email}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
-                  Los marcados FIRMA reciben su propio enlace para aprobar; los demás, una copia.
-                </div>
-              </div>
-            )}
-
-            {invitados.length > 0 && !enElCuadro.length && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>GENTE DEL PROYECTO</div>
-                {invitados.map(i => {
-                  const puesto = mandando.correos.includes(i.email);
-                  return (
-                    <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 0", fontSize: 12.5, color: colors.ink }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 7, flex: 1, minWidth: 0, cursor: "pointer" }}>
-                        <input type="checkbox" checked={puesto}
-                          onChange={() => setMandando(m => ({ ...m, correos: puesto ? m.correos.filter(c => c !== i.email) : [...m.correos, i.email] }))} />
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {i.nombre}{i.rol ? ` · ${i.rol}` : ""} <span style={{ color: colors.muted, fontSize: 11 }}>{i.email}</span>
-                        </span>
-                      </label>
-                      {/* QUIÉN FIRMA Y QUIÉN SOLO SE ENTERA. No es lo mismo:
-                          el que firma recibe su enlace y la orden no se aplica
-                          hasta que él aprueba; el otro recibe una copia. */}
-                      {puesto && (
-                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11,
-                          color: (mandando.firman || []).includes(i.email) ? colors.brand : colors.muted,
-                          fontWeight: (mandando.firman || []).includes(i.email) ? 700 : 400, cursor: "pointer", whiteSpace: "nowrap" }}>
-                          <input type="checkbox" checked={(mandando.firman || []).includes(i.email)}
-                            onChange={e => setMandando(m => ({ ...m,
-                              firman: e.target.checked
-                                ? [...(m.firman || []), i.email]
-                                : (m.firman || []).filter(c => c !== i.email) }))} />
-                          aprueba
-                        </label>
-                      )}
+            {/* UNA LISTA Y UNA DECISIÓN POR PERSONA.
+                Eran cuatro listas y dos casillas —"se le manda" y "aprueba"—
+                para algo que tiene dos estados: el que firma es el que aprueba,
+                y el resto solo la ve. No hay un tercero. */}
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+              A QUIÉN SE LA MANDO
+            </div>
+            {(mandando.gente || []).map((g, i) => {
+              const cambiar = campos => setMandando(m => ({ ...m, gente: m.gente.map((x, k) => (k === i ? { ...x, ...campos } : x)) }));
+              const nuevoEnLaLista = !g.id && !invitados.some(v => v.email === g.email);
+              return (
+                <div key={g.email || i} style={{ display: "flex", gap: 7, alignItems: "center", padding: "4px 0",
+                  borderTop: i ? `1px solid ${colors.neutralSoft}` : "none", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 170 }}>
+                    {nuevoEnLaLista ? (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                        <input value={g.nombre} placeholder="Nombre" onChange={e => cambiar({ nombre: e.target.value })}
+                          style={{ ...inputStyle, padding: "5px 7px", fontSize: 12 }} />
+                        <input value={g.empresa} placeholder="Empresa o cargo" onChange={e => cambiar({ empresa: e.target.value })}
+                          style={{ ...inputStyle, padding: "5px 7px", fontSize: 12 }} />
+                        <input value={g.email} placeholder="correo@empresa.com" type="email"
+                          onChange={e => cambiar({ email: e.target.value.trim().toLowerCase() })}
+                          style={{ ...inputStyle, padding: "5px 7px", fontSize: 12, gridColumn: "1 / -1" }} />
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 12.5, color: g.modo === "no" ? colors.muted : colors.ink }}>
+                          {g.nombre || g.email}{g.empresa ? <span style={{ color: colors.muted }}> · {g.empresa}</span> : null}
+                        </div>
+                        {/* EL CORREO ENTERO Y NO CORTADO: es lo único que hay
+                            para darse cuenta de que está mal escrito, y un
+                            correo de aprobación que rebota se parece a un
+                            cliente que no contestó. */}
+                        <div style={{ fontSize: 10.5, color: colors.muted, wordBreak: "break-all" }}>
+                          {g.email}
+                          {g.ya ? ` · ya se le mandó${g.firmo ? " y aprobó" : g.objeto ? " y objetó" : ""}` : ""}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {g.ya ? (
+                    <span style={{ fontSize: 10.5, color: colors.muted }}>no se le vuelve a mandar</span>
+                  ) : (
+                    <div style={{ display: "flex", gap: 3 }}>
+                      {[["aprueba", "aprueba"], ["ve", "solo la ve"], ["no", "no le llega"]].map(([val, texto]) => (
+                        <button key={val} onClick={() => cambiar({ modo: val })}
+                          style={{ border: `1px solid ${g.modo === val ? colors.brand : colors.border}`,
+                            background: g.modo === val ? colors.brand : "#fff",
+                            color: g.modo === val ? "#fff" : colors.muted,
+                            borderRadius: 20, padding: "3px 9px", fontSize: 10.5, cursor: "pointer",
+                            fontFamily: colors.font, fontWeight: g.modo === val ? 700 : 400, whiteSpace: "nowrap" }}>
+                          {texto}
+                        </button>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* QUIEN FIRMA Y NO ESTÁ EN LA LISTA DEL PROYECTO.
-                El cliente, el fiscalizador externo, el gerente del mandante:
-                son los que más tienen que firmar y los que nunca están
-                cargados. Con nombre y empresa, porque eso es lo que después
-                se lee en el documento al lado de su aprobación — "aprobado
-                por fulano" sin decir de qué empresa no prueba nada. */}
-            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>QUIEN FIRMA Y NO ESTÁ EN LA LISTA</label>
-            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5, margin: "2px 0 0" }}>
-              El que agregues acá <strong>firma</strong>: recibe su propio enlace para aprobar u objetar, entra al cuadro
-              de firmas del PDF, y la orden no entra al presupuesto hasta que apruebe. Si solo tiene que enterarse,
-              va en <em>otros correos</em>.
-            </div>
-            {(mandando.externos || []).map((x, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr 22px", gap: 5, marginTop: 4 }}>
-                <input value={x.nombre} placeholder="Nombre"
-                  onChange={e => setMandando(m => ({ ...m, externos: m.externos.map((y, k) => k === i ? { ...y, nombre: e.target.value } : y) }))}
-                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
-                <input value={x.empresa} placeholder="Empresa o cargo"
-                  onChange={e => setMandando(m => ({ ...m, externos: m.externos.map((y, k) => k === i ? { ...y, empresa: e.target.value } : y) }))}
-                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
-                <input value={x.email} placeholder="correo@empresa.com" type="email"
-                  onChange={e => setMandando(m => ({ ...m, externos: m.externos.map((y, k) => k === i ? { ...y, email: e.target.value } : y) }))}
-                  style={{ ...inputStyle, padding: "6px 8px", fontSize: 12 }} />
-                <button onClick={() => setMandando(m => ({ ...m, externos: m.externos.filter((_, k) => k !== i) }))}
-                  style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", padding: 0 }}>
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-            <button onClick={() => setMandando(m => ({ ...m, externos: [...(m.externos || []), { nombre: "", empresa: "", email: "" }] }))}
+                  )}
+                </div>
+              );
+            })}
+            <button onClick={() => setMandando(m => ({ ...m,
+              gente: [...(m.gente || []), { id: null, nombre: "", empresa: "", rol: "", email: "", modo: "aprueba" }] }))}
               style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 7, padding: "5px 10px",
-                color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font, marginTop: 5, marginBottom: 8 }}>
-              + Agregar a quien firma
+                color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font, margin: "7px 0 8px" }}>
+              + Agregar a alguien que no está en la lista
             </button>
 
-            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>OTROS CORREOS (solo copia, sin firmar)</label>
+            <label style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>OTROS CORREOS, SOLO PARA QUE LA VEAN</label>
             <input placeholder="cliente@empresa.com, gerente@…"
               onChange={e => setMandando(m => ({ ...m, sueltos: e.target.value }))}
               style={{ ...inputStyle, marginTop: 4, marginBottom: 8 }} />
