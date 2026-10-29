@@ -16,7 +16,7 @@ import {
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
 import {
   leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
-  enlacesDeCotizaciones, sincronizarBeneficios,
+  enlacesDeCotizaciones, sincronizarBeneficios, guardarIva,
 } from "./cotizacionesOrden";
 import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos } from "./cuentaOrdenCambio.js";
 import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
@@ -300,7 +300,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
    * @returns el texto de qué hizo, para decirlo en la pantalla.
    */
   async function ponerLosCostos(o, cot, suyas) {
-    const { pone, sinCosto, sinUsar } = emparejarCostos(suyas, cot.items || []);
+    const { pone, sinCosto, sinUsar } = emparejarCostos(suyas, cot.items || [], cot.iva);
     for (const x of pone) {
       const r = await guardarLinea(x.id, { costo_unitario: x.costo_unitario, cotizacion_id: cot.id });
       if (r.error) return `No se pudo guardar el costo: ${r.error}`;
@@ -319,7 +319,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   /** Los renglones de una cotización, como partidas de la orden con su costo. */
   async function agregarPartidas(o, c, yaPuestas) {
     const puestas = [...yaPuestas];
-    for (const p of partidasDeCotizacion(c.items || [])) {
+    for (const p of partidasDeCotizacion(c.items || [], c.iva)) {
       const r = await agregarLinea(o.id, { ...p, orden: puestas.length, cotizacion_id: c.id }, puestas);
       if (r.error) return r.error;
       puestas.push(r.linea);
@@ -924,7 +924,48 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                 onBlur={e => e.target.value.trim() !== (c.proveedor || "") && hacer(() => guardarProveedor(c.id, e.target.value))}
                                 style={{ ...celda, width: 170 }} />
                             ) : <span style={{ color: colors.ink }}>{c.proveedor || "Proveedor sin nombre"}</span>}
-                            <span style={{ color: colors.muted }}>{(c.items || []).length} renglones · ${fmt(c.total)}</span>
+                            {/* EL IVA SE CORRIGE ACÁ. NOVA lo lee del papel,
+                                pero una proforma puede no decirlo. De ese
+                                porcentaje depende el margen entero: con el 15%
+                                puesto o sin poner, la misma cotización da dos
+                                márgenes que se llevan quince puntos. */}
+                            {puedeEditar && (
+                              <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: colors.muted }}>
+                                IVA
+                                <input type="number" step="0.5" min="0" max="30"
+                                  defaultValue={Number(c.iva) || 0} key={`iva${c.id}-${c.iva}`}
+                                  title="El IVA que está incluido en los montos. La orden cobra sin IVA, así que su costo se calcula sacándolo."
+                                  onBlur={async e => {
+                                    const v = Number(e.target.value) || 0;
+                                    if (v === (Number(c.iva) || 0)) return;
+                                    setOcupado(true);
+                                    const err = await guardarIva(c.id, v);
+                                    if (!err) {
+                                      // El margen cambia con el IVA: los costos
+                                      // que salieron de esta proforma se
+                                      // recalculan solos, si no el número de la
+                                      // pantalla queda del porcentaje viejo.
+                                      await ponerLosCostos(o, { ...c, iva: v }, suyas.map(l =>
+                                        (l.cotizacion_id === c.id ? { ...l, costo_unitario: null } : l)));
+                                    }
+                                    setOcupado(false);
+                                    await cargar(); onCambio?.();
+                                    if (err) setAviso(err);
+                                  }}
+                                  style={{ ...celda, width: 52, textAlign: "right" }} />
+                                %
+                              </label>
+                            )}
+                            {/* EL IVA, DICHO. La orden cobra sin IVA y el costo
+                                que usa es sin IVA: si la pantalla mostrara solo
+                                el total de la proforma, los dos números no
+                                cuadrarían contra el papel del proveedor. */}
+                            <span style={{ color: colors.muted }}>
+                              {(c.items || []).length} renglones · ${fmt(c.total)}
+                              {Number(c.iva) > 0
+                                ? ` (IVA ${fmt(c.iva)}% incluido · $${fmt(c.total / (1 + Number(c.iva) / 100))} es el costo de la orden)`
+                                : " · sin IVA"}
+                            </span>
                             <button onClick={() => setVerRenglones(v => v === c.id ? null : c.id)}
                               style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
                               {verRenglones === c.id ? "ocultar lo leído" : "ver lo leído"}

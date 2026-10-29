@@ -63,7 +63,7 @@ const renglones = (items = []) => items.map(x => ({
  * El archivo tal como llegó, no una interpretación: lo que se discute con el
  * proveedor es su papel, no nuestra lectura de su papel.
  */
-export async function guardarCotizacion(ordenId, archivo, { proveedor, items = [] }, quien) {
+export async function guardarCotizacion(ordenId, archivo, { proveedor, items = [], iva = 0 }, quien) {
   let ruta = null, nombre = null;
   if (archivo) {
     const limpio = String(archivo.name || "cotizacion").replace(/[^\w.-]+/g, "_").slice(-60);
@@ -77,6 +77,9 @@ export async function guardarCotizacion(ordenId, archivo, { proveedor, items = [
     orden_id: ordenId, archivo_path: ruta, archivo_nombre: nombre,
     proveedor: String(proveedor || "").trim() || null,
     total: Math.round(lista.reduce((t, x) => t + x.monto, 0) * 100) / 100,
+    // Lo que de eso es impuesto. El total se guarda como lo paga el cliente;
+    // la orden de cambio le saca el IVA para su costo, porque cobra sin IVA.
+    iva: Number(iva) || 0,
     items: lista,
     creado_por: quien?.id ?? null, creado_nombre: quien?.name || null,
   }).select().single();
@@ -97,6 +100,21 @@ export async function cotizacionesDe(ordenIds = []) {
   const porOrden = {};
   for (const c of data || []) (porOrden[c.orden_id] = porOrden[c.orden_id] || []).push(c);
   return { porOrden };
+}
+
+/**
+ * Corregir el IVA de una cotización ya cargada.
+ *
+ * NOVA lo lee del papel, pero una proforma puede no decirlo, o decirlo de una
+ * manera que no se entiende. Y de ese porcentaje depende el margen entero de la
+ * orden: con el 15% puesto o sin poner, la misma cotización da dos márgenes que
+ * se llevan quince puntos.
+ */
+export async function guardarIva(id, pct) {
+  const n = Number(String(pct).replace(",", ".")) || 0;
+  if (n < 0 || n > 30) return "El IVA se escribe como porcentaje: 15, o 0 si la proforma no tiene.";
+  const { error } = await supabase.from("orden_cambio_cotizaciones").update({ iva: n }).eq("id", id);
+  return error ? (falta(error) ? "Falta correr la migración 134 para guardar el IVA de la proforma." : error.message) : null;
 }
 
 export async function guardarProveedor(id, proveedor) {

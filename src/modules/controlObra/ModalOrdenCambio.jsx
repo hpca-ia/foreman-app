@@ -146,11 +146,13 @@ export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentU
     if (!original) return;
     setLeyendo("leyendo"); setErrorNova("");
     try {
-      const { proveedor, items, cortado, archivo } = await leerConNova(original, rubros, p2 => setLeyendo(p2 || "leyendo"));
-      const partidas = partidasDeCotizacion(items);
+      const { proveedor, items, cortado, archivo, iva } = await leerConNova(original, rubros, p2 => setLeyendo(p2 || "leyendo"));
+      // EL COSTO VA SIN IVA: la orden cobra sin IVA, y medir un precio sin IVA
+      // contra un costo con IVA se come el margen entero sin que nada lo diga.
+      const partidas = partidasDeCotizacion(items, iva);
       if (!partidas.length) throw new Error("NOVA no encontró renglones con precios en la cotización.");
       setLineas(partidas);
-      setCotizacion({ archivo, proveedor: proveedor || "", items });
+      setCotizacion({ archivo, proveedor: proveedor || "", items, iva });
       if (cortado) setErrorNova("La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel.");
     } catch (err) {
       setErrorNova(err.message);

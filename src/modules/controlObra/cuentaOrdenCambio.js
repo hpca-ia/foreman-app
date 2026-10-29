@@ -50,13 +50,28 @@ export function margenDeOrden(lineas = []) {
  * El precio nace igual al costo —es lo único que se sabe—, y el costo queda
  * aparte para que ponerle margen al precio no borre lo que cuesta.
  */
-export function partidasDeCotizacion(items = []) {
+/**
+ * EL COSTO DE UNA ORDEN DE CAMBIO VA SIN IVA.
+ *
+ * El precio que firma el cliente es el del contrato, sin IVA. La proforma del
+ * proveedor viene con IVA adentro —así la lee NOVA, porque en Beneficios eso es
+ * lo correcto: ahí se decide a quién comprarle y lo que se paga es con IVA—.
+ * Medir uno contra el otro es comparar dos cosas distintas y se come el margen
+ * entero sin que nada lo diga.
+ */
+export const sinIva = (monto, iva) => {
+  const p = n(iva);
+  if (!(p > 0)) return n(monto);
+  return Math.round((n(monto) / (1 + p / 100)) * 10000) / 10000;
+};
+
+export function partidasDeCotizacion(items = [], iva = 0) {
   return items.filter(x => x?.descripcion && n(x.monto)).map(x => {
     const cantidad = n(x.cantidad) || 1;
     // El unitario sale del total, que es el número que el proveedor suma: si
     // la proforma trae el unitario y el total, el que vale es el que
     // multiplica.
-    const unitario = Math.round((n(x.monto) / cantidad) * 10000) / 10000;
+    const unitario = Math.round((sinIva(x.monto, iva) / cantidad) * 10000) / 10000;
     return {
       tipo: "aumenta",
       descripcion: String(x.descripcion).slice(0, 160),
@@ -92,7 +107,7 @@ export function partidasDeCotizacion(items = []) {
  *
  * @returns { pone: [{id, costo_unitario, como}], sinCosto, sinUsar }
  */
-export function emparejarCostos(lineas = [], items = []) {
+export function emparejarCostos(lineas = [], items = [], iva = 0) {
   const limpio = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const adiciones = lineas.filter(l => l.tipo !== "quita");
@@ -101,9 +116,11 @@ export function emparejarCostos(lineas = [], items = []) {
   const pone = [];
 
   const costoDe = (l, x) => {
-    // El unitario sale del total, que es el número que el proveedor suma.
+    // El unitario sale del total, que es el número que el proveedor suma, y
+    // SIN IVA: la orden cobra sin IVA y el margen tiene que medir lo mismo
+    // contra lo mismo.
     const cant = n(l.cantidad) || n(x.cantidad) || 1;
-    return Math.round((n(x.monto) / cant) * 10000) / 10000;
+    return Math.round((sinIva(x.monto, iva) / cant) * 10000) / 10000;
   };
 
   // 1. Por nombre: el que de verdad ata los dos papeles.

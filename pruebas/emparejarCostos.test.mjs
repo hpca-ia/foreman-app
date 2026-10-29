@@ -63,3 +63,17 @@ test("una partida que ya tiene costo no se cuenta como sin costo", () => {
     [{ descripcion: "Otra", cantidad: 1, monto: 5 }, { descripcion: "Y otra", cantidad: 1, monto: 6 }]);
   assert.deepEqual(sinCosto, []);
 });
+
+test("el costo de una orden de cambio va sin IVA: la orden cobra sin IVA", () => {
+  // La OC-01 de Plaza Lagos: $1.389,75 con IVA del 15% son $1.208,48 de costo,
+  // y el margen pasa de $336,89 (19,5%) a $518,16 (30%).
+  const { pone } = emparejarCostos(lineas, items, 15);
+  assert.equal(pone[0].costo_unitario, 151.0598);
+  const costo = Math.round(pone[0].costo_unitario * 8 * 100) / 100;
+  assert.equal(costo, 1208.48);
+  assert.equal(Math.round((1726.64 - costo) * 100) / 100, 518.16);
+});
+
+test("sin IVA declarado, el monto se usa tal cual", () => {
+  assert.equal(emparejarCostos(lineas, items, 0).pone[0].costo_unitario, 173.7188);
+});

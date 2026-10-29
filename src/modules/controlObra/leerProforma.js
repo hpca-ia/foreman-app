@@ -34,12 +34,28 @@ descripción va corta y sin barras adentro.`;
 export function renglonesDeTexto(txt = "") {
   const items = [];
   let proveedor = "";
+  // CUÁNTO DE ESOS MONTOS ES IVA.
+  //
+  // Los montos vienen con el IVA adentro, que es lo que hace falta para
+  // comparar proformas en Beneficios: ahí se decide a quién comprarle, y lo que
+  // se paga es con IVA. Pero una orden de cambio se cobra SIN IVA, y medir un
+  // precio sin IVA contra un costo con IVA es comparar dos cosas distintas: en
+  // la OC-01 de Plaza Lagos eso se comía 15 puntos del margen —$336,89 contra
+  // los $518,16 que de verdad deja—. Por eso el porcentaje se pregunta y viaja:
+  // cada lado lo saca o lo deja según lo que esté midiendo.
+  let iva = 0;
   for (const cruda of String(txt).split("\n")) {
     const linea = cruda.trim();
     if (!linea || !linea.includes("|")) continue;
     let campos = linea.replace(/^[-*\s]+/, "").split("|").map(s => s.trim());
     if (/^proveedor$/i.test(campos[0])) {
       proveedor = campos.slice(1).join(" ").trim();
+      continue;
+    }
+    if (/^iva$/i.test(campos[0])) {
+      const p = num(campos[1]);
+      // Un IVA de 115 es el modelo contestando el total y no el porcentaje.
+      if (p >= 0 && p <= 30) iva = p;
       continue;
     }
     // Una descripción con una barra adentro parte la línea de más. Los cuatro
@@ -59,7 +75,7 @@ export function renglonesDeTexto(txt = "") {
       rubro_id: /^\d+$/.test(id) ? Number(id) : null,
     });
   }
-  return { proveedor, items };
+  return { proveedor, items, iva };
 }
 
 /**
@@ -84,7 +100,8 @@ export function interpretarRespuesta(txt = "") {
         monto: Math.round(num(x.monto) * 100) / 100,
         rubro_id: /^\d+$/.test(String(x.rubro_id ?? "").trim()) ? Number(x.rubro_id) : null,
       }));
-    return { proveedor: String(p.proveedor || "").trim(), items };
+    const pct = num(p.iva);
+    return { proveedor: String(p.proveedor || "").trim(), items, iva: pct >= 0 && pct <= 30 ? pct : 0 };
   } catch {
     return porLineas;
   }
@@ -195,6 +212,14 @@ ${FORMATO}
 
 "monto" es lo que suma ESE renglón CON IVA incluido.
 
+Después de la línea del proveedor va una segunda línea:  IVA | porcentaje
+
+Es el porcentaje de IVA que está adentro de esos montos: 15 si la proforma tiene
+IVA del 15%, 0 si no tiene IVA o no se puede saber. Si la proforma muestra un
+subtotal y después el IVA, los montos de los renglones tienen que ser los del
+subtotal multiplicados por (1 + porcentaje/100), de manera que la suma de los
+renglones sea el total que paga el cliente.
+
 "rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
 no estás seguro. El guion es una respuesta válida y es mejor que adivinar.
 ${lista ? `\nRubros de la obra: ${lista}` : ""}`;
@@ -220,7 +245,7 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
   const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
   const bloques = esHoja ? partirHoja(texto, 60) : [null];
   const items = [];
-  let proveedor = "", cortado = false;
+  let proveedor = "", cortado = false, iva = 0;
 
   for (let i = 0; i < bloques.length; i++) {
     onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
@@ -243,7 +268,8 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
     // cortado —"48" de "48,90"— entra como un renglón que parece bueno.
     if (seCorto) { leido.items.pop(); cortado = true; }
     if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
+    if (leido.iva && !iva) iva = leido.iva;
     items.push(...leido.items);
   }
-  return { proveedor, items, cortado };
+  return { proveedor, items, cortado, iva };
 }
