@@ -11,7 +11,7 @@ import {
   pedirVisto, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
-  insistirConLaOrden,
+  insistirConLaOrden, genteDeOtrosProyectos,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
 import {
@@ -79,6 +79,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const [verRenglones, setVerRenglones] = useState(null);
   const [verLiquidacion, setVerLiquidacion] = useState(false);
   const [insistiendo, setInsistiendo] = useState(null);   // id de la orden a la que se le está insistiendo
+  // Lo que contesta "traer los de siempre", al lado del botón y no arriba de
+  // la pantalla: un aviso que aparece a dos pantallas de distancia del botón
+  // que se apretó se lee como que el botón no hizo nada.
+  const [avisoGente, setAvisoGente] = useState(null);     // { ordenId, texto }
+  const [traerDe, setTraerDe] = useState(null);           // { ordenId, gente, elegidos }
   const [verPendientes, setVerPendientes] = useState(true);
   const cotRef = useRef(null);
   const cotPara = useRef(null);
@@ -161,24 +166,36 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // después rebota —y un correo de aprobación que rebota no se nota: se
   // parece a un cliente que no contestó—. Trae la gente del proyecto que
   // recibe órdenes y no está ya en la lista.
+  /** De dónde salió esta persona, dicho para quien elige. */
+  const deDonde = g => (g.deSiempre ? "los de siempre"
+    : g.deOrdenes ? "órdenes anteriores"
+    : g.deActas ? "actas de este proyecto"
+    : "el proyecto");
+
   async function traerLosDeSiempre(o) {
+    setAvisoGente(null);
     const ya = new Set((aprobadores[o.id] || []).map(a => String(a.email || "").toLowerCase()));
-    const faltan = invitados.filter(i => !ya.has(String(i.email).toLowerCase()));
-    if (!faltan.length) { setAviso("Ya están todos los del proyecto en la lista."); return; }
-    await hacer(async () => {
-      for (const i of faltan) {
-        const r = await guardarAprobador({
-          orden_id: o.id, nombre: i.nombre || "", empresa: i.empresa || null,
-          rol: i.rol || "", email: i.email,
-          // Vienen SIN marcar. De un proyecto salen veinte involucrados y
-          // una orden la firman dos o tres; si vinieran marcados, la orden
-          // quedaría esperando veinte firmas que nadie pidió y no entraría
-          // nunca al presupuesto. Se tilda a los que aprueban.
-          aprueba: false,
-        });
-        if (r.error) return r.error;
-      }
-      return null;
+    let gente = invitados.filter(i => !ya.has(String(i.email).toLowerCase()))
+      .map(g => ({ ...g, proyectos: [deDonde(g)] }));
+
+    // UNA OBRA NUEVA NO TIENE A NADIE TODAVÍA, y decirle "ya están todos" es
+    // mentirle: no hay ninguno. Lo que sí hay casi siempre es la misma gente
+    // en otra obra del mismo cliente.
+    if (!gente.length && !invitados.length) {
+      gente = (await genteDeOtrosProyectos(obra.lead_id)).filter(g => !ya.has(g.email));
+    }
+    if (!gente.length) {
+      setAvisoGente({ ordenId: o.id, texto: invitados.length
+        ? `Ya están los ${invitados.length} del proyecto en esta lista.`
+        : "Este proyecto todavía no tiene gente cargada, y no hay de dónde traerla. "
+          + "Agregá quien firma a mano: desde la próxima orden ya los trae solos." });
+      return;
+    }
+    // Vienen marcados los que ya recibieron una orden de este proyecto o son
+    // de los de siempre: destildar uno es más rápido que tildar cuatro.
+    setTraerDe({
+      ordenId: o.id, gente,
+      elegidos: new Set(gente.filter(g => g.deSiempre || g.recibe_ordenes || g.deOrdenes).map(g => g.email)),
     });
   }
 
@@ -1344,6 +1361,75 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         De esta lista sale el envío. Tildá <strong>aprueba</strong> a los que tienen que firmar:
                         la orden entra al presupuesto cuando firman todos ellos. Los demás reciben copia.
                       </span>
+                    </div>
+                  )}
+
+                  {/* LA RESPUESTA DEL BOTÓN, AL LADO DEL BOTÓN. */}
+                  {avisoGente?.ordenId === o.id && (
+                    <div style={{ fontSize: 11.5, color: colors.warning, marginTop: 6, lineHeight: 1.5 }}>
+                      {avisoGente.texto}
+                    </div>
+                  )}
+
+                  {/* DE DÓNDE TRAERLOS CUANDO EL PROYECTO TODAVÍA NO TIENE.
+                      No se traen solos: son correos que van a recibir un precio,
+                      y meter a doce personas de otra obra sin mirar es la manera
+                      de mandarle una orden de cambio a quien no le toca. */}
+                  {traerDe?.ordenId === o.id && (
+                    <div style={{ marginTop: 8, background: colors.bg, border: `1px solid ${colors.border}`,
+                      borderRadius: colors.radiusSm, padding: "9px 11px" }}>
+                      <div style={{ fontSize: 11.5, color: colors.ink, fontWeight: 700, marginBottom: 2 }}>
+                        Este proyecto todavía no tiene su gente cargada
+                      </div>
+                      <div style={{ fontSize: 11, color: colors.muted, marginBottom: 7, lineHeight: 1.5 }}>
+                        Estos ya firmaron o recibieron otras órdenes. Elegí a quién va ésta: los que vienen de la
+                        orden anterior de esta obra ya están marcados.
+                      </div>
+                      {traerDe.gente.map(g => (
+                        <label key={g.email} style={{ display: "flex", gap: 7, alignItems: "flex-start",
+                          padding: "3px 0", fontSize: 12, color: colors.ink, cursor: "pointer" }}>
+                          <input type="checkbox" checked={traerDe.elegidos.has(g.email)} style={{ marginTop: 3 }}
+                            onChange={() => setTraerDe(t => {
+                              const e = new Set(t.elegidos);
+                              if (e.has(g.email)) e.delete(g.email); else e.add(g.email);
+                              return { ...t, elegidos: e };
+                            })} />
+                          <span style={{ minWidth: 0 }}>
+                            {g.nombre || g.email}
+                            {g.empresa ? <span style={{ color: colors.muted }}> · {g.empresa}</span> : null}
+                            <div style={{ fontSize: 10.5, color: colors.muted }}>
+                              {g.email}{g.proyectos?.length ? ` · de ${g.proyectos.join(", ")}` : ""}
+                            </div>
+                          </span>
+                        </label>
+                      ))}
+                      <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+                        <Button variant="primary" size="sm" disabled={ocupado || !traerDe.elegidos.size}
+                          onClick={async () => {
+                            const van = traerDe.gente.filter(g => traerDe.elegidos.has(g.email));
+                            setTraerDe(null);
+                            await hacer(async () => {
+                              for (const g of van) {
+                                const r = await guardarAprobador({
+                                  orden_id: o.id, nombre: g.nombre || "", empresa: g.empresa || null,
+                                  rol: g.rol || "", email: g.email,
+                                  // Sin marcar: de acá salen los que reciben, y
+                                  // quién FIRMA se tilda aparte. Una orden que
+                                  // espera seis firmas que nadie pidió no entra
+                                  // nunca al presupuesto.
+                                  aprueba: false,
+                                });
+                                if (r.error) return r.error;
+                              }
+                              return null;
+                            });
+                            setAvisoGente({ ordenId: o.id, texto: `${van.length} ${van.length === 1 ? "persona agregada" : "personas agregadas"}. `
+                              + "Tildá 'aprueba' a los que tienen que firmar." });
+                          }}>
+                          Traer {traerDe.elegidos.size || ""}
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => setTraerDe(null)}>Cancelar</Button>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -454,19 +454,103 @@ export async function moverLinea(lineas, id, direccion) {
  */
 export async function gentePara(leadId) {
   if (!leadId) return [];
-  const [{ data: convocados }, { data: invitados }] = await Promise.all([
+  // LAS CUATRO LISTAS SON UNA SOLA PERSONA.
+  //
+  // El mismo arquitecto de la fiscalización está cargado como convocado del
+  // acta, como invitado del pipeline, como asistente de las seis actas que ya
+  // se hicieron y como firmante de las dos órdenes anteriores. Son cuatro
+  // tablas por historia, no por decisión, y el que arma una orden no tiene por
+  // qué saber en cuál quedó: termina tipeando un correo que ya está escrito
+  // tres veces, y ahí es donde se cuela la letra cambiada que después rebota
+  // sin que nadie lo note —un correo de aprobación que no llega se parece a un
+  // cliente que no contestó—.
+  //
+  // Así que el directorio del proyecto se arma de las cuatro y se alimenta
+  // solo: cada persona que entra a un acta o a una orden ya está disponible
+  // para la próxima, sin que nadie la vuelva a cargar.
+  //
+  // `deSiempre` marca a los convocados, que es otra cosa: esos entran solos en
+  // cada acta nueva. Un proveedor que vino una vez a una reunión queda en el
+  // directorio —para no volver a tipearlo— pero no se cuela en todas las actas
+  // del año.
+  const [{ data: convocados }, { data: invitados }, { data: actas }, { data: obras }] = await Promise.all([
     supabase.from("obra_convocados").select("*").eq("lead_id", leadId).eq("activo", true).order("orden"),
     supabase.from("pipeline_invitados").select("*").eq("lead_id", leadId),
+    supabase.from("obra_actas").select("id").eq("lead_id", leadId),
+    supabase.from("obras").select("id").eq("lead_id", leadId),
   ]);
+
+  const [{ data: asistentes }, { data: firmantes }] = await Promise.all([
+    (actas || []).length
+      ? supabase.from("acta_asistentes").select("nombre,empresa,cargo,email").in("acta_id", (actas || []).map(a => a.id))
+      : Promise.resolve({ data: [] }),
+    (obras || []).length
+      ? supabase.from("ordenes_cambio").select("id").in("obra_id", (obras || []).map(o => o.id))
+        .then(async ({ data: ords }) => ((ords || []).length
+          ? supabase.from("orden_cambio_aprobaciones").select("nombre,empresa,rol,email").in("orden_id", ords.map(o => o.id))
+          : { data: [] }))
+      : Promise.resolve({ data: [] }),
+  ]);
+
   const por = new Map();
-  const poner = (nombre, empresa, rol, email, extra) => {
+  const poner = (nombre, empresa, rol, email, extra = {}) => {
     const limpio = String(email || "").trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(limpio) || por.has(limpio)) return;
-    por.set(limpio, { nombre: nombre || "", empresa: empresa || "", rol: rol || "", email: limpio, ...extra });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(limpio)) return;
+    const ya = por.get(limpio);
+    if (!ya) { por.set(limpio, { nombre: nombre || "", empresa: empresa || "", rol: rol || "", email: limpio, ...extra }); return; }
+    // Gana el dato que existe sobre el vacío, y el nombre más completo: el
+    // firmante de una orden suele estar cargado como "Diners" y el convocado
+    // del acta con nombre, empresa y cargo.
+    if (String(nombre || "").length > String(ya.nombre || "").length) ya.nombre = nombre;
+    if (!ya.empresa && empresa) ya.empresa = empresa;
+    if (!ya.rol && rol) ya.rol = rol;
+    Object.assign(ya, { ...extra, ...(ya.deSiempre ? { deSiempre: true } : {}) });
   };
-  for (const c of convocados || []) poner(c.nombre, c.empresa, c.cargo, c.email, { id: `c${c.id}` });
+
+  for (const c of convocados || []) poner(c.nombre, c.empresa, c.cargo, c.email, { id: `c${c.id}`, deSiempre: true });
   for (const i of invitados || []) poner(i.nombre, "", i.rol, i.email, { id: `i${i.id}`, recibe_ordenes: i.recibe_ordenes });
+  for (const a of asistentes || []) poner(a.nombre, a.empresa, a.cargo, a.email, { deActas: true });
+  for (const f of firmantes || []) poner(f.nombre, f.empresa, f.rol, f.email, { deOrdenes: true });
   return [...por.values()];
+}
+
+/**
+ * LA GENTE DE LAS OTRAS OBRAS, para cuando este proyecto todavía no tiene.
+ *
+ * "Traer los de siempre" no hacía nada en una obra nueva, y decía "ya están
+ * todos los del proyecto": no era cierto —no había ninguno— y mandaba a
+ * tipear cuatro correos a mano, que es de donde sale la letra cambiada que
+ * después rebota sin que nadie lo note.
+ *
+ * Y casi siempre son los mismos: el mismo cliente abre la obra del aeropuerto
+ * y la de Plaza Lagos con la misma gente. Se ofrecen los de los otros
+ * proyectos, diciendo de cuál vienen, para elegir y traerlos.
+ *
+ * Gana el más completo: el convocado de un acta trae empresa y cargo.
+ */
+export async function genteDeOtrosProyectos(leadId) {
+  const [{ data: convocados }, { data: leads }] = await Promise.all([
+    supabase.from("obra_convocados").select("*").eq("activo", true).order("orden"),
+    supabase.from("leads").select("id,nombre"),
+  ]);
+  const nombreDe = new Map((leads || []).map(l => [Number(l.id), l.nombre]));
+  const por = new Map();
+  for (const c of convocados || []) {
+    if (Number(c.lead_id) === Number(leadId)) continue;
+    const email = String(c.email || "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) continue;
+    const ya = por.get(email);
+    const fila = {
+      nombre: c.nombre || "", empresa: c.empresa || "", rol: c.cargo || "", email,
+      proyectos: new Set([nombreDe.get(Number(c.lead_id)) || ""].filter(Boolean)),
+    };
+    if (!ya) { por.set(email, fila); continue; }
+    fila.proyectos.forEach(x => ya.proyectos.add(x));
+    if (String(fila.nombre).length > String(ya.nombre).length) ya.nombre = fila.nombre;
+    if (!ya.empresa) ya.empresa = fila.empresa;
+    if (!ya.rol) ya.rol = fila.rol;
+  }
+  return [...por.values()].map(x => ({ ...x, proyectos: [...x.proyectos] }));
 }
 
 export async function guardarAprobador(fila) {
