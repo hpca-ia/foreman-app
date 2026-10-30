@@ -190,3 +190,25 @@ export function eficienciaDeLaDiferencia(linea, rubro, analisis) {
     nota: `Lo cotizan por debajo del costo cargado${analisis?.titulo ? ` · ${analisis.titulo}` : ""}`,
   };
 }
+
+/**
+ * EL COSTO DEL RUBRO, CARGADO DE UNA VEZ.
+ *
+ * Se escribe solo donde falta —el `is null` está en la consulta, no en la
+ * pantalla—: así dos personas cargando costos a la vez no se pisan, y volver a
+ * apretar el botón no reemplaza un costo bueno por el de una proforma nueva.
+ * El costo que ya estaba es justamente el que sirve para comparar.
+ */
+export async function cargarCostosDeRubros(filas = []) {
+  let cuantos = 0;
+  for (const f of filas) {
+    if (!f?.id || !(Number(f.costo_unitario) > 0)) continue;
+    const { data, error } = await supabase.from("obra_rubros")
+      .update({ costo_unitario: Number(f.costo_unitario) })
+      .eq("id", f.id).is("costo_unitario", null).select("id");
+    if (error) return { error: /costo_unitario/.test(error.message)
+      ? "Falta correr la migración 148 para que el rubro pueda guardar su costo." : error.message, cuantos };
+    cuantos += (data || []).length;
+  }
+  return { cuantos };
+}

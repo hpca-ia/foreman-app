@@ -500,7 +500,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           )}
 
           {tab === "beneficios" && (
-            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} currentUser={currentUser} /></SiSeRompe>
+            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} porRubro={porRubro} currentUser={currentUser} /></SiSeRompe>
           )}
           {tab === "diferencias" && (
             <SiSeRompe que="Diferencias"><PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} /></SiSeRompe>

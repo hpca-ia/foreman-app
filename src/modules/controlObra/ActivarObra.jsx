@@ -91,6 +91,11 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
       unidad: it.unidad || "",
       cantidad: Number(it.cantidad) || 0,
       precio_unitario: Number(it.precio_unitario) || 0,
+      // EL COSTO BAJA CON EL RUBRO. El presupuesto tiene dos números —lo que
+      // cuesta y lo que el cliente paga— y acá se copiaba solo el segundo: por
+      // eso Beneficios no podía medir nada. Null, no cero: no saber lo que
+      // cuesta no es lo mismo que que sea gratis.
+      costo_unitario: Number(it.precio_base) > 0 ? Number(it.precio_base) : null,
       iva_pct: ivaPct,
       total_base: conIva[idx],
       presupuesto_item_id: it.id,

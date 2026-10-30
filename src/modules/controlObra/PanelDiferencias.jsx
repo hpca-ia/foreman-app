@@ -13,7 +13,7 @@ import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa,
 } from "./analisisDeDiferencias";
-import { sincronizarEficiencias, eficienciaDeLaDiferencia } from "./beneficios";
+import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
 //
@@ -141,6 +141,42 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         : "Todo lo que trae está en el contrato y con las mismas cantidades: no hay diferencias.");
     } catch (err) { setError(err.message); }
     setLeyendo("");
+  }
+
+  /**
+   * EL COSTO DEL RUBRO SE CARGA DESDE ACÁ.
+   *
+   * Un rubro sin costo no se puede juzgar —el precio que tiene es el de VENTA,
+   * y contra ese todo proveedor parece barato— y hasta ahora la única forma de
+   * cargarlo era abrir el presupuesto y escribirlo a mano, rubro por rubro.
+   * Nadie hace eso ciento setenta veces, y por eso Beneficios estaba vacío.
+   *
+   * El dato está acá: NOVA acaba de leerlo y el renglón ya está emparejado con
+   * su rubro. Se carga el unitario de la propuesta, y solo en los que NO tienen
+   * costo: el que ya tenía uno no se toca, porque ese es justamente el que
+   * sirve para comparar.
+   */
+  async function cargarLosCostos() {
+    const candidatos = lineas.filter(l => {
+      if (!l.obra_rubro_id || !Number(l.cantidad)) return false;
+      const rub = vivos.find(x => x.id === l.obra_rubro_id);
+      return rub && (rub.costo_unitario === null || rub.costo_unitario === undefined || rub.costo_unitario === "");
+    });
+    if (!candidatos.length) { setAviso("Todos los rubros emparejados ya tienen costo cargado."); return; }
+    if (!window.confirm(`¿Cargar el costo de ${candidatos.length} `
+      + `${candidatos.length === 1 ? "rubro" : "rubros"} con el unitario de esta propuesta?\n\n`
+      + "A los que ya tienen costo no se los toca. Después se puede corregir rubro por rubro.")) return;
+    setOcupado(true);
+    const r = await cargarCostosDeRubros(candidatos.map(l => ({
+      id: l.obra_rubro_id,
+      costo_unitario: Math.round((Number(l.monto) || 0) / Number(l.cantidad) * 10000) / 10000,
+    })));
+    setOcupado(false);
+    if (r.error) { setError(r.error); return; }
+    setAviso(`Quedó cargado el costo de ${r.cuantos} ${r.cuantos === 1 ? "rubro" : "rubros"}. `
+      + "Beneficios ya puede medir si se compró mejor o peor que lo presupuestado.");
+    setSinCosto(0);
+    onCambio?.();
   }
 
   async function marcar(l, decision) {
@@ -407,8 +443,23 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             color: colors.inkSoft, lineHeight: 1.55 }}>
             De los renglones que calzaron con un rubro, <strong>{sinCosto}</strong> no tienen costo cargado:
             de esos no se puede decir si el precio está bien, porque no hay contra qué compararlo. Esta
-            propuesta es su primera referencia — cargándole el costo a esos rubros, la próxima sí se puede
-            comparar.
+            propuesta es su primera referencia.
+            {/* Y EL COSTO SE CARGA DE ACÁ, que es donde está el dato.
+                Pedirle a alguien que después abra el presupuesto y escriba a
+                mano ciento setenta costos es pedirle que no lo haga nunca: el
+                número lo acabamos de leer y el rubro ya está emparejado. Con
+                eso cargado, Beneficios puede medir solo si la obra compra
+                mejor o peor que lo presupuestado. */}
+            <div style={{ marginTop: 7 }}>
+              <button onClick={cargarLosCostos} disabled={ocupado}
+                style={{ background: colors.brand, color: "#fff", border: "none", borderRadius: colors.radiusSm,
+                  padding: "6px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: colors.font }}>
+                Cargar esos costos a los rubros
+              </button>
+              <span style={{ fontSize: 10.5, color: colors.muted, marginLeft: 8 }}>
+                Toma el precio de esta propuesta como costo del rubro. Desde ahí Beneficios mide solo.
+              </span>
+            </div>
           </div>
         )}
 

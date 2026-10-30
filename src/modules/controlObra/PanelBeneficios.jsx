@@ -8,6 +8,7 @@ import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
 import { ordenesMudas, contraQueSeMide } from "./cuentaBeneficios.js";
+import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
@@ -28,7 +29,7 @@ import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 
 const n = v => Number(v) || 0;
 
-export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
+export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, currentUser }) {
   const [items, setItems] = useState([]);
   const [proveedor, setProveedor] = useState("");
   const [ordenes, setOrdenes] = useState([]);
@@ -85,6 +86,14 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   // Contra qué se mide cada partida: el rubro nuevo no tiene base en el
   // presupuesto porque no estaba ahí, y hay que decirlo donde se mira el margen.
   const base = contraQueSeMide(ordenes, lineasDeOrdenes);
+  // LO QUE DICEN LOS RUBROS, SIN QUE NADIE CARGUE NADA.
+  //
+  // Los dos números están desde el primer día: lo que el rubro tenía de costo
+  // y lo que se gastó en él. Esperar que alguien escriba ciento setenta filas a
+  // mano es por qué este panel estaba vacío.
+  const sola = eficienciaDeRubros({ rubros, porRubro });
+  const porQue = porQueNoSabe(sola, rubros.filter(r => !r.anulado_por_oc && !r.oculto).length);
+  const titular = comoSeDice(sola);
 
   const r = compararContraPresupuesto(items, rubros);
   // Renglones sin precio: títulos de sección, opcionales, notas al pie que
@@ -570,6 +579,63 @@ Rubros de la obra: ${lista}`;
         {avisoOrdenes && (
           <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 8 }}>
             {avisoOrdenes} Hasta entonces, lo que dejan las órdenes de cambio no aparece acá.
+          </div>
+        )}
+
+        {/* ── LO QUE DICEN LOS RUBROS DE LA OBRA ───────────────────────
+            Calculado solo, contra las cantidades VIGENTES: cuando una orden de
+            cambio regulariza una cantidad, esto se acomoda con aprobarla. */}
+        {(sola.cuantos > 0 || porQue) && (
+          <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: `1px solid ${colors.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
+              LO QUE DICEN LOS RUBROS DE LA OBRA · CALCULADO SOLO
+            </div>
+            {porQue && (
+              <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 7, lineHeight: 1.5 }}>
+                {porQue}
+                {!sola.cuantos && (
+                  <span style={{ color: colors.muted }}>
+                    {" "}El costo se carga desde Diferencias, con la propuesta que NOVA ya leyó:
+                    el renglón viene emparejado con su rubro.
+                  </span>
+                )}
+              </div>
+            )}
+            {sola.cuantos > 0 && (
+              <>
+                <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+                  <Tarjeta label={`SE AHORRÓ · ${sola.cuantosAhorro} terminados`} valor={sola.ahorro} color={colors.success}
+                    icono={<TrendingDown size={11} color={colors.success} />} />
+                  <Tarjeta label={`SOBREPRECIO · ${sola.cuantosSobreprecio}`} valor={sola.sobreprecio} color={colors.danger} />
+                  <Tarjeta label="NETO DE LO QUE YA PASÓ" valor={sola.neto}
+                    color={sola.neto >= 0 ? colors.success : colors.danger} />
+                  {/* Lo que PARECE a favor en rubros sin terminar: puede ser
+                      nada más lo que todavía falta comprar. Contarlo con el
+                      resto es lo que hace que una obra parezca rentable hasta
+                      el último mes. */}
+                  {sola.cuantosEnCurso > 0 && (
+                    <Tarjeta label={`SIN TERMINAR · ${sola.cuantosEnCurso} rubros`} valor={sola.enCurso} color={colors.warning} />
+                  )}
+                </div>
+                {titular && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{titular}</div>}
+                <div style={{ marginTop: 7 }}>
+                  {sola.filas.filter(f => f.estado === "sobreprecio" || f.estado === "ahorro").slice(0, 8).map(f => (
+                    <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11.5,
+                      padding: "3px 0", borderBottom: `1px solid ${colors.borderSoft || colors.border}` }}>
+                      <span style={{ color: colors.muted, fontSize: 10.5, minWidth: 34 }}>{f.numero}</span>
+                      <span style={{ flex: 1, color: colors.ink }}>{f.descripcion}</span>
+                      <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>
+                        costaba ${fmt(f.presupuestado)} · se gastó ${fmt(f.gastado)}
+                      </span>
+                      <span style={{ fontWeight: 700, whiteSpace: "nowrap",
+                        color: f.dif > 0 ? colors.success : colors.danger }}>
+                        {f.dif > 0 ? "+" : "−"}${fmt(Math.abs(f.dif))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
