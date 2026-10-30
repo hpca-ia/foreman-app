@@ -44,6 +44,7 @@ export function renglonesDeTexto(txt = "") {
   // los $518,16 que de verdad deja—. Por eso el porcentaje se pregunta y viaja:
   // cada lado lo saca o lo deja según lo que esté midiendo.
   let iva = 0;
+  let totales = null;
   for (const cruda of String(txt).split("\n")) {
     const linea = cruda.trim();
     if (!linea || !linea.includes("|")) continue;
@@ -56,6 +57,21 @@ export function renglonesDeTexto(txt = "") {
       const p = num(campos[1]);
       // Un IVA de 115 es el modelo contestando el total y no el porcentaje.
       if (p >= 0 && p <= 30) iva = p;
+      continue;
+    }
+    // LOS TRES NÚMEROS DEL PIE, PARA COMPROBAR LA LECTURA.
+    //
+    // Es la única manera de saber si NOVA leyó bien sin volver a sumar la
+    // proforma a mano. Si los renglones no dan el subtotal del papel, algo se
+    // leyó mal —un renglón de más, uno de menos, un monto con el IVA adentro—
+    // y eso hay que decirlo antes de que el número viaje a un margen.
+    if (/^totales$/i.test(campos[0])) {
+      const [, sub, i2, tot] = campos;
+      totales = {
+        subtotal: /^[-–—]?$/.test(String(sub || "").trim()) ? null : num(sub),
+        iva: /^[-–—]?$/.test(String(i2 || "").trim()) ? null : num(i2),
+        total: /^[-–—]?$/.test(String(tot || "").trim()) ? null : num(tot),
+      };
       continue;
     }
     // Una descripción con una barra adentro parte la línea de más. Los cuatro
@@ -75,7 +91,7 @@ export function renglonesDeTexto(txt = "") {
       rubro_id: /^\d+$/.test(id) ? Number(id) : null,
     });
   }
-  return { proveedor, items, iva };
+  return { proveedor, items, iva, totales };
 }
 
 /**
@@ -101,7 +117,13 @@ export function interpretarRespuesta(txt = "") {
         rubro_id: /^\d+$/.test(String(x.rubro_id ?? "").trim()) ? Number(x.rubro_id) : null,
       }));
     const pct = num(p.iva);
-    return { proveedor: String(p.proveedor || "").trim(), items, iva: pct >= 0 && pct <= 30 ? pct : 0 };
+    return {
+      proveedor: String(p.proveedor || "").trim(), items,
+      iva: pct >= 0 && pct <= 30 ? pct : 0,
+      totales: p.subtotal != null || p.total != null
+        ? { subtotal: p.subtotal == null ? null : num(p.subtotal), iva: p.iva_monto == null ? null : num(p.iva_monto), total: p.total == null ? null : num(p.total) }
+        : null,
+    };
   } catch {
     return porLineas;
   }
@@ -212,20 +234,61 @@ ${FORMATO}
 
 "monto" es lo que suma ESE renglón SIN IVA: su subtotal, antes de impuestos.
 
-EL IVA VA SIEMPRE AFUERA. No es del proveedor ni nuestro: es del fisco, y acá
-todo —presupuestos, costos y márgenes— se maneja sin él. Si la proforma muestra
-los renglones con IVA adentro y el subtotal abajo, los montos que devuelvas son
-los del subtotal: la suma de los renglones tiene que dar el SUBTOTAL del papel,
-no el total a pagar.
+EL IVA NO VA. Ni en los rubros del presupuesto, ni en las órdenes de cambio, ni
+en los costos: el IVA no es del proveedor ni nuestro, es del fisco, y en esta
+obra se liquida al final, aparte de todo. Un monto con IVA adentro mezclado
+entre los otros no es un error de redondeo: mueve el margen quince puntos.
 
-Después de la línea del proveedor va una segunda línea:  IVA | porcentaje
+Casi todas las proformas lo dicen con todas las letras, al pie: SUBTOTAL, IVA
+15%, TOTAL. El número que vale es el del SUBTOTAL. Si los renglones están
+escritos con el IVA adentro y abajo figura el subtotal, devolvé los montos que
+suman el subtotal, no el total a pagar.
 
-Es el porcentaje de IVA que tiene la proforma —15, 12, o 0 si no tiene—, y es
-solo para poder cuadrar contra el papel. No lo sumes a ningún monto.
+Después de la línea del proveedor van dos líneas más:
+
+  IVA | porcentaje
+  TOTALES | subtotal | iva | total
+
+El porcentaje es el que dice el papel —15, 12, o 0 si no tiene IVA—. En TOTALES
+van los tres números TAL COMO ESTÁN ESCRITOS al pie de la proforma, sin
+calcularlos y sin corregirlos; si alguno no aparece, poné un guion. Sirven para
+comprobar que se leyó bien: la suma de los renglones tiene que dar el subtotal.
 
 "rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
 no estás seguro. El guion es una respuesta válida y es mejor que adivinar.
 ${lista ? `\nRubros de la obra: ${lista}` : ""}`;
+}
+
+/**
+ * ¿LO QUE SE LEYÓ DA LO QUE DICE EL PAPEL?
+ *
+ * La única manera de saber si NOVA leyó bien sin volver a sumar la proforma a
+ * mano. La suma de los renglones tiene que dar el SUBTOTAL —no el total, que
+ * lleva el IVA—. Si no da, algo se leyó mal: un renglón de más, uno que quedó
+ * afuera, o un monto con el impuesto adentro. Y eso hay que decirlo antes de
+ * que el número se convierta en un margen.
+ *
+ * Se tolera un centavo por renglón: los redondeos del proveedor son suyos.
+ *
+ * @returns null si el papel no trae totales; si no, { cuadra, suma, subtotal,
+ *   diferencia, parece }
+ */
+export function cuadrar(items = [], totales = null) {
+  if (!totales || totales.subtotal == null) return null;
+  const suma = Math.round(items.reduce((t, x) => t + (Number(x.monto) || 0), 0) * 100) / 100;
+  const subtotal = Math.round((Number(totales.subtotal) || 0) * 100) / 100;
+  const diferencia = Math.round((suma - subtotal) * 100) / 100;
+  const tolerancia = Math.max(0.05, items.length * 0.01);
+  const cuadra = Math.abs(diferencia) <= tolerancia;
+  // Si lo leído da justo el TOTAL en vez del subtotal, lo que pasó se sabe: se
+  // leyeron los montos con el IVA adentro.
+  const total = totales.total == null ? null : Math.round(Number(totales.total) * 100) / 100;
+  const parece = cuadra ? null
+    : total != null && Math.abs(suma - total) <= tolerancia
+      ? "los renglones se leyeron CON el IVA adentro: dan el total del papel y no el subtotal"
+      : diferencia > 0 ? "se leyó de más: puede haber entrado un subtotal o un renglón repetido"
+        : "quedó algo afuera: puede ser una hoja que no se leyó o un renglón sin precio";
+  return { cuadra, suma, subtotal, total, diferencia, parece };
 }
 
 /**
@@ -248,7 +311,7 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
   const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
   const bloques = esHoja ? partirHoja(texto, 60) : [null];
   const items = [];
-  let proveedor = "", cortado = false, iva = 0;
+  let proveedor = "", cortado = false, iva = 0, totales = null;
 
   for (let i = 0; i < bloques.length; i++) {
     onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
@@ -272,7 +335,8 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
     if (seCorto) { leido.items.pop(); cortado = true; }
     if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
     if (leido.iva && !iva) iva = leido.iva;
+    if (leido.totales && !totales) totales = leido.totales;
     items.push(...leido.items);
   }
-  return { proveedor, items, cortado, iva };
+  return { proveedor, items, cortado, iva, totales, cuadre: cuadrar(items, totales) };
 }

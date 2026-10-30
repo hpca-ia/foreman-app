@@ -294,9 +294,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
         // que me cuesta"—. Lo que no se puede emparejar no se inventa: se dice.
         hecho = await ponerLosCostos(o, rc.cotizacion, suyas);
       }
-      setAviso([hecho, leida.cortado
-        ? "La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel." : ""]
-        .filter(Boolean).join(" "));
+      // ¿LO LEÍDO DA LO QUE DICE EL PAPEL? Si los renglones no suman el
+      // subtotal de la proforma, algo se leyó mal y eso tiene que saberse antes
+      // de que el número se convierta en un margen.
+      const q = leida.cuadre;
+      setAviso([
+        q && !q.cuadra
+          ? `Ojo: los renglones leídos suman $${fmt(q.suma)} y la proforma dice $${fmt(q.subtotal)} de subtotal`
+            + `${q.parece ? ` — ${q.parece}` : ""}. Revisá contra el papel antes de usar este costo.`
+          : "",
+        hecho,
+        leida.cortado ? "La cotización era larga y NOVA se quedó sin espacio: revisá el final contra el papel." : "",
+      ].filter(Boolean).join(" "));
     } catch (e) {
       setAviso(e.message);
     }
@@ -1030,8 +1039,12 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                   const texto = await ponerLosCostos(o, r.cotizacion, suyas);
                                   setLeyendoCot(null);
                                   await cargar(); onCambio?.();
+                                  const q = r.cuadre;
                                   setAviso(`Releída sin IVA: $${fmt(r.cotizacion.total)}`
-                                    + `${Number(r.cotizacion.iva) > 0 ? ` (la proforma tiene IVA ${fmt(r.cotizacion.iva)}%, que va aparte)` : ""}. ${texto}`);
+                                    + `${Number(r.cotizacion.iva) > 0 ? ` (la proforma tiene IVA ${fmt(r.cotizacion.iva)}%, que va aparte)` : ""}. `
+                                    + `${q && !q.cuadra
+                                      ? `Ojo: no cuadra con el subtotal del papel, que dice $${fmt(q.subtotal)}${q.parece ? ` — ${q.parece}` : ""}. `
+                                      : q ? "Cuadra con el subtotal del papel. " : ""}${texto}`);
                                 }}>
                                 {leyendoCot?.ordenId === o.id ? `Leyendo… ${leyendoCot.paso || ""}` : "Volver a leerla sin IVA"}
                               </Button>

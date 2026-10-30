@@ -147,7 +147,7 @@ export async function releerCotizacion(c, rubros = [], onPaso) {
     ...(leida.proveedor && !c.proveedor ? { proveedor: leida.proveedor } : {}),
   }).eq("id", c.id).select().single();
   if (e2) return { error: falta(e2) ? "Falta correr la migración 139." : e2.message };
-  return { cotizacion: fila, cortado: leida.cortado };
+  return { cotizacion: fila, cortado: leida.cortado, cuadre: leida.cuadre };
 }
 
 export async function guardarProveedor(id, proveedor) {
