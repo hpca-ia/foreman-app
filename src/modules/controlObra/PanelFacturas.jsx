@@ -8,7 +8,7 @@ import ModalFactura from "./ModalFactura";
 import FilaFactura from "./FilaFactura";
 import RespaldosPlanilla from "./RespaldosPlanilla";
 
-export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, currentUser, puede, onCambio, mostrarTitulo = true, porRubro = {} }) {
+export default function PanelFacturas({ obra, rubros, actividades = [], planillas, planillaActual, facturas, asignaciones, pagos = [], currentUser, puede, onCambio, mostrarTitulo = true, porRubro = {} }) {
   const [modal, setModal] = useState(null); // null | {factura?}
   const [verRespaldos, setVerRespaldos] = useState(false);
 
@@ -17,13 +17,33 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
   const asignadasPorFactura = {};
   asignaciones.forEach(a => { asignadasPorFactura[a.factura_id] = (asignadasPorFactura[a.factura_id] || 0) + (Number(a.monto) || 0); });
 
-  const resumen = resumenPlanilla({ facturas: delPeriodo, asignaciones: asignaciones.filter(a => delPeriodo.some(f => f.id === a.factura_id)) });
+  const resumen = resumenPlanilla({ facturas: delPeriodo, asignaciones: asignaciones.filter(a => delPeriodo.some(f => f.id === a.factura_id)), pagos });
 
   async function eliminar(f) {
     if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"}?`)) return;
     await supabase.from("obra_asignaciones").delete().eq("factura_id", f.id);
     await supabase.from("obra_facturas").delete().eq("id", f.id);
     onCambio();
+  }
+
+
+  /**
+   * Un anticipo que no espera ninguna factura pasa a ser gasto.
+   *
+   * El de la ventanería espera la ventanería y por eso no cuenta como obra.
+   * Unos honorarios cobrados por adelantado no esperan nada: ya son gasto, y
+   * hasta ahora no había manera de decirlo — quedaban en "anticipos sin
+   * factura" para siempre, sin entrar nunca al control.
+   */
+  async function yaEsGasto(f) {
+    if (!window.confirm(
+      `¿Este anticipo de $${fmt(f.total)} ya es gasto de la obra?\n\n`
+      + "Usalo cuando no espera ninguna factura: honorarios por adelantado, un trabajo pagado contra recibo.\n\n"
+      + "Pasa a contar en el control como cualquier otro gasto, en los rubros a los que esté asignado. "
+      + "Si todavía espera un comprobante, dejalo como anticipo.")) return;
+    const { error } = await supabase.from("obra_facturas").update({ clase: "recibo" }).eq("id", f.id);
+    if (error) { alert("No se pudo cambiar: " + error.message); return; }
+    onCambio?.();
   }
 
   return (
@@ -116,6 +136,7 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
           <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Sin facturas en este período.</div>
         ) : delPeriodo.map(f => (
           <FilaFactura key={f.id} f={f} asignado={asignadasPorFactura[f.id] || 0}
+            onYaEsGasto={yaEsGasto}
             onEditar={() => setModal({ factura: f })} onEliminar={() => eliminar(f)} />
         ))}
       </div>

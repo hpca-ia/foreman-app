@@ -26,7 +26,7 @@ const chip = (texto, color, fondo, titulo) => (
 
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id;
 
-export default function FilaFactura({ f, asignado = 0, extra, onEditar, onEliminar }) {
+export default function FilaFactura({ f, asignado = 0, extra, onEditar, onEliminar, onYaEsGasto }) {
   const pendiente = Math.round(((Number(f.total) || 0) - asignado) * 100) / 100;
   const vale = esNotaDeCredito(f.clase) || (Number(f.total) || 0) < 0;
   const anticipo = f.clase === "anticipo" && !f.facturada_con_id;
@@ -57,6 +57,24 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
             "Plata a favor de la obra: material devuelto o cobrado de más. Baja el gasto y se usa en una compra posterior.")}
           {anticipo && chip("ANTICIPO · sin factura", colors.warning, colors.warningSoft,
             "La plata salió y el comprobante todavía no se emite. No cuenta como obra ejecutada hasta que llegue su factura.")}
+          {/* HAY ANTICIPOS QUE NO ESPERAN NINGUNA FACTURA.
+              El de la ventanería espera la ventanería: hasta que llegue no es
+              obra, y por eso no cuenta. Pero unos honorarios cobrados por
+              adelantado, o un trabajo pagado contra recibo, ya son gasto —no
+              hay nada que esperar— y quedaban afuera del control para siempre,
+              sin manera de meterlos.
+
+              Es una decisión de alguien y por eso es un botón: de asignarlo a
+              un rubro no se puede deducir, porque asignar dice a qué rubro va
+              cuando llegue, no que ya llegó. */}
+          {anticipo && onYaEsGasto && (
+            <button onClick={e => { e.stopPropagation(); onYaEsGasto(f); }}
+              title="Este anticipo no espera ninguna factura: pasa a contar como gasto de la obra, igual que un recibo."
+              style={{ marginLeft: 6, background: "none", border: "none", padding: 0, cursor: "pointer",
+                fontFamily: colors.font, fontSize: 10.5, color: colors.brand, textDecoration: "underline" }}>
+              ya es gasto
+            </button>
+          )}
           {bodega && chip(bodega.corto, colors.inkSoft, colors.neutralSoft, bodega.hacer)}
           {f.clase === "proforma" && chip("PROFORMA", colors.warning, colors.warningSoft,
             "Todavía hay que pedir el documento definitivo.")}

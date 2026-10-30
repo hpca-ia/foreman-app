@@ -426,7 +426,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
                 <PanelFacturas puede={puede}
                   obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
-                  facturas={facturas} asignaciones={asignaciones} porRubro={porRubro}
+                  facturas={facturas} asignaciones={asignaciones} pagos={pagos} porRubro={porRubro}
                   currentUser={currentUser} onCambio={cargar}
                 />
               </div>
@@ -441,14 +441,14 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               <PanelFacturas puede={puede}
                 obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
                 planillaActual={planillas.find(p => p.id === abierta) || null}
-                facturas={facturas} asignaciones={asignaciones} porRubro={porRubro}
+                facturas={facturas} asignaciones={asignaciones} pagos={pagos} porRubro={porRubro}
                 currentUser={currentUser} onCambio={cargar} mostrarTitulo={false}
               />
             </PanelPlanillas>
           )}
           {tab === "facturas" && (
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
-              facturas={facturas} asignaciones={asignaciones} currentUser={currentUser} onCambio={cargar}
+              facturas={facturas} asignaciones={asignaciones} pagos={pagos} currentUser={currentUser} onCambio={cargar}
               sueltasAlEntrar={!!entrarEn?.sueltas} />
           )}
           {tab === "comprado" && (
@@ -485,7 +485,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
             <ExportarPlanilla obra={obra} planilla={planillaActual} planillas={planillas} grupos={grupos} porRubro={porRubro}
-              totales={totales} facturas={facturas} asignaciones={asignaciones} rubros={rubros} />
+              totales={totales} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubros} />
           )}
         </>
       )}

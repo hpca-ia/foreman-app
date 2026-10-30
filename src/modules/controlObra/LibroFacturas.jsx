@@ -22,7 +22,7 @@ import { Mini } from "./PanelFacturas";
 const pelado = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
-export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false }) {
+export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, pagos = [], currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false }) {
   const [alcance, setAlcance] = useState("todo");        // todo | sin | id de planilla
   const [proveedor, setProveedor] = useState("");
   const [tipo, setTipo] = useState("");
@@ -90,7 +90,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     return true;
   });
 
-  const resumen = resumenPlanilla({ facturas: vistas, asignaciones: asignaciones.filter(a => vistas.some(f => f.id === a.factura_id)) });
+  const resumen = resumenPlanilla({ facturas: vistas, asignaciones: asignaciones.filter(a => vistas.some(f => f.id === a.factura_id)), pagos });
   const alRubro = rubro
     ? asignaciones.filter(a => a.obra_rubro_id === Number(rubro) && vistas.some(f => f.id === a.factura_id)).reduce((s, a) => s + (Number(a.monto) || 0), 0)
     : 0;
@@ -141,6 +141,26 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
 
   const campo = { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "7px 10px", fontSize: 12, fontFamily: colors.font, color: colors.ink, minWidth: 0, width: "100%", boxSizing: "border-box" };
   const etiqueta = { fontSize: 9, color: colors.muted, fontWeight: 600, letterSpacing: 0.4, marginBottom: 4 };
+
+
+  /**
+   * Un anticipo que no espera ninguna factura pasa a ser gasto.
+   *
+   * El de la ventanería espera la ventanería y por eso no cuenta como obra.
+   * Unos honorarios cobrados por adelantado no esperan nada: ya son gasto, y
+   * hasta ahora no había manera de decirlo — quedaban en "anticipos sin
+   * factura" para siempre, sin entrar nunca al control.
+   */
+  async function yaEsGasto(f) {
+    if (!window.confirm(
+      `¿Este anticipo de $${fmt(f.total)} ya es gasto de la obra?\n\n`
+      + "Usalo cuando no espera ninguna factura: honorarios por adelantado, un trabajo pagado contra recibo.\n\n"
+      + "Pasa a contar en el control como cualquier otro gasto, en los rubros a los que esté asignado. "
+      + "Si todavía espera un comprobante, dejalo como anticipo.")) return;
+    const { error } = await supabase.from("obra_facturas").update({ clase: "recibo" }).eq("id", f.id);
+    if (error) { alert("No se pudo cambiar: " + error.message); return; }
+    onCambio?.();
+  }
 
   return (
     <div>
@@ -227,6 +247,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
           </div>
         ) : vistas.map(f => (
           <FilaFactura key={f.id} f={f} asignado={asignadoA[f.id] || 0}
+            onYaEsGasto={yaEsGasto}
             extra={[alcance === "todo" && nombrePlanilla(f.planilla_id), (rubrosDe[f.id] || []).map(r => `${r.numero} ${r.descripcion}`).join(" · ")].filter(Boolean).join(" · ")}
             onEditar={() => setModal({ factura: f })} onEliminar={() => eliminar(f)} />
         ))}

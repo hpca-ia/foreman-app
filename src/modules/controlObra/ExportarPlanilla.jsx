@@ -15,7 +15,7 @@ const opcion = activa => ({
   borderRadius: colors.radiusMd, padding: "9px 12px",
 });
 
-export default function ExportarPlanilla({ obra, planilla, planillas = [], grupos, porRubro, totales, facturas, asignaciones, rubros }) {
+export default function ExportarPlanilla({ obra, planilla, planillas = [], grupos, porRubro, totales, facturas, asignaciones, pagos = [], rubros }) {
   const [generando, setGenerando] = useState("");
   const [progreso, setProgreso] = useState("");
   const [contenido, setContenido] = useState("completo");
@@ -32,7 +32,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
   const nombreFacturas = todoElProyecto ? "Todo el proyecto" : nombrePlanilla;
   const planillaDe = id => { const p = planillas.find(x => x.id === id); return p ? p.nombre || `Planilla N°${p.numero}` : "Sin planilla"; };
   const asigPeriodo = asignaciones.filter(a => delPeriodo.some(f => f.id === a.factura_id));
-  const resumen = resumenPlanilla({ facturas: delPeriodo, asignaciones: asigPeriodo });
+  const resumen = resumenPlanilla({ facturas: delPeriodo, asignaciones: asigPeriodo, pagos });
 
   // LOS TRES MONTONES, TAMBIÉN EN EL DOCUMENTO QUE RECIBE EL CLIENTE.
   //

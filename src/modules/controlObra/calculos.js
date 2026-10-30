@@ -22,7 +22,7 @@
 // el de rubro estimado — salvo que la factura se haya asignado al rubro
 // directamente, que también se permite.
 
-import { esNotaDeCredito } from "./cuentasProveedor.js";
+import { esNotaDeCredito, creditoDisponible } from "./cuentasProveedor.js";
 
 const n = v => Number(v) || 0;
 
@@ -70,6 +70,15 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   // anticipó se liquida —`facturada_con_id` apuntando a la factura final, el
   // mismo camino que ya usa una proforma— y a partir de ahí lo que cuenta es
   // la factura, una sola vez.
+  //
+  // Y ASIGNARLO A UN RUBRO NO ALCANZA PARA QUE CUENTE: asignar dice A QUÉ
+  // rubro va cuando llegue, no que ya llegó. El anticipo de la ventanería
+  // asignado a su rubro sigue siendo ventanería que no está en la obra.
+  //
+  // Lo que sí lo convierte en gasto es decirlo: hay anticipos que no esperan
+  // ninguna factura —honorarios cobrados por adelantado, un trabajo pagado
+  // contra recibo— y para esos está el botón que los pasa a GASTO SIN FACTURA.
+  // Es una decisión de alguien, no algo que se deduce de haberlo asignado.
   const esAnticipo = new Set(facturas
     .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
     .map(f => f.id));
@@ -623,7 +632,7 @@ export function gastosSueltos({ facturas = [], asignaciones = [], rubros = [], a
     .sort((a, b) => b.monto - a.monto);
 }
 
-export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
+export function resumenPlanilla({ facturas = [], asignaciones = [], pagos = [] }) {
   const porFactura = {};
   asignaciones.forEach(a => {
     porFactura[a.factura_id] = (porFactura[a.factura_id] || 0) + n(a.monto);
@@ -632,8 +641,8 @@ export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
   const r = {
     cantidad: facturas.length,
     total: 0, asignado: 0, sinAsignar: 0,
-    gasto: 0, anticipos: 0, credito: 0,
-    cuantosAnticipos: 0, cuantasNotas: 0,
+    gasto: 0, anticipos: 0, credito: 0, creditoUsado: 0,
+    cuantosAnticipos: 0, cuantasNotas: 0, cuantasNotasUsadas: 0,
     subtotal_0: 0, subtotal_5: 0, subtotal_15: 0, iva: 0,
     porTipo: {},
   };
@@ -643,7 +652,20 @@ export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
     const asignado = Math.min(porFactura[f.id] || 0, total);
     r.total += total;
     if (f.clase === "anticipo" && !f.facturada_con_id) { r.anticipos += total; r.cuantosAnticipos += 1; }
-    else if (esNotaDeCredito(f.clase) || total < 0) { r.credito += Math.abs(total); r.cuantasNotas += 1; }
+    else if (esNotaDeCredito(f.clase) || total < 0) {
+      // LO QUE QUEDA DE LA NOTA, NO LO QUE DECÍA EL PAPEL.
+      //
+      // Una nota de crédito que ya se usó para pagar una factura no es plata
+      // disponible: se gastó. Acá se sumaba su monto entero siempre, así que
+      // las dos de KYWI —$105,06, aplicadas ayer a dos compras— seguían
+      // figurando como crédito a favor. Un crédito que no existe se lee como
+      // plata que se puede usar, y se usa dos veces.
+      const queda = creditoDisponible(f, pagos);
+      r.credito += queda;
+      r.creditoUsado += Math.abs(total) - queda;
+      if (queda > 0.004) r.cuantasNotas += 1;
+      r.cuantasNotasUsadas += queda > 0.004 ? 0 : 1;
+    }
     else r.gasto += total;
     r.asignado += asignado;
     r.sinAsignar += total - asignado;
@@ -655,7 +677,7 @@ export function resumenPlanilla({ facturas = [], asignaciones = [] }) {
     r.porTipo[tipo] = (r.porTipo[tipo] || 0) + total;
   });
 
-  ["total", "asignado", "sinAsignar", "gasto", "anticipos", "credito"].forEach(k => {
+  ["total", "asignado", "sinAsignar", "gasto", "anticipos", "credito", "creditoUsado"].forEach(k => {
     r[k] = Math.round(r[k] * 100) / 100;
   });
   return r;
