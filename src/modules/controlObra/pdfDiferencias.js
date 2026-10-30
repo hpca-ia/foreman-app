@@ -83,19 +83,26 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
 
     autoTable(doc, {
       startY: y,
-      head: [["QUÉ TRAE LA PROPUESTA", "CANT", "UNID", "COSTO", "CONTRA QUÉ RUBRO DEL CONTRATO", "CONTRATADO", "P. UNIT", "DECISIÓN"]],
+      // CANTIDAD, UNITARIO Y TOTAL DE LOS DOS LADOS. Con el total solo no se
+      // puede discutir nada: $660 puede ser un precio malo con la cantidad bien
+      // o un precio bien con la cantidad inflada, y son dos reclamos distintos.
+      head: [["QUÉ TRAE LA PROPUESTA", "CANT", "UNID", "C. UNIT", "TOTAL",
+        "CONTRA QUÉ RUBRO DEL CONTRATO", "CONTRATADO", "P. UNIT", "COSTO CARG.", "DECISIÓN"]],
       body: suyas.map(l => {
         const r = porRubro.get(Number(l.obra_rubro_id));
         const pu = r && n(r.cantidad) ? n(r.total_base) / n(r.cantidad) : null;
+        const cu = n(l.cantidad) ? n(l.monto) / n(l.cantidad) : null;
         return [
           l.descripcion,
           plata(l.cantidad), l.unidad || "",
+          cu == null ? "" : `$${plata(cu)}`,
           `$${plata(l.monto)}`,
           r ? `${r.numero || ""} ${r.descripcion || ""}`.trim()
             + (r.origen === "orden_cambio" ? "  (vino de una orden de cambio)" : "")
             : "— no hay rubro que lo cubra —",
           r ? `${plata(r.cantidad)} ${r.unidad || ""}`.trim() : "",
           pu == null ? "" : `$${plata(pu)}`,
+          r && n(r.costo_unitario) > 0 ? `$${plata(r.costo_unitario)}` : "",
           // La decisión tomada, o el espacio para escribirla a mano.
           DICE[l.decision] || "",
         ];
@@ -104,9 +111,10 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
       headStyles: { fillColor: [249, 250, 251], textColor: GRIS, fontSize: 7, fontStyle: "bold", lineColor: [229, 231, 235] },
       styles: { fontSize: 7.5, cellPadding: 4, lineColor: [229, 231, 235], textColor: NEGRO, minCellHeight: 16 },
       columnStyles: {
-        0: { cellWidth: "auto" }, 1: { cellWidth: 36, halign: "right" }, 2: { cellWidth: 32, halign: "center" },
-        3: { cellWidth: 52, halign: "right" }, 4: { cellWidth: 190 }, 5: { cellWidth: 60, halign: "right" },
-        6: { cellWidth: 48, halign: "right" }, 7: { cellWidth: 62, halign: "center", fontStyle: "bold" },
+        0: { cellWidth: "auto" }, 1: { cellWidth: 32, halign: "right" }, 2: { cellWidth: 28, halign: "center" },
+        3: { cellWidth: 46, halign: "right" }, 4: { cellWidth: 52, halign: "right", fontStyle: "bold" },
+        5: { cellWidth: 160 }, 6: { cellWidth: 54, halign: "right" }, 7: { cellWidth: 46, halign: "right" },
+        8: { cellWidth: 50, halign: "right" }, 9: { cellWidth: 56, halign: "center", fontStyle: "bold" },
       },
       margin: { left: M, right: M },
     });

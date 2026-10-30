@@ -64,6 +64,41 @@ const GRUPOS = [
     + "precio que firmó—: esta plata queda a favor de la obra y se registra en Beneficios."],
 ];
 
+
+// CANTIDAD × UNITARIO = TOTAL, QUE ES COMO SE LEE UN RENGLÓN DE OBRA.
+//
+// El panel mostraba solo el total de cada diferencia, y con un total no se
+// puede discutir nada: $660 puede ser un precio malo con la cantidad bien o un
+// precio bien con la cantidad inflada, y son dos reclamos distintos —uno es con
+// el proveedor y el otro con quien midió—. Los tres números juntos contestan
+// cuál de las dos cosas pasó, y la columna alineada deja comparar las filas de
+// un vistazo en vez de dividir de cabeza.
+//
+// Y CADA FILA DICE EN QUÉ BASE ESTÁ. El unitario del contrato es un PRECIO al
+// cliente y el de la propuesta es un COSTO nuestro: puestos en la misma columna
+// sin decirlo, la diferencia entre los dos parece un hallazgo cuando es el
+// margen. Esa confusión ya costó una vez.
+function Cuenta({ que, cantidad, unidad, unitario, total, color, base, fuerte }) {
+  const col = { fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", textAlign: "right" };
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "baseline", fontSize: 11,
+      color: color || colors.inkSoft, lineHeight: 1.7 }}>
+      <span style={{ width: 86, fontSize: 9.5, letterSpacing: 0.3, color: colors.muted,
+        textTransform: "uppercase", flexShrink: 0 }}>{que}</span>
+      <span style={{ ...col, width: 82 }}>
+        {cantidad != null ? `${fmt(cantidad)} ${unidad || ""}`.trim() : "—"}
+      </span>
+      <span style={{ ...col, width: 88, color: colors.muted }}>
+        {unitario != null ? `× $${fmt(unitario)}` : ""}
+      </span>
+      <span style={{ ...col, width: 96, fontWeight: fuerte ? 700 : 400, color: color || colors.ink }}>
+        {total != null ? `$${fmt(total)}` : ""}
+      </span>
+      {base && <span style={{ fontSize: 9.5, color: colors.muted }}>{base}</span>}
+    </div>
+  );
+}
+
 export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio }) {
   const [lista, setLista] = useState([]);
   const [enlaces, setEnlaces] = useState({});
@@ -362,7 +397,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                   </button>
                 )}
               </div>
-              <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 6 }}>{pista}</div>
+              {/* La pista genérica sobra donde ya hay una frase con la plata y
+                  con quién hay que hablar: dos textos que dicen lo mismo se
+                  dejan de leer los dos. */}
+              {clave !== "subio_precio" && clave !== "bajo_precio" && (
+                <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 6 }}>{pista}</div>
+              )}
               {/* CON QUIÉN ES LA CONVERSACIÓN, Y CUÁNTA PLATA HAY EN JUEGO.
                   Un sobreprecio sin el nombre del proveedor y sin el total no
                   se reclama: se mira, se cierra la pantalla y se paga. */}
@@ -395,17 +435,40 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             esto que se está comparando, y es lo que contesta si
                             la diferencia es real. */}
                         {rubro ? (
-                          <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 2 }}>
-                            contra <strong>{rubro.numero || ""} {String(rubro.descripcion || "").slice(0, 50)}</strong>
-                            {" · "}contratado {fmt(rubro.cantidad)} {rubro.unidad || ""}
-                            {puRubro != null && <> a ${fmt(puRubro)}</>}
+                          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1, marginBottom: 3 }}>
+                            contra <strong style={{ color: colors.inkSoft }}>{rubro.numero || ""}{" "}
+                            {String(rubro.descripcion || "").slice(0, 50)}</strong>
                             {deOrden && <span style={{ color: colors.warning }}> · vino de una orden de cambio</span>}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2 }}>
+                          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1, marginBottom: 3 }}>
                             no hay rubro del contrato que lo cubra
                           </div>
                         )}
+
+                        {/* LOS TRES NÚMEROS DE CADA LADO, uno debajo del otro y
+                            en columna: así se ve de dónde sale la diferencia sin
+                            dividir nada de cabeza. */}
+                        {rubro && (
+                          <Cuenta que="contratado" cantidad={rubro.cantidad} unidad={rubro.unidad}
+                            unitario={puRubro} total={rubro.total_base} base="precio al cliente" />
+                        )}
+                        {rubro && Number(rubro.costo_unitario) > 0 && (
+                          <Cuenta que="costo cargado" cantidad={rubro.cantidad} unidad={rubro.unidad}
+                            unitario={rubro.costo_unitario}
+                            total={Number(rubro.costo_unitario) * Number(rubro.cantidad)} base="nuestro costo" />
+                        )}
+                        <Cuenta que={l.hallazgo === "menos_cantidad" ? "no se hizo" : "la propuesta"}
+                          cantidad={l.cantidad} unidad={l.unidad}
+                          unitario={Number(l.cantidad) ? Number(l.monto) / Number(l.cantidad) : null}
+                          total={l.monto} fuerte
+                          color={l.hallazgo === "bajo_precio" ? colors.success
+                            : l.hallazgo === "subio_precio" ? colors.danger : colors.ink}
+                          base={l.hallazgo === "subio_precio" || l.hallazgo === "bajo_precio"
+                            ? `la diferencia de precio, sobre la cantidad que los dos tienen`
+                            : l.hallazgo === "mas_cantidad" ? "solo la cantidad de más, a costo"
+                              : l.hallazgo === "menos_cantidad" ? "se le devuelve al precio del contrato"
+                                : "a costo: todavía no tiene precio"} />
                         {deOrden && (
                           <div style={{ fontSize: 10.5, color: colors.warning, marginTop: 2 }}>
                             Mirá que no se esté cobrando dos veces lo mismo.
@@ -417,9 +480,6 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             {DECISIONES[l.decision]?.label} · {l.decidido_nombre}
                           </div>
                         )}
-                      </div>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap" }}>
-                        {fmt(l.cantidad)} {l.unidad} · ${fmt(l.monto)}
                       </div>
                     </div>
                     {abierto.estado !== "resuelto" && (
