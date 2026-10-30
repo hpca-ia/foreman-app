@@ -72,3 +72,17 @@ test("los días no cuentan horas ni dan negativo", () => {
   assert.equal(diasEntre("2026-10-20T23:00:00Z", "2026-10-29"), 9);
   assert.equal(diasEntre("2026-11-05", "2026-10-29"), 0);
 });
+
+test("una fecha que llega como Date da el mismo día que el texto", () => {
+  // Según de dónde venga, la misma fecha es "2026-10-20T22:45:39.538Z" o un
+  // Date. String(new Date()) da "Thu Oct 29 2026…", y cortarle diez letras
+  // devuelve "Thu Oct 2" — que termina en la pantalla como "NaN días".
+  assert.equal(diasEntre(new Date("2026-10-20T22:45:39.538Z"), HOY), 9);
+  assert.equal(diasEntre("2026-10-20T22:45:39.538Z", HOY), 9);
+});
+
+test("una orden sin ninguna fecha no dice NaN", () => {
+  const p = pendienteDe({ id: 1, estado: "enviada" }, [{ email: "a@x.com" }], HOY);
+  assert.equal(p.dias, 0);
+  assert.ok(!String(comoSeDice(p)).includes("NaN"));
+});

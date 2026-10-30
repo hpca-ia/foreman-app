@@ -6,7 +6,19 @@ import { sincronizarCapitulos } from "./sincronizarCapitulos";
 import Button from "../../components/ui/Button";
 import { fmt, calcularControl, agrupar, totalesObra, repartirSolicitudes } from "./calculos";
 import TablaControl from "./TablaControl";
-import { totales } from "./cuentaBeneficios.js";
+// CON OTRO NOMBRE, Y NO ES UN CAPRICHO.
+//
+// Acá abajo hay un `const totales = totalesObra(grupos)` —los totales de la
+// obra, un objeto— y esta importación se llamaba igual. La línea que suma los
+// beneficios decía `totales(beneficios)` creyendo llamar a la función, y lo que
+// encontraba era el objeto: "totales is not a function", y la obra entera en
+// blanco.
+//
+// No se notó durante meses porque ese renglón solo se dibuja cuando la obra
+// TIENE beneficios cargados, y hasta hoy no había ninguno en toda la base. El
+// día que apareció el primero —el margen de la OC-01 de Plaza Lagos— se llevó
+// la pantalla puesta.
+import { totales as totalesDeBeneficios } from "./cuentaBeneficios.js";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import LibroFacturas from "./LibroFacturas";
@@ -296,7 +308,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           // Solo lo ya comprado. Lo previsto sale de una proforma y todavía
           // puede no pasar: meterlo acá sería decir que la obra tiene una
           // utilidad que nadie cobró.
-          const t = totales(beneficios);
+          const t = totalesDeBeneficios(beneficios);
           if (!t.cuantos) return null;
           return <Tarjeta label={t.neto >= 0 ? "Beneficio" : "Sobreprecio"} valor={Math.abs(t.neto)}
             color={t.neto >= 0 ? colors.success : colors.danger} />;

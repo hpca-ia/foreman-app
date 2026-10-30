@@ -15,7 +15,16 @@
 
 const n = v => Number(v) || 0;
 const r2 = v => Math.round(n(v) * 100) / 100;
-const soloDia = f => String(f || "").slice(0, 10);
+// UNA FECHA PUEDE LLEGAR DE TRES MANERAS: el texto ISO que devuelve la base
+// por HTTP, un Date cuando se la lee con un driver, o nada. Las tres tienen que
+// dar el mismo día, porque un `String(new Date())` da "Thu Oct 29 2026…" y
+// cortarle diez letras devuelve "Thu Oct 2", que después se convierte en NaN y
+// termina en la pantalla como "NaN días esperando".
+const soloDia = f => {
+  if (!f) return "";
+  if (f instanceof Date) return Number.isNaN(f.getTime()) ? "" : f.toISOString().slice(0, 10);
+  return String(f).slice(0, 10);
+};
 
 /** Días enteros entre dos fechas. Sin horas: lo que se cuenta son días de espera. */
 export function diasEntre(desde, hasta) {
