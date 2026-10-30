@@ -14,6 +14,7 @@ import {
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
+import { baseSinIva } from "./contratoDeLaObra";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
 //
@@ -423,8 +424,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
               {suyas.map(l => {
                 const rubro = vivos.find(r => r.id === l.obra_rubro_id);
                 const deOrden = rubro?.origen === "orden_cambio";
-                const puRubro = rubro && Number(rubro.cantidad)
-                  ? Number(rubro.total_base) / Number(rubro.cantidad) : null;
+                // EL CONTRATO SE MUESTRA SIN IVA, porque el costo de la
+                // propuesta viene sin IVA. El rubro del control lo tiene
+                // adentro —$16,70 son $14,52 más IVA— y puestos los dos
+                // unitarios en la misma columna, la distancia entre ellos se
+                // lee como margen cuando quince de esos puntos son del fisco.
+                const base = rubro ? baseSinIva(rubro) : null;
+                const puRubro = rubro && Number(rubro.cantidad) ? base / Number(rubro.cantidad) : null;
+                // Lo que dejaría esta diferencia si el cliente la aprueba: se
+                // cobra al precio del contrato y cuesta lo que dice la
+                // propuesta. Es MARGEN —se vendió así el día que se firmó—, no
+                // una eficiencia, y todavía es previsto: sin orden aprobada no
+                // se cobra nada.
+                const puPropuesta = Number(l.cantidad) ? Number(l.monto) / Number(l.cantidad) : null;
+                const dejaria = (l.hallazgo === "mas_cantidad" || l.hallazgo === "nuevo")
+                  && puRubro != null && puPropuesta != null && puRubro > puPropuesta
+                  ? (puRubro - puPropuesta) * Number(l.cantidad) : null;
                 return (
                   <div key={l.id} style={{ ...caja, marginBottom: 6, padding: "9px 11px",
                     borderLeft: `3px solid ${COLOR_DECISION[l.decision] || colors.border}` }}>
@@ -451,7 +466,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             dividir nada de cabeza. */}
                         {rubro && (
                           <Cuenta que="contratado" cantidad={rubro.cantidad} unidad={rubro.unidad}
-                            unitario={puRubro} total={rubro.total_base} base="precio al cliente" />
+                            unitario={puRubro} total={base} base="precio al cliente, sin IVA" />
                         )}
                         {rubro && Number(rubro.costo_unitario) > 0 && (
                           <Cuenta que="costo cargado" cantidad={rubro.cantidad} unidad={rubro.unidad}
@@ -475,6 +490,13 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                           </div>
                         )}
                         {l.nota && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 3 }}>“{l.nota}”</div>}
+                        {dejaria != null && (
+                          <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 3 }}>
+                            Si el cliente la aprueba deja <strong style={{ color: colors.success }}>${fmt(dejaria)}</strong>:
+                            se cobra a ${fmt(puRubro)} y cuesta ${fmt(puPropuesta)}. Es el margen con el que se vendió
+                            el rubro, no una eficiencia — entra a Beneficios como previsto el día que se apruebe la orden.
+                          </div>
+                        )}
                         {l.decidido_nombre && (
                           <div style={{ fontSize: 10, color: COLOR_DECISION[l.decision], marginTop: 2, fontWeight: 600 }}>
                             {DECISIONES[l.decision]?.label} · {l.decidido_nombre}
