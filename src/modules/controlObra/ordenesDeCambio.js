@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { honorariosDe, rubroDeHonorarios } from "./honorariosDeOrden.js";
 
 // Las órdenes de cambio: lo que se pactó después.
 //
@@ -77,9 +78,30 @@ export async function crearOrden(obraId, datos, quien) {
     fecha: datos.fecha || new Date().toISOString().split("T")[0],
     emitido_por: datos.emitido_por?.trim() || quien?.name || null,
     justificacion: datos.justificacion?.trim() || null,
+    // Qué mueve la orden —puede ser más de una— y el honorario del contrato.
+    afecta: Array.isArray(datos.afecta) ? datos.afecta : [],
+    honorarios_pct: Number(datos.honorarios_pct) > 0 ? Number(datos.honorarios_pct) : null,
     contratista_nombre: datos.contratista_nombre?.trim() || "HCARQ SA",
     created_by: quien?.id ?? null, created_nombre: quien?.name || null,
   }).select().single();
+  if (error && /afecta|honorarios_pct|schema cache/i.test(error.message)) {
+    // Sin la 149 la orden se crea igual, sin esos dos datos: no vale la pena
+    // frenar una orden entera por un campo nuevo.
+    const { data: d2, error: e2 } = await supabase.from("ordenes_cambio").insert({
+      obra_id: obraId, numero,
+      codigo: `OC-${String(numero).padStart(2, "0")}`,
+      titulo: datos.titulo?.trim() || `Orden de cambio N°${numero}`,
+      tipo: datos.tipo?.trim() || null,
+      lugar: datos.lugar?.trim() || "Quito",
+      fecha: datos.fecha || new Date().toISOString().split("T")[0],
+      emitido_por: datos.emitido_por?.trim() || quien?.name || null,
+      justificacion: datos.justificacion?.trim() || null,
+      contratista_nombre: datos.contratista_nombre?.trim() || "HCARQ SA",
+      created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+    }).select().single();
+    if (e2) return { error: e2.message };
+    return { orden: d2 };
+  }
   if (error) return { error: falta(error) ? "Falta correr la migración 056." : error.message };
   return { orden: data };
 }
@@ -343,6 +365,17 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
       orden_cambio_id: orden.id,
     };
   });
+
+  // EL HONORARIO ENTRA APARTE, EN SU PROPIO CAPÍTULO.
+  //
+  // Sobre el neto de la orden se cobra el porcentaje del contrato —administrar
+  // un adicional es trabajo igual que administrar el resto— pero no se reparte
+  // dentro de los precios: cada partida tiene que seguir diciendo lo que
+  // cuesta, porque ese es el número contra el que después se compara una
+  // cotización. Y si la orden es negativa, el honorario también lo es.
+  const cuenta = honorariosDe({ lineas, pct: orden.honorarios_pct });
+  const honorario = rubroDeHonorarios(orden, cuenta, { conIva, iva });
+  if (honorario) filas.push(honorario);
 
   if (filas.length) {
     let { error } = await supabase.from("obra_rubros").insert(filas);

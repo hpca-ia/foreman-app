@@ -9,6 +9,7 @@ import { crearOrden, agregarLinea, subirSoporte, siguienteItem, subtotales, pedi
 import { pedirANova, JUICIO, textoDeNova } from "../../lib/modelos";
 import { leerConNova, guardarCotizacion } from "./cotizacionesOrden";
 import { partidasDeCotizacion, totalDeCotizacion, margenDeOrden, conMargen } from "./cuentaOrdenCambio.js";
+import { AFECTA, honorariosDe } from "./honorariosDeOrden.js";
 
 // Una orden de cambio entera, de una sola vez.
 //
@@ -30,6 +31,9 @@ const VACIA = {
   titulo: "", tipo: "", lugar: "Quito", fecha: new Date().toISOString().split("T")[0],
   emitido_por: "", justificacion: "", soportes: "", impacto_cronograma: "", dias_impacto: "",
   fecha_limite_aprobacion: "",
+  // Qué mueve la orden —pueden ser varias— y el porcentaje de honorarios del
+  // contrato, que se cobra sobre el neto y va al pie, no adentro de los rubros.
+  afecta: [], honorarios_pct: "",
 };
 // "aumenta" y no "agrega": es el valor que guarda la base y el que suma
 // `subtotales`. Con el otro, la vista previa de totales mostraba cero.
@@ -209,6 +213,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
   const camRef = useRef(null);
 
   const conMonto = lineas.filter(l => l.descripcion?.trim());
+  const hon = honorariosDe({ lineas: conMonto, pct: f.honorarios_pct });
   const sub = subtotales(conMonto.map(l => ({
     ...l, cantidad: Number(l.cantidad) || 0, precio_unitario: Number(l.precio_unitario) || 0,
   })));
@@ -343,6 +348,35 @@ Si el texto ya está bien escrito, devolvelo igual.`,
           <label style={lbl}>TÍTULO</label>
           <input autoFocus value={f.titulo} onChange={e => setF(v => ({ ...v, titulo: e.target.value }))}
             placeholder="Ej: Refuerzo de cimentación en eje 4 por suelo no apto" style={mini} />
+        </div>
+
+        {/* QUÉ MUEVE LA ORDEN, que es otra pregunta que por qué se origina.
+            Todas las órdenes se leían igual y el cliente tenía que abrir el PDF
+            para saber si eso le costaba plata o le cambiaba la fecha. Son
+            casillas y no una lista: el cambio de especificación que además
+            cuesta y además corre el plazo son tres, no una de tres. */}
+        <div style={{ marginBottom: 10 }}>
+          <label style={lbl}>QUÉ AFECTA ESTA ORDEN</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3 }}>
+            {AFECTA.map(([clave, nombre, pista]) => {
+              const puesta = (f.afecta || []).includes(clave);
+              return (
+                <button key={clave} type="button" title={pista}
+                  onClick={() => setF(v => ({ ...v, afecta: puesta
+                    ? (v.afecta || []).filter(x => x !== clave)
+                    : [...(v.afecta || []), clave] }))}
+                  style={{ border: `1px solid ${puesta ? colors.brand : colors.border}`,
+                    background: puesta ? colors.brand : "#fff", color: puesta ? "#fff" : colors.muted,
+                    borderRadius: 20, padding: "4px 12px", fontSize: 11.5, cursor: "pointer",
+                    fontFamily: colors.font, fontWeight: puesta ? 700 : 400 }}>
+                  {nombre}
+                </button>
+              );
+            })}
+            <span style={{ fontSize: 10.5, color: colors.muted, alignSelf: "center" }}>
+              {(f.afecta || []).length === AFECTA.length ? "las tres" : "las que correspondan"}
+            </span>
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 130px", gap: 8 }}>
@@ -746,17 +780,56 @@ Si el texto ya está bien escrito, devolvelo igual.`,
                 cuadro mostraba "AGREGA $0 · QUITA $0 · NETO $465,40": tres
                 números de los cuales uno solo era cierto, que es peor que no
                 mostrar ninguno. */}
-            {[["Adiciones", sub.adiciones, colors.brand], ["Reducciones", sub.reducciones, colors.danger], ["Total", sub.total, sub.total < 0 ? colors.success : colors.danger]].map(([k, v, c]) => (
+            {[["Adiciones", sub.adiciones, colors.brand], ["Reducciones", sub.reducciones, colors.danger], ["Neto", sub.total, sub.total < 0 ? colors.success : colors.danger]].map(([k, v, c]) => (
               <div key={k}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{k.toUpperCase()}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: c }}>
-                  {k === "Total" ? (Number(v) < 0 ? "−" : "+") : ""}
+                  {k === "Neto" ? (Number(v) < 0 ? "−" : "+") : ""}
                   ${(Math.abs(Number(v) || 0)).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
             ))}
+            {/* LOS HONORARIOS NO ENCARECEN EL RUBRO. Van al pie, como el IVA, y
+                al aprobarse entran al control en el capítulo de HONORARIOS.
+                Repartirlos dentro de los precios dejaría a cada partida
+                mintiendo sobre lo que cuesta, que es el número contra el que
+                después se compara una cotización. */}
+            {hon.hay && (
+              <div>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+                  HONORARIOS {hon.pct}%
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: hon.devuelve ? colors.success : colors.brand }}>
+                  {hon.devuelve ? "−" : "+"}${fmt(Math.abs(hon.honorarios))}
+                </div>
+              </div>
+            )}
+            {hon.hay && (
+              <div>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>TOTAL</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: colors.ink }}>
+                  {hon.subtotal < 0 ? "−" : "+"}${fmt(Math.abs(hon.subtotal))}
+                </div>
+              </div>
+            )}
           </div>
         )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 8 }}>
+          <div>
+            <label style={lbl}>HONORARIOS SOBRE EL NETO DE ESTA ORDEN</label>
+            <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 3 }}>
+              El porcentaje del contrato. Se cobra sobre el neto —si la orden reduce alcance, el honorario
+              baja igual— y va como línea al pie: no se reparte en los precios de las partidas.
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>%</label>
+            <input type="number" step="0.01" value={f.honorarios_pct}
+              onChange={e => setF(v => ({ ...v, honorarios_pct: e.target.value }))}
+              placeholder="10" style={mini} />
+          </div>
+        </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 8 }}>
           <div>

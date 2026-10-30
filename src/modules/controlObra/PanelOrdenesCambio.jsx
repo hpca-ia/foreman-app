@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
+import { AFECTA } from "./honorariosDeOrden.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
@@ -884,6 +885,51 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
                   </div>
                 )}
+
+                {/* QUÉ MUEVE ESTA ORDEN Y QUÉ HONORARIO LLEVA.
+                    Lo primero es lo que el que la recibe quiere saber antes que
+                    nada: si le cuesta plata, si le cambia lo que se construye o
+                    si le corre la fecha. Lo segundo es plata nuestra que se
+                    perdía por no estar escrita en ningún lado. */}
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                  {AFECTA.map(([clave, nombre, pista]) => {
+                    const puesta = (o.afecta || []).includes(clave);
+                    if (!editable) return puesta ? (
+                      <span key={clave} style={{ fontSize: 10.5, fontWeight: 700, color: colors.brand,
+                        border: `1px solid ${colors.brand}`, borderRadius: 20, padding: "2px 9px" }}>{nombre}</span>
+                    ) : null;
+                    return (
+                      <button key={clave} type="button" title={pista} disabled={ocupado}
+                        onClick={() => hacer(() => guardarOrden(o.id, { afecta: puesta
+                          ? (o.afecta || []).filter(x => x !== clave)
+                          : [...(o.afecta || []), clave] }))}
+                        style={{ border: `1px solid ${puesta ? colors.brand : colors.border}`,
+                          background: puesta ? colors.brand : "#fff", color: puesta ? "#fff" : colors.muted,
+                          borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer",
+                          fontFamily: colors.font, fontWeight: puesta ? 700 : 400 }}>
+                        {nombre}
+                      </button>
+                    );
+                  })}
+                  {editable && (
+                    <>
+                      <span style={{ fontSize: 10.5, color: colors.muted, marginLeft: 6 }}>HONORARIOS</span>
+                      <input type="number" step="0.01" defaultValue={o.honorarios_pct ?? ""}
+                        key={`ho${o.id}-${o.honorarios_pct}`} placeholder="10"
+                        onBlur={e => String(e.target.value) !== String(o.honorarios_pct ?? "")
+                          && hacer(() => guardarOrden(o.id, { honorarios_pct: Number(e.target.value) > 0 ? Number(e.target.value) : null }))}
+                        style={{ ...inputStyle, padding: "4px 7px", fontSize: 12, width: 64 }} />
+                      <span style={{ fontSize: 10.5, color: colors.muted }}>
+                        % sobre el neto, al pie: no encarece los rubros, entra al capítulo de honorarios
+                      </span>
+                    </>
+                  )}
+                  {!editable && o.honorarios_pct > 0 && (
+                    <span style={{ fontSize: 10.5, color: colors.muted }}>
+                      Honorarios {o.honorarios_pct}% sobre el neto
+                    </span>
+                  )}
+                </div>
 
                 {/* HASTA CUÁNDO HAY PARA APROBARLA. */}
                 {editable ? (

@@ -1,5 +1,6 @@
 import { cargarPDF } from "../../lib/exportar";
 import { pieDePdf } from "../../lib/piePdf";
+import { honorariosDe, comoSeDice } from "./honorariosDeOrden.js";
 
 // Las órdenes de cambio en PDF, con el formato que la oficina ya firma.
 //
@@ -69,6 +70,9 @@ async function comoJpeg(url, maxAncho = 900) {
 
 /** Pinta una orden completa, empezando en la página actual del documento. */
 async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [], iva = 0 }) {
+  // El honorario del contrato sobre el neto de esta orden, para el pie.
+  const hon = honorariosDe({ lineas, pct: orden?.honorarios_pct, iva });
+  const afecta = comoSeDice(orden);
   const ancho = doc.internal.pageSize.getWidth();
   const margen = 40;
   const util = ancho - margen * 2;
@@ -94,6 +98,10 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
     ["FECHA:", dia(orden.fecha || orden.created_at), "EMITIDO POR:", orden.emitido_por || orden.created_nombre || ""],
     ["TIPO:", orden.tipo || "", "PROYECTO:", proyecto || obra?.nombre || ""],
     ["LUGAR:", orden.lugar || "", "CLIENTE:", obra?.cliente_nombre || ""],
+    // QUÉ MUEVE ESTA ORDEN, arriba y no enterrado en el detalle: el que la
+    // recibe quiere saber antes que nada si le cuesta plata, si le cambia lo
+    // que se construye o si le corre la fecha de entrega.
+    ...(afecta ? [["AFECTA:", afecta, "", ""]] : []),
   ];
   tabla(autoTable, doc, {
     startY: y,
@@ -180,16 +188,39 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
       //   · Y ese total CON IVA es el que entra al control de obra, que maneja
       //     IVA. Sin el pie, el papel firmado y el control dicen dos números
       //     distintos y nadie puede atar los dos.
-      [{ content: iva > 0 ? "SUBTOTAL" : "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
+      [{ content: hon.hay || iva > 0 ? "NETO DE LA ORDEN" : "TOTAL", colSpan: 6,
+         styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
        { content: `${subtotales.total < 0 ? "− " : ""}$${plata(Math.abs(subtotales.total))}`,
          styles: { halign: "right", fontStyle: "bold", fontSize: 10, textColor: subtotales.total < 0 ? ROJO : TINTA } }],
+      // EL HONORARIO, AL PIE Y NO ADENTRO DE LOS RUBROS.
+      //
+      // Administrar un adicional es trabajo igual que administrar el resto, y
+      // el contrato ya dice el porcentaje. Repartirlo dentro de los precios
+      // dejaría a cada partida mintiendo sobre lo que cuesta, y escondería
+      // justo la parte que el cliente acepta aparte. Si la orden reduce
+      // alcance, el honorario baja con ella.
+      ...(hon.hay ? [
+        [{ content: `HONORARIOS ${plata(hon.pct).replace(/[.,]00$/, "")} % sobre el neto`, colSpan: 6,
+           styles: { halign: "right", textColor: GRIS } },
+         { content: `${hon.honorarios < 0 ? "− " : ""}$${plata(Math.abs(hon.honorarios))}`,
+           styles: { halign: "right", textColor: hon.honorarios < 0 ? ROJO : GRIS } }],
+      ] : []),
+      ...(hon.hay && iva > 0 ? [
+        [{ content: "SUBTOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 9 } },
+         { content: `${hon.subtotal < 0 ? "− " : ""}$${plata(Math.abs(hon.subtotal))}`,
+           styles: { halign: "right", fontStyle: "bold", fontSize: 9 } }],
+      ] : []),
       ...(iva > 0 ? [
         [{ content: `IVA ${plata(iva).replace(/[.,]00$/, "")} %`, colSpan: 6, styles: { halign: "right", textColor: GRIS } },
-         { content: `${subtotales.total < 0 ? "− " : ""}$${plata(Math.abs(subtotales.total) * iva / 100)}`,
+         { content: `${hon.subtotal < 0 ? "− " : ""}$${plata(Math.abs(hon.subtotal) * iva / 100)}`,
            styles: { halign: "right", textColor: GRIS } }],
         [{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
-         { content: `${subtotales.total < 0 ? "− " : ""}$${plata(Math.abs(subtotales.total) * (1 + iva / 100))}`,
-           styles: { halign: "right", fontStyle: "bold", fontSize: 10, textColor: subtotales.total < 0 ? ROJO : TINTA } }],
+         { content: `${hon.subtotal < 0 ? "− " : ""}$${plata(Math.abs(hon.subtotal) * (1 + iva / 100))}`,
+           styles: { halign: "right", fontStyle: "bold", fontSize: 10, textColor: hon.subtotal < 0 ? ROJO : TINTA } }],
+      ] : hon.hay ? [
+        [{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
+         { content: `${hon.subtotal < 0 ? "− " : ""}$${plata(Math.abs(hon.subtotal))}`,
+           styles: { halign: "right", fontStyle: "bold", fontSize: 10, textColor: hon.subtotal < 0 ? ROJO : TINTA } }],
       ] : []),
     ],
     theme: "grid",
