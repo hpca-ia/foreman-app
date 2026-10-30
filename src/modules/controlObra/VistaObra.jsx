@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { creditoDisponible } from "./cuentasProveedor";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -112,6 +113,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // Dónde se abre. Casi siempre en el control; cuando se entra desde un aviso
   // de la lista, en lo que ese aviso señalaba.
   const [tab, setTab] = useState(entrarEn?.tab || "control");
+  // Un número del encabezado lleva a sus documentos, ya filtrados.
+  const [verClase, setVerClase] = useState(null);
   const [rubros, setRubros] = useState([]);
   // Lo que se ganó o se perdió comprando, rubro por rubro. Se lee acá y se baja
   // a la tabla: el beneficio nace en su propia pestaña, pero la pregunta
@@ -268,15 +271,14 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             haría que la obra parezca que tiene más plata disponible de la que
             tiene; sumarlo a invertido, que parezca más adelantada. */}
         {porRubro._anticipado > 0 && (
-          <Tarjeta label="Anticipado a proveedores" valor={porRubro._anticipado} color={colors.warning}
-            onClick={vePlata ? () => setTab("proveedores") : null}
-            nota={"Plata que ya salió por algo que todavía no llegó. No cuenta como invertido.\n\n"
+          <Tarjeta label="Falta la factura" valor={porRubro._anticipado} color={colors.warning}
+            onClick={() => { setVerClase("anticipo"); setTab("facturas"); }}
+            nota={"Plata que ya salió de la caja y ya cuenta como gasto del rubro: lo que falta es el papel.\n\n"
               + facturas.filter(f => f.clase === "anticipo" && !f.facturada_con_id)
                 .map(f => `· ${f.razon_social || "sin proveedor"} — ${f.detalle || f.numero_factura || "sin detalle"} — $${fmt(f.total)}`)
                 .join("\n")
-              + "\n\nSalen de acá porque están cargados con la clase de documento «Anticipo a proveedor»:"
-              + " salió la plata y todavía no hay una factura que meta ese gasto al control."
-              + " Clic para verlos en Proveedores y cerrarlos cuando llegue su factura."} />
+              + "\n\nUn gasto sin comprobante es un gasto que no se puede justificar. Cuando llegue la factura"
+              + " se liquida contra ella y pasa a contar por el documento. Clic para verlos."} />
         )}
         {/* LAS NOTAS DE CRÉDITO, ARRIBA CON LO DEMÁS.
             Un vale del proveedor es plata nuestra que está en su casa: no es
@@ -285,16 +287,25 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             proveedor, nadie se acuerda de usarlo —que es exactamente lo que
             el proveedor espera—. */}
         {(() => {
-          const vales = facturas.filter(f => (f.clase === "nota_credito" || Number(f.total) < 0) && !f.facturada_con_id);
-          const suma = vales.reduce((t, f) => t + Math.abs(Number(f.total) || 0), 0);
+          // LO QUE QUEDA, NO LO QUE DECÍA EL PAPEL.
+          //
+          // Este número sumaba el monto de todas las notas, usadas o no. Las
+          // dos de KYWI —$105,06— se aplicaron a dos compras y seguían acá
+          // como crédito a favor. Un crédito que ya se gastó se lee como plata
+          // disponible, y se usa dos veces.
+          const vales = facturas
+            .filter(f => (f.clase === "nota_credito" || Number(f.total) < 0) && !f.facturada_con_id)
+            .map(f => ({ f, queda: creditoDisponible(f, pagos) }));
+          const suma = vales.reduce((t, v) => t + v.queda, 0);
           if (suma <= 0.005) return null;
           return (
             <Tarjeta label="Notas de crédito" valor={suma} color={colors.success}
-              onClick={vePlata ? () => setTab("proveedores") : null}
-              nota={"Crédito a favor sin usar: plata nuestra que está en la casa del proveedor.\n\n"
-                + vales.map(f => `· ${f.razon_social || "sin proveedor"} — ${f.detalle || f.numero_factura || "sin detalle"} — $${fmt(Math.abs(f.total))}`).join("\n")
-                + "\n\nNo es deuda ni gasto: vale hasta que se use en una compra."
-                + " Clic para verlas en Proveedores y marcar en qué factura se usaron."} />
+              onClick={() => { setVerClase("nota_credito"); setTab("facturas"); }}
+              nota={"Crédito a favor SIN USAR: plata nuestra que está en la casa del proveedor.\n\n"
+                + vales.map(({ f, queda }) => `· ${f.razon_social || "sin proveedor"} — ${f.detalle || f.numero_factura || "sin detalle"} — `
+                  + `$${fmt(queda)}${queda < Math.abs(Number(f.total) || 0) ? ` (de $${fmt(Math.abs(f.total))}, el resto ya se usó)` : ""}`).join("\n")
+                + "\n\nLo que ya se aplicó a una compra no está acá: se gastó."
+                + " Clic para ver las notas y en qué factura se usó cada una."} />
           );
         })()}
         <Tarjeta label="Saldo" valor={totales.saldo} color={totales.saldo < 0 ? colors.danger : colors.success} />
@@ -449,7 +460,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           {tab === "facturas" && (
             <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} pagos={pagos} currentUser={currentUser} onCambio={cargar}
-              sueltasAlEntrar={!!entrarEn?.sueltas} />
+              sueltasAlEntrar={!!entrarEn?.sueltas} claseAlEntrar={verClase}
+              porRubro={porRubro} />
           )}
           {tab === "comprado" && (
             <Suspense fallback={<Cargando />}>

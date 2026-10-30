@@ -22,13 +22,19 @@ import { Mini } from "./PanelFacturas";
 const pelado = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
-export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, pagos = [], currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false }) {
+export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, pagos = [], currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false, claseAlEntrar = null }) {
   const [alcance, setAlcance] = useState("todo");        // todo | sin | id de planilla
   const [proveedor, setProveedor] = useState("");
   const [tipo, setTipo] = useState("");
   const [rubro, setRubro] = useState("");
   const [texto, setTexto] = useState("");
   const [soloSueltas, setSoloSueltas] = useState(!!sueltasAlEntrar);
+  // EL NÚMERO DEL ENCABEZADO LLEVA A SUS DOCUMENTOS.
+  //
+  // Hacer clic en "Notas de crédito · $105,06" y caer en una lista donde no se
+  // ve ninguna nota no contesta nada: la pregunta era cuáles son y de dónde
+  // salen. Acá entra ya filtrado por esa clase, y se dice que está filtrado.
+  const [soloClase, setSoloClase] = useState(claseAlEntrar || null);
   // POR QUÉ PUERTA ENTRÓ EL GASTO.
   //
   // Una factura de compra trae su rubro decidido desde el pedido; un gasto de
@@ -85,6 +91,8 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     if (rubro && !(rubrosDe[f.id] || []).some(r => r.id === Number(rubro))) return false;
     if (soloSueltas && (asignadoA[f.id] || 0) + 0.01 >= (Number(f.total) || 0)) return false;
     if (soloCaja && !esDeCajaChica(f)) return false;
+    if (soloClase === "nota_credito" && !(f.clase === "nota_credito" || Number(f.total) < 0)) return false;
+    if (soloClase === "anticipo" && !(f.clase === "anticipo" && !f.facturada_con_id)) return false;
     if (soloBodega && !PROBLEMAS_BODEGA[estadoBodega(f)]) return false;
     if (q && ![f.detalle, f.justificacion, f.razon_social, f.numero_factura, f.ruc, f.numero_cheque].some(c => pelado(c).includes(q))) return false;
     return true;
@@ -97,7 +105,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
   const hayFiltro = proveedor || tipo || rubro || texto || soloSueltas || soloCaja || soloBodega;
   const sinContar = facturas.filter(f => PROBLEMAS_BODEGA[estadoBodega(f)]).length;
 
-  function limpiar() { setProveedor(""); setTipo(""); setRubro(""); setTexto(""); setSoloSueltas(false); setSoloCaja(false); setSoloBodega(false); }
+  function limpiar() { setProveedor(""); setTipo(""); setRubro(""); setTexto(""); setSoloSueltas(false); setSoloCaja(false); setSoloBodega(false); setSoloClase(null); }
 
   async function eliminar(f) {
     if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"}?`)) return;
@@ -116,6 +124,8 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
       soloSueltas && "Solo sin asignar",
       soloCaja && "Solo caja chica",
       soloBodega && "Solo las que la bodega no leyó",
+      soloClase === "nota_credito" && "Solo notas de crédito",
+      soloClase === "anticipo" && "Solo gastos sin factura todavía",
     ].filter(Boolean).join(" · ");
     const filas = [
       [`FACTURAS — ${obra.nombre}`],
@@ -162,6 +172,10 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     onCambio?.();
   }
 
+
+  const rotuloClase = soloClase === "nota_credito" ? "notas de crédito"
+    : soloClase === "anticipo" ? "gastos que todavía no tienen factura" : null;
+
   return (
     <div>
       {/* LA MISMA REVISIÓN QUE EN QUÉ SE COMPRÓ. Acá es donde se arreglan: cada
@@ -199,6 +213,21 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
           </select>
         </div>
       </div>
+
+      {/* ENTRÓ FILTRADO DESDE UN NÚMERO DEL ENCABEZADO: hay que decirlo, o
+          parece que la obra tiene cuatro facturas. Y la salida, al lado. */}
+      {rotuloClase && (
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 10,
+          background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+          padding: "8px 11px", fontSize: 12, color: colors.ink }}>
+          <span>Mostrando solo <strong>{rotuloClase}</strong> · {vistas.length} {vistas.length === 1 ? "documento" : "documentos"}</span>
+          <button onClick={() => setSoloClase(null)}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+              fontSize: 12, color: colors.brand, textDecoration: "underline" }}>
+            ver todas
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ ...campo, display: "flex", alignItems: "center", gap: 6, flex: "1 1 220px", width: "auto" }}>
