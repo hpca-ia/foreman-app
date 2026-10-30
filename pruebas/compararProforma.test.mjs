@@ -122,3 +122,57 @@ test("sin cantidades se compara por totales, como siempre", () => {
   assert.equal(l.porUnitario, false);
   assert.equal(l.diferencia, 300);
 });
+
+// ── LA TERCERA COLUMNA: EL COSTO CARGADO ───────────────────────────────────
+//
+// El presupuesto tiene dos números por rubro: el precio que ve el cliente y el
+// costo que nos cuesta. Son dos preguntas distintas y antes solo se podía hacer
+// la primera.
+
+test("sin costo cargado la comparación contra el costo no existe, y no es cero", () => {
+  // Es el caso de Diners Aéreo: 164 rubros que vinieron de un Excel de precios.
+  const r = compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 8, monto: 1200, rubro_id: 1 }],
+    [{ id: 1, descripcion: "Vinil en fachada", cantidad: 8, total_base: 1726.64 }]);
+  assert.equal(r.lineas[0].costoCargado, null);
+  assert.equal(r.lineas[0].vsCosto, null);
+  assert.equal(r.conCosto, 0);
+  assert.equal(r.sinCosto, 1);
+  assert.equal(r.laObraSabeSusCostos, false);
+  // Lo que sí se puede contestar: cuánto deja contra el precio al cliente.
+  assert.equal(r.lineas[0].diferencia, 526.64);
+});
+
+test("con costo cargado se contesta la otra pregunta: si el proveedor subió", () => {
+  const r = compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 8, monto: 1300, rubro_id: 1 }],
+    [{ id: 1, descripcion: "Vinil en fachada", cantidad: 8, total_base: 1726.64, costo_unitario: 150 }]);
+  const l = r.lineas[0];
+  assert.equal(l.costoCargado, 1200);
+  assert.equal(l.vsCosto, -100);          // cotiza $100 por encima de lo cargado
+  assert.equal(l.pctCosto, -8.3);
+  assert.equal(r.subioElProveedor, 100);
+  assert.equal(r.bajoElProveedor, 0);
+  assert.equal(r.laObraSabeSusCostos, true);
+});
+
+test("el costo cargado se mide sobre la cantidad que trae la proforma", () => {
+  // El rubro son 8 paneles y la proforma cotiza 12: lo comparable es el
+  // unitario, también del lado del costo.
+  const r = compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 12, monto: 1800, rubro_id: 1 }],
+    [{ id: 1, cantidad: 8, total_base: 1726.64, costo_unitario: 150 }]);
+  assert.equal(r.lineas[0].costoCargado, 1800);   // 150 × 12
+  assert.equal(r.lineas[0].vsCosto, 0);           // el proveedor no movió el precio
+  assert.equal(r.lineas[0].porUnitario, true);    // pero son más paneles
+});
+
+test("el proveedor que baja se cuenta aparte del que sube", () => {
+  const r = compararContraPresupuesto(
+    [{ descripcion: "A", cantidad: 1, monto: 90, rubro_id: 1 },
+     { descripcion: "B", cantidad: 1, monto: 130, rubro_id: 2 }],
+    [{ id: 1, cantidad: 1, total_base: 200, costo_unitario: 100 },
+     { id: 2, cantidad: 1, total_base: 200, costo_unitario: 100 }]);
+  assert.equal(r.bajoElProveedor, 10);
+  assert.equal(r.subioElProveedor, 30);
+});

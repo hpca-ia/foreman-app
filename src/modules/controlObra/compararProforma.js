@@ -27,6 +27,9 @@ const centavos = v => Math.round(n(v) * 100) / 100;
  */
 export function compararContraPresupuesto(items = [], rubros = []) {
   const porId = new Map(rubros.map(r => [Number(r.id), r]));
+  // ¿Esta obra sabe lo que le cuestan sus rubros? Casi nunca al principio: un
+  // presupuesto armado desde un Excel trae el precio al cliente y nada más.
+  const algunoConCosto = rubros.some(r => n(r.costo_unitario) > 0);
 
   const lineas = items.map(it => {
     const r = it.rubro_id != null ? porId.get(Number(it.rubro_id)) : null;
@@ -57,11 +60,35 @@ export function compararContraPresupuesto(items = [], rubros = []) {
     const presupuestado = delRubro == null ? null
       : porUnitario ? centavos(puRubro * cantProforma) : delRubro;
     const diferencia = presupuestado == null ? null : centavos(presupuestado - cotizado);
+
+    // ── LA TERCERA COLUMNA: LO QUE YA SABÍAMOS QUE COSTABA ───────────────────
+    //
+    // El presupuesto tiene dos números por rubro: el PRECIO, que es el que ve
+    // el cliente, y el COSTO, que es lo que nos cuesta. Comparar una proforma
+    // contra el precio dice cuánto deja; compararla contra el costo cargado
+    // dice si el proveedor subió, y son dos preguntas distintas.
+    //
+    // Y en una obra que vino de un Excel el costo no existe todavía: esta misma
+    // proforma es la primera vez que ese rubro va a tener uno. Por eso cuando
+    // no hay costo esto no es un error ni un cero — es `null`, y la pantalla
+    // ofrece cargarlo.
+    const puCosto = r && n(r.costo_unitario) > 0 ? n(r.costo_unitario) : null;
+    const costoCargado = puCosto == null ? null
+      : centavos(puCosto * (cantProforma || cantRubro || 0));
+    const vsCosto = costoCargado == null ? null : centavos(costoCargado - cotizado);
+
     return {
       ...it,
       rubro: r || null,
       cotizado,
       presupuestado,
+      // Lo que ya teníamos cargado como costo de ese rubro, medido sobre la
+      // cantidad que trae la proforma. null es "nunca se cargó", no cero.
+      costoCargado,
+      puCosto,
+      // Positivo: el proveedor cotiza por debajo de lo que teníamos cargado.
+      vsCosto,
+      pctCosto: costoCargado ? Math.round((vsCosto / costoCargado) * 1000) / 10 : null,
       // Lo que el rubro tiene presupuestado entero, aunque se compare una parte.
       delRubro,
       cantidadRubro: cantRubro || null,
@@ -89,6 +116,19 @@ export function compararContraPresupuesto(items = [], rubros = []) {
     // Cuántos se compararon por precio unitario porque las cantidades no son
     // las mismas. Hay que decirlo: es otra cuenta, aunque dé un número igual.
     porUnitario: lineas.filter(l => l.porUnitario).length,
+    // ── LO QUE FALTA SABER ────────────────────────────────────────────────
+    //
+    // Cuántos de los renglones emparejados tienen un costo cargado contra el
+    // cual comparar, y cuántos no. En una obra armada desde un Excel no lo
+    // tiene ninguno, y entonces esta proforma no es una comparación: es la
+    // primera vez que esos rubros van a saber lo que cuestan.
+    conCosto: conRubro.filter(l => l.costoCargado != null).length,
+    sinCosto: conRubro.filter(l => l.costoCargado == null).length,
+    laObraSabeSusCostos: algunoConCosto,
+    // Contra el costo cargado: si el proveedor subió o bajó respecto de lo que
+    // ya teníamos anotado. Es otra pregunta que cuánto deja el rubro.
+    subioElProveedor: centavos(conRubro.filter(l => l.vsCosto != null && l.vsCosto < 0).reduce((t, l) => t - l.vsCosto, 0)),
+    bajoElProveedor: centavos(conRubro.filter(l => l.vsCosto != null && l.vsCosto > 0).reduce((t, l) => t + l.vsCosto, 0)),
     cotizado: centavos(conRubro.reduce((t, l) => t + l.cotizado, 0)),
     presupuestado: centavos(conRubro.reduce((t, l) => t + l.presupuestado, 0)),
     ahorro,
