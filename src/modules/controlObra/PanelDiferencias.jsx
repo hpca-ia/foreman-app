@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { FileText, Check, Trash2 } from "lucide-react";
+import { FileText, Check, Trash2, Download } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
@@ -8,9 +8,10 @@ import { leerConNova } from "./cotizacionesOrden";
 import { compararContraPresupuesto } from "./compararProforma";
 import { loQueNoEstaPresupuestado, partidasParaOrden, comoSeDice } from "./extraParaCobrar";
 import { crearOrden, agregarLinea } from "./ordenesDeCambio";
+import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
-  enlacesDeAnalisis, DECISIONES,
+  enlacesDeAnalisis, DECISIONES, comoVa,
 } from "./analisisDeDiferencias";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
@@ -40,9 +41,21 @@ const COLOR_DECISION = {
   pendiente: colors.muted, cobrar: colors.brand, incluido: colors.inkSoft, nuestro: colors.danger,
 };
 
+// LAS TRES COSAS QUE PUEDE ENCONTRAR, Y QUE SE RESUELVEN DISTINTO. Juntas en
+// una lista plana no se pueden decidir: cincuenta y una tarjetas iguales.
+const GRUPOS = [
+  ["nuevo", "NO ESTÁ EN EL CONTRATO",
+    "Trabajo que el presupuesto no cubre. Si se cobra, hay que ponerle precio: costo más el margen."],
+  ["mas_cantidad", "MÁS CANTIDAD QUE LA CONTRATADA",
+    "El rubro ya existe y su precio está acordado: se cobra solo la diferencia, al precio que el cliente firmó."],
+  ["menos_cantidad", "MENOS CANTIDAD QUE LA CONTRATADA",
+    "Trabajo contratado que no se hizo. No es un ahorro nuestro: se le devuelve al cliente, como reducción."],
+];
+
 export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio }) {
   const [lista, setLista] = useState([]);
   const [enlaces, setEnlaces] = useState({});
+  const [avance, setAvance] = useState({});
   const [abierto, setAbierto] = useState(null);     // el análisis abierto
   const [lineas, setLineas] = useState([]);
   const [leyendo, setLeyendo] = useState("");
@@ -60,6 +73,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     if (r.error) { setError(r.error); return; }
     setLista(r.analisis);
     setEnlaces(await enlacesDeAnalisis(r.analisis));
+    // Cómo va cada uno: con varios abiertos a la vez, lo que importa de la
+    // lista es cuál está esperando una decisión y cuál ya se puede cerrar.
+    const m = {};
+    for (const a of r.analisis) {
+      const l = await lineasDe(a.id);
+      m[a.id] = comoVa(l.lineas || []);
+    }
+    setAvance(m);
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -113,6 +134,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     if (err) { setError(err); return; }
     setLineas(xs => xs.map(x => (x.id === l.id
       ? { ...x, decision, nota, decidido_nombre: currentUser?.name || null, decidido_at: new Date().toISOString() }
+      : x)));
+  }
+
+  /** El grupo entero para el mismo lado: casi siempre lo es, y lo que se revisa son las excepciones. */
+  async function marcarTodas(cuales, decision) {
+    if (!window.confirm(`¿Marcar ${cuales.length} diferencias como «${DECISIONES[decision]?.label}»?\n\n`
+      + "Cada una se puede cambiar después, una por una.")) return;
+    setOcupado(true);
+    for (const l of cuales) {
+      const err = await decidir(l.id, decision, null, currentUser);
+      if (err) { setOcupado(false); setError(err); return; }
+    }
+    setOcupado(false);
+    const ids = new Set(cuales.map(x => x.id));
+    setLineas(xs => xs.map(x => (ids.has(x.id)
+      ? { ...x, decision, decidido_nombre: currentUser?.name || null, decidido_at: new Date().toISOString() }
       : x)));
   }
 
@@ -189,60 +226,126 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           {abierto.estado === "resuelto" && <> · <strong style={{ color: colors.success }}>ya se armó su orden</strong></>}
         </div>
 
+        {/* EL PAPEL. Cincuenta y un renglones no se deciden en una pantalla:
+            se imprimen, se miran en el escritorio con el presupuesto al lado,
+            se marcan a mano y se discuten en una reunión — o se le mandan al
+            residente para que diga cuáles ya estaban incluidas. */}
+        <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap" }}>
+          <Button variant="outline" size="sm" disabled={ocupado || !lineas.length}
+            onClick={async () => {
+              setOcupado(true); setError("");
+              try {
+                await pdfDiferencias({ analisis: abierto, lineas, rubros: vivos, obra, proyecto: obra?.nombre }, "bajar");
+              } catch (e) { setError("No se pudo armar el PDF: " + e.message); }
+              setOcupado(false);
+            }}>
+            <Download size={13} /> Bajar el análisis en PDF
+          </Button>
+        </div>
+
         {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>{error}</div>}
         {aviso && <div style={{ fontSize: 12, color: colors.success, marginBottom: 8, lineHeight: 1.5 }}>{aviso}</div>}
 
-        {lineas.map(l => {
-          const rubro = vivos.find(r => r.id === l.obra_rubro_id);
-          const deOrden = rubro?.origen === "orden_cambio";
+        {/* ── AGRUPADAS POR LO QUE SON ─────────────────────────────────
+            Cincuenta y un tarjetas iguales en una lista no se pueden decidir:
+            son tres hallazgos distintos y cada uno se resuelve distinto. Lo que
+            no está en el contrato hay que ponerle precio; lo que trae más
+            cantidad ya tiene precio acordado y se cobra la diferencia; lo que
+            trae menos es trabajo que no se hizo y se devuelve.
+
+            Y CONTRA QUÉ SE COMPARÓ, a la vista: sin ver la cantidad contratada
+            y su precio no se puede decidir nada, y mirarlo en otra pestaña con
+            cincuenta renglones abiertos no lo hace nadie. */}
+        {GRUPOS.map(([clave, titulo, pista]) => {
+          const suyas = lineas.filter(l => l.hallazgo === clave);
+          if (!suyas.length) return null;
+          const suma = suyas.reduce((t, l) => t + (Number(l.monto) || 0), 0);
+          const sinDecidir = suyas.filter(l => l.decision === "pendiente");
           return (
-            <div key={l.id} style={{ ...caja, marginBottom: 7,
-              borderLeft: `3px solid ${COLOR_DECISION[l.decision] || colors.border}` }}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
-                <div style={{ flex: 1, minWidth: 220 }}>
-                  <div style={{ fontSize: 12.5, color: colors.ink }}>{l.descripcion}</div>
-                  <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
-                    {l.hallazgo === "nuevo" ? "no está en el contrato"
-                      : l.hallazgo === "mas_cantidad" ? "más cantidad que la contratada"
-                      : l.hallazgo === "menos_cantidad" ? "menos cantidad que la contratada" : ""}
-                    {rubro ? ` · contra ${rubro.numero || ""} ${String(rubro.descripcion || "").slice(0, 40)}` : ""}
-                  </div>
-                  {/* LA MISMA CONVERSACIÓN POR SEGUNDA VEZ. */}
-                  {deOrden && (
-                    <div style={{ fontSize: 10.5, color: colors.warning, marginTop: 2 }}>
-                      Ese rubro ya entró por una orden de cambio: mirá que no se esté cobrando dos veces lo mismo.
-                    </div>
-                  )}
-                  {l.nota && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 3 }}>“{l.nota}”</div>}
-                  {l.decidido_nombre && (
-                    <div style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>
-                      {DECISIONES[l.decision]?.label} · {l.decidido_nombre}
-                    </div>
-                  )}
+            <div key={clave} style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 9, alignItems: "baseline", flexWrap: "wrap", marginBottom: 2 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, letterSpacing: 0.3 }}>
+                  {titulo} · {suyas.length} · ${fmt(suma)}
                 </div>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap" }}>
-                  {fmt(l.cantidad)} {l.unidad} · ${fmt(l.monto)}
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 4, marginTop: 7, flexWrap: "wrap" }}>
-                {Object.entries(DECISIONES).filter(([k]) => k !== "pendiente").map(([k, d]) => (
-                  <button key={k} onClick={() => marcar(l, k)} disabled={ocupado} title={d.pista}
-                    style={{ border: `1px solid ${l.decision === k ? COLOR_DECISION[k] : colors.border}`,
-                      background: l.decision === k ? COLOR_DECISION[k] : "#fff",
-                      color: l.decision === k ? "#fff" : colors.muted,
-                      borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer",
-                      fontFamily: colors.font, fontWeight: l.decision === k ? 700 : 400 }}>
-                    {d.label}
-                  </button>
-                ))}
-                {l.decision !== "pendiente" && (
-                  <button onClick={() => marcar(l, "pendiente")} disabled={ocupado}
-                    style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
-                      fontSize: 11, color: colors.muted, textDecoration: "underline" }}>
-                    volver a dejarla sin decidir
+                {/* CINCUENTA DECISIONES DE A UNA NO LAS TOMA NADIE. Casi
+                    siempre el grupo entero va para el mismo lado, y lo que se
+                    revisa son las tres excepciones. */}
+                {sinDecidir.length > 1 && abierto.estado !== "resuelto" && (
+                  <button onClick={() => marcarTodas(sinDecidir, "cobrar")} disabled={ocupado}
+                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                      fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+                    se cobran {sinDecidir.length === suyas.length ? "todas" : `las ${sinDecidir.length} sin decidir`}
                   </button>
                 )}
               </div>
+              <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 6 }}>{pista}</div>
+
+              {suyas.map(l => {
+                const rubro = vivos.find(r => r.id === l.obra_rubro_id);
+                const deOrden = rubro?.origen === "orden_cambio";
+                const puRubro = rubro && Number(rubro.cantidad)
+                  ? Number(rubro.total_base) / Number(rubro.cantidad) : null;
+                return (
+                  <div key={l.id} style={{ ...caja, marginBottom: 6, padding: "9px 11px",
+                    borderLeft: `3px solid ${COLOR_DECISION[l.decision] || colors.border}` }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, minWidth: 220 }}>
+                        <div style={{ fontSize: 12.5, color: colors.ink }}>{l.descripcion}</div>
+                        {/* EL RUBRO DEL CONTRATO, CON SUS NÚMEROS. Es contra
+                            esto que se está comparando, y es lo que contesta si
+                            la diferencia es real. */}
+                        {rubro ? (
+                          <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 2 }}>
+                            contra <strong>{rubro.numero || ""} {String(rubro.descripcion || "").slice(0, 50)}</strong>
+                            {" · "}contratado {fmt(rubro.cantidad)} {rubro.unidad || ""}
+                            {puRubro != null && <> a ${fmt(puRubro)}</>}
+                            {deOrden && <span style={{ color: colors.warning }}> · vino de una orden de cambio</span>}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2 }}>
+                            no hay rubro del contrato que lo cubra
+                          </div>
+                        )}
+                        {deOrden && (
+                          <div style={{ fontSize: 10.5, color: colors.warning, marginTop: 2 }}>
+                            Mirá que no se esté cobrando dos veces lo mismo.
+                          </div>
+                        )}
+                        {l.nota && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 3 }}>“{l.nota}”</div>}
+                        {l.decidido_nombre && (
+                          <div style={{ fontSize: 10, color: COLOR_DECISION[l.decision], marginTop: 2, fontWeight: 600 }}>
+                            {DECISIONES[l.decision]?.label} · {l.decidido_nombre}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap" }}>
+                        {fmt(l.cantidad)} {l.unidad} · ${fmt(l.monto)}
+                      </div>
+                    </div>
+                    {abierto.estado !== "resuelto" && (
+                      <div style={{ display: "flex", gap: 4, marginTop: 7, flexWrap: "wrap" }}>
+                        {Object.entries(DECISIONES).filter(([k]) => k !== "pendiente").map(([k, d]) => (
+                          <button key={k} onClick={() => marcar(l, k)} disabled={ocupado} title={d.pista}
+                            style={{ border: `1px solid ${l.decision === k ? COLOR_DECISION[k] : colors.border}`,
+                              background: l.decision === k ? COLOR_DECISION[k] : "#fff",
+                              color: l.decision === k ? "#fff" : colors.muted,
+                              borderRadius: 20, padding: "3px 10px", fontSize: 11, cursor: "pointer",
+                              fontFamily: colors.font, fontWeight: l.decision === k ? 700 : 400 }}>
+                            {d.label}
+                          </button>
+                        ))}
+                        {l.decision !== "pendiente" && (
+                          <button onClick={() => marcar(l, "pendiente")} disabled={ocupado}
+                            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+                              fontSize: 11, color: colors.muted, textDecoration: "underline" }}>
+                            deshacer
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -298,8 +401,15 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}
       {aviso && <div style={{ fontSize: 12, color: colors.success, marginBottom: 10, lineHeight: 1.5 }}>{aviso}</div>}
 
-      {lista.map(a => (
-        <div key={a.id} style={{ ...caja, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      {/* VARIOS ABIERTOS A LA VEZ, cada uno con su papel y con cómo va.
+          Un análisis de cincuenta renglones no se termina de una sentada, y
+          mientras tanto llega la propuesta del siguiente proveedor. Cada uno
+          queda acá con lo que le falta decidir, para poder ir y venir. */}
+      {lista.map(a => {
+        const v = avance[a.id];
+        return (
+        <div key={a.id} style={{ ...caja, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+          borderLeft: `3px solid ${a.estado === "resuelto" ? colors.success : v?.sinDecidir ? colors.warning : colors.border}` }}>
           <button onClick={() => abrir(a)}
             style={{ flex: 1, minWidth: 200, textAlign: "left", background: "none", border: "none", padding: 0,
               cursor: "pointer", fontFamily: colors.font }}>
@@ -308,9 +418,24 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             </div>
             <div style={{ fontSize: 10.5, color: colors.muted }}>
               {String(a.created_at || "").slice(0, 10)} · {a.creado_nombre || ""}
-              {a.estado === "resuelto" ? " · ya se armó su orden de cambio" : " · abierto"}
+              {v ? ` · ${v.total} ${v.total === 1 ? "diferencia" : "diferencias"}` : ""}
             </div>
+            {v && (
+              <div style={{ fontSize: 10.5, marginTop: 2,
+                color: a.estado === "resuelto" ? colors.success : v.sinDecidir ? colors.warning : colors.inkSoft }}>
+                {a.estado === "resuelto"
+                  ? "Ya se armó su orden de cambio"
+                  : v.sinDecidir
+                    ? `Faltan ${v.sinDecidir} por decidir`
+                    : `Listo para armar la orden · ${v.aCobrar} a cobrar, $${fmt(v.monto)}`}
+              </div>
+            )}
           </button>
+          {enlaces[a.id] && (
+            <a href={enlaces[a.id]} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+              title="El papel que mandó el proveedor, tal como llegó"
+              style={{ fontSize: 11, color: colors.brand, whiteSpace: "nowrap" }}>ver el papel</a>
+          )}
           <button onClick={async () => {
             if (!window.confirm(`¿Borrar el análisis de ${a.titulo || "esta propuesta"}?\n\nSe va con sus decisiones.`)) return;
             await borrarAnalisis(a); cargar();
@@ -319,7 +444,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             <Trash2 size={13} />
           </button>
         </div>
-      ))}
+        );
+      })}
 
       {!lista.length && !leyendo && (
         <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>

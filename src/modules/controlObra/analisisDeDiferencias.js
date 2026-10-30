@@ -1,5 +1,8 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
+// Las cuentas viven aparte: son lo único de este archivo que se puede probar
+// sin un navegador, y son las que deciden qué se le cobra al cliente.
+export { DECISIONES, comoVa } from "./cuentaDiferencias.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, GUARDADO.
 //
@@ -15,14 +18,6 @@ import { enlacesFirmados } from "../../lib/enlacesFirmados";
 const BUCKET = "task-files";
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 export const SIN_145 = "Falta correr la migración 145 para guardar el análisis de diferencias.";
-
-/** Lo que se decidió con cada diferencia, y qué significa. */
-export const DECISIONES = {
-  pendiente: { label: "Sin decidir", pista: "Todavía se está discutiendo" },
-  cobrar:    { label: "Se cobra",    pista: "Va a la orden de cambio para el cliente" },
-  incluido:  { label: "Ya estaba",   pista: "El contrato ya lo cubría: no se cobra" },
-  nuestro:   { label: "Es nuestro",  pista: "Lo medimos mal nosotros: lo paga la obra" },
-};
 
 export async function analisisDe(obraId) {
   const { data, error } = await supabase.from("obra_analisis")

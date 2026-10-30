@@ -115,3 +115,25 @@ test("cada diferencia dice de qué tipo es, para poder decidirla distinto", () =
   assert.equal(h.nuevos[0].hallazgo, "nuevo");
   assert.equal(h.demas[0].hallazgo, "mas_cantidad");
 });
+
+test("cómo va un análisis: lo que falta decidir y lo que ya se va a cobrar", async () => {
+  const { comoVa } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const v = comoVa([
+    { decision: "cobrar", monto: 115.56 },
+    { decision: "cobrar", monto: 163.25 },
+    { decision: "incluido", monto: 50 },
+    { decision: "pendiente", monto: 20 },
+  ]);
+  assert.equal(v.total, 4);
+  assert.equal(v.sinDecidir, 1);
+  assert.equal(v.aCobrar, 2);
+  assert.equal(v.monto, 278.81);
+  assert.equal(v.listo, false);
+});
+
+test("decidido todo, el análisis queda listo para armar su orden", async () => {
+  const { comoVa } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const v = comoVa([{ decision: "cobrar", monto: 100 }, { decision: "nuestro", monto: 30 }]);
+  assert.equal(v.listo, true);
+  assert.equal(v.monto, 100, "lo que se le cobra al cliente, no lo que pagamos nosotros");
+});
