@@ -369,7 +369,27 @@ Rubros de la obra: ${lista}`;
               padding: "8px 11px", marginBottom: 10, lineHeight: 1.5 }}>
               Hay <strong>{r.sinRubro}</strong> {r.sinRubro === 1 ? "renglón" : "renglones"} sin emparejar con un
               rubro. No entran en ningún total: un beneficio calculado sobre la mitad de la proforma no es un
-              beneficio. Elegiles el rubro abajo, o sacalos de la comparación.
+              beneficio. Elegiles el rubro abajo, sacalos de la comparación — o, si es trabajo que el presupuesto
+              no tenía, cobráselos al cliente con el botón de acá abajo.
+            </div>
+          )}
+
+          {/* LO QUE NO ESTÁ EN EL CONTRATO NO SE RESUELVE ACÁ.
+              Un BENEFICIO es una diferencia a favor del proyecto sobre algo
+              que YA ESTÁ CONTRATADO: el rubro se presupuestó en $1.000 y se
+              compró en $800. Esos $200 son nuestros y suben la utilidad.
+
+              Un renglón que el contrato no cubre es otra cosa entera: no es
+              utilidad nuestra, es plata que sale de la obra y que hay que
+              COBRARLE AL CLIENTE. Eso se analiza y se resuelve en Diferencias
+              con el cliente, que compara el presupuesto contra una propuesta
+              nueva o una liquidación. Acá solo se dice que están, y no entran
+              en ningún total. */}
+          {r.sinRubro > 0 && (
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 10, lineHeight: 1.5 }}>
+              Si esos {r.sinRubro === 1 ? "renglón es trabajo" : "renglones son trabajo"} que el contrato no cubre,
+              no {r.sinRubro === 1 ? "es un beneficio" : "son beneficios"}: hay que cobrárselo al cliente.
+              Eso se arma en <strong>Diferencias con el cliente</strong>.
             </div>
           )}
 

@@ -15,6 +15,7 @@ import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import PanelCurar from "./PanelCurar";
 import PanelBeneficios from "./PanelBeneficios";
+import PanelDiferencias from "./PanelDiferencias";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
 import { comprometidoPorGrupo } from "./calculos";
@@ -359,6 +360,12 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
         {vePlata && <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>}
         {veCaja && <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>}
         <button onClick={() => setTab("beneficios")} style={tabS(tab === "beneficios")}>Beneficios</button>
+        {/* OTRA COSA QUE BENEFICIOS, Y POR ESO OTRA PESTAÑA. Beneficios son
+            utilidades nuestras sobre lo ya contratado; esto es el presupuesto
+            contra una propuesta nueva o una liquidación, y lo que sale son
+            diferencias del cliente: lo que hay que cobrarle y lo que hay que
+            devolverle. */}
+        <button onClick={() => setTab("diferencias")} style={tabS(tab === "diferencias")}>Diferencias</button>
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
@@ -454,6 +461,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           )}
 
           {tab === "beneficios" && <PanelBeneficios obra={obra} rubros={rubros} currentUser={currentUser} />}
+          {tab === "diferencias" && <PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} />}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (
