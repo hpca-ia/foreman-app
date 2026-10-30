@@ -90,7 +90,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
       deOrden: deDonde(l.rubro),
-      hallazgo: "otro_precio",
+      hallazgo: dif > 0 ? "subio_precio" : "bajo_precio",
       sube: dif > 0,
     };
   });
@@ -155,8 +155,25 @@ export function loQueNoEstaPresupuestado(comparacion) {
   // Las que tocan algo que ya movió una orden anterior: son las que hay que
   // mirar dos veces antes de volver a cobrarlas.
   const sobreOrdenes = [...demas, ...menos].filter(x => x.deOrden);
+  // SUBIÓ Y BAJÓ NO SON LO MISMO, Y NO SE RESUELVEN EN EL MISMO LADO.
+  //
+  // Si el proveedor cotiza POR ENCIMA del costo cargado, eso se come el margen
+  // y la conversación es con él. Si cotiza POR DEBAJO, es una EFICIENCIA: plata
+  // que queda a favor de la obra porque se compró mejor de lo presupuestado, y
+  // eso no es una diferencia con el cliente —no se le cobra ni se le devuelve
+  // nada— es un beneficio, y vive en Beneficios.
+  //
+  // Mezclados en una sola lista, el ahorro se lee como un problema y se
+  // descarta con los demás. Y los ahorros son justamente lo que nadie registra:
+  // las malas noticias las busca todo el mundo, las buenas no.
+  const subieron = otroPrecio.filter(x => x.sube);
+  const bajaron = otroPrecio.filter(x => !x.sube);
+
   return {
-    nuevos, demas, menos, otroPrecio, todo, sobreOrdenes, sinCostoConocido,
+    nuevos, demas, menos, otroPrecio, subieron, bajaron, todo, sobreOrdenes, sinCostoConocido,
+    // Lo que las bajadas de precio dejan a favor de la obra.
+    eficiencia: c2(bajaron.reduce((t, x) => t + x.costo, 0)),
+    sobreprecio: c2(subieron.reduce((t, x) => t + x.costo, 0)),
     cuantos: todo.length,
     // Lo que se le devuelve al cliente, al precio que él firmó.
     aDevolver: c2(menos.reduce((t, x) => t + n(x.precioUnitario) * x.cantidad, 0)),

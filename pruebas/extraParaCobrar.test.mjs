@@ -188,3 +188,34 @@ test("un centavo de redondeo no es un cambio de precio", () => {
     [{ descripcion: "Luminarias LED", cantidad: 12, unidad: "U", monto: 582.05, rubro_id: 1 }], conPrecio));
   assert.equal(h.otroPrecio.length, 0);
 });
+
+test("si el proveedor cotiza por DEBAJO del costo, eso es una eficiencia nuestra", () => {
+  // Costaba 48,50 y ahora lo cotizan a 44: son 4,50 × 12 = 54 a favor de la
+  // obra. No es una diferencia con el cliente —no se le cobra ni se le devuelve
+  // nada—: es un beneficio, y vive en Beneficios.
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 12, unidad: "U", monto: 528, rubro_id: 1 }], conPrecio));
+  assert.equal(h.bajaron.length, 1);
+  assert.equal(h.subieron.length, 0);
+  assert.equal(h.eficiencia, 54);
+  assert.equal(h.sobreprecio, 0);
+  assert.equal(h.bajaron[0].hallazgo, "bajo_precio");
+});
+
+test("si cotiza por encima, se come el margen y la conversación es con el proveedor", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 12, unidad: "U", monto: 612, rubro_id: 1 }], conPrecio));
+  assert.equal(h.subieron.length, 1);
+  assert.equal(h.sobreprecio, 30);
+  assert.equal(h.eficiencia, 0);
+  assert.equal(h.subieron[0].hallazgo, "subio_precio");
+});
+
+test("el ahorro y el sobreprecio se cuentan por separado: un neto esconde los dos", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto([
+    { descripcion: "Luminarias LED", cantidad: 12, unidad: "U", monto: 528, rubro_id: 1 },
+    { descripcion: "Tablero", cantidad: 1, unidad: "U", monto: 150, rubro_id: 2 },
+  ], [...conPrecio, { id: 2, numero: "4.13", descripcion: "Tablero", unidad: "U", cantidad: 1, total_base: 200, costo_unitario: 100 }]));
+  assert.equal(h.eficiencia, 54);
+  assert.equal(h.sobreprecio, 50);
+});

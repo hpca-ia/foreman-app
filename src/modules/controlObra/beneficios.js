@@ -130,3 +130,63 @@ export async function enlacesDeProformas(beneficios = []) {
   }
   return salida;
 }
+
+// ── LAS EFICIENCIAS QUE SALEN DE UN ANÁLISIS DE DIFERENCIAS ────────────────
+//
+// Cuando una propuesta nueva cotiza un rubro POR DEBAJO de lo presupuestado,
+// eso no es una diferencia con el cliente: él paga el precio que firmó y
+// nosotros compramos mejor. Es una eficiencia, y su lugar es Beneficios.
+//
+// Si solo quedara marcada en el análisis, el ahorro moriría ahí: Beneficios es
+// lo que se mira para decidir dónde se puede gastar más, y un ahorro que no
+// llega nunca se transforma en nada. Los sobreprecios los busca todo el mundo;
+// las eficiencias no las registra nadie.
+//
+// Entra como PREVISTO, no como confirmado: todavía es una cotización, y entre
+// que el proveedor cotiza y la factura llega se cae la mitad.
+
+/** La marca que deja ver de qué análisis salió cada fila, para poder rehacerla. */
+const marcaDe = analisisId => `[dif:${analisisId}]`;
+
+/**
+ * Deja en Beneficios exactamente las eficiencias que hoy tiene el análisis.
+ *
+ * Borra y vuelve a escribir las de este análisis en vez de agregar: así
+ * cambiar una decisión —o deshacerla— no deja un beneficio fantasma sumando
+ * para siempre. Volver a correrlo dos veces da el mismo resultado.
+ */
+export async function sincronizarEficiencias(obraId, analisisId, filas = []) {
+  const marca = marcaDe(analisisId);
+  const { error: e1 } = await supabase.from("obra_beneficios")
+    .delete().eq("obra_id", obraId).like("nota", `%${marca}%`);
+  if (e1) return { error: falta(e1) ? SIN_114 : e1.message };
+  if (!filas.length) return { guardados: 0 };
+  return guardarVarios(filas.map(f => ({ ...f, obra_id: obraId, origen: "proforma", estado: "previsto",
+    nota: `${f.nota ? `${f.nota} · ` : ""}${marca}` })));
+}
+
+/**
+ * Una diferencia de precio a la baja, vuelta fila de Beneficios.
+ *
+ * Lo presupuestado es el costo que la obra tenía cargado para esa cantidad, y
+ * lo real es lo que ahora lo cotizan. La diferencia —el monto del hallazgo— es
+ * el beneficio, y queda escrito contra qué rubro se midió: un ahorro sin el
+ * rubro al lado no se puede defender en una reunión.
+ */
+export function eficienciaDeLaDiferencia(linea, rubro, analisis) {
+  const n = v => Number(v) || 0;
+  const c2 = v => Math.round(n(v) * 100) / 100;
+  const presupuestado = rubro && rubro.costo_unitario != null
+    ? c2(n(rubro.costo_unitario) * n(linea.cantidad))
+    : c2(n(linea.monto));
+  return {
+    obra_rubro_id: linea.obra_rubro_id || null,
+    descripcion: String(linea.descripcion || "").slice(0, 200),
+    cantidad: n(linea.cantidad) || null,
+    unidad: linea.unidad || null,
+    presupuestado,
+    real: c2(presupuestado - n(linea.monto)),
+    proveedor: analisis?.proveedor || null,
+    nota: `Lo cotizan por debajo del costo cargado${analisis?.titulo ? ` · ${analisis.titulo}` : ""}`,
+  };
+}

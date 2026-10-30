@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { totales, netoPorRubro, esPrevisto } from "../src/modules/controlObra/cuentaBeneficios.js";
+import { totales, netoPorRubro, esPrevisto, contraQueSeMide } from "../src/modules/controlObra/cuentaBeneficios.js";
 
 const b = [
   { obra_rubro_id: 1, presupuestado: 1000, real: 800, estado: "confirmado" },   // +200
@@ -38,4 +38,23 @@ test("sin beneficios no revienta y da todo en cero", () => {
   const t = totales([]);
   assert.deepEqual([t.neto, t.ahorro, t.sobreprecio, t.previsto, t.cuantos], [0, 0, 0, 0, 0]);
   assert.deepEqual(netoPorRubro([]), {});
+});
+
+test("el rubro nuevo de una orden no se mide contra el presupuesto: no estaba", () => {
+  // Un rubro que no existía ni en el presupuesto ni en el control entra el rato
+  // que el cliente aprueba la orden, y desde entonces su presupuesto ES el
+  // precio de la orden. Buscarle una base en el presupuesto es buscar algo que
+  // nunca existió, y es lo que hace pensar que el margen está mal.
+  const r = contraQueSeMide(
+    [{ id: 1, estado: "aprobada" }, { id: 2, estado: "borrador" }],
+    { 1: [{ obra_rubro_id: 7, tipo: "aumenta" }, { tipo: "aumenta" }, { tipo: "quita", obra_rubro_id: 9 }],
+      2: [{ tipo: "aumenta" }] });
+  assert.equal(r.sobreRubros, 1);
+  assert.equal(r.nuevas, 1);
+  assert.match(r.frase, /no existía ni en el presupuesto ni en el control/);
+});
+
+test("sin órdenes aprobadas no hay nada que explicar", () => {
+  assert.equal(contraQueSeMide([], {}), null);
+  assert.equal(contraQueSeMide([{ id: 1, estado: "aprobada", anulada: true }], { 1: [{ tipo: "aumenta" }] }), null);
 });

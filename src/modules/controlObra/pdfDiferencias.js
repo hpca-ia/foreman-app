@@ -29,11 +29,14 @@ const GRUPOS = [
   ["nuevo", "NO ESTÁ EN EL CONTRATO", "Trabajo que el presupuesto no cubre. Hay que ponerle precio."],
   ["mas_cantidad", "MÁS CANTIDAD QUE LA CONTRATADA", "El rubro existe y su precio ya está acordado: se cobra la diferencia."],
   ["menos_cantidad", "MENOS CANTIDAD QUE LA CONTRATADA", "Trabajo contratado que no se hizo: se le devuelve al cliente."],
-  ["otro_precio", "EL MISMO RUBRO, A OTRO PRECIO",
+  ["subio_precio", "EL MISMO RUBRO, MÁS CARO QUE EL COSTO CARGADO",
     "Cambió el costo, no la cantidad. El precio del cliente no se mueve: esto va contra nuestro margen."],
+  ["bajo_precio", "EL MISMO RUBRO, MÁS BARATO: ES EFICIENCIA",
+    "Lo cotizan por debajo de lo presupuestado. Al cliente no se le cobra ni se le devuelve nada: queda a favor de la obra."],
 ];
 
-const DICE = { cobrar: "SE COBRA", incluido: "YA ESTABA", nuestro: "ES NUESTRO", pendiente: "" };
+const DICE = { cobrar: "SE COBRA", incluido: "YA ESTABA", nuestro: "ES NUESTRO",
+  eficiencia: "A FAVOR", pendiente: "" };
 
 /**
  * @param analisis  la fila de obra_analisis

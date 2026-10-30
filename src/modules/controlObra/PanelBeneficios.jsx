@@ -7,7 +7,7 @@ import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
-import { ordenesMudas } from "./cuentaBeneficios.js";
+import { ordenesMudas, contraQueSeMide } from "./cuentaBeneficios.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
@@ -82,6 +82,9 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   // desaparecen en silencio y la utilidad de la obra queda más baja de lo que
   // es, sin que nada lo diga.
   const mudas = ordenesMudas(ordenes, lineasDeOrdenes);
+  // Contra qué se mide cada partida: el rubro nuevo no tiene base en el
+  // presupuesto porque no estaba ahí, y hay que decirlo donde se mira el margen.
+  const base = contraQueSeMide(ordenes, lineasDeOrdenes);
 
   const r = compararContraPresupuesto(items, rubros);
   // Renglones sin precio: títulos de sección, opcionales, notas al pie que
@@ -635,6 +638,9 @@ Rubros de la obra: ${lista}`;
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
               ÓRDENES DE CAMBIO · LO COBRADO CONTRA LO QUE CUESTA
             </div>
+            {base && (
+              <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 6, lineHeight: 1.45 }}>{base.frase}</div>
+            )}
             <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
               {to.cuantos > 0 && <>
                 <Tarjeta label="COBRADO" valor={to.presupuestado} />

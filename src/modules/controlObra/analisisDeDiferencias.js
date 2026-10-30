@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son las que deciden qué se le cobra al cliente.
-export { DECISIONES, comoVa } from "./cuentaDiferencias.js";
+export { DECISIONES, decisionesPara, comoVa } from "./cuentaDiferencias.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, GUARDADO.
 //

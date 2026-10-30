@@ -11,8 +11,9 @@ import { crearOrden, agregarLinea } from "./ordenesDeCambio";
 import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
-  enlacesDeAnalisis, DECISIONES, comoVa,
+  enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa,
 } from "./analisisDeDiferencias";
+import { sincronizarEficiencias, eficienciaDeLaDiferencia } from "./beneficios";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
 //
@@ -39,6 +40,7 @@ import {
 
 const COLOR_DECISION = {
   pendiente: colors.muted, cobrar: colors.brand, incluido: colors.inkSoft, nuestro: colors.danger,
+  eficiencia: colors.success,
 };
 
 // LAS TRES COSAS QUE PUEDE ENCONTRAR, Y QUE SE RESUELVEN DISTINTO. Juntas en
@@ -50,9 +52,16 @@ const GRUPOS = [
     "El rubro ya existe y su precio está acordado: se cobra solo la diferencia, al precio que el cliente firmó."],
   ["menos_cantidad", "MENOS CANTIDAD QUE LA CONTRATADA",
     "Trabajo contratado que no se hizo. No es un ahorro nuestro: se le devuelve al cliente, como reducción."],
-  ["otro_precio", "EL MISMO RUBRO, A OTRO PRECIO",
+  // SUBIR Y BAJAR DE PRECIO NO SE RESUELVEN EN EL MISMO LADO, y mezclados en
+  // un solo grupo el ahorro se lee como un problema y se descarta junto con el
+  // resto. Los sobreprecios los busca todo el mundo; las eficiencias no las
+  // registra nadie, y son las que dicen si la obra compra bien.
+  ["subio_precio", "EL MISMO RUBRO, MÁS CARO QUE EL COSTO CARGADO",
     "Cambió el costo, no la cantidad. El precio que firmó el cliente no se mueve: esto va contra nuestro "
     + "margen, y la conversación es con el proveedor. Si se decide cobrárselo igual, hay que ponerle precio."],
+  ["bajo_precio", "EL MISMO RUBRO, MÁS BARATO: ES EFICIENCIA",
+    "Lo cotizan por debajo de lo presupuestado. Al cliente no se le cobra ni se le devuelve nada —paga el "
+    + "precio que firmó—: esta plata queda a favor de la obra y se registra en Beneficios."],
 ];
 
 export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio }) {
@@ -145,9 +154,28 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     const err = await decidir(l.id, decision, nota, currentUser);
     setOcupado(false);
     if (err) { setError(err); return; }
-    setLineas(xs => xs.map(x => (x.id === l.id
+    const frescas = lineas.map(x => (x.id === l.id
       ? { ...x, decision, nota, decidido_nombre: currentUser?.name || null, decidido_at: new Date().toISOString() }
-      : x)));
+      : x));
+    setLineas(frescas);
+    await pasarLasEficiencias(frescas);
+  }
+
+  /**
+   * LO QUE QUEDÓ A FAVOR SE VA A BENEFICIOS, no se queda marcado acá.
+   *
+   * Marcar un ahorro en este panel y que no llegue a Beneficios es igual que no
+   * marcarlo: Beneficios es lo que se mira para decidir dónde se puede gastar
+   * más. Se reescriben todas las de este análisis cada vez —no se agregan—, así
+   * cambiar o deshacer una decisión no deja un beneficio fantasma sumando.
+   */
+  async function pasarLasEficiencias(frescas) {
+    if (!abierto) return;
+    const filas = frescas.filter(x => x.decision === "eficiencia")
+      .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), abierto));
+    const r = await sincronizarEficiencias(abierto.obra_id, abierto.id, filas);
+    if (r.error) { setError(r.error); return; }
+    if (filas.length) onCambio?.();
   }
 
   /** El grupo entero para el mismo lado: casi siempre lo es, y lo que se revisa son las excepciones. */
@@ -161,9 +189,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     }
     setOcupado(false);
     const ids = new Set(cuales.map(x => x.id));
-    setLineas(xs => xs.map(x => (ids.has(x.id)
+    const frescas = lineas.map(x => (ids.has(x.id)
       ? { ...x, decision, decidido_nombre: currentUser?.name || null, decidido_at: new Date().toISOString() }
-      : x)));
+      : x));
+    setLineas(frescas);
+    await pasarLasEficiencias(frescas);
   }
 
   async function armarLaOrden() {
@@ -207,7 +237,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // EL PRECIO DEL CONTRATO SOLO VALE PARA LA CANTIDAD. Una diferencia de
     // precio no se cobra al precio del contrato —ese es justamente el que no
     // alcanzó—: si se decide cobrarla, lleva el margen como lo nuevo.
-    const puRubro = l.hallazgo !== "otro_precio" && rubro && Number(rubro.cantidad)
+    const puRubro = l.hallazgo !== "subio_precio" && l.hallazgo !== "bajo_precio" && rubro && Number(rubro.cantidad)
       ? Math.round((Number(rubro.total_base) / Number(rubro.cantidad)) * 10000) / 10000 : null;
     return {
       descripcion: l.descripcion, unidad: l.unidad || "u", cantidad: cant,
@@ -287,10 +317,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     siempre el grupo entero va para el mismo lado, y lo que se
                     revisa son las tres excepciones. */}
                 {sinDecidir.length > 1 && abierto.estado !== "resuelto" && (
-                  <button onClick={() => marcarTodas(sinDecidir, "cobrar")} disabled={ocupado}
+                  <button onClick={() => marcarTodas(sinDecidir, clave === "bajo_precio" ? "eficiencia" : "cobrar")}
+                    disabled={ocupado}
                     style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
                       fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
-                    se cobran {sinDecidir.length === suyas.length ? "todas" : `las ${sinDecidir.length} sin decidir`}
+                    {clave === "bajo_precio" ? "son eficiencia" : "se cobran"}{" "}
+                    {sinDecidir.length === suyas.length ? "todas" : `las ${sinDecidir.length} sin decidir`}
                   </button>
                 )}
               </div>
@@ -340,7 +372,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     </div>
                     {abierto.estado !== "resuelto" && (
                       <div style={{ display: "flex", gap: 4, marginTop: 7, flexWrap: "wrap" }}>
-                        {Object.entries(DECISIONES).filter(([k]) => k !== "pendiente").map(([k, d]) => (
+                        {decisionesPara(l.hallazgo).map(k => DECISIONES[k] && [k, DECISIONES[k]]).filter(Boolean).map(([k, d]) => (
                           <button key={k} onClick={() => marcar(l, k)} disabled={ocupado} title={d.pista}
                             style={{ border: `1px solid ${l.decision === k ? COLOR_DECISION[k] : colors.border}`,
                               background: l.decision === k ? COLOR_DECISION[k] : "#fff",

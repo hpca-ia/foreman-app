@@ -106,3 +106,44 @@ export function ordenesMudas(ordenes = [], lineasPorOrden = {}) {
     })
     .filter(Boolean);
 }
+
+/**
+ * CONTRA QUÉ SE MIDE EL MARGEN DE UNA ORDEN DE CAMBIO.
+ *
+ * Son dos cosas distintas y se leen igual en la pantalla, así que hay que
+ * decirlo:
+ *
+ *   · LA PARTIDA QUE CAE SOBRE UN RUBRO QUE YA EXISTÍA se mide contra el
+ *     presupuesto: el rubro estaba contratado y lo que la orden agrega se
+ *     compara con lo que ese rubro tenía cargado.
+ *   · LA PARTIDA NUEVA NO TIENE CONTRA QUÉ COMPARARSE. Ese rubro no existía ni
+ *     en el presupuesto ni en el control: entra el rato que el cliente aprueba
+ *     la orden, y desde entonces el presupuesto de ese trabajo ES el precio de
+ *     la orden. Su beneficio es el precio aprobado menos lo que costó, y nada
+ *     más —buscarle un rubro del presupuesto es buscar algo que nunca existió—.
+ *
+ * Sin esto, el que mira el margen de una orden hecha toda de rubros nuevos
+ * busca la base en el presupuesto, no la encuentra, y concluye que el número
+ * está mal.
+ */
+export function contraQueSeMide(ordenes = [], lineasPorOrden = {}) {
+  let nuevas = 0, sobreRubros = 0;
+  (ordenes || []).filter(o => o?.estado === "aprobada" && !o.anulada).forEach(o => {
+    (lineasPorOrden[o.id] || []).filter(l => l.tipo !== "quita").forEach(l => {
+      if (l.obra_rubro_id) sobreRubros += 1; else nuevas += 1;
+    });
+  });
+  if (!nuevas && !sobreRubros) return null;
+  const partes = [];
+  if (sobreRubros) {
+    partes.push(`${sobreRubros} ${sobreRubros === 1 ? "partida cae" : "partidas caen"} sobre rubros que ya `
+      + `${sobreRubros === 1 ? "estaba" : "estaban"} en el contrato: ahí el margen se mide contra el presupuesto`);
+  }
+  if (nuevas) {
+    partes.push(`${nuevas} ${nuevas === 1 ? "es un rubro nuevo" : "son rubros nuevos"} que no `
+      + `${nuevas === 1 ? "existía" : "existían"} ni en el presupuesto ni en el control —`
+      + `${nuevas === 1 ? "entró" : "entraron"} al aprobarse la orden—: su base es el precio que el cliente `
+      + "aprobó, y el margen es ese precio menos lo que costó");
+  }
+  return { nuevas, sobreRubros, frase: `${partes.join(" · ")}.` };
+}
