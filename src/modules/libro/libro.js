@@ -1,5 +1,5 @@
 import { supabase } from "../../lib/supabase";
-import { hoyEnObra, HORA_DE_CIERRE } from "./jornada.js";
+import { hoyEnObra, HORA_DE_CIERRE, HORA_LIMITE_ESCRITURA, sePuedeEscribirEl } from "./jornada.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { subirArchivo } from "../../lib/archivos";
 
@@ -36,7 +36,7 @@ const falta = e => /relation|column|does not exist|schema cache/i.test(e?.messag
 // La jornada de obra —de 6 a 6— vive aparte, que es lo único de acá que se
 // puede probar sin un navegador. Se reexporta para no tocar a quien ya la
 // importaba desde este archivo.
-export { hoyEnObra, HORA_DE_CIERRE };
+export { hoyEnObra, HORA_DE_CIERRE, HORA_LIMITE_ESCRITURA, sePuedeEscribirEl };
 
 /** El libro de un día: si es hoy y no existe, se abre solo al entrar. */
 /**
@@ -57,11 +57,18 @@ export { hoyEnObra, HORA_DE_CIERRE };
  * Esa diferencia importa: un libro lleno de días sin cerrar dice que el
  * residente no está cerrando, y antes no se veía en ningún lado.
  */
-export function estadoDelDia(dia, hoy = hoyEnObra()) {
+export function estadoDelDia(dia, hoy = hoyEnObra(), ahora = new Date()) {
   if (!dia) return { clave: "sin_abrir", etiqueta: "Sin abrir", seEscribe: false };
   if (dia.estado === "aprobado") return { clave: "aprobado", etiqueta: "Aprobado", seEscribe: false };
   if (dia.estado === "cerrado") return { clave: "cerrado", etiqueta: "Cerrado", seEscribe: false };
   if (dia.fecha === hoy) return { clave: "abierto", etiqueta: "Abierto", seEscribe: true };
+  // LA JORNADA DE AYER SE ESCRIBE HASTA EL MEDIODÍA. El que funde hasta las
+  // dos de la mañana no puede tener que escribir el libro antes de irse a
+  // dormir: lo escribe cuando se levanta, y eso sigue siendo el mismo día de
+  // trabajo visto desde el papel.
+  if (sePuedeEscribirEl(dia.fecha, ahora).hastaMediodia) {
+    return { clave: "abierto", etiqueta: `Abierto hasta las ${HORA_LIMITE_ESCRITURA}:00`, seEscribe: true, hastaMediodia: true };
+  }
   // REABIERTO: un día pasado que alguien volvió a abrir a propósito, con su
   // motivo. Se puede escribir, y se ve que se escribió después —que es la
   // mitad del asunto: un libro editable en silencio no vale como registro.
