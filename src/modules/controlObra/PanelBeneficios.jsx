@@ -184,9 +184,13 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
 
 ${FORMATO}
 
-"monto" es lo que suma ESE renglón CON IVA incluido, porque se va a comparar
-contra el presupuesto de la obra, que está cargado con IVA: comparar un precio
-sin IVA contra uno con IVA inventaría un ahorro del 15% que no existe.
+"monto" es lo que suma ESE renglón SIN IVA: su subtotal, antes de impuestos.
+
+EL IVA VA SIEMPRE AFUERA. No es del proveedor ni nuestro: es del fisco. El
+presupuesto de la obra está cargado sin IVA —el IVA se calcula aparte al
+final—, así que comparar contra un monto con IVA adentro inventa un sobreprecio
+del 15% que no existe. Si la proforma muestra los renglones con IVA y el
+subtotal abajo, devolvé los del subtotal.
 
 "rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
 no estás seguro. El guion es una respuesta válida y es mejor que adivinar: acá

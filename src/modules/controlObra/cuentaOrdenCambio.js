@@ -65,7 +65,10 @@ export const sinIva = (monto, iva) => {
   return Math.round((n(monto) / (1 + p / 100)) * 10000) / 10000;
 };
 
-export function partidasDeCotizacion(items = [], iva = 0) {
+export function partidasDeCotizacion(items = [], iva = 0, neta = true) {
+  // Desde la 139 NOVA lee el subtotal del renglón: no hay nada que descontar.
+  // Solo las cotizaciones viejas vinieron con el IVA adentro.
+  if (neta) iva = 0;
   return items.filter(x => x?.descripcion && n(x.monto)).map(x => {
     const cantidad = n(x.cantidad) || 1;
     // El unitario sale del total, que es el número que el proveedor suma: si
@@ -131,7 +134,8 @@ export function costosConOtroIva(lineas = [], cotizacionId, ivaViejo = 0, ivaNue
  *
  * @returns { pone: [{id, costo_unitario, como}], sinCosto, sinUsar }
  */
-export function emparejarCostos(lineas = [], items = [], iva = 0) {
+export function emparejarCostos(lineas = [], items = [], iva = 0, neta = true) {
+  if (neta) iva = 0;
   const limpio = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const adiciones = lineas.filter(l => l.tipo !== "quita");
@@ -218,7 +222,20 @@ export function rubroDeCadaLinea(codigo, lineas = [], rubros = []) {
 }
 
 /** ¿La orden deja beneficio? Aprobada, viva y ejecutada o por ejecutar. */
-export const ordenCuenta = o => o?.estado === "aprobada" && !o.anulada && o.ejecucion !== "no_ejecutado";
+/**
+ * ¿Esta orden cuenta para la utilidad de la obra?
+ *
+ * APROBADA QUIERE DECIR QUE CUENTA. Una orden aprobada ya metió sus rubros al
+ * presupuesto y se le está cobrando al cliente: su margen es utilidad de la
+ * obra desde ese momento, igual que el de una compra.
+ *
+ * Acá se pedía además que estuviera marcada como ejecutada, y eso hacía
+ * desaparecer en silencio a las dos OC-01 —aprobadas, cobrándose por $12.603, y
+ * marcadas 'no ejecutado' porque nadie sabía que ese interruptor movía la
+ * utilidad—. Lo que saca a una orden de la cuenta es ANULARLA: ahí deja de
+ * cobrarse, y ahí deja de ser beneficio.
+ */
+export const ordenCuenta = o => o?.estado === "aprobada" && !o.anulada;
 
 /**
  * Los beneficios previstos que tiene que tener una obra por sus órdenes de

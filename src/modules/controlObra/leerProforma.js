@@ -210,15 +210,18 @@ export function sistemaDeCotizacion(lista = "") {
 
 ${FORMATO}
 
-"monto" es lo que suma ESE renglón CON IVA incluido.
+"monto" es lo que suma ESE renglón SIN IVA: su subtotal, antes de impuestos.
+
+EL IVA VA SIEMPRE AFUERA. No es del proveedor ni nuestro: es del fisco, y acá
+todo —presupuestos, costos y márgenes— se maneja sin él. Si la proforma muestra
+los renglones con IVA adentro y el subtotal abajo, los montos que devuelvas son
+los del subtotal: la suma de los renglones tiene que dar el SUBTOTAL del papel,
+no el total a pagar.
 
 Después de la línea del proveedor va una segunda línea:  IVA | porcentaje
 
-Es el porcentaje de IVA que está adentro de esos montos: 15 si la proforma tiene
-IVA del 15%, 0 si no tiene IVA o no se puede saber. Si la proforma muestra un
-subtotal y después el IVA, los montos de los renglones tienen que ser los del
-subtotal multiplicados por (1 + porcentaje/100), de manera que la suma de los
-renglones sea el total que paga el cliente.
+Es el porcentaje de IVA que tiene la proforma —15, 12, o 0 si no tiene—, y es
+solo para poder cuadrar contra el papel. No lo sumes a ningún monto.
 
 "rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
 no estás seguro. El guion es una respuesta válida y es mejor que adivinar.

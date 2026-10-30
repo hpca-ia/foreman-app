@@ -99,8 +99,15 @@ test("deshacer la aprobación se lleva lo previsto y deja lo comprado", () => {
   assert.equal(p.insertar.length, 0);
 });
 
-test("una orden no ejecutada no deja beneficio", () => {
+test("aprobada quiere decir que cuenta, aunque nadie haya tocado la ejecución", () => {
+  // Las dos OC-01 estaban aprobadas, cobrándose en el contrato, y marcadas
+  // 'no ejecutado' porque nadie sabía que ese interruptor movía la utilidad.
   const p = planDeBeneficios({ obraId: 1, ordenes: [{ ...orden, ejecucion: "no_ejecutado" }], lineasPorOrden: lineas, rubros, cotizaciones, existentes: [], codigoDe });
+  assert.equal(p.insertar.length, 1);
+});
+
+test("anularla sí la saca: deja de cobrarse y deja de ser beneficio", () => {
+  const p = planDeBeneficios({ obraId: 1, ordenes: [{ ...orden, anulada: true }], lineasPorOrden: lineas, rubros, cotizaciones, existentes: [], codigoDe });
   assert.equal(p.insertar.length, 0);
 });
 

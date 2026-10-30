@@ -310,7 +310,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
    * @returns el texto de qué hizo, para decirlo en la pantalla.
    */
   async function ponerLosCostos(o, cot, suyas) {
-    const { pone, sinCosto, sinUsar } = emparejarCostos(suyas, cot.items || [], cot.iva);
+    const { pone, sinCosto, sinUsar } = emparejarCostos(suyas, cot.items || [], cot.iva, cot.neta !== false);
     for (const x of pone) {
       const r = await guardarLinea(x.id, { costo_unitario: x.costo_unitario, cotizacion_id: cot.id });
       if (r.error) return `No se pudo guardar el costo: ${r.error}`;
@@ -329,7 +329,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   /** Los renglones de una cotización, como partidas de la orden con su costo. */
   async function agregarPartidas(o, c, yaPuestas) {
     const puestas = [...yaPuestas];
-    for (const p of partidasDeCotizacion(c.items || [], c.iva)) {
+    for (const p of partidasDeCotizacion(c.items || [], c.iva, c.neta !== false)) {
       const r = await agregarLinea(o.id, { ...p, orden: puestas.length, cotizacion_id: c.id }, puestas);
       if (r.error) return r.error;
       puestas.push(r.linea);
@@ -1015,7 +1015,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                 puesto o sin poner, la misma cotización da dos
                                 márgenes que se llevan quince puntos. */}
                             {puedeEditar && (
-                              <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: colors.muted }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11,
+                                color: c.neta === false ? colors.warning : colors.muted }}
+                                title={c.neta === false
+                                  ? "Esta proforma se leyó con el IVA adentro. Poné el porcentaje y se descuenta: el costo de la orden va sin IVA."
+                                  : "Informativo: los montos ya se leyeron sin IVA. Sirve para cuadrar contra el papel del proveedor."}>
                                 IVA
                                 <input type="number" step="0.5" min="0" max="30"
                                   defaultValue={Number(c.iva) || 0} key={`iva${c.id}-${c.iva}`}
@@ -1056,10 +1060,19 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                 que usa es sin IVA: si la pantalla mostrara solo
                                 el total de la proforma, los dos números no
                                 cuadrarían contra el papel del proveedor. */}
-                            <span style={{ color: colors.muted }}>
+                            {/* EL IVA VA SIEMPRE AFUERA: no es del proveedor ni
+                                nuestro, es del fisco, y el presupuesto está
+                                cargado sin él. Lo que se lee hoy ya viene sin
+                                IVA; lo que se leyó antes vino con el IVA
+                                adentro y hay que decirlo, porque si no el
+                                margen de esa orden está 15 puntos abajo y nada
+                                lo dice. */}
+                            <span style={{ color: c.neta === false ? colors.warning : colors.muted }}>
                               {(c.items || []).length} renglones · ${fmt(c.total)}
-                              {Number(c.iva) > 0
-                                ? ` (IVA ${fmt(c.iva)}% incluido · $${fmt(c.total / (1 + Number(c.iva) / 100))} es el costo de la orden)`
+                              {c.neta === false
+                                ? Number(c.iva) > 0
+                                  ? ` con IVA ${fmt(c.iva)}% adentro · el costo son $${fmt(c.total / (1 + Number(c.iva) / 100))}`
+                                  : " · se leyó con el IVA adentro: poné el porcentaje para descontarlo"
                                 : " · sin IVA"}
                             </span>
                             <button onClick={() => setVerRenglones(v => v === c.id ? null : c.id)}

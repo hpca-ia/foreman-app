@@ -67,7 +67,7 @@ test("una partida que ya tiene costo no se cuenta como sin costo", () => {
 test("el costo de una orden de cambio va sin IVA: la orden cobra sin IVA", () => {
   // La OC-01 de Plaza Lagos: $1.389,75 con IVA del 15% son $1.208,48 de costo,
   // y el margen pasa de $336,89 (19,5%) a $518,16 (30%).
-  const { pone } = emparejarCostos(lineas, items, 15);
+  const { pone } = emparejarCostos(lineas, items, 15, false);
   assert.equal(pone[0].costo_unitario, 151.0598);
   const costo = Math.round(pone[0].costo_unitario * 8 * 100) / 100;
   assert.equal(costo, 1208.48);
@@ -76,4 +76,16 @@ test("el costo de una orden de cambio va sin IVA: la orden cobra sin IVA", () =>
 
 test("sin IVA declarado, el monto se usa tal cual", () => {
   assert.equal(emparejarCostos(lineas, items, 0).pone[0].costo_unitario, 173.7188);
+});
+
+test("desde la 139 la proforma se lee sin IVA y no hay nada que descontar", () => {
+  // El monto que trae NOVA ya es el subtotal del renglón: aplicarle el IVA otra
+  // vez lo descontaría dos veces.
+  const { pone } = emparejarCostos(lineas, [{ ...items[0], monto: 1208.48 }], 15, true);
+  assert.equal(pone[0].costo_unitario, 151.06);
+});
+
+test("una cotización vieja sí se netea: se leyó con el IVA adentro", () => {
+  const { pone } = emparejarCostos(lineas, items, 15, false);
+  assert.equal(pone[0].costo_unitario, 151.0598);
 });
