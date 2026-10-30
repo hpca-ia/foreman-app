@@ -117,6 +117,39 @@ export async function guardarIva(id, pct) {
   return error ? (falta(error) ? "Falta correr la migración 134 para guardar el IVA de la proforma." : error.message) : null;
 }
 
+/**
+ * VOLVER A LEER UNA PROFORMA QUE YA ESTÁ GUARDADA.
+ *
+ * Las proformas que se leyeron antes de la 139 vinieron con el IVA adentro,
+ * porque así lo pedía el lector. Arreglar eso pidiéndole a alguien que escriba
+ * "15" es hacerle adivinar un dato que está impreso en el papel —y que además
+ * no siempre es 15: en Ecuador era 12 hasta hace poco y hay proformas exentas—.
+ *
+ * El archivo está guardado. Lo honesto es volver a leerlo con el lector de
+ * ahora y que el costo salga del papel, no de un porcentaje supuesto.
+ */
+export async function releerCotizacion(c, rubros = [], onPaso) {
+  if (!c?.archivo_path) return { error: "Esta cotización no tiene el archivo guardado: no hay qué volver a leer." };
+  const { data, error } = await supabase.storage.from(BUCKET).download(c.archivo_path);
+  if (error) return { error: `No se pudo bajar la proforma: ${error.message}` };
+  const file = new File([data], c.archivo_nombre || "cotizacion.pdf", { type: data.type || "application/pdf" });
+
+  const leida = await leerConNova(file, rubros, onPaso);
+  if (!leida.items?.length) return { error: "NOVA no encontró renglones al volver a leerla." };
+
+  const lista = renglones(leida.items);
+  const { data: fila, error: e2 } = await supabase.from("orden_cambio_cotizaciones").update({
+    items: lista,
+    total: Math.round(lista.reduce((t, x) => t + x.monto, 0) * 100) / 100,
+    iva: Number(leida.iva) || 0,
+    // Ya viene sin IVA: no hay nada que descontar después.
+    neta: true,
+    ...(leida.proveedor && !c.proveedor ? { proveedor: leida.proveedor } : {}),
+  }).eq("id", c.id).select().single();
+  if (e2) return { error: falta(e2) ? "Falta correr la migración 139." : e2.message };
+  return { cotizacion: fila, cortado: leida.cortado };
+}
+
 export async function guardarProveedor(id, proveedor) {
   const { error } = await supabase.from("orden_cambio_cotizaciones")
     .update({ proveedor: String(proveedor || "").trim() || null }).eq("id", id);

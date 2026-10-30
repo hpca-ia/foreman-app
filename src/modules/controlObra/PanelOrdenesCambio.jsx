@@ -16,7 +16,7 @@ import {
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
 import {
   leerConNova, guardarCotizacion, cotizacionesDe, borrarCotizacion, guardarProveedor,
-  enlacesDeCotizaciones, sincronizarBeneficios, guardarIva, gastosDe, guardarGasto, borrarGasto,
+  enlacesDeCotizaciones, sincronizarBeneficios, guardarIva, gastosDe, guardarGasto, borrarGasto, releerCotizacion,
 } from "./cotizacionesOrden";
 import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos, costosConOtroIva } from "./cuentaOrdenCambio.js";
 import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
@@ -1009,14 +1009,38 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                 onBlur={e => e.target.value.trim() !== (c.proveedor || "") && hacer(() => guardarProveedor(c.id, e.target.value))}
                                 style={{ ...celda, width: 170 }} />
                             ) : <span style={{ color: colors.ink }}>{c.proveedor || "Proveedor sin nombre"}</span>}
-                            {/* EL IVA SE CORRIGE ACÁ. NOVA lo lee del papel,
-                                pero una proforma puede no decirlo. De ese
-                                porcentaje depende el margen entero: con el 15%
-                                puesto o sin poner, la misma cotización da dos
-                                márgenes que se llevan quince puntos. */}
-                            {puedeEditar && (
+                            {/* VOLVER A LEERLA, EN VEZ DE PEDIR UN PORCENTAJE.
+                                Las proformas leídas antes de la 139 vinieron
+                                con el IVA adentro. Arreglarlo pidiendo que
+                                alguien escriba "15" es hacerle adivinar un dato
+                                que está impreso en el papel —y que no siempre
+                                es 15: en Ecuador era 12 hasta hace poco y hay
+                                proformas exentas—. El archivo está guardado:
+                                se vuelve a leer y el costo sale del papel. */}
+                            {puedeEditar && c.neta === false && c.archivo_path && (
+                              <Button variant="primary" size="sm" disabled={!!leyendoCot}
+                                title="Esta proforma se leyó con el IVA adentro. Volver a leerla toma el subtotal del papel y recalcula el costo de las partidas."
+                                onClick={async () => {
+                                  setLeyendoCot({ ordenId: o.id, paso: "" }); setAviso("");
+                                  const r = await releerCotizacion(c, rubros, paso => setLeyendoCot({ ordenId: o.id, paso: paso || "" }));
+                                  if (r.error) { setLeyendoCot(null); setAviso(r.error); return; }
+                                  // Y los costos se vuelven a poner, si no el
+                                  // número de la pantalla queda de la lectura
+                                  // vieja.
+                                  const texto = await ponerLosCostos(o, r.cotizacion, suyas);
+                                  setLeyendoCot(null);
+                                  await cargar(); onCambio?.();
+                                  setAviso(`Releída sin IVA: $${fmt(r.cotizacion.total)}`
+                                    + `${Number(r.cotizacion.iva) > 0 ? ` (la proforma tiene IVA ${fmt(r.cotizacion.iva)}%, que va aparte)` : ""}. ${texto}`);
+                                }}>
+                                {leyendoCot?.ordenId === o.id ? `Leyendo… ${leyendoCot.paso || ""}` : "Volver a leerla sin IVA"}
+                              </Button>
+                            )}
+                            {/* El porcentaje, solo informativo y solo cuando se
+                                sabe: es para cuadrar contra el papel. */}
+                            {puedeEditar && c.neta !== false && (
                               <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11,
-                                color: c.neta === false ? colors.warning : colors.muted }}
+                                color: colors.muted }}
                                 title={c.neta === false
                                   ? "Esta proforma se leyó con el IVA adentro. Poné el porcentaje y se descuenta: el costo de la orden va sin IVA."
                                   : "Informativo: los montos ya se leyeron sin IVA. Sirve para cuadrar contra el papel del proveedor."}>
@@ -1070,9 +1094,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             <span style={{ color: c.neta === false ? colors.warning : colors.muted }}>
                               {(c.items || []).length} renglones · ${fmt(c.total)}
                               {c.neta === false
-                                ? Number(c.iva) > 0
-                                  ? ` con IVA ${fmt(c.iva)}% adentro · el costo son $${fmt(c.total / (1 + Number(c.iva) / 100))}`
-                                  : " · se leyó con el IVA adentro: poné el porcentaje para descontarlo"
+                                ? " · se leyó con el IVA adentro, cuando el lector lo pedía así. El margen de esta orden está abajo de lo real."
                                 : " · sin IVA"}
                             </span>
                             <button onClick={() => setVerRenglones(v => v === c.id ? null : c.id)}
