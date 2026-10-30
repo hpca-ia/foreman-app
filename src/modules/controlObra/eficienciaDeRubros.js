@@ -86,7 +86,16 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
   }
 
   const suma = (p, f) => filas.filter(f).reduce((t, x) => t + Math.abs(x[p]), 0);
+  // EL MARGEN VENDIDO NO ES UN BENEFICIO DE LA OBRA: se decidió el día que se
+  // firmó el contrato. Va aparte porque es la vara con la que se lee todo lo
+  // demás —una eficiencia de $2.000 sobre un margen vendido de $80.000 es
+  // ruido, y sobre uno de $6.000 es la diferencia entre ganar y no— pero
+  // sumarlo con lo que la obra ahorró deja a una obra que compra mal pareciendo
+  // sana porque vendió bien.
+  const vendido = c2(filas.reduce((t, x) => t + x.contratado, 0));
+  const costoVendido = c2(filas.reduce((t, x) => t + x.presupuestado, 0));
   return {
+    vendido, costoVendido, margenVendido: c2(vendido - costoVendido),
     filas: filas.sort((a, b) => Math.abs(b.dif) - Math.abs(a.dif)),
     ahorro: c2(suma("dif", f => f.estado === "ahorro")),
     sobreprecio: c2(suma("dif", f => f.estado === "sobreprecio")),

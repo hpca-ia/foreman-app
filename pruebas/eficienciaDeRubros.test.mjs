@@ -73,3 +73,14 @@ test("un rubro con costo y sin un peso gastado no es ni ahorro ni sobreprecio", 
   assert.equal(r.ahorro, 0);
   assert.equal(r.neto, 0);
 });
+
+test("el margen vendido va aparte: se decidio al firmar, no lo gano la obra", () => {
+  // Sumarlo con la eficiencia deja a una obra que compra mal pareciendo sana
+  // porque vendio bien. Va como vara, no como beneficio.
+  const r = eficienciaDeRubros({ rubros, porRubro });
+  assert.equal(r.vendido, 4500);          // 1.500 + 600 + 2.400, sin el que no tiene costo
+  assert.equal(r.costoVendido, 3000);     // 1.000 + 400 + 1.600
+  assert.equal(r.margenVendido, 1500);
+  // Y no se mezcla con lo que la obra ahorro.
+  assert.equal(r.neto, 30);
+});

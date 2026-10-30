@@ -618,6 +618,15 @@ Rubros de la obra: ${lista}`;
                   )}
                 </div>
                 {titular && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{titular}</div>}
+                {/* La vara con la que se lee todo lo de arriba, y que no se
+                    suma con nada: el margen vendido se decidió al firmar. */}
+                {sola.margenVendido !== 0 && (
+                  <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
+                    Esos {sola.cuantos} rubros se vendieron en ${fmt(sola.vendido)} con ${fmt(sola.costoVendido)} de
+                    costo presupuestado: <strong>${fmt(sola.margenVendido)}</strong> de margen vendido, que se decidió
+                    al firmar y no es mérito de la obra. Lo de arriba es lo que la obra le sumó o le restó a eso.
+                  </div>
+                )}
                 <div style={{ marginTop: 7 }}>
                   {sola.filas.filter(f => f.estado === "sobreprecio" || f.estado === "ahorro").slice(0, 8).map(f => (
                     <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11.5,
