@@ -221,6 +221,23 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
           background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
           padding: "8px 11px", fontSize: 12, color: colors.ink }}>
           <span>Mostrando solo <strong>{rotuloClase}</strong> · {vistas.length} {vistas.length === 1 ? "documento" : "documentos"}</span>
+          {/* EL RESUMEN DE LO FILTRADO, que es a lo que se vino. Con las notas
+              de crédito la pregunta es doble —cuánto queda para gastar y cuánto
+              ya se gastó— y una lista de documentos no la contesta: hay que
+              sumar a ojo y mirar los pagos de cada una. */}
+          {soloClase === "nota_credito" && (
+            <span style={{ color: colors.inkSoft }}>
+              · <strong style={{ color: resumen.credito > 0.005 ? colors.success : colors.muted }}>
+                ${fmt(resumen.credito)}
+              </strong> sin usar
+              {resumen.creditoUsado > 0.005 && <> · ${fmt(resumen.creditoUsado)} ya aplicadas</>}
+            </span>
+          )}
+          {soloClase === "anticipo" && (
+            <span style={{ color: colors.inkSoft }}>
+              · <strong style={{ color: colors.warning }}>${fmt(resumen.anticipos)}</strong> esperando su factura
+            </span>
+          )}
           <button onClick={() => setSoloClase(null)}
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
               fontSize: 12, color: colors.brand, textDecoration: "underline" }}>

@@ -295,17 +295,29 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           // disponible, y se usa dos veces.
           const vales = facturas
             .filter(f => (f.clase === "nota_credito" || Number(f.total) < 0) && !f.facturada_con_id)
-            .map(f => ({ f, queda: creditoDisponible(f, pagos) }));
+            .map(f => ({ f, queda: creditoDisponible(f, pagos), total: Math.abs(Number(f.total) || 0) }));
+          // SI HUBO NOTAS, LA TARJETA SE QUEDA aunque no quede crédito. Que
+          // desaparezca contesta mal la pregunta que uno trae: "¿y las notas de
+          // crédito?" — y la respuesta no es "no hay", es "las hubo y se
+          // usaron, acá está dónde".
+          if (!vales.length) return null;
           const suma = vales.reduce((t, v) => t + v.queda, 0);
-          if (suma <= 0.005) return null;
+          const usado = vales.reduce((t, v) => t + (v.total - v.queda), 0);
+          const cuantasVivas = vales.filter(v => v.queda > 0.005).length;
           return (
-            <Tarjeta label="Notas de crédito" valor={suma} color={colors.success}
+            <Tarjeta label="Notas de crédito" valor={suma}
+              color={suma > 0.005 ? colors.success : colors.muted}
+              pie={suma > 0.005
+                ? `disponibles de ${vales.length} ${vales.length === 1 ? "nota" : "notas"}${usado > 0.005 ? ` · $${fmt(usado)} ya usadas` : ""}`
+                : `sin usar · las ${vales.length} se aplicaron: $${fmt(usado)}`}
               onClick={() => { setVerClase("nota_credito"); setTab("facturas"); }}
-              nota={"Crédito a favor SIN USAR: plata nuestra que está en la casa del proveedor.\n\n"
-                + vales.map(({ f, queda }) => `· ${f.razon_social || "sin proveedor"} — ${f.detalle || f.numero_factura || "sin detalle"} — `
-                  + `$${fmt(queda)}${queda < Math.abs(Number(f.total) || 0) ? ` (de $${fmt(Math.abs(f.total))}, el resto ya se usó)` : ""}`).join("\n")
-                + "\n\nLo que ya se aplicó a una compra no está acá: se gastó."
-                + " Clic para ver las notas y en qué factura se usó cada una."} />
+              nota={(suma > 0.005
+                ? `Hay $${fmt(suma)} de crédito SIN USAR en ${cuantasVivas} ${cuantasVivas === 1 ? "nota" : "notas"}: plata nuestra que está en la casa del proveedor y se usa en la próxima compra.`
+                : "No queda crédito sin usar: todas las notas ya se aplicaron a una compra.")
+                + "\n\n"
+                + vales.map(({ f, queda, total }) => `· ${f.razon_social || "sin proveedor"} — $${fmt(total)} — `
+                  + (queda <= 0.005 ? "usada entera" : queda < total ? `quedan $${fmt(queda)}` : "sin usar")).join("\n")
+                + "\n\nClic para ver las notas y en qué factura se usó cada una."} />
           );
         })()}
         <Tarjeta label="Saldo" valor={totales.saldo} color={totales.saldo < 0 ? colors.danger : colors.success} />
@@ -508,7 +520,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
 // `nota` es lo que dice la tarjeta cuando se le deja el puntero encima: de
 // qué documentos está hecho el número. Un número del que no se puede
 // averiguar el origen sin preguntarle a alguien no se puede usar para decidir.
-function Tarjeta({ label, valor, color, sufijo = "", moneda = true, nota = "", onClick = null }) {
+function Tarjeta({ label, valor, color, sufijo = "", moneda = true, nota = "", onClick = null, pie = null }) {
   return (
     <div title={nota || undefined} onClick={onClick || undefined}
       style={{ background: colors.surface, border: `1px solid ${onClick ? colors.warningBorder : colors.border}`,
@@ -520,6 +532,10 @@ function Tarjeta({ label, valor, color, sufijo = "", moneda = true, nota = "", o
       <div style={{ fontSize: 15, fontWeight: 700, color: color || colors.inkSoft, marginTop: 3 }}>
         {moneda ? `$${fmt(valor)}` : `${Number(valor || 0).toFixed(1)}${sufijo}`}
       </div>
+      {/* UN CERO QUE SE EXPLICA VALE MÁS QUE UNA TARJETA QUE DESAPARECE. Si
+          hubo notas de crédito y ya se usaron, esconder el número deja la
+          pregunta "¿y las notas?" sin respuesta en ningún lado. */}
+      {pie && <div style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>{pie}</div>}
     </div>
   );
 }
