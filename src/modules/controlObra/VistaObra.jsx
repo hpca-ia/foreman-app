@@ -16,6 +16,7 @@ import PresupuestoOriginal from "./PresupuestoOriginal";
 import PanelCurar from "./PanelCurar";
 import PanelBeneficios from "./PanelBeneficios";
 import PanelDiferencias from "./PanelDiferencias";
+import SiSeRompe from "../../components/SiSeRompe";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
 import { comprometidoPorGrupo } from "./calculos";
@@ -449,8 +450,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             </Suspense>
           )}
           {tab === "ordenes" && (
-            <PanelOrdenesCambio obra={obra} proyecto={cadena.proyecto} rubros={rubros}
-              currentUser={currentUser} puede={puede} onCambio={cargar} />
+            <SiSeRompe que="Órdenes de cambio">
+              <PanelOrdenesCambio obra={obra} proyecto={cadena.proyecto} rubros={rubros}
+                currentUser={currentUser} puede={puede} onCambio={cargar} />
+            </SiSeRompe>
           )}
           {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} currentUser={currentUser} />}
 
@@ -460,8 +463,12 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             </Suspense>
           )}
 
-          {tab === "beneficios" && <PanelBeneficios obra={obra} rubros={rubros} currentUser={currentUser} />}
-          {tab === "diferencias" && <PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} />}
+          {tab === "beneficios" && (
+            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} currentUser={currentUser} /></SiSeRompe>
+          )}
+          {tab === "diferencias" && (
+            <SiSeRompe que="Diferencias"><PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} /></SiSeRompe>
+          )}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
           {tab === "exportar" && (

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import SiSeRompe from "../../components/SiSeRompe";
 import { Plus, Upload, AlertTriangle, Trash2, Users } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -120,9 +121,16 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
   }
 
   if (vista === "obra" && obraActiva) {
-    return <VistaObra obra={obraActiva} currentUser={currentUser} entrarEn={entrarEn}
-      puede={permiso => puedeEnObra(obraActiva, permiso)}
-      onVolver={() => { setVista("lista"); setEntrarEn(null); fetchObras(); }} />;
+    // CON RED. Si algo se rompe dibujando la obra, antes quedaba la pantalla en
+    // blanco: ni la obra, ni un mensaje, ni manera de volver a la lista. Y
+    // "se queda en blanco" no alcanza para encontrar nada.
+    return (
+      <SiSeRompe que={`La obra ${obraActiva.nombre || ""}`.trim()}>
+        <VistaObra obra={obraActiva} currentUser={currentUser} entrarEn={entrarEn}
+          puede={permiso => puedeEnObra(obraActiva, permiso)}
+          onVolver={() => { setVista("lista"); setEntrarEn(null); fetchObras(); }} />
+      </SiSeRompe>
+    );
   }
 
   return (
