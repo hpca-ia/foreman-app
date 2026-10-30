@@ -21,13 +21,15 @@
 // adicional suma un 15% de menos y el contrato vigente queda corto sin que nada
 // lo diga.
 //
-// ── LAS REDUCCIONES NO SE VEN COMO UNA LÍNEA NEGATIVA ───────────────────────
+// ── LAS REDUCCIONES SON LÍNEAS DE LA ORDEN ──────────────────────────────────
 //
-// Cuando una orden quita un rubro que ya estaba en el contrato, no agrega una
-// línea en negativo: TACHA el rubro original (`anulado_por_oc`). Por eso en el
-// control de presupuesto se ven las adiciones de la orden y no se ve la
-// reducción — está, pero es un rubro que dejó de contar. Acá se suma aparte,
-// con su monto, para que se pueda decir cuánto sacó cada orden.
+// El presupuesto original es lo que se firmó y no se toca. Una orden no lo
+// edita: le suma sus adiciones y le resta sus reducciones, y las dos son
+// renglones suyos, en su capítulo, uno en positivo y otro en negativo.
+//
+// Hasta la 141 la reducción tachaba el rubro original del contrato. Por eso el
+// capítulo de la orden mostraba solo lo que sumaba: ADICIONALES · OC-01 por
+// $12.508,62 cuando esa orden movía $3.849,94.
 //
 // Sin base de datos: se le pasan los rubros de la obra.
 
@@ -72,21 +74,24 @@ export function contratoDe(rubros = []) {
   // orden sacó un rubro, el contrato original seguía teniéndolo, y por eso la
   // reducción se puede mostrar como lo que es —algo que se quitó— en vez de
   // hacer desaparecer la plata sin explicación.
-  const original = c2(base.reduce((t, r) => t + enLaBaseDelControl(r), 0));
-  const reducciones = c2(base.filter(r => r.anulado_por_oc).reduce((t, r) => t + enLaBaseDelControl(r), 0));
+  // EL ORIGINAL ES EL PRESUPUESTO ENTERO: ninguna orden lo edita. (En las obras
+  // de antes de la 141 una reducción tachaba un rubro; esos rubros volvieron a
+  // contar y su resta vive ahora en la línea negativa de su orden.)
+  const original = c2(base.filter(r => !r.anulado_por_oc).reduce((t, r) => t + enLaBaseDelControl(r), 0));
 
-  // Lo que las órdenes agregaron. Una quita escrita a mano —sin rubro al que
-  // apuntar— entró en negativo y se resta sola.
-  const adiciones = c2(deOrden.reduce((t, r) => t + enLaBaseDelControl(r), 0));
+  // Lo que las órdenes suman y lo que restan, por separado: un neto esconde las
+  // dos mitades, y lo que se discute con el cliente son las dos.
+  const adiciones = c2(deOrden.filter(r => n(r.total_base) >= 0).reduce((t, r) => t + enLaBaseDelControl(r), 0));
+  const reducciones = c2(-deOrden.filter(r => n(r.total_base) < 0).reduce((t, r) => t + enLaBaseDelControl(r), 0));
 
   return {
     original,
     adiciones,
     reducciones,
     neto: c2(adiciones - reducciones),
-    vigente: c2(original - reducciones + adiciones),
+    vigente: c2(original + adiciones - reducciones),
     cuantasOrdenes: new Set(deOrden.map(r => r.orden_cambio_id).filter(Boolean)).size,
-    cuantosTachados: base.filter(r => r.anulado_por_oc).length,
+    cuantasReducciones: deOrden.filter(r => n(r.total_base) < 0).length,
     // Cuánto IVA lleva adentro el vigente, para poder decir el número sin él:
     // el contrato se firma con IVA y los adicionales se cotizan sin IVA, y en
     // una conversación hacen falta los dos.
