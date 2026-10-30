@@ -68,7 +68,7 @@ async function comoJpeg(url, maxAncho = 900) {
 }
 
 /** Pinta una orden completa, empezando en la página actual del documento. */
-async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [] }) {
+async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [], iva = 0 }) {
   const ancho = doc.internal.pageSize.getWidth();
   const margen = 40;
   const util = ancho - margen * 2;
@@ -168,9 +168,29 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
     body: [
       ...seccion("ADICIONES", "aumenta", subtotales.adiciones),
       ...seccion("REDUCCIONES", "quita", subtotales.reducciones),
-      [{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
+      // ── EL PIE, COMO EL DE CUALQUIER FACTURA ──────────────────────────
+      //
+      // La orden se cotiza sin IVA: el precio de cada partida, el margen y lo
+      // que se discute con el proveedor van sin impuesto. Pero el documento
+      // que firma el cliente tiene que cerrar como cierra un documento
+      // comercial —subtotal, IVA, total— y por dos razones:
+      //
+      //   · El cliente paga el total con IVA. Firmar $12.508,62 y recibir una
+      //     factura por $14.384,91 obliga a explicar la diferencia cada vez.
+      //   · Y ese total CON IVA es el que entra al control de obra, que maneja
+      //     IVA. Sin el pie, el papel firmado y el control dicen dos números
+      //     distintos y nadie puede atar los dos.
+      [{ content: iva > 0 ? "SUBTOTAL" : "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
        { content: `${subtotales.total < 0 ? "− " : ""}$${plata(Math.abs(subtotales.total))}`,
          styles: { halign: "right", fontStyle: "bold", fontSize: 10, textColor: subtotales.total < 0 ? ROJO : TINTA } }],
+      ...(iva > 0 ? [
+        [{ content: `IVA ${plata(iva).replace(/[.,]00$/, "")} %`, colSpan: 6, styles: { halign: "right", textColor: GRIS } },
+         { content: `${subtotales.total < 0 ? "− " : ""}$${plata(Math.abs(subtotales.total) * iva / 100)}`,
+           styles: { halign: "right", textColor: GRIS } }],
+        [{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold", fontSize: 10 } },
+         { content: `${subtotales.total < 0 ? "− " : ""}$${plata(Math.abs(subtotales.total) * (1 + iva / 100))}`,
+           styles: { halign: "right", fontStyle: "bold", fontSize: 10, textColor: subtotales.total < 0 ? ROJO : TINTA } }],
+      ] : []),
     ],
     theme: "grid",
     headStyles: { fillColor: [249, 250, 251], textColor: GRIS, fontSize: 7, fontStyle: "bold", lineColor: [229, 231, 235] },
@@ -185,7 +205,8 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   y = doc.lastAutoTable.finalY + 6;
 
   doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...GRIS);
-  doc.text(seguro(subtotales.total >= 0 ? "Mayor valor del contrato." : "Menor valor del contrato."), margen, y);
+  doc.text(seguro((subtotales.total >= 0 ? "Mayor valor del contrato." : "Menor valor del contrato.")
+    + (iva > 0 ? " Los precios de las partidas son sin IVA; el impuesto se suma al pie." : "")), margen, y);
   y += 16;
 
   // ── CAPÍTULO III ────────────────────────────────────────────────────────

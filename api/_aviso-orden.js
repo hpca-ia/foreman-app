@@ -71,7 +71,9 @@ export default async function handler(req, res) {
 
   // La línea base del contrato y lo que ya se pactó después, para que el
   // número nuevo se lea contra algo y no en el aire.
-  const rubros = await json(await rest(`obra_rubros?obra_id=eq.${orden.obra_id}&select=total_base,origen`));
+  const rubros = await json(await rest(`obra_rubros?obra_id=eq.${orden.obra_id}&select=total_base,origen,iva_pct`));
+  // El IVA de la obra: el de sus rubros, que es la base del control.
+  const iva = Number((rubros || []).find(r => r.iva_pct != null)?.iva_pct) || 0;
   const base = (rubros || []).filter(r => r.origen !== "orden_cambio").reduce((s, r) => s + Number(r.total_base || 0), 0);
   const adicionalesObra = (rubros || []).filter(r => r.origen === "orden_cambio").reduce((s, r) => s + Number(r.total_base || 0), 0);
 
@@ -198,15 +200,33 @@ export default async function handler(req, res) {
         </tr>
         ${seccion("ADICIONES", "aumenta", adiciones)}
         ${seccion("REDUCCIONES", "quita", reducciones)}
+        ${/* EL PIE, COMO EL DE CUALQUIER FACTURA. La orden se cotiza sin IVA
+             —el precio de cada partida y el margen van sin impuesto— pero el
+             cliente paga el total CON IVA, y ese total es el que entra al
+             control de obra. Sin el pie, el papel que firma y el control dicen
+             dos números distintos y nadie puede atar los dos. */ ""}
         <tr>
-          <td colspan="6" style="padding:9px 6px;text-align:right;font-size:13px;font-weight:700;border-top:2px solid #0F3D3E">TOTAL</td>
-          <td style="padding:9px 6px;text-align:right;font-size:14.5px;font-weight:700;border-top:2px solid #0F3D3E;color:${total < 0 ? "#B91C1C" : "#0F3D3E"}">
+          <td colspan="6" style="padding:9px 6px;text-align:right;font-size:13px;font-weight:700;border-top:2px solid #0F3D3E">${iva > 0 ? "SUBTOTAL" : "TOTAL"}</td>
+          <td style="padding:9px 6px;text-align:right;font-size:${iva > 0 ? "13px" : "14.5px"};font-weight:700;border-top:2px solid #0F3D3E;color:${total < 0 ? "#B91C1C" : "#0F3D3E"}">
             ${total < 0 ? "− " : ""}$${plata(Math.abs(total))}
           </td>
         </tr>
+        ${iva > 0 ? `<tr>
+          <td colspan="6" style="padding:4px 6px;text-align:right;font-size:12px;color:#6B7280">IVA ${String(iva).replace(/\.00$/, "")} %</td>
+          <td style="padding:4px 6px;text-align:right;font-size:12.5px;color:#6B7280">
+            ${total < 0 ? "− " : ""}$${plata(Math.abs(total) * iva / 100)}
+          </td>
+        </tr>
+        <tr>
+          <td colspan="6" style="padding:7px 6px;text-align:right;font-size:13.5px;font-weight:700">TOTAL</td>
+          <td style="padding:7px 6px;text-align:right;font-size:15px;font-weight:700;color:${total < 0 ? "#B91C1C" : "#0F3D3E"}">
+            ${total < 0 ? "− " : ""}$${plata(Math.abs(total) * (1 + iva / 100))}
+          </td>
+        </tr>` : ""}
       </table>
       <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
-        ${total >= 0 ? "Mayor valor del contrato" : "Menor valor del contrato"}.
+        ${total >= 0 ? "Mayor valor del contrato" : "Menor valor del contrato"}.${iva > 0
+          ? " Los precios de las partidas son sin IVA; el impuesto se suma al pie." : ""}
       </div>
 
       ${capitulo("III", "Impacto en cronograma.")}

@@ -168,6 +168,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   const esperando = resumenPendientes(porFirmar);
   // Los alquileres que se pasan de plazo o están por pasarse.
   const avisanPlazo = plazosQueAvisan(ordenes);
+  // EL IVA DE LA OBRA, que es el de sus rubros: la orden se cotiza sin IVA y
+  // el documento lo suma al pie, para que su total sea el que entra al control.
+  const ivaDeLaObra = Number(rubros.find(r => r.iva_pct != null)?.iva_pct) || 0;
 
   // LOS DE SIEMPRE.
   //
@@ -1518,16 +1521,42 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   </div>
                 ))}
 
-                {/* El resultado, que es lo que se conversa con el cliente. */}
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
-                  <span style={{ flex: 1, fontSize: 12, color: colors.inkSoft, fontWeight: 600 }}>Total</span>
-                  {/* Rojo cuando sube y verde cuando baja: el color habla de la
-                      plata del que paga, no del signo del número. Una orden que
-                      agrega 226 dólares no es una buena noticia para nadie, y
-                      pintarla de verde —como estaba— la hacía parecer una. */}
-                  <span style={{ fontSize: 16, fontWeight: 700, color: total < 0 ? colors.success : colors.danger }}>
-                    {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
-                  </span>
+                {/* EL RESULTADO, COMO CIERRA UN DOCUMENTO COMERCIAL.
+                    La orden se cotiza sin IVA —el precio de cada partida, el
+                    margen y lo que se discute con el proveedor— pero el cliente
+                    paga el total con IVA, y ese total con IVA es el que entra al
+                    control de obra. Sin el pie, el papel firmado y el control
+                    dicen dos números distintos y nadie puede atar los dos. */}
+                <div style={{ padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ flex: 1, fontSize: 12, color: colors.inkSoft, fontWeight: 600 }}>
+                      {ivaDeLaObra > 0 ? "Subtotal" : "Total"}
+                    </span>
+                    {/* Rojo cuando sube y verde cuando baja: el color habla de
+                        la plata del que paga, no del signo del número. */}
+                    <span style={{ fontSize: ivaDeLaObra > 0 ? 13.5 : 16, fontWeight: 700,
+                      color: total < 0 ? colors.success : colors.danger }}>
+                      {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
+                    </span>
+                  </div>
+                  {ivaDeLaObra > 0 && (
+                    <>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2 }}>
+                        <span style={{ flex: 1, fontSize: 11.5, color: colors.muted }}>IVA {fmt(ivaDeLaObra).replace(/[.,]00$/, "")}%</span>
+                        <span style={{ fontSize: 12.5, color: colors.muted }}>
+                          {total < 0 ? "−" : "+"}${fmt(Math.abs(total) * ivaDeLaObra / 100)}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 3 }}>
+                        <span style={{ flex: 1, fontSize: 12, color: colors.ink, fontWeight: 700 }}>
+                          Total · es el que entra al control
+                        </span>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: total < 0 ? colors.success : colors.danger }}>
+                          {total < 0 ? "−" : "+"}${fmt(Math.abs(total) * (1 + ivaDeLaObra / 100))}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
                 {/* ── LO QUE DEJA ESTA ORDEN ───────────────────────────────
                     Cobrado contra costado, en un cuadro y no en un renglón de
@@ -1998,7 +2027,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             // A cuánto asciende el contrato va solo si alguien
                             // lo decidió para ESTA orden.
                             resumenContrato: o.mostrar_contrato ? resumen : null,
-                            aprobadores: aprobadores[o.id] || [],
+                            aprobadores: aprobadores[o.id] || [], iva: ivaDeLaObra,
                           });
                           // EL ARCHIVO SE LLAMA COMO LA ORDEN. Quien lo
                           // recibe lo guarda en la carpeta del proyecto, y
@@ -2039,7 +2068,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             orden: o, lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
                             codigo: codigoDe(o), subtotales: sub,
                             resumenContrato: o.mostrar_contrato ? resumen : null,
-                            aprobadores: aprobadores[o.id] || [],
+                            aprobadores: aprobadores[o.id] || [], iva: ivaDeLaObra,
                           });
                           pdf = { nombre: `${nombreDelArchivo(o)}.pdf`, contenido: doc.output("datauristring").split(",")[1] };
                         } catch { /* sin PDF el pedido sale igual */ }
