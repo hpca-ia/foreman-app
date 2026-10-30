@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { sePuedeAnotar, permisoVigente, pedidosAbiertos, cuantosDias, hoyEnObra } from "./permisoDeDias";
 import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet, Pencil, CalendarDays } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -35,6 +36,11 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   const [personal, setPersonal] = useState([]);
   const [asistencia, setAsistencia] = useState({});
   const [fecha, setFecha] = useState(hoy());
+  // Los permisos para anotar días que todavía no pasaron. La asistencia es una
+  // firma: anotar por adelantado es firmar algo que no ocurrió, y eso lo tiene
+  // que autorizar alguien, por los días que haga falta y nada más.
+  const [permisos, setPermisos] = useState([]);
+  const [pidiendo, setPidiendo] = useState(null);   // { hasta, motivo }
   const [solapa, setSolapa] = useState("dia");
   const [cargando, setCargando] = useState(true);
   const [sinTablas, setSinTablas] = useState(false);
@@ -71,6 +77,10 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
     const mapa = {};
     (dias || []).forEach(d => { (mapa[d.personal_id] = mapa[d.personal_id] || []).push(d); });
     setAsistencia(mapa);
+    // Los permisos vivos y los que esperan respuesta.
+    const { data: pms } = await supabase.from("asistencia_permisos")
+      .select("*").eq("lead_id", lead.id).order("pedido_at", { ascending: false });
+    setPermisos(pms || []);
     const r = await rolesDeLaObra(lead.id);
     setRoles(r.roles);
     setErrorRoles(r.error || "");
@@ -87,6 +97,11 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   }, [lead, periodo.desde]);
 
   const editable = !lead || nivelProyecto?.(lead.id) === "editar";
+  // ¿Se puede anotar el día que está elegido? Y quién puede autorizar que se
+  // anote por adelantado: el que aprueba compras, que es el gerente o el
+  // Director. No hace falta un permiso nuevo para una decisión del mismo peso.
+  const puedeHoy = sePuedeAnotar(fecha, permisos);
+  const puedeAutorizar = puede ? puede("compras.aprobar") : true;
 
   if (cargando) return <Centro>Cargando…</Centro>;
 
@@ -159,14 +174,19 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   }
 
   async function marcar(p, campos) {
+    // La base también lo rechaza —la regla vive ahí, no en esta pantalla— pero
+    // un error de la base es una frase que nadie entiende. Acá se dice antes y
+    // en castellano.
+    if (!puedeHoy.sePuede) { setError(puedeHoy.porQue); return; }
+    setError("");
     const ya = delDia(p.id);
-    if (ya) await supabase.from("obra_asistencia").update(campos).eq("id", ya.id);
-    else {
-      await supabase.from("obra_asistencia").insert({
+    const { error: e } = ya
+      ? await supabase.from("obra_asistencia").update(campos).eq("id", ya.id)
+      : await supabase.from("obra_asistencia").insert({
         lead_id: lead.id, obra_id: lead.obra_id || null, personal_id: p.id, fecha,
         dias: 1, ...campos, anotado_por: currentUser?.id ?? null,
       });
-    }
+    if (e) { setError(e.message.replace(/^.*?:\s*/, "")); return; }
     await cargar();
   }
 
@@ -219,7 +239,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
             <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
               style={{ ...inputStyle, width: 160, padding: "6px 9px", fontSize: 12.5 }} />
             <span style={{ fontSize: 12, color: colors.muted }}>{dia(fecha)}</span>
-            {editable && personal.length > 0 && (
+            {editable && personal.length > 0 && puedeHoy.sePuede && (
               <Button variant="outline" size="sm" onClick={async () => {
                 // Todos presentes de un toque: es lo normal, y marcar doce
                 // casillas una por una hace que nadie lo haga a diario.
@@ -227,6 +247,104 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
               }}>Vinieron todos</Button>
             )}
           </div>
+
+          {/* ── UN DÍA QUE TODAVÍA NO PASÓ ────────────────────────────────
+              La asistencia es una firma: dice que esta persona trabajó este
+              día. Anotarlo por adelantado es firmar algo que no ocurrió, y el
+              día que haya que defender un rol —ante el trabajador, ante el
+              Ministerio— eso no se explica.
+
+              Pero a veces hace falta, y por una razón legítima: el cierre de
+              mes cae un miércoles y el rol sale el jueves, con los dos días que
+              faltan. La respuesta no es prohibirlo ni dejarlo abierto: es que
+              alguien lo autorice, por esos días y nada más. */}
+          {puedeHoy.futuro && (
+            <div style={{ background: puedeHoy.sePuede ? colors.brandSoft : colors.warningSoft,
+              border: `1px solid ${puedeHoy.sePuede ? colors.border : colors.warningBorder}`,
+              borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 10,
+              fontSize: 12, color: colors.ink, lineHeight: 1.55 }}>
+              {puedeHoy.porQue}
+              {!puedeHoy.sePuede && editable && !pidiendo && !pedidosAbiertos(permisos).length && (
+                <Button variant="outline" size="sm" style={{ marginLeft: 8 }}
+                  onClick={() => setPidiendo({ hasta: fecha, motivo: "" })}>
+                  Pedir el permiso
+                </Button>
+              )}
+              {!puedeHoy.sePuede && pedidosAbiertos(permisos).length > 0 && (
+                <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 4 }}>
+                  Ya hay un pedido esperando respuesta, hasta el {String(pedidosAbiertos(permisos)[0].hasta).slice(0, 10)}.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* El pedido: hasta qué día y por qué. El motivo no es burocracia —
+              es lo que mira el que autoriza para decir que sí. */}
+          {pidiendo && (
+            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+              borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, marginBottom: 6 }}>
+                Pedir permiso para anotar por adelantado
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 7, alignItems: "center" }}>
+                <label style={{ fontSize: 11.5, color: colors.muted }}>Hasta el día</label>
+                <input type="date" value={pidiendo.hasta} min={hoyEnObra()}
+                  onChange={e => setPidiendo(p => ({ ...p, hasta: e.target.value }))}
+                  style={{ ...inputStyle, width: 170, padding: "6px 9px", fontSize: 12.5 }} />
+                <label style={{ fontSize: 11.5, color: colors.muted }}>Para qué</label>
+                <input value={pidiendo.motivo} placeholder="Ej: el rol de octubre cierra el jueves"
+                  onChange={e => setPidiendo(p => ({ ...p, motivo: e.target.value }))}
+                  style={{ ...inputStyle, padding: "6px 9px", fontSize: 12.5 }} />
+              </div>
+              <div style={{ display: "flex", gap: 7, marginTop: 9, alignItems: "center", flexWrap: "wrap" }}>
+                <Button variant="primary" size="sm" disabled={!pidiendo.hasta || !pidiendo.motivo.trim()}
+                  onClick={async () => {
+                    const { error: e } = await supabase.from("asistencia_permisos").insert({
+                      lead_id: lead.id, hasta: pidiendo.hasta, motivo: pidiendo.motivo.trim(),
+                      pedido_por: currentUser?.id ?? null, pedido_nombre: currentUser?.name || null,
+                    });
+                    setPidiendo(null);
+                    if (e) { setError(e.message); return; }
+                    await cargar();
+                  }}>
+                  Pedirlo · {cuantosDias(pidiendo.hasta)} {cuantosDias(pidiendo.hasta) === 1 ? "día" : "días"}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setPidiendo(null)}>Cancelar</Button>
+              </div>
+            </div>
+          )}
+
+          {/* QUIEN AUTORIZA LO VE ACÁ, donde está la asistencia: un pedido que
+              llega a otra pantalla es un pedido que espera dos días. */}
+          {puedeAutorizar && pedidosAbiertos(permisos).map(p => (
+            <div key={p.id} style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`,
+              borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.55 }}>
+                <strong>{p.pedido_nombre || "El residente"}</strong> pide anotar hasta el{" "}
+                <strong>{String(p.hasta).slice(0, 10)}</strong> — {cuantosDias(p.hasta)}{" "}
+                {cuantosDias(p.hasta) === 1 ? "día" : "días"} por adelantado.
+                {p.motivo ? <div style={{ color: colors.inkSoft, marginTop: 2 }}>“{p.motivo}”</div> : null}
+              </div>
+              <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+                <Button variant="primary" size="sm" onClick={async () => {
+                  await supabase.from("asistencia_permisos").update({
+                    estado: "dado", dado_por: currentUser?.id ?? null,
+                    dado_nombre: currentUser?.name || null, dado_at: new Date().toISOString(),
+                  }).eq("id", p.id);
+                  await cargar();
+                }}>Autorizar hasta el {String(p.hasta).slice(0, 10)}</Button>
+                <Button variant="secondary" size="sm" onClick={async () => {
+                  const r = window.prompt("¿Por qué no? Lo lee quien lo pidió.", "");
+                  if (r === null) return;
+                  await supabase.from("asistencia_permisos").update({
+                    estado: "negado", respuesta: r || null, dado_por: currentUser?.id ?? null,
+                    dado_nombre: currentUser?.name || null, dado_at: new Date().toISOString(),
+                  }).eq("id", p.id);
+                  await cargar();
+                }}>No</Button>
+              </div>
+            </div>
+          ))}
 
           {!personal.length ? (
             <Centro>Todavía no hay nadie cargado. Andá a “La gente”.</Centro>
