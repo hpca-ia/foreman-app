@@ -50,6 +50,9 @@ const GRUPOS = [
     "El rubro ya existe y su precio está acordado: se cobra solo la diferencia, al precio que el cliente firmó."],
   ["menos_cantidad", "MENOS CANTIDAD QUE LA CONTRATADA",
     "Trabajo contratado que no se hizo. No es un ahorro nuestro: se le devuelve al cliente, como reducción."],
+  ["otro_precio", "EL MISMO RUBRO, A OTRO PRECIO",
+    "Cambió el costo, no la cantidad. El precio que firmó el cliente no se mueve: esto va contra nuestro "
+    + "margen, y la conversación es con el proveedor. Si se decide cobrárselo igual, hay que ponerle precio."],
 ];
 
 export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio }) {
@@ -84,12 +87,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
+  const [sinCosto, setSinCosto] = useState(0);
+
   const abrir = useCallback(async a => {
     setAbierto(a); setAviso(""); setError("");
     const r = await lineasDe(a.id);
     if (r.error) { setError(r.error); return; }
     setLineas(r.lineas);
-  }, []);
+    // Cuántos de los que calzaron no tienen costo contra el cual juzgar su
+    // precio: se vuelve a calcular contra los rubros de hoy, que pueden haber
+    // cambiado desde que se leyó la propuesta.
+    const rs = (r.lineas || []).map(l => l.obra_rubro_id).filter(Boolean);
+    setSinCosto(rs.filter(id => {
+      const rub = vivos.find(x => x.id === id);
+      return rub && (rub.costo_unitario === null || rub.costo_unitario === undefined || rub.costo_unitario === "");
+    }).length);
+  }, [vivos]);
 
   async function leer(e) {
     const file = e.target.files?.[0];
@@ -191,7 +204,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     const costoUnitario = Math.round((Number(l.monto) || 0) / cant * 10000) / 10000;
     // EL PRECIO DEL CONTRATO SE RESPETA. Volver a ponerle precio a un rubro que
     // el cliente ya firmó es abrir una negociación que no hacía falta.
-    const puRubro = rubro && Number(rubro.cantidad)
+    // EL PRECIO DEL CONTRATO SOLO VALE PARA LA CANTIDAD. Una diferencia de
+    // precio no se cobra al precio del contrato —ese es justamente el que no
+    // alcanzó—: si se decide cobrarla, lleva el margen como lo nuevo.
+    const puRubro = l.hallazgo !== "otro_precio" && rubro && Number(rubro.cantidad)
       ? Math.round((Number(rubro.total_base) / Number(rubro.cantidad)) * 10000) / 10000 : null;
     return {
       descripcion: l.descripcion, unidad: l.unidad || "u", cantidad: cant,
@@ -349,6 +365,20 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             </div>
           );
         })}
+
+        {/* LO QUE NO SE PUEDE JUZGAR, DICHO. Un rubro sin costo cargado no
+            tiene contra qué comparar el precio: el del rubro es el de VENTA, y
+            contra ese todo proveedor parece barato —esa diferencia es el
+            margen, no un hallazgo—. Esta propuesta es su primera referencia. */}
+        {sinCosto > 0 && (
+          <div style={{ ...caja, borderLeft: `3px solid ${colors.warning}`, fontSize: 11.5,
+            color: colors.inkSoft, lineHeight: 1.55 }}>
+            De los renglones que calzaron con un rubro, <strong>{sinCosto}</strong> no tienen costo cargado:
+            de esos no se puede decir si el precio está bien, porque no hay contra qué compararlo. Esta
+            propuesta es su primera referencia — cargándole el costo a esos rubros, la próxima sí se puede
+            comparar.
+          </div>
+        )}
 
         {!lineas.length && (
           <div style={{ ...caja, fontSize: 12.5, color: colors.success }}>

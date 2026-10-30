@@ -137,3 +137,54 @@ test("decidido todo, el análisis queda listo para armar su orden", async () => 
   assert.equal(v.listo, true);
   assert.equal(v.monto, 100, "lo que se le cobra al cliente, no lo que pagamos nosotros");
 });
+
+// ── CANTIDAD Y PRECIO SON DOS DIFERENCIAS ──────────────────────────────────
+//
+// 12 U a $48,50 contratadas contra 16 U a $51,00 cotizadas. Mirar solo el
+// total, o solo la cantidad, esconde la mitad.
+// El rubro con su COSTO cargado: 12 U que costaban $48,50 cada una. Sin costo
+// no hay contra qué comparar el precio —el del rubro es el de venta, y contra
+// ese todo proveedor parece barato: esa diferencia es el margen—.
+const conPrecio = [{ id: 1, numero: "4.12", descripcion: "Luminarias LED", unidad: "U",
+  cantidad: 12, total_base: 816, costo_unitario: 48.5 }];
+const propuesta = [{ descripcion: "Luminarias LED", cantidad: 16, unidad: "U", monto: 816, rubro_id: 1 }];
+const dos = loQueNoEstaPresupuestado(compararContraPresupuesto(propuesta, conPrecio));
+
+test("la cantidad de más se cobra, y se cobra aparte del precio", () => {
+  assert.equal(dos.demas.length, 1);
+  assert.equal(dos.demas[0].cantidad, 4);
+  assert.equal(dos.demas[0].precioUnitario, 68, "al precio que el cliente firmó: 816/12");
+});
+
+test("el precio distinto aparece como su propia diferencia", () => {
+  assert.equal(dos.otroPrecio.length, 1);
+  assert.equal(dos.otroPrecio[0].costo, 40, "2,50 de más × 16 unidades");
+  assert.equal(dos.otroPrecio[0].sube, true);
+  assert.match(dos.otroPrecio[0].por, /costaba \$48\.5 y ahora lo cotizan a \$51/);
+});
+
+test("el precio NO se le cobra al cliente: el del contrato está firmado", () => {
+  assert.equal(dos.otroPrecio[0].precioUnitario, null);
+});
+
+test("mismo precio y otra cantidad: no inventa una diferencia de precio", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 16, unidad: "U", monto: 776, rubro_id: 1 }], conPrecio));
+  assert.equal(h.otroPrecio.length, 0);
+  assert.equal(h.demas.length, 1);
+});
+
+test("misma cantidad y otro precio: antes no se veía en ningún lado", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 12, unidad: "U", monto: 612, rubro_id: 1 }], conPrecio));
+  assert.equal(h.demas.length, 0);
+  assert.equal(h.menos.length, 0);
+  assert.equal(h.otroPrecio.length, 1);
+  assert.equal(h.otroPrecio[0].costo, 30);     // 2,50 × 12
+});
+
+test("un centavo de redondeo no es un cambio de precio", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 12, unidad: "U", monto: 582.05, rubro_id: 1 }], conPrecio));
+  assert.equal(h.otroPrecio.length, 0);
+});

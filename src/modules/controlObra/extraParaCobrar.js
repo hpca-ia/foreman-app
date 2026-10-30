@@ -55,6 +55,50 @@ export function loQueNoEstaPresupuestado(comparacion) {
     hallazgo: "nuevo",
   }));
 
+  // ── EL PRECIO TAMBIÉN SE COMPARA, PERO CONTRA EL COSTO ────────────────────
+  //
+  // Cantidad y precio son dos diferencias distintas y se resuelven distinto. La
+  // cantidad de más se le cobra al cliente al precio que él firmó; el precio es
+  // otra conversación, y es con el proveedor.
+  //
+  // CONTRA EL COSTO, NO CONTRA EL PRECIO AL CLIENTE. El rubro del control tiene
+  // el precio de venta: si se comparara el unitario del proveedor contra ese,
+  // TODAS las líneas saldrían "más baratas" — y esa diferencia no es un error,
+  // es nuestro margen. Lo que dice si el precio está bien es lo que costaba
+  // antes, y eso es el costo cargado del rubro.
+  //
+  // Cuando el rubro no tiene costo cargado —que hoy es casi todo Diners, porque
+  // el presupuesto vino de un Excel de precios— no se inventa una diferencia:
+  // no se puede juzgar un precio contra algo que no se sabe. Esa propuesta es
+  // la primera referencia, y cargarla es lo que hay que hacer.
+  const otroPrecio = lineas.filter(l => {
+    if (!l.rubro || l.puCosto == null || l.puProforma == null) return false;
+    return Math.abs(l.puProforma - l.puCosto) > Math.max(0.01, Math.abs(l.puCosto) * 0.001);
+  }).map(l => {
+    const dif = c2((n(l.puProforma) - n(l.puCosto)) * n(l.cantidad));
+    return {
+      descripcion: `${l.rubro.descripcion || l.descripcion} — ${dif > 0 ? "subió" : "bajó"} de precio`.slice(0, 160),
+      unidad: l.unidadRubro || l.unidad || "u",
+      cantidad: n(l.cantidad),
+      costo: Math.abs(dif),
+      costoUnitario: c2(Math.abs(n(l.puProforma) - n(l.puCosto))),
+      // NO SE LE PONE PRECIO AL CLIENTE: el del contrato está firmado. Si se
+      // decide cobrárselo igual —porque aceptó una revisión— se le pone uno en
+      // la orden, y esa es una decisión de alguien, no un automatismo.
+      precioUnitario: null,
+      por: `costaba $${c2(l.puCosto)} y ahora lo cotizan a $${c2(l.puProforma)}`,
+      rubro_id: l.rubro.id,
+      rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
+      deOrden: deDonde(l.rubro),
+      hallazgo: "otro_precio",
+      sube: dif > 0,
+    };
+  });
+
+  // Y LO QUE NO SE PUEDE JUZGAR, DICHO. Un rubro sin costo cargado no tiene
+  // contra qué comparar el precio: esta propuesta es su primera referencia.
+  const sinCostoConocido = lineas.filter(l => l.rubro && l.puCosto == null && l.puProforma != null).length;
+
   // Más cantidad de la que se presupuestó, del mismo rubro.
   const demas = lineas.filter(l => l.rubro && n(l.cantidad) > n(l.cantidadRubro) * 1.001).map(l => {
     const extra = c2(n(l.cantidad) - n(l.cantidadRubro));
@@ -62,6 +106,9 @@ export function loQueNoEstaPresupuestado(comparacion) {
       descripcion: `${l.rubro.descripcion || l.descripcion} — ${extra} ${l.unidadRubro || l.unidad || "u"} de más`.slice(0, 160),
       unidad: l.unidadRubro || l.unidad || "u",
       cantidad: extra,
+      // SOLO LA CANTIDAD, al precio de la propuesta: lo que ese precio tenga de
+      // distinto al del contrato se cuenta aparte, en su propia diferencia, y
+      // no se le cobra al cliente.
       costo: c2(extra * (n(l.puProforma) || 0)),
       costoUnitario: c2(l.puProforma),
       // EL PRECIO YA ESTÁ ACORDADO: es el del rubro del contrato. Volver a
@@ -104,12 +151,12 @@ export function loQueNoEstaPresupuestado(comparacion) {
     };
   });
 
-  const todo = [...nuevos, ...demas];
+  const todo = [...nuevos, ...demas, ...otroPrecio];
   // Las que tocan algo que ya movió una orden anterior: son las que hay que
   // mirar dos veces antes de volver a cobrarlas.
   const sobreOrdenes = [...demas, ...menos].filter(x => x.deOrden);
   return {
-    nuevos, demas, menos, todo, sobreOrdenes,
+    nuevos, demas, menos, otroPrecio, todo, sobreOrdenes, sinCostoConocido,
     cuantos: todo.length,
     // Lo que se le devuelve al cliente, al precio que él firmó.
     aDevolver: c2(menos.reduce((t, x) => t + n(x.precioUnitario) * x.cantidad, 0)),
@@ -147,10 +194,11 @@ export function partidasParaOrden(hallazgos, pct = 0) {
 
 /** El titular, para no tener que armarlo en cada pantalla. */
 export function comoSeDice(h) {
-  if (!h.cuantos && !h.menos?.length) return null;
+  if (!h.cuantos && !h.menos?.length && !h.otroPrecio?.length) return null;
   const partes = [];
   if (h.nuevos.length) partes.push(`${h.nuevos.length} ${h.nuevos.length === 1 ? "renglón que no está" : "renglones que no están"} en el presupuesto`);
   if (h.demas.length) partes.push(`${h.demas.length} ${h.demas.length === 1 ? "rubro con más cantidad" : "rubros con más cantidad"} de la presupuestada`);
   if (h.menos.length) partes.push(`${h.menos.length} ${h.menos.length === 1 ? "rubro con menos" : "rubros con menos"} de lo contratado`);
+  if (h.otroPrecio?.length) partes.push(`${h.otroPrecio.length} ${h.otroPrecio.length === 1 ? "rubro a otro precio" : "rubros a otro precio"}`);
   return `${partes.join(" y ")} · $${h.costo.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de costo`;
 }
