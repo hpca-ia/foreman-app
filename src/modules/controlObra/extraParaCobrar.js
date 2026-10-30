@@ -75,18 +75,33 @@ export function loQueNoEstaPresupuestado(comparacion) {
     if (!l.rubro || l.puCosto == null || l.puProforma == null) return false;
     return Math.abs(l.puProforma - l.puCosto) > Math.max(0.01, Math.abs(l.puCosto) * 0.001);
   }).map(l => {
-    const dif = c2((n(l.puProforma) - n(l.puCosto)) * n(l.cantidad));
+    // LA DIFERENCIA DE PRECIO SE MIDE SOBRE LA CANTIDAD QUE LOS DOS TIENEN.
+    //
+    // El rubro son 120 varillas, la proforma cotiza 150 y además a otro precio.
+    // Hay dos diferencias y no son la misma: 30 varillas de más —que se le
+    // cobran al cliente al precio que firmó— y un precio distinto en las que ya
+    // estaban. Si el precio se midiera sobre las 150, las 30 de más contarían
+    // dos veces: una como cantidad y otra como precio.
+    //
+    // Sobre la cantidad común, entonces. Y la diferencia de precio aparece
+    // IGUAL cuando la cantidad cambió: eran dos hallazgos que se tapaban uno al
+    // otro, y el rubro con más cantidad Y peor precio salía como si solo
+    // hubiera cambiado la cantidad.
+    const comun = n(l.cantidadRubro) > 0 ? Math.min(n(l.cantidad), n(l.cantidadRubro)) : n(l.cantidad);
+    const dif = c2((n(l.puProforma) - n(l.puCosto)) * comun);
     return {
       descripcion: `${l.rubro.descripcion || l.descripcion} — ${dif > 0 ? "subió" : "bajó"} de precio`.slice(0, 160),
       unidad: l.unidadRubro || l.unidad || "u",
-      cantidad: n(l.cantidad),
+      cantidad: comun,
       costo: Math.abs(dif),
       costoUnitario: c2(Math.abs(n(l.puProforma) - n(l.puCosto))),
       // NO SE LE PONE PRECIO AL CLIENTE: el del contrato está firmado. Si se
       // decide cobrárselo igual —porque aceptó una revisión— se le pone uno en
       // la orden, y esa es una decisión de alguien, no un automatismo.
       precioUnitario: null,
-      por: `costaba $${c2(l.puCosto)} y ahora lo cotizan a $${c2(l.puProforma)}`,
+      por: `costaba $${c2(l.puCosto)} y ahora lo cotizan a $${c2(l.puProforma)}`
+        + (n(l.cantidad) !== n(l.cantidadRubro) && n(l.cantidadRubro) > 0
+          ? ` · sobre las ${comun} ${l.unidadRubro || l.unidad || "u"} que los dos tienen, la cantidad va aparte` : ""),
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
       deOrden: deDonde(l.rubro),

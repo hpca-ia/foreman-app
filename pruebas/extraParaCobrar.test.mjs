@@ -158,7 +158,10 @@ test("la cantidad de más se cobra, y se cobra aparte del precio", () => {
 
 test("el precio distinto aparece como su propia diferencia", () => {
   assert.equal(dos.otroPrecio.length, 1);
-  assert.equal(dos.otroPrecio[0].costo, 40, "2,50 de más × 16 unidades");
+  // SOBRE LAS 12 DEL CONTRATO, NO SOBRE LAS 16 COTIZADAS: las 4 de más ya se
+  // cuentan como cantidad, al precio que el cliente firmó. Medir el precio
+  // sobre las 16 las contaría dos veces.
+  assert.equal(dos.otroPrecio[0].costo, 30, "2,50 de más × las 12 que los dos tienen");
   assert.equal(dos.otroPrecio[0].sube, true);
   assert.match(dos.otroPrecio[0].por, /costaba \$48\.5 y ahora lo cotizan a \$51/);
 });
@@ -218,4 +221,27 @@ test("el ahorro y el sobreprecio se cuentan por separado: un neto esconde los do
   ], [...conPrecio, { id: 2, numero: "4.13", descripcion: "Tablero", unidad: "U", cantidad: 1, total_base: 200, costo_unitario: 100 }]));
   assert.equal(h.eficiencia, 54);
   assert.equal(h.sobreprecio, 50);
+});
+
+test("la diferencia de precio aparece aunque la cantidad tambien haya cambiado", () => {
+  // El rubro son 12 y la proforma trae 15, y encima a otro precio. Son DOS
+  // hallazgos: tres de mas —que se le cobran al cliente al precio que firmo— y
+  // un precio distinto en las que ya estaban. Antes el de cantidad tapaba al de
+  // precio y el rubro salia como si solo hubiera cambiado la cantidad.
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 15, unidad: "U", monto: 660, rubro_id: 1 }], conPrecio));
+  assert.equal(h.demas.length, 1);
+  // 44 contra 48,50 cargado: bajo 4,50, y sobre las 12 que los dos tienen.
+  assert.equal(h.bajaron.length, 1);
+  assert.equal(h.bajaron[0].cantidad, 12);
+  assert.equal(h.eficiencia, 54);
+});
+
+test("la diferencia de precio se mide sobre la cantidad comun, no sobre la cotizada", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Luminarias LED", cantidad: 15, unidad: "U", monto: 900, rubro_id: 1 }], conPrecio));
+  // 60 por unidad contra 48,50 cargado: subio 11,50 sobre las 12 del contrato.
+  assert.equal(h.subieron.length, 1);
+  assert.equal(h.subieron[0].cantidad, 12);
+  assert.equal(h.sobreprecio, 138);
 });

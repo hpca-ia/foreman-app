@@ -363,6 +363,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 )}
               </div>
               <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 6 }}>{pista}</div>
+              {/* CON QUIÉN ES LA CONVERSACIÓN, Y CUÁNTA PLATA HAY EN JUEGO.
+                  Un sobreprecio sin el nombre del proveedor y sin el total no
+                  se reclama: se mira, se cierra la pantalla y se paga. */}
+              {clave === "subio_precio" && (
+                <div style={{ fontSize: 11, color: colors.danger, marginBottom: 6, fontWeight: 600 }}>
+                  Hay ${fmt(suma)} en juego y la conversación es con
+                  {" "}{abierto.proveedor || "el proveedor"}: el precio que firmó el cliente no se mueve,
+                  así que esto sale de nuestro margen.
+                </div>
+              )}
+              {clave === "bajo_precio" && (
+                <div style={{ fontSize: 11, color: colors.success, marginBottom: 6, fontWeight: 600 }}>
+                  ${fmt(suma)} quedan a favor de la obra. Marcándolas pasan a Beneficios como previsto,
+                  y se confirman cuando llegue la factura.
+                </div>
+              )}
 
               {suyas.map(l => {
                 const rubro = vivos.find(r => r.id === l.obra_rubro_id);
