@@ -180,7 +180,12 @@ test("una asignación sin su factura no revienta ni inventa una fila", () => {
 
 // ── Anticipos a proveedor: plata que salió, obra que todavía no está ──
 
-test("UN ANTICIPO NO ES OBRA HECHA: no suma a invertido", () => {
+test("UN ANTICIPO ES GASTO: la plata salió de la caja", () => {
+  // Esta prueba decía lo contrario —que un anticipo no suma a invertido— con
+  // el argumento de que el material todavía no llegó. Eso mira el avance de
+  // OBRA; el control de presupuesto mira la PLATA, y la plata salió. El avance
+  // de obra tiene su propia columna, que sale de lo que cada rubro dice que
+  // tiene ejecutado y no de las facturas.
   const rubros = [{ id: 1, total_base: 20000, actividad_id: null }];
   const facturas = [
     { id: 10, _planillaNumero: 1, clase: "anticipo" },
@@ -191,10 +196,28 @@ test("UN ANTICIPO NO ES OBRA HECHA: no suma a invertido", () => {
     { factura_id: 11, obra_rubro_id: 1, monto: 2000 },
   ];
   const r = calcularControl({ rubros, facturas, asignaciones, planillaNumero: 1 });
-  assert.equal(r[1].periodo, 2000, "solo la factura de lo que llegó");
-  assert.equal(r[1].acumulado, 2000);
-  assert.equal(r[1].saldo, 18000);
-  assert.equal(r._anticipado, 6000, "y el anticipo se cuenta aparte");
+  assert.equal(r[1].periodo, 8000, "los dos: lo anticipado salió igual");
+  assert.equal(r[1].acumulado, 8000);
+  assert.equal(r[1].saldo, 12000);
+  // Y se sigue diciendo cuánto espera su comprobante: un gasto que no se puede
+  // justificar hay que verlo antes de que pasen tres meses.
+  assert.equal(r._anticipado, 6000, "lo que falta documentar");
+});
+
+test("liquidado contra su factura, el anticipo deja de contar por su cuenta", () => {
+  // Si contaran los dos, el gasto estaría dos veces.
+  const rubros = [{ id: 1, total_base: 20000, actividad_id: null }];
+  const facturas = [
+    { id: 10, _planillaNumero: 1, clase: "anticipo", facturada_con_id: 11 },
+    { id: 11, _planillaNumero: 1, clase: "factura" },
+  ];
+  const asignaciones = [
+    { factura_id: 10, obra_rubro_id: 1, monto: 6000 },
+    { factura_id: 11, obra_rubro_id: 1, monto: 6000 },
+  ];
+  const r = calcularControl({ rubros, facturas, asignaciones, planillaNumero: 1 });
+  assert.equal(r[1].acumulado, 6000, "una sola vez, la de la factura");
+  assert.equal(r._anticipado, 0);
 });
 
 test("un anticipo LIQUIDADO deja de ser anticipo: lo que vale es la factura", () => {

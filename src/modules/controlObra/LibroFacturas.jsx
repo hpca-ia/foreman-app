@@ -144,19 +144,19 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
 
 
   /**
-   * Un anticipo que no espera ninguna factura pasa a ser gasto.
+   * Un anticipo que no va a tener factura nunca deja de figurar como pendiente.
    *
-   * El de la ventanería espera la ventanería y por eso no cuenta como obra.
-   * Unos honorarios cobrados por adelantado no esperan nada: ya son gasto, y
-   * hasta ahora no había manera de decirlo — quedaban en "anticipos sin
-   * factura" para siempre, sin entrar nunca al control.
+   * El gasto ya cuenta —la plata salió de la caja— pero el aviso de "falta la
+   * factura" quedaría prendido para siempre en algo que se pagó contra recibo.
+   * Un aviso que nunca se apaga deja de leerse, y con él se dejan de leer los
+   * que sí hay que atender.
    */
   async function yaEsGasto(f) {
     if (!window.confirm(
-      `¿Este anticipo de $${fmt(f.total)} ya es gasto de la obra?\n\n`
-      + "Usalo cuando no espera ninguna factura: honorarios por adelantado, un trabajo pagado contra recibo.\n\n"
-      + "Pasa a contar en el control como cualquier otro gasto, en los rubros a los que esté asignado. "
-      + "Si todavía espera un comprobante, dejalo como anticipo.")) return;
+      `¿Este gasto de $${fmt(f.total)} no va a tener factura nunca?\n\n`
+      + "Usalo para lo que se paga contra recibo: honorarios, un trabajo de alguien que no factura.\n\n"
+      + "Ya cuenta como gasto en sus rubros —la plata salió de la caja— y esto solo apaga el aviso de que "
+      + "falta el comprobante. Si la factura todavía puede llegar, dejalo como está.")) return;
     const { error } = await supabase.from("obra_facturas").update({ clase: "recibo" }).eq("id", f.id);
     if (error) { alert("No se pudo cambiar: " + error.message); return; }
     onCambio?.();

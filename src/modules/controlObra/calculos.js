@@ -66,23 +66,31 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   // miles de diferencia, justo en el renglón que uno mira para decidir si
   // puede comprometer algo más.
   //
-  // El anticipo se cuenta aparte y aparece como tal. Cuando llega lo que se
-  // anticipó se liquida —`facturada_con_id` apuntando a la factura final, el
-  // mismo camino que ya usa una proforma— y a partir de ahí lo que cuenta es
-  // la factura, una sola vez.
+  // EL ANTICIPO ES GASTO: LA PLATA SALIÓ DE LA CAJA.
   //
-  // Y ASIGNARLO A UN RUBRO NO ALCANZA PARA QUE CUENTE: asignar dice A QUÉ
-  // rubro va cuando llegue, no que ya llegó. El anticipo de la ventanería
-  // asignado a su rubro sigue siendo ventanería que no está en la obra.
+  // Se le entregaron $5.000 al proveedor. Ese dinero no está más, y el rubro al
+  // que se lo asignó tiene que mostrarlo: es lo que de verdad se lleva gastado
+  // de ese rubro, y es el número con el que se decide si queda plata para
+  // comprometer algo más.
   //
-  // Lo que sí lo convierte en gasto es decirlo: hay anticipos que no esperan
-  // ninguna factura —honorarios cobrados por adelantado, un trabajo pagado
-  // contra recibo— y para esos está el botón que los pasa a GASTO SIN FACTURA.
-  // Es una decisión de alguien, no algo que se deduce de haberlo asignado.
-  const esAnticipo = new Set(facturas
-    .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
+  // Antes se contaba aparte, con el argumento de que el material anticipado
+  // todavía no llegó y contarlo dejaba la obra más adelantada de lo que está.
+  // Eso mira el avance de OBRA; el control de presupuesto mira la PLATA, y la
+  // plata salió. Las dos preguntas existen —cuánta obra hay hecha y cuánto se
+  // lleva gastado— y el avance de obra tiene su propia columna, que sale de lo
+  // que cada rubro dice que tiene ejecutado y no de las facturas.
+  //
+  // CUANDO LLEGA LA FACTURA, MANDA LA FACTURA. El anticipo se liquida contra
+  // ella —`facturada_con_id`— y deja de contar por su cuenta: si contaran los
+  // dos, el gasto estaría dos veces. El documento se planilla en el período en
+  // que se ejecutó, que es cuando el papel existe.
+  const liquidado = new Set(facturas
+    .filter(f => f.clase === "anticipo" && f.facturada_con_id)
     .map(f => f.id));
   let anticipado = 0;
+  const sinLiquidar = new Set(facturas
+    .filter(f => f.clase === "anticipo" && !f.facturada_con_id)
+    .map(f => f.id));
 
   // INVERTIDO ES LA PLATA QUE SE PUSO, NO EL PAPEL QUE SE EMITIÓ.
   //
@@ -157,7 +165,9 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   let fueraDePlanilla = 0, facturasFueraDePlanilla = new Set();
 
   asignaciones.forEach(a => {
-    if (esAnticipo.has(a.factura_id)) { anticipado += n(a.monto); return; }
+    // Un anticipo YA LIQUIDADO no cuenta por su cuenta: cuenta su factura.
+    if (liquidado.has(a.factura_id)) return;
+    if (sinLiquidar.has(a.factura_id)) anticipado += n(a.monto);
     const num = planillaDeFactura[a.factura_id];
     if (num == null) {
       fueraDePlanilla += n(a.monto);
@@ -226,8 +236,10 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
   porRubro._porActividad = porActividad;
   porRubro._fueraDePlanilla = fueraDePlanilla;
   porRubro._facturasFueraDePlanilla = facturasFueraDePlanilla.size;
-  // Lo anticipado a proveedores y todavía no recibido. No es invertido y no
-  // es saldo: es plata que ya salió y obra que todavía no está.
+  // Lo anticipado a proveedores que todavía espera su factura. Ya está contado
+  // como gasto —la plata salió de la caja— y se dice aparte por otra razón: es
+  // lo que falta documentar. Un anticipo sin su comprobante es un gasto que no
+  // se puede justificar, y eso hay que verlo antes de que pasen tres meses.
   porRubro._anticipado = Math.round(anticipado * 100) / 100;
   // Lo asignado a rubros que todavía no se pagó: deuda con proveedores que va
   // a entrar al control cuando se pague. No es saldo de presupuesto.

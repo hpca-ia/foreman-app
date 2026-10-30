@@ -28,19 +28,19 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
 
 
   /**
-   * Un anticipo que no espera ninguna factura pasa a ser gasto.
+   * Un anticipo que no va a tener factura nunca deja de figurar como pendiente.
    *
-   * El de la ventanería espera la ventanería y por eso no cuenta como obra.
-   * Unos honorarios cobrados por adelantado no esperan nada: ya son gasto, y
-   * hasta ahora no había manera de decirlo — quedaban en "anticipos sin
-   * factura" para siempre, sin entrar nunca al control.
+   * El gasto ya cuenta —la plata salió de la caja— pero el aviso de "falta la
+   * factura" quedaría prendido para siempre en algo que se pagó contra recibo.
+   * Un aviso que nunca se apaga deja de leerse, y con él se dejan de leer los
+   * que sí hay que atender.
    */
   async function yaEsGasto(f) {
     if (!window.confirm(
-      `¿Este anticipo de $${fmt(f.total)} ya es gasto de la obra?\n\n`
-      + "Usalo cuando no espera ninguna factura: honorarios por adelantado, un trabajo pagado contra recibo.\n\n"
-      + "Pasa a contar en el control como cualquier otro gasto, en los rubros a los que esté asignado. "
-      + "Si todavía espera un comprobante, dejalo como anticipo.")) return;
+      `¿Este gasto de $${fmt(f.total)} no va a tener factura nunca?\n\n`
+      + "Usalo para lo que se paga contra recibo: honorarios, un trabajo de alguien que no factura.\n\n"
+      + "Ya cuenta como gasto en sus rubros —la plata salió de la caja— y esto solo apaga el aviso de que "
+      + "falta el comprobante. Si la factura todavía puede llegar, dejalo como está.")) return;
     const { error } = await supabase.from("obra_facturas").update({ clase: "recibo" }).eq("id", f.id);
     if (error) { alert("No se pudo cambiar: " + error.message); return; }
     onCambio?.();
@@ -87,14 +87,15 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
       )}
 
       {/* RESUMEN DEL PERÍODO, EN LOS MONTONES QUE SON.
-          Un anticipo y una nota de crédito no son gasto facturado, y sumarlos
-          en un solo "total" es lo que hace que la planilla no cuadre contra el
-          control: el control cuenta invertido lo facturado y pagado, nada más.
-          Separados, el corte cierra y se ve qué quedó vivo para el siguiente. */}
+          Un anticipo y una nota de crédito no son gasto FACTURADO —uno espera
+          su papel, la otra es plata a favor— y sumarlos en un solo "total"
+          esconde las dos cosas que hay que mirar: cuánto falta documentar y
+          cuánto crédito queda sin usar. El anticipo sí cuenta como gasto: la
+          plata salió de la caja. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginBottom: 14 }}>
         <Mini label="Documentos" valor={resumen.cantidad} moneda={false} />
         <Mini label="Gasto facturado" valor={resumen.gasto} />
-        {resumen.anticipos > 0.005 && <Mini label="Anticipos sin factura" valor={resumen.anticipos} color={colors.warning} />}
+        {resumen.anticipos > 0.005 && <Mini label="Gasto sin factura todavía" valor={resumen.anticipos} color={colors.warning} />}
         {resumen.credito > 0.005 && <Mini label="Notas de crédito" valor={resumen.credito} color={colors.success} />}
         <Mini label="Base 0%" valor={resumen.subtotal_0} />
         <Mini label="Base 5%" valor={resumen.subtotal_5} />
@@ -112,8 +113,9 @@ export default function PanelFacturas({ obra, rubros, actividades = [], planilla
           {resumen.anticipos > 0.005 && (
             <div>
               <strong style={{ color: colors.warning }}>${fmt(resumen.anticipos)} en {resumen.cuantosAnticipos === 1 ? "un anticipo" : `${resumen.cuantosAnticipos} anticipos`}</strong>:
-              {" "}la plata salió y <strong>todavía no está facturada</strong>. No cuenta como invertido ni cierra con esta
-              planilla: queda vivo hasta que llegue la factura, aunque sea en otro período.
+              {" "}la plata salió de la caja y <strong>ya cuenta como gasto</strong> en los rubros a los que esté asignada.
+              Lo que falta es el papel: cuando llegue la factura se liquida contra ella y pasa a contar por el
+              documento, en el período en que se emitió.
             </div>
           )}
           {resumen.credito > 0.005 && (

@@ -55,24 +55,20 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
           {esDeCajaChica(f) && <MarcaCaja />}
           {vale && chip("NOTA DE CRÉDITO · a favor", colors.success, colors.successSoft,
             "Plata a favor de la obra: material devuelto o cobrado de más. Baja el gasto y se usa en una compra posterior.")}
-          {anticipo && chip("ANTICIPO · sin factura", colors.warning, colors.warningSoft,
-            "La plata salió y el comprobante todavía no se emite. No cuenta como obra ejecutada hasta que llegue su factura.")}
-          {/* HAY ANTICIPOS QUE NO ESPERAN NINGUNA FACTURA.
-              El de la ventanería espera la ventanería: hasta que llegue no es
-              obra, y por eso no cuenta. Pero unos honorarios cobrados por
-              adelantado, o un trabajo pagado contra recibo, ya son gasto —no
-              hay nada que esperar— y quedaban afuera del control para siempre,
-              sin manera de meterlos.
-
-              Es una decisión de alguien y por eso es un botón: de asignarlo a
-              un rubro no se puede deducir, porque asignar dice a qué rubro va
-              cuando llegue, no que ya llegó. */}
+          {anticipo && chip("FALTA LA FACTURA", colors.warning, colors.warningSoft,
+            "La plata salió de la caja y ya cuenta como gasto del rubro. Lo que falta es el comprobante: cuando llegue se liquida contra él.")}
+          {/* HAY ANTICIPOS QUE NO VAN A TENER FACTURA NUNCA.
+              Unos honorarios contra recibo, un trabajo pagado a alguien que no
+              factura. El gasto ya cuenta —la plata salió— pero el aviso de
+              "falta la factura" va a quedar prendido para siempre, y un aviso
+              que nunca se apaga deja de leerse. Esto lo apaga diciendo lo que
+              es: un gasto sin factura, y así se queda. */}
           {anticipo && onYaEsGasto && (
             <button onClick={e => { e.stopPropagation(); onYaEsGasto(f); }}
-              title="Este anticipo no espera ninguna factura: pasa a contar como gasto de la obra, igual que un recibo."
+              title="Este anticipo no va a tener factura nunca: deja de figurar como pendiente de documentar."
               style={{ marginLeft: 6, background: "none", border: "none", padding: 0, cursor: "pointer",
                 fontFamily: colors.font, fontSize: 10.5, color: colors.brand, textDecoration: "underline" }}>
-              ya es gasto
+              no espera factura
             </button>
           )}
           {bodega && chip(bodega.corto, colors.inkSoft, colors.neutralSoft, bodega.hacer)}
