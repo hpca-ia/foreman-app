@@ -1,6 +1,7 @@
 import { cargarPDF } from "../../lib/exportar";
 import { pieDePdf } from "../../lib/piePdf";
 import { honorariosDe, comoSeDice } from "./honorariosDeOrden.js";
+import { impactoDelPlazo } from "./impactoDelPlazo.js";
 
 // Las órdenes de cambio en PDF, con el formato que la oficina ya firma.
 //
@@ -244,7 +245,10 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   capitulo("III", "Impacto en cronograma.");
   doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(...GRIS);
   doc.text(seguro("Argumentos:"), margen, y); y += 12;
-  parrafo(orden.impacto_cronograma || (orden.dias_impacto ? `Impacto estimado de ${orden.dias_impacto} días.` : "Sin impacto en el cronograma."));
+  // EL PAPEL NO AFIRMA LO QUE NADIE DIJO. Antes, con el campo vacío imprimía
+  // "Sin impacto en el cronograma": una afirmación que viajaba firmada al
+  // cliente y que el día del atraso decía lo contrario de lo que pasó.
+  parrafo(impactoDelPlazo(orden).frase);
 
   // ── CAPÍTULO IV ─────────────────────────────────────────────────────────
   capitulo("IV", "Revisión y aprobación.");

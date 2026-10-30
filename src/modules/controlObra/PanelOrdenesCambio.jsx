@@ -6,6 +6,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { AFECTA } from "./honorariosDeOrden.js";
+import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
@@ -929,6 +930,47 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       Honorarios {o.honorarios_pct}% sobre el neto
                     </span>
                   )}
+                </div>
+
+                {/* ¿CORRE EL PLAZO? Sin contestar, el papel lo dice así: no
+                    afirma que no corre, que es lo que hacía antes. */}
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                  <span style={{ fontSize: 10.5, color: colors.muted, fontWeight: 700, letterSpacing: 0.3 }}>
+                    ¿CORRE EL PLAZO?
+                  </span>
+                  {editable ? [[true, "Sí"], [false, "No"]].map(([valor, texto]) => {
+                    const puesto = o.impacta_crono === valor;
+                    return (
+                      <button key={String(valor)} type="button" disabled={ocupado}
+                        onClick={() => hacer(() => guardarOrden(o.id, { impacta_crono: puesto ? null : valor,
+                          ...(valor === false ? { dias_impacto: null } : {}) }))}
+                        style={{ border: `1px solid ${puesto ? (valor ? colors.warning : colors.success) : colors.border}`,
+                          background: puesto ? (valor ? colors.warning : colors.success) : "#fff",
+                          color: puesto ? "#fff" : colors.muted,
+                          borderRadius: 20, padding: "3px 12px", fontSize: 11, cursor: "pointer",
+                          fontFamily: colors.font, fontWeight: puesto ? 700 : 400 }}>
+                        {texto}
+                      </button>
+                    );
+                  }) : null}
+                  {editable && o.impacta_crono === true && (
+                    <input type="number" defaultValue={o.dias_impacto ?? ""} key={`di${o.id}-${o.dias_impacto}`}
+                      placeholder="días"
+                      onBlur={e => String(e.target.value) !== String(o.dias_impacto ?? "")
+                        && hacer(() => guardarOrden(o.id, { dias_impacto: Number(e.target.value) || null }))}
+                      style={{ ...inputStyle, padding: "4px 7px", fontSize: 12, width: 70 }} />
+                  )}
+                  {editable && (
+                    <input defaultValue={o.impacto_cronograma || ""} key={`ic${o.id}-${o.impacto_cronograma}`}
+                      placeholder={o.impacta_crono === false ? "Por qué no lo corre" : "Qué se atrasa y por qué"}
+                      onBlur={e => e.target.value !== (o.impacto_cronograma || "")
+                        && hacer(() => guardarOrden(o.id, { impacto_cronograma: e.target.value.trim() || null }))}
+                      style={{ ...inputStyle, padding: "4px 7px", fontSize: 12, flex: 1, minWidth: 180 }} />
+                  )}
+                  <span style={{ fontSize: 10.5,
+                    color: impactoDelPlazo(o).definido ? colors.inkSoft : colors.warning }}>
+                    {impactoDelPlazo(o).frase}
+                  </span>
                 </div>
 
                 {/* HASTA CUÁNDO HAY PARA APROBARLA. */}

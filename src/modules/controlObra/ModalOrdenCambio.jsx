@@ -34,6 +34,8 @@ const VACIA = {
   // Qué mueve la orden —pueden ser varias— y el porcentaje de honorarios del
   // contrato, que se cobra sobre el neto y va al pie, no adentro de los rubros.
   afecta: [], honorarios_pct: "",
+  // null es "todavía no se contestó", que no es lo mismo que "no corre".
+  impacta_crono: null,
 };
 // "aumenta" y no "agrega": es el valor que guarda la base y el que suma
 // `subtotales`. Con el otro, la vista previa de totales mostraba cero.
@@ -256,10 +258,11 @@ Si el texto ya está bien escrito, devolvelo igual.`,
         fecha_limite_aprobacion: f.fecha_limite_aprobacion,
       }));
     }
-    if (f.impacto_cronograma?.trim() || f.dias_impacto) {
+    if (f.impacto_cronograma?.trim() || f.dias_impacto || f.impacta_crono != null) {
       await import("./ordenesDeCambio").then(m => m.guardarOrden(orden.id, {
+        impacta_crono: f.impacta_crono,
         impacto_cronograma: f.impacto_cronograma?.trim() || null,
-        dias_impacto: Number(f.dias_impacto) || null,
+        dias_impacto: f.impacta_crono === false ? null : (Number(f.dias_impacto) || null),
         soportes: f.soportes?.trim() || null,
       }));
     }
@@ -831,17 +834,47 @@ Si el texto ya está bien escrito, devolvelo igual.`,
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 8 }}>
-          <div>
-            <label style={lbl}>CAPÍTULO III · IMPACTO EN EL PLAZO</label>
-            <input value={f.impacto_cronograma} onChange={e => setF(v => ({ ...v, impacto_cronograma: e.target.value }))}
-              placeholder="Qué se atrasa y por qué" style={mini} />
+        {/* ¿CORRE EL PLAZO? SÍ O NO, Y NO EL SILENCIO.
+            El campo vacío se imprimía como "Sin impacto en el cronograma", que
+            es una afirmación que nadie hizo. Decir que no corre es hacerse
+            cargo; no contestar es otra cosa, y tiene que verse. */}
+        <div style={{ marginBottom: 8 }}>
+          <label style={lbl}>CAPÍTULO III · ¿CORRE EL PLAZO DE ENTREGA?</label>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+            {[[true, "Sí, lo corre"], [false, "No lo corre"]].map(([valor, texto]) => {
+              const puesto = f.impacta_crono === valor;
+              return (
+                <button key={String(valor)} type="button"
+                  onClick={() => setF(v => ({ ...v, impacta_crono: puesto ? null : valor,
+                    dias_impacto: valor === false ? "" : v.dias_impacto }))}
+                  style={{ border: `1px solid ${puesto ? (valor ? colors.warning : colors.success) : colors.border}`,
+                    background: puesto ? (valor ? colors.warning : colors.success) : "#fff",
+                    color: puesto ? "#fff" : colors.muted,
+                    borderRadius: 20, padding: "4px 14px", fontSize: 11.5, cursor: "pointer",
+                    fontFamily: colors.font, fontWeight: puesto ? 700 : 400 }}>
+                  {texto}
+                </button>
+              );
+            })}
+            {f.impacta_crono === true && (
+              <>
+                <input type="number" value={f.dias_impacto}
+                  onChange={e => setF(v => ({ ...v, dias_impacto: e.target.value }))}
+                  placeholder="0" style={{ ...mini, width: 80 }} />
+                <span style={{ fontSize: 11, color: colors.muted }}>días</span>
+              </>
+            )}
+            {f.impacta_crono == null && (
+              <span style={{ fontSize: 10.5, color: colors.warning }}>
+                Sin contestar, el papel no va a decir que no corre: va a decir que no se definió.
+              </span>
+            )}
           </div>
-          <div>
-            <label style={lbl}>DÍAS</label>
-            <input type="number" value={f.dias_impacto} onChange={e => setF(v => ({ ...v, dias_impacto: e.target.value }))}
-              placeholder="0" style={mini} />
-          </div>
+          <input value={f.impacto_cronograma} onChange={e => setF(v => ({ ...v, impacto_cronograma: e.target.value }))}
+            placeholder={f.impacta_crono === false
+              ? "Por qué no lo corre, si hace falta decirlo"
+              : "Qué se atrasa y por qué"}
+            style={{ ...mini, marginTop: 6 }} />
         </div>
         <div style={{ fontSize: 10, color: colors.muted, marginTop: -4 }}>
           Esos días los lee el cronograma valorado cuando la orden se aprueba, para ofrecer extender el plazo.

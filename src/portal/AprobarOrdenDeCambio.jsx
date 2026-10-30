@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { impactoDelPlazo } from "../modules/controlObra/impactoDelPlazo";
 
 // La orden de cambio, para quien la tiene que aprobar.
 //
@@ -174,16 +175,28 @@ export default function AprobarOrdenDeCambio({ token }) {
               <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>Diferencia sobre el contrato</span>
               <span style={{ fontSize: 15, fontWeight: 700, color: suma < 0 ? C.verde : C.tinta }}>{monto(suma)}</span>
             </div>
-            {!!orden.dias_impacto && (
-              <div style={{ fontSize: 12.5, color: C.ambar, marginTop: 7, fontWeight: 600 }}>
-                Suma {orden.dias_impacto} {Number(orden.dias_impacto) === 1 ? "día" : "días"} al plazo de obra.
-              </div>
-            )}
-            {orden.impacto_cronograma && (
-              <div style={{ fontSize: 12.5, color: C.gris, marginTop: 4, lineHeight: 1.5, whiteSpace: "pre-line" }}>
-                {orden.impacto_cronograma}
-              </div>
-            )}
+            {/* EL PLAZO ES LA MITAD DE LO QUE ESTÁ ACEPTANDO, y la que
+                después se discute. Si no se definió, se dice así: el papel no
+                afirma que no corre cuando nadie lo contestó. */}
+            {(() => {
+              const plazo = impactoDelPlazo(orden);
+              if (!plazo.definido) return (
+                <div style={{ fontSize: 12.5, color: C.gris, marginTop: 7 }}>
+                  Todavía no está definido si esta orden corre la fecha de entrega.
+                </div>
+              );
+              return (
+                <div style={{ fontSize: 12.5, marginTop: 7, lineHeight: 1.5, whiteSpace: "pre-line",
+                  color: plazo.impacta ? C.ambar : C.verde, fontWeight: 600 }}>
+                  {plazo.impacta && plazo.dias > 0
+                    ? `Suma ${plazo.dias} ${plazo.dias === 1 ? "día" : "días"} al plazo de obra.`
+                    : plazo.impacta ? "Corre la fecha de entrega." : "No corre la fecha de entrega."}
+                  {plazo.nota && (
+                    <span style={{ color: C.gris, fontWeight: 400 }}>{" "}{plazo.nota}</span>
+                  )}
+                </div>
+              );
+            })()}
           </Caja>
         )}
 

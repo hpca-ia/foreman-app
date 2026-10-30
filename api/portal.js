@@ -356,6 +356,10 @@ async function ordenParaFirmar(req, res, firma) {
       fecha: orden.fecha, lugar: orden.lugar, justificacion: orden.justificacion,
       fecha_limite_aprobacion: orden.fecha_limite_aprobacion,
       impacto_cronograma: orden.impacto_cronograma, dias_impacto: orden.dias_impacto,
+      // Si corre el plazo o no. Que el cliente lo vea antes de aprobar: es la
+      // mitad de lo que está aceptando, y la que después se discute.
+      impacta_crono: orden.impacta_crono,
+      afecta: orden.afecta, honorarios_pct: orden.honorarios_pct,
       anulada: orden.anulada,
     },
     // EL MONTO SE CALCULA ACÁ. Se mandaban `l.total` y `l.accion`, dos
@@ -1096,7 +1100,7 @@ async function armarInforme(lead) {
   if (lead.obra_id) {
     ordenes = await json(await rest(
       `ordenes_cambio?obra_id=eq.${lead.obra_id}&estado=in.(enviada,aprobada)`
-      + `&select=id,numero,codigo,titulo,tipo,fecha,justificacion,impacto_cronograma,dias_impacto,`
+      + `&select=id,numero,codigo,titulo,tipo,fecha,justificacion,impacto_cronograma,dias_impacto,impacta_crono,afecta,`
       + `estado,anulada,cliente_acepto,cliente_respondio_at,contratante_comentario&order=numero`)) || [];
     ordenes = ordenes.filter(o => !o.anulada);
   }
