@@ -71,10 +71,26 @@ export function loQueNoEstaPresupuestado(comparacion) {
   // el presupuesto vino de un Excel de precios— no se inventa una diferencia:
   // no se puede juzgar un precio contra algo que no se sabe. Esa propuesta es
   // la primera referencia, y cargarla es lo que hay que hacer.
+  // Y CUANDO NO HAY COSTO CARGADO, CONTRA EL PRECIO QUE VIO EL CLIENTE.
+  //
+  // La vara buena es el costo: contra él se sabe si el proveedor subió. Pero
+  // cuando el rubro no tiene costo —todo Diners, porque el presupuesto vino de
+  // un Excel de precios— quedarse callado es perder la única comparación que sí
+  // existe: el precio que el cliente ya aceptó. Si la proforma nueva viene por
+  // debajo de ese precio, esa diferencia es plata del proyecto.
+  //
+  // No es lo mismo que la otra y por eso se dice contra qué se comparó: contra
+  // el costo se mide si se compró MEJOR; contra el precio al cliente se mide la
+  // utilidad, que estaba vendida desde el principio. Las dos son beneficio de
+  // la casa; una se ganó comprando y la otra vendiendo.
+  const varaDe = l => (l.puCosto != null ? l.puCosto : l.puRubro);
   const otroPrecio = lineas.filter(l => {
-    if (!l.rubro || l.puCosto == null || l.puProforma == null) return false;
-    return Math.abs(l.puProforma - l.puCosto) > Math.max(0.01, Math.abs(l.puCosto) * 0.001);
+    const vara = varaDe(l);
+    if (!l.rubro || vara == null || l.puProforma == null) return false;
+    return Math.abs(l.puProforma - vara) > Math.max(0.01, Math.abs(vara) * 0.001);
   }).map(l => {
+    const vara = varaDe(l);
+    const contraPrecio = l.puCosto == null;
     // LA DIFERENCIA DE PRECIO SE MIDE SOBRE LA CANTIDAD QUE LOS DOS TIENEN.
     //
     // El rubro son 120 varillas, la proforma cotiza 150 y además a otro precio.
@@ -88,18 +104,19 @@ export function loQueNoEstaPresupuestado(comparacion) {
     // otro, y el rubro con más cantidad Y peor precio salía como si solo
     // hubiera cambiado la cantidad.
     const comun = n(l.cantidadRubro) > 0 ? Math.min(n(l.cantidad), n(l.cantidadRubro)) : n(l.cantidad);
-    const dif = c2((n(l.puProforma) - n(l.puCosto)) * comun);
+    const dif = c2((n(l.puProforma) - n(vara)) * comun);
     return {
       descripcion: `${l.rubro.descripcion || l.descripcion} — ${dif > 0 ? "subió" : "bajó"} de precio`.slice(0, 160),
       unidad: l.unidadRubro || l.unidad || "u",
       cantidad: comun,
       costo: Math.abs(dif),
-      costoUnitario: c2(Math.abs(n(l.puProforma) - n(l.puCosto))),
+      costoUnitario: c2(Math.abs(n(l.puProforma) - n(vara))),
       // NO SE LE PONE PRECIO AL CLIENTE: el del contrato está firmado. Si se
       // decide cobrárselo igual —porque aceptó una revisión— se le pone uno en
       // la orden, y esa es una decisión de alguien, no un automatismo.
       precioUnitario: null,
-      por: `costaba $${c2(l.puCosto)} y ahora lo cotizan a $${c2(l.puProforma)}`
+      contraPrecio,
+      por: `${contraPrecio ? "el cliente lo vio a" : "costaba"} $${c2(vara)} y ahora lo cotizan a $${c2(l.puProforma)}`
         + (n(l.cantidad) !== n(l.cantidadRubro) && n(l.cantidadRubro) > 0
           ? ` · sobre las ${comun} ${l.unidadRubro || l.unidad || "u"} que los dos tienen, la cantidad va aparte` : ""),
       rubro_id: l.rubro.id,
@@ -166,6 +183,10 @@ export function loQueNoEstaPresupuestado(comparacion) {
     };
   });
 
+  // TODO LO ENCONTRADO SE GUARDA —también lo que quedó a favor, que es lo que
+  // nadie registra—, pero no todo se le cobra al cliente: una bajada de precio
+  // no es un adicional. Por eso el total de lo que hay que cobrar se arma
+  // aparte, y la orden de cambio se hace solo con eso.
   const todo = [...nuevos, ...demas, ...otroPrecio];
   // Las que tocan algo que ya movió una orden anterior: son las que hay que
   // mirar dos veces antes de volver a cobrarlas.
@@ -189,10 +210,10 @@ export function loQueNoEstaPresupuestado(comparacion) {
     // Lo que las bajadas de precio dejan a favor de la obra.
     eficiencia: c2(bajaron.reduce((t, x) => t + x.costo, 0)),
     sobreprecio: c2(subieron.reduce((t, x) => t + x.costo, 0)),
-    cuantos: todo.length,
+    cuantos: nuevos.length + demas.length + subieron.length,
     // Lo que se le devuelve al cliente, al precio que él firmó.
     aDevolver: c2(menos.reduce((t, x) => t + n(x.precioUnitario) * x.cantidad, 0)),
-    costo: c2(todo.reduce((t, x) => t + x.costo, 0)),
+    costo: c2([...nuevos, ...demas, ...subieron].reduce((t, x) => t + x.costo, 0)),
     // Lo que ya tiene precio acordado se cobra a ese precio; el resto todavía
     // no tiene ninguno y por eso no se puede sumar un total de venta sin
     // inventarlo.
@@ -212,7 +233,12 @@ export function loQueNoEstaPresupuestado(comparacion) {
  */
 export function partidasParaOrden(hallazgos, pct = 0) {
   const p = n(pct);
-  return [...(hallazgos?.todo || []), ...(hallazgos?.menos || [])].map(x => ({
+  // LO QUE BAJÓ DE PRECIO NO VA EN LA ORDEN. No hay nada que cobrarle al
+  // cliente porque el proveedor cotizó más barato: esa plata es nuestra y su
+  // lugar es Beneficios. Meterla acá sería mandarle al cliente un adicional por
+  // haber comprado bien.
+  return [...(hallazgos?.todo || []).filter(x => x.hallazgo !== "bajo_precio"),
+    ...(hallazgos?.menos || [])].map(x => ({
     tipo: x.quita ? "quita" : "aumenta",
     descripcion: x.descripcion,
     unidad: x.unidad,
@@ -227,10 +253,16 @@ export function partidasParaOrden(hallazgos, pct = 0) {
 /** El titular, para no tener que armarlo en cada pantalla. */
 export function comoSeDice(h) {
   if (!h.cuantos && !h.menos?.length && !h.otroPrecio?.length) return null;
+  // Lo que quedó a favor se dice con sus propias palabras: no es algo que haya
+  // que cobrar, y sumarlo al titular de los adicionales lo convertiría en uno.
+  if (!h.cuantos && !h.menos?.length && h.bajaron?.length) {
+    return `${h.bajaron.length} ${h.bajaron.length === 1 ? "rubro lo cotizan" : "rubros los cotizan"} por debajo `
+      + `de lo que vale para la obra · $${h.eficiencia.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} a favor`;
+  }
   const partes = [];
   if (h.nuevos.length) partes.push(`${h.nuevos.length} ${h.nuevos.length === 1 ? "renglón que no está" : "renglones que no están"} en el presupuesto`);
   if (h.demas.length) partes.push(`${h.demas.length} ${h.demas.length === 1 ? "rubro con más cantidad" : "rubros con más cantidad"} de la presupuestada`);
   if (h.menos.length) partes.push(`${h.menos.length} ${h.menos.length === 1 ? "rubro con menos" : "rubros con menos"} de lo contratado`);
-  if (h.otroPrecio?.length) partes.push(`${h.otroPrecio.length} ${h.otroPrecio.length === 1 ? "rubro a otro precio" : "rubros a otro precio"}`);
+  if (h.subieron?.length) partes.push(`${h.subieron.length} ${h.subieron.length === 1 ? "rubro más caro" : "rubros más caros"} de lo que vale`);
   return `${partes.join(" y ")} · $${h.costo.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de costo`;
 }

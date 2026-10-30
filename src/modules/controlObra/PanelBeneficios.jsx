@@ -92,7 +92,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   // y lo que se gastó en él. Esperar que alguien escriba ciento setenta filas a
   // mano es por qué este panel estaba vacío.
   const sola = eficienciaDeRubros({ rubros, porRubro });
-  const porQue = porQueNoSabe(sola, rubros.filter(r => !r.anulado_por_oc && !r.oculto).length);
+  const porQue = porQueNoSabe(sola);
   const titular = comoSeDice(sola);
 
   const r = compararContraPresupuesto(items, rubros);
@@ -588,7 +588,22 @@ Rubros de la obra: ${lista}`;
         {(sola.cuantos > 0 || porQue) && (
           <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: `1px solid ${colors.border}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
-              LO QUE DICEN LOS RUBROS DE LA OBRA · CALCULADO SOLO
+              LO QUE DEJA LA OBRA · LO QUE SE COBRA MENOS LO QUE SE GASTÓ · CALCULADO SOLO
+            </div>
+            {/* LA PREGUNTA DE LA CASA PRIMERO. Cuánto deja la obra: lo que se
+                cobra menos lo que se gastó, rubro por rubro y sin que nadie
+                cargue nada. El desglose entre lo que ya estaba vendido y lo
+                que se ganó comprando viene abajo, y necesita el costo. */}
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
+              <Tarjeta label="DEJAN LOS TERMINADOS" valor={sola.aFavorHecho}
+                color={sola.aFavorHecho >= 0 ? colors.success : colors.danger}
+                icono={<TrendingUp size={11} color={colors.success} />} />
+              {sola.aFavorEnCurso !== 0 && (
+                <Tarjeta label="EN LOS QUE SIGUEN ANDANDO" valor={sola.aFavorEnCurso} color={colors.warning} />
+              )}
+              {sola.enContra !== 0 && (
+                <Tarjeta label="YA SE PASARON DE SU COSTO" valor={sola.enContra} color={colors.danger} />
+              )}
             </div>
             {porQue && (
               <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 7, lineHeight: 1.5 }}>
@@ -603,6 +618,9 @@ Rubros de la obra: ${lista}`;
             )}
             {sola.cuantos > 0 && (
               <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+                  DE ESO, LO QUE SE GANÓ COMPRANDO · {sola.cuantos} rubros con costo cargado
+                </div>
                 <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
                   <Tarjeta label={`SE AHORRÓ · ${sola.cuantosAhorro} terminados`} valor={sola.ahorro} color={colors.success}
                     icono={<TrendingDown size={11} color={colors.success} />} />
@@ -628,17 +646,18 @@ Rubros de la obra: ${lista}`;
                   </div>
                 )}
                 <div style={{ marginTop: 7 }}>
-                  {sola.filas.filter(f => f.estado === "sobreprecio" || f.estado === "ahorro").slice(0, 8).map(f => (
+                  {sola.filas.filter(f => f.estado === "sobreprecio" || f.estado === "ahorro").slice(0, 10).map(f => (
                     <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11.5,
                       padding: "3px 0", borderBottom: `1px solid ${colors.borderSoft || colors.border}` }}>
                       <span style={{ color: colors.muted, fontSize: 10.5, minWidth: 34 }}>{f.numero}</span>
                       <span style={{ flex: 1, color: colors.ink }}>{f.descripcion}</span>
                       <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>
-                        costaba ${fmt(f.presupuestado)} · se gastó ${fmt(f.gastado)}
+                        se cobra ${fmt(f.contratado)} · se gastó ${fmt(f.gastado)}
+                        {f.presupuestado != null && <> · costaba ${fmt(f.presupuestado)}</>}
                       </span>
                       <span style={{ fontWeight: 700, whiteSpace: "nowrap",
-                        color: f.dif > 0 ? colors.success : colors.danger }}>
-                        {f.dif > 0 ? "+" : "−"}${fmt(Math.abs(f.dif))}
+                        color: f.aFavor >= 0 ? colors.success : colors.danger }}>
+                        {f.aFavor >= 0 ? "+" : "−"}${fmt(Math.abs(f.aFavor))}
                       </span>
                     </div>
                   ))}

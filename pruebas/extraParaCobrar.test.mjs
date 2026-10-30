@@ -51,11 +51,28 @@ test("como partidas de una orden: el precio del contrato se respeta, lo nuevo ll
   assert.equal(nuevo.precio_unitario, 480);        // 400 + 20%
 });
 
-test("una proforma que calza con el presupuesto no inventa un extra", () => {
+test("una proforma que calza con el presupuesto no inventa un extra que cobrar", () => {
+  // Las 8 unidades contratadas, sin cantidad de más ni renglones nuevos: no
+  // hay nada que cobrarle al cliente.
   const sin = loQueNoEstaPresupuestado(compararContraPresupuesto(
     [{ descripcion: "Vinil", cantidad: 8, monto: 1200, rubro_id: 1 }], rubros));
   assert.equal(sin.cuantos, 0);
-  assert.equal(comoSeDice(sin), null);
+  assert.equal(sin.costo, 0);
+  assert.equal(partidasParaOrden(sin, 20).length, 0);
+});
+
+test("pero si lo cotizan por debajo de lo que el cliente paga, eso es plata de la casa", () => {
+  // El rubro se vendió en $1.726,64 y ahora lo cotizan en $1.200. Ese rubro no
+  // tiene costo cargado, así que la única vara que existe es el precio que el
+  // cliente ya aceptó —y contra esa vara quedan $526,64 a favor del proyecto—.
+  // Callarlo porque "no hay costo" es perder la única comparación posible.
+  const sin = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 8, monto: 1200, rubro_id: 1 }], rubros));
+  assert.equal(sin.bajaron.length, 1);
+  assert.equal(sin.eficiencia, 526.64);
+  assert.equal(sin.bajaron[0].contraPrecio, true);
+  assert.match(sin.bajaron[0].por, /el cliente lo vio a \$215\.83 y ahora lo cotizan a \$150/);
+  assert.match(comoSeDice(sin), /526,64 a favor/);
 });
 
 test("menos cantidad de la presupuestada no es un extra a cobrar", () => {

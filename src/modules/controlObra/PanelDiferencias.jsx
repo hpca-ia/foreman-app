@@ -57,12 +57,12 @@ const GRUPOS = [
   // un solo grupo el ahorro se lee como un problema y se descarta junto con el
   // resto. Los sobreprecios los busca todo el mundo; las eficiencias no las
   // registra nadie, y son las que dicen si la obra compra bien.
-  ["subio_precio", "EL MISMO RUBRO, MÁS CARO QUE EL COSTO CARGADO",
+  ["subio_precio", "EL MISMO RUBRO, MÁS CARO DE LO QUE VALE PARA LA OBRA",
     "Cambió el costo, no la cantidad. El precio que firmó el cliente no se mueve: esto va contra nuestro "
     + "margen, y la conversación es con el proveedor. Si se decide cobrárselo igual, hay que ponerle precio."],
-  ["bajo_precio", "EL MISMO RUBRO, MÁS BARATO: ES EFICIENCIA",
-    "Lo cotizan por debajo de lo presupuestado. Al cliente no se le cobra ni se le devuelve nada —paga el "
-    + "precio que firmó—: esta plata queda a favor de la obra y se registra en Beneficios."],
+  ["bajo_precio", "EL MISMO RUBRO, MÁS BARATO: ES BENEFICIO",
+    "Lo cotizan por debajo de lo que vale para la obra. Al cliente no se le cobra ni se le devuelve nada "
+    + "—paga el precio que firmó—: esta plata queda a favor del proyecto y se registra en Beneficios."],
 ];
 
 
@@ -416,8 +416,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
               )}
               {clave === "bajo_precio" && (
                 <div style={{ fontSize: 11, color: colors.success, marginBottom: 6, fontWeight: 600 }}>
-                  ${fmt(suma)} quedan a favor de la obra. Marcándolas pasan a Beneficios como previsto,
-                  y se confirman cuando llegue la factura.
+                  ${fmt(suma)} quedan a favor del proyecto. Marcándolas pasan a Beneficios como previsto,
+                  y se confirman cuando llegue la factura. No van en la orden de cambio: al cliente no se le
+                  cobra un adicional por haber comprado bien.
                 </div>
               )}
 
@@ -540,8 +541,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           <div style={{ ...caja, borderLeft: `3px solid ${colors.warning}`, fontSize: 11.5,
             color: colors.inkSoft, lineHeight: 1.55 }}>
             De los renglones que calzaron con un rubro, <strong>{sinCosto}</strong> no tienen costo cargado:
-            de esos no se puede decir si el precio está bien, porque no hay contra qué compararlo. Esta
-            propuesta es su primera referencia.
+            esos se compararon contra <strong>el precio que vio el cliente</strong>, que es la única vara que
+            existe. Ahí lo que se ve es la utilidad —que estaba vendida desde el principio—, no si se compró
+            mejor que lo presupuestado. Cargándoles el costo, la próxima propuesta dice las dos cosas.
             {/* Y EL COSTO SE CARGA DE ACÁ, que es donde está el dato.
                 Pedirle a alguien que después abra el presupuesto y escriba a
                 mano ciento setenta costos es pedirle que no lo haga nunca: el

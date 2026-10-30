@@ -41,7 +41,7 @@ test("el rubro sin costo cargado no vale cero: vale no sé", () => {
   assert.equal(r.sinCostoConGasto, 1);
   assert.equal(r.cuantos, 3);
   assert.equal(r.completo, false);
-  assert.match(porQueNoSabe(r, 4), /1 no tienen costo/);
+  assert.match(porQueNoSabe(r), /1 de los 4 rubros no tienen costo/);
 });
 
 test("sin ningún costo cargado lo dice en vez de contestar que no hay ahorros", () => {
@@ -50,7 +50,10 @@ test("sin ningún costo cargado lo dice en vez de contestar que no hay ahorros",
   const r = eficienciaDeRubros({ rubros: rubros.map(({ costo_unitario, ...x }) => x), porRubro });
   assert.equal(r.cuantos, 0);
   assert.equal(r.sinCosto, 4);
-  assert.match(porQueNoSabe(r, 4), /Ninguno de los 4 rubros/);
+  // Y lo que deja se sigue diciendo: lo que no se sabe es qué parte de eso se
+  // ganó comprando mejor, no cuánto dejó. Los tres terminados, 650 + 80 + 200.
+  assert.equal(r.aFavorHecho, 930);
+  assert.match(porQueNoSabe(r), /se lee como el margen con el que se vendió/);
 });
 
 test("la cantidad vigente manda: el rubro tachado por una orden de cambio no cuenta", () => {
@@ -83,4 +86,47 @@ test("el margen vendido va aparte: se decidio al firmar, no lo gano la obra", ()
   assert.equal(r.margenVendido, 1500);
   // Y no se mezcla con lo que la obra ahorro.
   assert.equal(r.neto, 30);
+});
+
+test("el rubro sin costo tambien deja plata, y se cuenta", () => {
+  // Que no se sepa lo que iba a costar no borra lo que dejo: se vendio en 900,
+  // se gasto 700, y esos 200 son del proyecto. Dejarlo afuera era dejar casi
+  // toda la obra afuera y mostrar vacio un panel de una obra que daba plata.
+  const r = eficienciaDeRubros({ rubros, porRubro });
+  const vinil = r.filas.find(f => f.descripcion === "Vinil");
+  assert.equal(vinil.aFavor, 200);
+  assert.equal(vinil.presupuestado, null);
+  assert.equal(vinil.sinCosto, true);
+  // Y no se cuela en la eficiencia, que es contra el costo.
+  assert.equal(r.cuantosAhorro, 1);
+  assert.equal(r.ahorro, 150);
+});
+
+test("lo que deja la obra: terminado aparte de lo que todavia puede gastar mas", () => {
+  const r = eficienciaDeRubros({ rubros, porRubro });
+  // Terminados: mamposteria 1.500-850 = 650, vinil 900-700 = 200.
+  assert.equal(r.aFavorHecho, 850);
+  // Pintura se paso: 600-520 = 80 a favor... no, deja 80, pero su costo se
+  // paso, asi que es sobreprecio y su plata va aparte.
+  assert.equal(r.enContra, 80);
+  // Cielo raso al 30%: 2.400-400, todavia puede gastar mas.
+  assert.equal(r.aFavorEnCurso, 2000);
+});
+
+test("el costo se lleva a la base del gasto: la factura trae el IVA adentro", () => {
+  // Lo asignado a un rubro sale de las facturas y lleva IVA; el costo del
+  // presupuesto esta sin IVA. Restarlos de frente inventa un sobreprecio del
+  // 15% en un rubro que se compro exactamente a lo presupuestado.
+  const r = eficienciaDeRubros({
+    rubros: [{ id: 7, descripcion: "Luminarias", cantidad: 10, costo_unitario: 100,
+      iva_pct: 15, total_base: 1495, avance_pct: 100 }],
+    porRubro: { 7: { acumulado: 1150 } },
+  });
+  assert.equal(r.filas[0].presupuestado, 1150);
+  assert.equal(r.filas[0].dif, 0);
+  assert.equal(r.sobreprecio, 0);
+  // Y lo que deja sigue siendo el IVA que se le cobra al cliente de mas, que
+  // no es nuestro: por eso la eficiencia se mide contra el costo y no contra
+  // lo que deja.
+  assert.equal(r.ahorro, 0);
 });
