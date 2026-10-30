@@ -89,3 +89,29 @@ test("una obra que solo informa los adicionales pierde credibilidad: se dicen lo
   ], rubros));
   assert.match(comoSeDice(mezcla), /1 renglón que no está en el presupuesto y 1 rubro con menos de lo contratado/);
 });
+
+test("una diferencia sobre un rubro que vino de una orden se marca, para no cobrarla dos veces", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 12, unidad: "u", monto: 1800, rubro_id: 7 }],
+    [{ id: 7, numero: "ADIC-01", descripcion: "Vinil en fachada", unidad: "u", cantidad: 8,
+       total_base: 1726.64, origen: "orden_cambio", orden_cambio_id: 6 }]));
+  assert.equal(h.demas.length, 1);
+  assert.match(h.demas[0].deOrden, /ya venía de una orden de cambio/);
+  assert.equal(h.sobreOrdenes.length, 1);
+});
+
+test("una diferencia sobre un rubro del contrato original no lleva esa marca", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 12, unidad: "u", monto: 1800, rubro_id: 1 }], rubros));
+  assert.equal(h.demas[0].deOrden, null);
+  assert.equal(h.sobreOrdenes.length, 0);
+});
+
+test("cada diferencia dice de qué tipo es, para poder decidirla distinto", () => {
+  const h = loQueNoEstaPresupuestado(compararContraPresupuesto([
+    { descripcion: "Perfilería", cantidad: 1, unidad: "glb", monto: 400, rubro_id: null },
+    { descripcion: "Vinil", cantidad: 12, unidad: "u", monto: 1800, rubro_id: 1 },
+  ], rubros));
+  assert.equal(h.nuevos[0].hallazgo, "nuevo");
+  assert.equal(h.demas[0].hallazgo, "mas_cantidad");
+});

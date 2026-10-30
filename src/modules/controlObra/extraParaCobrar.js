@@ -31,6 +31,17 @@ const c2 = v => Math.round(n(v) * 100) / 100;
 export function loQueNoEstaPresupuestado(comparacion) {
   const lineas = comparacion?.lineas || [];
 
+  // DE DÓNDE VIENE EL RUBRO CONTRA EL QUE SE COMPARA.
+  //
+  // Un rubro puede ser del contrato original o haber entrado por una orden de
+  // cambio ya aprobada. La diferencia importa al discutirla: si la propuesta
+  // nueva cambia una cantidad que YA se modificó en la OC-01, eso no es un
+  // adicional nuevo, es la misma conversación por segunda vez — y hay que
+  // decirlo antes de mandarle otra orden al cliente por lo mismo.
+  const deDonde = r => (r?.origen === "orden_cambio"
+    ? `ya venía de una orden de cambio${r.orden_cambio_id ? ` (la N° ${r.orden_cambio_id})` : ""}`
+    : null);
+
   // Trabajo nuevo: la proforma lo cotiza y no hay rubro que lo contenga.
   const nuevos = lineas.filter(l => !l.rubro).map(l => ({
     descripcion: String(l.descripcion || "").slice(0, 160),
@@ -41,6 +52,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
     // No hay precio acordado: hay que ponerle uno.
     precioUnitario: null,
     por: "no está en el presupuesto",
+    hallazgo: "nuevo",
   }));
 
   // Más cantidad de la que se presupuestó, del mismo rubro.
@@ -59,6 +71,8 @@ export function loQueNoEstaPresupuestado(comparacion) {
       por: `el rubro tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y la proforma trae ${n(l.cantidad)}`.trim(),
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
+      deOrden: deDonde(l.rubro),
+      hallazgo: "mas_cantidad",
     };
   });
 
@@ -84,13 +98,18 @@ export function loQueNoEstaPresupuestado(comparacion) {
       por: `el contrato tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y acá figuran ${n(l.cantidad)}`.trim(),
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
+      deOrden: deDonde(l.rubro),
+      hallazgo: "menos_cantidad",
       quita: true,
     };
   });
 
   const todo = [...nuevos, ...demas];
+  // Las que tocan algo que ya movió una orden anterior: son las que hay que
+  // mirar dos veces antes de volver a cobrarlas.
+  const sobreOrdenes = [...demas, ...menos].filter(x => x.deOrden);
   return {
-    nuevos, demas, menos, todo,
+    nuevos, demas, menos, todo, sobreOrdenes,
     cuantos: todo.length,
     // Lo que se le devuelve al cliente, al precio que él firmó.
     aDevolver: c2(menos.reduce((t, x) => t + n(x.precioUnitario) * x.cantidad, 0)),
