@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { conIvaCuadrado } from "./cuadrarConElPapel";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { asegurarProyecto } from "../../lib/proyectoDeObra";
@@ -69,6 +70,17 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
     // total_base va CON IVA, igual que en el Excel (P.U. con IVA × cantidad),
     // porque las facturas que se cargan también vienen con IVA. Comparar un
     // presupuesto sin IVA contra facturas con IVA inflaría el avance ~15%.
+    // Y EL TOTAL TIENE QUE SER EL DEL PRESUPUESTO, al centavo. El presupuesto
+    // calcula el IVA una vez sobre el subtotal; acá se calcula rubro por rubro
+    // y se redondea una vez por rubro, y la suma de los redondeos no es el
+    // redondeo de la suma. Con 164 rubros eso fueron tres centavos de menos en
+    // Diners Aéreo y uno de más en Plaza Lagos. Los centavos se reparten.
+    const { totales: conIva } = conIvaCuadrado(
+      items.map(it => Number(it.total) || 0), ivaPct,
+      // El total del papel: el que dice el presupuesto. Si ya venía con IVA
+      // adentro, el papel es el subtotal, que es lo que suman sus rubros.
+      yaIncluyeIva ? null : (Number(sel.total) || null));
+
     const filas = items.map((it, idx) => ({
       obra_id: obra.id,
       numero: idx + 1,
@@ -80,7 +92,7 @@ export default function ActivarObra({ currentUser, onCancelar, onCreada }) {
       cantidad: Number(it.cantidad) || 0,
       precio_unitario: Number(it.precio_unitario) || 0,
       iva_pct: ivaPct,
-      total_base: Math.round((Number(it.total) || 0) * (1 + ivaPct / 100) * 100) / 100,
+      total_base: conIva[idx],
       presupuesto_item_id: it.id,
     }));
 

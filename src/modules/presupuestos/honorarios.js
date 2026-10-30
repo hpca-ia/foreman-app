@@ -38,3 +38,40 @@ export function totalesPresupuesto(subtotal, p = {}, conIva = true) {
 
 /** Cómo se lee un honorario en una línea: "Honorarios de administración (10 %)". */
 export const etiquetaHonorario = h => `${String(h.nombre || "Honorarios").trim()}${h.tipo !== "monto" ? ` (${n(h.valor).toLocaleString("es-EC", { maximumFractionDigits: 2 })} %)` : ""}`;
+
+/**
+ * LOS HONORARIOS COMO UN CAPÍTULO DEL PRESUPUESTO.
+ *
+ * Hasta ahora los honorarios viven fuera de los rubros: se calculan sobre el
+ * costo directo y se suman al pie, junto con el IVA. Para el documento que ve
+ * el cliente está bien — es como se presenta un presupuesto— pero tiene una
+ * consecuencia que no se ve hasta que la obra arranca: a la obra viajan los
+ * RUBROS, y los honorarios no son un rubro. El contrato de Diners Aéreo entró
+ * al control por $172.127,27 cuando el presupuesto, con su 10% de
+ * administración, son $189.340,00: faltaban $17.212,73 que sí se le cobran al
+ * cliente y que ningún número de la obra conocía.
+ *
+ * Pasarlos a un capítulo los convierte en lo que para la obra tienen que ser:
+ * renglones. Se planillan, se controlan, llevan IVA como todo lo demás y
+ * viajan solos a cualquier lado al que vaya el presupuesto.
+ *
+ * Esto NO cambia lo que paga el cliente: el mismo monto, en otro lugar del
+ * papel. Por eso después hay que sacarlos del pie, o se cobrarían dos veces.
+ *
+ * @returns [{ capitulo, descripcion, unidad, cantidad, precio_unitario, total }]
+ */
+export const CAPITULO_HONORARIOS = "HONORARIOS";
+
+export function honorariosComoItems(p = {}, subtotal = 0) {
+  const { honorarios } = totalesPresupuesto(subtotal, p, false);
+  return honorarios
+    .filter(h => r2(h.monto) !== 0)
+    .map(h => ({
+      capitulo: CAPITULO_HONORARIOS,
+      descripcion: etiquetaHonorario(h),
+      unidad: "glb",
+      cantidad: 1,
+      precio_unitario: r2(h.monto),
+      total: r2(h.monto),
+    }));
+}

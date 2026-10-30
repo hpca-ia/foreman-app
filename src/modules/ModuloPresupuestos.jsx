@@ -341,6 +341,44 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     recalcTotales(items, { honorarios: limpia, honorarios_pct: sumaPct });
   }
 
+  /**
+   * Los honorarios, convertidos en un capítulo del presupuesto.
+   *
+   * Al pie no viajan a la obra: a la obra van los RUBROS. El contrato de Diners
+   * Aéreo entró al control por $172.127,27 cuando el presupuesto, con su 10% de
+   * administración, son $189.340,00 — faltaban $17.212,73 que sí se le cobran
+   * al cliente y que ningún número de la obra conocía.
+   *
+   * Como capítulo son renglones: se planillan, se controlan y llevan IVA como
+   * todo lo demás. Y se sacan del pie en el mismo gesto, porque si no se
+   * cobrarían dos veces.
+   */
+  async function honorariosACapitulo(nuevos) {
+    if (!presupuestoActivo || !nuevos.length) return;
+    const capOrden = (capitulosActivos.length || 0) + 1;
+    const filas = nuevos.map((x, i) => ({
+      presupuesto_id: presupuestoActivo.id,
+      capitulo: x.capitulo,
+      descripcion: x.descripcion,
+      unidad: x.unidad,
+      cantidad: x.cantidad,
+      precio_unitario: x.precio_unitario,
+      total: x.total,
+      orden: capOrden * 1000 + i,
+    }));
+    const { data, error } = await supabase.from("presupuesto_items").insert(filas).select();
+    if (error) { alert("No se pudo crear el capítulo de honorarios: " + error.message); return; }
+
+    // Y se van del pie: el mismo monto en dos lugares se cobra dos veces.
+    const { error: e2 } = await supabase.from("presupuestos")
+      .update({ honorarios: [], honorarios_pct: 0 }).eq("id", presupuestoActivo.id);
+    if (e2) { alert("El capítulo se creó, pero los honorarios siguen sumándose al pie: " + e2.message); return; }
+
+    const juntos = [...items, ...(data || [])];
+    setItems(juntos);
+    await recalcTotales(juntos, { honorarios: [], honorarios_pct: 0 });
+  }
+
   // El área la escribe quien arma el presupuesto: no sale de los rubros.
   async function guardarArea(valor) {
     const area = Number(valor) > 0 ? Number(valor) : null;
@@ -2276,7 +2314,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--neutral-soft)",fontSize:13,color:"var(--ink-soft)"}}>
                 <span>Subtotal <span style={{fontSize:11,color:"var(--muted)"}}>· costo directo</span></span><span>${fmt(presupuestoActivo.subtotal)}</span>
               </div>
-              <EditorHonorarios lista={lineasHonorarios(presupuestoActivo)} subtotal={presupuestoActivo.subtotal} onCambiar={guardarHonorarios}/>
+              <EditorHonorarios lista={lineasHonorarios(presupuestoActivo)} subtotal={presupuestoActivo.subtotal}
+                onCambiar={guardarHonorarios} onPasarACapitulo={honorariosACapitulo}/>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--neutral-soft)",fontSize:13,color:"var(--ink-soft)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <span>IVA</span>
