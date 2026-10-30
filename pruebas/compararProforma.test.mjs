@@ -176,3 +176,21 @@ test("el proveedor que baja se cuenta aparte del que sube", () => {
   assert.equal(r.bajoElProveedor, 10);
   assert.equal(r.subioElProveedor, 30);
 });
+
+test("el rubro se lleva a sin IVA antes de compararlo con la proforma", () => {
+  // Los rubros base del control traen el IVA adentro; la proforma se lee sin
+  // IVA desde la 139. Compararlos crudos inventa un ahorro del 15%.
+  const r = compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 1, monto: 100, rubro_id: 1 }],
+    [{ id: 1, cantidad: 1, iva_pct: 15, total_base: 115 }]);
+  assert.equal(r.lineas[0].presupuestado, 100);
+  assert.equal(r.lineas[0].diferencia, 0);
+});
+
+test("un rubro que metió una orden de cambio ya está sin IVA", () => {
+  const r = compararContraPresupuesto(
+    [{ descripcion: "Vinil", cantidad: 1, monto: 100, rubro_id: 1 }],
+    [{ id: 1, cantidad: 1, iva_pct: 15, total_base: 115, origen: "orden_cambio" }]);
+  assert.equal(r.lineas[0].presupuestado, 115);
+  assert.equal(r.lineas[0].diferencia, 15);
+});

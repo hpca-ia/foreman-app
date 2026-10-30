@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import SiSeRompe from "../../components/SiSeRompe";
+import { contratoDe } from "./contratoDeLaObra";
 import { Plus, Upload, AlertTriangle, Trash2, Users } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -56,7 +57,12 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
     if (lista.length) {
       const ids = lista.map(o => o.id);
       const [{ data: rubros }, { data: facturas }] = await Promise.all([
-        supabase.from("obra_rubros").select("id,obra_id,total_base").in("obra_id", ids),
+        // CON LO QUE HACE FALTA PARA DECIR EN CUÁNTO VA EL CONTRATO: de dónde
+        // viene cada rubro, su IVA y si una orden de cambio lo tachó. Sin eso
+        // el único número posible es la suma cruda, que mezcla rubros con IVA
+        // adentro y rubros de orden sin IVA.
+        supabase.from("obra_rubros")
+          .select("id,obra_id,total_base,origen,iva_pct,anulado_por_oc,orden_cambio_id,oculto").in("obra_id", ids),
         supabase.from("obra_facturas").select("id,obra_id,total").in("obra_id", ids),
       ]);
       const facturaIds = (facturas || []).map(f => f.id);
@@ -70,9 +76,22 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
 
       const r = {};
       lista.forEach(o => { r[o.id] = { base: 0, invertido: 0, rubros: 0, sinAsignar: 0 }; });
+      // El contrato de cada obra: lo firmado, lo que las órdenes le movieron y
+      // en cuánto va hoy. En la base del control, que maneja IVA.
+      const porObra = {};
+      (rubros || []).forEach(x => { (porObra[x.obra_id] = porObra[x.obra_id] || []).push(x); });
+      lista.forEach(o => { r[o.id].contrato = contratoDe(porObra[o.id] || []); });
       (rubros || []).forEach(x => {
         if (!r[x.obra_id]) return;
-        r[x.obra_id].base += Number(x.total_base) || 0;
+        // UN RUBRO TACHADO POR UNA ORDEN DE CAMBIO NO SUMA.
+        //
+        // Cuando una orden quita algo del contrato, no agrega una línea en
+        // negativo: tacha el rubro original. El control de presupuesto ya lo
+        // excluía; esta lista no, así que la OC-01 sumaba sus adiciones y no
+        // restaba su reducción, y el presupuesto de la obra quedaba $8.658,68
+        // más alto de lo que es.
+        if (x.anulado_por_oc || x.oculto) return;
+        r[x.obra_id].base += contratoDe([x]).vigente;
         r[x.obra_id].rubros += 1;
       });
       const asignadoPorFactura = {};
@@ -206,6 +225,26 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
                   <div style={{ background: colors.neutralSoft, borderRadius: 4, height: 6, marginBottom: 10, overflow: "hidden" }}>
                     <div style={{ background: pct > 100 ? colors.danger : colors.brand, height: 6, width: `${Math.min(pct, 100)}%`, transition: "width .4s" }} />
                   </div>
+                  {/* EN CUÁNTO VA EL CONTRATO, QUE SON TRES NÚMEROS.
+                      Con uno solo no se puede discutir nada: "el contrato son
+                      doscientos mil" no dice si eran ciento noventa y entraron
+                      diez de adicionales, o eran doscientos diez y se sacaron
+                      diez. Y las reducciones no se ven en el control porque una
+                      orden que quita un rubro lo TACHA en vez de agregar una
+                      línea en negativo: acá se dicen con su monto. */}
+                  {r.contrato?.cuantasOrdenes > 0 && (
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline",
+                      background: colors.bg, borderRadius: colors.radiusSm, padding: "7px 10px", marginBottom: 9 }}>
+                      <Dato label="Contrato original" valor={r.contrato.original} />
+                      <Dato label={`${r.contrato.cuantasOrdenes} ${r.contrato.cuantasOrdenes === 1 ? "orden aprobada" : "órdenes aprobadas"}`}
+                        valor={r.contrato.neto} color={r.contrato.neto < 0 ? colors.danger : colors.success} />
+                      <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.4 }}>
+                        +${fmt(r.contrato.adiciones)} de adiciones
+                        {r.contrato.reducciones ? ` · −$${fmt(r.contrato.reducciones)} de reducciones` : " · sin reducciones"}
+                      </div>
+                      <Dato label="Contrato con las órdenes" valor={r.contrato.vigente} color={colors.brand} />
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
                     <Dato label="Presupuesto" valor={r.base} />
                     <Dato label="Invertido" valor={r.invertido} color={colors.ink} />

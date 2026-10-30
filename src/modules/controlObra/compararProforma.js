@@ -1,3 +1,4 @@
+import { baseSinIva } from "./contratoDeLaObra.js";
 // Lo que cotizan hoy contra lo que se presupuestó.
 //
 // Entre que se arma el presupuesto y que se compra pasan meses, y el precio no
@@ -34,10 +35,15 @@ export function compararContraPresupuesto(items = [], rubros = []) {
   const lineas = items.map(it => {
     const r = it.rubro_id != null ? porId.get(Number(it.rubro_id)) : null;
     const cotizado = centavos(it.monto);
-    // Contra el presupuesto del rubro CON IVA, que es como está cargado el
-    // control: comparar una proforma sin IVA contra un presupuesto con IVA
-    // inventaría un ahorro del 15% que no existe.
-    const delRubro = r ? centavos(r.total_base) : null;
+    // CONTRA EL RUBRO SIN IVA, porque la proforma ya se lee sin IVA.
+    //
+    // Los rubros base del control están cargados CON el IVA adentro —en Diners
+    // Aéreo suman $172.127,24, que es el subtotal del presupuesto por 1,15— y
+    // los que mete una orden de cambio entran sin IVA. Comparar un costo sin
+    // IVA contra un rubro con IVA inventa un ahorro del 15% que no existe, y al
+    // revés inventa un sobreprecio. Se lleva todo a la base en la que trabaja
+    // la empresa: sin IVA, que es como se cotiza y como se mide el margen.
+    const delRubro = r ? baseSinIva(r) : null;
 
     // SOLO SE COMPARA LO MISMO CONTRA LO MISMO.
     //

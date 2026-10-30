@@ -308,6 +308,20 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
     if (error && !/column|schema cache/i.test(error.message)) return error.message;
   }
 
+  // EN LA BASE DEL CONTROL, QUE ES CON IVA.
+  //
+  // La orden se arma SIN IVA —así se cotiza, así se mide su margen y así va el
+  // documento que firma el cliente, con el IVA al pie—. El control de
+  // presupuesto, en cambio, tiene sus rubros con el impuesto adentro: es
+  // contra eso que se descuenta lo que se gasta.
+  //
+  // Metiendo la línea tal cual, el adicional entraba un 15% corto y el
+  // contrato vigente quedaba corto con él, sin que nada lo dijera.
+  const { data: unRubro } = await supabase.from("obra_rubros")
+    .select("iva_pct").eq("obra_id", orden.obra_id).not("iva_pct", "is", null).limit(1).maybeSingle();
+  const iva = Number(unRubro?.iva_pct) || 0;
+  const conIva = v => Math.round(v * (1 + iva / 100) * 100) / 100;
+
   const filas = (lineas || []).filter(l => !(l.tipo === "quita" && l.obra_rubro_id)).map((l, i) => {
     const signo = l.tipo === "quita" ? -1 : 1;
     return {
@@ -319,8 +333,9 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
       descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigoDe(orden)}`,
       unidad: l.unidad || "",
       cantidad: Number(l.cantidad) || 0,
-      precio_unitario: signo * (Number(l.precio_unitario) || 0),
-      total_base: signo * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0),
+      precio_unitario: signo * conIva(Number(l.precio_unitario) || 0),
+      total_base: signo * conIva((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0)),
+      iva_pct: iva,
       origen: "orden_cambio",
       orden_cambio_id: orden.id,
     };
