@@ -5,7 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
-import { AFECTA } from "./honorariosDeOrden.js";
+import { AFECTA, honorariosDe } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
@@ -821,6 +821,10 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
         const suyas = lineas[o.id] || [];
         const sub = subtotales(suyas);
         const total = sub.total;
+        // El pie de la orden: neto, honorarios del contrato y total. Estaba
+        // calculado en el papel y en el formulario de creación, pero no acá,
+        // que es donde se mira la orden todos los días.
+        const hon = honorariosDe({ lineas: suyas, pct: o.honorarios_pct });
         const suyasFotos = fotos[o.id] || [];
         const esta = abierta === o.id;
         const editable = puedeEditar && o.estado !== "aprobada";
@@ -847,6 +851,13 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               <span style={{ fontSize: 14, fontWeight: 700, color: total < 0 ? colors.danger : colors.brand }}>
                 {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
               </span>
+              {hon.hay && (
+                <span title={`Honorarios ${hon.pct}% sobre el neto, al pie: no encarecen los rubros`}
+                  style={{ fontSize: 11, color: colors.muted, whiteSpace: "nowrap" }}>
+                  +{hon.pct}% = <strong style={{ color: colors.ink }}>
+                    {hon.subtotal < 0 ? "−" : ""}${fmt(Math.abs(hon.subtotal))}</strong>
+                </span>
+              )}
             </div>
 
             {esta && (
@@ -884,6 +895,56 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>
                     {[o.tipo, o.lugar, o.fecha && new Date(`${o.fecha}T12:00:00`).toLocaleDateString("es-EC"),
                       o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+
+                {/* EL PIE DE LA ORDEN, CON LOS HONORARIOS A LA VISTA.
+                    Estaban calculados en el PDF y en el formulario de creación
+                    pero no acá, que es donde se mira la orden todos los días:
+                    un número que hay que ir a buscar a otra pantalla es un
+                    número que no se revisa. */}
+                {!!suyas.length && (
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline",
+                    background: colors.neutralSoft || "#F9FAFB", borderRadius: colors.radiusSm,
+                    padding: "7px 10px", marginBottom: 8 }}>
+                    {[["NETO", hon.neto, hon.neto < 0 ? colors.success : colors.ink]].map(([k, v, c]) => (
+                      <div key={k}>
+                        <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>{k}</div>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: c }}>
+                          {v < 0 ? "−" : ""}${fmt(Math.abs(v))}
+                        </div>
+                      </div>
+                    ))}
+                    {hon.hay ? (
+                      <>
+                        <div>
+                          <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+                            HONORARIOS {hon.pct}%
+                          </div>
+                          <div style={{ fontSize: 13.5, fontWeight: 700,
+                            color: hon.devuelve ? colors.success : colors.brand }}>
+                            {hon.devuelve ? "−" : "+"}${fmt(Math.abs(hon.honorarios))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>TOTAL</div>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: colors.ink }}>
+                            {hon.subtotal < 0 ? "−" : ""}${fmt(Math.abs(hon.subtotal))}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 10.5, color: colors.muted, flex: 1, minWidth: 160 }}>
+                          Al aprobarse, los honorarios entran al control en el capítulo de HONORARIOS:
+                          no encarecen los rubros de la orden.
+                        </span>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 10.5, color: editable ? colors.warning : colors.muted,
+                        flex: 1, minWidth: 180, alignSelf: "center" }}>
+                        {editable
+                          ? "Sin honorarios: poné el porcentaje del contrato acá abajo y se calcula sobre el neto."
+                          : "Esta orden se emitió sin honorarios sobre el neto."}
+                      </span>
+                    )}
                   </div>
                 )}
 

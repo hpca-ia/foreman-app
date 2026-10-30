@@ -33,7 +33,10 @@ const VACIA = {
   fecha_limite_aprobacion: "",
   // Qué mueve la orden —pueden ser varias— y el porcentaje de honorarios del
   // contrato, que se cobra sobre el neto y va al pie, no adentro de los rubros.
-  afecta: [], honorarios_pct: "",
+  // El porcentaje del contrato ya puesto: un campo vacío no lo llena nadie, y
+  // el honorario que no se cobra no se reclama después. Se borra si esta orden
+  // no lleva.
+  afecta: [], honorarios_pct: "10",
   // null es "todavía no se contestó", que no es lo mismo que "no corre".
   impacta_crono: null,
 };
