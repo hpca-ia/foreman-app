@@ -70,3 +70,39 @@ export function totalesPorOrigen(beneficios = []) {
     obra: totales(beneficios),
   };
 }
+
+/**
+ * LAS ÓRDENES APROBADAS QUE NO ESTÁN SUMANDO EN BENEFICIOS, Y POR QUÉ.
+ *
+ * El margen de una orden de cambio es beneficio de la obra igual que comprar
+ * mejor. Para contarlo hacen falta dos cosas, y cuando falta una la orden
+ * desaparece de Beneficios sin decir nada: queda cobrándose en el contrato y
+ * sin aparecer en la utilidad, que es la peor de las dos mitades.
+ *
+ *   · QUE SE HAYA EJECUTADO. Una orden marcada "no ejecutada" no deja margen, y
+ *     está bien — pero si ya metió sus rubros al presupuesto de la obra, las dos
+ *     cosas no pueden ser ciertas a la vez. Eso es lo que pasa hoy con las dos
+ *     OC-01: aprobadas, cobrándose, y marcadas como no ejecutadas.
+ *   · QUE SE SEPA LO QUE CUESTA. Sin costo en las partidas no hay margen que
+ *     calcular. No es cero: es que no se sabe.
+ *
+ * @param ordenes  las de la obra
+ * @param lineasPorOrden { [orden_id]: [lineas] }
+ */
+export function ordenesMudas(ordenes = [], lineasPorOrden = {}) {
+  const tiene = l => l?.costo_unitario !== null && l?.costo_unitario !== undefined && l?.costo_unitario !== "";
+  return (ordenes || [])
+    .filter(o => o?.estado === "aprobada" && !o.anulada)
+    .map(o => {
+      const adiciones = (lineasPorOrden[o.id] || []).filter(l => l.tipo !== "quita");
+      const sinCosto = adiciones.filter(l => !tiene(l)).length;
+      const noEjecutada = o.ejecucion === "no_ejecutado";
+      if (!noEjecutada && !sinCosto) return null;
+      const por = [
+        noEjecutada ? "está marcada como NO EJECUTADA, pero sus rubros ya están en el presupuesto de la obra" : "",
+        sinCosto ? `${sinCosto} ${sinCosto === 1 ? "partida" : "partidas"} sin costo: no se sabe qué deja` : "",
+      ].filter(Boolean).join(" · ");
+      return { orden: o, noEjecutada, sinCosto, por };
+    })
+    .filter(Boolean);
+}

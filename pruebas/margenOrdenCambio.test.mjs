@@ -186,3 +186,20 @@ test("si se borra el gasto, su beneficio previsto se va", () => {
   });
   assert.ok(p.borrar.includes(77));
 });
+
+test("una orden aprobada que no suma en beneficios lo dice, y dice por qué", async () => {
+  const { ordenesMudas } = await import("../src/modules/controlObra/cuentaBeneficios.js");
+  // El caso real: las dos OC-01, aprobadas y marcadas como no ejecutadas, con
+  // sus rubros ya metidos en el presupuesto de la obra.
+  const m = ordenesMudas(
+    [{ id: 5, codigo: "OC-01", estado: "aprobada", ejecucion: "no_ejecutado" },
+     { id: 6, codigo: "OC-01", estado: "aprobada", ejecucion: "ejecutado" },
+     { id: 7, codigo: "OC-02", estado: "enviada", ejecucion: "no_ejecutado" },
+     { id: 8, codigo: "OC-03", estado: "aprobada", ejecucion: "ejecutado" }],
+    { 5: [{ tipo: "aumenta" }], 6: [{ tipo: "aumenta", costo_unitario: 10 }], 8: [{ tipo: "aumenta" }, { tipo: "aumenta", costo_unitario: 5 }] });
+  assert.deepEqual(m.map(x => x.orden.id), [5, 8]);
+  assert.match(m[0].por, /NO EJECUTADA/);
+  assert.match(m[0].por, /1 partida sin costo/);
+  assert.match(m[1].por, /1 partida sin costo/);
+  assert.ok(!m[1].noEjecutada);
+});

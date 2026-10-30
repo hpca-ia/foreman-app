@@ -7,7 +7,9 @@ import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
+import { ordenesMudas } from "./cuentaBeneficios.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
+import { cargarOrdenes } from "./ordenesDeCambio";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -29,6 +31,8 @@ const n = v => Number(v) || 0;
 export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const [items, setItems] = useState([]);
   const [proveedor, setProveedor] = useState("");
+  const [ordenes, setOrdenes] = useState([]);
+  const [lineasDeOrdenes, setLineasDeOrdenes] = useState({});
   const [leyendo, setLeyendo] = useState(false);
   const [paso, setPaso] = useState("");
   // Cuando NOVA se quedó sin espacio antes de terminar la proforma.
@@ -60,6 +64,12 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
     if (r.error) { setError(r.error); return; }
     setGuardados(r.beneficios);
     setEnlaces(await enlacesDeProformas(r.beneficios));
+    // Y las órdenes, para poder decir cuáles NO están sumando y por qué: una
+    // orden aprobada que no llega acá se va en silencio y la utilidad de la
+    // obra queda más baja de lo que es.
+    const oc = await cargarOrdenes(obra.id);
+    setOrdenes(oc.ordenes || []);
+    setLineasDeOrdenes(oc.lineas || {});
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -68,6 +78,10 @@ export default function PanelBeneficios({ obra, rubros = [], currentUser }) {
   const tc = porOrigen.compras;
   const to = porOrigen.ordenes;
   const hayOrdenes = guardados.some(esDeOrden);
+  // Las órdenes aprobadas que no llegan a Beneficios, con el motivo: sin eso
+  // desaparecen en silencio y la utilidad de la obra queda más baja de lo que
+  // es, sin que nada lo diga.
+  const mudas = ordenesMudas(ordenes, lineasDeOrdenes);
 
   const r = compararContraPresupuesto(items, rubros);
   // Renglones sin precio: títulos de sección, opcionales, notas al pie que
@@ -578,6 +592,36 @@ Rubros de la obra: ${lista}`;
               {tc.cuantosPrevistos > 0 && (
                 <Tarjeta label={`PREVISTO · ${tc.cuantosPrevistos} sin comprar`} valor={tc.previsto} color={colors.warning} />
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── POR QUÉ UNA ORDEN APROBADA NO ESTÁ SUMANDO ───────────────────
+            El margen de una orden de cambio es beneficio de la obra igual que
+            comprar mejor. Pero para contarlo hacen falta dos cosas, y cuando
+            falta una la orden desaparece de acá sin decir nada: queda cobrándose
+            en el contrato y sin aparecer en la utilidad.
+
+            · QUE SE HAYA EJECUTADO. Una orden aprobada y marcada 'no ejecutada'
+              no deja margen, y es correcto — pero si sus rubros ya están en el
+              presupuesto de la obra, las dos cosas no pueden ser ciertas a la
+              vez, y hay que resolverlo.
+            · QUE SE SEPA LO QUE CUESTA. Sin costo en las partidas no hay margen
+              que calcular: no es cero, es que no se sabe. */}
+        {mudas.length > 0 && (
+          <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`,
+            borderRadius: colors.radiusMd, padding: "9px 11px", marginBottom: 10 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.ink, marginBottom: 3 }}>
+              {mudas.length === 1 ? "Una orden aprobada no está sumando acá" : `${mudas.length} órdenes aprobadas no están sumando acá`}
+            </div>
+            {mudas.map(m => (
+              <div key={m.orden.id} style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, padding: "2px 0" }}>
+                <strong>{m.orden.codigo || `OC-${m.orden.numero}`}</strong> · {m.por}
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
+              Se resuelve en <strong>Órdenes de cambio</strong>: marcá la ejecución y cargá el costo de las partidas
+              —la cotización del proveedor lo pone sola—. El margen aparece acá en cuanto las dos cosas estén.
             </div>
           </div>
         )}
