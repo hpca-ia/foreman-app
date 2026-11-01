@@ -349,13 +349,32 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   //
   // El presupuesto original no se toca. La orden suma lo suyo y resta lo suyo,
   // en el mismo capítulo, y ahí se lee lo que de verdad hizo.
+  // UNA LÍNEA QUE VA A UN CAPÍTULO QUE YA EXISTE SE SIENTA CON ÉL.
+  //
+  // Cuando la partida trae su propio capítulo —el desalojo va a PRELIMINARES Y
+  // VARIOS, que la obra ya tiene— se le ponía igual el `capitulo_orden` de la
+  // orden (9001). Resultado: dos capítulos con el mismo nombre, el de la obra
+  // arriba con sus 18 rubros y otro idéntico al fondo con uno solo. El rubro
+  // está en el control, pero quien lo busca en su capítulo no lo encuentra, y
+  // lo que concluye —con razón— es que la orden no entró entera.
+  //
+  // Si el capítulo existe, se usa su orden. Si es nuevo, el de la orden.
+  const { data: capitulosDeLaObra } = await supabase.from("obra_rubros")
+    .select("capitulo,capitulo_orden").eq("obra_id", orden.obra_id).is("orden_cambio_id", null);
+  const ordenDeCapitulo = new Map();
+  for (const r of capitulosDeLaObra || []) {
+    if (r.capitulo && !ordenDeCapitulo.has(r.capitulo)) ordenDeCapitulo.set(r.capitulo, r.capitulo_orden);
+  }
+
   const filas = (lineas || []).map((l, i) => {
     const signo = l.tipo === "quita" ? -1 : 1;
+    const capitulo = l.capitulo || `ADICIONALES · ${codigoDe(orden)}`;
     return {
       obra_id: orden.obra_id,
       numero: 9000 + orden.numero * 100 + i,
-      capitulo: l.capitulo || `ADICIONALES · ${codigoDe(orden)}`,
-      capitulo_orden: 9000 + orden.numero,
+      capitulo,
+      capitulo_orden: ordenDeCapitulo.has(capitulo)
+        ? ordenDeCapitulo.get(capitulo) : 9000 + orden.numero,
       orden: 9000000 + orden.numero * 1000 + i,
       descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigoDe(orden)}`,
       unidad: l.unidad || "",

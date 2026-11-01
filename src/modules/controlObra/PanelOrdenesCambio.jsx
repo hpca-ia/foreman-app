@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
-import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice } from "./cuadreDeOrdenes.js";
+import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice, capitulosPartidos } from "./cuadreDeOrdenes.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
@@ -187,6 +187,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     rubrosDeOrdenes: rubros.filter(r => r.orden_cambio_id),
     obra, iva: ivaDeLaObra,
   });
+  // Un capítulo partido en dos no mueve ningún total, así que nada lo denuncia
+  // solo: el rubro está, suma, y quien lo busca en su capítulo no lo encuentra.
+  const partidos = capitulosPartidos(rubros);
 
   // LOS DE SIEMPRE.
   //
@@ -474,6 +477,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           Una orden aprobada y el control son dos lugares que pueden decir
           cosas distintas, y hasta ahora descubrirlo era sentarse a sumar a
           mano. Buscar errores a mano no es el trabajo de nadie. */}
+      {partidos.length > 0 && (
+        <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warning}`,
+          borderRadius: colors.radiusMd, padding: "9px 12px", margin: "8px 0", fontSize: 11.5,
+          color: colors.inkSoft, lineHeight: 1.5 }}>
+          <strong style={{ color: colors.warning }}>
+            {partidos.length === 1 ? "Un capítulo está partido en dos" : `${partidos.length} capítulos están partidos`}
+          </strong>{" "}
+          — {partidos.map(p => p.capitulo).join(", ")}. Sus rubros aparecen en dos bloques distintos del control
+          con el mismo nombre: están y suman, pero el que los busca en su capítulo no los encuentra.
+        </div>
+      )}
+
       {cuadre.mal.length > 0 && (
         <div style={{ background: "#FEF2F2", border: `1px solid ${colors.danger}`, borderRadius: colors.radiusMd,
           padding: "9px 12px", margin: "8px 0" }}>

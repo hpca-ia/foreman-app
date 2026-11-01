@@ -121,3 +121,30 @@ export function comoSeDice(cuadre) {
   return `${cuantas} ${cuantas === 1 ? "orden aprobada no cuadra" : "órdenes aprobadas no cuadran"} `
     + `con el control · $${cuadre.enJuego.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en juego`;
 }
+
+/**
+ * UN CAPÍTULO PARTIDO EN DOS, QUE ES CÓMO SE ESCONDE UN RUBRO A PLENA VISTA.
+ *
+ * Al aprobar, una partida que va a un capítulo que la obra ya tiene —el
+ * desalojo a PRELIMINARES Y VARIOS— se guardaba con el `capitulo_orden` de la
+ * orden en vez del del capítulo. El control terminaba con dos capítulos del
+ * mismo nombre: el de la obra con sus dieciocho rubros, y otro idéntico al
+ * fondo con uno solo. El rubro está, suma en los totales, y quien lo busca en
+ * su capítulo no lo encuentra: lo que concluye, con razón, es que la orden no
+ * entró entera.
+ *
+ * Se revisa por si vuelve a pasar, porque un rubro escondido no se denuncia
+ * solo: los totales siguen cuadrando mientras alguien busca.
+ */
+export function capitulosPartidos(rubros = []) {
+  const vistos = new Map();
+  for (const r of rubros) {
+    if (!r?.capitulo || r.oculto) continue;
+    const ya = vistos.get(r.capitulo) || new Set();
+    ya.add(Number(r.capitulo_orden) || 0);
+    vistos.set(r.capitulo, ya);
+  }
+  return [...vistos.entries()]
+    .filter(([, ordenes]) => ordenes.size > 1)
+    .map(([capitulo, ordenes]) => ({ capitulo, ordenes: [...ordenes].sort((a, b) => a - b) }));
+}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cuadreDeUnaOrden, cuadreDeOrdenes, comoSeDice } from "../src/modules/controlObra/cuadreDeOrdenes.js";
+import { cuadreDeUnaOrden, cuadreDeOrdenes, comoSeDice, capitulosPartidos } from "../src/modules/controlObra/cuadreDeOrdenes.js";
 
 // La OC-01 del Aereo, tal como esta: cuatro adiciones, una reduccion, el
 // desalojo en otro capitulo y los honorarios en el suyo.
@@ -84,4 +84,26 @@ test("el aviso dice cuantas no cuadran y cuanta plata hay en juego", () => {
   });
   assert.equal(cu.mal.length, 1);
   assert.match(comoSeDice(cu), /1 orden aprobada no cuadra/);
+});
+
+test("un capitulo partido en dos esconde un rubro a plena vista", () => {
+  // El desalojo de la OC-01 quedo en un segundo "PRELIMINARES Y VARIOS" al
+  // fondo del control: el rubro esta y suma, pero quien lo busca en su
+  // capitulo no lo encuentra y concluye que la orden no entro entera.
+  const partidos = capitulosPartidos([
+    { capitulo: "PRELIMINARES Y VARIOS", capitulo_orden: 1 },
+    { capitulo: "PRELIMINARES Y VARIOS", capitulo_orden: 1 },
+    { capitulo: "PRELIMINARES Y VARIOS", capitulo_orden: 9001, orden_cambio_id: 5 },
+    { capitulo: "ADICIONALES · OC-01", capitulo_orden: 9001 },
+  ]);
+  assert.equal(partidos.length, 1);
+  assert.equal(partidos[0].capitulo, "PRELIMINARES Y VARIOS");
+  assert.deepEqual(partidos[0].ordenes, [1, 9001]);
+});
+
+test("sin capitulos partidos no denuncia nada", () => {
+  assert.deepEqual(capitulosPartidos([
+    { capitulo: "PRELIMINARES Y VARIOS", capitulo_orden: 1 },
+    { capitulo: "ADICIONALES · OC-01", capitulo_orden: 9001 },
+  ]), []);
 });
