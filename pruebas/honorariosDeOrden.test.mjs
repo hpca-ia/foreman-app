@@ -81,3 +81,27 @@ test("sin porcentaje en la orden manda el del contrato de la obra", () => {
   assert.equal(pctQueCorresponde({ honorarios_pct: 0 }, { honorarios_pct: 10 }), 0);
   assert.equal(pctQueCorresponde({}, {}), 0);
 });
+
+test("el IVA se calcula DESPUES de los honorarios, y cada parte lleva el suyo", () => {
+  // La OC-03 de Diners Aereo: el pie decia que al control entraban $331,44
+  // —el IVA sobre el neto, olvidandose del honorario— cuando entran $364,58.
+  // Y no entran juntos: el trabajo va a los rubros de la orden y el honorario
+  // al capitulo de HONORARIOS, cada uno con su IVA, que es como se factura.
+  const l = [
+    { tipo: "aumenta", cantidad: 39, precio_unitario: 12 },
+    { tipo: "aumenta", cantidad: 1, precio_unitario: 165 },
+    { tipo: "aumenta", cantidad: 8, precio_unitario: 8.6 },
+    { tipo: "aumenta", cantidad: 39, precio_unitario: 8.6 },
+    { tipo: "aumenta", cantidad: 1, precio_unitario: 125 },
+    { tipo: "quita", cantidad: 39, precio_unitario: 22.41 },
+  ];
+  const c = honorariosDe({ lineas: l, pct: 10, iva: 15 });
+  assert.equal(c.neto, 288.21);
+  assert.equal(c.honorarios, 28.82);
+  assert.equal(c.subtotal, 317.03);
+  assert.equal(c.iva, 47.55);
+  assert.equal(c.total, 364.58);
+  // Las dos partes, cada una con su IVA, suman el mismo total.
+  const conIva = v => Math.round(v * 1.15 * 100) / 100;
+  assert.equal(conIva(c.neto) + conIva(c.honorarios), 364.58);
+});

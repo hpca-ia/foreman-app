@@ -1711,37 +1711,47 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     paga el total con IVA, y ese total con IVA es el que entra al
                     control de obra. Sin el pie, el papel firmado y el control
                     dicen dos números distintos y nadie puede atar los dos. */}
-                <div style={{ padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ flex: 1, fontSize: 12, color: colors.inkSoft, fontWeight: 600 }}>
-                      {ivaDeLaObra > 0 ? "Subtotal" : "Total"}
-                    </span>
-                    {/* Rojo cuando sube y verde cuando baja: el color habla de
-                        la plata del que paga, no del signo del número. */}
-                    <span style={{ fontSize: ivaDeLaObra > 0 ? 13.5 : 16, fontWeight: 700,
-                      color: total < 0 ? colors.success : colors.danger }}>
-                      {total < 0 ? "−" : "+"}${fmt(Math.abs(total))}
-                    </span>
-                  </div>
-                  {ivaDeLaObra > 0 && (
-                    <>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2 }}>
-                        <span style={{ flex: 1, fontSize: 11.5, color: colors.muted }}>IVA {fmt(ivaDeLaObra).replace(/[.,]00$/, "")}%</span>
-                        <span style={{ fontSize: 12.5, color: colors.muted }}>
-                          {total < 0 ? "−" : "+"}${fmt(Math.abs(total) * ivaDeLaObra / 100)}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 3 }}>
+                {/* EL IVA VA DESPUÉS DE LOS HONORARIOS, Y CADA COSA CON EL SUYO.
+                    El pie sumaba el IVA sobre el neto y se olvidaba del
+                    honorario: decía que al control entraban $331,44 cuando
+                    entran $364,58. Y no entran juntos: el trabajo va a los
+                    rubros de la orden y el honorario al capítulo de
+                    HONORARIOS, cada uno con su IVA, que es como se factura y
+                    como se descuenta después. */}
+                {(() => {
+                  const ivaDe = v => Math.round(v * ivaDeLaObra) / 100;
+                  const signo = v => (v < 0 ? "−" : "+");
+                  const color = v => (v < 0 ? colors.success : colors.danger);
+                  const renglon = (texto, valor, chico, nota) => (
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: chico ? 2 : 3 }}>
+                      <span style={{ flex: 1, fontSize: chico ? 11.5 : 12,
+                        color: chico ? colors.muted : colors.inkSoft, fontWeight: chico ? 400 : 600 }}>
+                        {texto}{nota && <span style={{ color: colors.muted, fontWeight: 400 }}> · {nota}</span>}
+                      </span>
+                      <span style={{ fontSize: chico ? 12.5 : 13.5, fontWeight: chico ? 400 : 700,
+                        color: chico ? colors.muted : color(valor) }}>
+                        {signo(valor)}${fmt(Math.abs(valor))}
+                      </span>
+                    </div>
+                  );
+                  return (
+                    <div style={{ padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}`, marginBottom: 8 }}>
+                      {renglon("Trabajo", total, false, "va a los rubros de la orden")}
+                      {ivaDeLaObra > 0 && renglon(`IVA ${fmt(ivaDeLaObra).replace(/[.,]00$/, "")}%`, ivaDe(total), true)}
+                      {hon.hay && renglon(`Honorarios ${hon.pct}%`, hon.honorarios, false, "van al capítulo de HONORARIOS")}
+                      {hon.hay && ivaDeLaObra > 0 && renglon(`IVA ${fmt(ivaDeLaObra).replace(/[.,]00$/, "")}%`, ivaDe(hon.honorarios), true)}
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4,
+                        paddingTop: 4, borderTop: `1px solid ${colors.neutralSoft}` }}>
                         <span style={{ flex: 1, fontSize: 12, color: colors.ink, fontWeight: 700 }}>
                           Total · es el que entra al control
                         </span>
-                        <span style={{ fontSize: 16, fontWeight: 700, color: total < 0 ? colors.success : colors.danger }}>
-                          {total < 0 ? "−" : "+"}${fmt(Math.abs(total) * (1 + ivaDeLaObra / 100))}
+                        <span style={{ fontSize: 16, fontWeight: 700, color: color(hon.subtotal) }}>
+                          {signo(hon.subtotal)}${fmt(Math.abs(hon.subtotal + ivaDe(hon.subtotal)))}
                         </span>
                       </div>
-                    </>
-                  )}
-                </div>
+                    </div>
+                  );
+                })()}
                 {/* ── LO QUE DEJA ESTA ORDEN ───────────────────────────────
                     Cobrado contra costado, en un cuadro y no en un renglón de
                     texto. Es el número con el que se pone el precio de la
