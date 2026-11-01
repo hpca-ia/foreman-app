@@ -1,3 +1,5 @@
+import { baseSinIva } from "./contratoDeLaObra.js";
+
 // Las cuentas de los beneficios de la obra.
 //
 // Aparte del resto porque es lo único que se puede probar sin un navegador —y
@@ -146,4 +148,63 @@ export function contraQueSeMide(ordenes = [], lineasPorOrden = {}) {
       + "aprobó, y el margen es ese precio menos lo que costó");
   }
   return { nuevas, sobreRubros, frase: `${partes.join(" · ")}.` };
+}
+
+/**
+ * Una diferencia de precio a la baja, vuelta fila de Beneficios.
+ *
+ * Lo presupuestado es el costo que la obra tenía cargado para esa cantidad, y
+ * lo real es lo que ahora lo cotizan. La diferencia —el monto del hallazgo— es
+ * el beneficio, y queda escrito contra qué rubro se midió: un ahorro sin el
+ * rubro al lado no se puede defender en una reunión.
+ */
+export function eficienciaDeLaDiferencia(linea, rubro, analisis, contra = "costo") {
+  const n = v => Number(v) || 0;
+  const c2 = v => Math.round(n(v) * 100) / 100;
+
+  // LO QUE PAGAMOS NOSOTROS SALE DE UN RUBRO QUE YA ESTÁ VENDIDO.
+  //
+  // Cuando una diferencia se decide "la pagamos nosotros", no es que la obra
+  // la regale: es que ese trabajo está cubierto por un rubro del contrato —el
+  // que se señala al lado— y entonces se ejecuta contra su plata. El cliente no
+  // tiene nada que aprobar, porque ya lo pagó cuando firmó ese rubro.
+  //
+  // Lo que queda a favor es la distancia entre lo que ese rubro se vendió y lo
+  // que de verdad costó hacerlo, y eso es beneficio del proyecto. La base, en
+  // ese caso, es el PRECIO del rubro sin IVA —no su costo cargado— porque es
+  // contra el precio que se está midiendo lo que la obra se ahorró de pagar
+  // aparte.
+  const precioSinIva = rubro && n(rubro.cantidad)
+    ? c2((baseSinIva(rubro) / n(rubro.cantidad)) * n(linea.cantidad)) : null;
+  const porCosto = rubro && rubro.costo_unitario != null
+    ? c2(n(rubro.costo_unitario) * n(linea.cantidad)) : c2(n(linea.monto));
+
+  const porPrecio = contra === "precio" && precioSinIva != null;
+  const presupuestado = porPrecio ? precioSinIva : porCosto;
+
+  // QUÉ ES `monto` EN CADA CASO, que es donde esto se equivocaba.
+  //
+  // En una diferencia de precio, el monto guardado ES LA DIFERENCIA —lo que
+  // cambió el unitario por la cantidad— así que lo que de verdad va a costar
+  // es el presupuestado menos esa diferencia. En una que se paga con la plata
+  // de un rubro propio, el monto es EL COSTO ENTERO del renglón.
+  //
+  // Restarlo igual que al otro daba la cuenta al revés: el tablero de $380
+  // contra un rubro vendido en $1.008 entraba como "$1.008 → $628", o sea
+  // $380 de beneficio cuando el beneficio son $628. El error se lleva la
+  // mitad justo en el renglón donde más plata hay.
+  const real = porPrecio ? c2(n(linea.monto)) : c2(presupuestado - n(linea.monto));
+  return {
+    obra_rubro_id: linea.obra_rubro_id || null,
+    descripcion: String(linea.descripcion || "").slice(0, 200),
+    cantidad: n(linea.cantidad) || null,
+    unidad: linea.unidad || null,
+    presupuestado,
+    real,
+    proveedor: analisis?.proveedor || null,
+    nota: (contra === "precio"
+      ? `Se hace con la plata de un rubro ya contratado${rubro?.numero != null ? ` (rubro ${rubro.numero})` : ""}`
+      : "Lo cotizan por debajo del costo cargado")
+      + (analisis?.titulo ? ` · ${analisis.titulo}` : ""),
+  };
 }

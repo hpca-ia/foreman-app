@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { totales, netoPorRubro, esPrevisto, contraQueSeMide } from "../src/modules/controlObra/cuentaBeneficios.js";
+import { totales, netoPorRubro, esPrevisto, contraQueSeMide, eficienciaDeLaDiferencia }
+  from "../src/modules/controlObra/cuentaBeneficios.js";
 
 const b = [
   { obra_rubro_id: 1, presupuestado: 1000, real: 800, estado: "confirmado" },   // +200
@@ -57,4 +58,29 @@ test("el rubro nuevo de una orden no se mide contra el presupuesto: no estaba", 
 test("sin órdenes aprobadas no hay nada que explicar", () => {
   assert.equal(contraQueSeMide([], {}), null);
   assert.equal(contraQueSeMide([{ id: 1, estado: "aprobada", anulada: true }], { 1: [{ tipo: "aumenta" }] }), null);
+});
+
+test("lo que se paga con un rubro propio: el beneficio es el precio menos el costo", () => {
+  // El tablero cuesta $380 y sale de un rubro vendido en $1.008: quedan $628
+  // a favor. Restando el monto como si fuera una diferencia daba "$1.008 →
+  // $628", o sea $380 de beneficio: la cuenta al reves, y justo al reves en
+  // el renglon donde mas plata hay.
+  const b = eficienciaDeLaDiferencia(
+    { descripcion: "Tablero", cantidad: 1, unidad: "U", monto: 380, obra_rubro_id: 7 },
+    { id: 7, numero: 3, cantidad: 1, total_base: 1159.2, iva_pct: 15 },
+    { titulo: "Proforma noviembre" }, "precio");
+  assert.equal(b.presupuestado, 1008);
+  assert.equal(b.real, 380);
+  assert.equal(b.presupuestado - b.real, 628);
+});
+
+test("la eficiencia de precio sigue midiendose contra el costo cargado", () => {
+  // Aca el monto SI es la diferencia: costaba 48,50 y lo cotizan a 44, sobre
+  // 12 unidades son 54 a favor.
+  const b = eficienciaDeLaDiferencia(
+    { descripcion: "Luminarias", cantidad: 12, unidad: "U", monto: 54, obra_rubro_id: 1 },
+    { id: 1, cantidad: 12, costo_unitario: 48.5, total_base: 816 },
+    { titulo: "Proforma" }, "costo");
+  assert.equal(b.presupuestado, 582);
+  assert.equal(b.real, 528);
 });

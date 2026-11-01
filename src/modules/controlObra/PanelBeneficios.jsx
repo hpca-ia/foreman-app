@@ -824,7 +824,10 @@ Rubros de la obra: ${lista}`;
                       {b.origen === "manual" ? " · a mano" : ""}
                       {esDeOrden(b) ? " · orden de cambio: lo cobrado contra su cotización" : ""}
                       {esPrevisto(b) ? " · todavía no se compró" : ""}
-                      {b.nota ? ` · ${b.nota}` : ""}
+                      {/* La marca [dif:N] es de la máquina —sirve para rehacer
+                          las filas de un análisis sin duplicarlas— y no tiene
+                          nada que decirle a quien lee. */}
+                      {b.nota ? ` · ${String(b.nota).replace(/\s*·?\s*\[dif:\d+\]/g, "").trim()}` : ""}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0, fontSize: 11, color: colors.muted }}>
