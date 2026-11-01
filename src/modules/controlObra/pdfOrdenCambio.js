@@ -74,6 +74,8 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   // El honorario del contrato sobre el neto de esta orden, para el pie.
   const hon = honorariosDe({ lineas, pct: pctQueCorresponde(orden, obra), iva });
   const afecta = comoSeDice(orden);
+  // La orden anulada que esta viene a reemplazar, si la hay.
+  const reemplazada = orden?.reemplazada || null;
   const ancho = doc.internal.pageSize.getWidth();
   const margen = 40;
   const util = ancho - margen * 2;
@@ -85,10 +87,20 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   y += 6;
 
   if (orden.anulada) {
+    // POR QUÉ SE ANULÓ, EN EL PAPEL. El sello solo no le explica nada a quien
+    // la recibe: el cliente que tiene dos órdenes por el mismo trabajo quiere
+    // saber cuál vale y qué pasó con la otra.
+    const porQue = String(orden.anulada_motivo || "").trim();
+    const alto = porQue ? 28 : 18;
     y += 12;
-    doc.setFillColor(254, 242, 242).rect(margen, y - 11, util, 18, "F");
+    doc.setFillColor(254, 242, 242).rect(margen, y - 11, util, alto, "F");
     doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...ROJO);
     doc.text(seguro("ORDEN DE CAMBIO ANULADA — NO EJECUTADA"), ancho / 2, y + 1, { align: "center" });
+    if (porQue) {
+      doc.setFont("helvetica", "normal").setFontSize(8);
+      doc.text(seguro(porQue).slice(0, 150), ancho / 2, y + 11, { align: "center" });
+      y += 10;
+    }
     y += 12;
   }
   y += 12;
@@ -103,6 +115,11 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
     // recibe quiere saber antes que nada si le cuesta plata, si le cambia lo
     // que se construye o si le corre la fecha de entrega.
     ...(afecta ? [["AFECTA:", afecta, "", ""]] : []),
+    // A CUÁL REEMPLAZA. Una orden que sale a corregir otra anulada tiene que
+    // decirlo en la carátula: si no, el cliente recibe dos papeles por el
+    // mismo trabajo y no sabe cuál vale.
+    ...(reemplazada ? [["REEMPLAZA A:", `${reemplazada.codigo || `OC-${String(reemplazada.numero ?? "").padStart(2, "0")}`}`
+      + `${reemplazada.anulada_motivo ? ` · anulada: ${reemplazada.anulada_motivo}` : " · anulada"}`, "", ""]] : []),
   ];
   tabla(autoTable, doc, {
     startY: y,

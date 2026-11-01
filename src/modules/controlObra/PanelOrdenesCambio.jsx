@@ -2225,7 +2225,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         setBajando(o.id); setAviso("");
                         try {
                           const doc = await pdfDeOrden({
-                            orden: o, lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
+                            // La anulada que esta reemplaza viaja con la orden:
+                            // la carátula la menciona para que el cliente sepa
+                            // cuál de los dos papeles vale.
+                            orden: { ...o, reemplazada: ordenes.find(x => Number(x.id) === Number(o.reemplaza_a)) || null },
+                            lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
                             codigo: codigoDe(o), subtotales: sub,
                             // A cuánto asciende el contrato va solo si alguien
                             // lo decidió para ESTA orden.
@@ -2268,7 +2272,11 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         let pdf = null;
                         try {
                           const doc = await pdfDeOrden({
-                            orden: o, lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
+                            // La anulada que esta reemplaza viaja con la orden:
+                            // la carátula la menciona para que el cliente sepa
+                            // cuál de los dos papeles vale.
+                            orden: { ...o, reemplazada: ordenes.find(x => Number(x.id) === Number(o.reemplaza_a)) || null },
+                            lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
                             codigo: codigoDe(o), subtotales: sub,
                             resumenContrato: o.mostrar_contrato ? resumen : null,
                             aprobadores: aprobadores[o.id] || [], iva: ivaDeLaObra,
