@@ -107,7 +107,10 @@ export function porQueFallo(res, data, quehacer = "armarlo") {
  * precisión, no de criterio: el dato está en el papel. Acá importa acertar y
  * no inventar, y eso ya lo hace bien un modelo intermedio.
  */
-export const LECTURA = "claude-sonnet-4-5";
+// Sube a la generación 5: leer un papel torcido y no inventar lo que no está
+// es exactamente donde se nota el modelo, y acá un renglón mal leído se
+// convierte en una orden de cambio mal cobrada.
+export const LECTURA = "claude-sonnet-5-5";
 
 /**
  * CORTO. Una frase que entra, una estructura que sale.

@@ -37,14 +37,34 @@ export async function leerConNova(original, rubros = [], onPaso) {
 
   const leida = await leerCotizacion(file, {
     lista, modelo: LECTURA, hojaComoTexto, onPaso,
+    // UN CORTE DEL SERVIDOR NO ES UNA RESPUESTA, ASÍ QUE SE VUELVE A PREGUNTAR.
+    //
+    // El servidor corta la petición al minuto, y una proforma larga o un PDF
+    // escaneado a veces lo roza: la misma lectura, pedida otra vez, entra.
+    // Hacer que el que subió el archivo lo vuelva a subir para intentar lo
+    // mismo es hacerle a mano el trabajo de un reintento, y con la vuelta
+    // perdida casi nadie prueba de nuevo: la proforma queda sin leer.
+    //
+    // Se reintenta una sola vez y solo cuando el corte fue por tiempo. Un error
+    // de verdad —un archivo ilegible, una clave vencida— se dice enseguida, sin
+    // hacer esperar otro minuto para repetir la misma mala noticia.
     pedir: async cuerpo => {
-      const { res, data } = await pedirANova(cuerpo);
-      if (!res.ok || data?.error) {
-        throw new Error(data?.error?.message || data?.error
-          || (res.status === 504 ? "NOVA se demoró más de un minuto leyendo y el servidor la cortó. Probá con menos hojas."
+      let ultimo = null;
+      for (let intento = 0; intento < 2; intento++) {
+        if (intento) onPaso?.("el servidor cortó la primera lectura · probando otra vez");
+        const { res, data } = await pedirANova(cuerpo);
+        if (res.ok && !data?.error) {
+          return { texto: textoDeNova(data) || "", cortado: data?.stop_reason === "max_tokens" };
+        }
+        const porTiempo = res.status === 504 || res.status === 408 || res.status === 524;
+        ultimo = new Error(data?.error?.message || data?.error
+          || (porTiempo
+            ? "NOVA se demoró más de un minuto leyendo y el servidor la cortó las dos veces que lo intentó. "
+              + "Si es un Excel, probá con menos hojas; si es un PDF escaneado, con menos páginas."
             : `El servidor se cortó leyendo el archivo (${res.status}).`));
+        if (!porTiempo) throw ultimo;
       }
-      return { texto: textoDeNova(data) || "", cortado: data?.stop_reason === "max_tokens" };
+      throw ultimo;
     },
   });
   // LO QUE NO SE SOSTIENE VUELVE SIN RUBRO. NOVA empareja bien casi siempre,
