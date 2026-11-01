@@ -14,7 +14,7 @@ import {
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
-import { copiaDelRubro, globalMultiplicado } from "./desconfiarDeNova.js";
+import { copiaDelRubro, globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
 import { baseSinIva } from "./contratoDeLaObra";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
@@ -749,7 +749,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 // se sostiene, no alcanza con haberlo arreglado para las
                 // próximas lecturas —hay que decirlo acá, que es donde alguien
                 // está por decidir contra ese número.
-                const dudoso = rubro && (copiaDelRubro(l.descripcion, rubro) || globalMultiplicado(l, rubro));
+                // Se mira el texto DEL PAPEL, no el de la tarjeta: la tarjeta
+                // usa el nombre del rubro a propósito en las diferencias de
+                // precio y de cantidad, así que compararla con el rubro daría
+                // siempre que sí.
+                const dudoso = rubro && !!l.texto_papel
+                  && (copiaDelRubro(l.texto_papel, rubro)
+                    || unidadesDistintas({ unidad: l.unidad_papel }, rubro)
+                    || globalMultiplicado({ cantidad: l.cantidad_papel }, rubro));
                 return (
                   <div key={l.id} style={{ ...caja, marginBottom: 6, padding: "9px 11px",
                     opacity: revisada && l.decision === "pendiente" ? 0.85 : 1,
@@ -776,6 +783,26 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                         {/* EL RUBRO DEL CONTRATO, CON SUS NÚMEROS. Es contra
                             esto que se está comparando, y es lo que contesta si
                             la diferencia es real. */}
+                        {/* LO QUE DICE LA COTIZACIÓN, con sus palabras.
+                            La descripción de arriba usa el nombre del rubro del
+                            contrato —es lo correcto: lo que cambió es su precio
+                            y no su nombre— y entonces el papel desaparecía de
+                            la pantalla: uno leía un texto, lo iba a buscar a la
+                            cotización y no estaba. Con los dos a la vista, un
+                            emparejamiento equivocado se ve solo: "1 Mes de
+                            alquiler" contra "1 glb de instalación" no necesita
+                            que nadie explique que ahí hay algo que no cierra. */}
+                        {l.texto_papel && l.texto_papel !== l.descripcion && (
+                          <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 1, lineHeight: 1.45 }}>
+                            <span style={{ color: colors.muted }}>en la cotización: </span>
+                            “{l.texto_papel}”
+                            {l.cantidad_papel != null && (
+                              <span style={{ color: colors.muted }}>
+                                {" "}· {fmt(l.cantidad_papel)} {l.unidad_papel || ""}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {rubro ? (
                           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1, marginBottom: 3 }}>
                             contra <strong style={{ color: colors.inkSoft }}>{rubro.numero || ""}{" "}
@@ -819,10 +846,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                         {dudoso && (
                           <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 2, lineHeight: 1.45 }}>
                             <strong>Este emparejamiento no se sostiene.</strong>{" "}
-                            {copiaDelRubro(l.descripcion, rubro)
+                            {copiaDelRubro(l.texto_papel, rubro)
                               ? "El texto del renglón es el del rubro del contrato, no el del papel del proveedor."
-                              : `El rubro es un global de ${fmt(rubro.cantidad)} ${rubro.unidad || ""} y el renglón `
-                                + `trae ${fmt(l.cantidad)}.`}
+                              : unidadesDistintas({ unidad: l.unidad_papel }, rubro)
+                                ? `El papel lo cobra por ${l.unidad_papel} y el rubro está contratado por ${rubro.unidad}.`
+                                : `El rubro es un global de ${fmt(rubro.cantidad)} ${rubro.unidad || ""} y el renglón `
+                                  + `trae ${fmt(l.cantidad_papel)}.`}
                             {" "}No decidas contra estos números: señalá el rubro correcto, o volvé a leer la
                             proforma —desde hoy NOVA transcribe el papel sin ver la lista de rubros—.
                           </div>

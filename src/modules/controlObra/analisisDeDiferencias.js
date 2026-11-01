@@ -70,10 +70,21 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     monto: Number(l.monto) || 0,
     obra_rubro_id: l.obra_rubro_id || null,
     hallazgo: l.hallazgo || null,
+    // El renglón del papel, para poder ver la cotización contra el presupuesto
+    // sin abrir el PDF.
+    texto_papel: l.textoPapel || null,
+    unidad_papel: l.unidadPapel || null,
+    cantidad_papel: l.cantidadPapel ?? null,
     orden: i,
   }));
   if (filas.length) {
-    const { error: e2 } = await supabase.from("obra_analisis_lineas").insert(filas);
+    let { error: e2 } = await supabase.from("obra_analisis_lineas").insert(filas);
+    // Sin la 155 el análisis entra igual, sin el texto del papel: vale más
+    // guardarlo que frenarlo por una columna nueva.
+    if (e2 && /texto_papel|unidad_papel|cantidad_papel|column|schema cache/i.test(e2.message)) {
+      const sinPapel = filas.map(({ texto_papel, unidad_papel, cantidad_papel, ...r }) => r);
+      ({ error: e2 } = await supabase.from("obra_analisis_lineas").insert(sinPapel));
+    }
     if (e2) return { error: falta(e2) ? SIN_145 : e2.message, analisis: data };
   }
   return { analisis: data };

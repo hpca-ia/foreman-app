@@ -59,3 +59,27 @@ test("un emparejamiento que se sostiene no se toca", () => {
   assert.equal(r.sospechosos, 0);
   assert.equal(r.porQue, null);
 });
+
+test("la unidad dice que se esta comprando, y es la prueba mas barata", () => {
+  // El alquiler mensual del tablero de obra —$115,56 POR MES— calzo con
+  // "INSTALACION DE ACOMETIDA PROVISIONAL, TABLERO Y LUMINARIAS", un global de
+  // $1.159,20, y la pantalla dedujo que el proveedor habia bajado el precio
+  // mil dolares. La descripcion se parecia; la unidad no.
+  const r = limpiarEmparejamientos([
+    { descripcion: "Suministro de 1 tablero electrico industrial. Alquiler y transporte",
+      cantidad: 1, unidad: "Mes", monto: 115.56, rubro_id: 3 },
+  ], [rubro]);
+  assert.equal(r.items[0].rubro_id, null);
+  assert.match(r.motivos[0].porQue, /por Mes y el rubro est. contratado por glb/i);
+});
+
+test("unidades de la misma familia no molestan, y una rara no opina", () => {
+  const porML = { id: 9, descripcion: "Alimentador 3x12 THHN", unidad: "ML", cantidad: 200 };
+  const r = limpiarEmparejamientos(
+    [{ descripcion: "Alimentador 3X12 THHN AWG para circuitos", cantidad: 200, unidad: "m", rubro_id: 9 }], [porML]);
+  assert.equal(r.items[0].rubro_id, 9);
+  // "jgo" no esta en ninguna familia: no es motivo para tirar el emparejamiento.
+  const raro = limpiarEmparejamientos(
+    [{ descripcion: "Juego de herrajes", cantidad: 2, unidad: "jgo", rubro_id: 9 }], [porML]);
+  assert.equal(raro.items[0].rubro_id, 9);
+});

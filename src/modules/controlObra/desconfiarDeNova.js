@@ -93,7 +93,9 @@ export function limpiarEmparejamientos(items = [], rubros = []) {
     if (!rubro) return it;
     let porQue = null;
     if (copiaDelRubro(it.descripcion, rubro)) porQue = "el texto es el del rubro, no el del papel";
-    else if (globalMultiplicado(it, rubro)) porQue = "el rubro es un global de una unidad y el renglón trae varias";
+    else if (unidadesDistintas(it, rubro)) {
+      porQue = `el papel lo cobra por ${it.unidad} y el rubro está contratado por ${rubro.unidad}`;
+    } else if (globalMultiplicado(it, rubro)) porQue = "el rubro es un global de una unidad y el renglón trae varias";
     else if ((cuantosPorRubro.get(Number(it.rubro_id)) || 0) >= 3
       && copiaDelRubro(it.descripcion, rubro)) porQue = "tres renglones distintos contra el mismo rubro";
     if (!porQue) return it;
@@ -111,3 +113,45 @@ export function limpiarEmparejamientos(items = [], rubros = []) {
       : null,
   };
 }
+
+// LA UNIDAD ES LA PRUEBA MÁS BARATA DE TODAS.
+//
+// Un renglón que se cobra POR MES no es el mismo trabajo que un rubro que se
+// contrató como global, y uno medido en metros lineales no es uno que se cuenta
+// por unidad. La descripción puede parecerse —"tablero eléctrico" aparece en
+// los dos— pero la unidad no se parece: dice qué se está comprando.
+//
+// Es lo que pasó con el alquiler mensual del tablero de obra: $115,56 POR MES
+// calzó con "INSTALACIÓN DE ACOMETIDA PROVISIONAL, TABLERO Y LUMINARIAS", un
+// global de $1.159,20, y la pantalla dedujo que el proveedor había bajado el
+// precio mil dólares.
+const FAMILIA = [
+  ["u", ["u", "un", "und", "unid", "unidad", "unidades", "pza", "pieza", "c u", "cu"]],
+  ["glb", ["glb", "gbl", "global", "gl", "lote", "suma global"]],
+  ["m", ["m", "ml", "metro", "metros", "m lineal", "mtl"]],
+  ["m2", ["m2", "m²", "mt2", "metro2"]],
+  ["m3", ["m3", "m³", "mt3"]],
+  ["kg", ["kg", "kilo", "kilos", "kgs"]],
+  ["tiempo", ["mes", "meses", "dia", "dias", "semana", "semanas", "hora", "horas", "jornal", "jornales"]],
+  ["pto", ["pto", "ptos", "punto", "puntos"]],
+];
+
+/** La familia de una unidad, o null si no se reconoce (y entonces no opina). */
+export function familiaDe(unidad) {
+  const u = pelado(unidad);
+  if (!u) return null;
+  const f = FAMILIA.find(([, vs]) => vs.includes(u));
+  return f ? f[0] : null;
+}
+
+/**
+ * ¿Están midiendo cosas distintas?
+ *
+ * Solo opina cuando reconoce las dos unidades: una unidad rara —"jgo", "rollo"—
+ * no es motivo para tirar un emparejamiento que puede estar bien.
+ */
+export const unidadesDistintas = (linea, rubro) => {
+  const a = familiaDe(linea?.unidad);
+  const b = familiaDe(rubro?.unidad);
+  return !!a && !!b && a !== b;
+};

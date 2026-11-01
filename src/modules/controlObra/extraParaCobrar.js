@@ -52,6 +52,11 @@ export function loQueNoEstaPresupuestado(comparacion) {
     // No hay precio acordado: hay que ponerle uno.
     precioUnitario: null,
     por: "no está en el presupuesto",
+    // Acá los dos textos coinciden —no hay rubro con el cual confundirse— pero
+    // se guarda igual: así todas las diferencias se miran del mismo modo.
+    textoPapel: l.descripcion || null,
+    unidadPapel: l.unidad || null,
+    cantidadPapel: n(l.cantidad) || null,
     hallazgo: "nuevo",
   }));
 
@@ -119,6 +124,13 @@ export function loQueNoEstaPresupuestado(comparacion) {
       por: `${contraPrecio ? "el cliente lo vio a" : "costaba"} $${c2(vara)} y ahora lo cotizan a $${c2(l.puProforma)}`
         + (n(l.cantidad) !== n(l.cantidadRubro) && n(l.cantidadRubro) > 0
           ? ` · sobre las ${comun} ${l.unidadRubro || l.unidad || "u"} que los dos tienen, la cantidad va aparte` : ""),
+      // EL RENGLÓN TAL COMO LO ESCRIBIÓ EL PROVEEDOR. La descripción de arriba
+      // usa el nombre del rubro del contrato —es lo correcto, lo que cambió es
+      // su precio y no su nombre— y entonces el papel desaparece de la
+      // pantalla: uno lee un texto, lo va a buscar a la cotización y no está.
+      textoPapel: l.descripcion || null,
+      unidadPapel: l.unidad || null,
+      cantidadPapel: n(l.cantidad) || null,
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
       deOrden: deDonde(l.rubro),
@@ -148,6 +160,13 @@ export function loQueNoEstaPresupuestado(comparacion) {
       // negociación que no hacía falta.
       precioUnitario: l.puRubro != null ? c2(l.puRubro) : null,
       por: `el rubro tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y la proforma trae ${n(l.cantidad)}`.trim(),
+      // EL RENGLÓN TAL COMO LO ESCRIBIÓ EL PROVEEDOR. La descripción de arriba
+      // usa el nombre del rubro del contrato —es lo correcto, lo que cambió es
+      // su precio y no su nombre— y entonces el papel desaparece de la
+      // pantalla: uno lee un texto, lo va a buscar a la cotización y no está.
+      textoPapel: l.descripcion || null,
+      unidadPapel: l.unidad || null,
+      cantidadPapel: n(l.cantidad) || null,
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
       deOrden: deDonde(l.rubro),
@@ -175,6 +194,13 @@ export function loQueNoEstaPresupuestado(comparacion) {
       costoUnitario: c2(l.puProforma),
       precioUnitario: l.puRubro != null ? c2(l.puRubro) : null,
       por: `el contrato tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y acá figuran ${n(l.cantidad)}`.trim(),
+      // EL RENGLÓN TAL COMO LO ESCRIBIÓ EL PROVEEDOR. La descripción de arriba
+      // usa el nombre del rubro del contrato —es lo correcto, lo que cambió es
+      // su precio y no su nombre— y entonces el papel desaparece de la
+      // pantalla: uno lee un texto, lo va a buscar a la cotización y no está.
+      textoPapel: l.descripcion || null,
+      unidadPapel: l.unidad || null,
+      cantidadPapel: n(l.cantidad) || null,
       rubro_id: l.rubro.id,
       rubro_codigo: String(l.rubro.numero ?? l.rubro.codigo ?? ""),
       deOrden: deDonde(l.rubro),
