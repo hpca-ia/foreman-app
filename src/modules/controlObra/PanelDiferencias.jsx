@@ -11,7 +11,7 @@ import { crearOrden, agregarLinea } from "./ordenesDeCambio";
 import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
-  enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa,
+  enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { baseSinIva } from "./contratoDeLaObra";
@@ -111,6 +111,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [pct, setPct] = useState("20");
+  // Qué se está mirando: todas, las que nadie abrió, las sin decidir, las anotadas.
+  const [filtro, setFiltro] = useState("todas");
 
   // TODO EL CONTRATO VIGENTE, no solo el original: una propuesta nueva puede
   // mover un rubro que ya cambió una orden anterior.
@@ -215,19 +217,44 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     onCambio?.();
   }
 
+  /** Ya la miré, aunque todavía no la decida. */
+  async function revisar(l) {
+    const revisada = !l.revisado_at;
+    setLineas(xs => xs.map(x => (x.id === l.id
+      ? { ...x, revisado_at: revisada ? new Date().toISOString() : null,
+        revisado_nombre: revisada ? (currentUser?.name || null) : null }
+      : x)));
+    const err = await marcarRevisada(l.id, revisada, currentUser);
+    if (err) setError(err);
+  }
+
+  /**
+   * LO QUE SE ANOTA SE GUARDA SOLO, al salir del campo.
+   *
+   * Un botón de guardar por renglón son cincuenta botones, y una nota que se
+   * pierde al cambiar de pestaña no la escribe nadie dos veces.
+   */
+  async function guardarNota(l, texto) {
+    if (String(texto || "").trim() === String(l.nota || "").trim()) return;
+    setLineas(xs => xs.map(x => (x.id === l.id ? { ...x, nota: texto } : x)));
+    const err = await anotar(l.id, texto);
+    if (err) setError(err);
+  }
+
   async function marcar(l, decision) {
-    const nota = decision === "incluido" || decision === "nuestro"
-      ? window.prompt(decision === "incluido"
-        ? "¿Dónde estaba incluido? Queda escrito para cuando el proveedor vuelva a pedirlo."
-        : "¿Qué pasó? Esto lo paga la obra, así que conviene saber por qué.", "")
-      : null;
-    if (nota === null && (decision === "incluido" || decision === "nuestro")) return;
+    // LA NOTA YA NO SE PIDE EN UNA VENTANITA. Se escribe en el renglón, en
+    // cualquier momento y con cualquier decisión: un prompt que aparece al
+    // marcar se contesta con un enter para sacárselo de encima, y lo que
+    // quedaba escrito era "x". El campo está abajo, a la vista, y se guarda
+    // solo.
+    const nota = undefined;
     setOcupado(true);
     const err = await decidir(l.id, decision, nota, currentUser);
     setOcupado(false);
     if (err) { setError(err); return; }
     const frescas = lineas.map(x => (x.id === l.id
-      ? { ...x, decision, nota, decidido_nombre: currentUser?.name || null, decidido_at: new Date().toISOString() }
+      ? { ...x, decision, decidido_nombre: currentUser?.name || null,
+        decidido_at: new Date().toISOString(), revisado_at: x.revisado_at || new Date().toISOString() }
       : x));
     setLineas(frescas);
     await pasarLasEficiencias(frescas);
@@ -262,7 +289,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     setOcupado(false);
     const ids = new Set(cuales.map(x => x.id));
     const frescas = lineas.map(x => (ids.has(x.id)
-      ? { ...x, decision, decidido_nombre: currentUser?.name || null, decidido_at: new Date().toISOString() }
+      ? { ...x, decision, decidido_nombre: currentUser?.name || null,
+        decidido_at: new Date().toISOString(), revisado_at: x.revisado_at || new Date().toISOString() }
       : x));
     setLineas(frescas);
     await pasarLasEficiencias(frescas);
@@ -327,6 +355,20 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     const porDecidir = lineas.filter(l => l.decision === "pendiente").length;
     const aCobrar = lineas.filter(l => l.decision === "cobrar");
     const total = aCobrar.reduce((t, l) => t + (Number(l.monto) || 0), 0);
+    const va = comoVa(lineas);
+    // POR DÓNDE VOY. Cincuenta renglones no se miran de una sentada, y lo que
+    // hace falta al volver es saber dónde se quedó uno, no cuántos faltan.
+    const pasa = l => (filtro === "todas" ? true
+      : filtro === "sinMirar" ? !l.revisado_at && l.decision === "pendiente"
+      : filtro === "pendientes" ? l.decision === "pendiente"
+      : filtro === "anotadas" ? !!String(l.nota || "").trim()
+      : true);
+    const FILTROS = [
+      ["todas", `Todas · ${lineas.length}`],
+      ["sinMirar", `Sin mirar · ${va.sinMirar}`],
+      ["pendientes", `Sin decidir · ${va.sinDecidir}`],
+      ["anotadas", `Con nota · ${va.anotadas}`],
+    ];
     return (
       <div style={{ fontFamily: colors.font }}>
         <button onClick={() => { setAbierto(null); cargar(); }}
@@ -338,7 +380,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           {abierto.titulo || "Propuesta"}{abierto.proveedor ? ` · ${abierto.proveedor}` : ""}
         </div>
         <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>
-          {lineas.length} {lineas.length === 1 ? "diferencia" : "diferencias"} · {porDecidir} sin decidir
+          {lineas.length} {lineas.length === 1 ? "diferencia" : "diferencias"} · {va.revisadas} revisadas
+          {va.miradasSinDecidir > 0 && <> · {va.miradasSinDecidir} miradas y dejadas pendientes</>}
+          {porDecidir > 0 && <> · {porDecidir} sin decidir</>}
           {enlaces[abierto.id] && <> · <a href={enlaces[abierto.id]} target="_blank" rel="noreferrer"
             style={{ color: colors.brand }}>ver el papel</a></>}
           {abierto.estado === "resuelto" && <> · <strong style={{ color: colors.success }}>ya se armó su orden</strong></>}
@@ -374,16 +418,54 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             Y CONTRA QUÉ SE COMPARÓ, a la vista: sin ver la cantidad contratada
             y su precio no se puede decidir nada, y mirarlo en otra pestaña con
             cincuenta renglones abiertos no lo hace nadie. */}
+        {/* LA BARRA DE LO REVISADO. Es la respuesta a "¿dónde me quedé?", que
+            es la pregunta con la que uno vuelve a un análisis de cincuenta
+            renglones al día siguiente. */}
+        {lineas.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ height: 5, background: colors.neutralSoft, borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ width: `${Math.round((va.revisadas / lineas.length) * 100)}%`, height: "100%",
+                background: va.revisadas === lineas.length ? colors.success : colors.brand }} />
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 7 }}>
+              {FILTROS.map(([k, texto]) => (
+                <button key={k} onClick={() => setFiltro(k)}
+                  style={{ border: `1px solid ${filtro === k ? colors.brand : colors.border}`,
+                    background: filtro === k ? colors.brand : "#fff",
+                    color: filtro === k ? "#fff" : colors.muted,
+                    borderRadius: 20, padding: "3px 11px", fontSize: 11, cursor: "pointer",
+                    fontFamily: colors.font, fontWeight: filtro === k ? 700 : 400 }}>
+                  {texto}
+                </button>
+              ))}
+              {va.sinMirar > 0 && filtro !== "sinMirar" && (
+                <span style={{ fontSize: 10.5, color: colors.muted, alignSelf: "center" }}>
+                  Tildá cada renglón a medida que lo mirás: lo revisado no se pierde al salir.
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {GRUPOS.map(([clave, titulo, pista]) => {
-          const suyas = lineas.filter(l => l.hallazgo === clave);
-          if (!suyas.length) return null;
-          const suma = suyas.reduce((t, l) => t + (Number(l.monto) || 0), 0);
+          // EL TOTAL DEL GRUPO ES EL DEL GRUPO, no el de lo que se está
+          // mirando: un filtro que además cambia los montos deja de ser un
+          // filtro y pasa a ser otra cuenta.
+          const delGrupo = lineas.filter(l => l.hallazgo === clave);
+          if (!delGrupo.length) return null;
+          const suyas = delGrupo.filter(pasa);
+          const suma = delGrupo.reduce((t, l) => t + (Number(l.monto) || 0), 0);
           const sinDecidir = suyas.filter(l => l.decision === "pendiente");
           return (
             <div key={clave} style={{ marginBottom: 14 }}>
               <div style={{ display: "flex", gap: 9, alignItems: "baseline", flexWrap: "wrap", marginBottom: 2 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, letterSpacing: 0.3 }}>
-                  {titulo} · {suyas.length} · ${fmt(suma)}
+                  {titulo} · {delGrupo.length} · ${fmt(suma)}
+                  {suyas.length !== delGrupo.length && (
+                    <span style={{ fontWeight: 400, color: colors.muted }}>
+                      {" "}· se muestran {suyas.length}
+                    </span>
+                  )}
                 </div>
                 {/* CINCUENTA DECISIONES DE A UNA NO LAS TOMA NADIE. Casi
                     siempre el grupo entero va para el mismo lado, y lo que se
@@ -394,7 +476,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
                       fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
                     {clave === "bajo_precio" ? "son eficiencia" : "se cobran"}{" "}
-                    {sinDecidir.length === suyas.length ? "todas" : `las ${sinDecidir.length} sin decidir`}
+                    {sinDecidir.length === delGrupo.length ? "todas" : `las ${sinDecidir.length} sin decidir`}
                   </button>
                 )}
               </div>
@@ -441,10 +523,28 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 const dejaria = (l.hallazgo === "mas_cantidad" || l.hallazgo === "nuevo")
                   && puRubro != null && puPropuesta != null && puRubro > puPropuesta
                   ? (puRubro - puPropuesta) * Number(l.cantidad) : null;
+                const revisada = !!l.revisado_at;
                 return (
                   <div key={l.id} style={{ ...caja, marginBottom: 6, padding: "9px 11px",
+                    opacity: revisada && l.decision === "pendiente" ? 0.85 : 1,
                     borderLeft: `3px solid ${COLOR_DECISION[l.decision] || colors.border}` }}>
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      {/* EL CHECK DE "YA LA MIRÉ", lo primero del renglón.
+                          Revisar y decidir no son lo mismo: hay renglones que
+                          se miran, se entienden y se dejan pendientes a
+                          propósito, y hasta ahora se veían igual que los que
+                          nadie abrió. Volver al día siguiente obligaba a
+                          empezar desde arriba. */}
+                      <button onClick={() => revisar(l)} disabled={ocupado}
+                        title={revisada
+                          ? `Revisada${l.revisado_nombre ? ` por ${l.revisado_nombre}` : ""} · marcar como sin revisar`
+                          : "Marcar como ya revisada"}
+                        style={{ width: 20, height: 20, flexShrink: 0, marginTop: 1, cursor: "pointer",
+                          borderRadius: 5, fontFamily: colors.font, fontSize: 12, lineHeight: 1,
+                          border: `1.5px solid ${revisada ? colors.success : colors.border}`,
+                          background: revisada ? colors.success : "#fff", color: "#fff" }}>
+                        {revisada ? "✓" : ""}
+                      </button>
                       <div style={{ flex: 1, minWidth: 220 }}>
                         <div style={{ fontSize: 12.5, color: colors.ink }}>{l.descripcion}</div>
                         {/* EL RUBRO DEL CONTRATO, CON SUS NÚMEROS. Es contra
@@ -490,7 +590,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             Mirá que no se esté cobrando dos veces lo mismo.
                           </div>
                         )}
-                        {l.nota && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 3 }}>“{l.nota}”</div>}
+                        {/* ANOTAR, EN CUALQUIER MOMENTO Y CON CUALQUIER
+                            DECISIÓN. "El proveedor dice que subió por el
+                            dólar", "preguntar si incluye el andamio": eso es
+                            lo que convierte una lista de números en una
+                            conversación que se puede retomar, y es lo que se
+                            lee en la reunión. Se guarda al salir del campo. */}
+                        <input defaultValue={l.nota || ""} key={`n${l.id}-${l.nota || ""}`}
+                          placeholder="Anotar algo sobre este renglón…"
+                          onClick={e => e.stopPropagation()}
+                          onBlur={e => guardarNota(l, e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                          style={{ width: "100%", marginTop: 4, padding: "3px 7px", fontSize: 11,
+                            fontFamily: colors.font, color: colors.inkSoft,
+                            border: `1px solid ${l.nota ? colors.border : "transparent"}`,
+                            background: l.nota ? "#fff" : colors.bg,
+                            borderRadius: colors.radiusSm, outline: "none" }} />
                         {dejaria != null && (
                           <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 3 }}>
                             Si el cliente la aprueba deja <strong style={{ color: colors.success }}>${fmt(dejaria)}</strong>:
@@ -639,7 +754,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 {a.estado === "resuelto"
                   ? "Ya se armó su orden de cambio"
                   : v.sinDecidir
-                    ? `Faltan ${v.sinDecidir} por decidir`
+                    // POR DÓNDE VA, no solo cuánto falta: con "faltan 48 por
+                    // decidir" en los dos análisis no se sabe en cuál se
+                    // avanzó ayer ni cuál conviene retomar.
+                    ? `${v.revisadas} de ${v.total} revisadas · faltan ${v.sinDecidir} por decidir`
+                      + (v.aFavor ? ` · $${fmt(v.aFavor)} a favor` : "")
                     : `Listo para armar la orden · ${v.aCobrar} a cobrar, $${fmt(v.monto)}`}
               </div>
             )}

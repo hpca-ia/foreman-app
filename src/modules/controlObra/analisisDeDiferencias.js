@@ -78,11 +78,52 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
 
 /** La decisión de una diferencia, con quién la tomó: eso es lo que vale después. */
 export async function decidir(lineaId, decision, nota, quien) {
-  const { error } = await supabase.from("obra_analisis_lineas").update({
-    decision, nota: nota || null,
+  const campos = {
+    decision,
     decidido_por: quien?.id ?? null, decidido_nombre: quien?.name || null,
     decidido_at: new Date().toISOString(),
+    // DECIDIR ES HABER REVISADO. Marcar la decisión y que el renglón siguiera
+    // apareciendo como "sin mirar" obligaba a hacer dos clics para decir una
+    // sola cosa, y el que hace dos clics por renglón deja de hacerlos en el
+    // quince.
+    revisado_at: new Date().toISOString(),
+    revisado_por: quien?.id ?? null, revisado_nombre: quien?.name || null,
+  };
+  // La nota solo se pisa cuando viene una: decidir no puede borrar lo que
+  // alguien escribió sobre ese renglón.
+  if (nota !== undefined && nota !== null) campos.nota = nota || null;
+  let { error } = await supabase.from("obra_analisis_lineas").update(campos).eq("id", lineaId);
+  if (error && /revisado|column|schema cache/i.test(error.message)) {
+    const { revisado_at, revisado_por, revisado_nombre, ...viejos } = campos;
+    ({ error } = await supabase.from("obra_analisis_lineas").update(viejos).eq("id", lineaId));
+  }
+  return error ? error.message : null;
+}
+
+/**
+ * YA LA MIRÉ, AUNQUE TODAVÍA NO LA DECIDA.
+ *
+ * Revisar y decidir son dos cosas distintas. Hay renglones que uno mira,
+ * entiende, y deja pendientes a propósito —"esto lo hablo con Jorge el lunes"—
+ * y en la pantalla se veían igual que los que nadie abrió todavía. Al volver al
+ * día siguiente no había forma de saber dónde se había quedado, así que se
+ * empezaba de nuevo desde arriba: por eso los últimos renglones de una lista
+ * larga no los revisaba nunca nadie.
+ */
+export async function marcarRevisada(lineaId, revisada, quien) {
+  const { error } = await supabase.from("obra_analisis_lineas").update({
+    revisado_at: revisada ? new Date().toISOString() : null,
+    revisado_por: revisada ? (quien?.id ?? null) : null,
+    revisado_nombre: revisada ? (quien?.name || null) : null,
   }).eq("id", lineaId);
+  return error ? (/revisado|column|schema cache/i.test(error.message)
+    ? "Falta correr la migración 153 para poder marcar lo revisado." : error.message) : null;
+}
+
+/** Lo que se anotó sobre un renglón, que se puede escribir en cualquier momento. */
+export async function anotar(lineaId, nota) {
+  const { error } = await supabase.from("obra_analisis_lineas")
+    .update({ nota: String(nota || "").trim() || null }).eq("id", lineaId);
   return error ? error.message : null;
 }
 

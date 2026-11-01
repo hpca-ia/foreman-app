@@ -262,3 +262,21 @@ test("la diferencia de precio se mide sobre la cantidad comun, no sobre la cotiz
   assert.equal(h.subieron[0].cantidad, 12);
   assert.equal(h.sobreprecio, 138);
 });
+
+test("revisado no es decidido: una mirada y dejada a proposito no es una sin abrir", async () => {
+  // Las dos se veian igual en la pantalla, asi que al volver al dia siguiente
+  // no habia forma de saber donde se habia quedado uno: se empezaba de nuevo
+  // desde arriba, y por eso los ultimos renglones no los revisaba nadie.
+  const { comoVa } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const v = comoVa([
+    { decision: "cobrar" },
+    { decision: "pendiente", revisado_at: "2026-11-01T10:00:00Z", nota: "hablar con Jorge el lunes" },
+    { decision: "pendiente" },
+    { decision: "pendiente" },
+  ]);
+  assert.equal(v.sinDecidir, 3);
+  assert.equal(v.revisadas, 2);          // la decidida cuenta como revisada
+  assert.equal(v.miradasSinDecidir, 1);
+  assert.equal(v.sinMirar, 2);
+  assert.equal(v.anotadas, 1);
+});

@@ -50,12 +50,24 @@ export function comoVa(lineas = []) {
   // Lo que quedó a favor nuestro se cuenta aparte de lo que se le cobra al
   // cliente: son dos plata distintas y van a dos lados distintos.
   const eficiencias = lineas.filter(l => l.decision === "eficiencia");
+  // REVISADO NO ES DECIDIDO. Un renglón mirado y dejado a propósito para
+  // hablarlo el lunes no es lo mismo que uno que nadie abrió, y sin
+  // distinguirlos volver al análisis obliga a empezar desde arriba.
+  const revisadas = lineas.filter(l => !!l.revisado_at || l.decision !== "pendiente");
+  const anotadas = lineas.filter(l => String(l.nota || "").trim());
+  const miradasSinDecidir = lineas.filter(l => !!l.revisado_at && l.decision === "pendiente");
   return {
     total: lineas.length,
     sinDecidir,
     aCobrar: aCobrar.length,
     monto: Math.round(aCobrar.reduce((t, l) => t + (Number(l.monto) || 0), 0) * 100) / 100,
     eficiencias: eficiencias.length,
+    revisadas: revisadas.length,
+    sinMirar: lineas.length - revisadas.length,
+    // Las que alguien ya miró y dejó pendientes a propósito: son las que hay
+    // que volver a tocar, y no se mezclan con las que nadie abrió.
+    miradasSinDecidir: miradasSinDecidir.length,
+    anotadas: anotadas.length,
     aFavor: Math.round(eficiencias.reduce((t, l) => t + (Number(l.monto) || 0), 0) * 100) / 100,
     listo: lineas.length > 0 && sinDecidir === 0,
   };

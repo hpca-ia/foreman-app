@@ -87,7 +87,7 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
       // puede discutir nada: $660 puede ser un precio malo con la cantidad bien
       // o un precio bien con la cantidad inflada, y son dos reclamos distintos.
       head: [["QUÉ TRAE LA PROPUESTA", "CANT", "UNID", "C. UNIT", "TOTAL",
-        "CONTRA QUÉ RUBRO DEL CONTRATO", "CONTRATADO", "P. UNIT", "COSTO CARG.", "DECISIÓN"]],
+        "CONTRA QUÉ RUBRO DEL CONTRATO", "CONTRATADO", "P. UNIT", "COSTO CARG.", "LO QUE SE ANOTÓ", "DECISIÓN"]],
       body: suyas.map(l => {
         const r = porRubro.get(Number(l.obra_rubro_id));
         const pu = r && n(r.cantidad) ? n(r.total_base) / n(r.cantidad) : null;
@@ -103,6 +103,9 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
           r ? `${plata(r.cantidad)} ${r.unidad || ""}`.trim() : "",
           pu == null ? "" : `$${plata(pu)}`,
           r && n(r.costo_unitario) > 0 ? `$${plata(r.costo_unitario)}` : "",
+          // Lo anotado viaja al papel: es lo que se lee en la reunión, y sin
+          // esto la hoja impresa pierde justo la parte que alguien pensó.
+          (l.nota || "").slice(0, 120),
           // La decisión tomada, o el espacio para escribirla a mano.
           DICE[l.decision] || "",
         ];
@@ -114,7 +117,8 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
         0: { cellWidth: "auto" }, 1: { cellWidth: 32, halign: "right" }, 2: { cellWidth: 28, halign: "center" },
         3: { cellWidth: 46, halign: "right" }, 4: { cellWidth: 52, halign: "right", fontStyle: "bold" },
         5: { cellWidth: 160 }, 6: { cellWidth: 54, halign: "right" }, 7: { cellWidth: 46, halign: "right" },
-        8: { cellWidth: 50, halign: "right" }, 9: { cellWidth: 56, halign: "center", fontStyle: "bold" },
+        8: { cellWidth: 50, halign: "right" }, 9: { cellWidth: 110, fontSize: 7 },
+        10: { cellWidth: 56, halign: "center", fontStyle: "bold" },
       },
       margin: { left: M, right: M },
     });
