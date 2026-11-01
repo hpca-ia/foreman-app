@@ -120,6 +120,24 @@ export async function marcarRevisada(lineaId, revisada, quien) {
     ? "Falta correr la migración 153 para poder marcar lo revisado." : error.message) : null;
 }
 
+/**
+ * CONTRA QUÉ RUBRO SE COMPARA ESTA DIFERENCIA.
+ *
+ * NOVA empareja por descripción y acierta casi siempre, pero "pintura de
+ * fibrocemento" puede calzar con tres rubros parecidos y elegir el que no es.
+ * Cuando pasa, todo lo que sigue sale mal: la cantidad contratada, el precio
+ * contra el que se compara y la decisión de si ya estaba incluido.
+ *
+ * Y es la herramienta que faltaba para decir "esto ya estaba": no alcanza con
+ * marcarlo, hay que poder señalar EN CUÁL rubro estaba, que es lo que el
+ * proveedor va a pedir cuando vuelva a reclamarlo.
+ */
+export async function reEmparejar(lineaId, rubroId) {
+  const { error } = await supabase.from("obra_analisis_lineas")
+    .update({ obra_rubro_id: rubroId || null }).eq("id", lineaId);
+  return error ? error.message : null;
+}
+
 /** Lo que se anotó sobre un renglón, que se puede escribir en cualquier momento. */
 export async function anotar(lineaId, nota) {
   const { error } = await supabase.from("obra_analisis_lineas")

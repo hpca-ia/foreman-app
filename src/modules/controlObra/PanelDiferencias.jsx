@@ -11,7 +11,7 @@ import { crearOrden, agregarLinea } from "./ordenesDeCambio";
 import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
-  enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar,
+  enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { baseSinIva } from "./contratoDeLaObra";
@@ -100,6 +100,93 @@ function Cuenta({ que, cantidad, unidad, unitario, total, color, base, fuerte })
   );
 }
 
+
+// EL PRESUPUESTO AL LADO, QUE ES CONTRA LO QUE SE DECIDE.
+//
+// Cada diferencia ya mostraba el rubro con el que calzó, y eso alcanza para
+// mirar un renglón pero no para decidirlo. La pregunta que se hace uno en cada
+// línea es la otra: "¿esto no estará cubierto por algún otro rubro del
+// contrato?" —y para contestarla hay que leer el capítulo entero, que vive en
+// otra pestaña, con cincuenta renglones abiertos y la decisión a medio tomar.
+// Nadie cambia de pestaña cincuenta veces: lo que se hace es decidir sin mirar,
+// y así es como se le cobra al cliente algo que ya había pagado.
+//
+// Entonces el presupuesto se abre acá, con buscador, y sirve para dos cosas:
+// leerlo mientras se decide, y señalar el rubro correcto cuando NOVA emparejó
+// mal o cuando hay que decir EN CUÁL rubro ya estaba incluido.
+function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) {
+  const texto = busca.trim().toLowerCase();
+  const filtrados = texto
+    ? rubros.filter(r => `${r.numero ?? ""} ${r.descripcion || ""} ${r.capitulo || ""}`.toLowerCase().includes(texto))
+    : rubros;
+  const porCapitulo = [];
+  for (const r of filtrados) {
+    const cap = r.capitulo || "SIN CAPÍTULO";
+    const ya = porCapitulo.find(x => x.capitulo === cap);
+    if (ya) ya.rubros.push(r); else porCapitulo.push({ capitulo: cap, rubros: [r] });
+  }
+  return (
+    <div style={{ width: 320, flexShrink: 0, border: `1px solid ${colors.border}`,
+      borderRadius: colors.radiusMd, background: colors.surface, alignSelf: "flex-start",
+      position: "sticky", top: 8, maxHeight: "78vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "9px 11px", borderBottom: `1px solid ${colors.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, flex: 1 }}>
+            EL PRESUPUESTO · {rubros.length} RUBROS
+          </span>
+          <button onClick={onCerrar}
+            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+              fontSize: 11, color: colors.brand }}>ocultar</button>
+        </div>
+        {/* ELEGIR EL RUBRO CORRECTO, que es la mitad del trabajo: NOVA empareja
+            por descripción y "pintura de fibrocemento" calza con tres. */}
+        {eligiendo && (
+          <div style={{ fontSize: 11, color: colors.brand, fontWeight: 600, marginTop: 4, lineHeight: 1.4 }}>
+            Elegí contra qué rubro se compara «{String(eligiendo.descripcion || "").slice(0, 44)}»
+          </div>
+        )}
+        <input value={busca} onChange={e => onBusca(e.target.value)} placeholder="Buscar por número o descripción…"
+          style={{ width: "100%", marginTop: 5, padding: "5px 8px", fontSize: 11.5, fontFamily: colors.font,
+            border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, outline: "none" }} />
+      </div>
+      <div style={{ overflowY: "auto", padding: "4px 0" }}>
+        {!filtrados.length && (
+          <div style={{ padding: "10px 11px", fontSize: 11, color: colors.muted }}>
+            Ningún rubro del contrato dice eso.
+          </div>
+        )}
+        {porCapitulo.map(c => (
+          <div key={c.capitulo}>
+            <div style={{ padding: "5px 11px 2px", fontSize: 9.5, fontWeight: 700, color: colors.muted,
+              letterSpacing: 0.3, background: colors.bg }}>
+              {c.capitulo}
+            </div>
+            {c.rubros.map(r => (
+              <div key={r.id}
+                onClick={eligiendo ? () => onElegir(r) : undefined}
+                style={{ padding: "4px 11px", fontSize: 11, lineHeight: 1.45, color: colors.inkSoft,
+                  cursor: eligiendo ? "pointer" : "default",
+                  borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <span style={{ color: colors.muted, minWidth: 30 }}>{r.numero ?? ""}</span>
+                  <span style={{ flex: 1 }}>{r.descripcion}</span>
+                </div>
+                <div style={{ display: "flex", gap: 6, color: colors.muted, fontSize: 10,
+                  fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ minWidth: 30 }} />
+                  <span>{fmt(r.cantidad)} {r.unidad || ""}</span>
+                  <span style={{ flex: 1, textAlign: "right" }}>${fmt(r.total_base)}</span>
+                  {Number(r.costo_unitario) > 0 && <span>· costo ${fmt(r.costo_unitario)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio }) {
   const [lista, setLista] = useState([]);
   const [enlaces, setEnlaces] = useState({});
@@ -113,6 +200,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   const [pct, setPct] = useState("20");
   // Qué se está mirando: todas, las que nadie abrió, las sin decidir, las anotadas.
   const [filtro, setFiltro] = useState("todas");
+  // EL PRESUPUESTO AL LADO, que es contra lo que se decide cada diferencia.
+  // `eligiendo` es la línea que está buscando otro rubro.
+  const [verPresupuesto, setVerPresupuesto] = useState(false);
+  const [buscaRubro, setBuscaRubro] = useState("");
+  const [eligiendo, setEligiendo] = useState(null);
 
   // TODO EL CONTRATO VIGENTE, no solo el original: una propuesta nueva puede
   // mover un rubro que ya cambió una orden anterior.
@@ -215,6 +307,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       + "Beneficios ya puede medir si se compró mejor o peor que lo presupuestado.");
     setSinCosto(0);
     onCambio?.();
+  }
+
+  /** Esta diferencia se compara contra otro rubro del contrato. */
+  async function usarRubro(linea, rubro) {
+    setLineas(xs => xs.map(x => (x.id === linea.id ? { ...x, obra_rubro_id: rubro?.id || null } : x)));
+    setEligiendo(null);
+    const err = await reEmparejar(linea.id, rubro?.id || null);
+    if (err) setError(err);
   }
 
   /** Ya la miré, aunque todavía no la decida. */
@@ -370,7 +470,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       ["anotadas", `Con nota · ${va.anotadas}`],
     ];
     return (
-      <div style={{ fontFamily: colors.font }}>
+      <div style={{ fontFamily: colors.font, display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <button onClick={() => { setAbierto(null); cargar(); }}
           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
             fontSize: 12, color: colors.brand, marginBottom: 8 }}>
@@ -393,6 +494,15 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             se marcan a mano y se discuten en una reunión — o se le mandan al
             residente para que diga cuáles ya estaban incluidas. */}
         <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap" }}>
+          {/* EL PRESUPUESTO, A MANO MIENTRAS SE DECIDE. La pregunta de cada
+              renglón es "¿esto no estará cubierto por otro rubro?", y hasta
+              ahora contestarla era cambiar de pestaña con la decisión a medio
+              tomar. Nadie lo hace cincuenta veces: se decide sin mirar. */}
+          {!verPresupuesto && (
+            <Button variant="outline" size="sm" onClick={() => setVerPresupuesto(true)}>
+              Ver el presupuesto al lado
+            </Button>
+          )}
           <Button variant="outline" size="sm" disabled={ocupado || !lineas.length}
             onClick={async () => {
               setOcupado(true); setError("");
@@ -590,6 +700,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             Mirá que no se esté cobrando dos veces lo mismo.
                           </div>
                         )}
+                        {/* EL EMPAREJAMIENTO SE CORRIGE A MANO. NOVA acierta
+                            casi siempre, pero "pintura de fibrocemento" calza
+                            con tres rubros parecidos, y cuando elige el que no
+                            es sale mal todo lo que sigue: la cantidad
+                            contratada, el precio contra el que se compara y la
+                            decisión de si ya estaba incluido. */}
+                        {abierto.estado !== "resuelto" && (
+                          <button onClick={() => { setVerPresupuesto(true); setEligiendo(l); }}
+                            style={{ background: "none", border: "none", padding: 0, marginTop: 2,
+                              cursor: "pointer", fontFamily: colors.font, fontSize: 10.5,
+                              color: eligiendo?.id === l.id ? colors.brand : colors.muted,
+                              fontWeight: eligiendo?.id === l.id ? 700 : 400, textDecoration: "underline" }}>
+                            {eligiendo?.id === l.id ? "elegí el rubro en el presupuesto →"
+                              : rubro ? "comparar contra otro rubro" : "buscarle un rubro en el presupuesto"}
+                          </button>
+                        )}
                         {/* ANOTAR, EN CUALQUIER MOMENTO Y CON CUALQUIER
                             DECISIÓN. "El proveedor dice que subió por el
                             dólar", "preguntar si incluye el andamio": eso es
@@ -702,6 +828,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             </div>
           </div>
         )}
+      </div>
+      {verPresupuesto && (
+        <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+          eligiendo={eligiendo} onElegir={r => usarRubro(eligiendo, r)}
+          onCerrar={() => { setVerPresupuesto(false); setEligiendo(null); }} />
+      )}
       </div>
     );
   }
