@@ -246,6 +246,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   const [verPresupuesto, setVerPresupuesto] = useState(false);
   const [buscaRubro, setBuscaRubro] = useState("");
   const [eligiendo, setEligiendo] = useState(null);
+  // Lo que NOVA leyó, esperando que alguien mire los emparejamientos.
+  const [revisando, setRevisando] = useState(null);
   // EL ALTO SE MIDE, NO SE ADIVINA.
   //
   // "100vh menos ciento cincuenta" es una cuenta que depende de cuánto hay
@@ -319,8 +321,30 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     try {
       const r = await leerConNova(file, vivos, p => setLeyendo(p || "leyendo"));
       if (!r.items?.length) throw new Error("NOVA no encontró renglones con precios en el archivo.");
-      // Se compara en el momento y se guarda ya emparejado: así al volver
-      // mañana no hay que leer nada de nuevo.
+      // NADA SE COMPARA ANTES DE QUE ALGUIEN MIRE LOS EMPAREJAMIENTOS.
+      //
+      // De qué rubro es cada renglón es la decisión de la que cuelga todo lo
+      // demás, y es la única que la máquina no puede garantizar: un
+      // emparejamiento equivocado produce números con la misma cara que los
+      // buenos. Antes se guardaba de una y el error aparecía tres pantallas
+      // después, convertido en "este renglón deja veintinueve mil dólares".
+      //
+      // Se muestran los dos textos —el del papel y el del contrato— y se
+      // aceptan uno por uno. Es un minuto de trabajo contra una orden de
+      // cambio mal cobrada.
+      setLeyendo("");
+      setRevisando({ ...r, file, items: r.items.map(x => ({ ...x, visto: false })) });
+      return;
+    } catch (err) { setError(err.message); }
+    setLeyendo("");
+  }
+
+  /** Ya miré los emparejamientos: ahora sí, comparar y guardar. */
+  async function comparar(rev) {
+    setLeyendo("comparando"); setError(""); setAviso("");
+    try {
+      const r = rev;
+      const file = rev.file;
       const h = loQueNoEstaPresupuestado(compararContraPresupuesto(r.items, vivos));
       const g = await guardarAnalisis({
         obraId: obra.id, titulo: file.name, proveedor: r.proveedor || "",
@@ -328,10 +352,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         lineas: [...h.todo, ...h.menos].map(x => ({
           descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad,
           monto: x.costo, obra_rubro_id: x.rubro_id || null, hallazgo: x.hallazgo,
+          textoPapel: x.textoPapel, unidadPapel: x.unidadPapel, cantidadPapel: x.cantidadPapel,
         })),
         quien: currentUser,
       });
       if (g.error) throw new Error(g.error);
+      setRevisando(null);
       await cargar();
       await abrir(g.analisis);
       // EL DESCUENTO DEL PIE, DICHO. Es plata nuestra y es de lo primero que
@@ -552,6 +578,133 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
 
   const caja = { background: colors.surface, border: `1px solid ${colors.border}`,
     borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 10 };
+
+  // ── LOS EMPAREJAMIENTOS, ANTES DE COMPARAR NADA ──────────────────────────
+  //
+  // Lo que NOVA leyó del papel, renglón por renglón, con el rubro que propone
+  // al lado. Se acepta o se cambia, y recién entonces se compara: de esta
+  // decisión cuelga todo lo demás, y es la única que la máquina no puede
+  // garantizar sola.
+  if (revisando) {
+    const items = revisando.items || [];
+    const conRubro = items.filter(x => x.rubro_id).length;
+    const sinVer = items.filter(x => x.rubro_id && !x.visto).length;
+    const cambiar = (i, campos) => setRevisando(v => ({
+      ...v, items: v.items.map((x, k) => (k === i ? { ...x, ...campos } : x)),
+    }));
+    return (
+      <div ref={cajaRef} style={{ fontFamily: colors.font, display: "flex", gap: 12,
+        alignItems: verPresupuesto ? "stretch" : "flex-start",
+        ...(verPresupuesto && alto ? { height: alto, overflow: "hidden" } : {}) }}>
+        <div style={{ flex: 1, minWidth: 0, ...(verPresupuesto ? { overflowY: "auto", paddingRight: 4 } : {}) }}>
+          <button onClick={() => { setRevisando(null); setEligiendo(null); }}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+              fontSize: 12, color: colors.brand, marginBottom: 8 }}>
+            ← Descartar esta lectura
+          </button>
+          <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>
+            Qué está emparejando NOVA{revisando.proveedor ? ` · ${revisando.proveedor}` : ""}
+          </div>
+          <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5, maxWidth: 760 }}>
+            {items.length} renglones leídos del papel · {conRubro} con un rubro propuesto.
+            {" "}<strong>Nada se compara hasta que mires esto.</strong> De qué rubro es cada renglón es la
+            decisión de la que cuelga todo lo demás, y un emparejamiento equivocado produce números con la
+            misma cara que los buenos. Lo que quede sin rubro se trata como trabajo nuevo, que es lo correcto
+            cuando el contrato no lo cubre.
+          </div>
+
+          <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {!verPresupuesto && (
+              <Button variant="outline" size="sm" onClick={() => setVerPresupuesto(true)}>
+                Ver el presupuesto al lado
+              </Button>
+            )}
+            <Button variant="primary" size="sm" disabled={!!leyendo}
+              onClick={() => comparar({ ...revisando, items: items.map(({ visto, ...x }) => x) })}>
+              <Check size={13} /> {leyendo ? "Comparando…" : "Aceptar y comparar con el contrato"}
+            </Button>
+            {sinVer > 0 && (
+              <span style={{ fontSize: 11, color: colors.warning }}>
+                {sinVer} {sinVer === 1 ? "emparejamiento sin mirar" : "emparejamientos sin mirar"}
+              </span>
+            )}
+          </div>
+
+          {items.map((x, i) => {
+            const r = vivos.find(v => Number(v.id) === Number(x.rubro_id));
+            const raro = r && (copiaDelRubro(x.descripcion, r) || unidadesDistintas(x, r)
+              || globalMultiplicado(x, r));
+            return (
+              <div key={i} style={{ ...caja, marginBottom: 6, padding: "8px 10px",
+                borderLeft: `3px solid ${raro ? colors.danger : x.visto ? colors.success
+                  : r ? colors.border : colors.neutralSoft}` }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 240 }}>
+                    <div style={{ fontSize: 12, color: colors.ink, lineHeight: 1.4 }}>{x.descripcion}</div>
+                    <div style={{ fontSize: 10.5, color: colors.muted, fontVariantNumeric: "tabular-nums" }}>
+                      {fmt(x.cantidad)} {x.unidad || ""} · ${fmt(x.monto)}
+                    </div>
+                    {/* EL RUBRO PROPUESTO, CON SUS PROPIOS NÚMEROS: es contra
+                        esto que se va a comparar, y la unidad sola ya dice si
+                        están hablando de lo mismo. */}
+                    {r ? (
+                      <div style={{ fontSize: 11, color: raro ? colors.danger : colors.inkSoft, marginTop: 3,
+                        lineHeight: 1.45 }}>
+                        <span style={{ color: colors.muted }}>contra el rubro </span>
+                        <strong>{r.numero ?? ""} {String(r.descripcion || "").slice(0, 70)}</strong>
+                        <span style={{ color: colors.muted }}>
+                          {" "}· {fmt(r.cantidad)} {r.unidad || ""} × ${fmt(unitario(r))}
+                        </span>
+                        {raro && <div style={{ fontWeight: 700 }}>
+                          {copiaDelRubro(x.descripcion, r) ? "El texto es el del rubro, no el del papel."
+                            : unidadesDistintas(x, r)
+                              ? `El papel lo cobra por ${x.unidad} y el rubro está contratado por ${r.unidad}.`
+                              : `El rubro es un global de ${fmt(r.cantidad)} ${r.unidad || ""} y el renglón trae ${fmt(x.cantidad)}.`}
+                        </div>}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: colors.muted, marginTop: 3 }}>
+                        sin rubro · va a entrar como trabajo nuevo
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                    {r && (
+                      <button onClick={() => cambiar(i, { visto: !x.visto })}
+                        style={{ border: `1px solid ${x.visto ? colors.success : colors.border}`,
+                          background: x.visto ? colors.success : "#fff", color: x.visto ? "#fff" : colors.muted,
+                          borderRadius: 20, padding: "3px 11px", fontSize: 11, cursor: "pointer",
+                          fontFamily: colors.font, fontWeight: x.visto ? 700 : 400 }}>
+                        {x.visto ? "✓ aceptado" : "aceptar"}
+                      </button>
+                    )}
+                    {r && (
+                      <button onClick={() => cambiar(i, { rubro_id: null, visto: false })}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+                          fontSize: 11, color: colors.danger, textDecoration: "underline" }}>
+                        quitar
+                      </button>
+                    )}
+                    <button onClick={() => { setVerPresupuesto(true); setEligiendo({ indice: i, descripcion: x.descripcion }); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+                        fontSize: 11, color: eligiendo?.indice === i ? colors.brand : colors.muted,
+                        fontWeight: eligiendo?.indice === i ? 700 : 400, textDecoration: "underline" }}>
+                      {eligiendo?.indice === i ? "elegí el rubro →" : r ? "otro rubro" : "buscarle rubro"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {verPresupuesto && (
+          <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+            eligiendo={eligiendo} onCerrar={() => { setVerPresupuesto(false); setEligiendo(null); }}
+            onElegir={rb => { cambiar(eligiendo.indice, { rubro_id: rb.id, visto: true }); setEligiendo(null); }} />
+        )}
+      </div>
+    );
+  }
 
   // ── UN ANÁLISIS ABIERTO ───────────────────────────────────────────────────
   if (abierto) {
