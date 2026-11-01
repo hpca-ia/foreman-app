@@ -126,9 +126,18 @@ function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) 
     if (ya) ya.rubros.push(r); else porCapitulo.push({ capitulo: cap, rubros: [r] });
   }
   return (
+    // VIAJA CON EL QUE LEE. El presupuesto se abre para mirarlo MIENTRAS se
+    // decide cada diferencia, y una lista de cincuenta renglones se scrollea
+    // entera: un panel que se queda arriba sirve para los tres primeros y
+    // después es una columna vacía al costado.
+    //
+    // `top` cuenta desde el contenedor que scrollea, que es el del contenido
+    // de la aplicación, y el alto se limita para que su propia lista scrollee
+    // adentro en vez de empujar la página.
     <div style={{ width: 320, flexShrink: 0, border: `1px solid ${colors.border}`,
       borderRadius: colors.radiusMd, background: colors.surface, alignSelf: "flex-start",
-      position: "sticky", top: 8, maxHeight: "78vh", display: "flex", flexDirection: "column" }}>
+      position: "sticky", top: 10, maxHeight: "calc(100vh - 90px)",
+      display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ padding: "9px 11px", borderBottom: `1px solid ${colors.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, flex: 1 }}>
