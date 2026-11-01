@@ -349,34 +349,34 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   //
   // El presupuesto original no se toca. La orden suma lo suyo y resta lo suyo,
   // en el mismo capítulo, y ahí se lee lo que de verdad hizo.
-  // UNA LÍNEA QUE VA A UN CAPÍTULO QUE YA EXISTE SE SIENTA CON ÉL.
+  // TODAS LAS PARTIDAS VAN AL CAPÍTULO DE LA ORDEN.
   //
-  // Cuando la partida trae su propio capítulo —el desalojo va a PRELIMINARES Y
-  // VARIOS, que la obra ya tiene— se le ponía igual el `capitulo_orden` de la
-  // orden (9001). Resultado: dos capítulos con el mismo nombre, el de la obra
-  // arriba con sus 18 rubros y otro idéntico al fondo con uno solo. El rubro
-  // está en el control, pero quien lo busca en su capítulo no lo encuentra, y
-  // lo que concluye —con razón— es que la orden no entró entera.
+  // Aunque el rubro ya exista en el presupuesto. El capítulo de una orden de
+  // cambio tiene que mostrar lo que ESA orden costó, completo y en un solo
+  // lugar: es lo que el cliente aprobó y es lo que se le va a cobrar. Si el
+  // desalojo se sienta en PRELIMINARES Y VARIOS porque ese rubro ya existía, el
+  // capítulo de la orden muestra menos de lo que la orden vale y la plata del
+  // cambio queda repartida entre el presupuesto original y el adicional, que
+  // son dos conversaciones distintas con dos documentos distintos.
   //
-  // Si el capítulo existe, se usa su orden. Si es nuevo, el de la orden.
-  const { data: capitulosDeLaObra } = await supabase.from("obra_rubros")
-    .select("capitulo,capitulo_orden").eq("obra_id", orden.obra_id).is("orden_cambio_id", null);
-  const ordenDeCapitulo = new Map();
-  for (const r of capitulosDeLaObra || []) {
-    if (r.capitulo && !ordenDeCapitulo.has(r.capitulo)) ordenDeCapitulo.set(r.capitulo, r.capitulo_orden);
-  }
-
+  // Que el rubro ya existiera se MENCIONA —sirve para no cobrarlo dos veces y
+  // para saber contra qué precio se comparó— pero no cambia dónde vive.
+  //
+  // La única excepción son los honorarios, que se pagan aparte y por eso tienen
+  // su propio capítulo.
   const filas = (lineas || []).map((l, i) => {
     const signo = l.tipo === "quita" ? -1 : 1;
-    const capitulo = l.capitulo || `ADICIONALES · ${codigoDe(orden)}`;
+    // La mención del rubro que ya existía: su número y su capítulo.
+    const yaExistia = [l.rubro_codigo && `rubro ${l.rubro_codigo}`, l.capitulo]
+      .filter(Boolean).join(" · ");
     return {
       obra_id: orden.obra_id,
       numero: 9000 + orden.numero * 100 + i,
-      capitulo,
-      capitulo_orden: ordenDeCapitulo.has(capitulo)
-        ? ordenDeCapitulo.get(capitulo) : 9000 + orden.numero,
+      capitulo: `ADICIONALES · ${codigoDe(orden)}`,
+      capitulo_orden: 9000 + orden.numero,
       orden: 9000000 + orden.numero * 1000 + i,
-      descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigoDe(orden)}`,
+      descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigoDe(orden)}`
+        + (yaExistia ? `  ·  ya existía: ${yaExistia}` : ""),
       unidad: l.unidad || "",
       cantidad: Number(l.cantidad) || 0,
       precio_unitario: signo * conIva(Number(l.precio_unitario) || 0),
