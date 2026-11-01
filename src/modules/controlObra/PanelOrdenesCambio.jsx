@@ -7,6 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
+import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice } from "./cuadreDeOrdenes.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
@@ -174,6 +175,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // EL IVA DE LA OBRA, que es el de sus rubros: la orden se cotiza sin IVA y
   // el documento lo suma al pie, para que su total sea el que entra al control.
   const ivaDeLaObra = Number(rubros.find(r => r.iva_pct != null)?.iva_pct) || 0;
+
+  // ¿EL CONTROL DICE LO MISMO QUE LAS ÓRDENES?
+  //
+  // Se revisa solo, cada vez que se abre el panel. Hasta ahora, descubrir que
+  // a una orden aprobada le faltaba un rubro en el control requería sentarse a
+  // sumar a mano sus partidas contra su papel, y eso no lo hace nadie: lo que
+  // se veía era un capítulo que sumaba raro, meses después.
+  const cuadre = cuadreDeOrdenes({
+    ordenes, lineasPorOrden: lineas,
+    rubrosDeOrdenes: rubros.filter(r => r.orden_cambio_id),
+    obra, iva: ivaDeLaObra,
+  });
 
   // LOS DE SIEMPRE.
   //
@@ -456,6 +469,28 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           </Button>
         )}
       </div>
+
+      {/* LO QUE NO CUADRA, ARRIBA Y SIN QUE NADIE LO BUSQUE.
+          Una orden aprobada y el control son dos lugares que pueden decir
+          cosas distintas, y hasta ahora descubrirlo era sentarse a sumar a
+          mano. Buscar errores a mano no es el trabajo de nadie. */}
+      {cuadre.mal.length > 0 && (
+        <div style={{ background: "#FEF2F2", border: `1px solid ${colors.danger}`, borderRadius: colors.radiusMd,
+          padding: "9px 12px", margin: "8px 0" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: colors.danger, marginBottom: 3 }}>
+            {cuadreComoSeDice(cuadre)}
+          </div>
+          {cuadre.mal.map(f => (
+            <div key={f.id} style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+              <strong>{f.codigo}</strong>: {f.problema}
+              {" · "}el papel dice ${fmt(f.esperado)} y el control tiene ${fmt(f.enControl)}
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
+            Desaprobar y volver a aprobar la orden rehace sus rubros con las reglas de hoy.
+          </div>
+        </div>
+      )}
 
       {/* El consolidado, siempre a mano: es el documento que se entrega, y sus
           números son los que se citan en cualquier conversación de obra. */}
@@ -929,6 +964,30 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       o.emitido_por && `Emitida por ${o.emitido_por}`].filter(Boolean).join(" · ")}
                   </div>
                 )}
+
+                {/* DÓNDE QUEDÓ ESTA ORDEN EN EL CONTROL.
+                    Sus líneas pueden caer en capítulos distintos —el desalojo
+                    en PRELIMINARES, los honorarios en HONORARIOS, el resto en
+                    ADICIONALES · OC-01— y entonces el capítulo que lleva el
+                    nombre de la orden NO suma lo que la orden vale. Leerlo como
+                    si lo fuera es de donde salen las diferencias que después
+                    hay que buscar a mano. */}
+                {(() => {
+                  const c = cuadre.filas.find(x => Number(x.id) === Number(o.id));
+                  if (!c) return null;
+                  return (
+                    <div style={{ fontSize: 11, color: c.cuadra ? colors.muted : colors.danger,
+                      marginBottom: 8, lineHeight: 1.5 }}>
+                      {c.cuadra ? "En el control: " : "NO CUADRA · "}
+                      <strong>${fmt(c.enControl)}</strong>
+                      {c.capitulos.length > 1 && (
+                        <> repartidos en {c.capitulos.length} capítulos ({c.capitulos
+                          .map(x => `${x.capitulo} $${fmt(x.total)}`).join(" · ")})</>
+                      )}
+                      {!c.cuadra && <> — {c.problema}. El papel dice ${fmt(c.esperado)}.</>}
+                    </div>
+                  );
+                })()}
 
                 {/* EL PIE DE LA ORDEN, CON LOS HONORARIOS A LA VISTA.
                     Estaban calculados en el PDF y en el formulario de creación
