@@ -36,7 +36,8 @@ export async function leerConNova(original, rubros = [], onPaso) {
     .map(r => `${r.id}:${String(r.descripcion || "").slice(0, 60)}`).join(" | ");
 
   const leida = await leerCotizacion(file, {
-    lista, modelo: LECTURA, hojaComoTexto, onPaso,
+    lista, rubros: (rubros || []).filter(r => !r.oculto && !r.anulado_por_oc),
+    modelo: LECTURA, hojaComoTexto, onPaso,
     // UN CORTE DEL SERVIDOR NO ES UNA RESPUESTA, ASÍ QUE SE VUELVE A PREGUNTAR.
     //
     // El servidor corta la petición al minuto, y una proforma larga o un PDF

@@ -14,7 +14,7 @@ import {
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
-import { copiaDelRubro, globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
+import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
 import { baseSinIva } from "./contratoDeLaObra";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
@@ -606,7 +606,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             Qué está emparejando NOVA{revisando.proveedor ? ` · ${revisando.proveedor}` : ""}
           </div>
           <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5, maxWidth: 760 }}>
-            {items.length} renglones leídos del papel · {conRubro} con un rubro propuesto.
+            {items.length} renglones leídos del papel ·{" "}
+            {Number(revisando.ciertos) > 0 && (
+              <><strong>{revisando.ciertos}</strong> calzaron por texto exacto —esos no pueden estar mal—{" "}
+              y </>
+            )}
+            <strong>{conRubro - (Number(revisando.ciertos) || 0)}</strong>{" "}
+            {conRubro - (Number(revisando.ciertos) || 0) === 1 ? "lo propuso" : "los propuso"} NOVA entre los
+            cinco rubros más parecidos.
             {" "}<strong>Nada se compara hasta que mires esto.</strong> De qué rubro es cada renglón es la
             decisión de la que cuelga todo lo demás, y un emparejamiento equivocado produce números con la
             misma cara que los buenos. Lo que quede sin rubro se trata como trabajo nuevo, que es lo correcto
@@ -632,8 +639,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
 
           {items.map((x, i) => {
             const r = vivos.find(v => Number(v.id) === Number(x.rubro_id));
-            const raro = r && (copiaDelRubro(x.descripcion, r) || unidadesDistintas(x, r)
-              || globalMultiplicado(x, r));
+            const raro = r && (unidadesDistintas(x, r) || globalMultiplicado(x, r));
             return (
               <div key={i} style={{ ...caja, marginBottom: 6, padding: "8px 10px",
                 borderLeft: `3px solid ${raro ? colors.danger : x.visto ? colors.success
@@ -650,16 +656,17 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     {r ? (
                       <div style={{ fontSize: 11, color: raro ? colors.danger : colors.inkSoft, marginTop: 3,
                         lineHeight: 1.45 }}>
-                        <span style={{ color: colors.muted }}>contra el rubro </span>
+                        <span style={{ color: x.porTexto ? colors.success : colors.muted }}>
+                          {x.porTexto ? "mismo texto que el rubro " : "contra el rubro "}
+                        </span>
                         <strong>{r.numero ?? ""} {String(r.descripcion || "").slice(0, 70)}</strong>
                         <span style={{ color: colors.muted }}>
                           {" "}· {fmt(r.cantidad)} {r.unidad || ""} × ${fmt(unitario(r))}
                         </span>
                         {raro && <div style={{ fontWeight: 700 }}>
-                          {copiaDelRubro(x.descripcion, r) ? "El texto es el del rubro, no el del papel."
-                            : unidadesDistintas(x, r)
-                              ? `El papel lo cobra por ${x.unidad} y el rubro está contratado por ${r.unidad}.`
-                              : `El rubro es un global de ${fmt(r.cantidad)} ${r.unidad || ""} y el renglón trae ${fmt(x.cantidad)}.`}
+                          {unidadesDistintas(x, r)
+                            ? `El papel lo cobra por ${x.unidad} y el rubro está contratado por ${r.unidad}.`
+                            : `El rubro es un global de ${fmt(r.cantidad)} ${r.unidad || ""} y el renglón trae ${fmt(x.cantidad)}.`}
                         </div>}
                       </div>
                     ) : (
@@ -906,9 +913,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 // usa el nombre del rubro a propósito en las diferencias de
                 // precio y de cantidad, así que compararla con el rubro daría
                 // siempre que sí.
+                // Se miran los NÚMEROS, no las palabras: en una obra cuyo
+                // presupuesto se armó con la cotización vieja de este mismo
+                // proveedor, el texto idéntico es la firma de un acierto.
                 const dudoso = rubro && !!l.texto_papel
-                  && (copiaDelRubro(l.texto_papel, rubro)
-                    || unidadesDistintas({ unidad: l.unidad_papel }, rubro)
+                  && (unidadesDistintas({ unidad: l.unidad_papel }, rubro)
                     || globalMultiplicado({ cantidad: l.cantidad_papel }, rubro));
                 return (
                   <div key={l.id} style={{ ...caja, marginBottom: 6, padding: "9px 11px",
@@ -999,12 +1008,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                         {dudoso && (
                           <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 2, lineHeight: 1.45 }}>
                             <strong>Este emparejamiento no se sostiene.</strong>{" "}
-                            {copiaDelRubro(l.texto_papel, rubro)
-                              ? "El texto del renglón es el del rubro del contrato, no el del papel del proveedor."
-                              : unidadesDistintas({ unidad: l.unidad_papel }, rubro)
-                                ? `El papel lo cobra por ${l.unidad_papel} y el rubro está contratado por ${rubro.unidad}.`
-                                : `El rubro es un global de ${fmt(rubro.cantidad)} ${rubro.unidad || ""} y el renglón `
-                                  + `trae ${fmt(l.cantidad_papel)}.`}
+                            {unidadesDistintas({ unidad: l.unidad_papel }, rubro)
+                              ? `El papel lo cobra por ${l.unidad_papel} y el rubro está contratado por ${rubro.unidad}.`
+                              : `El rubro es un global de ${fmt(rubro.cantidad)} ${rubro.unidad || ""} y el renglón `
+                                + `trae ${fmt(l.cantidad_papel)}.`}
                             {" "}No decidas contra estos números: señalá el rubro correcto, o volvé a leer la
                             proforma —desde hoy NOVA transcribe el papel sin ver la lista de rubros—.
                           </div>

@@ -30,7 +30,25 @@ const pelado = t => String(t || "").toLowerCase()
   .replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 
 /**
- * UN RENGLÓN QUE REPITE AL RUBRO NO ES UN RENGLÓN: ES EL RUBRO.
+ * EL TEXTO IGUAL NO PRUEBA NADA, Y POR ESO ESTO YA NO DESCALIFICA A NADIE.
+ *
+ * Parecía una señal buenísima: si el renglón dice exactamente lo que dice el
+ * rubro, es que NOVA copió la lista del presupuesto en vez de leer el papel.
+ * Y marcó en rojo "Tablero Trifásico de 20 espacios -PRINCIPAL" contra el
+ * rubro 91, que se llama igual, con la misma unidad, la misma cantidad y un
+ * precio a quince dólares de distancia: el emparejamiento más correcto de toda
+ * la proforma.
+ *
+ * Lo que pasa es que este presupuesto se armó con una cotización vieja de este
+ * mismo proveedor, así que los textos SON los mismos. En una obra así, el texto
+ * idéntico es la firma de un acierto y no de una copia.
+ *
+ * Y la copia que esto venía a cazar ya no puede ocurrir: desde que la
+ * transcripción se hace sin ver la lista de rubros, no hay nada que copiar.
+ * Lo que queda son las reglas que miran los NÚMEROS —la unidad, la cantidad—,
+ * que hablan de si las dos cosas son la misma y no de cómo se escriben.
+ *
+ * Se deja la función porque sirve para explicar, pero no descalifica.
  *
  * Cuando el texto que vuelve es igual al del rubro con el que dice calzar, lo
  * que pasó es que NOVA copió la lista del presupuesto en vez de leer el papel.
@@ -92,12 +110,12 @@ export function limpiarEmparejamientos(items = [], rubros = []) {
     const rubro = porId.get(Number(it.rubro_id));
     if (!rubro) return it;
     let porQue = null;
-    if (copiaDelRubro(it.descripcion, rubro)) porQue = "el texto es el del rubro, no el del papel";
-    else if (unidadesDistintas(it, rubro)) {
+    if (unidadesDistintas(it, rubro)) {
       porQue = `el papel lo cobra por ${it.unidad} y el rubro está contratado por ${rubro.unidad}`;
     } else if (globalMultiplicado(it, rubro)) porQue = "el rubro es un global de una unidad y el renglón trae varias";
-    else if ((cuantosPorRubro.get(Number(it.rubro_id)) || 0) >= 3
-      && copiaDelRubro(it.descripcion, rubro)) porQue = "tres renglones distintos contra el mismo rubro";
+    else if ((cuantosPorRubro.get(Number(it.rubro_id)) || 0) >= 3 && globalMultiplicado(it, rubro)) {
+      porQue = "tres renglones distintos contra el mismo rubro global";
+    }
     if (!porQue) return it;
     motivos.push({ descripcion: it.descripcion, rubro: rubro.descripcion, porQue });
     return { ...it, rubro_id: null, dudoso: porQue };

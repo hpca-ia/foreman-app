@@ -1,3 +1,4 @@
+import { emparejarPorTexto, pedidoDeEmparejamiento } from "./emparejarRubros.js";
 // CÓMO CONTESTA NOVA UNA PROFORMA, Y POR QUÉ NO EN JSON.
 //
 // Pedirle JSON cuesta unos cuarenta tokens por renglón: las llaves, las
@@ -352,7 +353,7 @@ export function cuadrar(items = [], totales = null, descuento = 0) {
  * @param pedir  función que habla con NOVA: (cuerpo) => { texto, cortado }
  * @returns { proveedor, items, cortado }
  */
-export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, hojaComoTexto } = {}) {
+export async function leerCotizacion(file, { pedir, lista = "", rubros = [], modelo, onPaso, hojaComoTexto } = {}) {
   const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file?.name || "");
   const esPdf = file?.type === "application/pdf";
   const sistema = sistemaDeCotizacion();
@@ -412,24 +413,48 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
   // Cuesta un pedido más y son cinco tokens de respuesta por renglón. La otra
   // forma salía gratis y escribía los textos del presupuesto adentro de la
   // proforma del proveedor.
-  if (lista && items.length) {
-    onPaso?.("emparejando con el presupuesto");
-    const numerados = items.map((x, i) => `${i + 1}. ${x.descripcion} (${x.cantidad || ""} ${x.unidad || ""})`).join("\n");
-    try {
-      const { texto } = await pedir({
-        model: modelo, max_tokens: 1500,
-        system: `${PROMPT_RUBROS}\n\nRubros de la obra: ${lista}`,
-        messages: [{ role: "user", content: [{ type: "text", text: numerados }] }],
-      });
-      const mapa = asignacionDeTexto(texto);
-      items.forEach((x, i) => { x.rubro_id = mapa.get(i + 1) ?? null; });
-    } catch {
-      // Sin emparejar también sirve: los renglones quedan para asignarlos a
-      // mano, que es mejor que no poder leer la proforma.
+  // PRIMERO LO QUE NO NECESITA QUE NADIE OPINE: el mismo texto y una unidad que
+  // no se contradice. Dos cadenas iguales son dos cadenas iguales, siempre, y
+  // en esta obra —cuyo presupuesto se armó con una cotización vieja del mismo
+  // proveedor— eso cubre buena parte de la proforma.
+  let ciertos = 0;
+  if (rubros.length && items.length) {
+    const porTexto = emparejarPorTexto(items, rubros);
+    porTexto.items.forEach((x, i) => { items[i] = x; });
+    ciertos = porTexto.ciertos;
+  }
+
+  // Y LO QUE QUEDA SE PREGUNTA CONTRA CINCO CANDIDATOS, no contra la lista
+  // entera: elegir entre cinco parecidos es un problema mucho más chico que
+  // recordar ciento setenta rubros, y el que no tiene ningún candidato no se
+  // pregunta —preguntarlo sería darle la oportunidad de inventar uno—.
+  if (rubros.length && items.length) {
+    const pedido = pedidoDeEmparejamiento(items, rubros);
+    if (pedido.indices.length) {
+      onPaso?.("emparejando con el presupuesto");
+      try {
+        const { texto } = await pedir({
+          model: modelo, max_tokens: 1500, system: PROMPT_RUBROS,
+          messages: [{ role: "user", content: [{ type: "text", text: pedido.texto }] }],
+        });
+        const mapa = asignacionDeTexto(texto);
+        const validos = new Set(rubros.map(r => Number(r.id)));
+        pedido.indices.forEach((indice, k) => {
+          const id = mapa.get(k + 1);
+          // Un id que no está en la lista es una invención: se descarta.
+          items[indice].rubro_id = id && validos.has(Number(id)) ? Number(id) : null;
+        });
+      } catch {
+        // Sin emparejar también sirve: los renglones quedan para asignarlos a
+        // mano, que es mejor que no poder leer la proforma.
+      }
     }
   }
 
   return { proveedor, items, cortado, iva, totales, descuento,
+    // Cuántos salieron de comparar textos —esos no pueden estar mal— y cuántos
+    // los eligió el modelo, que son los que hay que mirar.
+    ciertos, propuestos: items.filter(x => x.rubro_id && !x.porTexto).length,
     cuadre: cuadrar(items, totales, descuento) };
 }
 
