@@ -370,8 +370,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
    */
   async function pasarLasEficiencias(frescas) {
     if (!abierto) return;
-    const filas = frescas.filter(x => x.decision === "eficiencia")
-      .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), abierto));
+    // LO QUE LLEGA A BENEFICIOS SON DOS COSAS, medidas contra varas distintas:
+    //
+    //   · la eficiencia de precio, contra el COSTO cargado del rubro;
+    //   · lo que se paga con la plata de un rubro ya contratado, contra el
+    //     PRECIO de ese rubro sin IVA —el cliente ya lo pagó al firmarlo, así
+    //     que lo que sobre entre ese precio y lo que costó es del proyecto.
+    //
+    // Lo segundo necesita saber de qué rubro sale: sin rubro señalado no hay
+    // base contra la cual medir, y entonces no se inventa un beneficio.
+    const filas = [
+      ...frescas.filter(x => x.decision === "eficiencia")
+        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), abierto, "costo")),
+      ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
+        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), abierto, "precio"))
+        .filter(x => x.presupuestado > 0),
+    ];
     const r = await sincronizarEficiencias(abierto.obra_id, abierto.id, filas);
     if (r.error) { setError(r.error); return; }
     if (filas.length) onCambio?.();
@@ -732,11 +746,28 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             border: `1px solid ${l.nota ? colors.border : "transparent"}`,
                             background: l.nota ? "#fff" : colors.bg,
                             borderRadius: colors.radiusSm, outline: "none" }} />
-                        {dejaria != null && (
+                        {dejaria != null && (l.decision === "pendiente" || l.decision === "cobrar") && (
                           <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 3 }}>
                             Si el cliente la aprueba deja <strong style={{ color: colors.success }}>${fmt(dejaria)}</strong>:
                             se cobra a ${fmt(puRubro)} y cuesta ${fmt(puPropuesta)}. Es el margen con el que se vendió
                             el rubro, no una eficiencia — entra a Beneficios como previsto el día que se apruebe la orden.
+                          </div>
+                        )}
+                        {/* LO QUE PASA CON LA PLATA, DICHO EN EL RENGLÓN.
+                            "Lo pagamos nosotros" sin decir de dónde sale es
+                            una decisión a medias: sale de un rubro del
+                            contrato, y lo que ese rubro tenga de más entre su
+                            precio y lo que costó queda a favor del proyecto. */}
+                        {l.decision === "nuestro" && (
+                          <div style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.5,
+                            color: rubro ? colors.success : colors.warning }}>
+                            {rubro && puRubro != null
+                              ? <>Se hace con la plata del rubro {rubro.numero || ""}, que se vendió en
+                                ${fmt(puRubro * Number(l.cantidad))} y cuesta ${fmt(l.monto)}: quedan
+                                {" "}<strong>${fmt(puRubro * Number(l.cantidad) - Number(l.monto))}</strong> a
+                                favor del proyecto, y ya están en Beneficios. El cliente no aprueba nada.</>
+                              : "Falta señalar de qué rubro del contrato sale: sin eso no se sabe contra qué "
+                                + "medirlo y no entra a Beneficios."}
                           </div>
                         )}
                         {l.decidido_nombre && (

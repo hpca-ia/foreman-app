@@ -10,13 +10,29 @@ export const DECISIONES = {
     label: "Se le cobra al cliente",
     pista: "Entra en la orden de cambio que el cliente firma y paga",
   },
+  // LAS DOS QUE NO SE LE COBRAN AL CLIENTE, Y QUE NO SON LO MISMO.
+  //
+  //   · YA ESTABA INCLUIDO es una respuesta AL PROVEEDOR: eso que está
+  //     cotizando aparte ya forma parte de lo que se le contrató, así que no se
+  //     le paga. No sale plata de ningún lado; la conversación es con él, y lo
+  //     que hay que poder señalar es en qué rubro estaba, porque es lo que va a
+  //     pedir cuando vuelva a reclamarlo.
+  //
+  //   · LO PAGAMOS NOSOTROS es una decisión SOBRE NUESTRA PLATA: el trabajo es
+  //     real y hay que hacerlo, el cliente no lo va a pagar aparte, y sale de
+  //     un rubro del contrato que ya está vendido. El cliente no aprueba nada
+  //     —ya lo pagó cuando firmó ese rubro— y lo que ese rubro tenga de más
+  //     entre su precio y lo que de verdad costó queda a favor del proyecto.
+  //
+  // Dicho de una: en la primera no se gasta, en la segunda se gasta de un
+  // rubro propio. Por eso la segunda llega a Beneficios y la primera no.
   incluido: {
     label: "Ya estaba incluido",
-    pista: "El contrato ya lo cubría: no se cobra nada, y queda escrito dónde estaba",
+    pista: "Ya es parte de lo que se le contrató al proveedor: no se le paga aparte. Señalá en qué rubro estaba",
   },
   nuestro: {
     label: "Lo pagamos nosotros",
-    pista: "Error nuestro —una medición, un olvido—: sale de la utilidad de la obra, no del cliente",
+    pista: "Se hace con la plata de un rubro ya contratado: el cliente no aprueba nada y lo que sobre de ese rubro queda a favor",
   },
   // UN AHORRO NO ES UNA DIFERENCIA CON EL CLIENTE.
   //

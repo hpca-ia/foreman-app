@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
+import { baseSinIva } from "./contratoDeLaObra.js";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son justo lo que no puede estar mal.
 export { totales, esPrevisto, netoPorRubro, esDeOrden, totalesPorOrigen } from "./cuentaBeneficios.js";
@@ -173,12 +174,28 @@ export async function sincronizarEficiencias(obraId, analisisId, filas = []) {
  * el beneficio, y queda escrito contra qué rubro se midió: un ahorro sin el
  * rubro al lado no se puede defender en una reunión.
  */
-export function eficienciaDeLaDiferencia(linea, rubro, analisis) {
+export function eficienciaDeLaDiferencia(linea, rubro, analisis, contra = "costo") {
   const n = v => Number(v) || 0;
   const c2 = v => Math.round(n(v) * 100) / 100;
-  const presupuestado = rubro && rubro.costo_unitario != null
-    ? c2(n(rubro.costo_unitario) * n(linea.cantidad))
-    : c2(n(linea.monto));
+
+  // LO QUE PAGAMOS NOSOTROS SALE DE UN RUBRO QUE YA ESTÁ VENDIDO.
+  //
+  // Cuando una diferencia se decide "la pagamos nosotros", no es que la obra
+  // la regale: es que ese trabajo está cubierto por un rubro del contrato —el
+  // que se señala al lado— y entonces se ejecuta contra su plata. El cliente no
+  // tiene nada que aprobar, porque ya lo pagó cuando firmó ese rubro.
+  //
+  // Lo que queda a favor es la distancia entre lo que ese rubro se vendió y lo
+  // que de verdad costó hacerlo, y eso es beneficio del proyecto. La base, en
+  // ese caso, es el PRECIO del rubro sin IVA —no su costo cargado— porque es
+  // contra el precio que se está midiendo lo que la obra se ahorró de pagar
+  // aparte.
+  const precioSinIva = rubro && n(rubro.cantidad)
+    ? c2((baseSinIva(rubro) / n(rubro.cantidad)) * n(linea.cantidad)) : null;
+  const porCosto = rubro && rubro.costo_unitario != null
+    ? c2(n(rubro.costo_unitario) * n(linea.cantidad)) : c2(n(linea.monto));
+
+  const presupuestado = contra === "precio" && precioSinIva != null ? precioSinIva : porCosto;
   return {
     obra_rubro_id: linea.obra_rubro_id || null,
     descripcion: String(linea.descripcion || "").slice(0, 200),
@@ -187,7 +204,10 @@ export function eficienciaDeLaDiferencia(linea, rubro, analisis) {
     presupuestado,
     real: c2(presupuestado - n(linea.monto)),
     proveedor: analisis?.proveedor || null,
-    nota: `Lo cotizan por debajo del costo cargado${analisis?.titulo ? ` · ${analisis.titulo}` : ""}`,
+    nota: (contra === "precio"
+      ? `Se hace con la plata de un rubro ya contratado${rubro?.numero != null ? ` (rubro ${rubro.numero})` : ""}`
+      : "Lo cotizan por debajo del costo cargado")
+      + (analisis?.titulo ? ` · ${analisis.titulo}` : ""),
   };
 }
 
