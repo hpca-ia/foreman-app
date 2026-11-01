@@ -291,6 +291,19 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     {Math.abs(cajaDelGrupo(g)) > 0.009 && <MarcaCaja monto={cajaDelGrupo(g)} de={g.acumulado} />}
                     {/* Esto se gastó sin estar contratado: salarios, oficina,
                         logística. Que se vea distinto es el punto. */}
+                    {/* LOS RUBROS DE UNA ORDEN ESTÁN CON IVA ACÁ Y SIN IVA EN
+                        EL PAPEL, y nada lo decía: el que compara el capítulo
+                        contra la orden firmada encuentra un 15% de diferencia
+                        en cada renglón y sale a buscar el rubro que falta.
+                        Encima el capítulo no suma la orden entera, porque sus
+                        líneas pueden caer en otros capítulos. */}
+                    {g.rubros.some(r => r.orden_cambio_id) && (
+                      <span title="El control trabaja con IVA; la orden de cambio se firma sin IVA. Y una orden puede dejar líneas en otros capítulos, así que este total no es el de la orden."
+                        style={{ background: colors.neutralSoft || "#F3F4F6", color: colors.muted, borderRadius: 10,
+                          padding: "1px 7px", fontSize: 9, fontWeight: 600, flexShrink: 0 }}>
+                        con IVA · el papel va sin IVA
+                      </span>
+                    )}
                     {g.sinPresupuesto && (
                       <span title="Gasto sin presupuesto: no estaba contratado, por eso el saldo va en negativo"
                         style={{ background: colors.warningSoft, color: colors.warning, borderRadius: 10,

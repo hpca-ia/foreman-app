@@ -979,12 +979,14 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     <div style={{ fontSize: 11, color: c.cuadra ? colors.muted : colors.danger,
                       marginBottom: 8, lineHeight: 1.5 }}>
                       {c.cuadra ? "En el control: " : "NO CUADRA · "}
-                      <strong>${fmt(c.enControl)}</strong>
+                      <strong>${fmt(c.enControl)}</strong> con IVA
+                      {ivaDeLaObra > 0 && <> (el papel dice ${fmt(hon.subtotal)} sin IVA)</>}
                       {c.capitulos.length > 1 && (
                         <> repartidos en {c.capitulos.length} capítulos ({c.capitulos
                           .map(x => `${x.capitulo} $${fmt(x.total)}`).join(" · ")})</>
                       )}
                       {!c.cuadra && <> — {c.problema}. El papel dice ${fmt(c.esperado)}.</>}
+                      {c.cuadra && <> · cada renglón calza, renglón por renglón.</>}
                     </div>
                   );
                 })()}
