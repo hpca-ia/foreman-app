@@ -84,10 +84,48 @@ export function contratoDe(rubros = []) {
   const adiciones = c2(deOrden.filter(r => n(r.total_base) >= 0).reduce((t, r) => t + enLaBaseDelControl(r), 0));
   const reducciones = c2(-deOrden.filter(r => n(r.total_base) < 0).reduce((t, r) => t + enLaBaseDelControl(r), 0));
 
+  // DE QUÉ ESTÁ HECHO CADA NÚMERO, orden por orden y rubro por rubro.
+  //
+  // "+$12.893,62 de adiciones" no se parece a ningún número de ninguna orden
+  // de cambio —la OC-01 dice $10.877,05— y la distancia tiene tres razones que
+  // hay que poder ver: el control lleva el IVA adentro, los honorarios suman
+  // como adición, y si hay varias órdenes están todas juntas. Sin el desglose,
+  // el único camino para entenderlo es sumar los rubros a mano.
+  const porOrden = [];
+  for (const r of deOrden) {
+    const id = Number(r.orden_cambio_id) || 0;
+    let fila = porOrden.find(x => x.id === id);
+    if (!fila) {
+      fila = { id, codigo: null, adiciones: 0, reducciones: 0, honorarios: 0, rubros: [] };
+      porOrden.push(fila);
+    }
+    // El código sale del propio rubro —su capítulo o su descripción lo llevan
+    // escrito— para no tener que ir a buscar la orden a otra tabla solo para
+    // poder nombrarla.
+    if (!fila.codigo) {
+      const m = /\bOC-\d+\b/.exec(`${r.capitulo || ""} ${r.descripcion || ""}`);
+      if (m) fila.codigo = m[0];
+    }
+    const monto = enLaBaseDelControl(r);
+    if (monto < 0) fila.reducciones = c2(fila.reducciones - monto);
+    else fila.adiciones = c2(fila.adiciones + monto);
+    if (/honorario/i.test(r.capitulo || "")) fila.honorarios = c2(fila.honorarios + monto);
+    fila.rubros.push({ descripcion: r.descripcion || "", capitulo: r.capitulo || "", monto: c2(monto) });
+  }
+  porOrden.forEach(f => {
+    f.neto = c2(f.adiciones - f.reducciones);
+    f.rubros.sort((a, b) => Math.abs(b.monto) - Math.abs(a.monto));
+  });
+
   return {
     original,
     adiciones,
     reducciones,
+    // Qué puso cada orden, para poder abrir el número en vez de creerle.
+    porOrden: porOrden.sort((a, b) => a.id - b.id),
+    // Los honorarios suman como adición porque son plata del contrato, pero
+    // conviene poder decir cuánto de la adición es honorario y cuánto trabajo.
+    honorarios: c2(porOrden.reduce((t, f) => t + f.honorarios, 0)),
     neto: c2(adiciones - reducciones),
     vigente: c2(original + adiciones - reducciones),
     cuantasOrdenes: new Set(deOrden.map(r => r.orden_cambio_id).filter(Boolean)).size,

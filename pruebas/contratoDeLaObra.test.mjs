@@ -76,3 +76,32 @@ test("cada rubro se puede leer en las dos bases", () => {
   assert.equal(baseSinIva({ origen: "orden_cambio", iva_pct: 15, total_base: 115 }), 115);
   assert.equal(enLaBaseDelControl({ origen: "orden_cambio", iva_pct: 15, total_base: 115 }), 115);
 });
+
+test("el desglose dice que puso cada orden, y cuanto de eso es honorario", () => {
+  // "+$12.893,62 de adiciones" no se parece a ningun numero de la OC-01, que
+  // dice $10.877,05: el control lleva el IVA adentro y los honorarios suman
+  // como adicion. Sin desglose, entenderlo es sumar los rubros a mano.
+  const c = contratoDe([
+    { total_base: 100000, iva_pct: 15 },
+    { origen: "orden_cambio", orden_cambio_id: 5, capitulo: "ADICIONALES · OC-01", descripcion: "Losa", total_base: 10830.23 },
+    { origen: "orden_cambio", orden_cambio_id: 5, capitulo: "ADICIONALES · OC-01", descripcion: "(–) Microcemento", total_base: -8658.68 },
+    { origen: "orden_cambio", orden_cambio_id: 5, capitulo: "HONORARIOS", descripcion: "Honorarios 10% sobre OC-01", total_base: 385 },
+  ]);
+  assert.equal(c.adiciones, 11215.23);
+  assert.equal(c.reducciones, 8658.68);
+  assert.equal(c.honorarios, 385);
+  assert.equal(c.porOrden.length, 1);
+  assert.equal(c.porOrden[0].neto, 2556.55);
+  assert.equal(c.porOrden[0].honorarios, 385);
+  // Y el rubro mas grande primero, que es por donde se empieza a mirar.
+  assert.equal(c.porOrden[0].rubros[0].descripcion, "Losa");
+});
+
+test("cada orden del desglose se nombra sola, desde sus propios rubros", () => {
+  const c = contratoDe([
+    { total_base: 1000, iva_pct: 15 },
+    { origen: "orden_cambio", orden_cambio_id: 5, capitulo: "ADICIONALES · OC-01", descripcion: "Losa · OC-01", total_base: 100 },
+    { origen: "orden_cambio", orden_cambio_id: 5, capitulo: "HONORARIOS", descripcion: "Honorarios 10% sobre OC-01", total_base: 10 },
+  ]);
+  assert.equal(c.porOrden[0].codigo, "OC-01");
+});

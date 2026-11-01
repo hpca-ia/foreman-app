@@ -28,6 +28,8 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
   const [resumen, setResumen] = useState({});
   const [cargando, setCargando] = useState(true);
   const [borrar, setBorrar] = useState(null);
+  // Qué obra tiene abierto el desglose de sus adiciones y reducciones.
+  const [verContrato, setVerContrato] = useState(null);
   const [cuantasHay, setCuantasHay] = useState(0);
   const [proyectos, setProyectos] = useState({});
   const [presupuestos, setPresupuestos] = useState({});
@@ -238,11 +240,55 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
                       <Dato label="Contrato original" valor={r.contrato.original} />
                       <Dato label={`${r.contrato.cuantasOrdenes} ${r.contrato.cuantasOrdenes === 1 ? "orden aprobada" : "órdenes aprobadas"}`}
                         valor={r.contrato.neto} color={r.contrato.neto < 0 ? colors.danger : colors.success} />
-                      <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.4 }}>
+                      {/* DE DÓNDE SALEN ESTOS DOS NÚMEROS.
+                          "+$12.893,62 de adiciones" no se parece a ningún
+                          número de ninguna orden —la OC-01 dice $10.877,05— y
+                          la distancia tiene tres razones: el control lleva el
+                          IVA adentro, los honorarios suman como adición, y si
+                          hay varias órdenes están todas juntas. Se abre y se
+                          ve, en vez de tener que sumar los rubros a mano. */}
+                      <div onClick={e => { e.stopPropagation(); setVerContrato(v => (v === o.id ? null : o.id)); }}
+                        title="Ver de qué órdenes salen estos números"
+                        style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.4, cursor: "pointer",
+                          textDecoration: "underline dotted" }}>
                         +${fmt(r.contrato.adiciones)} de adiciones
                         {r.contrato.reducciones ? ` · −$${fmt(r.contrato.reducciones)} de reducciones` : " · sin reducciones"}
                       </div>
                       <Dato label="Contrato con las órdenes" valor={r.contrato.vigente} color={colors.brand} />
+                    </div>
+                  )}
+                  {verContrato === o.id && (
+                    <div onClick={e => e.stopPropagation()}
+                      style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+                        borderRadius: colors.radiusSm, padding: "8px 11px", marginBottom: 9, fontSize: 11 }}>
+                      <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, marginBottom: 4 }}>
+                        DE QUÉ ESTÁN HECHAS LAS ADICIONES Y LAS REDUCCIONES
+                      </div>
+                      {r.contrato.porOrden.map(f => (
+                        <div key={f.id} style={{ marginBottom: 5 }}>
+                          <div style={{ fontWeight: 700, color: colors.ink }}>
+                            {f.codigo || (f.id ? `Orden ${f.id}` : "Sin orden")}
+                            {" · "}+${fmt(f.adiciones)}
+                            {f.reducciones ? ` · −$${fmt(f.reducciones)}` : ""}
+                            {f.honorarios ? <span style={{ fontWeight: 400, color: colors.muted }}>
+                              {" "}(incluye ${fmt(f.honorarios)} de honorarios)</span> : null}
+                          </div>
+                          {f.rubros.map((x, i) => (
+                            <div key={i} style={{ display: "flex", gap: 8, color: colors.inkSoft, lineHeight: 1.55 }}>
+                              <span style={{ flex: 1 }}>{x.descripcion}</span>
+                              <span style={{ color: colors.muted, fontSize: 10 }}>{x.capitulo}</span>
+                              <span style={{ fontWeight: 600, whiteSpace: "nowrap",
+                                color: x.monto < 0 ? colors.danger : colors.ink }}>
+                                {x.monto < 0 ? "−" : "+"}${fmt(Math.abs(x.monto))}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 10, color: colors.muted, marginTop: 3, lineHeight: 1.5 }}>
+                        Estos montos llevan el IVA adentro, como todo el control: la orden se firma sin IVA.
+                        Los honorarios suman como adición porque son plata del contrato.
+                      </div>
                     </div>
                   )}
                   <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
