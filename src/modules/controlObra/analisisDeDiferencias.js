@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son las que deciden qué se le cobra al cliente.
-export { DECISIONES, decisionesPara, comoVa } from "./cuentaDiferencias.js";
+export { DECISIONES, decisionesPara, comoVa, recalcularContra } from "./cuentaDiferencias.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, GUARDADO.
 //
@@ -75,14 +75,15 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     texto_papel: l.textoPapel || null,
     unidad_papel: l.unidadPapel || null,
     cantidad_papel: l.cantidadPapel ?? null,
+    monto_papel: l.montoPapel ?? null,
     orden: i,
   }));
   if (filas.length) {
     let { error: e2 } = await supabase.from("obra_analisis_lineas").insert(filas);
     // Sin la 155 el análisis entra igual, sin el texto del papel: vale más
     // guardarlo que frenarlo por una columna nueva.
-    if (e2 && /texto_papel|unidad_papel|cantidad_papel|column|schema cache/i.test(e2.message)) {
-      const sinPapel = filas.map(({ texto_papel, unidad_papel, cantidad_papel, ...r }) => r);
+    if (e2 && /texto_papel|unidad_papel|cantidad_papel|monto_papel|column|schema cache/i.test(e2.message)) {
+      const sinPapel = filas.map(({ texto_papel, unidad_papel, cantidad_papel, monto_papel, ...r }) => r);
       ({ error: e2 } = await supabase.from("obra_analisis_lineas").insert(sinPapel));
     }
     if (e2) return { error: falta(e2) ? SIN_145 : e2.message, analisis: data };
@@ -146,9 +147,19 @@ export async function marcarRevisada(lineaId, revisada, quien) {
  * marcarlo, hay que poder señalar EN CUÁL rubro estaba, que es lo que el
  * proveedor va a pedir cuando vuelva a reclamarlo.
  */
-export async function reEmparejar(lineaId, rubroId) {
-  const { error } = await supabase.from("obra_analisis_lineas")
-    .update({ obra_rubro_id: rubroId || null }).eq("id", lineaId);
+export async function reEmparejar(lineaId, rubroId, recalculado = null) {
+  // AL CAMBIAR EL RUBRO CAMBIA LO QUE EL RENGLÓN ES: un trabajo "nuevo" al que
+  // se le señala su rubro pasa a ser el mismo trabajo a otro precio o con otra
+  // cantidad, y lo que se cobra —o lo que queda a favor— es la diferencia, no
+  // el monto entero. Sin rehacer la cuenta, la tarjeta sigue diciendo "no está
+  // en el contrato" al lado del rubro que lo contiene.
+  const campos = { obra_rubro_id: rubroId || null };
+  if (recalculado) {
+    campos.hallazgo = recalculado.hallazgo;
+    campos.cantidad = recalculado.cantidad;
+    campos.monto = recalculado.monto;
+  }
+  const { error } = await supabase.from("obra_analisis_lineas").update(campos).eq("id", lineaId);
   return error ? error.message : null;
 }
 

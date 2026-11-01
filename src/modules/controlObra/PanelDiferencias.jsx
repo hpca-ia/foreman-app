@@ -12,6 +12,7 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
+  recalcularContra,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
@@ -353,6 +354,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad,
           monto: x.costo, obra_rubro_id: x.rubro_id || null, hallazgo: x.hallazgo,
           textoPapel: x.textoPapel, unidadPapel: x.unidadPapel, cantidadPapel: x.cantidadPapel,
+          montoPapel: x.montoPapel,
         })),
         quien: currentUser,
       });
@@ -413,10 +415,24 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
 
   /** Esta diferencia se compara contra otro rubro del contrato. */
   async function usarRubro(linea, rubro) {
-    setLineas(xs => xs.map(x => (x.id === linea.id ? { ...x, obra_rubro_id: rubro?.id || null } : x)));
+    // Y SE REHACE LA CUENTA CONTRA EL RUBRO NUEVO. Mismo rubro a otro precio es
+    // una diferencia de precio —y si bajó, un beneficio—; otra cantidad vuelve
+    // a ser una diferencia de cantidad, que es lo que va a la orden de cambio.
+    const re = recalcularContra(linea, rubro, rubro && Number(rubro.cantidad)
+      ? baseSinIva(rubro) / Number(rubro.cantidad) : 0);
+    const campos = re
+      ? { obra_rubro_id: rubro?.id || null, hallazgo: re.hallazgo, cantidad: re.cantidad, monto: re.monto }
+      : { obra_rubro_id: rubro?.id || null };
+    const frescas = lineas.map(x => (x.id === linea.id ? { ...x, ...campos } : x));
+    setLineas(frescas);
     setEligiendo(null);
-    const err = await reEmparejar(linea.id, rubro?.id || null);
-    if (err) setError(err);
+    const err = await reEmparejar(linea.id, rubro?.id || null, re);
+    if (err) { setError(err); return; }
+    if (!re && rubro) {
+      setAviso(`Contra el rubro ${rubro.numero ?? ""} ese renglón calza: misma cantidad y mismo precio. `
+        + "No es una diferencia.");
+    }
+    await pasarLasEficiencias(frescas);
   }
 
   /** Ya la miré, aunque todavía no la decida. */

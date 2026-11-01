@@ -88,3 +88,61 @@ export function comoVa(lineas = []) {
     listo: lineas.length > 0 && sinDecidir === 0,
   };
 }
+
+/**
+ * QUÉ ES ESTE RENGLÓN AHORA QUE SE LE SEÑALÓ OTRO RUBRO.
+ *
+ * Un renglón sin rubro entra como trabajo nuevo, y está bien: sin un rubro que
+ * lo cubra, eso es alcance que apareció después. Pero en el momento en que
+ * alguien le señala el rubro a mano, deja de ser trabajo nuevo —el contrato SÍ
+ * lo cubre— y pasa a ser una de otras dos cosas: el mismo trabajo con otra
+ * cantidad, o el mismo trabajo al mismo volumen y a otro precio.
+ *
+ * Sin rehacer la cuenta, la tarjeta sigue diciendo "no está en el contrato" al
+ * lado del rubro que lo contiene, con el monto entero como si hubiera que
+ * cobrarlo todo. Lo que corresponde cobrar —o lo que queda a favor— es la
+ * diferencia contra lo contratado, y el beneficio no aparecía en ningún lado.
+ *
+ * LA VARA ES EL COSTO CARGADO SI EXISTE, y si no el precio que vio el cliente:
+ * es la misma regla con la que se leyó la proforma, y tiene que ser la misma
+ * acá o el mismo renglón diría dos cosas distintas según cómo llegó.
+ *
+ * @param linea  la diferencia guardada, con lo que decía el papel
+ * @param rubro  el rubro que se le señaló, ya sin IVA en su unitario
+ * @returns { hallazgo, cantidad, monto, por } o null si contra ese rubro calza
+ */
+export function recalcularContra(linea, rubro, unitarioSinIva) {
+  const n = v => Number(v) || 0;
+  const c2 = v => Math.round(n(v) * 100) / 100;
+  const cantPapel = n(linea?.cantidad_papel ?? linea?.cantidad);
+  const montoPapel = n(linea?.monto_papel ?? linea?.monto);
+  if (!rubro) {
+    return { hallazgo: "nuevo", cantidad: cantPapel || 1, monto: montoPapel,
+      por: "no está en el presupuesto" };
+  }
+  const cantRubro = n(rubro.cantidad);
+  const puPapel = cantPapel ? montoPapel / cantPapel : 0;
+  const puRubro = n(unitarioSinIva);
+  const puCosto = n(rubro.costo_unitario) > 0 ? n(rubro.costo_unitario) : null;
+  const vara = puCosto != null ? puCosto : puRubro;
+
+  if (cantRubro && cantPapel > cantRubro * 1.001) {
+    const extra = c2(cantPapel - cantRubro);
+    return { hallazgo: "mas_cantidad", cantidad: extra, monto: c2(extra * puPapel),
+      por: `el rubro tiene ${cantRubro} ${rubro.unidad || ""} y la proforma trae ${cantPapel}`.trim() };
+  }
+  if (cantRubro && cantPapel > 0 && cantPapel < cantRubro * 0.999) {
+    const falta = c2(cantRubro - cantPapel);
+    return { hallazgo: "menos_cantidad", cantidad: falta, monto: c2(falta * puPapel),
+      por: `el contrato tiene ${cantRubro} ${rubro.unidad || ""} y acá figuran ${cantPapel}`.trim() };
+  }
+  // Misma cantidad: lo único que puede haber cambiado es el precio.
+  const dif = c2((puPapel - vara) * (cantPapel || cantRubro || 1));
+  if (!vara || Math.abs(dif) <= Math.max(0.01, Math.abs(vara) * 0.001)) return null;
+  return {
+    hallazgo: dif > 0 ? "subio_precio" : "bajo_precio",
+    cantidad: cantPapel || cantRubro || 1,
+    monto: Math.abs(dif),
+    por: `${puCosto != null ? "costaba" : "el cliente lo vio a"} $${c2(vara)} y ahora lo cotizan a $${c2(puPapel)}`,
+  };
+}

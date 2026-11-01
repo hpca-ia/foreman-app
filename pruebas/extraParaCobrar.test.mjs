@@ -280,3 +280,39 @@ test("revisado no es decidido: una mirada y dejada a proposito no es una sin abr
   assert.equal(v.sinMirar, 2);
   assert.equal(v.anotadas, 1);
 });
+
+test("al señalarle el rubro, el renglon deja de ser trabajo nuevo", async () => {
+  // Un renglon sin rubro entra como nuevo, y esta bien. Pero cuando alguien le
+  // señala el rubro a mano, el contrato SI lo cubre: lo que corresponde cobrar
+  // —o lo que queda a favor— es la diferencia, no el monto entero.
+  const { recalcularContra } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const rubro = { cantidad: 1, unidad: "U", total_base: 195.78, iva_pct: 15 };
+  // El tablero: contratado a $170,24 sin IVA y cotizado a $154,76.
+  const r = recalcularContra({ cantidad_papel: 1, monto_papel: 154.76 }, rubro, 170.24);
+  assert.equal(r.hallazgo, "bajo_precio");
+  assert.equal(r.monto, 15.48);
+  assert.match(r.por, /el cliente lo vio a \$170\.24/);
+});
+
+test("con costo cargado, la vara es el costo y no el precio al cliente", async () => {
+  const { recalcularContra } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const rubro = { cantidad: 1, unidad: "U", costo_unitario: 140 };
+  const r = recalcularContra({ cantidad_papel: 1, monto_papel: 154.76 }, rubro, 170.24);
+  assert.equal(r.hallazgo, "subio_precio");
+  assert.equal(r.monto, 14.76);
+  assert.match(r.por, /costaba \$140/);
+});
+
+test("si contra ese rubro calza, no hay diferencia que mostrar", async () => {
+  const { recalcularContra } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  assert.equal(recalcularContra({ cantidad_papel: 1, monto_papel: 170.24 },
+    { cantidad: 1, unidad: "U" }, 170.24), null);
+});
+
+test("y si cambia la cantidad, vuelve a ser una diferencia de cantidad", async () => {
+  const { recalcularContra } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const r = recalcularContra({ cantidad_papel: 12, monto_papel: 600 }, { cantidad: 8, unidad: "U" }, 50);
+  assert.equal(r.hallazgo, "mas_cantidad");
+  assert.equal(r.cantidad, 4);
+  assert.equal(r.monto, 200);
+});
