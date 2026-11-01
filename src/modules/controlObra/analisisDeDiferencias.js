@@ -39,7 +39,7 @@ export async function lineasDe(analisisId) {
  * El archivo se guarda tal como llegó: lo que se discute con el proveedor es su
  * papel, no nuestra lectura de su papel.
  */
-export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, items, iva, lineas, quien }) {
+export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, items, iva, descuento, lineas, quien }) {
   let ruta = null, nombre = null;
   if (archivo) {
     const limpio = String(archivo.name || "propuesta").replace(/[^\w.-]+/g, "_").slice(-60);
@@ -52,6 +52,9 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     obra_id: obraId, titulo: titulo || null, proveedor: proveedor || null,
     archivo_path: ruta, archivo_nombre: nombre,
     items: items || [], iva: Number(iva) || 0,
+    // El descuento ofrecido al pie, entero: es lo que hay que acordarse de
+    // pedir cuando llegue la factura.
+    descuento: Number(descuento) || 0,
     creado_por: quien?.id ?? null, creado_nombre: quien?.name || null,
   }).select().single();
   if (error) {

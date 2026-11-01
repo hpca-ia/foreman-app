@@ -276,6 +276,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // Cuántos de los que calzaron no tienen costo contra el cual juzgar su
     // precio: se vuelve a calcular contra los rubros de hoy, que pueden haber
     // cambiado desde que se leyó la propuesta.
+    // El descuento ofrecido y lo ya decidido se sincronizan al abrir: si solo
+    // se escribieran al cambiar una decisión, un análisis que se lee y se
+    // cierra dejaría su descuento sin llegar nunca a Beneficios.
+    pasarLasEficiencias(r.lineas || [], a);
     const rs = (r.lineas || []).map(l => l.obra_rubro_id).filter(Boolean);
     setSinCosto(rs.filter(id => {
       const rub = vivos.find(x => x.id === id);
@@ -296,7 +300,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       const h = loQueNoEstaPresupuestado(compararContraPresupuesto(r.items, vivos));
       const g = await guardarAnalisis({
         obraId: obra.id, titulo: file.name, proveedor: r.proveedor || "",
-        archivo: r.archivo || file, items: r.items, iva: r.iva,
+        archivo: r.archivo || file, items: r.items, iva: r.iva, descuento: r.descuento,
         lineas: [...h.todo, ...h.menos].map(x => ({
           descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad,
           monto: x.costo, obra_rubro_id: x.rubro_id || null, hallazgo: x.hallazgo,
@@ -314,8 +318,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       setAviso((h.cuantos || h.menos.length
         ? `${comoSeDice(h)}. Quedó guardado: podés salir y volver.`
         : "Todo lo que trae está en el contrato y con las mismas cantidades: no hay diferencias.")
-        + (dto ? ` · La proforma trae $${fmt(dto)} de descuento especial, ya repartido entre los renglones: `
-          + "los costos de abajo son los de verdad, no los de lista." : ""));
+        + (dto ? ` · La proforma ofrece $${fmt(dto)} de descuento especial: está anotado aparte, `
+          + "para acordarse de pedirlo cuando llegue la factura." : "")
+        + (r.porQueDudosos ? ` · ${r.porQueDudosos}` : ""));
     } catch (err) { setError(err.message); }
     setLeyendo("");
   }
@@ -415,8 +420,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
    * más. Se reescriben todas las de este análisis cada vez —no se agregan—, así
    * cambiar o deshacer una decisión no deja un beneficio fantasma sumando.
    */
-  async function pasarLasEficiencias(frescas) {
-    if (!abierto) return;
+  async function pasarLasEficiencias(frescas, cual = null) {
+    const an = cual || abierto;
+    if (!an) return;
     // LO QUE LLEGA A BENEFICIOS SON DOS COSAS, medidas contra varas distintas:
     //
     //   · la eficiencia de precio, contra el COSTO cargado del rubro;
@@ -427,13 +433,25 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // Lo segundo necesita saber de qué rubro sale: sin rubro señalado no hay
     // base contra la cual medir, y entonces no se inventa un beneficio.
     const filas = [
+      // EL DESCUENTO OFRECIDO, COMO BENEFICIO Y ENTERO. No se reparte entre los
+      // renglones: es un trato con el proveedor y se mira entero, porque lo que
+      // hace falta es acordarse de pedirlo cuando llegue la factura a precio de
+      // lista. Entra como previsto hasta que esa factura lo traiga.
+      ...(Number(an.descuento) > 0 ? [{
+        descripcion: `Descuento especial ofrecido${an.proveedor ? ` por ${an.proveedor}` : ""}`,
+        cantidad: 1, unidad: "glb",
+        presupuestado: Number(an.descuento), real: 0,
+        proveedor: an.proveedor || null, obra_rubro_id: null,
+        nota: `Lo ofrece la proforma al pie${an.titulo ? ` · ${an.titulo}` : ""}`
+          + " · hay que pedirlo cuando llegue la factura",
+      }] : []),
       ...frescas.filter(x => x.decision === "eficiencia")
-        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), abierto, "costo")),
+        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "costo")),
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
-        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), abierto, "precio"))
+        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
         .filter(x => x.presupuestado > 0),
     ];
-    const r = await sincronizarEficiencias(abierto.obra_id, abierto.id, filas);
+    const r = await sincronizarEficiencias(an.obra_id, an.id, filas);
     if (r.error) { setError(r.error); return; }
     if (filas.length) onCambio?.();
   }
@@ -548,6 +566,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           {lineas.length} {lineas.length === 1 ? "diferencia" : "diferencias"} · {va.revisadas} revisadas
           {va.miradasSinDecidir > 0 && <> · {va.miradasSinDecidir} miradas y dejadas pendientes</>}
           {porDecidir > 0 && <> · {porDecidir} sin decidir</>}
+          {Number(abierto.descuento) > 0 && (
+            <> · <strong style={{ color: colors.success }}>
+              ${fmt(abierto.descuento)} de descuento ofrecido</strong>, hay que pedirlo al facturar</>
+          )}
           {enlaces[abierto.id] && <> · <a href={enlaces[abierto.id]} target="_blank" rel="noreferrer"
             style={{ color: colors.brand }}>ver el papel</a></>}
           {abierto.estado === "resuelto" && <> · <strong style={{ color: colors.success }}>ya se armó su orden</strong></>}

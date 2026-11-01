@@ -22,7 +22,19 @@ descripción | cantidad | unidad | monto | rubro_id
 La primera línea es el proveedor:  PROVEEDOR | nombre del proveedor
 
 Sin encabezados, sin totales, sin subtotales y sin líneas en blanco. La
-descripción va corta y sin barras adentro.`;
+descripción va corta y sin barras adentro.
+
+LA DESCRIPCIÓN SE COPIA DEL PAPEL, PALABRA POR PALABRA. Es lo que escribió el
+proveedor. Nunca uses el texto de la lista de rubros del presupuesto para
+describir un renglón: si lo hacés, el que lee cree que el proveedor cotizó algo
+que no cotizó.
+
+EL rubro_id SE PONE SOLO CUANDO ES EL MISMO TRABAJO, y vacío en cualquier otro
+caso. Vacío es una respuesta correcta y frecuente: la aplicación muestra esos
+renglones aparte y una persona les asigna el rubro en dos clics, con el
+presupuesto al lado. Un rubro equivocado, en cambio, no se ve —produce números
+con la misma cara que los buenos— y termina en una orden de cambio mal cobrada.
+Ante la duda, vacío.`;
 
 /**
  * Las líneas que escribió NOVA, vueltas renglones.
@@ -366,44 +378,15 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
     if (leido.descuento && !descuento) descuento = leido.descuento;
     items.push(...leido.items);
   }
-  // EL DESCUENTO SE REPARTE ANTES DE DEVOLVER NADA. Todo lo que sigue —comparar
-  // contra el rubro, cargar costos, medir el margen de una orden— trabaja con
-  // el costo por renglón: si el descuento viajara aparte, cada uno de esos
-  // números seguiría diciendo el precio de lista.
-  const conDto = conDescuento(items, descuento);
-  return { proveedor, items: conDto, cortado, iva, totales, descuento,
+  // EL DESCUENTO VIAJA ENTERO Y APARTE, no repartido entre los renglones.
+  //
+  // Repartirlo deja cada renglón diciendo un precio que no figura en ningún
+  // papel, y el descuento —que es lo que hay que ACORDARSE DE PEDIR cuando
+  // llegue la factura— desaparece disuelto en cincuenta centavos por acá y
+  // treinta por allá. Es un trato con el proveedor, y los tratos se miran
+  // enteros: va a Beneficios como lo que es, una rebaja ofrecida sobre el
+  // total, con su monto a la vista.
+  return { proveedor, items, cortado, iva, totales, descuento,
     cuadre: cuadrar(items, totales, descuento) };
 }
 
-/**
- * EL DESCUENTO DEL PIE, REPARTIDO ENTRE LOS RENGLONES.
- *
- * Un descuento al final del papel no es un renglón más: es menos plata en cada
- * una de las cosas que se compran. Y todo lo que viene después trabaja con el
- * costo POR RENGLÓN —comparar contra el rubro, cargar el costo del rubro, medir
- * el margen de una orden de cambio—, así que si el descuento se guardara
- * aparte, cada uno de esos números seguiría diciendo el precio de lista y el
- * ahorro no existiría en ningún lado.
- *
- * Se reparte a prorrata de lo que pesa cada renglón, y los centavos que sobran
- * del redondeo caen en el renglón más grande: así la suma de los renglones da
- * exactamente el subtotal del papel, que es contra lo que se comprueba todo.
- */
-export function conDescuento(items = [], descuento = 0) {
-  const d = Math.abs(Number(descuento) || 0);
-  const total = items.reduce((t, x) => t + (Number(x.monto) || 0), 0);
-  if (!d || total <= 0) return items;
-  const c2 = v => Math.round(v * 100) / 100;
-  const rebajados = items.map(x => {
-    const monto = Number(x.monto) || 0;
-    return { ...x, monto: c2(monto - (d * monto) / total), listaMonto: c2(monto) };
-  });
-  // Los centavos del redondeo, al renglón más grande.
-  const sobra = c2(c2(total - d) - rebajados.reduce((t, x) => t + x.monto, 0));
-  if (sobra !== 0) {
-    let may = 0;
-    rebajados.forEach((x, i) => { if (Math.abs(x.monto) > Math.abs(rebajados[may].monto)) may = i; });
-    rebajados[may] = { ...rebajados[may], monto: c2(rebajados[may].monto + sobra) };
-  }
-  return rebajados;
-}

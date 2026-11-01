@@ -3,6 +3,7 @@ import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { pedirANova, LECTURA, textoDeNova } from "../../lib/modelos";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import { leerCotizacion } from "./leerProforma.js";
+import { limpiarEmparejamientos } from "./desconfiarDeNova.js";
 import { hojaComoTexto } from "./beneficios";
 import { codigoDe } from "./nombreOrden";
 import { planDeBeneficios } from "./cuentaOrdenCambio.js";
@@ -46,9 +47,16 @@ export async function leerConNova(original, rubros = [], onPaso) {
       return { texto: textoDeNova(data) || "", cortado: data?.stop_reason === "max_tokens" };
     },
   });
+  // LO QUE NO SE SOSTIENE VUELVE SIN RUBRO. NOVA empareja bien casi siempre,
+  // pero cuando se equivoca el error no se ve: produce números con la misma
+  // cara que los buenos. Un renglón sin rubro se señala a mano en dos clics;
+  // un rubro equivocado cuesta una orden mal cobrada.
+  const revisada = limpiarEmparejamientos(leida.items || [], rubros || []);
+
   // Se guarda el archivo que se leyó: si era una foto, la comprimida, que es
   // la que entra en el depósito sin pasarse de tamaño y se ve igual.
-  return { ...leida, archivo: file };
+  return { ...leida, items: revisada.items, dudosos: revisada.sospechosos,
+    porQueDudosos: revisada.porQue, archivo: file };
 }
 
 /** Lo que se guarda de lo leído: lo justo para mirarlo sin volver a leerlo. */
