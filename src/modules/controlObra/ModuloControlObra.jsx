@@ -64,7 +64,11 @@ export default function ModuloControlObra({ currentUser, puede, nivelObra = () =
         // el único número posible es la suma cruda, que mezcla rubros con IVA
         // adentro y rubros de orden sin IVA.
         supabase.from("obra_rubros")
-          .select("id,obra_id,total_base,origen,iva_pct,anulado_por_oc,orden_cambio_id,oculto").in("obra_id", ids),
+          // La descripción y el capítulo vienen para poder abrir el desglose
+          // de las adiciones: sin ellos la lista salía con los montos solos,
+          // que es el número que ya estaba arriba.
+          .select("id,obra_id,total_base,origen,iva_pct,anulado_por_oc,orden_cambio_id,oculto,descripcion,capitulo")
+          .in("obra_id", ids),
         supabase.from("obra_facturas").select("id,obra_id,total").in("obra_id", ids),
       ]);
       const facturaIds = (facturas || []).map(f => f.id);
