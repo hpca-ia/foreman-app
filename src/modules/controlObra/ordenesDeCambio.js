@@ -378,7 +378,19 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   const { data: laObra } = await supabase.from("obras")
     .select("honorarios_pct").eq("id", orden.obra_id).maybeSingle();
   const cuenta = honorariosDe({ lineas, pct: pctQueCorresponde(orden, laObra) });
-  const honorario = rubroDeHonorarios(orden, cuenta, { conIva, iva });
+  // AL CAPÍTULO DE HONORARIOS QUE LA OBRA YA TIENE, con el nombre que le puso
+  // su presupuesto: en Plaza Lagos se llama "HONORARIOS Y CARGOS" y en el
+  // Aéreo "HONORARIOS". Creando uno nuevo a nombre fijo, la obra terminaría con
+  // dos capítulos de honorarios y el del contrato en uno y el de las órdenes en
+  // el otro, que es la forma más segura de que alguien sume solo la mitad.
+  const { data: capHon } = await supabase.from("obra_rubros")
+    .select("capitulo,capitulo_orden").eq("obra_id", orden.obra_id)
+    .ilike("capitulo", "%honorario%").order("capitulo_orden").limit(1).maybeSingle();
+  const honorario = rubroDeHonorarios(orden, cuenta, {
+    conIva, iva,
+    capitulo: capHon?.capitulo || "HONORARIOS",
+  });
+  if (honorario && capHon) honorario.capitulo_orden = capHon.capitulo_orden;
   if (honorario) filas.push(honorario);
 
   if (filas.length) {
