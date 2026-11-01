@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renglonesDeTexto, interpretarRespuesta, partirHoja } from "../src/modules/controlObra/leerProforma.js";
+import { renglonesDeTexto, interpretarRespuesta, partirHoja, conDescuento, cuadrar } from "../src/modules/controlObra/leerProforma.js";
 
 test("una proforma en líneas se vuelve renglones", () => {
   const r = renglonesDeTexto([
@@ -117,4 +117,37 @@ test("el emparejamiento vuelve en corto y el guion no asigna", () => {
   assert.equal(m.has(1), false);
   assert.equal(m.get(2), 19);
   assert.equal(m.get(3), 7);
+});
+
+test("el descuento del pie se reparte entre los renglones, al centavo", () => {
+  // Un descuento al final no es un renglon mas: es menos plata en cada cosa
+  // que se compra. Y todo lo que viene despues trabaja con el costo POR
+  // RENGLON, asi que guardado aparte el ahorro no existiria en ningun lado.
+  const items = [{ descripcion: "A", monto: 600 }, { descripcion: "B", monto: 300 }, { descripcion: "C", monto: 100 }];
+  const r = conDescuento(items, 100);
+  assert.equal(r[0].monto, 540);
+  assert.equal(r[1].monto, 270);
+  assert.equal(r[2].monto, 90);
+  assert.equal(r.reduce((t, x) => t + x.monto, 0), 900);
+  // Y queda a la vista cuanto decia la lista, para poder discutirlo.
+  assert.equal(r[0].listaMonto, 600);
+});
+
+test("los centavos del redondeo caen en el renglon mas grande", () => {
+  const r = conDescuento([{ monto: 33.33 }, { monto: 33.33 }, { monto: 33.34 }], 10);
+  assert.equal(Math.round(r.reduce((t, x) => t + x.monto, 0) * 100) / 100, 90);
+});
+
+test("sin descuento los renglones no se tocan", () => {
+  const items = [{ monto: 100 }];
+  assert.equal(conDescuento(items, 0), items);
+});
+
+test("el cuadre cuenta el descuento: los renglones van a precio de lista", () => {
+  // El subtotal del papel ya viene descontado, asi que sin contarlo toda
+  // proforma con descuento se denunciaba como mal leida.
+  const c = cuadrar([{ monto: 600 }, { monto: 300 }, { monto: 100 }], { subtotal: 900 }, 100);
+  assert.equal(c.cuadra, true);
+  const malo = cuadrar([{ monto: 600 }, { monto: 300 }, { monto: 100 }], { subtotal: 900 }, 0);
+  assert.equal(malo.cuadra, false);
 });

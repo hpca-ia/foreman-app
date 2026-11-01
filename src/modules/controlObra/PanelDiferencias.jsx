@@ -114,6 +114,11 @@ function Cuenta({ que, cantidad, unidad, unitario, total, color, base, fuerte })
 // Entonces el presupuesto se abre acá, con buscador, y sirve para dos cosas:
 // leerlo mientras se decide, y señalar el rubro correcto cuando NOVA emparejó
 // mal o cuando hay que decir EN CUÁL rubro ya estaba incluido.
+// El unitario del rubro SIN IVA, que es la base en la que cotiza el proveedor:
+// el del control lleva el impuesto adentro y compararlos de frente se lleva
+// quince puntos.
+const unitario = r => (Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0);
+
 function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) {
   const texto = busca.trim().toLowerCase();
   const filtrados = texto
@@ -126,22 +131,30 @@ function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) 
     if (ya) ya.rubros.push(r); else porCapitulo.push({ capitulo: cap, rubros: [r] });
   }
   return (
-    // VIAJA CON EL QUE LEE. El presupuesto se abre para mirarlo MIENTRAS se
-    // decide cada diferencia, y una lista de cincuenta renglones se scrollea
-    // entera: un panel que se queda arriba sirve para los tres primeros y
-    // después es una columna vacía al costado.
+    // VIAJA CON EL QUE LEE, Y NO CON `sticky`.
     //
-    // `top` cuenta desde el contenedor que scrollea, que es el del contenido
-    // de la aplicación, y el alto se limita para que su propia lista scrollee
-    // adentro en vez de empujar la página.
+    // El presupuesto se abre para mirarlo MIENTRAS se decide cada diferencia, y
+    // una lista de cincuenta renglones se scrollea entera: un panel que se
+    // queda arriba sirve para los tres primeros y después es una columna vacía
+    // al costado.
+    //
+    // Con `position: sticky` no alcanzaba. El contenedor de la aplicación tiene
+    // `overflow-y: auto` pero crece con su contenido, así que nunca scrollea él
+    // —scrollea la ventana—: para el navegador ese es igual el contenedor de
+    // referencia del sticky, y un sticky anclado a algo que no se mueve no se
+    // mueve nunca. Dos horas de CSS para descubrir que el culpable estaba tres
+    // archivos más arriba.
+    //
+    // Entonces no se pega a nada: la que scrollea es la columna de las
+    // diferencias, acá adentro, y esta se queda quieta al lado porque nunca se
+    // fue a ningún lado.
     <div style={{ width: 320, flexShrink: 0, border: `1px solid ${colors.border}`,
-      borderRadius: colors.radiusMd, background: colors.surface, alignSelf: "flex-start",
-      position: "sticky", top: 10, maxHeight: "calc(100vh - 90px)",
-      display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      borderRadius: colors.radiusMd, background: colors.surface, alignSelf: "stretch",
+      display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
       <div style={{ padding: "9px 11px", borderBottom: `1px solid ${colors.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, flex: 1 }}>
-            EL PRESUPUESTO · {rubros.length} RUBROS
+            EL PRESUPUESTO · {rubros.length} RUBROS · SIN IVA
           </span>
           <button onClick={onCerrar}
             style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
@@ -180,13 +193,31 @@ function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) 
                   <span style={{ color: colors.muted, minWidth: 30 }}>{r.numero ?? ""}</span>
                   <span style={{ flex: 1 }}>{r.descripcion}</span>
                 </div>
+              {/* CANTIDAD × UNITARIO = TOTAL, que es contra lo que se compara.
+                  Con el total solo no se puede decidir nada: la proforma trae
+                  un unitario y una cantidad, y la pregunta es si ese unitario
+                  es mejor o peor que el del contrato. El total de un rubro de
+                  cien metros no se parece a nada de lo que dice el papel. */}
                 <div style={{ display: "flex", gap: 6, color: colors.muted, fontSize: 10,
                   fontVariantNumeric: "tabular-nums" }}>
                   <span style={{ minWidth: 30 }} />
                   <span>{fmt(r.cantidad)} {r.unidad || ""}</span>
-                  <span style={{ flex: 1, textAlign: "right" }}>${fmt(r.total_base)}</span>
-                  {Number(r.costo_unitario) > 0 && <span>· costo ${fmt(r.costo_unitario)}</span>}
+                  <span>× ${fmt(unitario(r))}</span>
+                  <span style={{ flex: 1, textAlign: "right", color: colors.inkSoft }}>
+                    ${fmt(baseSinIva(r))}
+                  </span>
                 </div>
+                {Number(r.costo_unitario) > 0 && (
+                  <div style={{ display: "flex", gap: 6, color: colors.muted, fontSize: 10,
+                    fontVariantNumeric: "tabular-nums" }}>
+                    <span style={{ minWidth: 30 }} />
+                    <span style={{ flex: 1 }}>costo cargado</span>
+                    <span>× ${fmt(r.costo_unitario)}</span>
+                    <span style={{ minWidth: 60, textAlign: "right" }}>
+                      ${fmt(Number(r.costo_unitario) * Number(r.cantidad))}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -275,9 +306,16 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       if (g.error) throw new Error(g.error);
       await cargar();
       await abrir(g.analisis);
-      setAviso(h.cuantos || h.menos.length
+      // EL DESCUENTO DEL PIE, DICHO. Es plata nuestra y es de lo primero que
+      // hay que saber de una proforma: ya quedó repartido entre los renglones,
+      // así que cada costo que se compare abajo es el de verdad y no el de
+      // lista.
+      const dto = Number(r.descuento) || 0;
+      setAviso((h.cuantos || h.menos.length
         ? `${comoSeDice(h)}. Quedó guardado: podés salir y volver.`
-        : "Todo lo que trae está en el contrato y con las mismas cantidades: no hay diferencias.");
+        : "Todo lo que trae está en el contrato y con las mismas cantidades: no hay diferencias.")
+        + (dto ? ` · La proforma trae $${fmt(dto)} de descuento especial, ya repartido entre los renglones: `
+          + "los costos de abajo son los de verdad, no los de lista." : ""));
     } catch (err) { setError(err.message); }
     setLeyendo("");
   }
@@ -493,8 +531,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       ["anotadas", `Con nota · ${va.anotadas}`],
     ];
     return (
-      <div style={{ fontFamily: colors.font, display: "flex", gap: 12, alignItems: "flex-start" }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ fontFamily: colors.font, display: "flex", gap: 12,
+        alignItems: verPresupuesto ? "stretch" : "flex-start",
+        ...(verPresupuesto ? { height: "calc(100vh - 150px)", overflow: "hidden" } : {}) }}>
+      <div style={{ flex: 1, minWidth: 0, ...(verPresupuesto
+        ? { overflowY: "auto", paddingRight: 4 } : {}) }}>
         <button onClick={() => { setAbierto(null); cargar(); }}
           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
             fontSize: 12, color: colors.brand, marginBottom: 8 }}>

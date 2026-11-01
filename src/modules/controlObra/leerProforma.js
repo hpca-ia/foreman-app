@@ -45,6 +45,8 @@ export function renglonesDeTexto(txt = "") {
   // cada lado lo saca o lo deja según lo que esté midiendo.
   let iva = 0;
   let totales = null;
+  // Lo que el papel descuenta al pie, como número positivo.
+  let descuento = 0;
   for (const cruda of String(txt).split("\n")) {
     const linea = cruda.trim();
     if (!linea || !linea.includes("|")) continue;
@@ -65,6 +67,19 @@ export function renglonesDeTexto(txt = "") {
     // proforma a mano. Si los renglones no dan el subtotal del papel, algo se
     // leyó mal —un renglón de más, uno de menos, un monto con el IVA adentro—
     // y eso hay que decirlo antes de que el número viaje a un margen.
+    // EL DESCUENTO DEL PIE, QUE ES PLATA NUESTRA.
+    //
+    // Un "descuento especial" abajo de los renglones es lo que de verdad se va
+    // a pagar de menos, y hasta ahora se descartaba junto con los subtotales:
+    // la línea empieza con "descuento" y el filtro de totales la sacaba. Se
+    // perdía el descuento entero y, encima, la comprobación del pie salía mal
+    // —"se leyó de más"— porque los renglones sumaban el precio de lista y el
+    // subtotal del papel ya venía descontado.
+    if (/^descuento$/i.test(campos[0])) {
+      const d = num(campos[1]);
+      if (d) descuento = Math.abs(Math.round(d * 100) / 100);
+      continue;
+    }
     if (/^totales$/i.test(campos[0])) {
       const [, sub, i2, tot] = campos;
       totales = {
@@ -91,7 +106,7 @@ export function renglonesDeTexto(txt = "") {
       rubro_id: /^\d+$/.test(id) ? Number(id) : null,
     });
   }
-  return { proveedor, items, iva, totales };
+  return { proveedor, items, iva, totales, descuento };
 }
 
 /**
@@ -248,6 +263,14 @@ Después de la línea del proveedor van dos líneas más:
 
   IVA | porcentaje
   TOTALES | subtotal | iva | total
+  DESCUENTO | monto
+
+EL DESCUENTO ESPECIAL VA, y es de las cosas más importantes del papel. Muchas
+proformas suman los renglones y después restan abajo un "descuento especial",
+un "descuento comercial" o un "dto. por volumen". Esa plata es nuestra: es lo
+que de verdad se va a pagar de menos. Si el papel lo trae, devolvelo como un
+número POSITIVO en esa línea, y dejá los renglones con sus precios de lista, sin
+descontarlo adentro de cada uno. Si no hay descuento, no pongas la línea.
 
 El porcentaje es el que dice el papel —15, 12, o 0 si no tiene IVA—. En TOTALES
 van los tres números TAL COMO ESTÁN ESCRITOS al pie de la proforma, sin
@@ -273,9 +296,13 @@ ${lista ? `\nRubros de la obra: ${lista}` : ""}`;
  * @returns null si el papel no trae totales; si no, { cuadra, suma, subtotal,
  *   diferencia, parece }
  */
-export function cuadrar(items = [], totales = null) {
+export function cuadrar(items = [], totales = null, descuento = 0) {
   if (!totales || totales.subtotal == null) return null;
-  const suma = Math.round(items.reduce((t, x) => t + (Number(x.monto) || 0), 0) * 100) / 100;
+  // Los renglones vienen a precio de lista y el subtotal del papel ya trae el
+  // descuento restado: sin contarlo, toda proforma con descuento se denunciaba
+  // como mal leída.
+  const suma = Math.round((items.reduce((t, x) => t + (Number(x.monto) || 0), 0)
+    - (Number(descuento) || 0)) * 100) / 100;
   const subtotal = Math.round((Number(totales.subtotal) || 0) * 100) / 100;
   const diferencia = Math.round((suma - subtotal) * 100) / 100;
   const tolerancia = Math.max(0.05, items.length * 0.01);
@@ -311,7 +338,7 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
   const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
   const bloques = esHoja ? partirHoja(texto, 60) : [null];
   const items = [];
-  let proveedor = "", cortado = false, iva = 0, totales = null;
+  let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0;
 
   for (let i = 0; i < bloques.length; i++) {
     onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
@@ -336,7 +363,47 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
     if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
     if (leido.iva && !iva) iva = leido.iva;
     if (leido.totales && !totales) totales = leido.totales;
+    if (leido.descuento && !descuento) descuento = leido.descuento;
     items.push(...leido.items);
   }
-  return { proveedor, items, cortado, iva, totales, cuadre: cuadrar(items, totales) };
+  // EL DESCUENTO SE REPARTE ANTES DE DEVOLVER NADA. Todo lo que sigue —comparar
+  // contra el rubro, cargar costos, medir el margen de una orden— trabaja con
+  // el costo por renglón: si el descuento viajara aparte, cada uno de esos
+  // números seguiría diciendo el precio de lista.
+  const conDto = conDescuento(items, descuento);
+  return { proveedor, items: conDto, cortado, iva, totales, descuento,
+    cuadre: cuadrar(items, totales, descuento) };
+}
+
+/**
+ * EL DESCUENTO DEL PIE, REPARTIDO ENTRE LOS RENGLONES.
+ *
+ * Un descuento al final del papel no es un renglón más: es menos plata en cada
+ * una de las cosas que se compran. Y todo lo que viene después trabaja con el
+ * costo POR RENGLÓN —comparar contra el rubro, cargar el costo del rubro, medir
+ * el margen de una orden de cambio—, así que si el descuento se guardara
+ * aparte, cada uno de esos números seguiría diciendo el precio de lista y el
+ * ahorro no existiría en ningún lado.
+ *
+ * Se reparte a prorrata de lo que pesa cada renglón, y los centavos que sobran
+ * del redondeo caen en el renglón más grande: así la suma de los renglones da
+ * exactamente el subtotal del papel, que es contra lo que se comprueba todo.
+ */
+export function conDescuento(items = [], descuento = 0) {
+  const d = Math.abs(Number(descuento) || 0);
+  const total = items.reduce((t, x) => t + (Number(x.monto) || 0), 0);
+  if (!d || total <= 0) return items;
+  const c2 = v => Math.round(v * 100) / 100;
+  const rebajados = items.map(x => {
+    const monto = Number(x.monto) || 0;
+    return { ...x, monto: c2(monto - (d * monto) / total), listaMonto: c2(monto) };
+  });
+  // Los centavos del redondeo, al renglón más grande.
+  const sobra = c2(c2(total - d) - rebajados.reduce((t, x) => t + x.monto, 0));
+  if (sobra !== 0) {
+    let may = 0;
+    rebajados.forEach((x, i) => { if (Math.abs(x.monto) > Math.abs(rebajados[may].monto)) may = i; });
+    rebajados[may] = { ...rebajados[may], monto: c2(rebajados[may].monto + sobra) };
+  }
+  return rebajados;
 }
