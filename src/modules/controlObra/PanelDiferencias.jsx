@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { FileText, Check, Trash2, Download } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -14,6 +14,7 @@ import {
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
+import { copiaDelRubro, globalMultiplicado } from "./desconfiarDeNova.js";
 import { baseSinIva } from "./contratoDeLaObra";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
@@ -245,6 +246,29 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   const [verPresupuesto, setVerPresupuesto] = useState(false);
   const [buscaRubro, setBuscaRubro] = useState("");
   const [eligiendo, setEligiendo] = useState(null);
+  // EL ALTO SE MIDE, NO SE ADIVINA.
+  //
+  // "100vh menos ciento cincuenta" es una cuenta que depende de cuánto hay
+  // arriba —el encabezado, las pestañas, el título del análisis, los avisos— y
+  // eso cambia con cada obra y con cada aviso que aparece. Cuando sobra, el
+  // panel queda cortado abajo; cuando falta, la página entera vuelve a
+  // scrollear y el presupuesto se va para arriba.
+  //
+  // Se mide dónde empieza la columna y se usa lo que queda hasta el borde de
+  // la pantalla. Al cambiar el tamaño de la ventana se vuelve a medir.
+  const cajaRef = useRef(null);
+  const [alto, setAlto] = useState(0);
+  useEffect(() => {
+    if (!verPresupuesto) { setAlto(0); return undefined; }
+    const medir = () => {
+      const t = cajaRef.current?.getBoundingClientRect().top ?? 0;
+      setAlto(Math.max(320, Math.round(window.innerHeight - t - 14)));
+    };
+    medir();
+    window.addEventListener("resize", medir);
+    const t = setTimeout(medir, 120);   // después de que se dibuje lo de arriba
+    return () => { window.removeEventListener("resize", medir); clearTimeout(t); };
+  }, [verPresupuesto, abierto, lineas.length, aviso, error]);
 
   // TODO EL CONTRATO VIGENTE, no solo el original: una propuesta nueva puede
   // mover un rubro que ya cambió una orden anterior.
@@ -549,9 +573,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       ["anotadas", `Con nota · ${va.anotadas}`],
     ];
     return (
-      <div style={{ fontFamily: colors.font, display: "flex", gap: 12,
+      <div ref={cajaRef} style={{ fontFamily: colors.font, display: "flex", gap: 12,
         alignItems: verPresupuesto ? "stretch" : "flex-start",
-        ...(verPresupuesto ? { height: "calc(100vh - 150px)", overflow: "hidden" } : {}) }}>
+        ...(verPresupuesto && alto ? { height: alto, overflow: "hidden" } : {}) }}>
       <div style={{ flex: 1, minWidth: 0, ...(verPresupuesto
         ? { overflowY: "auto", paddingRight: 4 } : {}) }}>
         <button onClick={() => { setAbierto(null); cargar(); }}
@@ -720,6 +744,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                   && puRubro != null && puPropuesta != null && puRubro > puPropuesta
                   ? (puRubro - puPropuesta) * Number(l.cantidad) : null;
                 const revisada = !!l.revisado_at;
+                // LO QUE QUEDÓ GUARDADO MAL TAMBIÉN SE DENUNCIA. El análisis
+                // se leyó una vez y vive en la base: si el emparejamiento no
+                // se sostiene, no alcanza con haberlo arreglado para las
+                // próximas lecturas —hay que decirlo acá, que es donde alguien
+                // está por decidir contra ese número.
+                const dudoso = rubro && (copiaDelRubro(l.descripcion, rubro) || globalMultiplicado(l, rubro));
                 return (
                   <div key={l.id} style={{ ...caja, marginBottom: 6, padding: "9px 11px",
                     opacity: revisada && l.decision === "pendiente" ? 0.85 : 1,
@@ -786,6 +816,17 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             Mirá que no se esté cobrando dos veces lo mismo.
                           </div>
                         )}
+                        {dudoso && (
+                          <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 2, lineHeight: 1.45 }}>
+                            <strong>Este emparejamiento no se sostiene.</strong>{" "}
+                            {copiaDelRubro(l.descripcion, rubro)
+                              ? "El texto del renglón es el del rubro del contrato, no el del papel del proveedor."
+                              : `El rubro es un global de ${fmt(rubro.cantidad)} ${rubro.unidad || ""} y el renglón `
+                                + `trae ${fmt(l.cantidad)}.`}
+                            {" "}No decidas contra estos números: señalá el rubro correcto, o volvé a leer la
+                            proforma —desde hoy NOVA transcribe el papel sin ver la lista de rubros—.
+                          </div>
+                        )}
                         {/* EL EMPAREJAMIENTO SE CORRIGE A MANO. NOVA acierta
                             casi siempre, pero "pintura de fibrocemento" calza
                             con tres rubros parecidos, y cuando elige el que no
@@ -818,7 +859,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             border: `1px solid ${l.nota ? colors.border : "transparent"}`,
                             background: l.nota ? "#fff" : colors.bg,
                             borderRadius: colors.radiusSm, outline: "none" }} />
-                        {dejaria != null && (l.decision === "pendiente" || l.decision === "cobrar") && (
+                        {dejaria != null && !dudoso && (l.decision === "pendiente" || l.decision === "cobrar") && (
                           <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 3 }}>
                             Si el cliente la aprueba deja <strong style={{ color: colors.success }}>${fmt(dejaria)}</strong>:
                             se cobra a ${fmt(puRubro)} y cuesta ${fmt(puPropuesta)}. Es el margen con el que se vendió

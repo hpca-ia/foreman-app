@@ -254,8 +254,25 @@ export function asignacionDeTexto(txt = "") {
 // mismo papel —lo que un proveedor cotiza— y tiene que leerse igual en los
 // dos, o el mismo archivo daría dos resultados distintos según por dónde entre.
 
-export function sistemaDeCotizacion(lista = "") {
+/**
+ * LEER NO ES EMPAREJAR, Y POR ESO SE PREGUNTAN APARTE.
+ *
+ * Antes la lista de rubros del presupuesto viajaba en el mismo pedido que la
+ * transcripción, y pasó lo que tenía que pasar: NOVA devolvió como "renglones
+ * de la proforma" los textos de los rubros del contrato, palabra por palabra,
+ * con cantidades inventadas. Nadie lo notaba hasta que la pantalla decía que
+ * aprobar un renglón dejaba veintinueve mil dólares.
+ *
+ * Teniendo las dos cosas a la vista, cualquiera mezcla: la lista es lo que está
+ * escrito más cerca y copiar es más fácil que leer un PDF torcido.
+ *
+ * Entonces la lectura se hace a ciegas —el papel y nada más— y el
+ * emparejamiento se pregunta después, sobre lo que ya se transcribió. Lo que no
+ * se vio no se puede copiar, y eso no depende de que la instrucción se respete.
+ */
+export function sistemaDeCotizacion() {
   return `Eres NOVA. Lees proformas de proveedores de construcción en Ecuador.
+Transcribís lo que dice el papel. No comparás con nada ni completás nada.
 
 ${FORMATO}
 
@@ -289,9 +306,8 @@ van los tres números TAL COMO ESTÁN ESCRITOS al pie de la proforma, sin
 calcularlos y sin corregirlos; si alguno no aparece, poné un guion. Sirven para
 comprobar que se leyó bien: la suma de los renglones tiene que dar el subtotal.
 
-"rubro_id" es el rubro de la lista al que corresponde ese renglón, o un guion si
-no estás seguro. El guion es una respuesta válida y es mejor que adivinar.
-${lista ? `\nRubros de la obra: ${lista}` : ""}`;
+El campo "rubro_id" va siempre con un guion: emparejar no es parte de esta
+lectura. Acá solo se transcribe el papel.`;
 }
 
 /**
@@ -339,7 +355,7 @@ export function cuadrar(items = [], totales = null, descuento = 0) {
 export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, hojaComoTexto } = {}) {
   const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file?.name || "");
   const esPdf = file?.type === "application/pdf";
-  const sistema = sistemaDeCotizacion(lista);
+  const sistema = sistemaDeCotizacion();
 
   const b64 = esHoja ? null : await new Promise(res => {
     const fr = new FileReader();
@@ -386,6 +402,33 @@ export async function leerCotizacion(file, { pedir, lista = "", modelo, onPaso, 
   // treinta por allá. Es un trato con el proveedor, y los tratos se miran
   // enteros: va a Beneficios como lo que es, una rebaja ofrecida sobre el
   // total, con su monto a la vista.
+  // ── Y RECIÉN AHORA, EL EMPAREJAMIENTO ────────────────────────────────────
+  //
+  // En un pedido aparte, con los renglones ya transcriptos y numerados. NOVA ve
+  // la lista de rubros por primera vez cuando ya no tiene el papel adelante,
+  // así que no hay nada que copiar: lo único que puede hacer con la lista es
+  // elegir un número o poner un guion.
+  //
+  // Cuesta un pedido más y son cinco tokens de respuesta por renglón. La otra
+  // forma salía gratis y escribía los textos del presupuesto adentro de la
+  // proforma del proveedor.
+  if (lista && items.length) {
+    onPaso?.("emparejando con el presupuesto");
+    const numerados = items.map((x, i) => `${i + 1}. ${x.descripcion} (${x.cantidad || ""} ${x.unidad || ""})`).join("\n");
+    try {
+      const { texto } = await pedir({
+        model: modelo, max_tokens: 1500,
+        system: `${PROMPT_RUBROS}\n\nRubros de la obra: ${lista}`,
+        messages: [{ role: "user", content: [{ type: "text", text: numerados }] }],
+      });
+      const mapa = asignacionDeTexto(texto);
+      items.forEach((x, i) => { x.rubro_id = mapa.get(i + 1) ?? null; });
+    } catch {
+      // Sin emparejar también sirve: los renglones quedan para asignarlos a
+      // mano, que es mejor que no poder leer la proforma.
+    }
+  }
+
   return { proveedor, items, cortado, iva, totales, descuento,
     cuadre: cuadrar(items, totales, descuento) };
 }
