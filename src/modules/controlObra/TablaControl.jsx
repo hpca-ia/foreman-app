@@ -17,7 +17,7 @@ function pctColor(pct, saldo) {
   return colors.inkSoft;
 }
 
-function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null, beneficio = 0, deCaja = 0 }) {
+function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = null, beneficio = 0, deCaja = 0, onPedidos = null }) {
   // Sacado del contrato por una orden de cambio: se lee tachado y en gris. Que
   // siga a la vista es el punto — alguien tiene que poder ver que ese trabajo
   // estaba y ya no está, sin ir a buscar la orden.
@@ -60,7 +60,13 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = n
       <span style={{ textAlign: "right", color: colors.ink }} title={acc.estimado ? "Repartido desde una agrupación a prorrata del presupuesto — no es un monto de factura" : undefined}>
         {acc.estimado && <span style={{ color: colors.muted, marginRight: 2 }}>~</span>}${fmt(acc.acumulado)}
       </span>
-      <span style={{ textAlign: "right", color: comprometido ? colors.warning : colors.muted, fontSize: 11 }}>
+      {/* La columna naranja se abre como los gastos: es plata pedida y sin
+          facturar, y sin poder preguntarle de dónde sale no se puede bajar. */}
+      <span onClick={comprometido && onPedidos ? e => { e.stopPropagation(); onPedidos(); } : undefined}
+        title={comprometido ? "Ver de qué pedidos está hecho este número" : undefined}
+        style={{ textAlign: "right", color: comprometido ? colors.warning : colors.muted, fontSize: 11,
+          cursor: comprometido && onPedidos ? "pointer" : undefined,
+          textDecoration: comprometido && onPedidos ? "underline" : undefined }}>
         {comprometido ? `$${fmt(comprometido)}` : ""}
       </span>
       <span style={{ textAlign: "right", color: acc.saldo < 0 ? colors.danger : colors.inkSoft }}>${fmt(acc.saldo)}</span>
@@ -108,6 +114,56 @@ function FilaRubro({ rubro: r, porRubro, sangria, comprometido = 0, onAvance = n
  * que dice la factura, y quien revisa tiene que poder distinguirlo sin abrirla:
  * contra un número prorrateado no se reclama nada.
  */
+
+// DE QUÉ ESTÁ HECHO LO COMPROMETIDO.
+//
+// La columna naranja dice cuánta plata está pedida y todavía no facturada, y
+// era el único número del control al que no se le podía preguntar de dónde
+// sale: los gastos se abren renglón por renglón desde que existe esta tabla,
+// pero "COMPROMETIDO $1.830" no se abría. Un número que no se puede abrir no
+// se puede discutir ni bajar, y este es justamente el que decide si todavía
+// hay plata para comprometer algo más.
+//
+// El desglose ya lo calculaba `comprometidoPorGrupo`; lo que faltaba era
+// mostrarlo.
+function Pedidos({ pedidos, sangria }) {
+  if (!pedidos.length) {
+    return (
+      <div style={{ padding: `6px 14px 8px ${sangria + 14}px`, fontSize: 11, color: colors.muted,
+        borderBottom: `1px solid ${colors.neutralSoft}`, background: colors.warningSoft }}>
+        No hay pedidos de compra abiertos contra este renglón.
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: colors.warningSoft, borderBottom: `1px solid ${colors.neutralSoft}`,
+      padding: `5px 14px 7px ${sangria + 14}px` }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.warning, letterSpacing: 0.3, marginBottom: 3 }}>
+        PEDIDO Y TODAVÍA SIN FACTURA · {pedidos.length}
+      </div>
+      {pedidos.map(d => (
+        <div key={d.id} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11,
+          color: colors.inkSoft, lineHeight: 1.65 }}>
+          <span style={{ flex: 1, minWidth: 120 }}>
+            {d.descripcion || "(sin descripción)"}
+            <span style={{ color: colors.muted }}> · {d.destino}</span>
+          </span>
+          {/* DE DÓNDE SALIÓ EL MONTO: un acordado y un estimado no valen lo
+              mismo, y el que mira este número tiene que poder distinguirlos
+              sin abrir Compras. */}
+          <span style={{ fontSize: 10, color: d.deProforma ? colors.muted : colors.warning, whiteSpace: "nowrap" }}>
+            {d.deDonde}
+          </span>
+          <span style={{ fontSize: 10, color: d.firme ? colors.inkSoft : colors.muted, whiteSpace: "nowrap" }}>
+            {d.estado}
+          </span>
+          <span style={{ fontWeight: 600, color: colors.warning, whiteSpace: "nowrap" }}>${fmt(d.monto)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Gastos({ gastos, sangria, pagadoDe = {} }) {
   if (!gastos.length) {
     return (
@@ -194,6 +250,8 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   // llena la pantalla de listas y se pierde la tabla, que es lo que se vino a
   // mirar.
   const [verGastos, setVerGastos] = useState(null);
+  // Qué columna naranja está desplegada: lo comprometido también se abre.
+  const [verPedidos, setVerPedidos] = useState(null);
   const [verDetalle, setVerDetalle] = useState(false);
   // Se guardan los CERRADOS, no los abiertos: así al cambiar de agrupación
   // los grupos nuevos aparecen abiertos en vez de colapsarse todos.
@@ -323,7 +381,12 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                   <span style={{ textAlign: "right" }}>${fmt(g.anterior)}</span>
                   <span style={{ textAlign: "right" }}>${fmt(g.periodo)}</span>
                   <span style={{ textAlign: "right" }}>${fmt(g.acumulado)}</span>
-                  <span style={{ textAlign: "right", color: pedido ? colors.warning : colors.muted }}>{pedido ? `$${fmt(pedido)}` : "—"}</span>
+                  <span onClick={pedido ? e => { e.stopPropagation(); setVerPedidos(v => (v === `g${g.clave || g.capitulo}` ? null : `g${g.clave || g.capitulo}`)); } : undefined}
+                    title={pedido ? "Ver de qué pedidos está hecho este número" : undefined}
+                    style={{ textAlign: "right", color: pedido ? colors.warning : colors.muted,
+                      cursor: pedido ? "pointer" : undefined, textDecoration: pedido ? "underline" : undefined }}>
+                    {pedido ? `$${fmt(pedido)}` : "—"}
+                  </span>
                   <span style={{ textAlign: "right", color: libre < 0 ? colors.danger : colors.brand }}
                     title={pedido ? `Quedan $${fmt(g.saldo)} sin contar lo comprometido; contándolo, $${fmt(libre)}` : undefined}>
                     ${fmt(g.saldo)}
@@ -351,6 +414,13 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     —viáticos, logística, honorarios—, no contra el contrato.
                     El número estaba y no había forma de preguntarle de dónde
                     venía. Ahora se abre con sus gastos, uno por uno. */}
+                {verPedidos === `g${g.clave || g.capitulo}` && (
+                  <Pedidos sangria={14}
+                    pedidos={(comprometido?.detalle || []).filter(d => (modo === "actividad"
+                      ? d.claveAct === (g.clave || g.capitulo)
+                      : d.capitulo === g.capitulo))} />
+                )}
+
                 {abierto && !g.rubros.length && (
                   <Gastos sangria={14} pagadoDe={pagadoDe}
                     gastos={modo === "actividad"
@@ -364,7 +434,12 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                     <FilaRubro rubro={r} porRubro={porRubro} sangria={14} onAvance={onAvance}
                       beneficio={beneficioDe[r.id] || 0}
                       deCaja={deCajaDe[r.id] || 0}
-                      comprometido={comprometido?.porRubro?.[r.id] || 0} />
+                      comprometido={comprometido?.porRubro?.[r.id] || 0}
+                      onPedidos={() => setVerPedidos(v => (v === `r${r.id}` ? null : `r${r.id}`))} />
+                    {verPedidos === `r${r.id}` && (
+                      <Pedidos sangria={14}
+                        pedidos={(comprometido?.detalle || []).filter(d => Number(d.rubroId) === Number(r.id))} />
+                    )}
                     {verGastos === `r${r.id}` && (
                       <Gastos sangria={14} pagadoDe={pagadoDe}
                         gastos={gastosDe({ rubroId: r.id }, { facturas, asignaciones, rubros })} />

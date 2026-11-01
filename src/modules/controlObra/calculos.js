@@ -361,6 +361,10 @@ export function comprometidoPorGrupo(solicitudes = [], rubros = [], adjuntos = [
     if (s.obra_rubro_id) porRubro[s.obra_rubro_id] = (porRubro[s.obra_rubro_id] || 0) + monto;
     detalle.push({
       id: s.id, monto, estado: s.estado, firme: !BLANDAS.includes(s.estado),
+      // Contra qué rubro va, por id: el texto de `destino` es para leer, no
+      // para filtrar. Sin esto, mostrar el desglose de un rubro obligaba a
+      // comparar descripciones, que es como se pierde un pedido.
+      rubroId: s.obra_rubro_id ?? null,
       descripcion: s.descripcion || "",
       capitulo: capitulo || SIN_CAPITULO, claveAct,
       // A qué apunta, dicho como se lee. Sin esto no hay manera de contrastar
