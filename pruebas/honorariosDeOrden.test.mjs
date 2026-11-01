@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { honorariosDe, netoDeLaOrden, rubroDeHonorarios, afectaDe, comoSeDice }
+import { honorariosDe, netoDeLaOrden, rubroDeHonorarios, afectaDe, comoSeDice, pctQueCorresponde }
   from "../src/modules/controlObra/honorariosDeOrden.js";
 
 const lineas = [
@@ -67,4 +67,17 @@ test("una orden puede afectar varias cosas a la vez, y se dicen todas", () => {
   assert.equal(comoSeDice({ afecta: [] }), null);
   // Lo que venga de la base y no sea una de las tres no se cuela.
   assert.deepEqual(afectaDe({ afecta: ["tiempo", "cualquier cosa"] }), ["tiempo"]);
+});
+
+test("sin porcentaje en la orden manda el del contrato de la obra", () => {
+  // Poner el numero en cada orden garantizaba que la primera armada con prisa
+  // saliera sin honorarios: no porque se decidiera no cobrarlos —eso se decidio
+  // al firmar— sino porque habia un campo mas que llenar.
+  assert.equal(pctQueCorresponde({}, { honorarios_pct: 10 }), 10);
+  assert.equal(pctQueCorresponde({ honorarios_pct: null }, { honorarios_pct: 10 }), 10);
+  // El de la orden manda cuando lo tiene: alguna vez se negocia distinto.
+  assert.equal(pctQueCorresponde({ honorarios_pct: 6 }, { honorarios_pct: 10 }), 6);
+  // Y un 0 puesto a proposito es una decision, no un campo vacio.
+  assert.equal(pctQueCorresponde({ honorarios_pct: 0 }, { honorarios_pct: 10 }), 0);
+  assert.equal(pctQueCorresponde({}, {}), 0);
 });

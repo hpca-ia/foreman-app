@@ -1,5 +1,5 @@
 import { supabase } from "../../lib/supabase";
-import { honorariosDe, rubroDeHonorarios } from "./honorariosDeOrden.js";
+import { honorariosDe, rubroDeHonorarios, pctQueCorresponde } from "./honorariosDeOrden.js";
 
 // Las órdenes de cambio: lo que se pactó después.
 //
@@ -80,6 +80,8 @@ export async function crearOrden(obraId, datos, quien) {
     justificacion: datos.justificacion?.trim() || null,
     // Qué mueve la orden —puede ser más de una— y el honorario del contrato.
     afecta: Array.isArray(datos.afecta) ? datos.afecta : [],
+    // A cuál reemplaza, si esta sale a corregir una que se anuló.
+    reemplaza_a: datos.reemplaza_a || null,
     honorarios_pct: Number(datos.honorarios_pct) > 0 ? Number(datos.honorarios_pct) : null,
     contratista_nombre: datos.contratista_nombre?.trim() || "HCARQ SA",
     created_by: quien?.id ?? null, created_nombre: quien?.name || null,
@@ -373,7 +375,9 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   // dentro de los precios: cada partida tiene que seguir diciendo lo que
   // cuesta, porque ese es el número contra el que después se compara una
   // cotización. Y si la orden es negativa, el honorario también lo es.
-  const cuenta = honorariosDe({ lineas, pct: orden.honorarios_pct });
+  const { data: laObra } = await supabase.from("obras")
+    .select("honorarios_pct").eq("id", orden.obra_id).maybeSingle();
+  const cuenta = honorariosDe({ lineas, pct: pctQueCorresponde(orden, laObra) });
   const honorario = rubroDeHonorarios(orden, cuenta, { conIva, iva });
   if (honorario) filas.push(honorario);
 
@@ -401,6 +405,54 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
     contratante_fecha: new Date().toISOString().split("T")[0],
     contratante_comentario: observaciones?.trim() || orden.contratante_comentario || null,
     ejecucion: orden.ejecucion === "por_definir" ? "ejecutado" : orden.ejecucion,
+  });
+}
+
+/**
+ * ANULAR UNA ORDEN: deshacer lo que hizo aprobarla, y dejar escrito por qué.
+ *
+ * Una orden aprobada con un error —una cantidad mal medida, un precio viejo, el
+ * rubro equivocado— no se corrige editándola: ya está firmada y el cliente tiene
+ * su copia. Se anula y se emite otra que la reemplaza.
+ *
+ * Hasta ahora el botón marcaba la casilla y nada más: los rubros que la orden
+ * había metido al control seguían ahí, sumando al contrato vigente. La anulada
+ * y su reemplazo quedaban las dos adentro, el contrato inflado por el valor
+ * entero de la anulada, y nada que lo dijera. Anular tiene que deshacer lo que
+ * hizo aprobar, igual que desaprobar.
+ *
+ * La orden NO se borra ni cambia de estado: queda aprobada y anulada, que es la
+ * verdad —se aprobó, y después se anuló—. Todo lo que cuenta plata ya filtra
+ * por `anulada`, así que deja de sumar sola.
+ */
+export async function anularOrden(orden, quien, motivo) {
+  const { error } = await supabase.from("obra_rubros").delete().eq("orden_cambio_id", orden.id);
+  if (error) return error.message;
+  // Las viejas tachaban un rubro del contrato en vez de restar con una línea
+  // propia: ese rubro vuelve, porque el trabajo se sigue haciendo.
+  await supabase.from("obra_rubros").update({ anulado_por_oc: null }).eq("anulado_por_oc", orden.id);
+  return guardarOrden(orden.id, {
+    anulada: true,
+    anulada_at: new Date().toISOString(),
+    anulada_por: quien?.id ?? null,
+    anulada_nombre: quien?.name || null,
+    anulada_motivo: String(motivo || "").trim() || null,
+  });
+}
+
+/**
+ * Deshacer la anulación: vuelve a estar en revisión, no aprobada.
+ *
+ * Sus rubros se fueron del control al anularla y la única forma de meterlos de
+ * nuevo es el camino de siempre, que es aprobarla. Devolverla directo a
+ * "aprobada" dejaría una orden aprobada sin un solo rubro en el control, que es
+ * peor que el problema que esto arregla.
+ */
+export async function desanularOrden(orden) {
+  return guardarOrden(orden.id, {
+    anulada: false, anulada_at: null, anulada_por: null, anulada_nombre: null, anulada_motivo: null,
+    estado: orden.estado === "aprobada" ? "enviada" : orden.estado,
+    aprobada_at: orden.estado === "aprobada" ? null : orden.aprobada_at,
   });
 }
 

@@ -175,6 +175,35 @@ export default function AprobarOrdenDeCambio({ token }) {
               <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>Diferencia sobre el contrato</span>
               <span style={{ fontSize: 15, fontWeight: 700, color: suma < 0 ? C.verde : C.tinta }}>{monto(suma)}</span>
             </div>
+            {/* EL HONORARIO, ANTES DE FIRMAR.
+                Es parte de lo que está aceptando y el papel se lo muestra al
+                pie. Que la pantalla donde aprieta "apruebo" diga un número y el
+                PDF otro es la clase de diferencia que hace que alguien deje de
+                firmar por el enlace y vuelva a pedir todo por correo. */}
+            {Number(orden.honorarios_pct) > 0 && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 5 }}>
+                  <span style={{ fontSize: 12.5, color: C.gris }}>
+                    Honorarios de administración {orden.honorarios_pct}%
+                  </span>
+                  <span style={{ fontSize: 13, color: C.gris }}>
+                    {monto(Math.round(suma * Number(orden.honorarios_pct)) / 100)}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                  marginTop: 4, paddingTop: 5, borderTop: `1px solid ${C.borde}` }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>Total de la orden</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: C.tinta }}>
+                    {monto(Math.round(suma * (100 + Number(orden.honorarios_pct))) / 100)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: C.gris, marginTop: 3, lineHeight: 1.45 }}>
+                  Los honorarios se calculan sobre el neto de esta orden, como dice el contrato, y no están
+                  incluidos en los precios de las partidas. Los valores son sin IVA.
+                </div>
+              </>
+            )}
+
             {/* EL PLAZO ES LA MITAD DE LO QUE ESTÁ ACEPTANDO, y la que
                 después se discute. Si no se definió, se dice así: el papel no
                 afirma que no corre cuando nadie lo contestó. */}

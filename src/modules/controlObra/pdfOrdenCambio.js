@@ -1,6 +1,6 @@
 import { cargarPDF } from "../../lib/exportar";
 import { pieDePdf } from "../../lib/piePdf";
-import { honorariosDe, comoSeDice } from "./honorariosDeOrden.js";
+import { honorariosDe, comoSeDice, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 
 // Las órdenes de cambio en PDF, con el formato que la oficina ya firma.
@@ -72,7 +72,7 @@ async function comoJpeg(url, maxAncho = 900) {
 /** Pinta una orden completa, empezando en la página actual del documento. */
 async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [], iva = 0 }) {
   // El honorario del contrato sobre el neto de esta orden, para el pie.
-  const hon = honorariosDe({ lineas, pct: orden?.honorarios_pct, iva });
+  const hon = honorariosDe({ lineas, pct: pctQueCorresponde(orden, obra), iva });
   const afecta = comoSeDice(orden);
   const ancho = doc.internal.pageSize.getWidth();
   const margen = 40;

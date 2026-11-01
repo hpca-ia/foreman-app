@@ -5,11 +5,12 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
-import { AFECTA, honorariosDe } from "./honorariosDeOrden.js";
+import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
+  anularOrden, desanularOrden,
   pedirElVistoAlDirector, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
@@ -769,8 +770,12 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           pudiera escribirla podía también mandarla al cliente sin que nadie la
           mirara. */}
       {nueva === true && (
+        /* `anuladas`: las que todavía no tienen reemplazo, que es lo que esta
+            orden nueva puede venir a corregir. */
         <ModalOrdenCambio obra={obra} proyecto={proyecto} rubros={rubros} currentUser={currentUser}
           puedeAprobar={esDirector}
+          anuladas={ordenes.filter(x => x.anulada
+            && !ordenes.some(y => Number(y.reemplaza_a) === Number(x.id)))}
           onCerrar={() => setNueva(null)}
           onCreada={async (orden, avisoCot, opciones) => {
             setNueva(null); await cargar(); setAbierta(orden.id);
@@ -824,7 +829,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
         // El pie de la orden: neto, honorarios del contrato y total. Estaba
         // calculado en el papel y en el formulario de creación, pero no acá,
         // que es donde se mira la orden todos los días.
-        const hon = honorariosDe({ lineas: suyas, pct: o.honorarios_pct });
+        const hon = honorariosDe({ lineas: suyas, pct: pctQueCorresponde(o, obra) });
         const suyasFotos = fotos[o.id] || [];
         const esta = abierta === o.id;
         const editable = puedeEditar && o.estado !== "aprobada";
@@ -863,9 +868,36 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
             {esta && (
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${colors.neutralSoft}` }}>
                 {o.anulada && (
-                  <div style={{ background: "#FEF2F2", color: colors.danger, fontSize: 11.5, fontWeight: 700,
-                    textAlign: "center", padding: "6px 8px", borderRadius: 6, marginBottom: 8 }}>
-                    ORDEN DE CAMBIO ANULADA — NO EJECUTADA
+                  <div style={{ background: "#FEF2F2", color: colors.danger, fontSize: 11.5,
+                    padding: "7px 10px", borderRadius: 6, marginBottom: 8, lineHeight: 1.5 }}>
+                    <div style={{ fontWeight: 700, textAlign: "center" }}>
+                      ORDEN DE CAMBIO ANULADA — NO EJECUTADA
+                    </div>
+                    {/* POR QUÉ, QUIÉN Y CUÁNDO. "Anulada" a secas, seis meses
+                        después, no le explica nada a nadie: ni al cliente que
+                        pregunta por qué recibió dos órdenes por lo mismo. */}
+                    {(o.anulada_motivo || o.anulada_nombre) && (
+                      <div style={{ textAlign: "center", fontWeight: 400, marginTop: 2 }}>
+                        {o.anulada_motivo}
+                        {o.anulada_nombre && <> · la anuló {o.anulada_nombre}</>}
+                        {o.anulada_at && <> el {new Date(o.anulada_at).toLocaleDateString("es-EC")}</>}
+                      </div>
+                    )}
+                    {/* Dónde terminó ese trabajo: es lo que se busca al abrir
+                        una orden anulada. */}
+                    {ordenes.filter(x => Number(x.reemplaza_a) === Number(o.id)).map(x => (
+                      <div key={x.id} style={{ textAlign: "center", fontWeight: 700, marginTop: 2 }}>
+                        La reemplaza la {codigoDe(x)}{x.titulo ? ` · ${x.titulo}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Y del otro lado: esta orden sale a corregir una anulada. */}
+                {o.reemplaza_a && (
+                  <div style={{ background: colors.neutralSoft || "#F9FAFB", color: colors.inkSoft, fontSize: 11.5,
+                    padding: "6px 10px", borderRadius: 6, marginBottom: 8, textAlign: "center" }}>
+                    Reemplaza a la{" "}
+                    <strong>{codigoDe(ordenes.find(x => Number(x.id) === Number(o.reemplaza_a)) || {})}</strong>, anulada.
                   </div>
                 )}
                 {/* LA CABECERA TAMBIÉN SE CORRIGE. Un borrador se abre para
@@ -977,12 +1009,15 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     <>
                       <span style={{ fontSize: 10.5, color: colors.muted, marginLeft: 6 }}>HONORARIOS</span>
                       <input type="number" step="0.01" defaultValue={o.honorarios_pct ?? ""}
-                        key={`ho${o.id}-${o.honorarios_pct}`} placeholder="10"
+                        key={`ho${o.id}-${o.honorarios_pct}`}
+                        placeholder={obra?.honorarios_pct ? String(obra.honorarios_pct) : "10"}
                         onBlur={e => String(e.target.value) !== String(o.honorarios_pct ?? "")
                           && hacer(() => guardarOrden(o.id, { honorarios_pct: Number(e.target.value) > 0 ? Number(e.target.value) : null }))}
                         style={{ ...inputStyle, padding: "4px 7px", fontSize: 12, width: 64 }} />
                       <span style={{ fontSize: 10.5, color: colors.muted }}>
-                        % sobre el neto, al pie: no encarece los rubros, entra al capítulo de honorarios
+                        {o.honorarios_pct == null && obra?.honorarios_pct
+                          ? `% — en blanco usa el ${obra.honorarios_pct}% del contrato. Al pie, no encarece los rubros.`
+                          : "% sobre el neto, al pie: no encarece los rubros, entra al capítulo de honorarios"}
                       </span>
                     </>
                   )}
@@ -2153,7 +2188,26 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>{e.label}</button>
                       );
                     })}
-                    <button onClick={() => hacer(() => guardarOrden(o.id, { anulada: !o.anulada }))} disabled={ocupado}
+                    {/* ANULAR SACA SUS RUBROS DEL CONTROL. Antes solo marcaba
+                        la casilla y lo que esa orden había metido al aprobarse
+                        seguía sumando al contrato vigente. */}
+                    <button onClick={() => {
+                      if (o.anulada) {
+                        if (!window.confirm(o.estado === "aprobada"
+                          ? `¿Quitarle la anulación a la ${codigoDe(o)}?\n\nVuelve a quedar en revisión: `
+                            + "para que sus rubros entren otra vez al control hay que aprobarla de nuevo."
+                          : `¿Quitarle la anulación a la ${codigoDe(o)}?`)) return;
+                        return hacer(() => desanularOrden(o));
+                      }
+                      const motivo = window.prompt(
+                        `¿Por qué se anula la ${codigoDe(o)}?\n\n`
+                        + (o.estado === "aprobada"
+                          ? "Sus rubros salen del control de presupuesto y el contrato vigente vuelve a lo que era.\n\n"
+                          : "")
+                        + "Queda escrito en el papel y en la orden que la reemplace.", "");
+                      if (motivo === null) return;
+                      return hacer(() => anularOrden(o, currentUser, motivo));
+                    }} disabled={ocupado}
                       style={{ border: `1px solid ${o.anulada ? colors.danger : colors.border}`, background: o.anulada ? colors.danger : "#fff",
                         color: o.anulada ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 9px", fontSize: 10.5,
                         fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>Anulada</button>

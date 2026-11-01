@@ -335,7 +335,7 @@ async function ordenParaFirmar(req, res, firma) {
   if (!orden) return res.status(404).json({ error: "Este enlace no está disponible." });
   const [lineas, obras, otros] = await Promise.all([
     json(await rest(`orden_cambio_lineas?orden_id=eq.${orden.id}&select=*&order=orden`)),
-    json(await rest(`obras?id=eq.${orden.obra_id}&select=nombre,cliente_nombre`)),
+    json(await rest(`obras?id=eq.${orden.obra_id}&select=nombre,cliente_nombre,honorarios_pct`)),
     json(await rest(`orden_cambio_aprobaciones?orden_id=eq.${orden.id}&select=nombre,rol,aprobado_at&order=id`)),
   ]);
 
@@ -359,7 +359,11 @@ async function ordenParaFirmar(req, res, firma) {
       // Si corre el plazo o no. Que el cliente lo vea antes de aprobar: es la
       // mitad de lo que está aceptando, y la que después se discute.
       impacta_crono: orden.impacta_crono,
-      afecta: orden.afecta, honorarios_pct: orden.honorarios_pct,
+      afecta: orden.afecta,
+      // EL HONORARIO TAMBIÉN LO TIENE QUE VER ANTES DE FIRMAR. Es parte de lo
+      // que está aceptando: el papel se lo muestra al pie y acá se lo mostraba
+      // el documento pero no la pantalla donde aprueba.
+      honorarios_pct: orden.honorarios_pct ?? obras?.[0]?.honorarios_pct ?? null,
       anulada: orden.anulada,
     },
     // EL MONTO SE CALCULA ACÁ. Se mandaban `l.total` y `l.accion`, dos
@@ -1097,11 +1101,15 @@ async function armarInforme(lead) {
   // con sus partidas y sus fotos, porque aprobar un número sin ver qué lo
   // compone no es aprobar.
   let ordenes = [];
+  // El porcentaje de honorarios del contrato, para el pie de cada orden.
+  let obraDelLead = null;
   if (lead.obra_id) {
+    obraDelLead = (await json(await rest(
+      `obras?id=eq.${lead.obra_id}&select=honorarios_pct`)))?.[0] || null;
     ordenes = await json(await rest(
       `ordenes_cambio?obra_id=eq.${lead.obra_id}&estado=in.(enviada,aprobada)`
       + `&select=id,numero,codigo,titulo,tipo,fecha,justificacion,impacto_cronograma,dias_impacto,impacta_crono,afecta,`
-      + `estado,anulada,cliente_acepto,cliente_respondio_at,contratante_comentario&order=numero`)) || [];
+      + `honorarios_pct,estado,anulada,cliente_acepto,cliente_respondio_at,contratante_comentario&order=numero`)) || [];
     ordenes = ordenes.filter(o => !o.anulada);
   }
   let lineasOC = [], fotosOC = [];
@@ -1138,6 +1146,10 @@ async function armarInforme(lead) {
       const suyas = lineasOC.filter(l => l.orden_id === o.id);
       const num = v => Number(v) || 0;
       const monto = l => num(l.cantidad) * num(l.precio_unitario) * (l.tipo === "quita" ? -1 : 1);
+      const neto = suyas.reduce((t, l) => t + monto(l), 0);
+      // El de la orden si lo tiene; si no, el del contrato de la obra.
+      const pctOrden = num(o.honorarios_pct) > 0 ? num(o.honorarios_pct)
+        : (o.honorarios_pct === 0 ? 0 : num(obraDelLead?.honorarios_pct));
       return {
         ...o,
         lineas: suyas.map(l => ({
@@ -1145,7 +1157,13 @@ async function armarInforme(lead) {
           cantidad: num(l.cantidad), precio_unitario: num(l.precio_unitario),
           monto: Math.round(monto(l) * 100) / 100,
         })),
-        total: Math.round(suyas.reduce((t, l) => t + monto(l), 0) * 100) / 100,
+        total: Math.round(neto * 100) / 100,
+        // EL HONORARIO ES PARTE DE LO QUE SE SUMA AL CONTRATO, y el cliente
+        // tiene que verlo acá y no solo en el PDF: dos números distintos para
+        // la misma orden es lo que hace que deje de mirar el portal.
+        honorarios_pct: pctOrden > 0 ? pctOrden : null,
+        honorarios: pctOrden > 0 ? Math.round(neto * pctOrden) / 100 : 0,
+        total_con_honorarios: Math.round(neto * (100 + pctOrden)) / 100,
         fotos: fotosOC.filter(f => f.orden_id === o.id).map(conUrl),
       };
     }),

@@ -62,6 +62,22 @@ export function comoSeDice(orden) {
 }
 
 /**
+ * EL PORCENTAJE QUE LE TOCA A ESTA ORDEN.
+ *
+ * El de la orden si alguna vez se negoció distinto; si no, el del contrato de
+ * la obra. Poner el número en cada orden era garantizar que la primera que se
+ * armara con prisa saliera sin honorarios: no porque se decidiera no cobrarlos
+ * —eso se decidió al firmar— sino porque había un campo más que llenar.
+ */
+export function pctQueCorresponde(orden, obra) {
+  const suyo = n(orden?.honorarios_pct);
+  if (suyo > 0) return suyo;
+  // El 0 puesto a propósito en la orden es una decisión: esta no lleva.
+  if (orden?.honorarios_pct === 0) return 0;
+  return n(obra?.honorarios_pct);
+}
+
+/**
  * El neto de la orden: lo que agrega menos lo que quita.
  *
  * Es sobre esto que se calculan los honorarios, y no sobre las adiciones:

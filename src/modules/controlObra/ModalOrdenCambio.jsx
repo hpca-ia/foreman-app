@@ -36,7 +36,7 @@ const VACIA = {
   // El porcentaje del contrato ya puesto: un campo vacío no lo llena nadie, y
   // el honorario que no se cobra no se reclama después. Se borra si esta orden
   // no lleva.
-  afecta: [], honorarios_pct: "10",
+  afecta: [], honorarios_pct: "", reemplaza_a: "",
   // null es "todavía no se contestó", que no es lo mismo que "no corre".
   impacta_crono: null,
 };
@@ -51,7 +51,7 @@ const LINEA = () => ({ tipo: "aumenta", descripcion: "", unidad: "u", cantidad: 
 
 const TIPOS = ["Requerimiento del cliente", "Vicio oculto", "Cambio de especificación", "Error de proyecto", "Condición del terreno"];
 
-export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentUser, puedeAprobar = false, onCerrar, onCreada }) {
+export default function ModalOrdenCambio({ obra, proyecto, rubros = [], currentUser, puedeAprobar = false, anuladas = [], onCerrar, onCreada }) {
   const [f, setF] = useState(VACIA);
   const [lineas, setLineas] = useState([LINEA()]);
   const [fotos, setFotos] = useState([]);
@@ -218,7 +218,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
   const camRef = useRef(null);
 
   const conMonto = lineas.filter(l => l.descripcion?.trim());
-  const hon = honorariosDe({ lineas: conMonto, pct: f.honorarios_pct });
+  const hon = honorariosDe({ lineas: conMonto, pct: f.honorarios_pct === "" ? obra?.honorarios_pct : f.honorarios_pct });
   const sub = subtotales(conMonto.map(l => ({
     ...l, cantidad: Number(l.cantidad) || 0, precio_unitario: Number(l.precio_unitario) || 0,
   })));
@@ -250,7 +250,8 @@ Si el texto ya está bien escrito, devolvelo igual.`,
     }
     setGuardando(true); setError("");
 
-    const r = await crearOrden(obra.id, { ...f, dias_impacto: Number(f.dias_impacto) || null }, currentUser);
+    const r = await crearOrden(obra.id, { ...f, dias_impacto: Number(f.dias_impacto) || null,
+      reemplaza_a: f.reemplaza_a ? Number(f.reemplaza_a) : null }, currentUser);
     if (r.error) { setError(r.error); setGuardando(false); return; }
     const orden = r.orden;
 
@@ -355,6 +356,32 @@ Si el texto ya está bien escrito, devolvelo igual.`,
           <input autoFocus value={f.titulo} onChange={e => setF(v => ({ ...v, titulo: e.target.value }))}
             placeholder="Ej: Refuerzo de cimentación en eje 4 por suelo no apto" style={mini} />
         </div>
+
+        {/* ¿VIENE A CORREGIR UNA ANULADA?
+            Una orden aprobada con un error no se edita —ya está firmada y el
+            cliente tiene su copia—: se anula y se emite otra. El papel nuevo
+            tiene que decir a cuál reemplaza, porque si no el cliente recibe dos
+            órdenes por el mismo trabajo y no sabe cuál vale. */}
+        {anuladas.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>¿REEMPLAZA A UNA ORDEN ANULADA?</label>
+            <select value={f.reemplaza_a} onChange={e => setF(v => ({ ...v, reemplaza_a: e.target.value }))} style={mini}>
+              <option value="">No, es una orden nueva</option>
+              {anuladas.map(o => (
+                <option key={o.id} value={o.id}>
+                  {o.codigo || `OC-${String(o.numero).padStart(2, "0")}`} · {o.titulo}
+                  {o.anulada_motivo ? ` — ${o.anulada_motivo}` : ""}
+                </option>
+              ))}
+            </select>
+            {f.reemplaza_a && (
+              <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
+                Va a salir mencionado en el papel, y desde la anulada se va a poder ver que este trabajo
+                terminó acá.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* QUÉ MUEVE LA ORDEN, que es otra pregunta que por qué se origina.
             Todas las órdenes se leían igual y el cliente tenía que abrir el PDF
@@ -825,15 +852,18 @@ Si el texto ya está bien escrito, devolvelo igual.`,
           <div>
             <label style={lbl}>HONORARIOS SOBRE EL NETO DE ESTA ORDEN</label>
             <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 3 }}>
-              El porcentaje del contrato. Se cobra sobre el neto —si la orden reduce alcance, el honorario
-              baja igual— y va como línea al pie: no se reparte en los precios de las partidas.
+              {obra?.honorarios_pct
+                ? `En blanco usa el ${obra.honorarios_pct}% del contrato de esta obra. `
+                : "El porcentaje del contrato. "}
+              Se cobra sobre el neto —si la orden reduce alcance, el honorario baja igual— y va como línea
+              al pie: no se reparte en los precios de las partidas.
             </div>
           </div>
           <div>
             <label style={lbl}>%</label>
             <input type="number" step="0.01" value={f.honorarios_pct}
               onChange={e => setF(v => ({ ...v, honorarios_pct: e.target.value }))}
-              placeholder="10" style={mini} />
+              placeholder={obra?.honorarios_pct ? String(obra.honorarios_pct) : "10"} style={mini} />
           </div>
         </div>
 

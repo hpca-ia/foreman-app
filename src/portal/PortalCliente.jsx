@@ -278,11 +278,31 @@ function OrdenCambio({ o, onContestar, enviando }) {
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 10px",
             borderTop: `2px solid ${colors.border}`, fontSize: 13.5, fontWeight: 700, color: colors.ink }}>
-            <span>{o.total < 0 ? "Se descuenta del contrato" : "Se suma al contrato"}</span>
+            <span>Neto de la orden</span>
             <span style={{ color: o.total < 0 ? colors.danger : colors.brand }}>
               {o.total < 0 ? "−" : "+"}{plata(o.total)}
             </span>
           </div>
+          {/* EL HONORARIO, TAMBIÉN ACÁ. Es parte de lo que se suma al
+              contrato: que el portal diga un número y el PDF otro para la
+              misma orden es lo que hace que el cliente deje de mirar el
+              portal y vuelva a pedir todo por correo. */}
+          {o.honorarios_pct > 0 && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px",
+                fontSize: 12.5, color: colors.muted }}>
+                <span>Honorarios de administración {o.honorarios_pct}%</span>
+                <span>{o.honorarios < 0 ? "−" : "+"}{plata(Math.abs(o.honorarios))}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px 9px",
+                fontSize: 13.5, fontWeight: 700, color: colors.ink }}>
+                <span>{o.total_con_honorarios < 0 ? "Se descuenta del contrato" : "Se suma al contrato"}</span>
+                <span style={{ color: o.total_con_honorarios < 0 ? colors.danger : colors.brand }}>
+                  {o.total_con_honorarios < 0 ? "−" : "+"}{plata(Math.abs(o.total_con_honorarios))}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       )}
 
