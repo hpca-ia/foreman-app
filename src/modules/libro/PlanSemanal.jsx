@@ -42,15 +42,15 @@ const CAMPOS = [
 export default function PlanSemanal({ lead, currentUser, puedeEscribir = true }) {
   // El corte de la semana lo decide la obra, no el calendario ni el día en que
   // se firmó el contrato.
-  const [corte, setCorte] = useState({ arranca: 0, dias: 8 });
+  const [corte, setCorte] = useState({ arranca: 1, dias: 7 });
   const hoy = new Date().toISOString().slice(0, 10);
-  // LA SEMANA DE OBRA ARRANCA EL DOMINGO, y la obra puede decir otra cosa.
+  // LA SEMANA DE OBRA VA DE LUNES A DOMINGO, y la obra puede decir otra cosa.
   //
   // Antes el corte se heredaba del día en que arrancó la obra —si empezó un
   // miércoles, el plan salía de miércoles a martes— y nadie lo había elegido.
   // Esto es solo el primer dibujo; el efecto de abajo lo corrige con el corte
   // que tenga guardada la obra.
-  const inicial = proponerPeriodo({ hoy, arranca: 0, dias: 8 });
+  const inicial = proponerPeriodo({ hoy, arranca: 1, dias: 7 });
   const [desde, setDesde] = useState(inicial.desde);
   const [hasta, setHasta] = useState(inicial.hasta);
   const [corteListo, setCorteListo] = useState(false);
@@ -103,7 +103,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
       // Qué semana usa esta obra. Si todavía no lo dice, domingo a domingo.
       const { data: o } = await supabase.from("obras")
         .select("semana_arranca,semana_dias").eq("lead_id", lead.id).maybeSingle();
-      const c = { arranca: o?.semana_arranca ?? 0, dias: o?.semana_dias ?? 8 };
+      const c = { arranca: o?.semana_arranca ?? 1, dias: o?.semana_dias ?? 7 };
       setCorte(c);
       const p = proponerPeriodo({
         hoy, inicioObra: inicio,

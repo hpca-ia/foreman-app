@@ -7,9 +7,20 @@
 // después del último plan escrito, así que un accidente del calendario quedaba
 // convertido en una regla permanente que ninguna pantalla podía cambiar.
 //
-// La semana de obra arranca el domingo y se llena hasta el domingo siguiente.
-// Son ocho días y se pisan en uno a propósito: el domingo de cierre es el de
-// apertura del siguiente, que es como se habla de las semanas en obra.
+// La semana de obra va de LUNES A DOMINGO, siete días, y cada día pertenece a
+// un solo plan.
+//
+// Estuvo un rato de domingo a domingo —ocho días que se pisan en uno— y suena
+// bien dicho, pero el plan cuelga de días: cada día tiene sus tareas y marcar
+// una escribe en el libro de ESE día. Con el domingo repetido, una tarea
+// pertenecía a dos semanas, el libro del domingo se escribía desde cualquiera
+// de las dos, y lo que quedó sin hacer se contaba dos veces al comparar una
+// semana con la anterior.
+//
+// El lunes arranca la semana de trabajo y es cuando se hace la reunión de
+// obra: el plan que se lee ahí empieza con el día que empieza. El domingo es
+// el último y es cuando se cierra. Y escribirlo antes de que la semana empiece
+// no depende del corte: se escribe el viernes, moviendo una semana.
 
 const masDias = (f, n) => {
   const d = new Date(`${String(f).slice(0, 10)}T12:00:00`);
@@ -54,7 +65,7 @@ export function proponerPeriodo({ hoy, inicioObra = null, ultimoDesde = null, ul
   // miércoles a martes y nadie lo había elegido.
   if (arranca != null) {
     ancla = arranqueDeLaSemana(dia, arranca);
-    largo = Number(dias) > 0 ? Number(dias) : 8;
+    largo = Number(dias) > 0 ? Number(dias) : 7;
     // LA SEMANA EN CURSO, SIN ADIVINAR. El plan se escribe antes de que la
     // semana empiece —esa es su razón de ser— pero saltar solo a la siguiente
     // porque es viernes sorprende al que abrió la pantalla para mirar lo de
@@ -96,7 +107,7 @@ export function correrPeriodo(desde, hasta, haciaDonde) {
  *
  * @param arranca  0 domingo, 1 lunes … 6 sábado
  */
-export function arranqueDeLaSemana(fecha, arranca = 0) {
+export function arranqueDeLaSemana(fecha, arranca = 1) {
   const d = new Date(`${String(fecha).slice(0, 10)}T12:00:00`);
   if (isNaN(d)) return String(fecha).slice(0, 10);
   const hoy = d.getDay();
