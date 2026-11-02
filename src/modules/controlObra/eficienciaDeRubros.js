@@ -159,10 +159,19 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
   // perdió comprando— y se separan abajo, pero la plata a favor del proyecto es
   // esta y es la que se mira primero. Un rubro terminado ya la dejó; uno a
   // medio ejecutar todavía puede gastar más.
+  // SOLO LOS RUBROS CON COSTO CARGADO. En los otros, "lo que deja" es
+  // contratado menos gastado, y eso no es un beneficio: es presupuesto que
+  // todavía no se gastó. En el Aéreo daba $58.906 —honorarios, dirección de
+  // proyecto, desalojo, camioneta— puesto en verde al lado de la plata ganada,
+  // cuando cada uno de esos rubros va a gastarse, y algunos enteros.
+  //
+  // Sin el costo no se puede decir nada de un rubro, y no decir nada es la
+  // respuesta correcta: lo que sí se sabe de esta obra está en la lista de
+  // abajo, que son los beneficios con un papel detrás.
   const favorable = f => f.estado === "ahorro";
-  const aFavorHecho = c2(filas.filter(favorable).reduce((t, x) => t + x.aFavor, 0));
-  const aFavorEnCurso = c2(filas.filter(f => f.estado === "en_curso").reduce((t, x) => t + x.aFavor, 0));
-  const enContra = c2(filas.filter(f => f.estado === "sobreprecio").reduce((t, x) => t + x.aFavor, 0));
+  const aFavorHecho = c2(conDato.filter(favorable).reduce((t, x) => t + x.aFavor, 0));
+  const aFavorEnCurso = c2(conDato.filter(f => f.estado === "en_curso").reduce((t, x) => t + x.aFavor, 0));
+  const enContra = c2(conDato.filter(f => f.estado === "sobreprecio").reduce((t, x) => t + x.aFavor, 0));
 
   return {
     vendido, costoVendido, margenVendido: c2(vendido - costoVendido),

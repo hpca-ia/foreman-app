@@ -50,9 +50,10 @@ test("sin ningún costo cargado lo dice en vez de contestar que no hay ahorros",
   const r = eficienciaDeRubros({ rubros: rubros.map(({ costo_unitario, ...x }) => x), porRubro });
   assert.equal(r.cuantos, 0);
   assert.equal(r.sinCosto, 4);
-  // Y lo que deja se sigue diciendo: lo que no se sabe es qué parte de eso se
-  // ganó comprando mejor, no cuánto dejó. Los tres terminados, 650 + 80 + 200.
-  assert.equal(r.aFavorHecho, 930);
+  // Y sin un solo costo cargado no se dice NADA de plata: contratado menos
+  // gastado no es un beneficio, es presupuesto que todavía no se gastó.
+  assert.equal(r.aFavorHecho, 0);
+  assert.equal(r.aFavorEnCurso, 0);
   assert.match(porQueNoSabe(r), /se lee como el margen con el que se vendió/);
 });
 
@@ -94,7 +95,10 @@ test("el rubro sin costo tambien deja plata, y se cuenta", () => {
   // toda la obra afuera y mostrar vacio un panel de una obra que daba plata.
   const r = eficienciaDeRubros({ rubros, porRubro });
   const vinil = r.filas.find(f => f.descripcion === "Vinil");
-  assert.equal(vinil.aFavor, 200);
+  assert.equal(vinil.aFavor, 200);   // la fila lo dice…
+  // …pero no entra en ningún total: sin costo no se puede afirmar que sea
+  // beneficio. Los terminados que sí tienen costo dejan 650.
+  assert.equal(r.aFavorHecho, 650);
   assert.equal(vinil.presupuestado, null);
   assert.equal(vinil.sinCosto, true);
   // Y no se cuela en la eficiencia, que es contra el costo.
@@ -104,8 +108,10 @@ test("el rubro sin costo tambien deja plata, y se cuenta", () => {
 
 test("lo que deja la obra: terminado aparte de lo que todavia puede gastar mas", () => {
   const r = eficienciaDeRubros({ rubros, porRubro });
-  // Terminados: mamposteria 1.500-850 = 650, vinil 900-700 = 200.
-  assert.equal(r.aFavorHecho, 850);
+  // Terminados CON COSTO: solo mamposteria, 1.500-850 = 650. El vinil tambien
+  // esta terminado y dejo 200, pero no tiene costo cargado: de ese no se puede
+  // afirmar nada, y no decir nada es la respuesta correcta.
+  assert.equal(r.aFavorHecho, 650);
   // Pintura se paso: 600-520 = 80 a favor... no, deja 80, pero su costo se
   // paso, asi que es sobreprecio y su plata va aparte.
   assert.equal(r.enContra, 80);
