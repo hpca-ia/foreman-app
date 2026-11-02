@@ -185,6 +185,21 @@ export async function ponerPrecio(lineaId, precio, deRubro = null) {
     ? "Falta correr la migración 158 para poder ponerle precio a una diferencia." : error.message) : null;
 }
 
+/**
+ * ESTOS RENGLONES YA SALIERON EN UNA ORDEN.
+ *
+ * Es lo único que hacía falta para no mandar dos veces lo mismo, y es mucho
+ * menos que cerrar el análisis entero: los que no salieron siguen vivos, se
+ * siguen decidiendo y arman la orden siguiente.
+ */
+export async function marcarEnOrden(ids = [], ordenId) {
+  if (!ids.length) return null;
+  const { error } = await supabase.from("obra_analisis_lineas")
+    .update({ orden_cambio_id: ordenId }).in("id", ids);
+  return error ? (/orden_cambio_id|column|schema cache/i.test(error.message)
+    ? "Falta correr la migración 159 para armar la orden por partes." : error.message) : null;
+}
+
 /** Lo que se anotó sobre un renglón, que se puede escribir en cualquier momento. */
 export async function anotar(lineaId, nota) {
   const { error } = await supabase.from("obra_analisis_lineas")

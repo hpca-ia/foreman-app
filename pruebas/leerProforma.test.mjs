@@ -130,3 +130,15 @@ test("el cuadre cuenta el descuento: los renglones van a precio de lista", () =>
   const malo = cuadrar([{ monto: 600 }, { monto: 300 }, { monto: 100 }], { subtotal: 900 }, 0);
   assert.equal(malo.cuadra, false);
 });
+
+test("si los renglones suman mas que el subtotal, esa diferencia es el descuento", () => {
+  // En una proforma NOVA dijo el descuento y en la siguiente, el mismo papel,
+  // no lo dijo: los renglones sumaban mil dolares mas que el subtotal y eso se
+  // denunciaba como "se leyo de mas". Lo que pasa es lo que dice el papel.
+  const items = [{ monto: 600 }, { monto: 300 }, { monto: 150 }];
+  // 1.050 de renglones contra 1.000 de subtotal: 50 de descuento.
+  const c = cuadrar(items, { subtotal: 1000 }, 50);
+  assert.equal(c.cuadra, true);
+  // Sin contarlo, el mismo papel se lee como mal leido.
+  assert.equal(cuadrar(items, { subtotal: 1000 }, 0).cuadra, false);
+});

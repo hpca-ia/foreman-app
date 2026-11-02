@@ -1,4 +1,4 @@
-import { emparejarPorTexto, pedidoDeEmparejamiento } from "./emparejarRubros.js";
+import { emparejarPorTexto, emparejarPorParecido, pedidoDeEmparejamiento } from "./emparejarRubros.js";
 // CÓMO CONTESTA NOVA UNA PROFORMA, Y POR QUÉ NO EN JSON.
 //
 // Pedirle JSON cuesta unos cuarenta tokens por renglón: las llaves, las
@@ -395,6 +395,22 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     if (leido.descuento && !descuento) descuento = leido.descuento;
     items.push(...leido.items);
   }
+  // EL DESCUENTO TAMBIÉN SE DEDUCE DE LA ARITMÉTICA, no solo de que NOVA lo
+  // diga. En una proforma lo dijo y en la siguiente, el mismo papel, no: los
+  // renglones sumaban mil dólares más que el subtotal del pie y eso se
+  // denunciaba como "se leyó de más", cuando lo que pasa es exactamente lo que
+  // dice el papel —hay un descuento abajo—.
+  //
+  // Si los renglones suman MÁS que el subtotal, esa diferencia es el descuento.
+  // Es la lectura honesta de un papel cuyo pie vale menos que sus renglones, y
+  // además convierte una alarma en un dato: antes había que creerle al modelo,
+  // ahora se comprueba con una resta.
+  if (!descuento && totales?.subtotal != null) {
+    const suma = items.reduce((t, x) => t + (Number(x.monto) || 0), 0);
+    const sobra = Math.round((suma - Number(totales.subtotal)) * 100) / 100;
+    if (sobra > Math.max(0.05, items.length * 0.01)) descuento = sobra;
+  }
+
   // EL DESCUENTO VIAJA ENTERO Y APARTE, no repartido entre los renglones.
   //
   // Repartirlo deja cada renglón diciendo un precio que no figura en ningún
@@ -421,7 +437,12 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   if (rubros.length && items.length) {
     const porTexto = emparejarPorTexto(items, rubros);
     porTexto.items.forEach((x, i) => { items[i] = x; });
-    ciertos = porTexto.ciertos;
+    // Y el mismo trabajo dicho con una palabra más, que es la mayoría: el
+    // proveedor agrega "EMT 1/2" donde el presupuesto corta. Por una cola de
+    // tres palabras quedaban sin emparejar renglones de tres mil dólares.
+    const porParecido = emparejarPorParecido(items, rubros);
+    porParecido.items.forEach((x, i) => { items[i] = x; });
+    ciertos = porTexto.ciertos + porParecido.ciertos;
   }
 
   // Y LO QUE QUEDA SE PREGUNTA CONTRA CINCO CANDIDATOS, no contra la lista

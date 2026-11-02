@@ -65,6 +65,67 @@ export function emparejarPorTexto(items = [], rubros = []) {
 }
 
 /**
+ * EL MISMO TRABAJO DICHO CON UNA PALABRA MÁS.
+ *
+ * El texto exacto cubre menos de lo que parece: el proveedor escribe "Punto de
+ * iluminación con tubería y accesorios metálicos EMT 1/2" donde el presupuesto
+ * dice "Punto de iluminación con tubería y accesorios metálicos". Es el mismo
+ * renglón —el presupuesto SALIÓ de una cotización suya— y por una cola de tres
+ * palabras quedaba sin emparejar, para que lo hiciera a mano alguien que tiene
+ * treinta renglones por revisar.
+ *
+ * Entonces también calza cuando uno de los dos textos CONTIENE al otro entero,
+ * o cuando comparten casi todas sus palabras largas, y la unidad no se
+ * contradice. Es generoso a propósito: todo esto pasa después por la pantalla
+ * donde una persona lo acepta o lo rechaza, así que el costo de proponer de más
+ * es un clic, y el de proponer de menos es que nadie empareje nada.
+ */
+function parecido(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.startsWith(b) || b.startsWith(a)) return 0.95;
+  const largas = t => new Set(t.split(" ").filter(w => w.length >= 5));
+  const A = largas(a);
+  const B = largas(b);
+  const chico = A.size <= B.size ? A : B;
+  if (chico.size < 2) return 0;
+  let juntas = 0;
+  for (const w of chico) if ((A === chico ? B : A).has(w)) juntas += 1;
+  return juntas / chico.size;
+}
+
+/**
+ * Lo que se parece lo bastante como para no preguntarlo.
+ *
+ * Se exige además que el mejor candidato le saque ventaja clara al segundo: si
+ * dos rubros se parecen igual —tres "punto de red Categoría 6" con cantidades
+ * distintas— elegir uno es tirar una moneda, y eso lo decide una persona.
+ */
+export function emparejarPorParecido(items = [], rubros = [], piso = 0.85) {
+  let ciertos = 0;
+  const salida = items.map(it => {
+    if (it.rubro_id) return it;
+    const texto = pelado(it.descripcion);
+    const puntos = rubros
+      .filter(r => unidadCompatible(it.unidad, r.unidad))
+      .map(r => ({ r, p: parecido(texto, pelado(r.descripcion)) }))
+      .sort((a, b) => b.p - a.p);
+    const mejor = puntos[0];
+    const segundo = puntos[1];
+    if (!mejor || mejor.p < piso) return it;
+    if (segundo && mejor.p - segundo.p < 0.05) return it;
+    ciertos += 1;
+    // SE PARECE NO ES LO MISMO QUE ES IGUAL, y la pantalla lo tiene que
+    // distinguir: "Punto para Sensor de iluminación con tubería EMT" y "Punto
+    // de iluminación con tubería EMT" comparten casi todo y no son el mismo
+    // trabajo. Lo que sale de acá es una PROPUESTA, y quien revisa tiene que
+    // saber cuáles mirar con cuidado.
+    return { ...it, rubro_id: mejor.r.id, porParecido: true };
+  });
+  return { items: salida, ciertos };
+}
+
+/**
  * LOS POCOS RUBROS QUE PODRÍAN SER ESTE RENGLÓN.
  *
  * Se puntúa por palabras compartidas —las largas pesan, "de" y "con" no— y se

@@ -12,7 +12,7 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
-  recalcularContra, ponerPrecio,
+  recalcularContra, ponerPrecio, marcarEnOrden,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
@@ -565,7 +565,13 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   }
 
   async function armarLaOrden() {
-    const van = lineas.filter(l => l.decision === "cobrar");
+    // LO QUE YA SALIÓ NO VUELVE A SALIR, y lo que queda sigue vivo.
+    //
+    // Una proforma de treinta renglones no se resuelve en una sola orden: se
+    // manda lo eléctrico porque el cliente lo necesita el lunes, y la
+    // albañilería sale la semana que viene. Antes armar la orden cerraba el
+    // análisis entero y los que quedaban se volvían de lectura.
+    const van = lineas.filter(l => l.decision === "cobrar" && !l.orden_cambio_id);
     if (!van.length) { setError("Marcá primero qué diferencias se le cobran al cliente."); return; }
     setOcupado(true); setError("");
     const r = await crearOrden(obra.id, {
@@ -586,12 +592,16 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       if (rl.error) { setOcupado(false); setError(rl.error); return; }
       puestas.push(rl.linea);
     }
-    await cerrarAnalisis(abierto.id, r.orden.id);
+    const err = await marcarEnOrden(van.map(l => l.id), r.orden.id);
+    if (err) { setOcupado(false); setError(err); return; }
+    setLineas(xs => xs.map(x => (van.some(v => v.id === x.id) ? { ...x, orden_cambio_id: r.orden.id } : x)));
     setOcupado(false);
     await cargar();
-    setAbierto(a => ({ ...a, estado: "resuelto", orden_cambio_id: r.orden.id }));
+    const quedan = lineas.filter(l => l.decision === "pendiente").length;
     setAviso(`Quedó armada la ${r.orden.codigo || `OC-${r.orden.numero}`} con ${puestas.length} `
-      + `${puestas.length === 1 ? "partida" : "partidas"}, en borrador. Revisá los precios antes de mandarla.`);
+      + `${puestas.length === 1 ? "partida" : "partidas"}, en borrador. Revisá los precios antes de mandarla.`
+      + (quedan ? ` El análisis sigue abierto: quedan ${quedan} renglones por decidir, y con esos se arma `
+        + "la orden siguiente." : ""));
     onCambio?.();
   }
 
@@ -652,13 +662,17 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           </div>
           <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10, lineHeight: 1.5, maxWidth: 760 }}>
             {items.length} renglones leídos del papel ·{" "}
-            {Number(revisando.ciertos) > 0 && (
-              <><strong>{revisando.ciertos}</strong> calzaron por texto exacto —esos no pueden estar mal—{" "}
-              y </>
+            {items.filter(x => x.porTexto).length > 0 && (
+              <><strong>{items.filter(x => x.porTexto).length}</strong> calzaron por texto exacto —esos no
+              pueden estar mal—, </>
             )}
-            <strong>{conRubro - (Number(revisando.ciertos) || 0)}</strong>{" "}
-            {conRubro - (Number(revisando.ciertos) || 0) === 1 ? "lo propuso" : "los propuso"} NOVA entre los
-            cinco rubros más parecidos.
+            {items.filter(x => x.porParecido).length > 0 && (
+              <><strong>{items.filter(x => x.porParecido).length}</strong> se parecen mucho y conviene
+              mirarlos, y </>
+            )}
+            <strong>{items.filter(x => x.rubro_id && !x.porTexto && !x.porParecido).length}</strong>{" "}
+            {items.filter(x => x.rubro_id && !x.porTexto && !x.porParecido).length === 1
+              ? "lo propuso" : "los propuso"} NOVA entre los cinco rubros más parecidos.
             {" "}<strong>Nada se compara hasta que mires esto.</strong> De qué rubro es cada renglón es la
             decisión de la que cuelga todo lo demás, y un emparejamiento equivocado produce números con la
             misma cara que los buenos. Lo que quede sin rubro se trata como trabajo nuevo, que es lo correcto
@@ -701,8 +715,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     {r ? (
                       <div style={{ fontSize: 11, color: raro ? colors.danger : colors.inkSoft, marginTop: 3,
                         lineHeight: 1.45 }}>
-                        <span style={{ color: x.porTexto ? colors.success : colors.muted }}>
-                          {x.porTexto ? "mismo texto que el rubro " : "contra el rubro "}
+                        <span style={{ color: x.porTexto ? colors.success
+                          : x.porParecido ? colors.warning : colors.muted }}>
+                          {x.porTexto ? "mismo texto que el rubro "
+                            : x.porParecido ? "se parece al rubro " : "contra el rubro "}
                         </span>
                         <strong>{r.numero ?? ""} {String(r.descripcion || "").slice(0, 70)}</strong>
                         <span style={{ color: colors.muted }}>
@@ -894,7 +910,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 {/* CINCUENTA DECISIONES DE A UNA NO LAS TOMA NADIE. Casi
                     siempre el grupo entero va para el mismo lado, y lo que se
                     revisa son las tres excepciones. */}
-                {sinDecidir.length > 1 && abierto.estado !== "resuelto" && (
+                {sinDecidir.length > 1 && (
                   <button onClick={() => marcarTodas(sinDecidir, clave === "bajo_precio" ? "eficiencia" : "cobrar")}
                     disabled={ocupado}
                     style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
@@ -1091,7 +1107,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             ciento" casi nunca es lo que uno cobraría: un
                             andamio y una instalación eléctrica no llevan el
                             mismo margen. */}
-                        {l.hallazgo === "nuevo" && abierto.estado !== "resuelto" && (
+                        {l.hallazgo === "nuevo" && !l.orden_cambio_id && (
                           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap",
                             marginTop: 4, fontSize: 10.5, color: colors.muted }}>
                             <span>precio al cliente</span>
@@ -1132,7 +1148,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             es sale mal todo lo que sigue: la cantidad
                             contratada, el precio contra el que se compara y la
                             decisión de si ya estaba incluido. */}
-                        {abierto.estado !== "resuelto" && (
+                        {!l.orden_cambio_id && (
                           <button onClick={() => { setVerPresupuesto(true); setEligiendo(l); }}
                             style={{ background: "none", border: "none", padding: 0, marginTop: 2,
                               cursor: "pointer", fontFamily: colors.font, fontSize: 10.5,
@@ -1182,6 +1198,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                                 + "medirlo y no entra a Beneficios."}
                           </div>
                         )}
+                        {l.orden_cambio_id && (
+                          <div style={{ fontSize: 10.5, color: colors.success, marginTop: 2, fontWeight: 600 }}>
+                            Ya salió en una orden de cambio: no vuelve a entrar en la próxima.
+                          </div>
+                        )}
                         {l.decidido_nombre && (
                           <div style={{ fontSize: 10, color: COLOR_DECISION[l.decision], marginTop: 2, fontWeight: 600 }}>
                             {DECISIONES[l.decision]?.label} · {l.decidido_nombre}
@@ -1189,7 +1210,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                         )}
                       </div>
                     </div>
-                    {abierto.estado !== "resuelto" && (
+                    {!l.orden_cambio_id && (
                       <div style={{ display: "flex", gap: 4, marginTop: 7, flexWrap: "wrap" }}>
                         {decisionesPara(l.hallazgo).map(k => DECISIONES[k] && [k, DECISIONES[k]]).filter(Boolean).map(([k, d]) => (
                           <button key={k} onClick={() => marcar(l, k)} disabled={ocupado} title={d.pista}
@@ -1253,10 +1274,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           </div>
         )}
 
-        {aCobrar.length > 0 && abierto.estado !== "resuelto" && (
+        {aCobrar.filter(l => !l.orden_cambio_id).length > 0 && (
           <div style={{ ...caja, borderLeft: `3px solid ${colors.brand}` }}>
             <div style={{ fontSize: 12.5, color: colors.ink, marginBottom: 7 }}>
-              <strong>{va.aCobrar} {va.aCobrar === 1 ? "diferencia" : "diferencias"} se le cobran al cliente</strong>
+              <strong>{aCobrar.filter(l => !l.orden_cambio_id).length}{" "}
+                {aCobrar.filter(l => !l.orden_cambio_id).length === 1 ? "diferencia" : "diferencias"} para la
+                próxima orden</strong>
               {" "}· ${fmt(va.monto)} de costo
               {va.aDevolver > 0 && (
                 <span style={{ color: colors.success }}>
