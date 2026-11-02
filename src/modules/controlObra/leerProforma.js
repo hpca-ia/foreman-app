@@ -195,6 +195,45 @@ export function partirHoja(texto = "", filas = 60) {
 
 const TOTALES = /^\s*(sub\s*-?\s*total|total|son[:\s]|iva\b|i\.v\.a|descuento|anticipo|forma de pago|observaciones|nota)/i;
 
+/**
+ * LAS COLUMNAS DE UNA PLANILLA SE ENCUENTRAN SIN PREGUNTARLE A NADIE.
+ *
+ * Un Excel es una tabla: tiene una fila de encabezados que dice DESCRIPCIÓN,
+ * CANTIDAD, UNIDAD, TOTAL. Buscarla es mirar texto, y eso lo hace una
+ * computadora sin equivocarse nunca y sin saltearse filas.
+ *
+ * Pedírselo a un modelo costaba caro: la proforma de octubre tiene 42 renglones
+ * con monto y devolvió 28. No fallaron los emparejamientos ni la comparación
+ * —los catorce que faltaban nunca entraron—, y lo peor es que no se notaba: la
+ * pantalla mostraba "esto lo cotiza uno solo" sobre renglones que estaban en
+ * los dos papeles.
+ *
+ * Si los encabezados no se reconocen, se le pregunta al modelo como antes.
+ */
+export function columnasDeHoja(filas = []) {
+  const pelado = t => String(t || "").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+  // SIN LOS ESPACIOS. Las proformas escriben los encabezados separando las
+  // letras —"D E S C R I P C I Ó N"— para que ocupen la celda, y así escrito no
+  // se parece a nada. Juntando las letras es la misma palabra, que es lo que
+  // cualquiera ve al mirarlo.
+  const busca = (f, ...claves) => f.findIndex(c => {
+    const t = pelado(c).replace(/ /g, "");
+    return t && claves.some(k => t === k || t.includes(k));
+  });
+  for (let i = 0; i < Math.min(filas.length, 40); i++) {
+    const f = (filas[i] || []).map(c => pelado(c));
+    const cD = busca(f, "descripcion", "detalle", "rubro", "concepto");
+    const cT = busca(f, "total", "valor total", "subtotal", "importe");
+    if (cD < 0 || cT < 0) continue;
+    const cC = busca(f, "cantidad", "cant");
+    const cU = busca(f, "unidad", "unid", "u/m", "um");
+    return { fila_encabezado: i, col_descripcion: cD, col_cantidad: cC < 0 ? null : cC,
+      col_unidad: cU < 0 ? null : cU, col_total: cT };
+  }
+  return null;
+}
+
 export function renglonesDeHoja(filas = [], mapa = {}) {
   const cD = mapa.col_descripcion, cC = mapa.col_cantidad, cU = mapa.col_unidad, cT = mapa.col_total;
   if (cD == null || cT == null) return [];
@@ -416,9 +455,32 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   });
 
   const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
-  const bloques = esHoja ? partirHoja(texto, 60) : [null];
   const items = [];
   let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0, fecha = null;
+
+  // UNA PLANILLA SE LEE SOLA, SIN MODELO.
+  //
+  // Es una tabla: encontrar la fila de encabezados y leer las de abajo es
+  // mirar texto. La proforma de octubre tiene 42 renglones con monto y el
+  // modelo devolvió 28 —se salteó catorce, entre ellos uno de $2.149— y eso no
+  // se notaba: la comparación mostraba "esto lo cotiza uno solo" sobre
+  // renglones que estaban en los dos papeles.
+  //
+  // Si no se reconocen los encabezados se sigue preguntando, que es mejor que
+  // no leer nada.
+  const filas = texto ? texto.split("\n").map(l => l.split("|").map(c => c.trim())) : [];
+  if (esHoja && filas.length) {
+    const mapa = columnasDeHoja(filas);
+    if (mapa) {
+      const solas = renglonesDeHoja(filas, mapa);
+      if (solas.length) {
+        items.push(...solas);
+        onPaso?.(`${solas.length} renglones leídos de la planilla`);
+      }
+    }
+  }
+
+  const bloques = esHoja ? (items.length ? [] : partirHoja(texto, 60)) : [null];
 
   for (let i = 0; i < bloques.length; i++) {
     onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
@@ -446,6 +508,14 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     if (leido.descuento && !descuento) descuento = leido.descuento;
     items.push(...leido.items);
   }
+  // El proveedor de una planilla leída sola: la primera línea que lo nombre.
+  if (esHoja && !proveedor && items.length) {
+    for (const l of filas.slice(0, 20)) {
+      const m = /(?:contratista|proveedor|empresa|raz[oó]n social)\s*[:|]\s*(.+)/i.exec(l.join(" "));
+      if (m) { proveedor = m[1].split("|")[0].trim().slice(0, 60); break; }
+    }
+  }
+
   // EL PIE, PREGUNTADO APARTE. Ver arriba: dentro de la transcripción es la
   // pregunta que se cae, y sin el subtotal tampoco se puede deducir el
   // descuento por resta.

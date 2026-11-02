@@ -109,6 +109,17 @@ export function compararCotizaciones(a = {}, b = {}, piso = 0.7) {
       // Positivo: B es más barato en este renglón.
       aFavorDeB: difUnitario != null && comun ? c2(difUnitario * comun) : null,
       distintaCantidad: f.a && f.b && n(f.a.cantidad) !== n(f.b.cantidad),
+      // MÁS BARATO Y ADEMÁS MENOS CANTIDAD: ese es el que engaña.
+      //
+      // Un unitario más bajo se lee como mejor oferta, y si encima cotiza
+      // menos metros el renglón sale muy por debajo del otro. Pero los metros
+      // que faltan hay que hacerlos igual: se compran después, a un precio que
+      // ya no se negocia, o aparecen como adicional. Es la forma más común de
+      // que una cotización barata termine cara, y no se ve mirando totales.
+      engana: uA != null && uB != null && f.a && f.b
+        ? (uA < uB && n(f.a.cantidad) < n(f.b.cantidad) ? "a"
+          : uB < uA && n(f.b.cantidad) < n(f.a.cantidad) ? "b" : null)
+        : null,
       solo: f.a && f.b ? null : (f.a ? "a" : "b"),
       parecido: f.parecido,
     };
@@ -119,16 +130,31 @@ export function compararCotizaciones(a = {}, b = {}, piso = 0.7) {
   const soloA = filas.filter(f => f.solo === "a");
   const soloB = filas.filter(f => f.solo === "b");
 
-  // LO MEJOR DE CADA UNO: cuánto sale si se le compra a cada uno lo que tiene
-  // más barato. Rara vez se puede contratar así —hay un costo en partir un
-  // trabajo entre dos— pero es la vara contra la que se negocia: "el otro me
-  // lo deja en tanto" es una frase que vale plata y necesita el número.
-  const loMejor = c2(filas.reduce((t, f) => {
+  // LOS TRES NÚMEROS QUE SE COMPARAN TIENEN QUE SER DEL MISMO ALCANCE.
+  //
+  // Comparar el total de un papel contra el del otro es comparar dos alcances
+  // distintos: si uno cotiza 28 renglones y el otro 32, el de 28 va a salir más
+  // barato siempre y eso no dice nada de sus precios. Peor todavía, "lo mejor
+  // de cada uno" sumaba también lo que cotiza uno solo, así que daba MÁS que
+  // cualquiera de los dos totales —$14.058 contra $3.875 y $11.856— y quedaba
+  // como un número que no se entiende.
+  //
+  // Lo que se compara es LO QUE COTIZAN LOS DOS: ahí los precios son
+  // comparables y la diferencia es de precio y no de alcance. Lo que cotiza uno
+  // solo se cuenta aparte, que es como hay que mirarlo.
+  const comunes = filas.filter(f => !f.solo);
+  const comunA = c2(comunes.reduce((t, f) => t + n(f.montoA), 0));
+  const comunB = c2(comunes.reduce((t, f) => t + n(f.montoB), 0));
+
+  // Comprándole a cada uno lo que tiene más barato, sobre ese mismo alcance
+  // común: es la vara contra la que se negocia —"el otro me lo deja en tanto"—
+  // y por eso tiene que poder compararse con los otros dos.
+  const loMejor = c2(comunes.reduce((t, f) => {
     if (f.unitarioA != null && f.unitarioB != null) {
-      const cant = Math.max(n(f.cantidadA), n(f.cantidadB));
+      const cant = Math.min(n(f.cantidadA), n(f.cantidadB));
       return t + Math.min(f.unitarioA, f.unitarioB) * cant;
     }
-    return t + n(f.montoA) + n(f.montoB);
+    return t + Math.max(n(f.montoA), n(f.montoB));
   }, 0));
 
   const totalA = c2(itemsA.reduce((t, x) => t + n(x.monto), 0) - n(a.descuento));
@@ -136,6 +162,10 @@ export function compararCotizaciones(a = {}, b = {}, piso = 0.7) {
 
   return {
     filas: filas.sort((x, y) => Math.abs(n(y.aFavorDeB)) - Math.abs(n(x.aFavorDeB))),
+    // Lo comparable: el mismo alcance en los dos.
+    comunA, comunB, difComun: c2(comunA - comunB),
+    // Los renglones donde uno es más barato porque además cotiza menos.
+    cuantosEnganan: filas.filter(f => f.engana).length,
     proveedorA: a.proveedor || "A", proveedorB: b.proveedor || "B",
     totalA, totalB,
     descuentoA: c2(a.descuento), descuentoB: c2(b.descuento),
@@ -153,18 +183,27 @@ export function compararCotizaciones(a = {}, b = {}, piso = 0.7) {
 /** El titular honesto de la comparación. */
 export function comoSeDice(c) {
   if (!c) return null;
-  const barato = c.diferencia > 0 ? c.proveedorB : c.proveedorA;
-  const cuanto = Math.abs(c.diferencia);
-  const partes = [`${barato} es $${cuanto.toFixed(2)} más barato en total`];
-  // Y LO QUE EL TOTAL NO DICE: el más barato puede serlo por no cotizar algo.
-  if (c.soloA.length || c.soloB.length) {
-    const falta = c.diferencia > 0 ? c.soloA : c.soloB;
-    const quien = c.diferencia > 0 ? c.proveedorB : c.proveedorA;
-    if (falta.length) {
-      const monto = c.diferencia > 0 ? c.montoSoloA : c.montoSoloB;
-      partes.push(`pero ${quien} no cotiza ${falta.length} ${falta.length === 1 ? "renglón" : "renglones"} `
-        + `que el otro sí, por $${monto.toFixed(2)}`);
-    }
+  const plata = v => `$${Math.abs(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const partes = [];
+
+  // PRIMERO LO COMPARABLE: el mismo alcance en los dos. Empezar por los totales
+  // es empezar por el número que miente cuando los alcances no coinciden.
+  if (!c.emparejados) {
+    partes.push("Estas dos cotizaciones no tienen ningún renglón en común: no hay nada que comparar");
+  } else if (Math.abs(c.difComun) < 0.01) {
+    partes.push(`En los ${c.emparejados} renglones que cotizan los dos, los precios son los mismos`);
+  } else {
+    const barato = c.difComun > 0 ? c.proveedorB : c.proveedorA;
+    partes.push(`En los ${c.emparejados} renglones que cotizan los dos, ${barato} sale `
+      + `${plata(c.difComun)} menos`);
   }
-  return partes.join(", ");
+
+  // Y DESPUÉS EL ALCANCE, que es otra conversación: lo que uno cotiza y el otro
+  // no va a aparecer igual en la obra, cotizado o no.
+  const sueltos = [];
+  if (c.soloB.length) sueltos.push(`${c.proveedorB} cotiza ${c.soloB.length} que ${c.proveedorA} no, por ${plata(c.montoSoloB)}`);
+  if (c.soloA.length) sueltos.push(`${c.proveedorA} cotiza ${c.soloA.length} que ${c.proveedorB} no, por ${plata(c.montoSoloA)}`);
+  if (sueltos.length) partes.push(sueltos.join(" y "));
+
+  return `${partes.join(". ")}.`;
 }

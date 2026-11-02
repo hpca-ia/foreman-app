@@ -162,3 +162,33 @@ test("el pie trae la fecha del documento, que es lo que distingue dos del mismo 
   // Sin fecha legible no se inventa una.
   assert.equal(pieDeTexto("FECHA | -\nSUBTOTAL | 100").fecha, undefined);
 });
+
+test("las columnas de un Excel se encuentran sin preguntarle a un modelo", async () => {
+  // La proforma de octubre tiene 42 renglones con monto y el modelo devolvio
+  // 28. Lo peor es que no se notaba: la pantalla mostraba "esto lo cotiza uno
+  // solo" sobre renglones que estaban en los dos papeles.
+  const { columnasDeHoja, renglonesDeHoja } = await import("../src/modules/controlObra/leerProforma.js");
+  const filas = [
+    ["PROFORMA N° 53"],
+    [],
+    ["ITEM", "D E S C R I P C I Ó N", "UNIDAD", "CANTIDAD", "PRECIO UNITARIO", "TOTAL"],
+    [1, "Punto de iluminación con tubería EMT", "U", 65, 33.07, 2149.81],
+    [2, "Breaker 1P-16A", "U", 20, 10.45, 209.07],
+    [],
+    ["", "SUBTOTAL", "", "", "", 2358.88],
+  ];
+  const m = columnasDeHoja(filas);
+  assert.equal(m.fila_encabezado, 2);
+  assert.equal(m.col_descripcion, 1);
+  assert.equal(m.col_cantidad, 3);
+  assert.equal(m.col_total, 5);
+  const items = renglonesDeHoja(filas, m);
+  assert.equal(items.length, 2);                 // el subtotal no es un renglon
+  assert.equal(items[0].cantidad, 65);
+  assert.equal(items[0].monto, 2149.81);
+});
+
+test("sin encabezados reconocibles no inventa un mapa: se le pregunta al modelo", async () => {
+  const { columnasDeHoja } = await import("../src/modules/controlObra/leerProforma.js");
+  assert.equal(columnasDeHoja([["a", "b"], [1, 2]]), null);
+});

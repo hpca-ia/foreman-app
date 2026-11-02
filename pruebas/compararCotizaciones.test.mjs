@@ -36,8 +36,12 @@ test("el que no cotiza algo no es mas barato: es otra cosa", () => {
   assert.equal(c.soloA.length, 1);
   assert.equal(c.soloA[0].descripcion, "Tablero Trifasico de 20 espacios");
   assert.equal(c.montoSoloA, 180);
-  assert.match(comoSeDice(c), /AXIOMA es \$350\.00 mas barato/i.test(comoSeDice(c)) ? /AXIOMA/ : /AXIOMA/);
-  assert.match(comoSeDice(c), /no cotiza 1 renglón/);
+  // El titular empieza por lo COMPARABLE —el mismo alcance en los dos— y
+  // despues dice lo del alcance, que es otra conversacion. Empezar por los
+  // totales es empezar por el numero que miente cuando los alcances no
+  // coinciden.
+  assert.match(comoSeDice(c), /En los 2 renglones que cotizan los dos/);
+  assert.match(comoSeDice(c), /SOLEK cotiza 1 que AXIOMA no, por \$180/);
 });
 
 test("cada uno gana en lo suyo, renglon por renglon", () => {
@@ -46,10 +50,15 @@ test("cada uno gana en lo suyo, renglon por renglon", () => {
   assert.equal(c.cuantosGanaA, 1);   // el breaker
 });
 
-test("lo mejor de cada uno es la vara con la que se negocia", () => {
-  // Comprando cada renglon al mas barato: 100 x 31 + 180 + 20 x 10 = 3.480.
+test("lo mejor de cada uno se mide sobre el mismo alcance que lo demas", () => {
+  // Sumando tambien lo que cotiza uno solo, este numero daba MAS que cualquiera
+  // de los dos totales y quedaba como algo que no se entiende. Sobre los
+  // renglones que cotizan los dos: 100 x 31 + 20 x 10 = 3.300, contra 3.500 de
+  // SOLEK y 3.330 de AXIOMA en ese mismo alcance.
   const c = compararCotizaciones(solek, axioma);
-  assert.equal(c.loMejor, 3480);
+  assert.equal(c.comunA, 3500);
+  assert.equal(c.comunB, 3330);
+  assert.equal(c.loMejor, 3300);
 });
 
 test("unitario contra unitario: si las cantidades no coinciden, los totales mienten", () => {
@@ -68,4 +77,26 @@ test("unitario contra unitario: si las cantidades no coinciden, los totales mien
 test("el descuento del pie entra en el total de cada uno", () => {
   const c = compararCotizaciones({ ...solek, descuento: 300 }, axioma);
   assert.equal(c.totalA, 3380);
+});
+
+test("mas barato y ademas menos cantidad: ese es el que engaña", () => {
+  // Un unitario mas bajo se lee como mejor oferta, y si encima cotiza menos
+  // metros el renglon sale muy por debajo. Pero los metros que faltan hay que
+  // hacerlos igual: se compran despues a un precio que ya no se negocia, o
+  // aparecen como adicional.
+  const uno = { proveedor: "UNO", items: [{ descripcion: "Cable THHN 12", cantidad: 120, unidad: "ML", monto: 480 }] };
+  const dos = { proveedor: "DOS", items: [{ descripcion: "Cable THHN 12 AWG", cantidad: 80, unidad: "ML", monto: 304 }] };
+  const c = compararCotizaciones(uno, dos);
+  const f = c.filas[0];
+  assert.equal(f.unitarioA, 4);
+  assert.equal(f.unitarioB, 3.8);   // DOS es mas barato por unidad…
+  assert.equal(f.cantidadB, 80);    // …y cotiza 40 metros menos
+  assert.equal(f.engana, "b");
+  assert.equal(c.cuantosEnganan, 1);
+});
+
+test("mas barato con la misma cantidad no engaña a nadie", () => {
+  const uno = { proveedor: "UNO", items: [{ descripcion: "Cable THHN 12", cantidad: 100, unidad: "ML", monto: 400 }] };
+  const dos = { proveedor: "DOS", items: [{ descripcion: "Cable THHN 12 AWG", cantidad: 100, unidad: "ML", monto: 380 }] };
+  assert.equal(compararCotizaciones(uno, dos).filas[0].engana, null);
 });
