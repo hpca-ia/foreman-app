@@ -163,6 +163,28 @@ export async function reEmparejar(lineaId, rubroId, recalculado = null) {
   return error ? error.message : null;
 }
 
+/**
+ * EL PRECIO QUE SE LE VA A COBRAR AL CLIENTE POR ESTA DIFERENCIA.
+ *
+ * Solo para lo que NO tiene precio en el contrato: si el rubro ya está
+ * contratado, manda el precio que el cliente firmó y no hay nada que elegir.
+ *
+ * Puede ser un número puesto a mano o el precio de un rubro parecido que ya
+ * está en el contrato —que es lo que se hace en obra—: si el cliente aceptó $12
+ * el metro de resane, el resane del otro ambiente va a $12, y la orden se
+ * defiende sola porque ese precio ya lo había aceptado. Por eso se guarda de
+ * qué rubro salió: "este precio es el del rubro 4.12, que usted ya aprobó" es
+ * una frase que cierra una discusión.
+ */
+export async function ponerPrecio(lineaId, precio, deRubro = null) {
+  const { error } = await supabase.from("obra_analisis_lineas").update({
+    precio_unitario: Number(precio) > 0 ? Number(precio) : null,
+    precio_de_rubro: deRubro || null,
+  }).eq("id", lineaId);
+  return error ? (/precio_unitario|precio_de_rubro|column|schema cache/i.test(error.message)
+    ? "Falta correr la migración 158 para poder ponerle precio a una diferencia." : error.message) : null;
+}
+
 /** Lo que se anotó sobre un renglón, que se puede escribir en cualquier momento. */
 export async function anotar(lineaId, nota) {
   const { error } = await supabase.from("obra_analisis_lineas")

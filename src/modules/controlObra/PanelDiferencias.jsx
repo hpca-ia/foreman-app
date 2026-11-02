@@ -12,7 +12,7 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
-  recalcularContra,
+  recalcularContra, ponerPrecio,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
@@ -166,7 +166,9 @@ function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) 
             por descripción y "pintura de fibrocemento" calza con tres. */}
         {eligiendo && (
           <div style={{ fontSize: 11, color: colors.brand, fontWeight: 600, marginTop: 4, lineHeight: 1.4 }}>
-            Elegí contra qué rubro se compara «{String(eligiendo.descripcion || "").slice(0, 44)}»
+            {eligiendo.paraPrecio
+              ? `Elegí el rubro cuyo precio querés cobrar por «${String(eligiendo.descripcion || "").slice(0, 40)}»`
+              : `Elegí contra qué rubro se compara «${String(eligiendo.descripcion || "").slice(0, 44)}»`}
           </div>
         )}
         <input value={busca} onChange={e => onBusca(e.target.value)} placeholder="Buscar por número o descripción…"
@@ -418,6 +420,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     onCambio?.();
   }
 
+  /**
+   * EL PRECIO DE LO NUEVO. A mano, o el de un rubro parecido del contrato.
+   *
+   * Si el cliente aceptó $12 el metro de resane, el resane del otro ambiente va
+   * a $12 —no a costo más veinte— y la orden se defiende sola: ese precio ya lo
+   * había aceptado.
+   */
+  async function fijarPrecio(linea, precio, deRubro = null) {
+    setLineas(xs => xs.map(x => (x.id === linea.id
+      ? { ...x, precio_unitario: Number(precio) > 0 ? Number(precio) : null, precio_de_rubro: deRubro }
+      : x)));
+    setEligiendo(null);
+    const err = await ponerPrecio(linea.id, precio, deRubro);
+    if (err) setError(err);
+  }
+
   /** Esta diferencia se compara contra otro rubro del contrato. */
   async function usarRubro(linea, rubro) {
     // Y SE REHACE LA CUENTA CONTRA EL RUBRO NUEVO. Mismo rubro a otro precio es
@@ -587,8 +605,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // EL PRECIO DEL CONTRATO SOLO VALE PARA LA CANTIDAD. Una diferencia de
     // precio no se cobra al precio del contrato —ese es justamente el que no
     // alcanzó—: si se decide cobrarla, lleva el margen como lo nuevo.
-    const puRubro = l.hallazgo !== "subio_precio" && l.hallazgo !== "bajo_precio" && rubro && Number(rubro.cantidad)
-      ? Math.round((Number(rubro.total_base) / Number(rubro.cantidad)) * 10000) / 10000 : null;
+    // EL PRECIO, EN ORDEN: el que firmó el cliente si el rubro está contratado;
+    // si no, el que se eligió a mano o se tomó de un rubro parecido; y recién
+    // si no hay ninguno, costo más el porcentaje de la caja de abajo.
+    const dePrecio = l.hallazgo !== "subio_precio" && l.hallazgo !== "bajo_precio";
+    const puRubro = !dePrecio ? null
+      : rubro && Number(rubro.cantidad)
+        ? Math.round((Number(rubro.total_base) / Number(rubro.cantidad)) * 10000) / 10000
+        : Number(l.precio_unitario) > 0 ? Number(l.precio_unitario) : null;
     return {
       descripcion: l.descripcion, unidad: l.unidad || "u", cantidad: cant,
       costo: Number(l.monto) || 0, costoUnitario,
@@ -1060,6 +1084,48 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             proforma —desde hoy NOVA transcribe el papel sin ver la lista de rubros—.
                           </div>
                         )}
+                        {/* EL PRECIO DE LO QUE NO ESTÁ EN EL CONTRATO.
+                            Lo que ya tiene rubro se cobra al precio que el
+                            cliente firmó y no hay nada que elegir. Lo nuevo no
+                            tiene precio acordado, y "costo más veinte por
+                            ciento" casi nunca es lo que uno cobraría: un
+                            andamio y una instalación eléctrica no llevan el
+                            mismo margen. */}
+                        {l.hallazgo === "nuevo" && abierto.estado !== "resuelto" && (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap",
+                            marginTop: 4, fontSize: 10.5, color: colors.muted }}>
+                            <span>precio al cliente</span>
+                            <input type="number" step="0.01" defaultValue={l.precio_unitario ?? ""}
+                              key={`p${l.id}-${l.precio_unitario ?? ""}`}
+                              placeholder="costo + %"
+                              onClick={e => e.stopPropagation()}
+                              onBlur={e => String(e.target.value) !== String(l.precio_unitario ?? "")
+                                && fijarPrecio(l, e.target.value, null)}
+                              style={{ ...inputStyle, padding: "2px 6px", fontSize: 11, width: 86, textAlign: "right" }} />
+                            <span>por {l.unidad || "u"}</span>
+                            <button onClick={() => { setVerPresupuesto(true); setEligiendo({ ...l, paraPrecio: true }); }}
+                              style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
+                                fontFamily: colors.font, fontSize: 10.5, textDecoration: "underline",
+                                color: eligiendo?.id === l.id && eligiendo?.paraPrecio ? colors.brand : colors.muted,
+                                fontWeight: eligiendo?.id === l.id && eligiendo?.paraPrecio ? 700 : 400 }}>
+                              {eligiendo?.id === l.id && eligiendo?.paraPrecio
+                                ? "elegí el rubro cuyo precio querés usar →"
+                                : "usar el precio de un rubro del contrato"}
+                            </button>
+                            {l.precio_de_rubro && (
+                              <span style={{ color: colors.success }}>
+                                · es el precio del rubro{" "}
+                                {vivos.find(r => r.id === l.precio_de_rubro)?.numero ?? l.precio_de_rubro}, que el
+                                cliente ya aceptó
+                              </span>
+                            )}
+                            {Number(l.precio_unitario) > 0 && Number(l.cantidad) > 0 && (
+                              <span style={{ color: colors.inkSoft }}>
+                                · se cobra ${fmt(Number(l.precio_unitario) * Number(l.cantidad))}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {/* EL EMPAREJAMIENTO SE CORRIGE A MANO. NOVA acierta
                             casi siempre, pero "pintura de fibrocemento" calza
                             con tres rubros parecidos, y cuando elige el que no
@@ -1214,7 +1280,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       </div>
       {verPresupuesto && (
         <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
-          eligiendo={eligiendo} onElegir={r => usarRubro(eligiendo, r)}
+          eligiendo={eligiendo}
+          onElegir={r => (eligiendo?.paraPrecio
+            ? fijarPrecio(eligiendo, Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0, r.id)
+            : usarRubro(eligiendo, r))}
           onCerrar={() => { setVerPresupuesto(false); setEligiendo(null); }} />
       )}
       </div>
@@ -1227,6 +1296,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Diferencias con el cliente</div>
       <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginBottom: 10, maxWidth: 760 }}>
         El contrato vigente contra una <strong>propuesta nueva</strong> o una <strong>liquidación</strong>.
+        Lo que sale de acá es un <strong>ejercicio</strong>: sirve para ver si la obra va para arriba o para
+        abajo y para armar la orden de cambio. La realidad la dice el control de obra, cuando las facturas
+        entran.
         Lo que aparece y el contrato no cubre se le cobra al cliente; lo contratado que no se hizo se le devuelve.
         Cada diferencia se decide una por una y <strong>el análisis queda guardado</strong>: se puede salir y
         volver mañana. No es lo mismo que Beneficios —esas son eficiencias nuestras sobre lo ya contratado.
