@@ -45,6 +45,37 @@ export function num(v) {
   return Number(limpio) || 0;
 }
 
+/**
+ * UNA CELDA CON PALABRAS NO ES UN NÚMERO.
+ *
+ * Los presupuestos y las proformas escriben el importe en letras al pie —"SON:
+ * CATORCE MIL NOVECIENTOS VEINTE Y SIETE DÓLARES CON 50/100"— y `num`, que
+ * limpia todo lo que no sea dígito, saca de ahí un 50100. En una proforma esa
+ * fila entró como un renglón de $50.100 y el total de la comparación pasó a
+ * decir cien mil dólares que no existen. En un presupuesto de ciento setenta
+ * rubros entraría igual, y ahí no lo ve nadie: es un rubro más en la lista, y
+ * desde el contrato se propaga al control, a las planillas y a los beneficios.
+ *
+ * Una cantidad puede traer su unidad pegada —"100 m2"— y eso sigue siendo un
+ * número. Tres letras seguidas ya son una palabra, y una palabra en una celda
+ * de plata quiere decir que esa fila no es un rubro.
+ *
+ * Y LA UNIDAD NO APORTA DÍGITOS. Limpiar todo lo que no sea número convierte
+ * "80 m2" en 802 —el 2 del metro cuadrado se pega al 80— y ese rubro entra con
+ * ochocientas dos unidades. Es un error viejo y silencioso: el total del papel
+ * sigue cuadrando porque la cantidad no se usa para sumarlo, y la cantidad mal
+ * leída recién se nota en la obra, cuando se compara contra lo ejecutado. Se
+ * toma el PRIMER número de la celda y lo que venga después se descarta.
+ */
+export function numeroDeCelda(v) {
+  if (typeof v === "number") return v;
+  const t = String(v ?? "").replace(/\b(usd|us\$|dólares|dolares|dls)\b/gi, "");
+  if (!t.trim()) return 0;
+  if (/[a-zñáéíóúü]{3,}/i.test(t)) return 0;
+  const m = /-?\d[\d.,]*/.exec(t);
+  return m ? num(m[0]) : 0;
+}
+
 export const MAPA_PROMPT = `Estas son las primeras filas de un presupuesto de construcción en Excel.
 Identifica la estructura. Devuelve SOLO JSON, sin markdown:
 {"fila_encabezado":0,"col_item":null,"col_descripcion":0,"col_unidad":0,"col_cantidad":0,"col_precio":0,"col_total":0,"col_capitulo":null,"precios_incluyen_iva":null,"nombre":"","cliente":"","emisor":""}
@@ -121,7 +152,7 @@ export function precioQueCuadra(filasTodas, m) {
   if (m.col_cantidad == null || m.col_total == null || m.col_precio == null) return null;
   const inicio = (m.fila_encabezado ?? 0) + 1;
   const filas = filasTodas.slice(inicio)
-    .map(f => ({ cant: num(f[m.col_cantidad]), total: num(f[m.col_total]), celdas: f }))
+    .map(f => ({ cant: numeroDeCelda(f[m.col_cantidad]), total: numeroDeCelda(f[m.col_total]), celdas: f }))
     .filter(x => x.cant > 0 && x.total > 0);
   if (filas.length < 5) return null;
 
@@ -171,7 +202,7 @@ export function mapaQueCuadra(filasTodas, m) {
 
   // Cuántas filas cumplen cantidad × precio = total con esta combinación.
   const calzan = (cc, cp, ct) => filas.filter(f => {
-    const cant = num(f[cc]), precio = num(f[cp]), total = num(f[ct]);
+    const cant = numeroDeCelda(f[cc]), precio = numeroDeCelda(f[cp]), total = numeroDeCelda(f[ct]);
     if (!(cant > 0 && precio > 0 && total > 0)) return false;
     return Math.abs(cant * precio - total) <= Math.max(0.02, total * 0.005);
   }).length;
@@ -331,9 +362,9 @@ export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = f
       // Distingue "total en 0" de "celda de total vacía": una fila con cantidad
       // y precio pero sin total es una línea que el propio Excel no suma.
       totalVacio: m.col_total != null && texto(val(f, m.col_total)) === "",
-      cant: num(val(f, m.col_cantidad)),
-      precio: num(val(f, m.col_precio)),
-      total: num(val(f, m.col_total)),
+      cant: numeroDeCelda(val(f, m.col_cantidad)),
+      precio: numeroDeCelda(val(f, m.col_precio)),
+      total: numeroDeCelda(val(f, m.col_total)),
       capCol: m.col_capitulo != null ? texto(val(f, m.col_capitulo)) : "",
       repiteEncabezado: esEncabezadoRepetido(f),
       linea: f.map(texto).filter(Boolean).join(" "),
