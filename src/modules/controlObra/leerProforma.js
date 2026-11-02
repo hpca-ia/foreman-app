@@ -13,6 +13,13 @@ import { emparejarPorTexto, emparejarPorParecido, pedidoDeEmparejamiento } from 
 // doscientos renglones que nadie tiene que copiar a mano.
 
 import { num, numeroDeCelda } from "../lectura/celdas.js";
+// La aritmética del papel —cantidad x unitario = total, suma = subtotal— es la
+// misma para el presupuesto, la proforma y la cotización, y es la que decide
+// si una lectura entra a FOREMAN. Vive en lectura/aritmetica.js.
+import { cuadrar, revisarLectura } from "../lectura/aritmetica.js";
+// Leer, comprobar, y si no cuadra volver a leer diciendo qué no cuadró.
+import { leerHastaQueCuadre, VUELTAS } from "../lectura/insistir.js";
+export { cuadrar, revisarLectura };
 // Las reglas para leer una celda son las mismas acá que en el presupuesto: es
 // el mismo papel con otro encabezado. Se re-exporta porque la pantalla y las
 // pruebas la piden desde este archivo.
@@ -440,48 +447,12 @@ lectura. Acá solo se transcribe el papel.`;
 }
 
 /**
- * ¿LO QUE SE LEYÓ DA LO QUE DICE EL PAPEL?
- *
- * La única manera de saber si NOVA leyó bien sin volver a sumar la proforma a
- * mano. La suma de los renglones tiene que dar el SUBTOTAL —no el total, que
- * lleva el IVA—. Si no da, algo se leyó mal: un renglón de más, uno que quedó
- * afuera, o un monto con el impuesto adentro. Y eso hay que decirlo antes de
- * que el número se convierta en un margen.
- *
- * Se tolera un centavo por renglón: los redondeos del proveedor son suyos.
- *
- * @returns null si el papel no trae totales; si no, { cuadra, suma, subtotal,
- *   diferencia, parece }
- */
-export function cuadrar(items = [], totales = null, descuento = 0) {
-  if (!totales || totales.subtotal == null) return null;
-  // Los renglones vienen a precio de lista y el subtotal del papel ya trae el
-  // descuento restado: sin contarlo, toda proforma con descuento se denunciaba
-  // como mal leída.
-  const suma = Math.round((items.reduce((t, x) => t + (Number(x.monto) || 0), 0)
-    - (Number(descuento) || 0)) * 100) / 100;
-  const subtotal = Math.round((Number(totales.subtotal) || 0) * 100) / 100;
-  const diferencia = Math.round((suma - subtotal) * 100) / 100;
-  const tolerancia = Math.max(0.05, items.length * 0.01);
-  const cuadra = Math.abs(diferencia) <= tolerancia;
-  // Si lo leído da justo el TOTAL en vez del subtotal, lo que pasó se sabe: se
-  // leyeron los montos con el IVA adentro.
-  const total = totales.total == null ? null : Math.round(Number(totales.total) * 100) / 100;
-  const parece = cuadra ? null
-    : total != null && Math.abs(suma - total) <= tolerancia
-      ? "los renglones se leyeron CON el IVA adentro: dan el total del papel y no el subtotal"
-      : diferencia > 0 ? "se leyó de más: puede haber entrado un subtotal o un renglón repetido"
-        : "quedó algo afuera: puede ser una hoja que no se leyó o un renglón sin precio";
-  return { cuadra, suma, subtotal, total, diferencia, parece };
-}
-
-/**
  * Un archivo de cotización —PDF, foto o Excel— leído a renglones.
  *
  * @param pedir  función que habla con NOVA: (cuerpo) => { texto, cortado }
  * @returns { proveedor, items, cortado }
  */
-export async function leerCotizacion(file, { pedir, lista = "", rubros = [], modelo, onPaso, hojaComoTexto } = {}) {
+export async function leerCotizacion(file, { pedir, lista = "", rubros = [], modelo, onPaso, hojaComoTexto, vueltas = VUELTAS } = {}) {
   const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file?.name || "");
   const esPdf = file?.type === "application/pdf";
   const sistema = sistemaDeCotizacion();
@@ -493,108 +464,124 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   });
 
   const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
-  const items = [];
-  let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0, fecha = null;
-
-  // UNA PLANILLA SE LEE SOLA, SIN MODELO.
-  //
-  // Es una tabla: encontrar la fila de encabezados y leer las de abajo es
-  // mirar texto. La proforma de octubre tiene 42 renglones con monto y el
-  // modelo devolvió 28 —se salteó catorce, entre ellos uno de $2.149— y eso no
-  // se notaba: la comparación mostraba "esto lo cotiza uno solo" sobre
-  // renglones que estaban en los dos papeles.
-  //
-  // Si no se reconocen los encabezados se sigue preguntando, que es mejor que
-  // no leer nada.
   const filas = texto ? texto.split("\n").map(l => l.split("|").map(c => c.trim())) : [];
-  if (esHoja && filas.length) {
-    const mapa = columnasDeHoja(filas);
-    if (mapa) {
-      const solas = renglonesDeHoja(filas, mapa);
-      if (solas.length) {
-        items.push(...solas);
-        onPaso?.(`${solas.length} renglones leídos de la planilla`);
+
+  // UNA LECTURA DEL PAPEL: los renglones y el pie. El lazo de abajo la vuelve
+  // a llamar, con el reclamo en la mano, si la aritmética no cierra.
+  //
+  // `reclamar` llega null en la primera vuelta. En las siguientes trae lo que
+  // no cuadró, dicho con los números: cuánto suma lo leído, cuánto dice el
+  // papel, y qué renglón no multiplica. La planilla de Excel se lee sola solo
+  // en la primera: leerla de nuevo daría exactamente lo mismo, así que si esa
+  // lectura no cerró, las vueltas que siguen son del modelo.
+  async function unaLectura(reclamar) {
+    const items = [];
+    let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0, fecha = null;
+
+    // UNA PLANILLA SE LEE SOLA, SIN MODELO.
+    //
+    // Es una tabla: encontrar la fila de encabezados y leer las de abajo es
+    // mirar texto. La proforma de octubre tiene 42 renglones con monto y el
+    // modelo devolvió 28 —se salteó catorce, entre ellos uno de $2.149— y eso no
+    // se notaba: la comparación mostraba "esto lo cotiza uno solo" sobre
+    // renglones que estaban en los dos papeles.
+    //
+    // Si no se reconocen los encabezados se sigue preguntando, que es mejor que
+    // no leer nada.
+    if (esHoja && filas.length && !reclamar) {
+      const mapa = columnasDeHoja(filas);
+      if (mapa) {
+        const solas = renglonesDeHoja(filas, mapa);
+        if (solas.length) {
+          items.push(...solas);
+          onPaso?.(`${solas.length} renglones leídos de la planilla`);
+        }
       }
     }
-  }
 
-  const bloques = esHoja ? (items.length ? [] : partirHoja(texto, 60)) : [null];
+    const bloques = esHoja ? (items.length ? [] : partirHoja(texto, 60)) : [null];
 
-  for (let i = 0; i < bloques.length; i++) {
-    onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
-    const { texto: salida, cortado: seCorto } = await pedir({
-      model: modelo, max_tokens: 3000, system: sistema,
-      messages: [{
-        role: "user",
-        content: esHoja
-          ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.` }]
-          : [
+    for (let i = 0; i < bloques.length; i++) {
+      onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
+      const { texto: salida, cortado: seCorto } = await pedir({
+        model: modelo, max_tokens: 3000, system: sistema,
+        messages: [{
+          role: "user",
+          content: esHoja
+            ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.${reclamar ? `\n\n${reclamar}` : ""}` }]
+            : [
+              esPdf
+                ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+                : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+              { type: "text", text: `Extrae los renglones de esta proforma.${reclamar ? `\n\n${reclamar}` : ""}` },
+            ],
+        }],
+      });
+      const leido = interpretarRespuesta(salida);
+      // Si se quedó sin espacio, la última línea quedó a medio escribir: un monto
+      // cortado —"48" de "48,90"— entra como un renglón que parece bueno.
+      if (seCorto) { leido.items.pop(); cortado = true; }
+      if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
+      if (leido.iva && !iva) iva = leido.iva;
+      if (leido.totales && !totales) totales = leido.totales;
+      if (leido.descuento && !descuento) descuento = leido.descuento;
+      items.push(...leido.items);
+    }
+    // El proveedor de una planilla leída sola: la primera línea que lo nombre.
+    if (esHoja && !proveedor && items.length) {
+      for (const l of filas.slice(0, 20)) {
+        const m = /(?:contratista|proveedor|empresa|raz[oó]n social)\s*[:|]\s*(.+)/i.exec(l.join(" "));
+        if (m) { proveedor = m[1].split("|")[0].trim().slice(0, 60); break; }
+      }
+    }
+
+    // EL PIE, PREGUNTADO APARTE. Ver arriba: dentro de la transcripción es la
+    // pregunta que se cae, y sin el subtotal tampoco se puede deducir el
+    // descuento por resta.
+    if (!esHoja && (!totales?.subtotal || !descuento)) {
+      try {
+        onPaso?.("leyendo el pie del papel");
+        const { texto } = await pedir({
+          model: modelo, max_tokens: 200, system: PROMPT_PIE,
+          messages: [{ role: "user", content: [
             esPdf
               ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
               : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
-            { type: "text", text: "Extrae los renglones de esta proforma." },
-          ],
-      }],
-    });
-    const leido = interpretarRespuesta(salida);
-    // Si se quedó sin espacio, la última línea quedó a medio escribir: un monto
-    // cortado —"48" de "48,90"— entra como un renglón que parece bueno.
-    if (seCorto) { leido.items.pop(); cortado = true; }
-    if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
-    if (leido.iva && !iva) iva = leido.iva;
-    if (leido.totales && !totales) totales = leido.totales;
-    if (leido.descuento && !descuento) descuento = leido.descuento;
-    items.push(...leido.items);
-  }
-  // El proveedor de una planilla leída sola: la primera línea que lo nombre.
-  if (esHoja && !proveedor && items.length) {
-    for (const l of filas.slice(0, 20)) {
-      const m = /(?:contratista|proveedor|empresa|raz[oó]n social)\s*[:|]\s*(.+)/i.exec(l.join(" "));
-      if (m) { proveedor = m[1].split("|")[0].trim().slice(0, 60); break; }
-    }
-  }
-
-  // EL PIE, PREGUNTADO APARTE. Ver arriba: dentro de la transcripción es la
-  // pregunta que se cae, y sin el subtotal tampoco se puede deducir el
-  // descuento por resta.
-  if (!esHoja && (!totales?.subtotal || !descuento)) {
-    try {
-      onPaso?.("leyendo el pie del papel");
-      const { texto } = await pedir({
-        model: modelo, max_tokens: 200, system: PROMPT_PIE,
-        messages: [{ role: "user", content: [
-          esPdf
-            ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-            : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
-          { type: "text", text: "El pie de esta proforma." },
-        ] }],
-      });
-      const pie = pieDeTexto(texto);
-      if (pie.fecha) fecha = pie.fecha;
-      if (pie.descuento && !descuento) descuento = Math.abs(pie.descuento);
-      if (pie.subtotal != null && !totales?.subtotal) {
-        totales = { ...(totales || {}), subtotal: pie.subtotal, iva: pie.iva ?? null, total: pie.total ?? null };
+            { type: "text", text: "El pie de esta proforma." },
+          ] }],
+        });
+        const pie = pieDeTexto(texto);
+        if (pie.fecha) fecha = pie.fecha;
+        if (pie.descuento && !descuento) descuento = Math.abs(pie.descuento);
+        if (pie.subtotal != null && !totales?.subtotal) {
+          totales = { ...(totales || {}), subtotal: pie.subtotal, iva: pie.iva ?? null, total: pie.total ?? null };
+        }
+      } catch {
+        // Sin el pie se sigue: lo que no se puede es inventarlo.
       }
-    } catch {
-      // Sin el pie se sigue: lo que no se puede es inventarlo.
     }
+
+    // EL DESCUENTO TAMBIÉN SE DEDUCE DE LA ARITMÉTICA, no solo de que NOVA lo
+    // diga. En una proforma lo dijo y en la siguiente, el mismo papel, no: los
+    // renglones sumaban mil dólares más que el subtotal del pie y eso se
+    // denunciaba como "se leyó de más", cuando lo que pasa es exactamente lo que
+    // dice el papel —hay un descuento abajo—.
+    //
+    // Si los renglones suman MÁS que el subtotal, esa diferencia es el descuento.
+    // Es la lectura honesta de un papel cuyo pie vale menos que sus renglones, y
+    // además convierte una alarma en un dato: antes había que creerle al modelo,
+    // ahora se comprueba con una resta.
+    if (!descuento && totales?.subtotal != null) {
+      const suma = items.reduce((t, x) => t + (Number(x.monto) || 0), 0);
+      const sobra = Math.round((suma - Number(totales.subtotal)) * 100) / 100;
+      if (sobra > Math.max(0.05, items.length * 0.01)) descuento = sobra;
+    }
+
+    return { items, proveedor, cortado, iva, totales, descuento, fecha };
   }
 
-  // EL DESCUENTO TAMBIÉN SE DEDUCE DE LA ARITMÉTICA, no solo de que NOVA lo
-  // diga. En una proforma lo dijo y en la siguiente, el mismo papel, no: los
-  // renglones sumaban mil dólares más que el subtotal del pie y eso se
-  // denunciaba como "se leyó de más", cuando lo que pasa es exactamente lo que
-  // dice el papel —hay un descuento abajo—.
-  //
-  // Si los renglones suman MÁS que el subtotal, esa diferencia es el descuento.
-  // Es la lectura honesta de un papel cuyo pie vale menos que sus renglones, y
-  // además convierte una alarma en un dato: antes había que creerle al modelo,
-  // ahora se comprueba con una resta.
-  if (!descuento && totales?.subtotal != null) {
-    const suma = items.reduce((t, x) => t + (Number(x.monto) || 0), 0);
-    const sobra = Math.round((suma - Number(totales.subtotal)) * 100) / 100;
-    if (sobra > Math.max(0.05, items.length * 0.01)) descuento = sobra;
-  }
+  const leido = await leerHastaQueCuadre({ leer: unaLectura, vueltas, onPaso });
+  const { items, proveedor, cortado, iva, totales, descuento, fecha } = leido;
 
   // EL DESCUENTO VIAJA ENTERO Y APARTE, no repartido entre los renglones.
   //
@@ -659,9 +646,17 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
 
   // LA ARITMÉTICA DEL PAPEL, SIEMPRE Y PARA TODOS LOS FORMATOS. Venga como
   // venga la proforma, los cuatro datos de cada renglón se comprueban solos.
-  const revision = revisarLectura(items, totales, descuento);
+  // La revisión es la que ya hizo el lazo sobre esta misma lectura: la que
+  // decidió que esta era la mejor de las vueltas. Volver a calcularla daría lo
+  // mismo, y así queda claro que es UNA sola comprobación, no dos criterios.
+  const { revision, quedo, cerro, vuelta, historia } = leido;
 
   return { proveedor, items, cortado, iva, totales, descuento, fecha, revision,
+    // Cómo quedó la lectura y cuánto costó llegar: `cerro` dice si pasó la
+    // comprobación contra el pie del papel, `vuelta` en cuál de las vueltas, e
+    // `historia` qué se le reclamó en cada una. Si `cerro` es false la lectura
+    // no se guarda sola: va a la pantalla con la diferencia a la vista.
+    quedo, cerro, vuelta, historia,
     // Cuántos salieron de comparar textos —esos no pueden estar mal— y cuántos
     // los eligió el modelo, que son los que hay que mirar.
     ciertos, propuestos: items.filter(x => x.rubro_id && !x.porTexto).length,
@@ -670,60 +665,4 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
 
 
 
-/**
- * ¿SE LEYÓ BIEN? LA ARITMÉTICA DEL PAPEL LO DICE.
- *
- * Toda proforma, venga como venga —PDF, foto, Excel, de cualquier proveedor—
- * tiene los mismos cuatro datos por renglón: qué, cuántos, a cuánto y cuánto
- * suma. Y esos cuatro datos se comprueban solos:
- *
- *   · CANTIDAD × UNITARIO = TOTAL, renglón por renglón. Si no da, ese renglón
- *     se leyó mal —un dígito de más en el unitario, una coma corrida— y es el
- *     error que no se ve, porque el número sigue pareciendo un número.
- *   · LA SUMA DE LOS RENGLONES = EL SUBTOTAL DEL PIE. Si no da, falta un
- *     renglón o sobra uno. Es la comprobación que descubrió que una planilla
- *     de 42 renglones se había leído con 28.
- *
- * Nada de esto necesita saber de construcción ni de este proveedor: es
- * aritmética, se corre siempre y no se equivoca. Lo que no se puede comprobar
- * se dice, en vez de dar por buena una lectura que nadie miró.
- */
-export function revisarLectura(items = [], totales = null, descuento = 0) {
-  const c2 = v => Math.round((Number(v) || 0) * 100) / 100;
-  const suman = c2(items.reduce((t, x) => t + (Number(x.monto) || 0), 0));
 
-  // Los renglones donde el papel da los tres números y no multiplican.
-  const malos = items.filter(x => {
-    const cant = Number(x.cantidad) || 0;
-    const uni = Number(x.unitario) || 0;
-    const tot = Number(x.monto) || 0;
-    if (!cant || !uni || !tot) return false;
-    return Math.abs(cant * uni - tot) > Math.max(0.02, tot * 0.005);
-  }).map(x => ({
-    descripcion: x.descripcion,
-    dice: c2(Number(x.cantidad) * Number(x.unitario)),
-    pero: c2(x.monto),
-  }));
-
-  const sub = totales?.subtotal == null ? null : c2(totales.subtotal);
-  const esperado = sub == null ? null : c2(sub + (Number(descuento) || 0));
-  const falta = esperado == null ? null : c2(esperado - suman);
-  const tolerancia = Math.max(0.05, items.length * 0.01);
-  const cuadra = falta == null ? null : Math.abs(falta) <= tolerancia;
-
-  const partes = [`${items.length} renglones · $${suman.toFixed(2)}`];
-  if (cuadra === true) partes.push("suman exactamente lo que dice el papel");
-  else if (cuadra === false) {
-    partes.push(falta > 0
-      ? `FALTAN $${falta.toFixed(2)}: el papel suma $${esperado.toFixed(2)} y lo leído da menos, así que `
-        + "algún renglón no entró"
-      : `SOBRAN $${Math.abs(falta).toFixed(2)}: puede haber entrado un subtotal o un renglón repetido`);
-  } else partes.push("el papel no trae subtotal, así que no se puede comprobar contra nada");
-  if (malos.length) {
-    partes.push(`${malos.length} ${malos.length === 1 ? "renglón no multiplica" : "renglones no multiplican"}: `
-      + "cantidad por unitario no da su total");
-  }
-
-  return { renglones: items.length, suman, subtotal: sub, esperado, falta, cuadra, malos,
-    confiable: cuadra !== false && !malos.length, conclusion: partes.join(" · ") };
-}

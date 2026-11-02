@@ -16,6 +16,7 @@ import {
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
+import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
 import { candidatosPara } from "./emparejarRubros.js";
 import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./compararCotizaciones.js";
 import { baseSinIva } from "./contratoDeLaObra";
@@ -756,11 +757,17 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           {/* ¿SE LEYÓ BIEN? Es lo primero que hay que saber, antes de
               emparejar nada: un renglón que falta no se ve faltar, se ve como
               un dato, y todo lo que sigue se decide sobre una lista incompleta. */}
-          {revisando.revision && (
+          {/* Cuadra, no cuadra, o no se pudo comprobar: son tres cosas. Un papel
+              sin subtotal al pie no deja comprobar nada, y decía "La lectura
+              cuadra" en verde, que es justo lo que no se sabe. */}
+          {revisando.revision && (() => {
+            const quedo = comoQuedo(revisando.revision);
+            const tono = quedo === "cuadra" ? colors.success : quedo === "no-cuadra" ? colors.danger : colors.warning;
+            return (
             <div style={{ ...caja, padding: "8px 11px", fontSize: 11.5, lineHeight: 1.5,
-              borderLeft: `3px solid ${revisando.revision.confiable ? colors.success : colors.danger}`,
-              color: revisando.revision.confiable ? colors.inkSoft : colors.danger }}>
-              <strong>{revisando.revision.confiable ? "La lectura cuadra." : "Ojo con esta lectura."}</strong>{" "}
+              borderLeft: `3px solid ${tono}`,
+              color: quedo === "cuadra" ? colors.inkSoft : tono }}>
+              <strong>{DICHO[quedo]}</strong>{" "}
               {revisando.revision.conclusion}
               {revisando.revision.malos.map((m, i) => (
                 <div key={i} style={{ fontSize: 10.5 }}>
@@ -769,7 +776,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 </div>
               ))}
             </div>
-          )}
+            );
+          })()}
 
           <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
             {!verPresupuesto && (
