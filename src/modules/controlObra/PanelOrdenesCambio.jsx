@@ -7,11 +7,12 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
+import { comoSeDice as parentescoDe, codigoDeLaRevision, mandaEnElControl } from "./revisionesDeOrden.js";
 import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice, capitulosPartidos } from "./cuadreDeOrdenes.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
-  anularOrden, desanularOrden,
+  anularOrden, desanularOrden, crearRevision,
   pedirElVistoAlDirector, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
@@ -159,7 +160,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // Lo que de verdad cuenta contra el contrato: aprobado y no anulado. Una
   // orden enviada todavía se está discutiendo, y una anulada no pasó nunca.
   const totalVigente = ordenes
-    .filter(o => !o.anulada && o.estado === "aprobada")
+    .filter(mandaEnElControl)
     .reduce((t, o) => t + subtotales(lineas[o.id] || []).total, 0);
 
   // Las que esperan una firma, con el monto de sus partidas puesto: la plata
@@ -516,7 +517,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           padding: "9px 12px", margin: "8px 0", flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", flex: 1, minWidth: 200 }}>
             {[["Órdenes", ordenes.length],
-              ["Aprobadas", ordenes.filter(o => o.estado === "aprobada" && !o.anulada).length],
+              ["Aprobadas", ordenes.filter(mandaEnElControl).length],
               ["Ejecutadas", ordenes.filter(o => o.ejecucion === "ejecutado" && !o.anulada).length],
               ["Anuladas", ordenes.filter(o => o.anulada).length]].map(([k, v]) => (
               <div key={k}>
@@ -947,6 +948,17 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     ))}
                   </div>
                 )}
+                {/* QUÉ VERSIÓN ES ESTA, Y CUÁL MANDA. El cliente recibe
+                    "OC-01.2" y tiene que reconocer el cambio que ya firmó; y
+                    quien mira el control tiene que saber cuál de las versiones
+                    es la que está contando. */}
+                {parentescoDe(o, ordenes) && (
+                  <div style={{ background: colors.neutralSoft || "#F9FAFB", color: colors.inkSoft, fontSize: 11.5,
+                    padding: "6px 10px", borderRadius: 6, marginBottom: 8, textAlign: "center" }}>
+                    {parentescoDe(o, ordenes)}
+                  </div>
+                )}
+
                 {/* Y del otro lado: esta orden sale a corregir una anulada. */}
                 {o.reemplaza_a && (
                   <div style={{ background: colors.neutralSoft || "#F9FAFB", color: colors.inkSoft, fontSize: 11.5,
@@ -2302,6 +2314,33 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       style={{ border: `1px solid ${o.anulada ? colors.danger : colors.border}`, background: o.anulada ? colors.danger : "#fff",
                         color: o.anulada ? "#fff" : colors.inkSoft, borderRadius: 12, padding: "2px 9px", fontSize: 10.5,
                         fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>Anulada</button>
+                  </div>
+                )}
+
+                {/* REVISAR UNA ORDEN APROBADA. No es anularla —esa no
+                    existió— ni mandar otra nueva por el mismo trabajo: es la
+                    misma conversación con otro alcance, y el número lo dice. */}
+                {puedeEditar && o.estado === "aprobada" && !o.anulada && !o.reemplazada_at && (
+                  <div style={{ marginBottom: 8 }}>
+                    <Button variant="outline" size="sm" disabled={ocupado}
+                      onClick={async () => {
+                        if (!window.confirm(`¿Hacer una revisión de la ${codigoDe(o)}?\n\n`
+                          + "Nace en borrador con las mismas partidas, para editarlas. La "
+                          + `${codigoDe(o)} sigue siendo la que manda hasta que el cliente apruebe la revisión.`)) return;
+                        setOcupado(true);
+                        const r = await crearRevision(o, ordenes, currentUser);
+                        setOcupado(false);
+                        if (r.error) { setAviso(r.error); return; }
+                        await cargar();
+                        setAbierta(r.orden.id);
+                        setAviso(`Quedó la ${codigoDe(r.orden)} en borrador con ${r.cuantas} `
+                          + `${r.cuantas === 1 ? "partida" : "partidas"} copiadas. Editala y mandala a aprobar.`);
+                      }}>
+                      Hacer una revisión · {codigoDeLaRevision(o, ordenes)}
+                    </Button>
+                    <span style={{ fontSize: 10.5, color: colors.muted, marginLeft: 8 }}>
+                      Cuando se apruebe, sus rubros reemplazan a los de esta en el control.
+                    </span>
                   </div>
                 )}
 

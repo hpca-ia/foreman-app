@@ -235,7 +235,7 @@ export function rubroDeCadaLinea(codigo, lineas = [], rubros = []) {
  * utilidad—. Lo que saca a una orden de la cuenta es ANULARLA: ahí deja de
  * cobrarse, y ahí deja de ser beneficio.
  */
-export const ordenCuenta = o => o?.estado === "aprobada" && !o.anulada;
+export const ordenCuenta = o => o?.estado === "aprobada" && !o.anulada && !o.reemplazada_at;
 
 /**
  * Los beneficios previstos que tiene que tener una obra por sus órdenes de

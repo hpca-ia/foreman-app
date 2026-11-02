@@ -27,7 +27,7 @@ const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
 
 /** ¿Esta orden tendría que estar en el control? */
-export const cuenta = o => o?.estado === "aprobada" && !o?.anulada;
+export const cuenta = o => o?.estado === "aprobada" && !o?.anulada && !o?.reemplazada_at;
 
 /**
  * Lo que una orden puso en el control, contra lo que su papel dice.

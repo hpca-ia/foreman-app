@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { honorariosDe, rubroDeHonorarios, pctQueCorresponde } from "./honorariosDeOrden.js";
+import { codigoDeLaRevision } from "./revisionesDeOrden.js";
 
 // Las órdenes de cambio: lo que se pactó después.
 //
@@ -106,6 +107,49 @@ export async function crearOrden(obraId, datos, quien) {
   }
   if (error) return { error: falta(error) ? "Falta correr la migración 056." : error.message };
   return { orden: data };
+}
+
+/**
+ * UNA REVISIÓN DE UNA ORDEN QUE YA SE APROBÓ.
+ *
+ * Nace en borrador y con las partidas de la que revisa, porque casi nunca se
+ * rehace todo: se agregan cuarenta metros, se cambia un acabado, se saca un
+ * renglón. Empezar de cero obligaría a volver a escribir quince partidas para
+ * cambiar una, y lo que se hace entonces es no revisar: se manda una orden
+ * nueva por el mismo trabajo y el cliente recibe dos papeles que se pisan.
+ *
+ * La original no se toca hasta que la revisión se apruebe: hasta ese día la que
+ * manda sigue siendo ella, con sus rubros en el control y su PDF firmado.
+ */
+export async function crearRevision(orden, ordenes, quien) {
+  const { data: ultimas } = await supabase.from("ordenes_cambio")
+    .select("numero").eq("obra_id", orden.obra_id).order("numero", { ascending: false }).limit(1);
+  const numero = (ultimas?.[0]?.numero || 0) + 1;
+  const codigo = codigoDeLaRevision(orden, ordenes || []);
+
+  const { data, error } = await supabase.from("ordenes_cambio").insert({
+    obra_id: orden.obra_id, numero, codigo,
+    titulo: orden.titulo, tipo: orden.tipo, lugar: orden.lugar,
+    fecha: new Date().toISOString().split("T")[0],
+    emitido_por: quien?.name || orden.emitido_por || null,
+    justificacion: orden.justificacion,
+    afecta: orden.afecta || [], honorarios_pct: orden.honorarios_pct,
+    contratista_nombre: orden.contratista_nombre || "HCARQ SA",
+    revision_de: orden.id,
+    created_by: quien?.id ?? null, created_nombre: quien?.name || null,
+  }).select().single();
+  if (error) {
+    return { error: /revision_de|column|schema cache/i.test(error.message)
+      ? "Falta correr la migración 157 para poder revisar una orden aprobada." : error.message };
+  }
+
+  // Las partidas de la que se revisa, tal como quedaron aprobadas.
+  const { data: lineas } = await supabase.from("orden_cambio_lineas")
+    .select("*").eq("orden_id", orden.id).order("orden");
+  const filas = (lineas || []).map(({ id, orden_id, created_at, ...l }) => ({ ...l, orden_id: data.id }));
+  if (filas.length) await supabase.from("orden_cambio_lineas").insert(filas);
+
+  return { orden: data, cuantas: filas.length };
 }
 
 /**
@@ -420,6 +464,16 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
       ({ error } = await supabase.from("obra_rubros").insert(limpias));
     }
     if (error) return error.message;
+  }
+
+  // EN EL CONTROL MANDA LA ÚLTIMA VERSIÓN. Aprobar una revisión saca del
+  // control los rubros de la versión anterior: si quedaran las dos, el contrato
+  // vigente sumaría el mismo trabajo dos veces. La vieja no se borra —queda con
+  // su PDF y sus firmas, que es lo que se firmó ese día— pero deja de contar.
+  if (orden.revision_de) {
+    await supabase.from("obra_rubros").delete().eq("orden_cambio_id", orden.revision_de);
+    await supabase.from("obra_rubros").update({ anulado_por_oc: null }).eq("anulado_por_oc", orden.revision_de);
+    await guardarOrden(orden.revision_de, { reemplazada_at: new Date().toISOString() });
   }
 
   return guardarOrden(orden.id, {
