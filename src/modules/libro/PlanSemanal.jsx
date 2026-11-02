@@ -224,11 +224,63 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
           onClick={() => { const p = correrPeriodo(desde, hasta, -1); setDesde(p.desde); setHasta(p.hasta); }}>◀</Button>
         <Button variant="outline" size="sm" title="El período en el que cae hoy"
           onClick={() => {
-            const p = proponerPeriodo({ hoy, inicioObra: desde, ultimoDesde: desde, ultimoHasta: hasta });
+            // Con el corte de la obra, no con el del período que esté abierto:
+            // si uno se fue a mirar una semana vieja de otro corte, "Hoy" tiene
+            // que traerlo a la semana de la obra y no perpetuar el corte viejo.
+            const p = proponerPeriodo({ hoy, arranca: corte.arranca, dias: corte.dias });
             setDesde(p.desde); setHasta(p.hasta);
           }}>Hoy</Button>
         <Button variant="outline" size="sm" title="El período siguiente, con el mismo corte"
           onClick={() => { const p = correrPeriodo(desde, hasta, 1); setDesde(p.desde); setHasta(p.hasta); }}>▶</Button>
+
+        {/* LA SEMANA QUE VIENE, A UN CLIC Y DICIENDO SI YA TIENE ALGO.
+            Trabajar la siguiente mientras corre la actual es lo normal —el
+            plan se escribe antes— y hasta ahora había que saber que la flecha
+            servía para eso. */}
+        <Button variant="outline" size="sm"
+          title="Planificar la semana que viene. Se puede escribir mientras corre la de ahora."
+          onClick={() => { const p = correrPeriodo(desde, hasta, 1); setDesde(p.desde); setHasta(p.hasta); }}>
+          Planificar la que viene →
+        </Button>
+
+        {/* LA SEMANA DE ESTA OBRA, configurable acá.
+            La mayoría corta de lunes a domingo, pero hay obras que no —las que
+            trabajan de martes a sábado, las que cierran el jueves— y hasta
+            ahora el corte se heredaba del día en que arrancó la obra sin que
+            nadie pudiera cambiarlo. Se elige una vez y queda: las dos fechas
+            de arriba siguen siendo libres para un período suelto. */}
+        {puedeArmar && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: colors.muted }}>
+            <span>la semana de esta obra arranca el</span>
+            <select value={corte.arranca}
+              onChange={async e => {
+                const arranca = Number(e.target.value);
+                setCorte(c => ({ ...c, arranca }));
+                const p = proponerPeriodo({ hoy, arranca, dias: corte.dias });
+                setDesde(p.desde); setHasta(p.hasta);
+                const { error: err } = await supabase.from("obras")
+                  .update({ semana_arranca: arranca }).eq("lead_id", lead.id);
+                if (err) setError(err.message);
+              }}
+              style={{ ...inputStyle, padding: "3px 6px", fontSize: 11, width: 96 }}>
+              {DIAS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+            </select>
+            <span>y dura</span>
+            <select value={corte.dias}
+              onChange={async e => {
+                const dias = Number(e.target.value);
+                setCorte(c => ({ ...c, dias }));
+                const p = proponerPeriodo({ hoy, arranca: corte.arranca, dias });
+                setDesde(p.desde); setHasta(p.hasta);
+                const { error: err } = await supabase.from("obras")
+                  .update({ semana_dias: dias }).eq("lead_id", lead.id);
+                if (err) setError(err.message);
+              }}
+              style={{ ...inputStyle, padding: "3px 6px", fontSize: 11, width: 62 }}>
+              {[5, 6, 7].map(n => <option key={n} value={n}>{n} días</option>)}
+            </select>
+          </div>
+        )}
 
         {/* Qué corte quedó. Las dos fechas se eligen libres —de miércoles a
             martes, de lunes a domingo, de lunes a lunes— y conviene ver en
