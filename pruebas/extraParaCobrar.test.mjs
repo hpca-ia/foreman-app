@@ -316,3 +316,21 @@ test("y si cambia la cantidad, vuelve a ser una diferencia de cantidad", async (
   assert.equal(r.cantidad, 4);
   assert.equal(r.monto, 200);
 });
+
+test("lo que se devuelve no se suma con lo que se cobra", async () => {
+  // Un renglon con menos cantidad decidido "se cobra" quiere decir que entra en
+  // la orden COMO REDUCCION, no que le sumamos plata al cliente. En el mismo
+  // total, el titular decia que se le cobran $500 cuando se le cobran $300 y se
+  // le devuelven $200: otra conversacion.
+  const { comoVa } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const v = comoVa([
+    { hallazgo: "nuevo", decision: "cobrar", monto: 300 },
+    { hallazgo: "menos_cantidad", decision: "cobrar", monto: 200 },
+  ]);
+  assert.equal(v.aCobrar, 1);
+  assert.equal(v.monto, 300);
+  assert.equal(v.aDevolver, 1);
+  assert.equal(v.montoDevuelto, 200);
+  // Las dos entran en la orden: una suma y la otra resta.
+  assert.equal(v.enLaOrden, 2);
+});

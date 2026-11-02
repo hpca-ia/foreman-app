@@ -63,6 +63,15 @@ export function decisionesPara(hallazgo) {
 export function comoVa(lineas = []) {
   const sinDecidir = lineas.filter(l => l.decision === "pendiente").length;
   const aCobrar = lineas.filter(l => l.decision === "cobrar");
+  // LO QUE SE DEVUELVE NO SE SUMA CON LO QUE SE COBRA.
+  //
+  // Un renglón con menos cantidad decidido "se cobra" quiere decir que entra en
+  // la orden —como reducción—, no que le sumamos plata al cliente. Contarlo en
+  // el mismo total deja el titular diciendo que se le cobran $500 cuando se le
+  // cobran $300 y se le devuelven $200, que es otra conversación.
+  const suma = ls => Math.round(ls.reduce((t, l) => t + (Number(l.monto) || 0), 0) * 100) / 100;
+  const seCobran = aCobrar.filter(l => l.hallazgo !== "menos_cantidad");
+  const seDevuelven = aCobrar.filter(l => l.hallazgo === "menos_cantidad");
   // Lo que quedó a favor nuestro se cuenta aparte de lo que se le cobra al
   // cliente: son dos plata distintas y van a dos lados distintos.
   const eficiencias = lineas.filter(l => l.decision === "eficiencia");
@@ -75,8 +84,11 @@ export function comoVa(lineas = []) {
   return {
     total: lineas.length,
     sinDecidir,
-    aCobrar: aCobrar.length,
-    monto: Math.round(aCobrar.reduce((t, l) => t + (Number(l.monto) || 0), 0) * 100) / 100,
+    aCobrar: seCobran.length,
+    monto: suma(seCobran),
+    aDevolver: seDevuelven.length,
+    montoDevuelto: suma(seDevuelven),
+    enLaOrden: aCobrar.length,
     eficiencias: eficiencias.length,
     revisadas: revisadas.length,
     sinMirar: lineas.length - revisadas.length,

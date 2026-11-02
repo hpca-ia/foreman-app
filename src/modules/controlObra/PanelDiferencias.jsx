@@ -363,13 +363,18 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       await cargar();
       await abrir(g.analisis);
       // EL DESCUENTO DEL PIE, DICHO. Es plata nuestra y es de lo primero que
-      // hay que saber de una proforma: ya quedó repartido entre los renglones,
-      // así que cada costo que se compare abajo es el de verdad y no el de
-      // lista.
+      // hay que saber de una proforma: va entero a Beneficios, sin repartir,
+      // porque lo que hace falta es acordarse de pedirlo cuando llegue la
+      // factura a precio de lista.
       const dto = Number(r.descuento) || 0;
-      setAviso((h.cuantos || h.menos.length
+      // UNA PROFORMA QUE SOLO TRAE PRECIOS MÁS BAJOS NO ES "sin diferencias".
+      // `cuantos` cuenta lo que hay que COBRARLE al cliente, y una baja de
+      // precio no se le cobra: decir que no hay nada sería tapar justo las
+      // eficiencias, que son las que nadie registra.
+      const hayAlgo = h.cuantos || h.menos.length || h.bajaron?.length;
+      setAviso((hayAlgo
         ? `${comoSeDice(h)}. Quedó guardado: podés salir y volver.`
-        : "Todo lo que trae está en el contrato y con las mismas cantidades: no hay diferencias.")
+        : "Todo lo que trae está en el contrato, con las mismas cantidades y a los mismos precios.")
         + (dto ? ` · La proforma ofrece $${fmt(dto)} de descuento especial: está anotado aparte, `
           + "para acordarse de pedirlo cuando llegue la factura." : "")
         + (r.porQueDudosos ? ` · ${r.porQueDudosos}` : ""));
@@ -733,7 +738,6 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   if (abierto) {
     const porDecidir = lineas.filter(l => l.decision === "pendiente").length;
     const aCobrar = lineas.filter(l => l.decision === "cobrar");
-    const total = aCobrar.reduce((t, l) => t + (Number(l.monto) || 0), 0);
     const va = comoVa(lineas);
     // POR DÓNDE VOY. Cincuenta renglones no se miran de una sentada, y lo que
     // hace falta al volver es saber dónde se quedó uno, no cuántos faltan.
@@ -1186,8 +1190,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         {aCobrar.length > 0 && abierto.estado !== "resuelto" && (
           <div style={{ ...caja, borderLeft: `3px solid ${colors.brand}` }}>
             <div style={{ fontSize: 12.5, color: colors.ink, marginBottom: 7 }}>
-              <strong>{aCobrar.length} {aCobrar.length === 1 ? "diferencia" : "diferencias"} se le cobran al cliente</strong>
-              {" "}· ${fmt(total)} de costo
+              <strong>{va.aCobrar} {va.aCobrar === 1 ? "diferencia" : "diferencias"} se le cobran al cliente</strong>
+              {" "}· ${fmt(va.monto)} de costo
+              {va.aDevolver > 0 && (
+                <span style={{ color: colors.success }}>
+                  {" "}· y {va.aDevolver} {va.aDevolver === 1 ? "se le devuelve" : "se le devuelven"},
+                  ${fmt(va.montoDevuelto)}
+                </span>
+              )}
               {porDecidir > 0 && <span style={{ color: colors.warning }}> · faltan {porDecidir} por decidir</span>}
             </div>
             <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
