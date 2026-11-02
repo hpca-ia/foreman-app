@@ -40,7 +40,7 @@ export async function lineasDe(analisisId) {
  * papel, no nuestra lectura de su papel.
  */
 export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, items, iva, descuento, lineas, quien,
-  modo = "contrato", b = null }) {
+  modo = "contrato", b = null, fecha = null }) {
   let ruta = null, nombre = null;
   if (archivo) {
     const limpio = String(archivo.name || "propuesta").replace(/[^\w.-]+/g, "_").slice(-60);
@@ -67,6 +67,7 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     // pedir cuando llegue la factura.
     descuento: Number(descuento) || 0,
     modo,
+    fecha_cotizacion: fecha || null, fecha_cotizacion_b: b?.fecha || null,
     items_b: b?.items || null, proveedor_b: b?.proveedor || null,
     descuento_b: Number(b?.descuento) || 0,
     archivo_b_path: rutaB, archivo_b_nombre: nombreB,

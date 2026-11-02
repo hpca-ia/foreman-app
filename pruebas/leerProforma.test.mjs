@@ -153,3 +153,12 @@ test("el pie del papel se lee solo, y de ahi sale el descuento", async () => {
   const sin = pieDeTexto("SUBTOTAL | 100\nDESCUENTO | -\nIVA | -\nTOTAL | 115");
   assert.equal(sin.descuento, null);
 });
+
+test("el pie trae la fecha del documento, que es lo que distingue dos del mismo proveedor", async () => {
+  const { pieDeTexto } = await import("../src/modules/controlObra/leerProforma.js");
+  const p = pieDeTexto("FECHA | 2026-08-31\nSUBTOTAL | 12.237,99\nDESCUENTO | -\nIVA | -\nTOTAL | -");
+  assert.equal(p.fecha, "2026-08-31");
+  assert.equal(p.subtotal, 12237.99);
+  // Sin fecha legible no se inventa una.
+  assert.equal(pieDeTexto("FECHA | -\nSUBTOTAL | 100").fecha, undefined);
+});

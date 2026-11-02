@@ -242,12 +242,17 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
  */
 export const PROMPT_PIE = `Mirá SOLO el pie de esta proforma, abajo de los renglones.
 
-Contestá exactamente estas cuatro líneas, sin explicar nada:
+Contestá exactamente estas cinco líneas, sin explicar nada:
 
+FECHA | la fecha de la proforma, como AAAA-MM-DD
 SUBTOTAL | monto
 DESCUENTO | monto
 IVA | monto
 TOTAL | monto
+
+La FECHA es la del documento —la que figura arriba o al pie, junto al número de
+proforma—, no la de hoy. Sirve para distinguir dos cotizaciones del mismo
+proveedor: sin ella, la de enero y la de marzo se llaman igual.
 
 Los montos van TAL COMO ESTÁN ESCRITOS en el papel, sin calcularlos y sin
 corregirlos. Si alguno no aparece, poné un guion.
@@ -262,7 +267,10 @@ export function pieDeTexto(txt = "") {
   const pie = {};
   for (const linea of String(txt).split("\n")) {
     const [que, monto] = linea.split("|").map(x => String(x || "").trim());
-    if (/^subtotal$/i.test(que)) pie.subtotal = val(monto);
+    if (/^fecha$/i.test(que)) {
+      const f = /\d{4}-\d{2}-\d{2}/.exec(String(monto || ""));
+      if (f) pie.fecha = f[0];
+    } else if (/^subtotal$/i.test(que)) pie.subtotal = val(monto);
     else if (/^descuento$/i.test(que)) pie.descuento = val(monto);
     else if (/^iva$/i.test(que)) pie.iva = val(monto);
     else if (/^total$/i.test(que)) pie.total = val(monto);
@@ -410,7 +418,7 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   const texto = esHoja && hojaComoTexto ? await hojaComoTexto(file) : null;
   const bloques = esHoja ? partirHoja(texto, 60) : [null];
   const items = [];
-  let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0;
+  let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0, fecha = null;
 
   for (let i = 0; i < bloques.length; i++) {
     onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
@@ -454,6 +462,7 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
         ] }],
       });
       const pie = pieDeTexto(texto);
+      if (pie.fecha) fecha = pie.fecha;
       if (pie.descuento && !descuento) descuento = Math.abs(pie.descuento);
       if (pie.subtotal != null && !totales?.subtotal) {
         totales = { ...(totales || {}), subtotal: pie.subtotal, iva: pie.iva ?? null, total: pie.total ?? null };
@@ -540,7 +549,7 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     }
   }
 
-  return { proveedor, items, cortado, iva, totales, descuento,
+  return { proveedor, items, cortado, iva, totales, descuento, fecha,
     // Cuántos salieron de comparar textos —esos no pueden estar mal— y cuántos
     // los eligió el modelo, que son los que hay que mirar.
     ciertos, propuestos: items.filter(x => x.rubro_id && !x.porTexto).length,
