@@ -53,6 +53,9 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   // Los enlaces a las proformas guardadas, firmados al cargar la pantalla.
   const [enlaces, setEnlaces] = useState({});
   const [avisoOrdenes, setAvisoOrdenes] = useState("");
+  // El desglose por origen, cerrado: la pregunta de esta pantalla es cuánta
+  // plata quedó a favor, y eso se contesta con un número.
+  const [verDesglose, setVerDesglose] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!obra?.id) return;
@@ -582,6 +585,43 @@ Rubros de la obra: ${lista}`;
           </div>
         )}
 
+        {/* ── LO QUE LLEVAMOS A FAVOR ─────────────────────────────────
+            Un solo número arriba, y abajo de dónde sale cada peso.
+
+            Acá había seis filas de tarjetas —presupuestado, costó, se ahorró,
+            sobreprecio, neto, previsto, cobrado, margen cobrado, neto de la
+            obra— que juntas no contestaban la única pregunta que se le hace a
+            esta pantalla: cuánta plata quedó a favor del proyecto. Cada
+            tarjeta era un recorte distinto de los mismos beneficios, y mirar
+            nueve recortes de lo mismo no es entender más: es no saber cuál
+            mirar.
+
+            Lo CONFIRMADO es plata que ya pasó: la compra se hizo y costó lo
+            que dice. Lo PREVISTO es una promesa —una proforma, una orden
+            aprobada que todavía no se compró— y se cuenta aparte porque entre
+            que el proveedor cotiza y la factura llega se cae la mitad.
+
+            Quien quiera el desglose por origen lo abre; el que no, no tiene
+            que entenderlo para usar la pantalla. */}
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+          <Tarjeta label="A FAVOR DEL PROYECTO" valor={t.neto}
+            color={t.neto >= 0 ? colors.success : colors.danger}
+            icono={<TrendingUp size={11} color={t.neto >= 0 ? colors.success : colors.danger} />} />
+          {t.cuantosPrevistos > 0 && (
+            <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin confirmar`} valor={t.previsto}
+              color={colors.warning} />
+          )}
+          {(t.cuantos > 0 || t.cuantosPrevistos > 0) && (
+            <button onClick={() => setVerDesglose(v => !v)}
+              style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+                fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
+              {verDesglose ? "ocultar el desglose" : "de dónde sale"}
+            </button>
+          )}
+        </div>
+
+        {verDesglose && (
+          <div style={{ marginBottom: 10 }}>
         {/* ── LO QUE DICEN LOS RUBROS DE LA OBRA ───────────────────────
             Calculado solo, contra las cantidades VIGENTES: cuando una orden de
             cambio regulariza una cantidad, esto se acomoda con aprobarla. */}
@@ -772,6 +812,9 @@ Rubros de la obra: ${lista}`;
           <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
             <Tarjeta label="NETO DE LA OBRA" valor={t.neto} color={t.neto >= 0 ? colors.success : colors.danger} />
             {t.cuantosPrevistos > 0 && <Tarjeta label="PREVISTO DE LA OBRA" valor={t.previsto} color={colors.warning} />}
+          </div>
+        )}
+
           </div>
         )}
 
