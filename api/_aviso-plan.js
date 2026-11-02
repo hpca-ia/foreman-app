@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Solo POST" });
   if (!configurado()) return res.status(503).json({ error: "Falta SUPABASE_SECRET_KEY" });
 
-  const { lead_id, desde, hasta, destinatarios, nota, de } = req.body || {};
+  const { lead_id, desde, hasta, destinatarios, nota, de, pdf } = req.body || {};
   const correos = (Array.isArray(destinatarios) ? destinatarios : []).map(x => String(x).trim()).filter(Boolean);
   if (!lead_id || !desde || !hasta) return res.status(400).json({ error: "Falta el proyecto o el período" });
   if (!correos.length) return res.status(400).json({ error: "Falta a quién mandarlo" });
@@ -134,6 +134,19 @@ export default async function handler(req, res) {
   const adjuntos = [];
   let peso = 0;
   const quedaronFuera = [];
+
+  // EL PLAN EN PDF, PRIMERO Y SIEMPRE.
+  //
+  // El correo cuenta la semana en texto, pero lo que se imprime y se pega en
+  // la caseta es la hoja. Sin ella el que la recibe tiene que entrar a FOREMAN
+  // para tener algo que llevar a la obra, y el encargado del contratista no
+  // tiene usuario. Va adjunto como va el acta de reunión: el documento viaja
+  // con el correo y se puede reenviar sin pedirle permiso a nadie.
+  if (pdf?.contenido) {
+    const bytes = Math.ceil((String(pdf.contenido).length * 3) / 4);
+    peso += bytes;
+    adjuntos.push({ filename: pdf.nombre || "plan-semanal.pdf", content: pdf.contenido });
+  }
   for (const a of archivos.slice(0, 6)) {
     try {
       const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/task-files/${a.storage_path}`,

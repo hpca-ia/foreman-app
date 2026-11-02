@@ -10,6 +10,7 @@ import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHech
   enlacesDeArchivos, cerrarPlan, reabrirPlan } from "./planSemanalDatos";
 import { cargarPlan as cargarGantt, leerPlazo } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
+import { gentePara } from "../controlObra/ordenesDeCambio";
 import { pdfPlanSemanal } from "./pdfPlanSemanal";
 
 // La semana que viene, escrita antes.
@@ -68,6 +69,9 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   // A quién se le manda. Por defecto el gerente y el director, que son los que
   // tienen que saber qué se va a hacer esta semana sin entrar a buscarlo.
   const [mandando, setMandando] = useState(null);
+  // La gente del proyecto —cliente, fiscalización, contratista—, que es la que
+  // necesita el plan y no tiene usuario en FOREMAN.
+  const [gente, setGente] = useState([]);
   // Las semanas ya planificadas. Sin un lugar donde verlas juntas, cada
   // semana era un papel que se escribía y se perdía.
   const [historial, setHistorial] = useState([]);
@@ -643,8 +647,18 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                 } catch (e) { setError("No se pudo armar el PDF: " + e.message); }
                 setOcupado(false);
               }}><Printer size={13} /> Imprimir o bajar</Button>
-              <Button variant="primary" size="sm" onClick={() => {
+              <Button variant="primary" size="sm" onClick={async () => {
                 const equipo = equipoEnCache() || [];
+                // LA GENTE DEL PROYECTO, NO SOLO EL EQUIPO DE LA OFICINA.
+                //
+                // El plan lo necesitan los que trabajan la semana: el
+                // encargado del contratista, el fiscalizador, el coordinador
+                // del cliente. Ninguno tiene usuario en FOREMAN, así que con
+                // la lista interna no había forma de mandárselo y terminaba
+                // reenviado a mano desde el correo de alguien. Es la misma
+                // gente que ya junta el acta de reunión, de las cuatro listas
+                // del proyecto.
+                try { setGente(await gentePara(lead.id)); } catch { /* queda el equipo */ }
                 // El gerente y el director vienen marcados; el resto del
                 // equipo queda a un clic. Marcar a mano cada lunes a las
                 // mismas dos personas es la clase de fricción que hace que el
@@ -653,26 +667,56 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                 setMandando({ correos: manda, nota: "" });
               }}><Send size={13} /> Mandar el plan por correo</Button>
               <span style={{ fontSize: 11.5, color: colors.muted }}>
-                Al gerente de proyecto y al director, con lo que quedó sin hacer la semana pasada arriba.
+                Con el PDF adjunto y lo que quedó sin hacer la semana pasada arriba. Vienen marcados el
+                gerente y el director; el resto del proyecto queda a un clic.
               </span>
             </div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
               <div>
                 <label style={lbl}>A QUIÉNES</label>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                  {(equipoEnCache() || []).filter(u => u.email).map(u => {
-                    const puesto = mandando.correos.includes(u.email);
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                  {(() => {
+                    // El equipo de la oficina y la gente del proyecto, en una
+                    // sola lista y sin repetidos: el mismo residente puede
+                    // estar en las dos.
+                    const todos = [];
+                    for (const u of [...(equipoEnCache() || []), ...gente]) {
+                      const mail = String(u.email || "").trim().toLowerCase();
+                      if (!mail || todos.some(x => x.email === mail)) continue;
+                      todos.push({ id: u.id ?? mail, email: mail, name: u.name || u.nombre || mail,
+                        rol: u.role || u.rol || u.empresa || "" });
+                    }
                     return (
-                      <button key={u.id} onClick={() => setMandando(m => ({ ...m,
-                        correos: puesto ? m.correos.filter(c => c !== u.email) : [...m.correos, u.email] }))}
-                        style={{ border: `1px solid ${puesto ? colors.brand : colors.border}`,
-                          background: puesto ? colors.brandSoft : "#fff", color: puesto ? colors.brand : colors.inkSoft,
-                          borderRadius: 14, padding: "3px 10px", fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
-                        {u.name}{u.role ? ` · ${u.role}` : ""}
-                      </button>
+                      <>
+                        {/* Mandárselo a todos es lo normal en un plan semanal:
+                            marcar quince a mano cada lunes es lo que hace que
+                            se deje de mandar a la tercera semana. */}
+                        <button onClick={() => setMandando(m => ({ ...m,
+                          correos: m.correos.length === todos.length ? [] : todos.map(u => u.email) }))}
+                          style={{ border: `1px solid ${colors.brand}`, background: "#fff", color: colors.brand,
+                            borderRadius: 14, padding: "3px 10px", fontSize: 11.5, cursor: "pointer",
+                            fontFamily: colors.font, fontWeight: 700 }}>
+                          {mandando.correos.length === todos.length ? "ninguno" : `todos · ${todos.length}`}
+                        </button>
+                        {todos.map(u => {
+                          const puesto = mandando.correos.includes(u.email);
+                          return (
+                            <button key={u.id} onClick={() => setMandando(m => ({ ...m,
+                              correos: puesto ? m.correos.filter(c => c !== u.email) : [...m.correos, u.email] }))}
+                              title={u.email}
+                              style={{ border: `1px solid ${puesto ? colors.brand : colors.border}`,
+                                background: puesto ? colors.brandSoft : "#fff",
+                                color: puesto ? colors.brand : colors.inkSoft,
+                                borderRadius: 14, padding: "3px 10px", fontSize: 11.5, cursor: "pointer",
+                                fontFamily: colors.font }}>
+                              {u.name}{u.rol ? ` · ${u.rol}` : ""}
+                            </button>
+                          );
+                        })}
+                      </>
                     );
-                  })}
+                  })()}
                 </div>
               </div>
               <div>
@@ -686,10 +730,31 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                   onClick={async () => {
                     setOcupado(true); setError("");
                     try {
+                      // EL PDF VIAJA CON EL CORREO, como el acta de reunión.
+                      // Lo que se imprime y se pega en la caseta es la hoja, y
+                      // el encargado del contratista no tiene usuario en
+                      // FOREMAN: sin el adjunto no tiene qué llevar a la obra.
+                      let pdf = null;
+                      try {
+                        const ant = correrPeriodo(desde, hasta, -1);
+                        const previa = await cargarPlan(lead.id, ant.desde, ant.hasta);
+                        const quedaron = previa.items
+                          .filter(i => !["material", "externo"].includes(i.tipo || "tarea") && !i.hecha);
+                        const frescos = archivos.length ? await enlacesDeArchivos(archivos) : {};
+                        const doc = await pdfPlanSemanal({
+                          proyecto: lead.nombre, desde, hasta, dias, items, quedaron,
+                          observaciones: periodo?.observaciones || "",
+                          borrador: !cerrado,
+                          cerradoPor: periodo?.cerrado_nombre || "", cerradoAt: periodo?.cerrado_at || null,
+                          archivos: archivos.map(a => ({ ...a, url: frescos[a.id] || enlaces[a.id] })),
+                        });
+                        pdf = { nombre: `Plan ${lead.nombre} ${desde} a ${hasta}.pdf`,
+                          contenido: doc.output("datauristring").split(",")[1] };
+                      } catch { /* sin el PDF el correo sale igual: el plan está en el cuerpo */ }
                       const r = await fetch("/api/aviso?de=plan", {
                         method: "POST", headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ lead_id: lead.id, desde, hasta, nota: mandando.nota,
-                          destinatarios: mandando.correos, de: currentUser?.name || "" }),
+                          destinatarios: mandando.correos, de: currentUser?.name || "", pdf }),
                       });
                       const d = await r.json();
                       setOcupado(false);
