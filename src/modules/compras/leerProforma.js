@@ -1,5 +1,8 @@
 import { buscarOCrear } from "../../lib/proveedores";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
+// La suma del pie la hace el código, no NOVA: es la misma regla que en el
+// control de obra, y vive una sola vez en el motor de lectura.
+import { montoDe } from "../lectura/aritmetica.js";
 
 // NOVA lee la proforma que acaban de subir.
 //
@@ -25,10 +28,11 @@ export async function leerProforma(archivo) {
     body: JSON.stringify({
       model: LECTURA, max_tokens: 700,
       system: `Eres NOVA. Lees proformas y cotizaciones de proveedores de construcción en Ecuador y devuelves SOLO JSON, sin markdown:
-{"proveedor":"","ruc":"","monto":0,"validez":"","detalle":""}
+{"proveedor":"","ruc":"","subtotal":null,"iva":null,"total":null,"validez":"","detalle":""}
 "proveedor" es la razón social o el nombre comercial de QUIEN COTIZA, nunca el cliente.
 Escríbelo tal como aparece en el membrete, completo, sin abreviar ni agregar nada.
-"monto" es el TOTAL a pagar con IVA incluido. Si solo hay subtotal, suma el IVA.
+"subtotal", "iva" y "total" son los tres números del pie, COPIADOS TAL COMO ESTÁN IMPRESOS.
+No los calcules, no los completes y no los corrijas: el que no esté escrito va en null.
 "validez" es hasta cuándo vale el precio, en YYYY-MM-DD, o "" si no lo dice.
 "detalle" es en una línea qué se está cotizando.`,
       messages: [{
@@ -50,7 +54,17 @@ Escríbelo tal como aparece en el membrete, completo, sin abreviar ni agregar na
     return {
       proveedor: (p.proveedor || "").trim(),
       ruc: (p.ruc || "").trim(),
-      monto: Number(p.monto) || null,
+      // EL IVA LO SUMA EL CÓDIGO, NO NOVA.
+      //
+      // El pedido anterior decía "si solo hay subtotal, suma el IVA", y eso es
+      // pedirle una cuenta a un lector. Una cuenta mal hecha en el monto de una
+      // solicitud de compra no se nota: es un número plausible al lado del
+      // nombre del proveedor, y nadie vuelve al PDF a comprobarlo.
+      //
+      // Ahora copia los tres números del pie tal como están impresos y la suma
+      // se hace acá. Si el papel trae el total, manda el total: es lo que el
+      // proveedor va a cobrar, esté bien sumado o no.
+      monto: montoDe(p),
       validez: p.validez || null,
       detalle: (p.detalle || "").trim(),
     };
@@ -105,7 +119,7 @@ export async function leerDocumentoDeCompra(archivo) {
       system: `Eres NOVA. Lees documentos de compra de proveedores de construcción en Ecuador
 —facturas, notas de venta, recibos y proformas— y devuelves SOLO JSON, sin markdown:
 
-{"clase":"factura","proveedor":"","ruc":"","numero":"","fecha":"","monto":0,"detalle":""}
+{"clase":"factura","proveedor":"","ruc":"","numero":"","fecha":"","subtotal":null,"iva":null,"total":null,"detalle":""}
 
 "clase" es qué documento es, mirando lo que dice el papel:
   "factura"    dice FACTURA y trae número de autorización del SRI.
@@ -125,8 +139,9 @@ sin abreviar ni agregar nada.
 
 "fecha" es la fecha de emisión en YYYY-MM-DD. "" si no se lee.
 
-"monto" es el TOTAL a pagar CON IVA incluido. Si solo hay subtotal, suma el IVA.
-Es el número más grande de la parte de abajo, no el subtotal.
+"subtotal", "iva" y "total" son los tres números del pie, COPIADOS TAL COMO ESTÁN
+IMPRESOS. No los calcules, no los completes y no los corrijas: el que no esté
+escrito va en null. El total es el número más grande de abajo, no el subtotal.
 
 "detalle" es en una línea qué se compró.
 
@@ -157,7 +172,10 @@ uno en blanco: el blanco se ve y se completa, el inventado se guarda y nadie lo 
       // Solo si es una fecha de verdad: "15 de marzo" guardado como fecha
       // rompe la planilla, y vacío se completa a mano en dos segundos.
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(p.fecha || "") ? p.fecha : "",
-      monto: Number(p.monto) || null,
+      // La suma la hace el código, no NOVA. Ver montoDe.
+      monto: montoDe(p),
+      subtotal: p.subtotal == null ? null : Number(p.subtotal) || null,
+      iva: p.iva == null ? null : Number(p.iva) || null,
       detalle: (p.detalle || "").trim(),
       // Los renglones, para poder repartir la factura entre varios rubros:
       // una de ferretería trae cemento, varilla y alambre, y eso es

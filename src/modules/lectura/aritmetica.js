@@ -135,3 +135,20 @@ export const DICHO = {
   "no-cuadra": "Ojo con esta lectura.",
   "sin-comprobar": "No se pudo comprobar: el papel no trae subtotal.",
 };
+
+/**
+ * El total a pagar, a partir de lo que dice el pie del papel.
+ *
+ * Manda el total impreso: es lo que el proveedor va a cobrar. Si no está, se
+ * arma con el subtotal más el IVA escrito; y si tampoco está el IVA, queda el
+ * subtotal, que es un número del papel y no uno inventado. Lo que no se hace
+ * nunca es ponerle el 15% a un subtotal porque sí: hay proformas exentas, con
+ * IVA 0 y con retención, y esa suposición no se ve una vez guardada.
+ */
+export function montoDe({ subtotal, iva, total } = {}) {
+  const n = v => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
+  const t = n(total), s = n(subtotal), i = n(iva);
+  if (t != null) return t;
+  if (s != null && i != null) return Math.round((s + i) * 100) / 100;
+  return s;
+}

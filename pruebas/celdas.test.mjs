@@ -55,3 +55,21 @@ test("el último separador es el decimal, venga como venga", () => {
   assert.equal(num("1,234.56"), 1234.56);
   assert.equal(num(1234.56), 1234.56);
 });
+
+import { montoDe } from "../src/modules/lectura/aritmetica.js";
+
+test("el total a pagar sale del papel, no de una cuenta que hizo NOVA", () => {
+  // El pedido anterior le decía al modelo "si solo hay subtotal, suma el IVA".
+  // Una cuenta mal hecha en el monto de una solicitud de compra no se nota: es
+  // un número plausible al lado del nombre del proveedor.
+  assert.equal(montoDe({ subtotal: 1000, iva: 150, total: 1150 }), 1150);
+  // Manda el total impreso aunque no cierre: es lo que el proveedor va a cobrar.
+  assert.equal(montoDe({ subtotal: 1000, iva: 150, total: 1149.99 }), 1149.99);
+  // Sin total, se suma lo que SÍ está escrito.
+  assert.equal(montoDe({ subtotal: 1000, iva: 150 }), 1150);
+  // Sin IVA escrito no se inventa un 15%: hay proformas exentas y con IVA 0.
+  assert.equal(montoDe({ subtotal: 1000 }), 1000);
+  assert.equal(montoDe({ subtotal: 1000, iva: 0 }), 1000);
+  assert.equal(montoDe({}), null);
+  assert.equal(montoDe(), null);
+});
