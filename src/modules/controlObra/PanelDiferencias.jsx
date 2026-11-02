@@ -17,6 +17,7 @@ import {
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
 import { candidatosPara } from "./emparejarRubros.js";
+import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./compararCotizaciones.js";
 import { baseSinIva } from "./contratoDeLaObra";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
@@ -252,6 +253,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   const [eligiendo, setEligiendo] = useState(null);
   // Lo que NOVA leyó, esperando que alguien mire los emparejamientos.
   const [revisando, setRevisando] = useState(null);
+  // Contra qué se compara: el contrato de la obra, o una segunda cotización.
+  const [modo, setModo] = useState("contrato");
+  const [segunda, setSegunda] = useState(null);
   // EL ALTO SE MIDE, NO SE ADIVINA.
   //
   // "100vh menos ciento cincuenta" es una cuenta que depende de cuánto hay
@@ -337,8 +341,47 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       // aceptan uno por uno. Es un minuto de trabajo contra una orden de
       // cambio mal cobrada.
       setLeyendo("");
+      if (modo === "cotizaciones") {
+        // La primera espera a la segunda: comparar dos papeles no pasa por el
+        // emparejamiento con rubros, son renglones contra renglones.
+        if (!segunda) { setSegunda({ ...r, file }); setAviso(
+          `Leída la cotización de ${r.proveedor || file.name}: ${r.items.length} renglones. `
+          + "Subí la segunda y las comparo."); return; }
+        await compararDosPapeles(segunda, { ...r, file });
+        return;
+      }
       setRevisando({ ...r, file, items: r.items.map(x => ({ ...x, visto: false })) });
       return;
+    } catch (err) { setError(err.message); }
+    setLeyendo("");
+  }
+
+  /**
+   * DOS COTIZACIONES, UNA CONTRA LA OTRA.
+   *
+   * No pasa por el emparejamiento con rubros —no hay contrato en el medio—:
+   * son renglones contra renglones, y lo que se busca es quién es más barato
+   * en qué y, sobre todo, qué cotiza uno que el otro no.
+   */
+  async function compararDosPapeles(a, b) {
+    setLeyendo("comparando"); setError(""); setAviso("");
+    try {
+      const g = await guardarAnalisis({
+        obraId: obra.id, modo: "cotizaciones",
+        titulo: `${a.proveedor || a.file?.name} vs ${b.proveedor || b.file?.name}`,
+        proveedor: a.proveedor || "", archivo: a.archivo || a.file,
+        items: a.items, iva: a.iva, descuento: a.descuento,
+        b: { items: b.items, proveedor: b.proveedor || "", descuento: b.descuento, archivo: b.archivo || b.file },
+        lineas: [], quien: currentUser,
+      });
+      if (g.error) throw new Error(g.error);
+      setSegunda(null);
+      await cargar();
+      await abrir(g.analisis);
+      const c = compararCotizaciones(
+        { proveedor: a.proveedor, items: a.items, descuento: a.descuento },
+        { proveedor: b.proveedor, items: b.items, descuento: b.descuento });
+      setAviso(comoSeDiceLaComparacion(c) || "Quedó guardada la comparación.");
     } catch (err) { setError(err.message); }
     setLeyendo("");
   }
@@ -808,6 +851,128 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             eligiendo={eligiendo} onCerrar={() => { setVerPresupuesto(false); setEligiendo(null); }}
             onElegir={rb => { cambiar(eligiendo.indice, { rubro_id: rb.id, visto: true }); setEligiendo(null); }} />
         )}
+      </div>
+    );
+  }
+
+  // ── DOS COTIZACIONES, UNA AL LADO DE LA OTRA ─────────────────────────────
+  //
+  // Elegir por el total es casi siempre elegir mal: el que da el número más
+  // bajo suele ser el que dejó tres renglones afuera, y esos tres aparecen en
+  // obra como adicionales. Lo que decide es renglón por renglón.
+  if (abierto && abierto.modo === "cotizaciones") {
+    const c = compararCotizaciones(
+      { proveedor: abierto.proveedor, items: abierto.items || [], descuento: abierto.descuento },
+      { proveedor: abierto.proveedor_b, items: abierto.items_b || [], descuento: abierto.descuento_b });
+    const col = { fontVariantNumeric: "tabular-nums", textAlign: "right", whiteSpace: "nowrap" };
+    return (
+      <div style={{ fontFamily: colors.font }}>
+        <button onClick={() => { setAbierto(null); cargar(); }}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+            fontSize: 12, color: colors.brand, marginBottom: 8 }}>
+          ← Diferencias
+        </button>
+        <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>
+          {c.proveedorA} contra {c.proveedorB}
+        </div>
+        <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 10, lineHeight: 1.5, maxWidth: 820 }}>
+          {comoSeDiceLaComparacion(c)}
+        </div>
+
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
+          <div style={{ ...caja, marginBottom: 0 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+              {String(c.proveedorA).toUpperCase()}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink }}>${fmt(c.totalA)}</div>
+            <div style={{ fontSize: 10, color: colors.muted }}>
+              {(abierto.items || []).length} renglones · gana en {c.cuantosGanaA}
+            </div>
+          </div>
+          <div style={{ ...caja, marginBottom: 0 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+              {String(c.proveedorB).toUpperCase()}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink }}>${fmt(c.totalB)}</div>
+            <div style={{ fontSize: 10, color: colors.muted }}>
+              {(abierto.items_b || []).length} renglones · gana en {c.cuantosGanaB}
+            </div>
+          </div>
+          {/* LO MEJOR DE CADA UNO: rara vez se puede contratar así, pero es la
+              vara con la que se negocia. "El otro me lo deja en tanto" es una
+              frase que vale plata y necesita el número. */}
+          <div style={{ ...caja, marginBottom: 0, borderLeft: `3px solid ${colors.success}` }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3 }}>
+              LO MEJOR DE CADA UNO
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: colors.success }}>${fmt(c.loMejor)}</div>
+            <div style={{ fontSize: 10, color: colors.muted }}>comprándole a cada uno lo suyo</div>
+          </div>
+        </div>
+
+        {/* LO QUE EL TOTAL ESCONDE, primero: el más barato puede serlo por no
+            cotizar algo, y eso aparece en obra como adicional. */}
+        {(c.soloA.length > 0 || c.soloB.length > 0) && (
+          <div style={{ ...caja, borderLeft: `3px solid ${colors.warning}`, fontSize: 11.5, lineHeight: 1.55 }}>
+            <strong>Lo que uno cotiza y el otro no</strong> — es lo que el total esconde, y lo que después
+            aparece en obra como adicional.
+            {[[c.soloA, c.proveedorA, c.montoSoloA], [c.soloB, c.proveedorB, c.montoSoloB]]
+              .filter(([l]) => l.length).map(([lista, quien, monto]) => (
+                <div key={quien} style={{ marginTop: 4 }}>
+                  <strong>Solo {quien}</strong> · {lista.length} {lista.length === 1 ? "renglón" : "renglones"}
+                  {" "}· ${fmt(monto)}
+                  {lista.map((f, i) => (
+                    <div key={i} style={{ color: colors.muted, fontSize: 11 }}>
+                      · {f.descripcion} — {fmt(f.cantidadA ?? f.cantidadB)} {f.unidad}{" "}
+                      ${fmt(f.montoA ?? f.montoB)}
+                    </div>
+                  ))}
+                </div>
+              ))}
+          </div>
+        )}
+
+        <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, margin: "10px 0 4px" }}>
+          RENGLÓN POR RENGLÓN · {c.emparejados} que cotizan los dos
+        </div>
+        <div style={{ display: "flex", gap: 8, fontSize: 9.5, fontWeight: 700, color: colors.muted,
+          padding: "0 10px 3px" }}>
+          <span style={{ flex: 1 }}>QUÉ</span>
+          <span style={{ ...col, width: 110 }}>{String(c.proveedorA).slice(0, 12)}</span>
+          <span style={{ ...col, width: 110 }}>{String(c.proveedorB).slice(0, 12)}</span>
+          <span style={{ ...col, width: 90 }}>DIFERENCIA</span>
+        </div>
+        {c.filas.filter(f => !f.solo).map((f, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11.5,
+            padding: "5px 10px", borderBottom: `1px solid ${colors.neutralSoft}`,
+            background: colors.surface }}>
+            <span style={{ flex: 1, color: colors.ink }}>
+              {f.descripcion}
+              {f.distintaCantidad && (
+                <span style={{ color: colors.warning, fontSize: 10 }}>
+                  {" "}· cotizan cantidades distintas: {fmt(f.cantidadA)} y {fmt(f.cantidadB)} {f.unidad}
+                </span>
+              )}
+            </span>
+            <span style={{ ...col, width: 110, color: f.difUnitario < 0 ? colors.success : colors.inkSoft,
+              fontWeight: f.difUnitario < 0 ? 700 : 400 }}>
+              {fmt(f.cantidadA)} × ${fmt(f.unitarioA)}
+            </span>
+            <span style={{ ...col, width: 110, color: f.difUnitario > 0 ? colors.success : colors.inkSoft,
+              fontWeight: f.difUnitario > 0 ? 700 : 400 }}>
+              {fmt(f.cantidadB)} × ${fmt(f.unitarioB)}
+            </span>
+            <span style={{ ...col, width: 90, fontWeight: 700,
+              color: f.aFavorDeB > 0 ? colors.success : f.aFavorDeB < 0 ? colors.danger : colors.muted }}>
+              {f.aFavorDeB ? `${f.aFavorDeB > 0 ? "+" : "−"}$${fmt(Math.abs(f.aFavorDeB))}` : "="}
+            </span>
+          </div>
+        ))}
+        <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6, lineHeight: 1.5, maxWidth: 820 }}>
+          La diferencia se mide por UNITARIO y sobre la cantidad que los dos cotizan: si uno cotiza 100 metros
+          y el otro 120, los totales no se pueden comparar y el barato parece caro. Esto no elige por vos —quién
+          cumple, quién tiene el material y quién factura no está en el papel—: dice en qué se diferencian.
+        </div>
       </div>
     );
   }
@@ -1397,13 +1562,49 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         volver mañana. No es lo mismo que Beneficios —esas son eficiencias nuestras sobre lo ya contratado.
       </div>
 
+      {/* CONTRA QUÉ SE COMPARA. Son dos preguntas distintas con la misma
+          maquinaria: contra el contrato, para saber qué se le cobra al cliente;
+          entre dos cotizaciones, para decidir a quién contratar. */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {[["contrato", "Contra el contrato de la obra", "qué se le cobra al cliente y qué queda a favor"],
+          ["cotizaciones", "Entre dos cotizaciones", "a quién conviene contratar, renglón por renglón"]].map(([k, t, p]) => (
+          <button key={k} onClick={() => { setModo(k); setSegunda(null); }} title={p}
+            style={{ border: `1px solid ${modo === k ? colors.brand : colors.border}`,
+              background: modo === k ? colors.brand : "#fff", color: modo === k ? "#fff" : colors.muted,
+              borderRadius: 20, padding: "4px 13px", fontSize: 11.5, cursor: "pointer",
+              fontFamily: colors.font, fontWeight: modo === k ? 700 : 400 }}>
+            {t}
+          </button>
+        ))}
+        <span style={{ fontSize: 10.5, color: colors.muted }}>
+          {modo === "contrato"
+            ? "qué se le cobra al cliente y qué queda a favor"
+            : "a quién conviene contratar: el total esconde al que no cotizó algo"}
+        </span>
+      </div>
+
+      {modo === "cotizaciones" && segunda && (
+        <div style={{ ...caja, fontSize: 11.5, color: colors.inkSoft, borderLeft: `3px solid ${colors.brand}` }}>
+          Primera cotización: <strong>{segunda.proveedor || segunda.file?.name}</strong> ·{" "}
+          {segunda.items?.length} renglones. Ahora subí la segunda para compararlas.
+          <button onClick={() => setSegunda(null)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+              fontSize: 11, color: colors.brand, textDecoration: "underline", marginLeft: 6 }}>
+            empezar de nuevo
+          </button>
+        </div>
+      )}
+
       <label style={{ ...caja, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
         cursor: leyendo ? "wait" : "pointer", borderStyle: "dashed", color: colors.inkSoft, fontSize: 12.5 }}>
         <input type="file" accept="image/*,.pdf,.xlsx,.xlsm,.xls,.csv" style={{ display: "none" }}
           disabled={!!leyendo} onChange={leer} />
         <FileText size={14} />
         {leyendo ? `NOVA está leyendo… ${leyendo === "leyendo" ? "" : leyendo}`
-          : "Subir una propuesta nueva o una liquidación (PDF, foto o Excel)"}
+          : modo === "cotizaciones"
+            ? (segunda ? "Subir la SEGUNDA cotización, para compararla con la primera"
+              : "Subir la PRIMERA cotización (PDF, foto o Excel)")
+            : "Subir una propuesta nueva o una liquidación (PDF, foto o Excel)"}
       </label>
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}

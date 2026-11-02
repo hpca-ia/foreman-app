@@ -39,7 +39,8 @@ export async function lineasDe(analisisId) {
  * El archivo se guarda tal como llegó: lo que se discute con el proveedor es su
  * papel, no nuestra lectura de su papel.
  */
-export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, items, iva, descuento, lineas, quien }) {
+export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, items, iva, descuento, lineas, quien,
+  modo = "contrato", b = null }) {
   let ruta = null, nombre = null;
   if (archivo) {
     const limpio = String(archivo.name || "propuesta").replace(/[^\w.-]+/g, "_").slice(-60);
@@ -48,6 +49,16 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     if (error) return { error: `No se pudo subir el archivo: ${error.message}` };
     nombre = archivo.name || limpio;
   }
+  // La segunda cotización, cuando se comparan dos papeles entre sí.
+  let rutaB = null, nombreB = null;
+  if (b?.archivo) {
+    const limpioB = String(b.archivo.name || "propuesta-b").replace(/[^\w.-]+/g, "_").slice(-60);
+    rutaB = `obra-${obraId}/analisis/${Date.now()}-b-${limpioB}`;
+    const { error } = await supabase.storage.from(BUCKET).upload(rutaB, b.archivo, { upsert: false });
+    if (error) return { error: `No se pudo subir la segunda cotización: ${error.message}` };
+    nombreB = b.archivo.name || limpioB;
+  }
+
   const { data, error } = await supabase.from("obra_analisis").insert({
     obra_id: obraId, titulo: titulo || null, proveedor: proveedor || null,
     archivo_path: ruta, archivo_nombre: nombre,
@@ -55,6 +66,10 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     // El descuento ofrecido al pie, entero: es lo que hay que acordarse de
     // pedir cuando llegue la factura.
     descuento: Number(descuento) || 0,
+    modo,
+    items_b: b?.items || null, proveedor_b: b?.proveedor || null,
+    descuento_b: Number(b?.descuento) || 0,
+    archivo_b_path: rutaB, archivo_b_nombre: nombreB,
     creado_por: quien?.id ?? null, creado_nombre: quien?.name || null,
   }).select().single();
   if (error) {

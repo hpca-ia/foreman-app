@@ -83,6 +83,11 @@ export function emparejarPorTexto(items = [], rubros = []) {
 function parecido(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
+  // LOS ESPACIOS NO DICEN NADA EN UN CÓDIGO. "Breaker 1P-16A" y "Breaker 1P-16
+  // A" son el mismo breaker, y la comparación por palabras no los junta porque
+  // de las dos solo "breaker" tiene largo suficiente para contar. Sin los
+  // espacios son idénticos, que es lo que cualquiera ve al leerlos.
+  if (a.replace(/ /g, "") === b.replace(/ /g, "")) return 1;
   if (a.startsWith(b) || b.startsWith(a)) return 0.95;
   const largas = t => new Set(t.split(" ").filter(w => w.length >= 5));
   const A = largas(a);
