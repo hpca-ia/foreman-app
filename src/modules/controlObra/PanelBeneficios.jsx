@@ -587,34 +587,52 @@ Rubros de la obra: ${lista}`;
             cambio regulariza una cantidad, esto se acomoda con aprobarla. */}
         {(sola.cuantos > 0 || porQue) && (
           <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: `1px solid ${colors.border}` }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
-              LO QUE DEJA LA OBRA · LO QUE SE COBRA MENOS LO QUE SE GASTÓ · CALCULADO SOLO
-            </div>
-            {/* LA PREGUNTA DE LA CASA PRIMERO. Cuánto deja la obra: lo que se
-                cobra menos lo que se gastó, rubro por rubro y sin que nadie
-                cargue nada. El desglose entre lo que ya estaba vendido y lo
-                que se ganó comprando viene abajo, y necesita el costo. */}
-            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
-              <Tarjeta label="DEJAN LOS TERMINADOS" valor={sola.aFavorHecho}
-                color={sola.aFavorHecho >= 0 ? colors.success : colors.danger}
-                icono={<TrendingUp size={11} color={colors.success} />} />
-              {sola.aFavorEnCurso !== 0 && (
-                <Tarjeta label="EN LOS QUE SIGUEN ANDANDO" valor={sola.aFavorEnCurso} color={colors.warning} />
-              )}
-              {sola.enContra !== 0 && (
-                <Tarjeta label="YA SE PASARON DE SU COSTO" valor={sola.enContra} color={colors.danger} />
-              )}
-            </div>
-            {porQue && (
-              <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 7, lineHeight: 1.5 }}>
-                {porQue}
-                {!sola.cuantos && (
-                  <span style={{ color: colors.muted }}>
-                    {" "}El costo se carga desde Diferencias, con la propuesta que NOVA ya leyó:
-                    el renglón viene emparejado con su rubro.
-                  </span>
-                )}
+            {/* SIN COSTOS CARGADOS, ESTE BLOQUE NO DICE NADA Y ENGAÑA.
+                Mostraba cuatro tarjetas y dos frases de las cuales lo único
+                cierto era que no se sabe. Y la peor era "en los que siguen
+                andando $58.906", que no es plata ganada: es presupuesto que
+                todavía no se gastó, leído en verde al lado de un beneficio.
+                Una pantalla que hay que explicar no sirve: cuando no hay con
+                qué medir, se dice en una línea y se ofrece el camino. */}
+            {!sola.cuantos ? (
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55 }}>
+                <strong style={{ color: colors.warning }}>
+                  Esta obra todavía no puede medir si compró mejor o peor que lo presupuestado.
+                </strong>{" "}
+                Ninguno de sus {sola.cuantosRubros} rubros tiene costo cargado, y sin eso lo único que se
+                puede restar es presupuesto menos gastado, que no es un beneficio: es plata que todavía no
+                se gastó. Los beneficios de abajo son los que salieron de análisis, de órdenes de cambio o
+                se cargaron a mano, y esos sí son reales.
+                <div style={{ color: colors.muted, marginTop: 3 }}>
+                  El costo se carga en <strong>Diferencias</strong>, con la propuesta que NOVA ya leyó: el
+                  renglón viene emparejado con su rubro y el botón los carga todos juntos.
+                </div>
               </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
+                  LO QUE DEJA LA OBRA · LO QUE SE COBRA MENOS LO QUE SE GASTÓ · CALCULADO SOLO
+                </div>
+                <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
+                  <Tarjeta label="DEJAN LOS TERMINADOS" valor={sola.aFavorHecho}
+                    color={sola.aFavorHecho >= 0 ? colors.success : colors.danger}
+                    icono={<TrendingUp size={11} color={colors.success} />} />
+                  {/* NO ES PLATA GANADA: es lo que todavía no se gastó de los
+                      rubros que siguen abiertos, y puede gastarse entero. */}
+                  {sola.aFavorEnCurso !== 0 && (
+                    <Tarjeta label="SIN TERMINAR · TODAVÍA NO SE SABE" valor={sola.aFavorEnCurso}
+                      color={colors.muted} />
+                  )}
+                  {sola.enContra !== 0 && (
+                    <Tarjeta label="YA SE PASARON DE SU COSTO" valor={sola.enContra} color={colors.danger} />
+                  )}
+                </div>
+                {porQue && (
+                  <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 7, lineHeight: 1.5 }}>
+                    {porQue}
+                  </div>
+                )}
+              </>
             )}
             {sola.cuantos > 0 && (
               <>
