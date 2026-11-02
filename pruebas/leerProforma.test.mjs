@@ -142,3 +142,14 @@ test("si los renglones suman mas que el subtotal, esa diferencia es el descuento
   // Sin contarlo, el mismo papel se lee como mal leido.
   assert.equal(cuadrar(items, { subtotal: 1000 }, 0).cuadra, false);
 });
+
+test("el pie del papel se lee solo, y de ahi sale el descuento", async () => {
+  const { pieDeTexto } = await import("../src/modules/controlProforma.js").catch(() => import("../src/modules/controlObra/leerProforma.js"));
+  const p = pieDeTexto("SUBTOTAL | 12.237,99\nDESCUENTO | 1.049,41\nIVA | 1.835,70\nTOTAL | 13.024,28");
+  assert.equal(p.subtotal, 12237.99);
+  assert.equal(p.descuento, 1049.41);
+  assert.equal(p.total, 13024.28);
+  // Lo que no aparece viene con guion y no se inventa.
+  const sin = pieDeTexto("SUBTOTAL | 100\nDESCUENTO | -\nIVA | -\nTOTAL | 115");
+  assert.equal(sin.descuento, null);
+});

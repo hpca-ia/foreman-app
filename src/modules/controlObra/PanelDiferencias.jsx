@@ -522,6 +522,18 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     //
     // Lo segundo necesita saber de qué rubro sale: sin rubro señalado no hay
     // base contra la cual medir, y entonces no se inventa un beneficio.
+    // LO QUE CUESTA MENOS DE LO QUE SE COBRA YA ES BENEFICIO, sin que nadie lo
+    // marque.
+    //
+    // Sobre la cantidad que el cliente YA tiene contratada, el beneficio existe
+    // desde que se sabe el costo: no depende de ninguna orden ni de ninguna
+    // aprobación —esa plata ya está vendida y ya se sabe lo que cuesta—. Pedir
+    // un clic para registrarlo es garantizar que la mitad no se registre, y las
+    // eficiencias son justamente las que nadie anota.
+    //
+    // Entra como PREVISTO, porque hasta que llegue la factura sigue siendo una
+    // cotización. Y lo de las cantidades de MÁS no entra acá: eso va a la orden
+    // de cambio y su margen llega a Beneficios el día que el cliente la aprueba.
     const filas = [
       // EL DESCUENTO OFRECIDO, COMO BENEFICIO Y ENTERO. No se reparte entre los
       // renglones: es un trato con el proveedor y se mira entero, porque lo que
@@ -535,7 +547,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         nota: `Lo ofrece la proforma al pie${an.titulo ? ` · ${an.titulo}` : ""}`
           + " · hay que pedirlo cuando llegue la factura",
       }] : []),
-      ...frescas.filter(x => x.decision === "eficiencia")
+      ...frescas.filter(x => x.hallazgo === "bajo_precio" || x.decision === "eficiencia")
+        .filter(x => x.decision !== "incluido" && x.decision !== "nuestro")
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "costo")),
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
@@ -963,9 +976,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
               )}
               {clave === "bajo_precio" && (
                 <div style={{ fontSize: 11, color: colors.success, marginBottom: 6, fontWeight: 600 }}>
-                  ${fmt(suma)} quedan a favor del proyecto. Marcándolas pasan a Beneficios como previsto,
-                  y se confirman cuando llegue la factura. No van en la orden de cambio: al cliente no se le
-                  cobra un adicional por haber comprado bien.
+                  ${fmt(suma)} quedan a favor del proyecto y <strong>ya están en Beneficios</strong> como
+                  previsto: sobre la cantidad que el cliente ya tiene contratada, el beneficio existe desde
+                  que se sabe el costo. Se confirman cuando llegue la factura. No van en la orden de cambio:
+                  al cliente no se le cobra un adicional por haber comprado bien.
                 </div>
               )}
 

@@ -227,6 +227,49 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
  * Se pregunta aparte y en corto —"3:44", cinco tokens— en vez de hacerle
  * reescribir la proforma entera para agregarle una columna.
  */
+/**
+ * EL PIE DEL PAPEL, PREGUNTADO SOLO.
+ *
+ * Transcribir treinta y cuatro renglones y además acordarse de devolver cuatro
+ * números del pie es una pregunta de más dentro de una tarea larga, y es la que
+ * se cae: en una proforma devolvió el descuento y en la siguiente, el mismo
+ * papel, no devolvió ni el descuento ni los totales. Sin el subtotal tampoco se
+ * puede deducir el descuento por resta, así que se perdía dos veces.
+ *
+ * Es la misma lección que el emparejamiento: una pregunta por pedido. Esta
+ * cuesta cuatro números de respuesta y recupera plata que estaba ofrecida por
+ * escrito.
+ */
+export const PROMPT_PIE = `Mirá SOLO el pie de esta proforma, abajo de los renglones.
+
+Contestá exactamente estas cuatro líneas, sin explicar nada:
+
+SUBTOTAL | monto
+DESCUENTO | monto
+IVA | monto
+TOTAL | monto
+
+Los montos van TAL COMO ESTÁN ESCRITOS en el papel, sin calcularlos y sin
+corregirlos. Si alguno no aparece, poné un guion.
+
+El DESCUENTO es cualquier rebaja que el papel reste abajo de los renglones:
+"descuento especial", "descuento comercial", "dto. por volumen". Va como número
+POSITIVO. Si no hay, guion.`;
+
+/** Las cuatro líneas del pie, leídas. */
+export function pieDeTexto(txt = "") {
+  const val = t => (/^[-–—\s]*$/.test(String(t || "")) ? null : num(t));
+  const pie = {};
+  for (const linea of String(txt).split("\n")) {
+    const [que, monto] = linea.split("|").map(x => String(x || "").trim());
+    if (/^subtotal$/i.test(que)) pie.subtotal = val(monto);
+    else if (/^descuento$/i.test(que)) pie.descuento = val(monto);
+    else if (/^iva$/i.test(que)) pie.iva = val(monto);
+    else if (/^total$/i.test(que)) pie.total = val(monto);
+  }
+  return pie;
+}
+
 export const PROMPT_RUBROS = `Para cada renglón numerado, decí a qué rubro del presupuesto corresponde.
 
 Contestá una línea por renglón, sin JSON y sin explicaciones:
@@ -395,6 +438,31 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     if (leido.descuento && !descuento) descuento = leido.descuento;
     items.push(...leido.items);
   }
+  // EL PIE, PREGUNTADO APARTE. Ver arriba: dentro de la transcripción es la
+  // pregunta que se cae, y sin el subtotal tampoco se puede deducir el
+  // descuento por resta.
+  if (!esHoja && (!totales?.subtotal || !descuento)) {
+    try {
+      onPaso?.("leyendo el pie del papel");
+      const { texto } = await pedir({
+        model: modelo, max_tokens: 200, system: PROMPT_PIE,
+        messages: [{ role: "user", content: [
+          esPdf
+            ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+            : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+          { type: "text", text: "El pie de esta proforma." },
+        ] }],
+      });
+      const pie = pieDeTexto(texto);
+      if (pie.descuento && !descuento) descuento = Math.abs(pie.descuento);
+      if (pie.subtotal != null && !totales?.subtotal) {
+        totales = { ...(totales || {}), subtotal: pie.subtotal, iva: pie.iva ?? null, total: pie.total ?? null };
+      }
+    } catch {
+      // Sin el pie se sigue: lo que no se puede es inventarlo.
+    }
+  }
+
   // EL DESCUENTO TAMBIÉN SE DEDUCE DE LA ARITMÉTICA, no solo de que NOVA lo
   // diga. En una proforma lo dijo y en la siguiente, el mismo papel, no: los
   // renglones sumaban mil dólares más que el subtotal del pie y eso se
