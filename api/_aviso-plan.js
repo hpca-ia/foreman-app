@@ -93,7 +93,11 @@ export default async function handler(req, res) {
       <tr><td style="padding:14px 0 4px;border-top:1px solid #e3e6ea">
         <div style="font-size:14px;font-weight:700;color:#0F3D3E;text-transform:capitalize">${esc(comoSeLee(d.fecha))}</div>
         ${tareas.length ? `<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:#1f2937;line-height:1.6">
-          ${tareas.map(t => `<li>${esc(t.texto)}${t.hecha ? ' <span style="color:#15803D">· hecha</span>' : ""}</li>`).join("")}
+          ${tareas.map(t => `<li>${esc(t.texto)}${t.hecha ? ' <span style="color:#15803D">· hecha</span>' : ""}`
+            // La nota debajo de su tarea: el que recibe el correo no estuvo en
+            // la reunión del lunes.
+            + (t.nota ? `<br><span style="color:#6B7280;font-size:13px">${esc(t.nota)}</span>` : "")
+            + "</li>").join("")}
         </ul>` : ""}
         ${materiales.length ? `<div style="font-size:12px;color:#6B7280;margin-top:5px">
           <strong>Material:</strong> ${materiales.map(m => esc(m.texto)).join(" · ")}

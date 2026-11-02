@@ -277,6 +277,25 @@ export async function marcarHecha(item, hecha, quien, { leadId, fecha } = {}) {
   return { item: data[0] };
 }
 
+/**
+ * LO QUE HAY QUE SABER PARA HACER ESA TAREA.
+ *
+ * "Fundir losa del eje 4" alcanza para una lista y no para trabajar: no dice
+ * que el hormigón lo trae Holcim a las siete, que hay que avisarle al vecino,
+ * ni que si llueve se pasa al jueves. Eso se habla el lunes en la reunión, lo
+ * recuerda alguien de memoria, y el miércoles lo ejecuta otro que no estuvo.
+ *
+ * Es distinto del MOTIVO, que es por qué no se hizo: uno se escribe al
+ * planificar y el otro al cerrar la semana. Mezclarlos obligaría a borrar lo
+ * que se había previsto para poder explicar lo que pasó.
+ */
+export async function guardarNota(id, nota) {
+  const { error } = await supabase.from("obra_plan_items")
+    .update({ nota: String(nota || "").trim() || null }).eq("id", id);
+  return error ? (/nota|column|schema cache/i.test(error.message)
+    ? "Falta correr la migración 163 para poder anotar bajo una tarea." : error.message) : null;
+}
+
 /** Por qué no se hizo. Sin motivo, una tarea sin marcar no dice nada. */
 export async function guardarMotivo(id, motivo) {
   const { error } = await supabase.from("obra_plan_items").update({ motivo: motivo || null }).eq("id", id);

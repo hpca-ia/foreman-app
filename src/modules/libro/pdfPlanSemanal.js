@@ -123,7 +123,11 @@ export async function pdfPlanSemanal({ proyecto, desde, hasta, dias = [], items 
         showHead: false,
         // La casilla vacía es para marcar en papel: la hoja se imprime el
         // lunes y se va tachando en la obra, donde nadie abre la app.
-        body: tareas.map(t => [t.hecha ? "X" : "[ ]", seguro(t.texto)]),
+        // LA NOTA VA CON SU TAREA, en la misma celda y abajo: el que lee la
+        // hoja en la obra no estuvo en la reunión del lunes, y "fundir losa
+        // del eje 4" no dice que el hormigón llega a las siete.
+        body: tareas.map(t => [t.hecha ? "X" : "[ ]",
+          seguro(t.texto) + (t.nota ? `\n   ${seguro(t.nota)}` : "")]),
         theme: "plain",
         margin: { left: margen, right: margen },
         styles: { fontSize: 9.5, cellPadding: { top: 3, bottom: 3, left: 2, right: 2 }, textColor: [17, 24, 39] },

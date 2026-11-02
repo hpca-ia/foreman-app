@@ -7,7 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHecha, guardarMotivo,
   diasEntre, loQueTocaEstaSemana, comoSalio, historialDePlanes, proponerPeriodo, correrPeriodo,
   periodoDelPlan, guardarObservaciones, archivosDelPlan, subirArchivoDelPlan, borrarArchivoDelPlan,
-  enlacesDeArchivos, cerrarPlan, reabrirPlan } from "./planSemanalDatos";
+  enlacesDeArchivos, cerrarPlan, reabrirPlan, guardarNota } from "./planSemanalDatos";
 import { cargarPlan as cargarGantt, leerPlazo } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
 import { gentePara } from "../controlObra/ordenesDeCambio";
@@ -390,6 +390,25 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                       opacity: t.hecha ? 0.65 : 1 }}>
                       {t.texto}
                     </div>
+                    {/* LO QUE HAY QUE SABER PARA HACERLA. Se escribe al
+                        planificar y viaja al PDF y al correo con la tarea:
+                        el que la ejecuta el miércoles no estuvo en la reunión
+                        del lunes. Distinto del motivo, que es hacia atrás. */}
+                    {puedeArmar ? (
+                      <input defaultValue={t.nota || ""} key={`n${t.id}-${t.nota || ""}`}
+                        placeholder="nota: a qué hora llega el material, quién la hace, de qué depende…"
+                        onBlur={async e => {
+                          if ((e.target.value || "") === (t.nota || "")) return;
+                          const err = await guardarNota(t.id, e.target.value);
+                          if (err) setError(err); else await cargar();
+                        }}
+                        style={{ ...inputStyle, marginTop: 3, padding: "3px 7px", fontSize: 11,
+                          color: colors.inkSoft,
+                          borderColor: t.nota ? colors.border : "transparent",
+                          background: t.nota ? "#fff" : colors.bg }} />
+                    ) : t.nota ? (
+                      <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>{t.nota}</div>
+                    ) : null}
                     {/* POR QUÉ NO SE HIZO. Es el campo que hace que planificar
                         sirva: una tarea sin marcar y sin motivo es un dato
                         perdido, y es justo el que hace falta cuando hay que
