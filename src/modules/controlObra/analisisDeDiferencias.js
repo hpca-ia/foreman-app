@@ -185,6 +185,14 @@ export async function cerrarAnalisis(id, ordenCambioId = null) {
 
 export async function borrarAnalisis(a) {
   if (a.archivo_path) await supabase.storage.from(BUCKET).remove([a.archivo_path]);
+  // LO QUE ESTE ANÁLISIS DEJÓ EN BENEFICIOS SE VA CON ÉL.
+  //
+  // Sus eficiencias y su descuento viven en obra_beneficios con la marca del
+  // análisis, y al borrarlo quedaban ahí sumando para siempre: un beneficio
+  // huérfano, sin papel que lo sostenga, que nadie puede ir a verificar y que
+  // nadie sabe de dónde salió. Peor que no tenerlo.
+  await supabase.from("obra_beneficios").delete()
+    .eq("obra_id", a.obra_id).like("nota", `%[dif:${a.id}]%`);
   const { error } = await supabase.from("obra_analisis").delete().eq("id", a.id);
   return error ? error.message : null;
 }

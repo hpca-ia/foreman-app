@@ -996,6 +996,15 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                         {/* LOS TRES NÚMEROS DE CADA LADO, uno debajo del otro y
                             en columna: así se ve de dónde sale la diferencia sin
                             dividir nada de cabeza. */}
+                        {/* LOS TRES RENGLONES SE LEEN IGUAL: cantidad por
+                            unitario igual total, en los tres.
+                            Antes el del medio mostraba la cantidad DE MÁS y el
+                            monto de la diferencia, así que las dos filas de
+                            arriba hablaban del trabajo entero y la de abajo de
+                            un pedazo: puestas una debajo de otra parecían
+                            comparables y no lo eran. Ahora el contrato y el
+                            papel se comparan enteros, y la diferencia tiene su
+                            propia fila al pie, que es lo que se decide. */}
                         {rubro && (
                           <Cuenta que="contratado" cantidad={rubro.cantidad} unidad={rubro.unidad}
                             unitario={puRubro} total={base} base="precio al cliente, sin IVA" />
@@ -1005,16 +1014,31 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             unitario={rubro.costo_unitario}
                             total={Number(rubro.costo_unitario) * Number(rubro.cantidad)} base="nuestro costo" />
                         )}
-                        <Cuenta que={l.hallazgo === "menos_cantidad" ? "no se hizo" : "la propuesta"}
+                        {/* EL PAPEL, ENTERO: su cantidad y su unitario, no un pedazo. */}
+                        <Cuenta que="la propuesta"
+                          cantidad={l.cantidad_papel ?? l.cantidad} unidad={l.unidad_papel || l.unidad}
+                          unitario={Number(l.cantidad_papel ?? l.cantidad)
+                            ? Number(l.monto_papel ?? l.monto) / Number(l.cantidad_papel ?? l.cantidad) : null}
+                          total={l.monto_papel ?? l.monto}
+                          base={l.monto_papel == null ? "" : "lo que cotiza el proveedor"} />
+                        {/* Y LA DIFERENCIA, que es lo único que se decide. */}
+                        <Cuenta
+                          que={l.hallazgo === "menos_cantidad" ? "se devuelve"
+                            : l.hallazgo === "mas_cantidad" ? "se cobra de más"
+                              : l.hallazgo === "nuevo" ? "no está contratado" : "la diferencia"}
                           cantidad={l.cantidad} unidad={l.unidad}
                           unitario={Number(l.cantidad) ? Number(l.monto) / Number(l.cantidad) : null}
                           total={l.monto} fuerte
                           color={l.hallazgo === "bajo_precio" ? colors.success
                             : l.hallazgo === "subio_precio" ? colors.danger : colors.ink}
                           base={l.hallazgo === "subio_precio" || l.hallazgo === "bajo_precio"
-                            ? `la diferencia de precio, sobre la cantidad que los dos tienen`
-                            : l.hallazgo === "mas_cantidad" ? "solo la cantidad de más, a costo"
-                              : l.hallazgo === "menos_cantidad" ? "se le devuelve al precio del contrato"
+                            ? "de precio, sobre la cantidad que los dos tienen"
+                            : l.hallazgo === "mas_cantidad"
+                              ? `a costo · al cliente se le cobra al precio del contrato${puRubro != null
+                                ? `: $${fmt(puRubro * Number(l.cantidad))}` : ""}`
+                              : l.hallazgo === "menos_cantidad"
+                                ? `al precio del contrato${puRubro != null
+                                  ? `: $${fmt(puRubro * Number(l.cantidad))}` : ""}`
                                 : "a costo: todavía no tiene precio"} />
                         {deOrden && (
                           <div style={{ fontSize: 10.5, color: colors.warning, marginTop: 2 }}>
