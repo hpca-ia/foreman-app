@@ -370,9 +370,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         obraId: obra.id, modo: "cotizaciones",
         titulo: `${a.proveedor || a.file?.name} vs ${b.proveedor || b.file?.name}`,
         proveedor: a.proveedor || "", archivo: a.archivo || a.file,
-        items: a.items, iva: a.iva, descuento: a.descuento, fecha: a.fecha,
+        items: a.items, iva: a.iva, descuento: a.descuento, fecha: a.fecha, totales: a.totales,
         b: { items: b.items, proveedor: b.proveedor || "", descuento: b.descuento,
-          archivo: b.archivo || b.file, fecha: b.fecha },
+          archivo: b.archivo || b.file, fecha: b.fecha, totales: b.totales },
         lineas: [], quien: currentUser,
       });
       if (g.error) throw new Error(g.error);
@@ -397,6 +397,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       const g = await guardarAnalisis({
         obraId: obra.id, titulo: file.name, proveedor: r.proveedor || "",
         archivo: r.archivo || file, items: r.items, iva: r.iva, descuento: r.descuento, fecha: r.fecha,
+        totales: r.totales,
         lineas: [...h.todo, ...h.menos].map(x => ({
           descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad,
           monto: x.costo, obra_rubro_id: x.rubro_id || null, hallazgo: x.hallazgo,
@@ -908,6 +909,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     };
     const tituloA = marca(c.proveedorA, abierto.fecha_cotizacion, abierto.archivo_nombre, abierto.archivo_b_nombre);
     const tituloB = marca(c.proveedorB, abierto.fecha_cotizacion_b, abierto.archivo_b_nombre, abierto.archivo_nombre);
+    // Y UN NÚMERO, SIEMPRE. El proveedor puede ser el mismo, la fecha puede no
+    // estar en el papel y los nombres de archivo pueden parecerse: lo único
+    // que no falla es "1" y "2". Las columnas se llaman así y el detalle va
+    // debajo, que es donde se lo mira una vez y no en cada renglón.
+    const chapa = (n, t) => `COTIZACIÓN ${n}${t ? ` · ${t}` : ""}`;
 
     const col = { fontVariantNumeric: "tabular-nums", textAlign: "right", whiteSpace: "nowrap" };
     const COLS = "minmax(180px,2.2fr) 58px 74px 84px 58px 74px 84px 84px";
@@ -931,25 +937,30 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             </span>
           )}
         </span>
-        {[["a", f.cantidadA, f.unitarioA, f.montoA, f.difUnitario < 0],
-          ["b", f.cantidadB, f.unitarioB, f.montoB, f.difUnitario > 0]].map(([k, cant, uni, tot, gana]) => {
-          // MÁS BARATO Y ADEMÁS MENOS CANTIDAD VA EN ROJO, no en verde: parece
-          // la mejor oferta y es la que va a salir cara. Los metros que faltan
-          // hay que hacerlos igual, y se compran después a un precio que ya no
-          // se negocia.
-          const trampa = f.engana === k;
-          const tono = trampa ? colors.danger : gana ? colors.success : colors.inkSoft;
+        {/* EL MÁS ALTO EN ROJO, EL MÁS BAJO EN VERDE, en precio y en cantidad.
+            Las dos cosas se leen de un vistazo y por separado: un renglón
+            puede ser más barato por unidad y traer más metros, y eso es una
+            conversación distinta de ser más caro. Si son iguales, ninguno se
+            pinta: el color se gasta cuando se usa para todo. */}
+        {[["a", f.cantidadA, f.unitarioA, f.montoA],
+          ["b", f.cantidadB, f.unitarioB, f.montoB]].map(([k, cant, uni, tot]) => {
+          const otroUni = k === "a" ? f.unitarioB : f.unitarioA;
+          const otraCant = k === "a" ? f.cantidadB : f.cantidadA;
+          const tonoUni = uni == null || otroUni == null || uni === otroUni ? colors.inkSoft
+            : uni > otroUni ? colors.danger : colors.success;
+          const tonoCant = cant == null || otraCant == null || cant === otraCant ? colors.muted
+            : cant > otraCant ? colors.danger : colors.success;
+          const pesa = v => (v === colors.danger || v === colors.success ? 700 : 400);
           return (
             <Fragment key={k}>
-              <span style={{ ...col, color: trampa ? colors.danger : colors.muted,
-                fontWeight: trampa ? 700 : 400 }}>
+              <span style={{ ...col, color: tonoCant, fontWeight: pesa(tonoCant) }}>
                 {cant == null ? "—" : fmt(cant)}
               </span>
-              <span style={{ ...col, color: tono, fontWeight: gana || trampa ? 700 : 400 }}>
+              <span style={{ ...col, color: tonoUni, fontWeight: pesa(tonoUni) }}>
                 {uni == null ? "—" : `$${fmt(uni)}`}
               </span>
-              <span style={{ ...col, color: trampa ? colors.danger : gana ? colors.success : colors.ink,
-                fontWeight: gana || trampa ? 700 : 400 }}>
+              <span style={{ ...col, color: tonoUni === colors.inkSoft ? colors.ink : tonoUni,
+                fontWeight: pesa(tonoUni) }}>
                 {tot == null ? "—" : `$${fmt(tot)}`}
               </span>
             </Fragment>
@@ -972,7 +983,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           ← Diferencias
         </button>
         <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>
-          {tituloA} <span style={{ color: colors.muted, fontWeight: 400 }}>contra</span> {tituloB}
+          <span style={{ color: colors.brand }}>1</span> {tituloA}{" "}
+          <span style={{ color: colors.muted, fontWeight: 400 }}>contra</span>{" "}
+          <span style={{ color: colors.brand }}>2</span> {tituloB}
         </div>
         <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 10, lineHeight: 1.5, maxWidth: 820 }}>
           {comoSeDiceLaComparacion(c)}
@@ -989,17 +1002,49 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             LO QUE DICE CADA PAPEL · alcances distintos, no se comparan entre sí
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {[[tituloA, c.totalA, (abierto.items || []).length, c.descuentoA],
-              [tituloB, c.totalB, (abierto.items_b || []).length, c.descuentoB]].map(([t, total, cuantos, dto]) => (
-              <div key={t}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, lineHeight: 1.3 }}>{t}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>${fmt(total)}</div>
-                <div style={{ fontSize: 10, color: colors.muted }}>
-                  {cuantos} renglones
-                  {dto > 0 ? ` · ya tiene restado $${fmt(dto)} de descuento` : " · sin descuento al pie"}
+            {[[1, tituloA, c.totalA, (abierto.items || []).length, c.descuentoA, abierto.totales],
+              [2, tituloB, c.totalB, (abierto.items_b || []).length, c.descuentoB, abierto.totales_b]]
+              .map(([n, t, leido, cuantos, dto, pie]) => {
+              // LO QUE DICE EL PAPEL Y LO QUE SE LEYÓ, uno al lado del otro.
+              // Si no coinciden, la lectura se comió algo y todo lo de abajo
+              // está decidido sobre una lista incompleta.
+              const sub = Number(pie?.subtotal) || 0;
+              const esperado = sub ? Math.round((sub - (Number(dto) || 0)) * 100) / 100 : null;
+              const calza = esperado == null ? null : Math.abs(esperado - leido) <= Math.max(0.05, cuantos * 0.01);
+              return (
+                <div key={n}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.brand, letterSpacing: 0.3 }}>
+                    COTIZACIÓN {n}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, lineHeight: 1.3 }}>{t}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: colors.ink }}>${fmt(leido)}</div>
+                  <div style={{ fontSize: 10, color: colors.muted }}>
+                    {cuantos} renglones leídos
+                    {dto > 0 ? ` · menos $${fmt(dto)} de descuento` : ""}
+                  </div>
+                  {/* El pie del papel, tal como está escrito. */}
+                  {sub ? (
+                    <div style={{ fontSize: 10, marginTop: 3, lineHeight: 1.45,
+                      color: calza === false ? colors.danger : colors.muted }}>
+                      el papel dice: subtotal ${fmt(sub)}
+                      {Number(pie?.iva) ? ` · IVA $${fmt(pie.iva)}` : ""}
+                      {Number(pie?.total) ? ` · total $${fmt(pie.total)}` : ""}
+                      {dto > 0 ? ` · descuento $${fmt(dto)}` : " · sin descuento"}
+                      {calza === false && (
+                        <div style={{ fontWeight: 700 }}>
+                          No cuadra: el papel da ${fmt(esperado)} y lo leído ${fmt(leido)}.
+                          Faltan o sobran ${fmt(Math.abs(esperado - leido))}.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 10, color: colors.muted, marginTop: 3 }}>
+                      el papel no trae subtotal: no hay con qué comprobar la lectura
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -1011,7 +1056,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
             {[[tituloA, c.comunA, c.cuantosGanaA], [tituloB, c.comunB, c.cuantosGanaB]].map(([t, v, gana]) => (
               <div key={t}>
-                <div style={{ fontSize: 10, color: colors.muted }}>{String(t).slice(0, 30)}</div>
+                <div style={{ fontSize: 10, color: colors.muted }}>
+                  <strong style={{ color: colors.brand }}>{t === tituloA ? "1" : "2"}</strong>{" "}
+                  {String(t).slice(0, 28)}
+                </div>
                 <div style={{ fontSize: 16, fontWeight: 700,
                   color: (t === tituloA ? c.difComun < 0 : c.difComun > 0) ? colors.success : colors.ink }}>
                   ${fmt(v)}
@@ -1053,10 +1101,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           fontWeight: 700, color: colors.inkSoft, padding: "0 9px 4px", textAlign: "center" }}>
           <span />
           <span style={{ gridColumn: "span 3", borderBottom: `2px solid ${colors.border}` }}>
-            {String(tituloA).slice(0, 26)}
+            {chapa(1, String(tituloA).slice(0, 22))}
           </span>
           <span style={{ gridColumn: "span 3", borderBottom: `2px solid ${colors.border}` }}>
-            {String(tituloB).slice(0, 26)}
+            {chapa(2, String(tituloB).slice(0, 22))}
           </span>
           <span />
         </div>
@@ -1080,10 +1128,14 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         )}
 
         <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8, lineHeight: 1.5, maxWidth: 860 }}>
-          En <strong style={{ color: colors.danger }}>rojo</strong>, el que es más barato por unidad
-          <strong> y además cotiza menos cantidad</strong>: parece la mejor oferta y es la que sale cara,
-          porque lo que falta hay que hacerlo igual y se compra después a un precio que ya no se negocia.
-          {c.cuantosEnganan > 0 && <strong> Hay {c.cuantosEnganan} así.</strong>}
+          En <strong style={{ color: colors.danger }}>rojo</strong> el más alto y en{" "}
+          <strong style={{ color: colors.success }}>verde</strong> el más bajo, tanto en precio unitario como
+          en cantidad: son dos lecturas distintas y un renglón puede ser más barato por unidad y traer más
+          metros.
+          {c.cuantosEnganan > 0 && (
+            <strong> Mirá los {c.cuantosEnganan} donde uno es más barato Y cotiza menos: lo que falta hay
+              que hacerlo igual.</strong>
+          )}
           {" "}La columna <strong>A FAVOR</strong> es por UNITARIO y sobre la cantidad que los dos cotizan: si uno
           cotiza 100 metros y el otro 120, los totales no se pueden comparar y el barato parece caro. En verde,
           quién es más barato en ese renglón. Esto no elige por vos —quién cumple, quién tiene el material y

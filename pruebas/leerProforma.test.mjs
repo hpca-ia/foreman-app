@@ -246,3 +246,24 @@ test("lee los renglones con unitario y tambien los de cinco campos", async () =>
   assert.equal(sin.items[0].monto, 2149.55);
   assert.equal(sin.items[0].rubro_id, 106);
 });
+
+test("una celda con letras no es un numero", async () => {
+  // Las proformas escriben el total en letras al pie —"CATORCE MIL ... CON
+  // 50/100"— y el lector sacaba de ahi un 50100. Esa fila entro dos veces como
+  // renglon y el total de la comparacion paso a decir cien mil dolares que no
+  // existen en ningun papel.
+  const { numeroDeCelda, columnasDeHoja, renglonesDeHoja } =
+    await import("../src/modules/controlObra/leerProforma.js");
+  assert.equal(numeroDeCelda("CATORCE MIL NOVECIENTOS VEINTE Y SIETE DOLARES CON 50/100"), 0);
+  assert.equal(numeroDeCelda("$ 1.234,56"), 1234.56);
+  assert.equal(numeroDeCelda("USD 900"), 900);
+  assert.equal(numeroDeCelda(2149.81), 2149.81);
+
+  const filas = [
+    ["ITEM", "DESCRIPCION", "UNIDAD", "CANTIDAD", "P. UNITARIO", "TOTAL"],
+    [1, "Punto de iluminacion", "U", 65, 33.07, 2149.81],
+    ["", "SON: CATORCE MIL DOLARES CON 50/100", "", "CATORCE MIL", "", "CATORCE MIL DOLARES CON 50/100"],
+  ];
+  const items = renglonesDeHoja(filas, columnasDeHoja(filas));
+  assert.equal(items.length, 1);
+});

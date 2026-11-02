@@ -265,6 +265,25 @@ export function columnasDeHoja(filas = []) {
   return null;
 }
 
+/**
+ * UNA CELDA CON LETRAS NO ES UN NÚMERO.
+ *
+ * Las proformas escriben el total en letras al pie —"CATORCE MIL NOVECIENTOS
+ * VEINTE Y SIETE DÓLARES CON 50/100"— y el lector de números, que limpia todo
+ * lo que no sea dígito, sacaba de ahí un 50100. Esa fila entró dos veces como
+ * renglón de la cotización, con cantidad 50.100 y monto $50.100, y el total de
+ * la comparación pasó a decir cien mil dólares que no existen en ningún papel.
+ *
+ * Un importe puede traer el símbolo de la moneda y nada más. Si después de
+ * sacarle eso queda una letra, esa celda es texto.
+ */
+export function numeroDeCelda(v) {
+  if (typeof v === "number") return v;
+  const t = String(v ?? "").replace(/\b(usd|us\$|dólares|dolares|dls)\b/gi, "").replace(/[$\s]/g, "");
+  if (!t || /[a-zñáéíóúü]/i.test(t)) return 0;
+  return num(t);
+}
+
 export function renglonesDeHoja(filas = [], mapa = {}) {
   const cD = mapa.col_descripcion, cC = mapa.col_cantidad, cU = mapa.col_unidad, cT = mapa.col_total;
   const cP = mapa.col_unitario;
@@ -274,7 +293,7 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
   for (let i = desde; i < filas.length; i++) {
     const f = filas[i] || [];
     const descripcion = String(f[cD] ?? "").trim();
-    const monto = Math.round(num(f[cT]) * 100) / 100;
+    const monto = Math.round(numeroDeCelda(f[cT]) * 100) / 100;
     // Sin descripción o sin monto es una fila vacía, un título de capítulo o
     // una línea de separación. No es un renglón que se compre.
     if (!descripcion || !monto) continue;
@@ -283,11 +302,11 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
     if (TOTALES.test(descripcion)) continue;
     items.push({
       descripcion: descripcion.slice(0, 90),
-      cantidad: num(cC == null ? 0 : f[cC]),
+      cantidad: numeroDeCelda(cC == null ? 0 : f[cC]),
       unidad: String(cU == null ? "" : (f[cU] ?? "")).trim().slice(0, 10),
       monto,
       // El unitario del papel, para comprobar la multiplicación.
-      unitario: cP == null ? null : (num(f[cP]) || null),
+      unitario: cP == null ? null : (numeroDeCelda(f[cP]) || null),
       rubro_id: null,
     });
   }
