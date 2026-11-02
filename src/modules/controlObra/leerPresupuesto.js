@@ -30,51 +30,11 @@ const unidadValida = u => !!u && u.length <= 10;
 // El número de capítulo de un código: "8.17" → "8".
 const prefijo = c => (texto(c).match(/^(\d+)/) || [])[1] || null;
 
-// Números que llegan como texto: "1.234,56" o "1,234.56". El último separador
-// es el decimal. Las celdas numéricas de Excel pasan tal cual.
-export function num(v) {
-  if (typeof v === "number") return v;
-  const limpio = texto(v).replace(/[^0-9,.-]/g, "");
-  if (!limpio) return 0;
-  const coma = limpio.lastIndexOf(","), punto = limpio.lastIndexOf(".");
-  if (coma >= 0 && punto >= 0) {
-    const dec = Math.max(coma, punto);
-    return Number(limpio.slice(0, dec).replace(/[.,]/g, "") + "." + limpio.slice(dec + 1)) || 0;
-  }
-  if (coma >= 0) return Number(limpio.replace(",", ".")) || 0;
-  return Number(limpio) || 0;
-}
-
-/**
- * UNA CELDA CON PALABRAS NO ES UN NÚMERO.
- *
- * Los presupuestos y las proformas escriben el importe en letras al pie —"SON:
- * CATORCE MIL NOVECIENTOS VEINTE Y SIETE DÓLARES CON 50/100"— y `num`, que
- * limpia todo lo que no sea dígito, saca de ahí un 50100. En una proforma esa
- * fila entró como un renglón de $50.100 y el total de la comparación pasó a
- * decir cien mil dólares que no existen. En un presupuesto de ciento setenta
- * rubros entraría igual, y ahí no lo ve nadie: es un rubro más en la lista, y
- * desde el contrato se propaga al control, a las planillas y a los beneficios.
- *
- * Una cantidad puede traer su unidad pegada —"100 m2"— y eso sigue siendo un
- * número. Tres letras seguidas ya son una palabra, y una palabra en una celda
- * de plata quiere decir que esa fila no es un rubro.
- *
- * Y LA UNIDAD NO APORTA DÍGITOS. Limpiar todo lo que no sea número convierte
- * "80 m2" en 802 —el 2 del metro cuadrado se pega al 80— y ese rubro entra con
- * ochocientas dos unidades. Es un error viejo y silencioso: el total del papel
- * sigue cuadrando porque la cantidad no se usa para sumarlo, y la cantidad mal
- * leída recién se nota en la obra, cuando se compara contra lo ejecutado. Se
- * toma el PRIMER número de la celda y lo que venga después se descarta.
- */
-export function numeroDeCelda(v) {
-  if (typeof v === "number") return v;
-  const t = String(v ?? "").replace(/\b(usd|us\$|dólares|dolares|dls)\b/gi, "");
-  if (!t.trim()) return 0;
-  if (/[a-zñáéíóúü]{3,}/i.test(t)) return 0;
-  const m = /-?\d[\d.,]*/.exec(t);
-  return m ? num(m[0]) : 0;
-}
+// `num` y `numeroDeCelda` viven en lectura/celdas.js: son las mismas reglas
+// para el presupuesto, la proforma y la cotización. Se re-exportan para no
+// cambiarle el import a quien ya las pedía desde acá.
+import { num, numeroDeCelda } from "../lectura/celdas.js";
+export { num, numeroDeCelda };
 
 export const MAPA_PROMPT = `Estas son las primeras filas de un presupuesto de construcción en Excel.
 Identifica la estructura. Devuelve SOLO JSON, sin markdown:

@@ -12,7 +12,11 @@ import { emparejarPorTexto, emparejarPorParecido, pedidoDeEmparejamiento } from 
 // puede leer ni en parte. Doscientos renglones de doscientos cincuenta son
 // doscientos renglones que nadie tiene que copiar a mano.
 
-import { num } from "./leerPresupuesto.js";
+import { num, numeroDeCelda } from "../lectura/celdas.js";
+// Las reglas para leer una celda son las mismas acá que en el presupuesto: es
+// el mismo papel con otro encabezado. Se re-exporta porque la pantalla y las
+// pruebas la piden desde este archivo.
+export { numeroDeCelda };
 
 export const FORMATO = `Contestá en LÍNEAS, sin JSON, sin markdown y sin ninguna
 explicación. Una línea por cada renglón de la proforma, con los campos separados
@@ -263,25 +267,6 @@ export function columnasDeHoja(filas = []) {
       col_unidad: cU < 0 ? null : cU, col_total: cT, col_unitario: cP < 0 || cP === cT ? null : cP };
   }
   return null;
-}
-
-/**
- * UNA CELDA CON LETRAS NO ES UN NÚMERO.
- *
- * Las proformas escriben el total en letras al pie —"CATORCE MIL NOVECIENTOS
- * VEINTE Y SIETE DÓLARES CON 50/100"— y el lector de números, que limpia todo
- * lo que no sea dígito, sacaba de ahí un 50100. Esa fila entró dos veces como
- * renglón de la cotización, con cantidad 50.100 y monto $50.100, y el total de
- * la comparación pasó a decir cien mil dólares que no existen en ningún papel.
- *
- * Un importe puede traer el símbolo de la moneda y nada más. Si después de
- * sacarle eso queda una letra, esa celda es texto.
- */
-export function numeroDeCelda(v) {
-  if (typeof v === "number") return v;
-  const t = String(v ?? "").replace(/\b(usd|us\$|dólares|dolares|dls)\b/gi, "").replace(/[$\s]/g, "");
-  if (!t || /[a-zñáéíóúü]/i.test(t)) return 0;
-  return num(t);
 }
 
 export function renglonesDeHoja(filas = [], mapa = {}) {
