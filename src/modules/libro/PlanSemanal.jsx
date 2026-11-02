@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, X, Check, AlertTriangle, CalendarDays, Send, Printer, Paperclip, FileText, Image as Imagen, Lock, Unlock } from "lucide-react";
+import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
@@ -38,12 +39,17 @@ const CAMPOS = [
 ];
 
 export default function PlanSemanal({ lead, currentUser, puedeEscribir = true }) {
+  // El corte de la semana lo decide la obra, no el calendario ni el día en que
+  // se firmó el contrato.
+  const [corte, setCorte] = useState({ arranca: 0, dias: 8 });
   const hoy = new Date().toISOString().slice(0, 10);
-  // El período arranca en lo que propone la obra, no en el lunes del
-  // calendario: si la obra empezó un miércoles, su semana es de miércoles a
-  // martes. Esto es solo el primer dibujo —sin saber todavía el arranque ni el
-  // último plan— y el efecto de abajo lo corrige con lo que diga la base.
-  const inicial = proponerPeriodo({ hoy });
+  // LA SEMANA DE OBRA ARRANCA EL DOMINGO, y la obra puede decir otra cosa.
+  //
+  // Antes el corte se heredaba del día en que arrancó la obra —si empezó un
+  // miércoles, el plan salía de miércoles a martes— y nadie lo había elegido.
+  // Esto es solo el primer dibujo; el efecto de abajo lo corrige con el corte
+  // que tenga guardada la obra.
+  const inicial = proponerPeriodo({ hoy, arranca: 0, dias: 8 });
   const [desde, setDesde] = useState(inicial.desde);
   const [hasta, setHasta] = useState(inicial.hasta);
   const [corteListo, setCorteListo] = useState(false);
@@ -90,8 +96,16 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
       ]);
       if (!vivo) return;
       const ultimo = (hist.semanas || [])[0] || null;
+      // Qué semana usa esta obra. Si todavía no lo dice, domingo a domingo.
+      const { data: o } = await supabase.from("obras")
+        .select("semana_arranca,semana_dias").eq("lead_id", lead.id).maybeSingle();
+      const c = { arranca: o?.semana_arranca ?? 0, dias: o?.semana_dias ?? 8 };
+      setCorte(c);
       const p = proponerPeriodo({
         hoy, inicioObra: inicio,
+        // El corte de la obra manda sobre el del último plan escrito: es el
+        // único lugar donde alguien lo decidió a propósito.
+        arranca: c.arranca, dias: c.dias,
         ultimoDesde: ultimo?.desde || null, ultimoHasta: ultimo?.hasta || null,
       });
       setDesde(p.desde); setHasta(p.hasta); setCorteListo(true);
@@ -328,6 +342,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
         const d = diaDe(f);
         const tareas = itemsDe(f, "tarea");
         const materiales = itemsDe(f, "material");
+        const externos = itemsDe(f, "externo");
         const esHoy = f === hoy;
         return (
           <div key={f} style={{ background: colors.surface, border: `1px solid ${esHoy ? colors.brand : colors.border}`,
@@ -454,6 +469,57 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
               </div>
             )}
 
+            {/* DECISIONES Y COMPROMISOS DE AFUERA.
+                Lo que la obra necesita de alguien que no es la obra: que el
+                cliente defina el color del porcelanato, que el fiscalizador
+                apruebe el ensayo, que el proveedor confirme la fecha del
+                vidrio. No es una tarea de la cuadrilla —no se resuelve
+                trabajando— pero frena igual, y cuando se frena lo que hace
+                falta es poder decir en qué día se pidió y a quién.
+                Puestos acá, al lado de las tareas de ese día, se reclaman el
+                lunes y no el día que ya pararon la obra. */}
+            {(externos.length > 0 || puedeArmar) && (
+              <div style={{ marginBottom: 9 }}>
+                <label style={lbl}>DECISIONES Y COMPROMISOS DE AFUERA</label>
+                <div style={{ display: "grid", gap: 3, marginBottom: 4 }}>
+                  {externos.map(m => (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12 }}>
+                      <button disabled={!puedeEscribir || ocupado}
+                        onClick={async () => {
+                          setOcupado(true);
+                          const r = await marcarHecha(m, !m.hecha, currentUser, { leadId: lead.id, fecha: f });
+                          setOcupado(false);
+                          if (r.error) setError(r.error); else await cargar();
+                        }}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                          color: m.hecha ? colors.success : colors.warning, display: "flex" }}>
+                        {m.hecha ? <Check size={13} /> : <span style={{ fontSize: 12, fontWeight: 700 }}>○</span>}
+                      </button>
+                      <span style={{ flex: 1, color: colors.ink, textDecoration: m.hecha ? "line-through" : "none",
+                        opacity: m.hecha ? 0.65 : 1 }}>{m.texto}</span>
+                      {puedeArmar && (
+                        <button onClick={async () => { const e = await borrarItem(m.id); if (e) setError(e); else await cargar(); }}
+                          style={{ background: "none", border: "none", color: colors.border, cursor: "pointer", display: "flex" }}>
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {puedeArmar && (
+                  <div style={{ display: "flex", gap: 5 }}>
+                    <input value={nuevo[`${f}·externo`] || ""}
+                      placeholder="qué hace falta de afuera, y de quién: «el cliente define el color»"
+                      onChange={e => setNuevo(n => ({ ...n, [`${f}·externo`]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === "Enter") sumar(f, "externo", nuevo[`${f}·externo`]); }}
+                      style={{ ...inputStyle, flex: 1, padding: "5px 9px", fontSize: 12 }} />
+                    <Button variant="outline" size="sm" disabled={ocupado}
+                      onClick={() => sumar(f, "externo", nuevo[`${f}·externo`])}><Plus size={12} /></Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Los campos que acompañan al día. Todos opcionales: un día normal
                 no tiene permisos especiales ni horario distinto, y obligar a
                 llenarlos haría que se llene cualquier cosa. */}
@@ -523,7 +589,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                 </div>
               </div>
               <Button variant="primary" size="sm" disabled={ocupado || !fechas.length} onClick={async () => {
-                const sinNada = !items.filter(i => (i.tipo || "tarea") !== "material").length;
+                const sinNada = !items.filter(i => !["material", "externo"].includes(i.tipo || "tarea")).length;
                 if (sinNada && !window.confirm(
                   "El plan no tiene ninguna actividad. ¿Cerrarlo igual?")) return;
                 setOcupado(true); setError("");
@@ -561,7 +627,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                   const ant = correrPeriodo(desde, hasta, -1);
                   const previa = await cargarPlan(lead.id, ant.desde, ant.hasta);
                   const quedaron = previa.items
-                    .filter(i => (i.tipo || "tarea") !== "material" && !i.hecha);
+                    .filter(i => !["material", "externo"].includes(i.tipo || "tarea") && !i.hecha);
                   // Los enlaces del depósito duran una hora y los de la
                   // pantalla pueden llevar rato abiertos: se piden de nuevo,
                   // porque un plano que no carga deja el PDF sin la hoja.

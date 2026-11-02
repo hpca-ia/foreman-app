@@ -40,65 +40,13 @@ export function diasEntre(desde, hasta, cal = null) {
   return out;
 }
 
-const masDias = (f, n) => {
-  const d = new Date(`${String(f).slice(0, 10)}T12:00:00`);
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-};
-const cuantosDias = (a, b) =>
-  Math.round((new Date(`${String(b).slice(0, 10)}T12:00:00`) - new Date(`${String(a).slice(0, 10)}T12:00:00`)) / 86400000) + 1;
+// El calendario de la semana vive aparte: es lo único de este archivo que se
+// puede probar sin un navegador.
+import { masDias, cuantosDias, lunesDeLaSemana } from "./semanaDeObra.js";
 
-/**
- * Qué período proponer al abrir la pantalla.
- *
- * ¿Y SI LA OBRA EMPIEZA UN MIÉRCOLES? Entonces la semana de esa obra es de
- * miércoles a martes, y lo va a ser hasta que termine. El corte no es una
- * propiedad del calendario, es de la obra: se hereda del arranque y después
- * del último plan que se escribió, y la pantalla abre donde corresponde sin
- * que nadie toque las dos fechas.
- *
- * Tres fuentes, en orden:
- *  1. El último plan guardado — su día de arranque y su largo son EL corte de
- *     esta obra, decidido por quien la lleva. Manda sobre cualquier regla.
- *  2. El arranque de la obra (`crono_inicio`) — si empieza el miércoles 8, el
- *     primer plan va del 8 al martes 14.
- *  3. Sin ninguno de los dos, lunes a sábado, que es lo más común.
- *
- * Y después CORRE HASTA HOY manteniendo el corte, de a un paso: el que abre un
- * lunes de marzo no quiere que le ofrezcan la semana de enero porque fue la
- * última que escribió, quiere la de ahora cortada igual que las de enero.
- */
-export function proponerPeriodo({ hoy, inicioObra = null, ultimoDesde = null, ultimoHasta = null } = {}) {
-  const dia = String(hoy || new Date().toISOString()).slice(0, 10);
-  let ancla, largo;
-  if (ultimoDesde && ultimoHasta && cuantosDias(ultimoDesde, ultimoHasta) > 0) {
-    ancla = String(ultimoDesde).slice(0, 10);
-    largo = cuantosDias(ultimoDesde, ultimoHasta);
-  } else if (inicioObra) {
-    ancla = String(inicioObra).slice(0, 10);
-    largo = 7;                         // miércoles a martes
-  } else {
-    ancla = lunesDeLaSemana(dia);
-    largo = 6;                         // lunes a sábado
-  }
-  // El paso es la semana salvo que el período sea más largo. "De lunes a
-  // lunes" son 8 días y se pisan en un día a propósito: el paso sigue siendo
-  // 7 y el lunes de cierre es el de apertura del siguiente.
-  const paso = largo <= 8 ? 7 : largo;
-  // La obra no empezó todavía: el primer plan es el del arranque.
-  if (dia <= ancla) return { desde: ancla, hasta: masDias(ancla, largo - 1) };
-  const saltos = Math.floor(cuantosDias(ancla, dia) / paso - 1 / paso);
-  const desde = masDias(ancla, Math.max(0, saltos) * paso);
-  return { desde, hasta: masDias(desde, largo - 1) };
-}
+export { proponerPeriodo, correrPeriodo, arranqueDeLaSemana, lunesDeLaSemana } from "./semanaDeObra.js";
 
-/** El período anterior y el siguiente, conservando el corte y el largo. */
-export function correrPeriodo(desde, hasta, haciaDonde) {
-  const largo = Math.max(1, cuantosDias(desde, hasta));
-  const paso = largo <= 8 ? 7 : largo;
-  const d = masDias(desde, paso * (haciaDonde < 0 ? -1 : 1));
-  return { desde: d, hasta: masDias(d, largo - 1) };
-}
+
 
 export async function cargarPlan(leadId, desde, hasta) {
   if (!leadId) return { dias: [], items: [], periodo: null, sinTablas: false };
@@ -366,12 +314,7 @@ export function loQueTocaEstaSemana(actividades = [], desde, hasta) {
  * diciembre, y entonces un plan de fin de año aparecería partido en dos
  * semanas que en la obra fueron una sola.
  */
-export function lunesDeLaSemana(fecha) {
-  const d = new Date(`${String(fecha).slice(0, 10)}T12:00:00`);
-  if (isNaN(d)) return String(fecha).slice(0, 10);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
-}
+
 
 /**
  * Las semanas ya planificadas de esta obra, de la más nueva a la más vieja.
