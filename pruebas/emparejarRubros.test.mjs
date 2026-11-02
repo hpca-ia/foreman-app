@@ -69,3 +69,18 @@ test("el pedido numera los renglones y lista sus candidatos con el id real", () 
   assert.match(p.texto, /91 = Tablero Trifasico de 20 espacios -PRINCIPAL/);
   assert.match(p.texto, /95 = Alimentador/);
 });
+
+test("el rubro que empieza igual va primero, aunque comparta menos palabras", () => {
+  // Sumar palabras compartidas premia al rubro mas largo: "Punto PARA
+  // INTERRUPTOR de iluminacion con tuberia y accesorios metalicos EMT" comparte
+  // mas palabras con cualquier renglon que "Punto de iluminacion con tuberia y
+  // accesorios metalicos", que es el que corresponde.
+  const rs = [
+    { id: 101, numero: 101, descripcion: "Punto para interruptor simple de iluminacion con tuberia y accesorios metalicos EMT con cable 2x12", unidad: "U", cantidad: 2 },
+    { id: 106, numero: 106, descripcion: "Punto de iluminacion con tuberia y accesorios metalicos", unidad: "U", cantidad: 65 },
+  ];
+  const c = candidatosPara(
+    { descripcion: "Punto de iluminacion con tuberia y accesorios metalicos EMT con cable 2x12+1x14 AWG", unidad: "U" },
+    rs, 2);
+  assert.equal(c[0].id, 106);
+});

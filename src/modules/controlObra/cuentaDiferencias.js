@@ -102,6 +102,33 @@ export function comoVa(lineas = []) {
 }
 
 /**
+ * QUÉ VA A SALIR DE ESTE EMPAREJAMIENTO, DICHO ANTES DE ACEPTARLO.
+ *
+ * Emparejar no es solo decir "este renglón es ese rubro": es decidir si la
+ * orden de cambio va a ser de más o de menos. El contrato tiene 65 puntos de
+ * iluminación y la proforma trae 111: aceptar ese emparejamiento son 46 que se
+ * le cobran al cliente. Si trae 40, son 25 que se le devuelven.
+ *
+ * Eso tiene que verse en el momento de aceptar, no tres pantallas después,
+ * porque es lo que uno está decidiendo de verdad.
+ */
+export function queSaleDe(linea, rubro, unitarioSinIva) {
+  const re = recalcularContra(linea, rubro, unitarioSinIva);
+  if (!rubro) return "entra como trabajo nuevo";
+  if (!re) return "calza: misma cantidad y mismo precio, no es una diferencia";
+  const n = v => Number(v) || 0;
+  const u = rubro.unidad || "";
+  if (re.hallazgo === "mas_cantidad") {
+    return `${n(re.cantidad)} ${u} de MÁS: van a la orden de cambio, al precio del contrato`;
+  }
+  if (re.hallazgo === "menos_cantidad") {
+    return `${n(re.cantidad)} ${u} de MENOS: van a la orden como reducción, al precio del contrato`;
+  }
+  if (re.hallazgo === "bajo_precio") return `misma cantidad y más barato: $${re.monto} a favor`;
+  return `misma cantidad y más caro: $${re.monto} contra nuestro margen`;
+}
+
+/**
  * QUÉ ES ESTE RENGLÓN AHORA QUE SE LE SEÑALÓ OTRO RUBRO.
  *
  * Un renglón sin rubro entra como trabajo nuevo, y está bien: sin un rubro que

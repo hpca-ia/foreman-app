@@ -12,10 +12,11 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
-  recalcularContra, ponerPrecio, marcarEnOrden,
+  recalcularContra, ponerPrecio, marcarEnOrden, queSaleDe,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
+import { candidatosPara } from "./emparejarRubros.js";
 import { baseSinIva } from "./contratoDeLaObra";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
@@ -547,7 +548,22 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
 
   /** El grupo entero para el mismo lado: casi siempre lo es, y lo que se revisa son las excepciones. */
   async function marcarTodas(cuales, decision) {
+    // COBRAR EN BLOQUE LO QUE NO CALZÓ ES COBRAR DOS VECES.
+    //
+    // En "no está en el contrato" caen los renglones que no encontraron rubro,
+    // y algunos no lo encontraron porque nadie los buscó. Marcarlos todos como
+    // "se cobra" le factura al cliente trabajo que ya había pagado, y eso no se
+    // descubre hasta que lo descubre él.
+    const conCandidato = decision === "cobrar"
+      ? cuales.filter(l => !l.obra_rubro_id && candidatosPara(
+        { descripcion: l.texto_papel || l.descripcion, unidad: l.unidad_papel || l.unidad }, vivos, 1).length)
+      : [];
     if (!window.confirm(`¿Marcar ${cuales.length} diferencias como «${DECISIONES[decision]?.label}»?\n\n`
+      + (conCandidato.length
+        ? `OJO: ${conCandidato.length} de esas no tienen rubro y hay rubros parecidos en el presupuesto. `
+          + "Si alguna ya estaba contratada, se la estarías cobrando dos veces. "
+          + "Abajo de cada una están los candidatos a un clic.\n\n"
+        : "")
       + "Cada una se puede cambiar después, una por una.")) return;
     setOcupado(true);
     for (const l of cuales) {
@@ -724,6 +740,15 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                         <span style={{ color: colors.muted }}>
                           {" "}· {fmt(r.cantidad)} {r.unidad || ""} × ${fmt(unitario(r))}
                         </span>
+                        {/* LO QUE VA A SALIR DE ACEPTARLO. Emparejar no es solo
+                            decir "es ese rubro": es decidir si la orden va a ser
+                            de más o de menos, y eso tiene que verse antes de
+                            aceptar, no tres pantallas después. */}
+                        <div style={{ fontWeight: 600, color: colors.ink, marginTop: 1 }}>
+                          {fmt(r.cantidad)} contratadas · {fmt(x.cantidad)} en el papel →{" "}
+                          {queSaleDe({ cantidad_papel: x.cantidad, monto_papel: x.monto }, r,
+                            Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0)}
+                        </div>
                         {raro && <div style={{ fontWeight: 700 }}>
                           {unidadesDistintas(x, r)
                             ? `El papel lo cobra por ${x.unidad} y el rubro está contratado por ${r.unidad}.`
@@ -1142,6 +1167,37 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             )}
                           </div>
                         )}
+                        {/* LOS CANDIDATOS, A UN CLIC.
+                            Un renglón sin rubro está en "no está en el
+                            contrato" justamente porque no calzó, y marcar el
+                            grupo entero como "se cobra" cobraría dos veces lo
+                            que sí estaba contratado y nadie emparejó. Buscar
+                            cada uno a mano en una lista de ciento setenta es lo
+                            que hace que nadie lo haga: acá están los tres que
+                            más se le parecen, con su cantidad y su precio, y
+                            aceptarlos es apretar uno. */}
+                        {!l.obra_rubro_id && !l.orden_cambio_id && (() => {
+                          const cands = candidatosPara(
+                            { descripcion: l.texto_papel || l.descripcion, unidad: l.unidad_papel || l.unidad },
+                            vivos, 3);
+                          if (!cands.length) return null;
+                          return (
+                            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 4, lineHeight: 1.7 }}>
+                              ¿será alguno de estos?{" "}
+                              {cands.map(r => (
+                                <button key={r.id} onClick={() => usarRubro(l, r)} disabled={ocupado}
+                                  title={`${r.descripcion} · ${fmt(r.cantidad)} ${r.unidad || ""} × $${fmt(unitario(r))}`}
+                                  style={{ border: `1px solid ${colors.border}`, background: "#fff",
+                                    color: colors.inkSoft, borderRadius: 20, padding: "2px 9px", fontSize: 10.5,
+                                    cursor: "pointer", fontFamily: colors.font, marginRight: 4 }}>
+                                  {r.numero ?? ""} {String(r.descripcion || "").slice(0, 30)}
+                                  {" · "}{fmt(r.cantidad)} {r.unidad || ""} contratadas vs{" "}
+                                  {fmt(l.cantidad_papel ?? l.cantidad)} del papel
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         {/* EL EMPAREJAMIENTO SE CORRIGE A MANO. NOVA acierta
                             casi siempre, pero "pintura de fibrocemento" calza
                             con tres rubros parecidos, y cuando elige el que no

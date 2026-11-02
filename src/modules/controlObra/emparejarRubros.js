@@ -140,7 +140,15 @@ export function candidatosPara(linea, rubros = [], cuantos = 5) {
     .filter(r => unidadCompatible(linea?.unidad, r.unidad))
     .map(r => {
       const texto = pelado(r.descripcion);
-      const puntos = palabras.reduce((t, w) => t + (texto.includes(w) ? w.length : 0), 0);
+      let puntos = palabras.reduce((t, w) => t + (texto.includes(w) ? w.length : 0), 0);
+      // EL QUE EMPIEZA IGUAL VA PRIMERO. Sumar palabras compartidas premia al
+      // rubro más largo: "Punto PARA INTERRUPTOR de iluminación con tubería y
+      // accesorios metálicos EMT…" comparte más palabras con cualquier renglón
+      // que "Punto de iluminación con tubería y accesorios metálicos", que es
+      // el que de verdad corresponde. Que uno sea el principio del otro es
+      // mucho mejor señal que compartir diez palabras sueltas.
+      const corto = pelado(linea?.descripcion);
+      if (texto && corto && (corto.startsWith(texto) || texto.startsWith(corto))) puntos += 100;
       return { r, puntos };
     })
     .filter(x => x.puntos > 0)

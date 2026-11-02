@@ -334,3 +334,15 @@ test("lo que se devuelve no se suma con lo que se cobra", async () => {
   // Las dos entran en la orden: una suma y la otra resta.
   assert.equal(v.enLaOrden, 2);
 });
+
+test("al emparejar se dice si la orden va a ser de mas o de menos", async () => {
+  // Emparejar no es solo decir "este renglon es ese rubro": es decidir si la
+  // orden de cambio va a ser de mas o de menos, y eso se decide en ese momento.
+  const { queSaleDe } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const rubro = { cantidad: 65, unidad: "U", total_base: 2149.81 };
+  const pu = 2149.81 / 65;
+  assert.match(queSaleDe({ cantidad_papel: 111, monto_papel: 3671.21 }, rubro, pu), /46 U de MÁS/);
+  assert.match(queSaleDe({ cantidad_papel: 40, monto_papel: 1322.96 }, rubro, pu), /25 U de MENOS/);
+  assert.match(queSaleDe({ cantidad_papel: 65, monto_papel: 2000 }, rubro, pu), /a favor/);
+  assert.equal(queSaleDe({ cantidad_papel: 1 }, null, 0), "entra como trabajo nuevo");
+});
