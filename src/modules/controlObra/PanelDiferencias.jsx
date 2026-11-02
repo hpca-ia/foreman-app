@@ -752,6 +752,24 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             cuando el contrato no lo cubre.
           </div>
 
+          {/* ¿SE LEYÓ BIEN? Es lo primero que hay que saber, antes de
+              emparejar nada: un renglón que falta no se ve faltar, se ve como
+              un dato, y todo lo que sigue se decide sobre una lista incompleta. */}
+          {revisando.revision && (
+            <div style={{ ...caja, padding: "8px 11px", fontSize: 11.5, lineHeight: 1.5,
+              borderLeft: `3px solid ${revisando.revision.confiable ? colors.success : colors.danger}`,
+              color: revisando.revision.confiable ? colors.inkSoft : colors.danger }}>
+              <strong>{revisando.revision.confiable ? "La lectura cuadra." : "Ojo con esta lectura."}</strong>{" "}
+              {revisando.revision.conclusion}
+              {revisando.revision.malos.map((m, i) => (
+                <div key={i} style={{ fontSize: 10.5 }}>
+                  · {String(m.descripcion || "").slice(0, 60)}: cantidad × unitario da ${fmt(m.dice)} y el
+                  papel dice ${fmt(m.pero)}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
             {!verPresupuesto && (
               <Button variant="outline" size="sm" onClick={() => setVerPresupuesto(true)}>

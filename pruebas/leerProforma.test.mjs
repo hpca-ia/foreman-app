@@ -192,3 +192,57 @@ test("sin encabezados reconocibles no inventa un mapa: se le pregunta al modelo"
   const { columnasDeHoja } = await import("../src/modules/controlObra/leerProforma.js");
   assert.equal(columnasDeHoja([["a", "b"], [1, 2]]), null);
 });
+
+test("la aritmetica del papel dice si se leyo bien", async () => {
+  const { revisarLectura } = await import("../src/modules/controlObra/leerProforma.js");
+  const items = [
+    { descripcion: "Punto de iluminacion", cantidad: 65, unitario: 33.07, monto: 2149.55 },
+    { descripcion: "Breaker", cantidad: 20, unitario: 10.45, monto: 209 },
+  ];
+  const r = revisarLectura(items, { subtotal: 2358.55 });
+  assert.equal(r.cuadra, true);
+  assert.equal(r.confiable, true);
+  assert.match(r.conclusion, /suman exactamente lo que dice el papel/);
+});
+
+test("si falta un renglon, la suma lo denuncia con el monto", async () => {
+  // Es la comprobacion que descubrio que una planilla de 42 renglones se habia
+  // leido con 28: un renglon que falta no se ve faltar, se ve como un dato.
+  const { revisarLectura } = await import("../src/modules/controlObra/leerProforma.js");
+  const r = revisarLectura([{ cantidad: 20, unitario: 10.45, monto: 209 }], { subtotal: 2358.55 });
+  assert.equal(r.cuadra, false);
+  assert.match(r.conclusion, /FALTAN \$2149\.55/);
+  assert.equal(r.confiable, false);
+});
+
+test("un renglon que no multiplica se leyo mal, aunque el total cuadre", async () => {
+  // Una coma corrida en el unitario deja un numero que sigue pareciendo un
+  // numero, y no se ve mirando la lista.
+  const { revisarLectura } = await import("../src/modules/controlObra/leerProforma.js");
+  const r = revisarLectura([{ descripcion: "Cable", cantidad: 100, unitario: 40, monto: 400 }], null);
+  assert.equal(r.malos.length, 1);
+  assert.equal(r.malos[0].dice, 4000);
+  assert.equal(r.malos[0].pero, 400);
+  assert.equal(r.confiable, false);
+  assert.match(r.conclusion, /no multiplica/);
+});
+
+test("el descuento del pie no se cuenta como un renglon que falta", async () => {
+  const { revisarLectura } = await import("../src/modules/controlObra/leerProforma.js");
+  const r = revisarLectura([{ monto: 1000 }], { subtotal: 900 }, 100);
+  assert.equal(r.cuadra, true);
+});
+
+test("lee los renglones con unitario y tambien los de cinco campos", async () => {
+  // Negarse a leer una proforma por una columna de mas o de menos es tirar la
+  // lectura entera por un dato que se puede deducir dividiendo.
+  const { renglonesDeTexto } = await import("../src/modules/controlObra/leerProforma.js");
+  const con = renglonesDeTexto("PROVEEDOR | SOLEK\nPunto de iluminacion | 65 | U | 33.07 | 2149.55 | 106");
+  assert.equal(con.items[0].unitario, 33.07);
+  assert.equal(con.items[0].monto, 2149.55);
+  assert.equal(con.items[0].rubro_id, 106);
+  const sin = renglonesDeTexto("PROVEEDOR | SOLEK\nPunto de iluminacion | 65 | U | 2149.55 | 106");
+  assert.equal(sin.items[0].unitario, null);
+  assert.equal(sin.items[0].monto, 2149.55);
+  assert.equal(sin.items[0].rubro_id, 106);
+});

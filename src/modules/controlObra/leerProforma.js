@@ -18,12 +18,17 @@ export const FORMATO = `Contestá en LÍNEAS, sin JSON, sin markdown y sin ningu
 explicación. Una línea por cada renglón de la proforma, con los campos separados
 por barras, exactamente así:
 
-descripción | cantidad | unidad | monto | rubro_id
+descripción | cantidad | unidad | precio unitario | monto | rubro_id
 
 La primera línea es el proveedor:  PROVEEDOR | nombre del proveedor
 
 Sin encabezados, sin totales, sin subtotales y sin líneas en blanco. La
 descripción va corta y sin barras adentro.
+
+EL PRECIO UNITARIO ES EL QUE DICE EL PAPEL, sin calcularlo. Si el renglón no lo
+trae, poné un guion: no lo deduzcas dividiendo. Sirve para comprobar la lectura
+—cantidad por unitario tiene que dar el monto— y un unitario inventado tapa
+justo el error que esa cuenta encuentra.
 
 LA DESCRIPCIÓN SE COPIA DEL PAPEL, PALABRA POR PALABRA. Es lo que escribió el
 proveedor. Nunca uses el texto de la lista de rubros del presupuesto para
@@ -102,12 +107,31 @@ export function renglonesDeTexto(txt = "") {
       };
       continue;
     }
-    // Una descripción con una barra adentro parte la línea de más. Los cuatro
-    // últimos campos son los números; todo lo de antes es la descripción.
-    if (campos.length > 5) campos = [campos.slice(0, campos.length - 4).join(" "), ...campos.slice(-4)];
-    if (campos.length === 4) campos = [...campos, ""]; // vino sin rubro
-    if (campos.length !== 5) continue;                 // una línea cortada a la mitad
-    const [descripcion, cantidad, unidad, monto, rubro] = campos;
+    // Una descripción con una barra adentro parte la línea de más. Los últimos
+    // campos son los números; todo lo de antes es la descripción.
+    //
+    // Y la línea puede venir con unitario o sin él: el formato lo pide, pero un
+    // renglón viejo o una respuesta corta traen cinco campos y se leen igual.
+    // Negarse a leer una proforma por una columna de más es tirar la lectura
+    // entera por un dato que se puede deducir dividiendo.
+    // CUÁL DE LAS DOS FORMAS ES, LO DICEN LOS NÚMEROS.
+    //
+    // Seis campos pueden ser un renglón con unitario —descripción, cantidad,
+    // unidad, unitario, monto, rubro— o una descripción que lleva una barra
+    // adentro: "Tubo PVC 110mm | desagüe | 12 | u | 48,00 | 7". Se mira el que
+    // tendría que ser la cantidad: si no es un número, la barra estaba en el
+    // texto y los campos son cinco.
+    const esNumero = t => /^[\s$]*-?[\d.,]+\s*$/.test(String(t || ""));
+    const conUnitario = campos.length >= 6
+      && esNumero(campos[campos.length - 5]) && esNumero(campos[campos.length - 3]);
+    const cuantos = conUnitario ? 5 : 4;
+    if (campos.length > cuantos + 1) {
+      campos = [campos.slice(0, campos.length - cuantos).join(" "), ...campos.slice(-cuantos)];
+    }
+    if (campos.length === cuantos) campos = [...campos, ""]; // vino sin rubro
+    if (campos.length !== cuantos + 1) continue;       // una línea cortada a la mitad
+    const [descripcion, cantidad, unidad, ...resto] = campos;
+    const [unitario, monto, rubro] = conUnitario ? resto : [null, ...resto];
     if (!descripcion) continue;
     if (/^descripci/i.test(descripcion)) continue;     // repitió el encabezado
     const id = String(rubro || "").trim();
@@ -115,6 +139,9 @@ export function renglonesDeTexto(txt = "") {
       descripcion: descripcion.slice(0, 90),
       cantidad: num(cantidad),
       unidad: String(unidad || "").slice(0, 10),
+      // El unitario del papel, tal cual: sirve para comprobar la lectura, y
+      // deducirlo dividiendo taparía justo el error que esa cuenta encuentra.
+      unitario: unitario == null || /^[-–—\s]*$/.test(String(unitario)) ? null : num(unitario),
       monto: Math.round(num(monto) * 100) / 100,
       rubro_id: /^\d+$/.test(id) ? Number(id) : null,
     });
@@ -228,14 +255,19 @@ export function columnasDeHoja(filas = []) {
     if (cD < 0 || cT < 0) continue;
     const cC = busca(f, "cantidad", "cant");
     const cU = busca(f, "unidad", "unid", "u/m", "um");
+    // EL PRECIO UNITARIO, cuando el papel lo trae. No hace falta para leer
+    // —el unitario se deduce dividiendo— pero sirve para comprobar: si
+    // cantidad por unitario no da el total, ese renglón se leyó mal.
+    const cP = busca(f, "preciounitario", "punitario", "punit", "preciou", "vunitario", "unitario");
     return { fila_encabezado: i, col_descripcion: cD, col_cantidad: cC < 0 ? null : cC,
-      col_unidad: cU < 0 ? null : cU, col_total: cT };
+      col_unidad: cU < 0 ? null : cU, col_total: cT, col_unitario: cP < 0 || cP === cT ? null : cP };
   }
   return null;
 }
 
 export function renglonesDeHoja(filas = [], mapa = {}) {
   const cD = mapa.col_descripcion, cC = mapa.col_cantidad, cU = mapa.col_unidad, cT = mapa.col_total;
+  const cP = mapa.col_unitario;
   if (cD == null || cT == null) return [];
   const desde = Number(mapa.fila_encabezado ?? 0) + 1;
   const items = [];
@@ -254,6 +286,8 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
       cantidad: num(cC == null ? 0 : f[cC]),
       unidad: String(cU == null ? "" : (f[cU] ?? "")).trim().slice(0, 10),
       monto,
+      // El unitario del papel, para comprobar la multiplicación.
+      unitario: cP == null ? null : (num(f[cP]) || null),
       rubro_id: null,
     });
   }
@@ -619,10 +653,73 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     }
   }
 
-  return { proveedor, items, cortado, iva, totales, descuento, fecha,
+  // LA ARITMÉTICA DEL PAPEL, SIEMPRE Y PARA TODOS LOS FORMATOS. Venga como
+  // venga la proforma, los cuatro datos de cada renglón se comprueban solos.
+  const revision = revisarLectura(items, totales, descuento);
+
+  return { proveedor, items, cortado, iva, totales, descuento, fecha, revision,
     // Cuántos salieron de comparar textos —esos no pueden estar mal— y cuántos
     // los eligió el modelo, que son los que hay que mirar.
     ciertos, propuestos: items.filter(x => x.rubro_id && !x.porTexto).length,
     cuadre: cuadrar(items, totales, descuento) };
 }
 
+
+
+/**
+ * ¿SE LEYÓ BIEN? LA ARITMÉTICA DEL PAPEL LO DICE.
+ *
+ * Toda proforma, venga como venga —PDF, foto, Excel, de cualquier proveedor—
+ * tiene los mismos cuatro datos por renglón: qué, cuántos, a cuánto y cuánto
+ * suma. Y esos cuatro datos se comprueban solos:
+ *
+ *   · CANTIDAD × UNITARIO = TOTAL, renglón por renglón. Si no da, ese renglón
+ *     se leyó mal —un dígito de más en el unitario, una coma corrida— y es el
+ *     error que no se ve, porque el número sigue pareciendo un número.
+ *   · LA SUMA DE LOS RENGLONES = EL SUBTOTAL DEL PIE. Si no da, falta un
+ *     renglón o sobra uno. Es la comprobación que descubrió que una planilla
+ *     de 42 renglones se había leído con 28.
+ *
+ * Nada de esto necesita saber de construcción ni de este proveedor: es
+ * aritmética, se corre siempre y no se equivoca. Lo que no se puede comprobar
+ * se dice, en vez de dar por buena una lectura que nadie miró.
+ */
+export function revisarLectura(items = [], totales = null, descuento = 0) {
+  const c2 = v => Math.round((Number(v) || 0) * 100) / 100;
+  const suman = c2(items.reduce((t, x) => t + (Number(x.monto) || 0), 0));
+
+  // Los renglones donde el papel da los tres números y no multiplican.
+  const malos = items.filter(x => {
+    const cant = Number(x.cantidad) || 0;
+    const uni = Number(x.unitario) || 0;
+    const tot = Number(x.monto) || 0;
+    if (!cant || !uni || !tot) return false;
+    return Math.abs(cant * uni - tot) > Math.max(0.02, tot * 0.005);
+  }).map(x => ({
+    descripcion: x.descripcion,
+    dice: c2(Number(x.cantidad) * Number(x.unitario)),
+    pero: c2(x.monto),
+  }));
+
+  const sub = totales?.subtotal == null ? null : c2(totales.subtotal);
+  const esperado = sub == null ? null : c2(sub + (Number(descuento) || 0));
+  const falta = esperado == null ? null : c2(esperado - suman);
+  const tolerancia = Math.max(0.05, items.length * 0.01);
+  const cuadra = falta == null ? null : Math.abs(falta) <= tolerancia;
+
+  const partes = [`${items.length} renglones · $${suman.toFixed(2)}`];
+  if (cuadra === true) partes.push("suman exactamente lo que dice el papel");
+  else if (cuadra === false) {
+    partes.push(falta > 0
+      ? `FALTAN $${falta.toFixed(2)}: el papel suma $${esperado.toFixed(2)} y lo leído da menos, así que `
+        + "algún renglón no entró"
+      : `SOBRAN $${Math.abs(falta).toFixed(2)}: puede haber entrado un subtotal o un renglón repetido`);
+  } else partes.push("el papel no trae subtotal, así que no se puede comprobar contra nada");
+  if (malos.length) {
+    partes.push(`${malos.length} ${malos.length === 1 ? "renglón no multiplica" : "renglones no multiplican"}: `
+      + "cantidad por unitario no da su total");
+  }
+
+  return { renglones: items.length, suman, subtotal: sub, esperado, falta, cuadra, malos,
+    confiable: cuadra !== false && !malos.length, conclusion: partes.join(" · ") };
+}
