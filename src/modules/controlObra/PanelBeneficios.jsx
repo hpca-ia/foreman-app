@@ -450,8 +450,8 @@ Rubros de la obra: ${lista}`;
             <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: dice[1], background: dice[2], borderRadius: 9, padding: "1px 6px" }}>{dice[0]}</span>
           </div>
           <div style={{ fontSize: 10.5, color: colors.muted }}>
-            se cobra ${fmt(f.cobrado)} · {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}
-            {" "}· gastado ${fmt(f.gastado)} en facturas · avance {f.avance}%
+            se cobra ${fmt(f.cobrado)} sin IVA · {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}
+            {" "}· gastado ${fmt(f.gastado)} en facturas, sin IVA · avance {f.avance}%
             {ingresosDe(f.id) ? ` · además ${ingresosDe(f.id)} ${ingresosDe(f.id) === 1 ? "ingreso cargado" : "ingresos cargados"} contra este rubro` : ""}
           </div>
         </div>
@@ -781,7 +781,7 @@ Rubros de la obra: ${lista}`;
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 6 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, flex: 1 }}>
-              RUBROS EN SEGUIMIENTO · {res.seguimiento.length}
+              RUBROS EN SEGUIMIENTO · {res.seguimiento.length} · SIN IVA, COMO LOS BENEFICIOS
             </div>
             {!eligiendoSeguir && (
               <button onClick={() => { setEligiendoSeguir(true); setBuscaRubro(""); }}
@@ -842,11 +842,11 @@ Rubros de la obra: ${lista}`;
                 cobra, listado bajo "rubros con costo cargado"— no se entendía
                 qué era ahorro de qué. */}
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
-              LO QUE DICE EL CONTROL, RUBRO POR RUBRO · CALCULADO SOLO
+              LO QUE DICE EL CONTROL, RUBRO POR RUBRO · SIN IVA · CALCULADO SOLO
             </div>
             <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 9 }}>
-              <strong>Se cobra</strong> es el precio del rubro al cliente, el del presupuesto vigente. <strong>Se gastó</strong> son
-              las facturas asignadas a ese rubro. La resta es lo que el rubro le deja a la obra, y adentro hay dos cosas: el margen
+              <strong>Se cobra</strong> es el precio del rubro al cliente, el del presupuesto vigente, sin IVA. <strong>Se gastó</strong> son
+              las facturas asignadas a ese rubro, llevadas a sin IVA con el porcentaje del rubro: el beneficio es líquido y el IVA no es nuestro. La resta es lo que el rubro le deja a la obra, y adentro hay dos cosas: el margen
               con el que se vendió y lo que se ganó o se perdió comprando. Para separarlas hace falta el <strong>costo</strong> del rubro.
             </div>
 

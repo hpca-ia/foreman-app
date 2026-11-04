@@ -119,16 +119,19 @@ test("lo que deja la obra: terminado aparte de lo que todavia puede gastar mas",
   assert.equal(r.aFavorEnCurso, 2000);
 });
 
-test("el costo se lleva a la base del gasto: la factura trae el IVA adentro", () => {
+test("el gasto se lleva a sin IVA, que es la base de los beneficios: la factura trae el IVA adentro", () => {
   // Lo asignado a un rubro sale de las facturas y lleva IVA; el costo del
   // presupuesto esta sin IVA. Restarlos de frente inventa un sobreprecio del
-  // 15% en un rubro que se compro exactamente a lo presupuestado.
+  // 15% en un rubro que se compro exactamente a lo presupuestado. Se divide
+  // el gasto por el porcentaje del rubro: todo queda sin IVA, como Beneficios.
   const r = eficienciaDeRubros({
     rubros: [{ id: 7, descripcion: "Luminarias", cantidad: 10, costo_unitario: 100,
       iva_pct: 15, total_base: 1495, avance_pct: 100 }],
     porRubro: { 7: { acumulado: 1150 } },
   });
-  assert.equal(r.filas[0].presupuestado, 1150);
+  assert.equal(r.filas[0].presupuestado, 1000);
+  assert.equal(r.filas[0].gastado, 1000);
+  assert.equal(r.filas[0].contratado, 1300);   // los 1.495 sin su 15%
   assert.equal(r.filas[0].dif, 0);
   assert.equal(r.sobreprecio, 0);
   // Y lo que deja sigue siendo el IVA que se le cobra al cliente de mas, que
@@ -142,7 +145,7 @@ test("los que ya gastaron más de lo que se cobra se listan aparte, con o sin co
   // $671,64. Aparecía bajo "rubros con costo cargado" y nadie entendía qué era.
   const r = eficienciaDeRubros({
     rubros: [
-      { id: 1, numero: 9101, descripcion: "Picado", total_base: 511.28, iva_pct: 15, cantidad: 95.61 },
+      { id: 1, numero: 9101, descripcion: "Picado", total_base: 511.28, iva_pct: 15, cantidad: 95.61, origen: "orden_cambio" },
       { id: 2, numero: 58, descripcion: "Mamparas", total_base: 6900, iva_pct: 15, cantidad: 1, costo_unitario: 150 },
       { id: 3, numero: 7, descripcion: "Pintura", total_base: 1000, iva_pct: 15, cantidad: 1, costo_unitario: 600, avance_pct: 100 },
     ],
@@ -150,7 +153,7 @@ test("los que ya gastaron más de lo que se cobra se listan aparte, con o sin co
   });
   assert.deepEqual(r.pasados.map(f => f.id), [1]);
   assert.equal(r.cuantosPasados, 1);
-  assert.equal(r.pasadosTotal, -160.36);
+  assert.equal(r.pasadosTotal, -72.75);   // $511,28 sin IVA contra $584,03 de facturas sin IVA
   assert.equal(r.pasados[0].sinCosto, true);
   // El de pintura compró mejor que su costo y está terminado: es ahorro, no pasado.
   assert.equal(r.filas.find(f => f.id === 3).estado, "ahorro");

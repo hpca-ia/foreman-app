@@ -1,4 +1,5 @@
-import { factorIva, conCosto, vivo } from "./eficienciaDeRubros.js";
+import { conCosto, vivo, sinIvaDelGasto } from "./eficienciaDeRubros.js";
+import { baseSinIva } from "./contratoDeLaObra.js";
 import { totales } from "./cuentaBeneficios.js";
 // EL RESULTADO DE LA OBRA, no solo los beneficios.
 //
@@ -19,6 +20,11 @@ import { totales } from "./cuentaBeneficios.js";
 // —eso es comprar mejor o peor que lo previsto— y, si no, contra lo que se
 // cobra, que mezcla el margen con la compra pero es lo único que hay.
 //
+// TODO SIN IVA, como los beneficios y como Diferencias: el beneficio es
+// líquido y el IVA no es nuestro. El control trae sus rubros con el IVA
+// adentro, así que acá se llevan a su base: lo que se cobra, y lo gastado en
+// facturas dividido por el porcentaje del rubro. El costo ya viene sin IVA.
+//
 // Sin base de datos: son las cuentas que dicen si la obra deja plata.
 
 const n = v => Number(v) || 0;
@@ -26,9 +32,9 @@ const c2 = v => Math.round(n(v) * 100) / 100;
 
 /** Un rubro del presupuesto medido contra sus facturas. */
 export function seguimientoDeRubro(r, porRubro = {}) {
-  const gastado = c2(porRubro?.[r.id]?.acumulado);
-  const cobrado = c2(r.total_base);
-  const costo = conCosto(r) ? c2(n(r.costo_unitario) * n(r.cantidad) * factorIva(r)) : null;
+  const gastado = sinIvaDelGasto(r, porRubro?.[r.id]?.acumulado);
+  const cobrado = baseSinIva(r);
+  const costo = conCosto(r) ? c2(n(r.costo_unitario) * n(r.cantidad)) : null;
   const contra = costo != null ? "costo" : "cobrado";
   const presupuestado = costo ?? cobrado;
   const resultado = c2(presupuestado - gastado);

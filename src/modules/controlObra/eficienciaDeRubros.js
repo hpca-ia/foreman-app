@@ -24,6 +24,12 @@
 // Y LO QUE NO SE SABE SE DICE. Un rubro sin costo cargado no tiene eficiencia
 // cero: tiene eficiencia desconocida, y son dos respuestas muy distintas para
 // quien está decidiendo si puede gastar más.
+//
+// TODO SIN IVA, COMO LOS BENEFICIOS. El control trabaja con el IVA adentro
+// —es lo que se le factura al cliente y lo que dicen las facturas—, pero
+// Beneficios y Diferencias se miden sin IVA: el beneficio es líquido, y el
+// IVA no es nuestro. Lo que se cobra se lleva a su base, el costo ya viene
+// sin IVA, y lo gastado en facturas se divide por el porcentaje del rubro.
 
 import { baseSinIva } from "./contratoDeLaObra.js";
 
@@ -44,6 +50,12 @@ export const vivo = r => r && !r.anulado_por_oc && !r.oculto;
 export function factorIva(r) {
   const base = baseSinIva(r);
   return base > 0 ? n(r?.total_base) / base : 1;
+}
+
+/** Lo gastado en facturas, sin el IVA del rubro: la base en la que se miden los beneficios. */
+export function sinIvaDelGasto(r, monto) {
+  const pct = n(r?.iva_pct);
+  return c2(pct > 0 ? n(monto) / (1 + pct / 100) : n(monto));
 }
 
 /** ¿Tiene costo cargado? Cero no es un costo: es no saber. */
@@ -71,7 +83,7 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
   let sinCosto = 0, sinCostoConGasto = 0;
 
   for (const r of rubros.filter(vivo)) {
-    const gastado = c2(porRubro[r.id]?.acumulado);
+    const gastado = sinIvaDelGasto(r, porRubro[r.id]?.acumulado);
     // EL RUBRO SIN COSTO TAMBIÉN DEJA PLATA, y hay que contarla.
     //
     // Que no se sepa lo que iba a costar no borra lo que dejó: el rubro se
@@ -82,7 +94,7 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
     //
     // Lo que no se puede hacer sin el costo es SEPARAR lo que ya estaba vendido
     // de lo que se ganó comprando mejor. Eso se dice; no se calla el total.
-    const aFavor = c2(n(r.total_base) - gastado);
+    const aFavor = c2(baseSinIva(r) - gastado);
     const terminadoSinCosto = n(r.avance_pct) >= 100;
     if (!conCosto(r)) {
       sinCosto += 1;
@@ -93,7 +105,7 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
         descripcion: r.descripcion || "",
         unidad: r.unidad || "", cantidad: n(r.cantidad),
         costoUnitario: null, presupuestado: null, dif: null,
-        gastado, aFavor, contratado: c2(r.total_base),
+        gastado, aFavor, contratado: baseSinIva(r),
         avance: n(r.avance_pct),
         estado: !gastado ? "sin_empezar" : aFavor < 0 ? "sobreprecio"
           : terminadoSinCosto ? "ahorro" : "en_curso",
@@ -103,14 +115,14 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
       });
       continue;
     }
-    // EN LA MISMA BASE QUE EL GASTO, QUE ES LA DEL CONTROL.
+    // EN LA MISMA BASE QUE LOS BENEFICIOS: SIN IVA.
     //
     // Lo asignado a un rubro sale de las facturas y lleva el IVA adentro —una
     // factura de $183,97 son $159,97 más $24—, y el costo del presupuesto está
     // sin IVA. Restarlos de frente se lleva quince puntos: inventa sobreprecio
-    // donde no lo hay y se come los ahorros chicos. El rubro ya sabe su factor,
-    // que es el mismo con el que se armó su total del control.
-    const presupuestado = c2(n(r.costo_unitario) * n(r.cantidad) * factorIva(r));
+    // donde no lo hay y se come los ahorros chicos. El gasto ya vino arriba
+    // dividido por el porcentaje del rubro; el costo se queda como está.
+    const presupuestado = c2(n(r.costo_unitario) * n(r.cantidad));
     const dif = c2(presupuestado - gastado);
     const terminado = n(r.avance_pct) >= 100;
     let estado;
@@ -133,10 +145,10 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
       // Adentro hay dos cosas —el margen con el que se vendió y lo que se ganó
       // o se perdió comprando— y abajo se separan, porque son dos
       // conversaciones. Pero la plata a favor del proyecto es esta.
-      aFavor: c2(n(r.total_base) - gastado),
+      aFavor: c2(baseSinIva(r) - gastado),
       // El margen vendido, aparte: sirve para saber si el rubro era bueno de
       // entrada, y no se suma nunca con la eficiencia.
-      contratado: c2(r.total_base),
+      contratado: baseSinIva(r),
     });
   }
 
