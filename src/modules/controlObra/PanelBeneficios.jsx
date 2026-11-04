@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Upload, Sparkles, TrendingUp, TrendingDown, Plus, Trash2, Check, X, Paperclip } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -14,6 +14,9 @@ import { cargarOrdenes } from "./ordenesDeCambio";
 import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
+// El presupuesto completo al costado, el mismo de Diferencias: cantidad,
+// unitario y total de cada rubro a la vista mientras se elige contra cuál va.
+import Presupuesto from "./PanelPresupuesto";
 
 // Lo que cotizan hoy contra lo que se presupuestó.
 //
@@ -49,6 +52,24 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [aMano, setAMano] = useState(null);
+  // El presupuesto al costado, mientras se carga uno a mano. Se mide dónde
+  // empieza la caja y se usa lo que queda hasta el borde de la pantalla; la
+  // columna del formulario scrollea adentro y el panel se queda a la vista.
+  const [verPresupuesto, setVerPresupuesto] = useState(false);
+  const [buscaRubro, setBuscaRubro] = useState("");
+  const cajaRef = useRef(null);
+  const [alto, setAlto] = useState(0);
+  useEffect(() => {
+    if (!verPresupuesto || !aMano) { setAlto(0); return undefined; }
+    const medir = () => {
+      const t = cajaRef.current?.getBoundingClientRect().top ?? 0;
+      setAlto(Math.max(320, Math.round(window.innerHeight - t - 14)));
+    };
+    medir();
+    window.addEventListener("resize", medir);
+    const t = setTimeout(medir, 120);
+    return () => { window.removeEventListener("resize", medir); clearTimeout(t); };
+  }, [verPresupuesto, aMano]);
 
   // Los enlaces a las proformas guardadas, firmados al cargar la pantalla.
   const [enlaces, setEnlaces] = useState({});
@@ -819,19 +840,47 @@ Rubros de la obra: ${lista}`;
         )}
 
         {aMano && (
+          <div ref={cajaRef} style={{ display: "flex", gap: 10, marginBottom: 10,
+            alignItems: verPresupuesto ? "stretch" : "flex-start",
+            ...(verPresupuesto && alto ? { height: alto, overflow: "hidden" } : {}) }}>
+          <div style={{ flex: 1, minWidth: 0, ...(verPresupuesto ? { overflowY: "auto", paddingRight: 4 } : {}) }}>
           <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`, borderRadius: colors.radiusMd,
-            padding: 12, marginBottom: 10, display: "grid", gap: 8,
+            padding: 12, display: "grid", gap: 8,
             gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
             <div style={{ gridColumn: "1 / -1" }}>
               <input autoFocus value={aMano.descripcion || ""} placeholder="Qué se compró o se negoció"
                 onChange={e => setAMano(a => ({ ...a, descripcion: e.target.value }))}
                 style={{ ...inputStyle, width: "100%", fontSize: 12.5, padding: "7px 10px" }} />
             </div>
-            <select value={aMano.obra_rubro_id || ""} onChange={e => setAMano(a => ({ ...a, obra_rubro_id: e.target.value }))}
-              style={{ ...inputStyle, fontSize: 11.5, padding: "7px 8px" }}>
-              <option value="">¿contra qué rubro? (opcional)</option>
-              {vivos.map(x => <option key={x.id} value={x.id}>{x.numero} · {x.descripcion.slice(0, 44)}</option>)}
-            </select>
+            {/* CONTRA QUÉ RUBRO, mirando el presupuesto entero. El desplegable
+                no dejaba ver ni la cantidad ni el precio, y había que saber
+                el nombre exacto: el panel del costado es el mismo de
+                Diferencias, con número, descripción, cantidad × unitario. */}
+            {(() => {
+              const rub = vivos.find(x => String(x.id) === String(aMano.obra_rubro_id));
+              return (
+                <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                  fontSize: 11.5, color: colors.inkSoft }}>
+                  {rub ? (
+                    <span style={{ color: colors.ink }}>
+                      <strong>{rub.numero}</strong> · {rub.descripcion}
+                      <span style={{ color: colors.muted }}> · {fmt(rub.cantidad)} {rub.unidad || ""}</span>
+                    </span>
+                  ) : <span style={{ color: colors.muted }}>¿contra qué rubro? (opcional)</span>}
+                  <button onClick={() => setVerPresupuesto(v => !v)}
+                    style={{ background: "none", border: `1px solid ${colors.brand}`, color: colors.brand, borderRadius: 14,
+                      padding: "2px 10px", fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
+                    {verPresupuesto ? "ocultar el presupuesto" : rub ? "cambiar de rubro" : "elegir en el presupuesto"}
+                  </button>
+                  {rub && (
+                    <button onClick={() => setAMano(a => ({ ...a, obra_rubro_id: "" }))}
+                      style={{ background: "none", border: "none", color: colors.muted, fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
+                      sin rubro
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
             <input type="number" step="0.01" value={aMano.presupuestado ?? ""}
               placeholder="Presupuestado" onChange={e => setAMano(a => ({ ...a, presupuestado: e.target.value }))}
               style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
@@ -865,6 +914,14 @@ Rubros de la obra: ${lista}`;
                 Si dejás vacío lo presupuestado se usa el del rubro elegido, que es contra el que hay que comparar.
               </div>
             )}
+          </div>
+          </div>
+          {verPresupuesto && (
+            <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+              eligiendo={{ descripcion: aMano.descripcion || "este beneficio" }}
+              onCerrar={() => setVerPresupuesto(false)}
+              onElegir={rb => { setAMano(a => ({ ...a, obra_rubro_id: String(rb.id) })); setVerPresupuesto(false); }} />
+          )}
           </div>
         )}
 

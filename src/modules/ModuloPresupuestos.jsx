@@ -2058,7 +2058,13 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       </button>
                     </div>
                   )}
-                  <table style={{width:"100%",minWidth:860,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
+                  {/* LA TABLA SCROLLEA DE LADO, NO SE APRIETA. Las columnas de números son
+      fijas (732 px entre todas) y la descripción se llevaba lo que sobraba:
+      a 860 de ancho eran 128 px, y los rubros se leían cortados. Ahora la
+      tabla pide 1060 y en una pantalla angosta se desplaza, que es lo que
+      hace cualquier planilla. */}
+                  <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",minWidth:1060,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
                     <colgroup>
                       {/* 70 no alcanzaba, y 112 tampoco: con un número de
                           cinco dígitos —11.15— y el "acá" visible el contenido
@@ -2244,6 +2250,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       );})}
                     </tbody>
                   </table>
+                  </div>
                   </div>
                 )}
                 {/* LOS EXTRAS DEL CAPÍTULO. Rubros que no estaban en lo pedido:
