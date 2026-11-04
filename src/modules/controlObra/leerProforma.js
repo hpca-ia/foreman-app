@@ -649,14 +649,14 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   // La revisión es la que ya hizo el lazo sobre esta misma lectura: la que
   // decidió que esta era la mejor de las vueltas. Volver a calcularla daría lo
   // mismo, y así queda claro que es UNA sola comprobación, no dos criterios.
-  const { revision, quedo, cerro, vuelta, historia } = leido;
+  const { revision, quedo, cerro, vuelta, vueltas: topeDeVueltas, historia } = leido;
 
   return { proveedor, items, cortado, iva, totales, descuento, fecha, revision,
     // Cómo quedó la lectura y cuánto costó llegar: `cerro` dice si pasó la
     // comprobación contra el pie del papel, `vuelta` en cuál de las vueltas, e
     // `historia` qué se le reclamó en cada una. Si `cerro` es false la lectura
     // no se guarda sola: va a la pantalla con la diferencia a la vista.
-    quedo, cerro, vuelta, historia,
+    quedo, cerro, vuelta, vueltas: topeDeVueltas, historia,
     // Cuántos salieron de comparar textos —esos no pueden estar mal— y cuántos
     // los eligió el modelo, que son los que hay que mirar.
     ciertos, propuestos: items.filter(x => x.rubro_id && !x.porTexto).length,

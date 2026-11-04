@@ -769,6 +769,18 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
               color: quedo === "cuadra" ? colors.inkSoft : tono }}>
               <strong>{DICHO[quedo]}</strong>{" "}
               {revisando.revision.conclusion}
+              {/* En cuántas vueltas cerró. Un modelo mejor cierra a la primera
+                  más seguido; uno más barato necesita que se le diga qué faltó
+                  y lea de nuevo. Los dos terminan en el mismo número: este es
+                  el que dice cuánto costó llegar, y con una semana de lecturas
+                  decide solo si el modelo del contrato vale lo que cuesta. */}
+              {revisando.vuelta != null && (
+                <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                  · {revisando.vuelta === 1
+                    ? "cerró a la primera"
+                    : `necesitó ${revisando.vuelta} de ${revisando.vueltas || 3} vueltas`}
+                </span>
+              )}
               {revisando.revision.malos.map((m, i) => (
                 <div key={i} style={{ fontSize: 10.5 }}>
                   · {String(m.descripcion || "").slice(0, 60)}: cantidad × unitario da ${fmt(m.dice)} y el
