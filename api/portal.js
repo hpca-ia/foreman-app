@@ -449,6 +449,14 @@ async function siFirmaronTodos(ordenId) {
   const lineas = await json(await rest(`orden_cambio_lineas?orden_id=eq.${ordenId}&select=*&order=orden`)) || [];
   const codigo = orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`;
 
+  // EN LA BASE DEL CONTROL, QUE ES CON IVA, igual que cuando aprueba la
+  // oficina. La orden se cotiza sin IVA; los rubros del control llevan el
+  // impuesto adentro y su porcentaje. Por esta puerta entraban sin IVA y sin
+  // porcentaje: un 15% corto en el contrato vigente, y nada lo decía.
+  const conIvaFila = await json(await rest(`obra_rubros?obra_id=eq.${orden.obra_id}&iva_pct=not.is.null&select=iva_pct&limit=1`));
+  const iva = Number(conIvaFila?.[0]?.iva_pct) || 0;
+  const conIva = v => Math.round(v * (1 + iva / 100) * 100) / 100;
+
   const anulan = lineas.filter(l => l.tipo === "quita" && l.obra_rubro_id);
   if (anulan.length) {
     await rest(`obra_rubros?id=in.(${anulan.map(l => Number(l.obra_rubro_id)).join(",")})`, {
@@ -468,8 +476,9 @@ async function siFirmaronTodos(ordenId) {
       descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigo}`,
       unidad: l.unidad || "",
       cantidad: Number(l.cantidad) || 0,
-      precio_unitario: signo * (Number(l.precio_unitario) || 0),
-      total_base: signo * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0),
+      precio_unitario: signo * conIva(Number(l.precio_unitario) || 0),
+      total_base: signo * conIva((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0)),
+      iva_pct: iva,
       origen: "orden_cambio",
       orden_cambio_id: orden.id,
     };

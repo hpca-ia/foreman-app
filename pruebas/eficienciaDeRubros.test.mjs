@@ -153,7 +153,7 @@ test("los que ya gastaron más de lo que se cobra se listan aparte, con o sin co
   });
   assert.deepEqual(r.pasados.map(f => f.id), [1]);
   assert.equal(r.cuantosPasados, 1);
-  assert.equal(r.pasadosTotal, -72.75);   // $511,28 sin IVA contra $584,03 de facturas sin IVA
+  assert.equal(r.pasadosTotal, -139.44);   // $444,59 sin IVA contra $584,03 de facturas sin IVA
   assert.equal(r.pasados[0].sinCosto, true);
   // El de pintura compró mejor que su costo y está terminado: es ahorro, no pasado.
   assert.equal(r.filas.find(f => f.id === 3).estado, "ahorro");

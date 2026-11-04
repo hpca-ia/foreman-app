@@ -53,10 +53,18 @@ export function enLaBaseDelControl(r) {
   return c2(n(r?.total_base));
 }
 
-/** Lo que vale un rubro sin IVA: la base en la que se cotiza y se mide el margen. */
+/**
+ * Lo que vale un rubro sin IVA: la base en la que se cotiza y se mide el margen.
+ *
+ * TAMBIÉN LOS DE UNA ORDEN DE CAMBIO. Desde la 140 el puente les pone el IVA
+ * al entrar al control —el picado de la OC-01 está a $5,3475 cuando la línea
+ * dice $4,65— y les deja su `iva_pct`. La excepción que los devolvía tal cual
+ * era de antes de eso, y dejaba a Diferencias y a Beneficios comparando un
+ * precio con IVA contra proformas sin IVA: un 15% de sobreprecio inventado.
+ * Manda el porcentaje que tiene cada rubro: sin él, el total es la base.
+ */
 export function baseSinIva(r) {
   const total = n(r?.total_base);
-  if (r?.origen === "orden_cambio") return c2(total);
   const pct = n(r?.iva_pct);
   return pct > 0 ? c2(total / (1 + pct / 100)) : c2(total);
 }

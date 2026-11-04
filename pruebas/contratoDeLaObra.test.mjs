@@ -20,7 +20,7 @@ const aereo = [
 test("el contrato original es el del control, con IVA, como se firmó", () => {
   const c = contratoDe(aereo);
   assert.equal(c.original, 172127.24);        // 163.468,56 + 8.658,68
-  assert.equal(c.sinIva, 153525.8);           // y sin IVA, para la conversación
+  assert.equal(c.sinIva, 153023.63);          // y sin IVA, para la conversación: también los de la orden
 });
 
 test("la reducción es una línea de la orden, no un tachón en el presupuesto", () => {
@@ -72,8 +72,10 @@ test("una quita entra en negativo: suma a las reducciones, no a las adiciones", 
 test("cada rubro se puede leer en las dos bases", () => {
   assert.equal(baseSinIva({ origen: "base", iva_pct: 15, total_base: 115 }), 100);
   assert.equal(enLaBaseDelControl({ origen: "base", iva_pct: 15, total_base: 115 }), 115);
-  // El de una orden está guardado sin IVA: en el control vale con IVA.
-  assert.equal(baseSinIva({ origen: "orden_cambio", iva_pct: 15, total_base: 115 }), 115);
+  // El de una orden también lleva el IVA adentro desde la 140: sin IVA vale 100.
+  assert.equal(baseSinIva({ origen: "orden_cambio", iva_pct: 15, total_base: 115 }), 100);
+  // Uno viejo, sin porcentaje cargado, se lee tal cual.
+  assert.equal(baseSinIva({ origen: "orden_cambio", total_base: 115 }), 115);
   assert.equal(enLaBaseDelControl({ origen: "orden_cambio", iva_pct: 15, total_base: 115 }), 115);
 });
 

@@ -291,6 +291,32 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     return true;
   }
 
+  // CAMBIAR QUIÉN APRUEBA DESPUÉS DE MANDARLA. La lista se cierra con el
+  // envío —el nombre y el correo son los del documento que salió—, pero si
+  // la firma de uno alcanza, el otro pasa a solo copia: no se le reclama una
+  // firma que no hace falta. Y si con eso ya firmaron todos los que tenían
+  // que firmar, la orden entra al presupuesto por el mismo camino que cuando
+  // la aprueba la oficina.
+  async function cambiarPapel(o, a2, aprueba) {
+    if (a2.envio_at && !aprueba && !window.confirm(
+      `${a2.nombre || a2.email} ya recibió la orden para firmarla. ¿Pasa a solo copia?\n\n`
+      + "Su firma deja de hacer falta. Si los demás ya aprobaron, la orden queda aprobada y entra al presupuesto.")) return;
+    await hacer(async () => {
+      const r = await guardarAprobador({ id: a2.id, aprueba });
+      if (r.error) return r.error;
+      if (aprueba || o.estado === "aprobada") return null;
+      // ¿Ya firmaron todos los que quedan? La misma cuenta que el portal: solo
+      // los que recibieron su enlace y tienen que firmar, ninguno con una
+      // objeción sin resolver.
+      const quedan = (aprobadores[o.id] || []).filter(x => x.id !== a2.id && x.envio_at && x.aprueba !== false);
+      const todos = quedan.length > 0 && quedan.every(x => x.aprobado_at && !String(x.observacion || "").trim());
+      if (!todos) return null;
+      const ra = await aprobarOrden(o, lineas[o.id] || [], currentUser,
+        { aprobada_por: quedan.map(x => x.nombre || x.email).join(", ") });
+      return typeof ra === "string" ? ra : ra?.error || null;
+    });
+  }
+
   /**
    * Subir la cotización de una orden que ya existe.
    *
@@ -2152,11 +2178,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             aprobar a quien no tiene que aprobar es pedirle
                             que decida algo que no le toca, y alguien lo va a
                             apretar. */}
-                        <label title={a2.aprueba ? "Su firma es necesaria" : "Solo recibe copia"}
-                          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, cursor: editable && !cerrado ? "pointer" : "default",
+                        {/* EL PAPEL SE PUEDE CAMBIAR AUNQUE YA SE HAYA MANDADO,
+                            mientras esa persona no haya decidido: si la firma
+                            de uno alcanza, el otro pasa a solo copia. Lo que no
+                            se toca después del envío es quién es y su correo. */}
+                        <label title={a2.aprobado_at || a2.observacion ? "Ya decidió: su papel no se cambia"
+                            : a2.aprueba ? "Su firma es necesaria" : "Solo recibe copia"}
+                          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5,
+                            cursor: editable && !a2.aprobado_at && !a2.observacion ? "pointer" : "default",
                             color: a2.aprueba ? colors.brand : colors.muted, fontWeight: a2.aprueba ? 700 : 400 }}>
-                          <input type="checkbox" checked={a2.aprueba !== false} disabled={!editable || cerrado}
-                            onChange={e => hacer(() => guardarAprobador({ id: a2.id, aprueba: e.target.checked }).then(r => r.error || null))} />
+                          <input type="checkbox" checked={a2.aprueba !== false}
+                            disabled={!editable || !!a2.aprobado_at || !!a2.observacion}
+                            onChange={e => cambiarPapel(o, a2, e.target.checked)} />
                           aprueba
                         </label>
                         <input defaultValue={a2.rol || ""} readOnly={!editable || cerrado} placeholder="Papel"

@@ -187,10 +187,12 @@ test("el rubro se lleva a sin IVA antes de compararlo con la proforma", () => {
   assert.equal(r.lineas[0].diferencia, 0);
 });
 
-test("un rubro que metió una orden de cambio ya está sin IVA", () => {
+test("un rubro que metió una orden de cambio también lleva el IVA adentro, y se compara sin él", () => {
+  // Desde la 140 el puente le pone el IVA al entrar al control. Tratarlo como
+  // si estuviera sin IVA inventaba un 15% de ahorro contra la proforma.
   const r = compararContraPresupuesto(
     [{ descripcion: "Vinil", cantidad: 1, monto: 100, rubro_id: 1 }],
     [{ id: 1, cantidad: 1, iva_pct: 15, total_base: 115, origen: "orden_cambio" }]);
-  assert.equal(r.lineas[0].presupuestado, 115);
-  assert.equal(r.lineas[0].diferencia, 15);
+  assert.equal(r.lineas[0].presupuestado, 100);
+  assert.equal(r.lineas[0].diferencia, 0);
 });
