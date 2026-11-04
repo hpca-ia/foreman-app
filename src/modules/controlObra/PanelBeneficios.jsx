@@ -333,7 +333,13 @@ Rubros de la obra: ${lista}`;
 
   async function guardarAMano() {
     const f = aMano || {};
-    if (!String(f.descripcion || "").trim()) { setError("Escribí qué se compró."); return; }
+    // CON EL RUBRO ELEGIDO, LA DESCRIPCIÓN ES LA SUYA. Escribir "panelado de
+    // duraplac" cuando ya se señaló el rubro 46 es copiar a mano lo que el
+    // presupuesto ya dice. Lo escrito, si hay, manda: sirve para el detalle
+    // —la marca, qué se negoció— que el rubro no tiene.
+    const rubro = vivos.find(x => String(x.id) === String(f.obra_rubro_id));
+    const descripcion = String(f.descripcion || "").trim() || (rubro ? rubro.descripcion : "");
+    if (!descripcion) { setError("Elegí el rubro en el presupuesto, o escribí qué se compró."); return; }
     setOcupado(true); setError("");
     // LA MISMA CUENTA QUE DIFERENCIAS. La cantidad medida en obra casi nunca
     // es la del presupuesto, así que el beneficio sale del precio unitario del
@@ -343,7 +349,7 @@ Rubros de la obra: ${lista}`;
     const res = await guardarBeneficio({
       id: f.id,
       obra_id: obra.id, obra_rubro_id: f.obra_rubro_id ? Number(f.obra_rubro_id) : null,
-      descripcion: f.descripcion.trim(),
+      descripcion,
       cantidad: n(f.cantidad) || null, unidad: String(f.unidad || "").trim() || null,
       presupuestado: c.presupuestado ?? 0,
       real: n(f.real), proveedor: f.proveedor || null, nota: f.nota || null,
@@ -851,11 +857,6 @@ Rubros de la obra: ${lista}`;
           <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`, borderRadius: colors.radiusMd,
             padding: 12, display: "grid", gap: 8,
             gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <input autoFocus value={aMano.descripcion || ""} placeholder="Qué se compró o se negoció"
-                onChange={e => setAMano(a => ({ ...a, descripcion: e.target.value }))}
-                style={{ ...inputStyle, width: "100%", fontSize: 12.5, padding: "7px 10px" }} />
-            </div>
             {/* CONTRA QUÉ RUBRO, mirando el presupuesto entero. El desplegable
                 no dejaba ver ni la cantidad ni el precio, y había que saber
                 el nombre exacto: el panel del costado es el mismo de
@@ -870,7 +871,7 @@ Rubros de la obra: ${lista}`;
                       <strong>{rub.numero}</strong> · {rub.descripcion}
                       <span style={{ color: colors.muted }}> · {fmt(rub.cantidad)} {rub.unidad || ""}</span>
                     </span>
-                  ) : <span style={{ color: colors.muted }}>¿contra qué rubro? (opcional)</span>}
+                  ) : <span style={{ color: colors.muted }}>¿contra qué rubro del presupuesto?</span>}
                   <button onClick={() => setVerPresupuesto(v => !v)}
                     style={{ background: "none", border: `1px solid ${colors.brand}`, color: colors.brand, borderRadius: 14,
                       padding: "2px 10px", fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
@@ -885,6 +886,15 @@ Rubros de la obra: ${lista}`;
                 </div>
               );
             })()}
+            {/* El rubro ya dice qué es. Esto es para el detalle que el rubro
+                no tiene —la marca, qué se negoció— o para un beneficio que no
+                está contra ningún rubro. */}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <input autoFocus value={aMano.descripcion || ""}
+                placeholder={aMano.obra_rubro_id ? "Detalle, si hace falta: marca, qué se negoció… (si no, queda el rubro)" : "Qué se compró o se negoció"}
+                onChange={e => setAMano(a => ({ ...a, descripcion: e.target.value }))}
+                style={{ ...inputStyle, width: "100%", fontSize: 12.5, padding: "7px 10px" }} />
+            </div>
             {/* POR UNIDAD Y POR TOTAL. Se escribe como viene en la factura:
                 cantidad, unidad y precio unitario, y el total sale solo —o
                 el total, y sale el unitario. Con dos de las tres alcanza. */}
