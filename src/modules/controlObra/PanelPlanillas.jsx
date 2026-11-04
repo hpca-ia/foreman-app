@@ -5,6 +5,7 @@ import { mensajeError } from "../../lib/sesion";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt } from "./calculos";
+import { creditoDisponible } from "./cuentasProveedor";
 import { partirPorFecha, siguienteDe, numeroNuevo, diaSiguiente, loQueQueda, cortePropuesto } from "./cortePlanilla.js";
 
 // Las planillas de una obra: cada una es un corte de período.
@@ -13,7 +14,7 @@ import { partirPorFecha, siguienteDe, numeroNuevo, diaSiguiente, loQueQueda, cor
 // hacía la fila era cerrar la planilla, y abrirla te sacaba a otra pestaña:
 // uno perdía de vista en qué planilla estaba parado.
 
-export default function PanelPlanillas({ obra, planillas, facturas, asignaciones, planillaSel, abierta, onAbrir, onVolver, onCambio, puede, children }) {
+export default function PanelPlanillas({ obra, planillas, facturas, asignaciones, pagos = [], planillaSel, abierta, onAbrir, onVolver, onCambio, puede, children }) {
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState("");
   const [editando, setEditando] = useState(null);     // id de la planilla que se está renombrando
@@ -42,7 +43,14 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
     cuantas[f.planilla_id] = (cuantas[f.planilla_id] || 0) + 1;
     if (suelto > 0.009) sinAsignar[f.planilla_id] = (sinAsignar[f.planilla_id] || 0) + 1;
     if (f.clase === "anticipo" && !f.facturada_con_id) anticipos[f.planilla_id] = (anticipos[f.planilla_id] || 0) + monto;
-    if ((f.clase === "nota_credito" || monto < 0) && !f.facturada_con_id) credito[f.planilla_id] = (credito[f.planilla_id] || 0) + Math.abs(monto);
+    // LO QUE TODAVÍA VALE EL VALE, no lo que decía al nacer. Un vale usado en
+    // dos compras de caja chica seguía figurando entero "a favor" al cerrar:
+    // los $105,06 de KYWI, gastados hasta el centavo, se nombraban en cada
+    // cierre. Lo usado está en los pagos: cada uno dice de qué vale salió.
+    if (f.clase === "nota_credito" || monto < 0) {
+      const queda = creditoDisponible(f, pagos);
+      if (queda > 0.005) credito[f.planilla_id] = (credito[f.planilla_id] || 0) + queda;
+    }
   });
 
   const abiertaAhora = planillas.find(p => p.estado === "abierta");
@@ -170,7 +178,7 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
           </div>
           {cerrando && !cerrada && (() => {
             const { quedan, pasan } = partirPorFecha(facturas, p.id, cerrando.hasta);
-            const q = loQueQueda(quedan, sueltoDe);
+            const q = loQueQueda(quedan, sueltoDe, f => creditoDisponible(f, pagos));
             const sig = siguienteDe(planillas, p);
             const hoy = new Date().toISOString().slice(0, 10);
             const c1 = cortePropuesto(p, hoy);

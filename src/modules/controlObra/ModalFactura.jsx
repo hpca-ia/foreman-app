@@ -12,7 +12,7 @@ import { buscarDuplicados, hashArchivo } from "./duplicados";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import AlertaDuplicado from "./AlertaDuplicado";
 import CampoProveedor from "../../components/CampoProveedor";
-import { comprasSinFacturar, engancharFactura } from "../compras/compras";
+import { comprasSinFacturar, engancharFactura, papelesDeLaFactura } from "../compras/compras";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { FORMAS_PAGO, registrarPago, valesDisponibles } from "./pagos";
 import { guardarRenglones, leerRenglones } from "./renglones";
@@ -25,6 +25,8 @@ import { totalesDeLectura, renglonesDeLectura, revisionDeFactura } from "./cuadr
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
+
+const TIPO_PAPEL = { respaldo: "DOCUMENTO", cotizacion: "PROFORMA", pago: "COMPROBANTE DE PAGO" };
 
 export default function ModalFactura({ obra, rubros, actividades = [], planilla, factura, asignacionesFactura = [], control = {}, currentUser, onCerrar, onGuardado }) {
   const editando = !!factura;
@@ -78,6 +80,8 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   const [nuevaActividad, setNuevaActividad] = useState("");
   const [porRubro, setPorRubro] = useState(false);
   const [archivo, setArchivo] = useState(null);
+  // Los papeles que esta factura tiene en Compras, si entró desde un pedido.
+  const [papelesCompra, setPapelesCompra] = useState([]);
   const [leyendo, setLeyendo] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -96,6 +100,15 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       .catch(() => {});
     return () => { vivo = false; };
   }, [obra?.id, obra?.lead_id]);
+
+  // LOS PAPELES QUE YA ESTÁN EN COMPRAS. Una factura que entró desde un
+  // pedido tiene su PDF adjunto allá, y acá figuraba "sin archivo": el mismo
+  // documento, en el mismo depósito, a una pantalla de distancia.
+  useEffect(() => {
+    let vivo = true;
+    papelesDeLaFactura(factura?.id).then(ps => { if (vivo) setPapelesCompra(ps); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [factura?.id]);
 
   async function revisarDuplicados(extra = {}) {
     const datos = { ...form, ...extra };
@@ -769,6 +782,27 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
           </Button>
           <input ref={fileRef} type="file" accept="image/*,.pdf" onChange={leerConNova} style={{ display: "none" }} />
       </div>
+
+      {!form.archivo_url && papelesCompra.length > 0 && (
+        <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>
+            Esta factura entró desde Compras y allá tiene {papelesCompra.length === 1 ? "un papel" : `${papelesCompra.length} papeles`}. ¿Cuál es el documento?
+          </div>
+          <div style={{ display: "grid", gap: 5 }}>
+            {papelesCompra.map(a => (
+              <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11.5, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, flexShrink: 0 }}>{TIPO_PAPEL[a.tipo] || String(a.tipo || "").toUpperCase()}</span>
+                <span title={a.nombre} style={{ color: colors.ink, flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nombre}</span>
+                <button onClick={() => setForm(p => ({ ...p, archivo_url: a.storage_path, archivo_nombre: a.nombre }))}
+                  style={{ background: "none", border: `1px solid ${colors.brand}`, color: colors.brand, borderRadius: 14, padding: "2px 10px", fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
+                  es este
+                </button>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6 }}>Al guardar queda como el archivo de la factura, sin volver a subirlo.</div>
+        </div>
+      )}
 
       <AlertaDuplicado exactos={dups.exactos} posibles={dups.posibles} justificacion={justificacion} setJustificacion={setJustificacion} />
       {revisandoDups && <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>Revisando si ya está cargada...</div>}

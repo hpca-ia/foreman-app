@@ -590,8 +590,17 @@ export async function facturarCompra(solicitud, datos, quien) {
     .select("id,numero,estado").eq("obra_id", obra.id).order("numero");
   const abierta = (planillas || []).find(p => p.estado === "abierta") || (planillas || []).slice(-1)[0] || null;
 
+  // EL PAPEL VIAJA CON LA FACTURA. El documento que se leyó o se adjuntó en
+  // Compras está en el mismo depósito que las facturas del control: se apunta
+  // a él, no se vuelve a subir. Sin esto la factura entraba al control "sin
+  // archivo" aunque el PDF estuviera a un clic, en el pedido.
+  const papel = datos.archivo_url
+    ? { archivo_url: datos.archivo_url, archivo_nombre: datos.archivo_nombre || null }
+    : await ultimoRespaldo(solicitud.id);
+
   const fila = {
     obra_id: obra.id, planilla_id: abierta?.id || null,
+    ...papel,
     fecha: datos.fecha || new Date().toISOString().slice(0, 10),
     clase: datos.clase || "factura",
     tipo_documento: (datos.clase || "factura").toUpperCase(),
@@ -651,6 +660,29 @@ export async function facturarCompra(solicitud, datos, quien) {
     `${(datos.clase || "factura") === "proforma" ? "Proforma" : "Factura"}${fila.numero_factura ? ` ${fila.numero_factura}` : ""} por $${total.toFixed(2)} cargada al control de obra${asignado ? "" : " — falta asignarle el rubro"}`);
 
   return { factura, sinDestino: !asignado, sinPlanilla: !abierta };
+}
+
+/** El último documento adjuntado al pedido como respaldo: la factura, el recibo. */
+async function ultimoRespaldo(solicitudId) {
+  const { data } = await supabase.from("compras_adjuntos")
+    .select("storage_path,nombre").eq("solicitud_id", solicitudId).eq("tipo", "respaldo")
+    .order("created_at", { ascending: false }).limit(1);
+  const a = data?.[0];
+  return a ? { archivo_url: a.storage_path, archivo_nombre: a.nombre } : {};
+}
+
+/**
+ * Los papeles que esa factura tiene en Compras: los adjuntos del pedido que
+ * la originó. Para que quien la abre en el control pueda decir "el documento
+ * es este" sin volver a subirlo.
+ */
+export async function papelesDeLaFactura(facturaId) {
+  if (!facturaId) return [];
+  const { data: sols } = await supabase.from("compras_solicitudes").select("id").eq("factura_id", facturaId);
+  if (!sols?.length) return [];
+  const { data } = await supabase.from("compras_adjuntos").select("*")
+    .in("solicitud_id", sols.map(x => x.id)).order("created_at", { ascending: false });
+  return data || [];
 }
 
 /**

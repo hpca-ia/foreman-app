@@ -53,3 +53,16 @@ test("se propone el último corte de quincena o de mes si cae dentro de la plani
   assert.equal(cortePropuesto({ fecha_desde: "2026-10-07" }, "2026-11-04"), "2026-10-31");
   assert.equal(cortePropuesto({ fecha_desde: "2026-11-01" }, "2026-11-04"), "2026-11-04");
 });
+
+test("el vale que ya se usó no queda a favor: se mide lo que le queda, no lo que decía", () => {
+  // Los $105,06 de KYWI, gastados en dos compras de caja chica, se nombraban
+  // enteros en cada cierre.
+  const quedan = [
+    { id: 103, total: -99.97, clase: "nota_credito" },
+    { id: 82, total: -5.09, clase: "nota_credito" },
+    { id: 7, total: -20, clase: "nota_credito" },
+  ];
+  const queda = { 103: 0, 82: 0, 7: 20 };
+  assert.equal(loQueQueda(quedan, () => 0, f => queda[f.id]).favor, 20);
+  assert.equal(loQueQueda(quedan).favor, 125.06);   // sin pagos a la vista, lo de siempre
+});

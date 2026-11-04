@@ -456,7 +456,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             </>
           )}
           {tab === "planillas" && (
-            <PanelPlanillas puede={puede} obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones}
+            <PanelPlanillas puede={puede} obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos}
               planillaSel={planillaSel} onCambio={cargar}
               abierta={planillas.find(p => p.id === abierta) || null}
               onAbrir={p => { setPlanillaSel(p.id); setAbierta(p.id); }}

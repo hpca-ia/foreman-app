@@ -42,14 +42,19 @@ export function diaSiguiente(f) {
  * cuántas no están asignadas a un rubro, cuánto sigue vivo en anticipos sin
  * factura y cuánto queda a favor en notas de crédito.
  */
-export function loQueQueda(quedan = [], sueltoDe = () => 0) {
+export function loQueQueda(quedan = [], sueltoDe = () => 0, favorDe = null) {
+  const esVale = f => f.clase === "nota_credito" || n(f.total) < 0;
+  // Con `favorDe` se mide lo que le QUEDA a cada vale —lo suyo menos lo ya
+  // usado en pagos—; sin él, lo que decía al nacer.
+  const favor = favorDe
+    ? quedan.filter(esVale).reduce((s, f) => s + n(favorDe(f)), 0)
+    : quedan.filter(f => esVale(f) && !f.facturada_con_id).reduce((s, f) => s + Math.abs(n(f.total)), 0);
   return {
     cuantas: quedan.length,
     total: r2(quedan.reduce((s, f) => s + n(f.total), 0)),
     sueltas: quedan.filter(f => sueltoDe(f) > 0.009).length,
     vivo: r2(quedan.filter(f => f.clase === "anticipo" && !f.facturada_con_id).reduce((s, f) => s + n(f.total), 0)),
-    favor: r2(quedan.filter(f => (f.clase === "nota_credito" || n(f.total) < 0) && !f.facturada_con_id)
-      .reduce((s, f) => s + Math.abs(n(f.total)), 0)),
+    favor: r2(favor),
   };
 }
 
