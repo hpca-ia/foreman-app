@@ -5,6 +5,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
+import { derivar, cuentaAMano, explicar } from "./beneficioAMano.js";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
 import { ordenesMudas, contraQueSeMide } from "./cuentaBeneficios.js";
@@ -334,14 +335,17 @@ Rubros de la obra: ${lista}`;
     const f = aMano || {};
     if (!String(f.descripcion || "").trim()) { setError("Escribí qué se compró."); return; }
     setOcupado(true); setError("");
-    const rubro = vivos.find(x => String(x.id) === String(f.obra_rubro_id));
+    // LA MISMA CUENTA QUE DIFERENCIAS. La cantidad medida en obra casi nunca
+    // es la del presupuesto, así que el beneficio sale del precio unitario del
+    // rubro por lo que de verdad se compró, y contra la base sin IVA, que es
+    // como se cotiza. Lo presupuestado escrito a mano manda sobre esa cuenta.
+    const c = cuentaAMano(f, vivos);
     const res = await guardarBeneficio({
       id: f.id,
       obra_id: obra.id, obra_rubro_id: f.obra_rubro_id ? Number(f.obra_rubro_id) : null,
       descripcion: f.descripcion.trim(),
-      // Si se eligió un rubro y no se escribió lo presupuestado, se toma el del
-      // rubro: es el número contra el que hay que comparar y ya está cargado.
-      presupuestado: n(f.presupuestado) || (rubro ? n(rubro.total_base) : 0),
+      cantidad: n(f.cantidad) || null, unidad: String(f.unidad || "").trim() || null,
+      presupuestado: c.presupuestado ?? 0,
       real: n(f.real), proveedor: f.proveedor || null, nota: f.nota || null,
       origen: "manual", fecha: f.fecha || undefined,
       // A mano lo decide quien escribe: muchos beneficios reales no tienen
@@ -881,12 +885,48 @@ Rubros de la obra: ${lista}`;
                 </div>
               );
             })()}
-            <input type="number" step="0.01" value={aMano.presupuestado ?? ""}
-              placeholder="Presupuestado" onChange={e => setAMano(a => ({ ...a, presupuestado: e.target.value }))}
-              style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
-            <input type="number" step="0.01" value={aMano.real ?? ""}
-              placeholder="Costó de verdad" onChange={e => setAMano(a => ({ ...a, real: e.target.value }))}
-              style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
+            {/* POR UNIDAD Y POR TOTAL. Se escribe como viene en la factura:
+                cantidad, unidad y precio unitario, y el total sale solo —o
+                el total, y sale el unitario. Con dos de las tres alcanza. */}
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input type="number" step="0.01" value={aMano.cantidad ?? ""} placeholder="Cantidad"
+                onChange={e => setAMano(a => derivar({ ...a, cantidad: e.target.value }, "cantidad"))}
+                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 110 }} />
+              <input value={aMano.unidad ?? ""} placeholder="Unidad"
+                onChange={e => setAMano(a => ({ ...a, unidad: e.target.value }))}
+                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 80 }} />
+              <span style={{ color: colors.muted, fontSize: 12 }}>×</span>
+              <input type="number" step="0.0001" value={aMano.unitario ?? ""} placeholder="Precio unitario"
+                onChange={e => setAMano(a => derivar({ ...a, unitario: e.target.value }, "unitario"))}
+                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 130 }} />
+              <span style={{ color: colors.muted, fontSize: 12 }}>=</span>
+              <input type="number" step="0.01" value={aMano.real ?? ""} placeholder="Total que costó"
+                onChange={e => setAMano(a => derivar({ ...a, real: e.target.value }, "real"))}
+                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 140, fontWeight: 600 }} />
+            </div>
+            {/* CONTRA QUÉ, Y CUÁNTO DA, mientras se escribe. El número de la
+                derecha sale de la misma cuenta que Diferencias: por precio
+                unitario cuando la cantidad no es la del rubro. */}
+            {(() => {
+              const c = cuentaAMano(aMano, vivos);
+              return (
+                <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 11.5 }}>
+                  <input type="number" step="0.01" value={aMano.presupuestado ?? ""}
+                    placeholder={c.presupuestado != null && !c.escrito ? `Presupuestado: $${fmt(c.presupuestado)}` : "Presupuestado"}
+                    title="Dejalo vacío para usar la cuenta del rubro. Lo que escribas acá manda."
+                    onChange={e => setAMano(a => ({ ...a, presupuestado: e.target.value }))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 190 }} />
+                  {c.presupuestado != null && (
+                    <span style={{ fontWeight: 700, fontSize: 13, color: c.diferencia >= 0 ? colors.success : colors.danger }}>
+                      {c.diferencia >= 0 ? "+" : "−"}${fmt(Math.abs(c.diferencia))}
+                    </span>
+                  )}
+                  <span style={{ color: c.presupuestado == null ? colors.warning : colors.muted, flex: 1, minWidth: 200 }}>
+                    {explicar(c, fmt)}
+                  </span>
+                </div>
+              );
+            })()}
             <input value={aMano.proveedor || ""} placeholder="Proveedor"
               onChange={e => setAMano(a => ({ ...a, proveedor: e.target.value }))}
               style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
@@ -909,18 +949,20 @@ Rubros de la obra: ${lista}`;
                 style={{ background: "none", border: "none", color: colors.muted, fontSize: 11.5,
                   cursor: "pointer", fontFamily: colors.font }}>cancelar</button>
             </div>
-            {aMano.obra_rubro_id && !aMano.presupuestado && (
-              <div style={{ gridColumn: "1 / -1", fontSize: 11, color: colors.muted }}>
-                Si dejás vacío lo presupuestado se usa el del rubro elegido, que es contra el que hay que comparar.
-              </div>
-            )}
           </div>
           </div>
           {verPresupuesto && (
             <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
               eligiendo={{ descripcion: aMano.descripcion || "este beneficio" }}
               onCerrar={() => setVerPresupuesto(false)}
-              onElegir={rb => { setAMano(a => ({ ...a, obra_rubro_id: String(rb.id) })); setVerPresupuesto(false); }} />
+              onElegir={rb => {
+                // La unidad es la del rubro. La cantidad se propone la del
+                // presupuesto y se corrige con la medida en obra.
+                setAMano(a => derivar({ ...a, obra_rubro_id: String(rb.id),
+                  unidad: a.unidad || rb.unidad || "",
+                  cantidad: a.cantidad || (n(rb.cantidad) ? String(rb.cantidad) : "") }, "cantidad"));
+                setVerPresupuesto(false);
+              }} />
           )}
           </div>
         )}
@@ -938,6 +980,7 @@ Rubros de la obra: ${lista}`;
                     <div style={{ fontSize: 12.5, color: colors.ink }}>{b.descripcion}</div>
                     <div style={{ fontSize: 10.5, color: colors.muted }}>
                       {b.fecha}{rub ? ` · ${rub.numero} ${rub.descripcion.slice(0, 40)}` : " · sin rubro"}
+                      {n(b.cantidad) ? ` · ${fmt(b.cantidad)} ${b.unidad || ""} a $${fmt(n(b.real) / n(b.cantidad))}` : ""}
                       {b.proveedor ? ` · ${b.proveedor}` : ""}
                       {b.origen === "manual" ? " · a mano" : ""}
                       {esDeOrden(b) ? " · orden de cambio: lo cobrado contra su cotización" : ""}
