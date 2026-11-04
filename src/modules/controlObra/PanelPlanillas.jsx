@@ -5,6 +5,7 @@ import { mensajeError } from "../../lib/sesion";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { fmt } from "./calculos";
+import { partirPorFecha, siguienteDe, numeroNuevo, diaSiguiente, loQueQueda, cortePropuesto } from "./cortePlanilla.js";
 
 // Las planillas de una obra: cada una es un corte de período.
 //
@@ -17,6 +18,7 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
   const [error, setError] = useState("");
   const [editando, setEditando] = useState(null);     // id de la planilla que se está renombrando
   const [nombre, setNombre] = useState("");
+  const [cerrando, setCerrando] = useState(null);     // { hasta } mientras se elige el corte
 
   const total = {}, cuantas = {}, sinAsignar = {};
   // LO QUE NO CIERRA CON EL CORTE.
@@ -28,11 +30,14 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
   // cerrar un corte sin decirlo es cerrarlo sabiendo que algo quedó abierto y
   // no dejar constancia de qué.
   const anticipos = {}, credito = {};
+  const sueltoDe = f => {
+    const asignado = asignaciones.filter(a => a.factura_id === f.id).reduce((s, a) => s + (Number(a.monto) || 0), 0);
+    return Math.round(((Number(f.total) || 0) - asignado) * 100) / 100;
+  };
   facturas.forEach(f => {
     if (!f.planilla_id) return;
     const monto = Number(f.total) || 0;
-    const asignado = asignaciones.filter(a => a.factura_id === f.id).reduce((s, a) => s + (Number(a.monto) || 0), 0);
-    const suelto = Math.round((monto - asignado) * 100) / 100;
+    const suelto = sueltoDe(f);
     total[f.planilla_id] = (total[f.planilla_id] || 0) + monto;
     cuantas[f.planilla_id] = (cuantas[f.planilla_id] || 0) + 1;
     if (suelto > 0.009) sinAsignar[f.planilla_id] = (sinAsignar[f.planilla_id] || 0) + 1;
@@ -61,23 +66,33 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
     if (data && onAbrir) onAbrir(data);
   }
 
-  async function cerrarPlanilla(p) {
+  // CERRAR POR FECHAS. Al 31 de octubre, a una quincena: la planilla va hasta
+  // el día que se elige, y las facturas con fecha posterior pasan a la
+  // siguiente, que se crea si no está. Primero se mueven y recién después se
+  // cierra: si algo falla a mitad queda una planilla abierta con facturas de
+  // más —que se ve— y no una cerrada con facturas que no son de su período.
+  async function cerrarPlanilla(p, hasta) {
     setError("");
-    const sueltas = sinAsignar[p.id] || 0;
-    const aviso = (sueltas > 0
-      ? `\n\nOJO: ${sueltas} factura(s) de esta planilla todavía no están asignadas a ningún rubro y no se están contando en el control.`
-      : "")
-      + ((anticipos[p.id] || 0) > 0.005
-        ? `\n\nQUEDA VIVO: $${fmt(anticipos[p.id])} en anticipos. La plata salió y todavía no está facturada: no cuenta como invertido y sigue abierto después de este corte, hasta que llegue la factura.`
-        : "")
-      + ((credito[p.id] || 0) > 0.005
-        ? `\n\nQUEDA A FAVOR: $${fmt(credito[p.id])} en notas de crédito. Es plata nuestra en la casa del proveedor y se usa en una compra, que puede caer en otra planilla.`
-        : "");
-    if (!window.confirm(`¿Cerrar ${p.nombre || "la planilla N°" + p.numero}?${aviso}`)) return;
+    if (!hasta) return;
+    const { pasan } = partirPorFecha(facturas, p.id, hasta);
+    if (pasan.length) {
+      let sig = siguienteDe(planillas, p);
+      if (!sig) {
+        const numero = numeroNuevo(planillas);
+        const { data, error: e } = await supabase.from("planillas").insert({
+          obra_id: obra.id, numero, nombre: `Planilla N°${numero}`, fecha_desde: diaSiguiente(hasta),
+        }).select().single();
+        if (e) { setError(mensajeError(e) || e.message); return; }
+        sig = data;
+      }
+      const { error: e } = await supabase.from("obra_facturas").update({ planilla_id: sig.id }).in("id", pasan.map(f => f.id));
+      if (e) { setError(mensajeError(e) || e.message); return; }
+    }
     const { error: e } = await supabase.from("planillas")
-      .update({ estado: "cerrada", fecha_cierre: new Date().toISOString(), fecha_hasta: new Date().toISOString().split("T")[0] })
+      .update({ estado: "cerrada", fecha_cierre: new Date().toISOString(), fecha_hasta: hasta })
       .eq("id", p.id);
     if (e) { setError(mensajeError(e) || e.message); return; }
+    setCerrando(null);
     onCambio();
   }
 
@@ -148,9 +163,60 @@ export default function PanelPlanillas({ obra, planillas, facturas, asignaciones
             <div style={{ marginLeft: "auto" }}>
               {cerrada
                 ? <Button variant="outline" size="sm" onClick={() => reabrir(p)}><Unlock size={12} /> Reabrir</Button>
-                : puede?.("planillas.cerrar") !== false ? <Button variant="outline" size="sm" onClick={() => cerrarPlanilla(p)}><Lock size={12} /> Cerrar planilla</Button> : null}
+                : puede?.("planillas.cerrar") !== false && !cerrando
+                  ? <Button variant="outline" size="sm" onClick={() => setCerrando({ hasta: cortePropuesto(p, new Date().toISOString().slice(0, 10)) })}><Lock size={12} /> Cerrar planilla</Button>
+                  : null}
             </div>
           </div>
+          {cerrando && !cerrada && (() => {
+            const { quedan, pasan } = partirPorFecha(facturas, p.id, cerrando.hasta);
+            const q = loQueQueda(quedan, sueltoDe);
+            const sig = siguienteDe(planillas, p);
+            const hoy = new Date().toISOString().slice(0, 10);
+            const c1 = cortePropuesto(p, hoy);
+            const antes = new Date(`${c1}T12:00:00`); antes.setDate(antes.getDate() - 1);
+            const desde = String(p.fecha_desde || "").slice(0, 10);
+            const cortes = [...new Set([c1, cortePropuesto(p, antes.toISOString().slice(0, 10)), hoy])].filter(c => !desde || c >= desde);
+            const chip = on => ({ background: on ? colors.brandSoft : colors.surface, border: `1px solid ${colors.border}`, borderRadius: 14,
+              padding: "4px 10px", fontSize: 11, color: on ? colors.brand : colors.inkSoft, cursor: "pointer", fontFamily: colors.font });
+            return (
+              <div style={{ background: colors.warningSoft, border: `1.5px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: "11px 14px", marginTop: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink, marginBottom: 6 }}>¿Hasta qué día va esta planilla?</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                  <input type="date" value={cerrando.hasta} min={desde || undefined}
+                    onChange={e => setCerrando({ hasta: e.target.value })}
+                    style={{ fontSize: 12, padding: "6px 9px", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, fontFamily: colors.font, color: colors.ink, background: colors.surface }} />
+                  {cortes.map(c => (
+                    <button key={c} onClick={() => setCerrando({ hasta: c })} style={chip(c === cerrando.hasta)}>
+                      {c === hoy ? "hoy" : `${c.slice(8, 10)}/${c.slice(5, 7)}`}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55, marginBottom: 9 }}>
+                  Hasta el <strong>{cerrando.hasta}</strong> quedan <strong>{q.cuantas} factura{q.cuantas === 1 ? "" : "s"}</strong> por <strong>${fmt(q.total)}</strong>.
+                  {pasan.length > 0 && (
+                    <> <strong>{pasan.length}</strong> con fecha posterior {pasan.length === 1 ? "pasa" : "pasan"} a la planilla siguiente
+                      {sig ? ` (${sig.nombre || `Planilla N°${sig.numero}`})` : ", que se crea al cerrar"}.</>
+                  )}
+                  {q.sueltas > 0 && (
+                    <><br /><span style={{ color: colors.warning }}>OJO: {q.sueltas} de las que quedan todavía no {q.sueltas === 1 ? "está asignada" : "están asignadas"} a ningún rubro y no se {q.sueltas === 1 ? "cuenta" : "cuentan"} en el control.</span></>
+                  )}
+                  {q.vivo > 0.005 && (
+                    <><br />QUEDA VIVO: ${fmt(q.vivo)} en anticipos. La plata salió y todavía no está facturada: sigue abierto después de este corte, hasta que llegue la factura.</>
+                  )}
+                  {q.favor > 0.005 && (
+                    <><br />QUEDA A FAVOR: ${fmt(q.favor)} en notas de crédito. Es plata nuestra en la casa del proveedor y se usa en una compra, que puede caer en otra planilla.</>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <Button variant="primary" size="sm" disabled={!cerrando.hasta} onClick={() => cerrarPlanilla(p, cerrando.hasta)}>
+                    <Lock size={12} /> Cerrar hasta el {cerrando.hasta || "…"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setCerrando(null)}>Cancelar</Button>
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 11, color: colors.muted }}>
             <span>{p.fecha_desde || "—"}{p.fecha_hasta ? ` → ${p.fecha_hasta}` : " → en curso"}</span>
             <span>{cuantas[p.id] || 0} factura{(cuantas[p.id] || 0) === 1 ? "" : "s"}</span>

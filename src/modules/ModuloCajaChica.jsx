@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { proponerCierre, cerrarCaja, cargarCierres, reabrirCierre } from "./cajaChica/cierres";
+import { ultimoCorte } from "./cajaChica/vuelta.js";
+import { resumenDeLaCaja } from "./cajaChica/resumen.js";
 import { efectivoGastado, valesPorUsar } from "./cajaChica/efectivo";
 import { porFecha, deLaVuelta } from "./cajaChica/lista";
 import { inputStyle } from "../components/ui/Input";
@@ -951,7 +953,7 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       </div>
 
       {subVista==="reporte"&&cajaActiva&&(
-        <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos} usuarios={users}/>
+        <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos} cierres={cierres} usuarios={users}/>
       )}
 
       {borrarCaja&&(
@@ -1244,31 +1246,51 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                 <div style={{fontSize:11,color:"var(--danger)"}}>Johanna debe revisar y entregar más dinero</div></div>
             </div>
           )}
-          {/* CERRAR LA VUELTA.
-              Una caja chica va por vueltas: se entrega un fondo, se gasta, se
-              rinde, y recién entonces se repone. El abono nuevo ES el acuse de
-              que la anterior se rindió —nadie repone una caja que todavía no
-              le rindieron— y por eso es lo que habilita el cierre.
-              Sin esto la caja es una lista que crece sin fin: al mes cuatro
-              nadie sabe qué gastos ya se revisaron, el responsable no tiene
-              con qué probar que rindió, y una diferencia de hace tres meses se
-              discute con el listado entero abierto. */}
+          {/* CERRAR LA CAJA POR FECHAS.
+              Al 31 de octubre, a una quincena: entra todo lo que tiene fecha
+              hasta ese día y lo de después queda para la planilla siguiente.
+              La fecha la elige quien cierra, y antes de apretar el botón se
+              ve exactamente qué entra, qué queda y qué está devuelto.
+              Sin cierres la caja es una lista que crece sin fin: al mes
+              cuatro nadie sabe qué gastos ya se revisaron, el responsable no
+              tiene con qué probar que rindió, y una diferencia de hace tres
+              meses se discute con el listado entero abierto. */}
           {(() => {
-            const prop = proponerCierre({ anticipos, gastos, cierres });
             if (sinCierres) return null;
-            if (!prop.puede) return null;
+            const base = proponerCierre({ anticipos, gastos, cierres });
+            if (!base.puede) return null;
+            const prop = cerrando ? proponerCierre({ anticipos, gastos, cierres, hasta: cerrando.hasta }) : base;
+            const hoy = new Date().toISOString().slice(0, 10);
+            const c1 = ultimoCorte(hoy);
+            const antes = new Date(`${c1}T12:00:00`); antes.setDate(antes.getDate() - 1);
+            const cortes = [...new Set([c1, ultimoCorte(antes.toISOString().slice(0, 10)), hoy])]
+              .filter(c => !prop.desde || c > prop.desde);
+            const s = (k, uno, varios) => `${k} ${k === 1 ? uno : varios}`;
+            const totalDevuelto = prop.devueltos.reduce((t, g) => t + (Number(g.monto) || 0), 0);
             return (
               <div style={{background:"var(--warning-soft)",border:"1.5px solid var(--warning-border)",borderRadius:10,
                 padding:"11px 14px",marginBottom:12}}>
                 <div style={{fontSize:13,fontWeight:700,color:"var(--ink)",marginBottom:3}}>
-                  Hay una vuelta para cerrar
+                  Hay {s(base.gastos.length + base.quedan.length, "gasto por rendir", "gastos por rendir")}
                 </div>
                 <div style={{fontSize:11.5,color:"var(--ink-soft)",lineHeight:1.55,marginBottom:9}}>
-                  Entró un abono de <strong>${fmt(prop.abono.monto)}</strong>
-                  {prop.abono.fecha ? ` el ${prop.abono.fecha}` : ""}, así que lo de antes ya se dio por rendido.
-                  Se cierran <strong>{prop.gastos.length}</strong> {prop.gastos.length===1?"gasto":"gastos"} por{" "}
-                  <strong>${fmt(prop.totalGastado)}</strong>, contra <strong>${fmt(prop.totalAbonado)}</strong> entregados:
-                  queda un saldo de <strong>${fmt(prop.saldo)}</strong>.
+                  Hasta el <strong>{prop.hasta}</strong> entran <strong>{s(prop.gastos.length, "gasto", "gastos")}</strong> por{" "}
+                  <strong>${fmt(prop.totalGastado)}</strong>, contra <strong>${fmt(prop.totalAbonado)}</strong> entregados
+                  {prop.abonos.length ? ` en ${s(prop.abonos.length, "abono", "abonos")}` : ""}: queda un saldo de{" "}
+                  <strong style={{color: prop.saldo < 0 ? "var(--danger)" : "var(--ink)"}}>${fmt(prop.saldo)}</strong>.
+                  {prop.desde ? ` El cierre anterior llegó hasta el ${prop.desde}.` : ""}
+                  {prop.quedan.length > 0 && (
+                    <><br/>{s(prop.quedan.length, "gasto", "gastos")} con fecha posterior {prop.quedan.length === 1 ? "queda" : "quedan"} para la planilla siguiente.</>
+                  )}
+                  {prop.abonosQueQuedan.length > 0 && (
+                    <><br/>{s(prop.abonosQueQuedan.length, "abono", "abonos")} con fecha posterior {prop.abonosQueQuedan.length === 1 ? "queda" : "quedan"} para la siguiente.</>
+                  )}
+                  {prop.devueltos.length > 0 && (
+                    <><br/><span style={{color:"var(--danger)"}}>
+                      {s(prop.devueltos.length, "gasto devuelto al residente", "gastos devueltos al residente")} por ${fmt(totalDevuelto)}{" "}
+                      {prop.devueltos.length === 1 ? "queda" : "quedan"} fuera hasta que se {prop.devueltos.length === 1 ? "corrija" : "corrijan"}.
+                    </span></>
+                  )}
                 </div>
                 {cerrando ? (
                   <div style={{display:"grid",gap:7}}>
@@ -1279,6 +1301,15 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                           onChange={e=>setCerrando(c=>({...c,hasta:e.target.value}))}
                           style={{...inputStyle,width:160,padding:"6px 9px",fontSize:12}}/>
                       </div>
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",paddingBottom:2}}>
+                        {cortes.map(c => (
+                          <button key={c} onClick={()=>setCerrando(x=>({...x,hasta:c}))}
+                            style={{background:c===cerrando.hasta?"var(--brand-soft)":"#fff",border:"1px solid var(--border)",borderRadius:14,
+                              padding:"4px 10px",fontSize:11,color:c===cerrando.hasta?"var(--brand)":"var(--ink-soft)",cursor:"pointer",fontFamily:"inherit"}}>
+                            {c === hoy ? "hoy" : `${c.slice(8, 10)}/${c.slice(5, 7)}`}
+                          </button>
+                        ))}
+                      </div>
                       <div style={{flex:1,minWidth:180}}>
                         <label style={{fontSize:10,color:"var(--muted)",fontWeight:600,display:"block",marginBottom:3}}>NOTA (OPCIONAL)</label>
                         <input value={cerrando.nota} placeholder="ej: devolvió $18 en efectivo"
@@ -1287,74 +1318,120 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                       </div>
                     </div>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                      <button onClick={async()=>{
-                        // UNA VUELTA NO SE RINDE CON GASTOS DEVUELTOS ADENTRO.
-                        // Un gasto devuelto es uno que administración dijo que
-                        // está mal cargado: cerrarlo es firmar que se revisó
-                        // todo, y eso todavía no es cierto.
-                        const devueltos = gastos.filter(g => !g.cierre_id && g.estado === "devuelto"
-                          && String(g.fecha||"").slice(0,10) <= cerrando.hasta);
-                        if (devueltos.length && !window.confirm(
-                          `Hay ${devueltos.length} ${devueltos.length===1?"gasto devuelto":"gastos devueltos"} en esta vuelta: `
-                          + "están mal cargados y todavía no se corrigieron.\n\n¿Cerrarla igual?")) return;
+                      <button disabled={!prop.gastos.length} onClick={async()=>{
                         const r = await cerrarCaja({ caja:cajaActiva, hasta:cerrando.hasta, nota:cerrando.nota,
                           quien:currentUser, anticipos, gastos, cierres });
                         if (r.error) { alert(r.error); return; }
                         setCerrando(null);
                         await fetchCierres(cajaActiva.id); await fetchGastos(cajaActiva.id); await fetchAnticipos(cajaActiva.id);
                       }} style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",
-                        fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Cerrar la vuelta</button>
+                        fontSize:12.5,fontWeight:600,cursor:prop.gastos.length?"pointer":"default",fontFamily:"inherit",
+                        opacity:prop.gastos.length?1:0.5}}>
+                        Cerrar hasta el {cerrando.hasta || "…"}
+                      </button>
                       <button onClick={()=>setCerrando(null)} style={{background:"none",border:"1px solid var(--border)",
                         borderRadius:8,padding:"7px 14px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={()=>setCerrando({hasta:prop.hasta,nota:""})}
+                  <button onClick={()=>setCerrando({hasta:base.hasta,nota:""})}
                     style={{background:"var(--brand)",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",
                       fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                    Cerrar hasta el {prop.hasta}
+                    Cerrar hasta el {base.hasta}
                   </button>
                 )}
               </div>
             );
           })()}
 
-          {/* Las vueltas ya rendidas. La foto de cada una, guardada: si mañana
-              alguien corrige un gasto viejo, la rendición firmada no cambia. */}
-          {cierres.length>0&&<div style={{marginBottom:14}}>
+          {/* EL RESUMEN DE LA CAJA: anticipos y cierres en una sola lista,
+              cada uno diciendo qué es. Un anticipo que llega después de un
+              cierre es la reposición de ese cierre, aunque quien lo cargó lo
+              haya llamado "cierre caja 1". La foto de cada cierre se guarda:
+              si mañana alguien corrige un gasto viejo, la rendición firmada
+              no cambia. */}
+          {(cierres.length>0||anticipos.length>0)&&<div style={{marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:6}}>
-              Vueltas cerradas ({cierres.length})
+              Resumen de la caja · {anticipos.length} {anticipos.length===1?"anticipo":"anticipos"} · {cierres.length} {cierres.length===1?"cierre":"cierres"}
             </div>
-            {cierres.map((c,i)=>(
-              <div key={c.id} style={{background:"var(--neutral-soft)",borderRadius:8,padding:"8px 12px",marginBottom:5,
+            {resumenDeLaCaja({ anticipos, cierres }).map(f => f.tipo === "cierre" ? (
+              <div key={`c${f.cierre.id}`} style={{background:"var(--neutral-soft)",borderRadius:8,padding:"8px 12px",marginBottom:5,
                 display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                <div style={{minWidth:0}}>
-                  <div style={{fontSize:12,color:"var(--ink)"}}>
-                    Cierre {c.numero} · hasta el {c.hasta} · {c.gastos} {c.gastos===1?"gasto":"gastos"}
-                  </div>
-                  <div style={{fontSize:10,color:"var(--muted)"}}>
-                    entregado ${fmt(c.total_abonado)} · gastado ${fmt(c.total_gastado)} · saldo ${fmt(c.saldo)}
-                    {c.cerrado_nombre?` · ${c.cerrado_nombre}`:""}{c.nota?` · ${c.nota}`:""}
+                <div style={{minWidth:0,display:"flex",gap:8,alignItems:"center"}}>
+                  <span style={{fontSize:9.5,fontWeight:700,letterSpacing:0.3,color:"var(--ink-soft)",background:"#fff",
+                    border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",flexShrink:0}}>CIERRE {f.cierre.numero}</span>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,color:"var(--ink)"}}>{f.dice}</div>
+                    <div style={{fontSize:10,color:"var(--muted)"}}>
+                      entregado ${fmt(f.cierre.total_abonado)} · gastado ${fmt(f.cierre.total_gastado)} · saldo ${fmt(f.cierre.saldo)}
+                      {f.cierre.cerrado_nombre?` · ${f.cierre.cerrado_nombre}`:""}{f.cierre.nota?` · ${f.cierre.nota}`:""}
+                    </div>
                   </div>
                 </div>
-                <button onClick={()=>setViendoCierre(String(c.id)===String(viendoCierre)?null:String(c.id))}
-                  style={{background:"none",border:"none",color:"var(--brand)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                  {String(c.id)===String(viendoCierre)?"ocultar":"ver sus gastos"}
-                </button>
-                {/* REABRIR CUALQUIERA, no solo la última. Las vueltas de más
-                    se hacen en cadena —se cerró una, entró un gasto atrasado,
-                    se cerró otra— y deshacerlas en orden obliga a tocar la
-                    buena para llegar a la mala. */}
-                {puede?.("borrar.definitivo")&&(
-                  <button onClick={async()=>{
-                    if(!window.confirm(`¿Reabrir el cierre ${c.numero}?\n\nSus gastos vuelven a quedar por rendir.`))return;
-                    const e = await reabrirCierre(c);
-                    if (e) { alert(e); return; }
-                    await fetchCierres(cajaActiva.id); await fetchGastos(cajaActiva.id); await fetchAnticipos(cajaActiva.id);
-                  }} style={{background:"none",border:"none",color:"var(--muted)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>reabrir</button>
-                )}
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>setViendoCierre(String(f.cierre.id)===String(viendoCierre)?null:String(f.cierre.id))}
+                    style={{background:"none",border:"none",color:"var(--brand)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                    {String(f.cierre.id)===String(viendoCierre)?"ocultar":"ver sus gastos"}
+                  </button>
+                  {/* REABRIR CUALQUIERA, no solo el último: deshacerlos en
+                      orden obliga a tocar el bueno para llegar al malo. */}
+                  {puede?.("borrar.definitivo")&&(
+                    <button onClick={async()=>{
+                      if(!window.confirm(`¿Reabrir el cierre ${f.cierre.numero}?\n\nSus gastos vuelven a quedar por rendir.`))return;
+                      const e = await reabrirCierre(f.cierre);
+                      if (e) { alert(e); return; }
+                      await fetchCierres(cajaActiva.id); await fetchGastos(cajaActiva.id); await fetchAnticipos(cajaActiva.id);
+                    }} style={{background:"none",border:"none",color:"var(--muted)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>reabrir</button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div key={`a${f.anticipo.id}`} style={{background:"#F5F3FF",border:"1px solid #DDD6FE",borderRadius:8,padding:"8px 12px",marginBottom:5,
+                display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <div style={{minWidth:0,display:"flex",gap:8,alignItems:"center"}}>
+                  <span style={{fontSize:9.5,fontWeight:700,letterSpacing:0.3,color:"#7C3AED",background:"#fff",
+                    border:"1px solid #DDD6FE",borderRadius:6,padding:"2px 6px",flexShrink:0}}>
+                    {f.tipo==="reposicion"?"REPOSICIÓN":"ANTICIPO"}
+                  </span>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,color:"var(--ink)"}}>{f.dice}{f.anticipo.descripcion?` · ${f.anticipo.descripcion}`:""}</div>
+                    <div style={{fontSize:10,color:"var(--muted)"}}>{f.fecha} · {f.anticipo.entregado_por_nombre}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{fontWeight:700,color:"#7C3AED",fontSize:13}}>${fmt(f.monto)}</div>
+                  {/* CORREGIRLO O BORRARLO. Un anticipo mal cargado deja la
+                      caja con un saldo que no existe. El saldo se recalcula
+                      desde los anticipos y los gastos, no se ajusta sumando la
+                      diferencia. */}
+                  {administra&&(
+                    <>
+                      <button onClick={()=>setAnticipoEditando({...f.anticipo})} title="Corregir este anticipo"
+                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:12,padding:0}}>✎</button>
+                      <button onClick={()=>borrarAnticipo(f.anticipo)} title="Borrar este anticipo"
+                        style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:12,padding:0}}>✕</button>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
+            {anticipoEditando&&(
+              <div style={{background:"#fff",border:"1px solid #DDD6FE",borderRadius:8,padding:"10px 12px",marginBottom:5,display:"grid",gap:7}}>
+                <div style={{fontSize:11.5,fontWeight:700,color:"#7C3AED"}}>Corregir el anticipo</div>
+                <div style={{display:"grid",gridTemplateColumns:"110px 140px 1fr",gap:7}}>
+                  <input type="number" step="0.01" value={anticipoEditando.monto} style={iS}
+                    onChange={e=>setAnticipoEditando(p=>({...p,monto:e.target.value}))}/>
+                  <input type="date" value={String(anticipoEditando.fecha||"").slice(0,10)} style={iS}
+                    onChange={e=>setAnticipoEditando(p=>({...p,fecha:e.target.value}))}/>
+                  <input value={anticipoEditando.descripcion||""} placeholder="Descripción" style={iS}
+                    onChange={e=>setAnticipoEditando(p=>({...p,descripcion:e.target.value}))}/>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={guardarAnticipo} style={{background:"#7C3AED",border:"none",borderRadius:8,padding:"6px 13px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>Guardar</button>
+                  <button onClick={()=>setAnticipoEditando(null)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"6px 13px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer",fontFamily:"var(--font)"}}>Cancelar</button>
+                </div>
+              </div>
+            )}
           </div>}
 
           {/* CORREGIR LA CAJA. El proyecto se elige de una lista larga y a
@@ -1401,49 +1478,6 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
             </div>
           )}
 
-          {anticipos.length>0&&<div style={{marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#7C3AED",marginBottom:6}}>Anticipos</div>
-            {anticipos.map(a=>(
-              <div key={a.id} style={{background:"#F5F3FF",border:"1px solid #DDD6FE",borderRadius:8,padding:"8px 12px",marginBottom:5,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div><div style={{fontSize:12,color:"var(--ink)"}}>{a.descripcion||"Anticipo"}</div>
-                  <div style={{fontSize:10,color:"var(--muted)"}}>{a.fecha} · {a.entregado_por_nombre}</div></div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{fontWeight:700,color:"#7C3AED",fontSize:13}}>${fmt(a.monto)}</div>
-                  {/* CORREGIRLO O BORRARLO. Un anticipo mal cargado —un cero
-                      de más, la fecha del mes pasado— deja la caja con un saldo
-                      que no existe, y el responsable rinde contra un número
-                      equivocado. El saldo se recalcula desde los anticipos y
-                      los gastos, no se ajusta sumando la diferencia: eso
-                      funciona hasta que alguien edita dos veces seguidas. */}
-                  {administra&&(
-                    <>
-                      <button onClick={()=>setAnticipoEditando({...a})} title="Corregir este anticipo"
-                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:12,padding:0}}>✎</button>
-                      <button onClick={()=>borrarAnticipo(a)} title="Borrar este anticipo"
-                        style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:12,padding:0}}>✕</button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-            {anticipoEditando&&(
-              <div style={{background:"#fff",border:"1px solid #DDD6FE",borderRadius:8,padding:"10px 12px",marginBottom:5,display:"grid",gap:7}}>
-                <div style={{fontSize:11.5,fontWeight:700,color:"#7C3AED"}}>Corregir el anticipo</div>
-                <div style={{display:"grid",gridTemplateColumns:"110px 140px 1fr",gap:7}}>
-                  <input type="number" step="0.01" value={anticipoEditando.monto} style={iS}
-                    onChange={e=>setAnticipoEditando(p=>({...p,monto:e.target.value}))}/>
-                  <input type="date" value={String(anticipoEditando.fecha||"").slice(0,10)} style={iS}
-                    onChange={e=>setAnticipoEditando(p=>({...p,fecha:e.target.value}))}/>
-                  <input value={anticipoEditando.descripcion||""} placeholder="Descripción" style={iS}
-                    onChange={e=>setAnticipoEditando(p=>({...p,descripcion:e.target.value}))}/>
-                </div>
-                <div style={{display:"flex",gap:6}}>
-                  <button onClick={guardarAnticipo} style={{background:"#7C3AED",border:"none",borderRadius:8,padding:"6px 13px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"var(--font)"}}>Guardar</button>
-                  <button onClick={()=>setAnticipoEditando(null)} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"6px 13px",color:"var(--ink-soft)",fontSize:12,cursor:"pointer",fontFamily:"var(--font)"}}>Cancelar</button>
-                </div>
-              </div>
-            )}
-          </div>}
           <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <span>📋 {cierreMirado ? `Gastos del cierre ${cierreMirado.numero}` : "Gastos por rendir"} ({gastosALaVista.length})</span>
             {cierreMirado && (

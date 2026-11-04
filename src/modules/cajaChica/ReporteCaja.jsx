@@ -6,11 +6,13 @@ import { inputStyle } from "../../components/ui/Input";
 import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
 import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
 import { enlaceArchivo, enlacesArchivos, subirArchivo } from "../../lib/archivos";
+import { paraElReporte } from "./lista.js";
+import { resumenDeLaCaja } from "./resumen.js";
 
 const primerDiaMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0]; };
 const hoy = () => new Date().toISOString().split("T")[0];
 
-export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) {
+export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usuarios = [] }) {
   const [desde, setDesde] = useState(primerDiaMes());
   const [hasta, setHasta] = useState(hoy());
   const [generando, setGenerando] = useState("");
@@ -21,15 +23,25 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
 
   const enRango = (f) => (!desde || f >= desde) && (!hasta || f <= hasta);
 
-  const { gastosF, anticiposF, totalGastos, totalAnticipos } = useMemo(() => {
-    const gastosF = gastos.filter(g => enRango(g.fecha)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const { gastosF, devueltosF, anticiposF, cierresF, totalGastos, totalAnticipos, totalDevueltos, queEs } = useMemo(() => {
+    const delPeriodo = gastos.filter(g => enRango(g.fecha)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    // LOS DEVUELTOS AL RESIDENTE QUEDAN FUERA. Están mal cargados y hasta que
+    // se corrijan no son un gasto de la caja: sumarlos era cobrarle a la obra
+    // un papel que administración rechazó. Van aparte, para que no se pierdan.
+    const { gastos: gastosF, devueltos: devueltosF } = paraElReporte(delPeriodo);
     const anticiposF = anticipos.filter(a => enRango(a.fecha)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const cierresF = cierres.filter(c => enRango(String(c.hasta || "").slice(0, 10)))
+      .sort((a, b) => (Number(a.numero) || 0) - (Number(b.numero) || 0));
+    // Qué es cada anticipo —el fondo, la reposición de qué cierre— dicho en el papel.
+    const dice = new Map(resumenDeLaCaja({ anticipos, cierres }).filter(f => f.anticipo).map(f => [f.anticipo.id, f.dice]));
     return {
-      gastosF, anticiposF,
+      gastosF, devueltosF, anticiposF, cierresF,
       totalGastos: gastosF.reduce((s, g) => s + (Number(g.monto) || 0), 0),
       totalAnticipos: anticiposF.reduce((s, a) => s + (Number(a.monto) || 0), 0),
+      totalDevueltos: devueltosF.reduce((s, g) => s + (Number(g.monto) || 0), 0),
+      queEs: a => dice.get(a.id) || "Anticipo",
     };
-  }, [gastos, anticipos, desde, hasta]);
+  }, [gastos, anticipos, cierres, desde, hasta]);
 
   const periodo = `${desde || "inicio"} a ${hasta || "hoy"}`;
   const conAdjunto = gastosF.filter(g => g.archivo_url).length;
@@ -47,16 +59,33 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
           g.estado || "pendiente", g.subido_por_nombre || "", g.archivo_url ? "Sí" : "No"]),
         [],
         ["", "", "", "", "", "", "TOTAL GASTOS", totalGastos],
+        ...(devueltosF.length ? [
+          [],
+          ["DEVUELTOS AL RESIDENTE — fuera de la cuenta hasta que se corrijan"],
+          ["FECHA", "PROVEEDOR", "RUC", "N° FACTURA", "DESCRIPCIÓN", "MOTIVO", "", "MONTO"],
+          ...devueltosF.map(g => [g.fecha, g.proveedor || "", g.ruc || "", g.numero_factura || "",
+            g.descripcion || "", g.devuelto_motivo || "", "", Number(g.monto) || 0]),
+          ["", "", "", "", "", "", "TOTAL DEVUELTO (no suma)", totalDevueltos],
+        ] : []),
       ];
 
       const filasAnticipos = [
         [`ANTICIPOS — ${caja.proyecto_nombre}`],
         [`Período: ${periodo}`],
         [],
-        ["FECHA", "DESCRIPCIÓN", "ENTREGADO POR", "MONTO"],
-        ...anticiposF.map(a => [a.fecha, a.descripcion || "", a.entregado_por_nombre || "", Number(a.monto) || 0]),
+        ["FECHA", "QUÉ ES", "DESCRIPCIÓN", "ENTREGADO POR", "MONTO"],
+        ...anticiposF.map(a => [a.fecha, queEs(a), a.descripcion || "", a.entregado_por_nombre || "", Number(a.monto) || 0]),
         [],
-        ["", "", "TOTAL ANTICIPOS", totalAnticipos],
+        ["", "", "", "TOTAL ANTICIPOS", totalAnticipos],
+      ];
+
+      const filasCierres = [
+        [`CIERRES DE CAJA — ${caja.proyecto_nombre}`],
+        [`Período: ${periodo}`],
+        [],
+        ["N°", "HASTA", "GASTOS", "ENTREGADO", "GASTADO", "SALDO", "CERRÓ", "NOTA"],
+        ...cierresF.map(c => [c.numero, c.hasta, c.gastos, Number(c.total_abonado) || 0, Number(c.total_gastado) || 0,
+          Number(c.saldo) || 0, c.cerrado_nombre || "", c.nota || ""]),
       ];
 
       const filasResumen = [
@@ -69,6 +98,8 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         ["Anticipos recibidos en el período", totalAnticipos],
         ["Gastos del período", totalGastos],
         ["Diferencia del período", totalAnticipos - totalGastos],
+        ...(devueltosF.length ? [["Devueltos al residente, fuera de la cuenta", totalDevueltos]] : []),
+        ...cierresF.map(c => [`Cierre ${c.numero} hasta el ${c.hasta}: gastado`, Number(c.total_gastado) || 0]),
         [],
         ["Saldo total entregado (histórico)", Number(caja.saldo_total) || 0],
         ["Total gastado (histórico)", Number(caja.saldo_gastado) || 0],
@@ -77,7 +108,8 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
 
       await exportarExcel(`Caja Chica - ${caja.proyecto_nombre} - ${desde}`, [
         { nombre: "Gastos", filas: filasGastos, anchos: [11, 28, 14, 18, 42, 24, 12, 12, 12, 16, 9] },
-        { nombre: "Anticipos", filas: filasAnticipos, anchos: [11, 40, 20, 12] },
+        { nombre: "Anticipos", filas: filasAnticipos, anchos: [11, 30, 40, 20, 12] },
+        ...(cierresF.length ? [{ nombre: "Cierres", filas: filasCierres, anchos: [5, 11, 8, 12, 12, 12, 18, 30] }] : []),
         { nombre: "Resumen", filas: filasResumen, anchos: [36, 16] },
       ]);
     } finally { setGenerando(""); }
@@ -92,12 +124,30 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         anchos: { 6: { halign: "right" } },
       }];
 
+      if (devueltosF.length) {
+        bloques.push({
+          titulo: "Devueltos al residente — fuera de la cuenta hasta que se corrijan",
+          columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Motivo", "Monto"],
+          filas: devueltosF.map(g => [g.fecha, g.proveedor || "—", g.numero_factura || "—",
+            (g.descripcion || "").slice(0, 45), (g.devuelto_motivo || "—").slice(0, 40), money(g.monto)]),
+          anchos: { 5: { halign: "right" } },
+        });
+      }
       if (anticiposF.length) {
         bloques.push({
           titulo: "Anticipos recibidos",
-          columnas: ["Fecha", "Descripción", "Entregado por", "Monto"],
-          filas: anticiposF.map(a => [a.fecha, a.descripcion || "—", a.entregado_por_nombre || "—", money(a.monto)]),
-          anchos: { 3: { halign: "right" } },
+          columnas: ["Fecha", "Qué es", "Descripción", "Entregado por", "Monto"],
+          filas: anticiposF.map(a => [a.fecha, queEs(a), a.descripcion || "—", a.entregado_por_nombre || "—", money(a.monto)]),
+          anchos: { 4: { halign: "right" } },
+        });
+      }
+      if (cierresF.length) {
+        bloques.push({
+          titulo: "Cierres de caja del período",
+          columnas: ["N°", "Hasta", "Gastos", "Entregado", "Gastado", "Saldo", "Cerró"],
+          filas: cierresF.map(c => [String(c.numero), c.hasta, String(c.gastos ?? ""), money(c.total_abonado),
+            money(c.total_gastado), money(c.saldo), c.cerrado_nombre || "—"]),
+          anchos: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
         });
       }
 
@@ -122,6 +172,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         resumen: soloAnexos ? [] : [
           { label: "Anticipos período", valor: `$${money(totalAnticipos)}` },
           { label: "Gastos período", valor: `$${money(totalGastos)}`, color: [185, 28, 28] },
+          ...(devueltosF.length ? [{ label: "Devueltos, fuera", valor: `$${money(totalDevueltos)}` }] : []),
           { label: "Diferencia", valor: `$${money(totalAnticipos - totalGastos)}` },
           { label: "Saldo disponible", valor: `$${money(caja.saldo_disponible)}`, color: [21, 128, 61] },
         ],
@@ -221,6 +272,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, usuarios = [] }) 
         <Mini label="Gastos" valor={gastosF.length} moneda={false} />
         <Mini label="Total gastado" valor={totalGastos} destacado />
         <Mini label="Anticipos" valor={totalAnticipos} />
+        {devueltosF.length > 0 && <Mini label="Devueltos, fuera" valor={totalDevueltos} />}
         <Mini label="Con factura" valor={`${conAdjunto}/${gastosF.length}`} moneda={false} />
       </div>
 

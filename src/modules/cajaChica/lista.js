@@ -32,3 +32,18 @@ export function deLaVuelta(filas = [], cierreId = null) {
     ? filas.filter(f => String(f.cierre_id || "") === String(cierreId))
     : filas.filter(f => !f.cierre_id);
 }
+
+/**
+ * Un gasto DEVUELTO AL RESIDENTE está mal cargado —administración lo
+ * rechazó— y hasta que se corrija no es un gasto de la caja: no se rinde y
+ * no suma en el reporte. Sumarlo era cobrarle a la obra un papel rechazado.
+ */
+export const devueltoAlResidente = g => g?.estado === "devuelto";
+
+/** Los que cuentan y los que están devueltos, aparte: se listan para que no se pierdan. */
+export function paraElReporte(gastos = []) {
+  return {
+    gastos: gastos.filter(g => !devueltoAlResidente(g)),
+    devueltos: gastos.filter(devueltoAlResidente),
+  };
+}

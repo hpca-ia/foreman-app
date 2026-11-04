@@ -3,9 +3,9 @@ import { supabase } from "../../lib/supabase";
 // Cerrar una vuelta de caja chica.
 //
 // Una caja chica va por vueltas: se entrega un fondo, se gasta, se rinde, y
-// recién entonces se repone. El abono nuevo ES el acuse de que la vuelta
-// anterior se rindió —nadie repone una caja que todavía no le rindieron— y
-// por eso es lo que habilita el cierre.
+// con lo rendido se repone. Se cierra POR FECHAS —al 31 de octubre, a una
+// quincena—: entra lo que tiene fecha hasta el corte y lo de después queda
+// para la planilla siguiente. La regla de qué entra vive en `vuelta.js`.
 //
 // Sin esto la caja es una lista que crece sin fin: al mes cuatro nadie sabe
 // qué gastos ya se revisaron, el responsable no tiene con qué probar que
@@ -29,12 +29,13 @@ import { proponerCierre } from "./vuelta.js";
  * diferencia entre un cierre y un filtro por fechas.
  */
 export async function cerrarCaja({ caja, hasta, nota, quien, anticipos = [], gastos = [], cierres = [] }) {
-  const prop = proponerCierre({ anticipos, gastos, cierres });
-  const corte = hasta || prop.hasta;
-  const abiertos = x => !x.cierre_id;
-  const entranG = gastos.filter(g => abiertos(g) && String(g.fecha || "").slice(0, 10) <= corte);
-  const entranA = anticipos.filter(a => abiertos(a) && String(a.fecha || "").slice(0, 10) <= corte);
-  if (!entranG.length && !entranA.length) return { error: "No hay movimientos sin rendir hasta esa fecha." };
+  // La misma cuenta que se mostró antes de apretar el botón: los devueltos
+  // quedan afuera, y lo posterior al corte también.
+  const prop = proponerCierre({ anticipos, gastos, cierres, hasta });
+  const corte = prop.hasta;
+  const entranG = prop.gastos;
+  const entranA = prop.abonos;
+  if (!entranG.length) return { error: "No hay gastos por rendir hasta esa fecha: nada que cerrar." };
 
   const totalGastado = redondo(entranG.reduce((t, g) => t + n(g.monto), 0));
   const totalAbonado = redondo(entranA.reduce((t, a) => t + n(a.monto), 0));
