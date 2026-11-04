@@ -79,6 +79,10 @@ export async function crearOrden(obraId, datos, quien) {
     fecha: datos.fecha || new Date().toISOString().split("T")[0],
     emitido_por: datos.emitido_por?.trim() || quien?.name || null,
     justificacion: datos.justificacion?.trim() || null,
+    // Los soportes también entran al crearla: NOVA los redacta junto con la
+    // justificación, y la pantalla de la orden ya los edita y el PDF ya los
+    // imprime. Se perdían acá, en el único paso que no los guardaba.
+    soportes: datos.soportes?.trim() || null,
     // Qué mueve la orden —puede ser más de una— y el honorario del contrato.
     afecta: Array.isArray(datos.afecta) ? datos.afecta : [],
     // A cuál reemplaza, si esta sale a corregir una que se anuló.
@@ -99,6 +103,10 @@ export async function crearOrden(obraId, datos, quien) {
       fecha: datos.fecha || new Date().toISOString().split("T")[0],
       emitido_por: datos.emitido_por?.trim() || quien?.name || null,
       justificacion: datos.justificacion?.trim() || null,
+      // Los soportes también entran al crearla: NOVA los redacta junto con la
+      // justificación, y la pantalla de la orden ya los edita y el PDF ya los
+      // imprime. Se perdían acá, en el único paso que no los guardaba.
+      soportes: datos.soportes?.trim() || null,
       contratista_nombre: datos.contratista_nombre?.trim() || "HCARQ SA",
       created_by: quien?.id ?? null, created_nombre: quien?.name || null,
     }).select().single();

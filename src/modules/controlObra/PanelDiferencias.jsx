@@ -17,6 +17,10 @@ import {
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
 import { globalMultiplicado, unidadesDistintas } from "./desconfiarDeNova.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
+// NOVA redacta la orden —justificación, soportes, una especificación por
+// partida— con los hechos ya decididos. Los números los pone el código.
+import { insumosDeOrden, redactarOrden } from "./redactarOrden.js";
+import { pedirANova, CONTRATO, textoDeNova } from "../../lib/modelos";
 import { candidatosPara } from "./emparejarRubros.js";
 import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./compararCotizaciones.js";
 import { baseSinIva } from "./contratoDeLaObra";
@@ -649,11 +653,30 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     const van = lineas.filter(l => l.decision === "cobrar" && !l.orden_cambio_id);
     if (!van.length) { setError("Marcá primero qué diferencias se le cobran al cliente."); return; }
     setOcupado(true); setError("");
+
+    // NOVA REDACTA; EL CÓDIGO PONE LOS NÚMEROS. Los hechos de cada partida
+    // —qué pasó, lo contratado contra lo necesario, el costo del proveedor—
+    // salen de las líneas ya decididas y de los rubros, y con eso el modelo
+    // escribe lo que un fiscalizador lee: la justificación, los soportes, una
+    // especificación por partida. Toda cifra que escriba tiene que estar en
+    // esos hechos; si no está, se le dice y redacta de nuevo. Y si no
+    // contesta, la orden sale igual con el borrador de siempre: redactar es
+    // una ayuda, no una condición.
+    const insumos = insumosDeOrden({ analisis: abierto, lineas: van, rubros: vivos, obra, pct: Number(pct) || 0 });
+    const { borrador, avisos: avisosDeNova } = await redactarOrden({
+      insumos, onPaso: setAviso,
+      pedir: async (system, usuario) => {
+        const { res, data } = await pedirANova({ model: CONTRATO, max_tokens: 2500, system,
+          messages: [{ role: "user", content: usuario }] });
+        if (!res.ok || data?.error) throw new Error(data?.error?.message || "NOVA no contestó");
+        return textoDeNova(data) || "";
+      },
+    });
+
     const r = await crearOrden(obra.id, {
       titulo: `Diferencias contra el presupuesto${abierto.proveedor ? ` · ${abierto.proveedor}` : ""}`,
-      justificacion: `Al comparar ${abierto.archivo_nombre || "la propuesta"} contra el contrato vigente `
-        + `aparecieron diferencias que no cubre:\n\n`
-        + van.map(l => `· ${l.descripcion}${l.nota ? ` — ${l.nota}` : ""}`).join("\n"),
+      justificacion: borrador.justificacion,
+      soportes: borrador.soportes || null,
       tipo: "Requerimiento cliente",
     }, currentUser);
     if (r.error) { setOcupado(false); setError(r.error); return; }
@@ -663,7 +686,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       todo: van.filter(l => l.hallazgo !== "menos_cantidad").map(comoPartida),
       menos: van.filter(l => l.hallazgo === "menos_cantidad").map(l => ({ ...comoPartida(l), quita: true })),
     }, pct)) {
-      const rl = await agregarLinea(r.orden.id, { ...linea, orden: puestas.length }, puestas);
+      // La especificación N es de la partida N: insumosDeOrden y
+      // partidasParaOrden ordenan igual —primero lo que suma, después lo que
+      // se descuenta—, y de eso depende que el texto caiga en su renglón.
+      const rl = await agregarLinea(r.orden.id, { ...linea, orden: puestas.length,
+        especificacion: borrador.partidas[puestas.length]?.especificacion || null }, puestas);
       if (rl.error) { setOcupado(false); setError(rl.error); return; }
       puestas.push(rl.linea);
     }
@@ -674,7 +701,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     await cargar();
     const quedan = lineas.filter(l => l.decision === "pendiente").length;
     setAviso(`Quedó armada la ${r.orden.codigo || `OC-${r.orden.numero}`} con ${puestas.length} `
-      + `${puestas.length === 1 ? "partida" : "partidas"}, en borrador. Revisá los precios antes de mandarla.`
+      + `${puestas.length === 1 ? "partida" : "partidas"}, en borrador${borrador.deRespaldo ? "" : ", redactada por NOVA"}. `
+      + "Revisá los precios y el texto antes de mandarla."
+      + (avisosDeNova.length ? ` ${avisosDeNova.join(" ")}` : "")
       + (quedan ? ` El análisis sigue abierto: quedan ${quedan} renglones por decidir, y con esos se arma `
         + "la orden siguiente." : ""));
     onCambio?.();
