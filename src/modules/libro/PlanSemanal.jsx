@@ -13,6 +13,9 @@ import { equipoEnCache } from "../../lib/equipo";
 // Lo que quedó sin hacer la semana anterior pasa a esta, con su motivo como
 // nota. Puro: qué quedó es un dato, no una opinión.
 import { loQueQuedo, propuestaDeArrastre, comoSeDice as comoSeDiceArrastre } from "./arrastrarPendientes.js";
+// Sumar a alguien del proyecto desde el plan: en una obra nueva el directorio
+// está vacío y la única forma de cargar a la gente era pasar por un acta.
+import { guardarConvocado } from "../actas/actas";
 import { gentePara } from "../controlObra/ordenesDeCambio";
 import { pdfPlanSemanal } from "./pdfPlanSemanal";
 
@@ -69,6 +72,8 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   // fechas, con el mismo corte —si la semana va de miércoles a martes, el
   // miércoles de antes—, igual que lo listan el PDF y el correo.
   const [quedaron, setQuedaron] = useState([]);
+  // La persona que se está sumando al proyecto desde el correo del plan.
+  const [nuevaPersona, setNuevaPersona] = useState(null);
   useEffect(() => {
     let vivo = true;
     if (!lead?.id || !desde || !hasta) { setQuedaron([]); return; }
@@ -809,7 +814,11 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                 setOcupado(false);
               }}><Printer size={13} /> Imprimir o bajar</Button>
               <Button variant="primary" size="sm" onClick={async () => {
-                const equipo = equipoEnCache() || [];
+                // La caché del equipo es { usuarios, proyectos }: lo que se quiere
+                // acá es la lista de usuarios. Tratarla como lista hacía que
+                // este clic lanzara un error silencioso y no pasara nada: el
+                // plan "no se podía mandar" sin que se viera por qué.
+                const equipo = equipoEnCache()?.usuarios || [];
                 // LA GENTE DEL PROYECTO, NO SOLO EL EQUIPO DE LA OFICINA.
                 //
                 // El plan lo necesitan los que trabajan la semana: el
@@ -824,7 +833,10 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                 // equipo queda a un clic. Marcar a mano cada lunes a las
                 // mismas dos personas es la clase de fricción que hace que el
                 // plan deje de mandarse a la tercera semana.
-                const manda = equipo.filter(u => u.email && ["gerente", "owner"].includes(u.role)).map(u => u.email);
+                // El director viene marcado (`owner`; "gerente" no existe como
+                // rol, pero si algún día existe entra igual). La columna es
+                // `rol`: `role` era de la lista vieja del teléfono.
+                const manda = equipo.filter(u => u.email && ["gerente", "owner"].includes(u.rol || u.role)).map(u => String(u.email).trim().toLowerCase());
                 setMandando({ correos: manda, nota: "" });
               }}><Send size={13} /> Mandar el plan por correo</Button>
               <span style={{ fontSize: 11.5, color: colors.muted }}>
@@ -842,7 +854,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                     // sola lista y sin repetidos: el mismo residente puede
                     // estar en las dos.
                     const todos = [];
-                    for (const u of [...(equipoEnCache() || []), ...gente]) {
+                    for (const u of [...(equipoEnCache()?.usuarios || []), ...gente]) {
                       const mail = String(u.email || "").trim().toLowerCase();
                       if (!mail || todos.some(x => x.email === mail)) continue;
                       todos.push({ id: u.id ?? mail, email: mail, name: u.name || u.nombre || mail,
@@ -860,6 +872,57 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                             fontFamily: colors.font, fontWeight: 700 }}>
                           {mandando.correos.length === todos.length ? "ninguno" : `todos · ${todos.length}`}
                         </button>
+                        {/* SUMAR A ALGUIEN DEL PROYECTO, acá mismo. Una obra nueva
+                            no tiene a nadie cargado —ni el encargado del
+                            contratista ni el fiscalizador— y hasta ahora la
+                            única puerta era el acta. Queda en el directorio del
+                            proyecto, para este correo y para las actas que
+                            vengan. */}
+                        {!nuevaPersona ? (
+                          <button onClick={() => setNuevaPersona({ nombre: "", empresa: "", email: "" })}
+                            title="Alguien del proyecto que no está en la lista"
+                            style={{ border: `1px dashed ${colors.border}`, background: "#fff", color: colors.inkSoft,
+                              borderRadius: 14, padding: "3px 10px", fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
+                            + sumar a alguien
+                          </button>
+                        ) : (
+                          <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "wrap", flexBasis: "100%" }}>
+                            <input placeholder="Nombre" value={nuevaPersona.nombre} autoFocus
+                              onChange={e => setNuevaPersona(n => ({ ...n, nombre: e.target.value }))}
+                              style={{ ...inputStyle, width: 150, padding: "4px 8px", fontSize: 11.5 }} />
+                            <input placeholder="Empresa o rol" value={nuevaPersona.empresa}
+                              onChange={e => setNuevaPersona(n => ({ ...n, empresa: e.target.value }))}
+                              style={{ ...inputStyle, width: 140, padding: "4px 8px", fontSize: 11.5 }} />
+                            <input placeholder="correo@" type="email" value={nuevaPersona.email}
+                              onChange={e => setNuevaPersona(n => ({ ...n, email: e.target.value }))}
+                              onKeyDown={e => { if (e.key === "Enter") document.getElementById("sumar-persona-plan")?.click(); }}
+                              style={{ ...inputStyle, width: 190, padding: "4px 8px", fontSize: 11.5 }} />
+                            <Button id="sumar-persona-plan" size="sm" variant="primary"
+                              disabled={ocupado || !nuevaPersona.nombre.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(nuevaPersona.email.trim())}
+                              onClick={async () => {
+                                setOcupado(true); setError("");
+                                const email = nuevaPersona.email.trim().toLowerCase();
+                                const r = await guardarConvocado({ lead_id: lead.id, nombre: nuevaPersona.nombre.trim(),
+                                  empresa: nuevaPersona.empresa.trim() || null, email, activo: true, orden: gente.length });
+                                if (r.error) { setOcupado(false); setError(r.error); return; }
+                                try { setGente(await gentePara(lead.id)); } catch { /* queda lo que había */ }
+                                // Recién sumado, va marcado: para eso se lo sumó.
+                                setMandando(m => ({ ...m, correos: m.correos.includes(email) ? m.correos : [...m.correos, email] }));
+                                setNuevaPersona(null);
+                                setOcupado(false);
+                              }}>Sumar</Button>
+                            <button onClick={() => setNuevaPersona(null)}
+                              style={{ border: "none", background: "transparent", color: colors.muted, cursor: "pointer", fontSize: 11.5, fontFamily: colors.font }}>
+                              cancelar
+                            </button>
+                          </span>
+                        )}
+                        {gente.length === 0 && !nuevaPersona && (
+                          <span style={{ flexBasis: "100%", fontSize: 11, color: colors.muted }}>
+                            Esta obra todavía no tiene a nadie del proyecto cargado —contratista, fiscalizador,
+                            cliente—. Sumalos acá o desde el acta: quedan para los dos.
+                          </span>
+                        )}
                         {todos.map(u => {
                           const puesto = mandando.correos.includes(u.email);
                           return (
