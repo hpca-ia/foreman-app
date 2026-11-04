@@ -213,3 +213,23 @@ test("dos personas con la misma cédula mal copiada siguen siendo dos", () => {
   ]);
   assert.equal(r.total, 2);
 });
+
+// ── EL UNITARIO IMPRESO ──────────────────────────────────────────────────────
+import { desdeLecturaDeFactura as deLaLectura } from "../src/modules/controlObra/itemsComprados.js";
+
+test("el unitario impreso manda sobre la división, cuando multiplica", () => {
+  const [a] = deLaLectura([{ descripcion: "Cemento", cantidad: 20, unidad: "saco", unitario: 8.5, monto: 170, iva: 15 }]);
+  assert.equal(a.precio_unitario, 8.5);
+  assert.equal("unitario" in a, false);   // no viaja a la tabla: la columna es precio_unitario
+});
+
+test("si el unitario impreso no multiplica el total, se vuelve a la división", () => {
+  // Un unitario mal leído no puede entrar al historial de precios.
+  const [a] = deLaLectura([{ descripcion: "Cemento", cantidad: 20, unitario: 9, monto: 170 }]);
+  assert.equal(a.precio_unitario, 8.5);
+});
+
+test("sin unitario impreso, la división de siempre", () => {
+  const [a] = deLaLectura([{ descripcion: "Varilla", cantidad: 5, monto: 60 }]);
+  assert.equal(a.precio_unitario, 12);
+});

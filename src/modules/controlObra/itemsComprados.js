@@ -202,7 +202,18 @@ export function desdeLecturaDeFactura(items = []) {
       iva_tasa: tasaDe(x.iva),
     }))
     .filter(x => x.descripcion && (x.cantidad || x.total))
-    .map(x => ({ ...x, precio_unitario: x.cantidad ? Math.round((x.total / x.cantidad) * 10000) / 10000 : null }));
+    // EL UNITARIO IMPRESO MANDA SOBRE LA DIVISIÓN. Ahora la lectura trae el
+    // precio unitario tal como está en el papel; dividir total entre cantidad
+    // da lo mismo cuando la factura está bien y otra cosa cuando no —un total
+    // mal leído arrastraba un unitario inventado al historial de precios—. Se
+    // usa el impreso si existe y multiplica; si no, la división de siempre.
+    .map(x => ({ ...x, precio_unitario: unitarioDe(x) }));
+}
+
+function unitarioDe(x) {
+  const impreso = Number(x.unitario) || 0;
+  if (impreso > 0 && x.cantidad && Math.abs(x.cantidad * impreso - x.total) <= Math.max(0.02, x.total * 0.005)) return impreso;
+  return x.cantidad ? Math.round((x.total / x.cantidad) * 10000) / 10000 : null;
 }
 
 /**
