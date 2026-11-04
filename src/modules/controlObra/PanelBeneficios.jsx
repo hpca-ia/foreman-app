@@ -8,7 +8,7 @@ import { compararContraPresupuesto } from "./compararProforma";
 import { derivar, cuentaAMano, explicar } from "./beneficioAMano.js";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
-import { ordenesMudas, contraQueSeMide } from "./cuentaBeneficios.js";
+import { ordenesMudas, contraQueSeMide, porProveedor } from "./cuentaBeneficios.js";
 import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
@@ -78,6 +78,8 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   // El desglose por origen, cerrado: la pregunta de esta pantalla es cuánta
   // plata quedó a favor, y eso se contesta con un número.
   const [verDesglose, setVerDesglose] = useState(false);
+  // Cómo se ven los guardados: la lista de siempre, o agrupados por proveedor.
+  const [vista, setVista] = useState("lista");
 
   const cargar = useCallback(async () => {
     if (!obra?.id) return;
@@ -346,6 +348,11 @@ Rubros de la obra: ${lista}`;
     // rubro por lo que de verdad se compró, y contra la base sin IVA, que es
     // como se cotiza. Lo presupuestado escrito a mano manda sobre esa cuenta.
     const c = cuentaAMano(f, vivos);
+    // EL RESPALDO, SI HAY. La captura del chat, la proforma, la foto del
+    // precio: tres meses después es lo único que prueba que se negoció. Si
+    // el depósito falla se guarda igual el beneficio y se dice.
+    let papel = {};
+    if (f.archivo) papel = await guardarProforma(obra.id, f.archivo);
     const res = await guardarBeneficio({
       id: f.id,
       obra_id: obra.id, obra_rubro_id: f.obra_rubro_id ? Number(f.obra_rubro_id) : null,
@@ -354,6 +361,7 @@ Rubros de la obra: ${lista}`;
       presupuestado: c.presupuestado ?? 0,
       real: n(f.real), proveedor: f.proveedor || null, nota: f.nota || null,
       origen: "manual", fecha: f.fecha || undefined,
+      ...(papel.path ? { archivo_path: papel.path, archivo_nombre: papel.nombre } : {}),
       // A mano lo decide quien escribe: muchos beneficios reales no tienen
       // papel —se negoció por teléfono— y esos ya están cobrados.
       estado: f.previsto ? "previsto" : "confirmado",
@@ -363,7 +371,8 @@ Rubros de la obra: ${lista}`;
     if (res.error) { setError(res.error); return; }
     setAMano(null);
     await cargar();
-    setAviso("Guardado.");
+    setAviso("Guardado." + (papel.path ? " El respaldo queda guardado con el beneficio." : ""));
+    if (papel.error) setFaltan(`El beneficio se guardó, pero el respaldo no se pudo guardar: ${papel.error}`);
   }
 
   const Tarjeta = ({ label, valor, color, icono }) => (
@@ -965,10 +974,26 @@ Rubros de la obra: ${lista}`;
                 onChange={e => setAMano(a => ({ ...a, previsto: e.target.checked }))} />
               Todavía no se compró
             </label>
-            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 7, alignItems: "center" }}>
-              <input value={aMano.nota || ""} placeholder="Por qué (se cambió de marca, se negoció el flete…)"
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+              <input value={aMano.nota || ""} placeholder="Qué se negoció (se cambió de marca, el flete gratis, descuento por volumen…)"
                 onChange={e => setAMano(a => ({ ...a, nota: e.target.value }))}
-                style={{ ...inputStyle, flex: 1, fontSize: 12, padding: "7px 10px" }} />
+                style={{ ...inputStyle, flex: 1, minWidth: 200, fontSize: 12, padding: "7px 10px" }} />
+              {/* EL RESPALDO: la captura del chat, la proforma, la foto del
+                  precio. Tres meses después es lo único que prueba que se
+                  negoció, y por eso se guarda con el beneficio. */}
+              <label title="Adjuntar un respaldo: la proforma, la captura del chat, la foto del precio"
+                style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: aMano.archivo ? colors.ink : colors.brand,
+                  border: `1px solid ${aMano.archivo ? colors.border : colors.brand}`, borderRadius: 14, padding: "4px 10px",
+                  cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <Paperclip size={12} />
+                {aMano.archivo ? aMano.archivo.name : "respaldo"}
+                <input type="file" accept="image/*,.pdf,.xlsx,.xls" style={{ display: "none" }}
+                  onChange={e => { const file = e.target.files?.[0]; setAMano(a => ({ ...a, archivo: file || null })); e.target.value = ""; }} />
+              </label>
+              {aMano.archivo && (
+                <button onClick={() => setAMano(a => ({ ...a, archivo: null }))} title="Quitar el respaldo"
+                  style={{ background: "none", border: "none", color: colors.muted, fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>×</button>
+              )}
               <Button variant="primary" size="sm" disabled={ocupado} onClick={guardarAMano}>
                 {ocupado ? "Guardando…" : "Guardar"}
               </Button>
@@ -994,7 +1019,79 @@ Rubros de la obra: ${lista}`;
           </div>
         )}
 
+        {/* VERLOS POR PROVEEDOR. Es la memoria de la obra: a quién se le
+            sacó qué —el flete, el descuento, el cambio de marca— para volver
+            a pedirlo la próxima vez, y para seguir si lo prometido se cumplió. */}
         {guardados.length > 0 && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8, fontSize: 11.5, color: colors.muted }}>
+            Ver:
+            {[["lista", "todos"], ["proveedor", "por proveedor"]].map(([k, txt]) => (
+              <button key={k} onClick={() => setVista(k)}
+                style={{ background: vista === k ? colors.brandSoft : "none", border: `1px solid ${vista === k ? colors.brand : colors.border}`,
+                  color: vista === k ? colors.brand : colors.inkSoft, borderRadius: 14, padding: "2px 10px", fontSize: 11,
+                  cursor: "pointer", fontFamily: colors.font, fontWeight: vista === k ? 700 : 400 }}>
+                {txt}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {guardados.length > 0 && vista === "proveedor" && (
+          <div style={{ display: "grid", gap: 8 }}>
+            {porProveedor(guardados).map(g => (
+              <div key={g.proveedor} style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+                borderRadius: colors.radiusMd, overflow: "hidden" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 12px", flexWrap: "wrap",
+                  background: colors.bg, borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>{g.proveedor}</div>
+                    <div style={{ fontSize: 10.5, color: colors.muted }}>
+                      {g.filas.length} {g.filas.length === 1 ? "beneficio" : "beneficios"}
+                      {g.cuantos ? ` · presupuestado $${fmt(g.presupuestado)} → costó $${fmt(g.real)}` : ""}
+                      {g.cuantosPrevistos ? ` · ${g.cuantosPrevistos} todavía sin comprar` : ""}
+                    </div>
+                  </div>
+                  {g.ahorro > 0 && <span style={{ fontSize: 11, color: colors.success }}>ahorró ${fmt(g.ahorro)}</span>}
+                  {g.sobreprecio > 0 && <span style={{ fontSize: 11, color: colors.danger }}>se pasó ${fmt(g.sobreprecio)}</span>}
+                  <span style={{ fontSize: 14, fontWeight: 700, color: g.neto >= 0 ? colors.success : colors.danger, minWidth: 86, textAlign: "right" }}>
+                    {g.neto >= 0 ? "+" : "−"}${fmt(Math.abs(g.neto))}
+                  </span>
+                </div>
+                {g.negociado.length > 0 && (
+                  <div style={{ padding: "7px 12px", fontSize: 11.5, color: colors.inkSoft, borderBottom: `1px solid ${colors.neutralSoft}`, lineHeight: 1.5 }}>
+                    <strong>Qué se negoció:</strong> {g.negociado.join(" · ")}
+                  </div>
+                )}
+                {g.filas.map(b => {
+                  const dif = Math.round((n(b.presupuestado) - n(b.real)) * 100) / 100;
+                  const rub = vivos.find(x => String(x.id) === String(b.obra_rubro_id));
+                  return (
+                    <div key={b.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 12px", fontSize: 11.5,
+                      borderBottom: `1px solid ${colors.neutralSoft}` }}>
+                      <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>{b.fecha}</span>
+                      <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {b.descripcion}{rub ? <span style={{ color: colors.muted }}> · {rub.numero}</span> : null}
+                        {n(b.cantidad) ? <span style={{ color: colors.muted }}> · {fmt(b.cantidad)} {b.unidad || ""}</span> : null}
+                        {esPrevisto(b) ? <span style={{ color: colors.warning }}> · sin comprar</span> : null}
+                      </span>
+                      <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>${fmt(b.presupuestado)} → ${fmt(b.real)}</span>
+                      <span style={{ fontWeight: 700, minWidth: 76, textAlign: "right", opacity: esPrevisto(b) ? 0.55 : 1,
+                        color: dif >= 0 ? colors.success : colors.danger }}>
+                        {dif >= 0 ? "+" : "−"}${fmt(Math.abs(dif))}
+                      </span>
+                      {b.archivo_path && enlaces[b.id] && (
+                        <a href={enlaces[b.id]} target="_blank" rel="noopener noreferrer" title={`Bajar el respaldo: ${b.archivo_nombre || "archivo"}`}
+                          style={{ color: colors.brand, display: "flex", flexShrink: 0 }}><Paperclip size={13} /></a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {guardados.length > 0 && vista === "lista" && (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
             borderRadius: colors.radiusMd, overflow: "hidden" }}>
             {guardados.map(b => {

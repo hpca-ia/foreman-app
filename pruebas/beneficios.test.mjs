@@ -84,3 +84,21 @@ test("la eficiencia de precio sigue midiendose contra el costo cargado", () => {
   assert.equal(b.presupuestado, 582);
   assert.equal(b.real, 528);
 });
+
+test("por proveedor: lo que se le sacó a cada uno y qué se negoció, con sus totales", async () => {
+  const { porProveedor } = await import("../src/modules/controlObra/cuentaBeneficios.js");
+  const g = porProveedor([
+    { proveedor: "Cholca", presupuestado: 720, real: 450, nota: "Negociación" },
+    { proveedor: "cholca ", presupuestado: 14300.02, real: 9500, nota: "Negociación" },     // el mismo, escrito distinto
+    { proveedor: "Kywi", presupuestado: 100, real: 130, nota: "Subió el acero" },
+    { proveedor: "Kywi", presupuestado: 50, real: 40, estado: "previsto", nota: "flete gratis [dif:7]" },
+    { presupuestado: 10, real: 8 },
+  ]);
+  assert.deepEqual(g.map(x => x.proveedor), ["Cholca", "Kywi", "Sin proveedor"]);
+  assert.equal(g[0].filas.length, 2);
+  assert.equal(g[0].neto, 5070.02);
+  assert.deepEqual(g[0].negociado, ["Negociación"]);
+  assert.equal(g[1].sobreprecio, 30);
+  assert.equal(g[1].previsto, 10);
+  assert.deepEqual(g[1].negociado, ["Subió el acero", "flete gratis"]);   // sin la marca de la máquina
+});

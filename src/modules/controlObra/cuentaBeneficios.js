@@ -208,3 +208,28 @@ export function eficienciaDeLaDiferencia(linea, rubro, analisis, contra = "costo
       + (analisis?.titulo ? ` · ${analisis.titulo}` : ""),
   };
 }
+
+/**
+ * Los beneficios agrupados por proveedor, con lo que se negoció con cada uno.
+ *
+ * Es la memoria de la obra: a quién se le sacó qué —el flete, el descuento por
+ * volumen, el cambio de marca— para volver a pedirlo la próxima vez, y para
+ * seguir si lo prometido se cumplió. Los totales de cada grupo son los mismos
+ * de siempre: lo previsto aparte, el ahorro y el sobreprecio por separado.
+ */
+export function porProveedor(beneficios = []) {
+  const grupos = new Map();
+  beneficios.forEach(b => {
+    const nombre = String(b?.proveedor || "").trim();
+    const clave = nombre.toLocaleLowerCase("es");
+    if (!grupos.has(clave)) grupos.set(clave, { proveedor: nombre || "Sin proveedor", filas: [] });
+    grupos.get(clave).filas.push(b);
+  });
+  const limpia = s => String(s || "").replace(/\s*·?\s*\[dif:\d+\]/g, "").trim();
+  return [...grupos.values()].map(g => ({
+    ...g,
+    ...totales(g.filas),
+    // Qué se negoció, dicho una vez por proveedor: las notas, sin repetir.
+    negociado: [...new Set(g.filas.map(b => limpia(b.nota)).filter(Boolean))],
+  })).sort((a, b) => Math.abs(b.neto) - Math.abs(a.neto) || a.proveedor.localeCompare(b.proveedor));
+}
