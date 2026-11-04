@@ -124,6 +124,11 @@ export async function autorizacionDe(clave) {
         identificacionComprador: dentro(xml, "identificacionComprador"),
         razonSocialComprador: dentro(xml, "razonSocialComprador"),
         importeTotal: Number(dentro(xml, "importeTotal")) || 0,
+        // LA BASE SIN IMPUESTOS Y EL DESCUENTO, del XML. Es contra esto que se
+        // comprueba que los renglones leídos del papel sumen lo que deben: no
+        // se leyó, viene firmado por el SRI.
+        totalSinImpuestos: Number(dentro(xml, "totalSinImpuestos")) || 0,
+        totalDescuento: Number(dentro(xml, "totalDescuento")) || 0,
         // EL IVA QUE DE VERDAD SE COBRÓ, de los totales por impuesto del XML.
         // Código 2 es IVA; el porcentaje 0, 6 (no objeto) y 7 (exento) no
         // cobran nada. Es lo que mira la regla de los negocios populares.

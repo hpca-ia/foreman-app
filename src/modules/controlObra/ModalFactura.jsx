@@ -17,6 +17,11 @@ import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { FORMAS_PAGO, registrarPago, valesDisponibles } from "./pagos";
 import { guardarRenglones, leerRenglones } from "./renglones";
 import { desdeLecturaDeFactura } from "./itemsComprados";
+// La factura también se comprueba con su propia aritmética: suma de renglones
+// = base imponible, y si no cierra, se vuelve a leer diciendo cuánto falta.
+import { leerHastaQueCuadre } from "../lectura/insistir.js";
+import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
+import { totalesDeLectura, renglonesDeLectura, revisionDeFactura } from "./cuadrarFactura.js";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -60,6 +65,11 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // Los renglones de la factura, leídos por NOVA. Cada uno puede ir a un rubro
   // distinto: una factura de ferretería sirve a tres capítulos.
   const [items, setItems] = useState([]);
+  // Cómo quedó la lectura: en cuántas vueltas cerró y contra qué. La revisión
+  // misma se calcula al pintar, porque cambia si alguien corrige un renglón a
+  // mano o cuando el SRI contesta con el XML.
+  const [lectura, setLectura] = useState(null);
+  const [paso, setPaso] = useState("");
   const [repartos, setRepartos] = useState(
     asignacionesFactura.map(a => a.obra_actividad_id != null
       ? { tipo: "actividad", id: a.obra_actividad_id, monto: a.monto }
@@ -170,76 +180,89 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       if (pesa) { setError(pesa); setLeyendo(false); return; }
       const listaRubros = rubros.slice(0, 220).map(r => `${r.id}:${r.descripcion.slice(0, 60)}`).join(" | ");
 
-      const res = await fetch("/api/nova", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: LECTURA, max_tokens: 4000,
-          system: `Eres NOVA. Lees comprobantes de gasto de una constructora de Ecuador —facturas, notas de venta, notas de crédito, recibos (también escritos a mano) y pasajes aéreos— y devuelves SOLO JSON, sin markdown:
-{"clase":"factura|nota_venta|nota_credito|recibo|pasaje","fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","clave_acceso":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
- "items":[{"descripcion":"","cantidad":0,"unidad":"","monto":0,"iva":15,"rubro_id":null}]}
+      // UNA LECTURA DE LA FACTURA. El lazo de abajo la vuelve a pedir, con el
+      // reclamo en la mano, si los renglones no suman la base impresa: "lo
+      // leído suma $230 y el papel dice $250, faltan $20" es lo que el modelo
+      // no sabía en la primera pasada. Tres vueltas; después se queda con la
+      // mejor y lo dice en pantalla.
+      async function unaLectura(reclamar) {
+        const res = await fetch("/api/nova", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: LECTURA, max_tokens: 4000,
+            system: `Eres NOVA. Lees comprobantes de gasto de una constructora de Ecuador —facturas, notas de venta, notas de crédito, recibos (también escritos a mano) y pasajes aéreos— y devuelves SOLO JSON, sin markdown:
+  {"clase":"factura|nota_venta|nota_credito|recibo|pasaje","fecha":"YYYY-MM-DD","ruc":"","razon_social":"","numero_factura":"","clave_acceso":"","numero_cheque":"","detalle":"","subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"total":0,"tipo":"material|mano_obra|maquinaria|contrato|honorarios|otro","rubro_id":null,
+   "items":[{"descripcion":"","cantidad":0,"unidad":"","unitario":0,"monto":0,"iva":15,"rubro_id":null}]}
 
-subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.
+  subtotal_0/5/15 son las bases imponibles por tasa de IVA. Si no distingues la tasa, pon todo en subtotal_15.
 
-"clase" es qué documento es: factura (dice FACTURA, con RUC y clave de
-acceso), nota_venta (dice NOTA DE VENTA: RIMPE o régimen simplificado),
-nota_credito (dice NOTA DE CRÉDITO: una devolución), recibo (un recibo simple,
-muchas veces escrito a mano) o pasaje (un boleto aéreo). Los montos van
-siempre como están impresos, positivos.
+  "clase" es qué documento es: factura (dice FACTURA, con RUC y clave de
+  acceso), nota_venta (dice NOTA DE VENTA: RIMPE o régimen simplificado),
+  nota_credito (dice NOTA DE CRÉDITO: una devolución), recibo (un recibo simple,
+  muchas veces escrito a mano) o pasaje (un boleto aéreo). Los montos van
+  siempre como están impresos, positivos.
 
-"clave_acceso" son los 49 dígitos seguidos que aparecen como NÚMERO DE
-AUTORIZACIÓN o CLAVE DE ACCESO, normalmente debajo del código de barras.
-Cópialos tal cual, sin espacios ni guiones. Con eso se le pregunta al SRI si la
-factura está autorizada de verdad, así que un dígito mal copiado hace fallar la
-consulta: si no se leen con certeza, devuelve "". Un recibo de venta o una nota
-de venta no tienen clave: ahí va "".
+  "clave_acceso" son los 49 dígitos seguidos que aparecen como NÚMERO DE
+  AUTORIZACIÓN o CLAVE DE ACCESO, normalmente debajo del código de barras.
+  Cópialos tal cual, sin espacios ni guiones. Con eso se le pregunta al SRI si la
+  factura está autorizada de verdad, así que un dígito mal copiado hace fallar la
+  consulta: si no se leen con certeza, devuelve "". Un recibo de venta o una nota
+  de venta no tienen clave: ahí va "".
 
-"items" ES LO MÁS IMPORTANTE: UNA LÍNEA POR CADA RENGLÓN DE LA FACTURA.
+  "items" ES LO MÁS IMPORTANTE: UNA LÍNEA POR CADA RENGLÓN DE LA FACTURA.
 
-Una factura de ferretería trae cemento, varilla y alambre, y cada cosa va a un
-capítulo distinto de la obra. Repartir el total a ojo entre capítulos es
-inventar; la factura ya dice qué trae y cuánto cuesta cada cosa. Copiá eso.
+  Una factura de ferretería trae cemento, varilla y alambre, y cada cosa va a un
+  capítulo distinto de la obra. Repartir el total a ojo entre capítulos es
+  inventar; la factura ya dice qué trae y cuánto cuesta cada cosa. Copiá eso.
 
-  "descripcion" el renglón como está impreso, corto.
-  "cantidad" y "unidad" si están; si no, 0 y "".
-  "monto" lo que suma ESE renglón, sin IVA —la base, igual que los subtotales—.
-  "iva" la tarifa de ESE renglón: 0, 5 o 15. Una factura puede mezclar
-  tarifas; si no se distingue cuál lleva el renglón, null.
-  "rubro_id" el rubro de la lista al que corresponde ESE renglón, o null si no
-  estás seguro. Null es una respuesta válida y es mejor que adivinar: quien
-  carga la factura lo elige en dos segundos, y un rubro equivocado se
-  descubre tres meses después.
+    "descripcion" el renglón como está impreso, corto.
+    "cantidad" y "unidad" si están; si no, 0 y "".
+    "unitario" el precio unitario impreso, sin IVA; 0 si el papel no lo trae.
+    "monto" lo que suma ESE renglón, sin IVA —la base, igual que los subtotales—.
+    "iva" la tarifa de ESE renglón: 0, 5 o 15. Una factura puede mezclar
+    tarifas; si no se distingue cuál lleva el renglón, null.
+    "rubro_id" el rubro de la lista al que corresponde ESE renglón, o null si no
+    estás seguro. Null es una respuesta válida y es mejor que adivinar: quien
+    carga la factura lo elige en dos segundos, y un rubro equivocado se
+    descubre tres meses después.
 
-La suma de los "monto" tiene que dar los subtotales. Si la factura trae
-descuentos o un renglón de transporte, ponelos como un ítem más, con su signo.
+  La suma de los "monto" tiene que dar los subtotales. Si la factura trae
+  descuentos o un renglón de transporte, ponelos como un ítem más, con su signo.
 
-Si no podés leer los renglones —una foto borrosa, un recibo escrito a mano—
-mandá "items" vacío. Un ítem inventado es peor que ninguno.
+  Si no podés leer los renglones —una foto borrosa, un recibo escrito a mano—
+  mandá "items" vacío. Un ítem inventado es peor que ninguno.
 
-"rubro_id" de arriba, el de la factura entera, es el más probable de todos: se
-usa cuando no hay renglones.
+  "rubro_id" de arriba, el de la factura entera, es el más probable de todos: se
+  usa cuando no hay renglones.
 
-Rubros: ${listaRubros}`,
-          messages: [{
-            role: "user",
-            content: [
-              esPdf
-                ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-                : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
-              { type: "text", text: "Extrae los datos de esta factura. Solo JSON." },
-            ],
-          }],
-        }),
-      });
-      // Si el servidor se cortó, lo que vuelve es una página de error en HTML:
-      // leerla como JSON da «Unexpected token 'A'...», que no le dice nada a
-      // nadie y parece que se rompió el programa entero.
-      const data = await res.json().catch(() => null);
-      if (!data) {
-        setError(`El servidor se cortó leyendo la factura (${res.status}). Si el archivo es muy grande, mandá una foto en vez del PDF entero.`);
-        setLeyendo(false); return;
+  Rubros: ${listaRubros}`,
+            messages: [{
+              role: "user",
+              content: [
+                esPdf
+                  ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+                  : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+                { type: "text", text: `Extrae los datos de esta factura. Solo JSON.${reclamar ? `\n\n${reclamar}` : ""}` },
+              ],
+            }],
+          }),
+        });
+        // Si el servidor se cortó, lo que vuelve es una página de error en HTML:
+        // leerla como JSON da «Unexpected token 'A'...», que no le dice nada a
+        // nadie y parece que se rompió el programa entero.
+        const data = await res.json().catch(() => null);
+        if (!data) {
+          throw new Error(`El servidor se cortó leyendo la factura (${res.status}). Si el archivo es muy grande, mandá una foto en vez del PDF entero.`);
+        }
+        const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
+        const p = JSON.parse(txt);
+        return { items: renglonesDeLectura(p), totales: totalesDeLectura(p), descuento: 0, p };
       }
-      const txt = (textoDeNova(data) || "{}").replace(/```json|```/g, "").trim();
-      const p = JSON.parse(txt);
+
+      const leido = await leerHastaQueCuadre({ leer: unaLectura, vueltas: 3, onPaso: setPaso });
+      setPaso("");
+      const p = leido.p || {};
+      setLectura({ quedo: leido.quedo, vuelta: leido.vuelta, vueltas: leido.vueltas, historia: leido.historia });
       // Al editar, lo que ya está escrito manda: alguien pudo haberlo
       // corregido a mano y volver a pisarlo con la lectura sería deshacer su
       // corrección. Lo que se vino a buscar son los renglones.
@@ -277,14 +300,14 @@ Rubros: ${listaRubros}`,
       // renglón y quien carga la factura confirma. Un rubro equivocado puesto
       // automáticamente se descubre tres meses después.
       if (Array.isArray(p.items) && p.items.length) {
-        setItems(p.items
-          .filter(x => x && (x.descripcion || n(x.monto)))
+        setItems((leido.items || [])
           .map((x, k) => ({
             k,
-            descripcion: String(x.descripcion || "").trim().slice(0, 90),
-            cantidad: n(x.cantidad),
-            unidad: String(x.unidad || "").trim().slice(0, 10),
-            monto: Math.round(n(x.monto) * 100) / 100,
+            descripcion: x.descripcion,
+            cantidad: x.cantidad,
+            unidad: x.unidad,
+            unitario: x.unitario,
+            monto: x.monto,
             iva: x.iva ?? null,
             // Solo si el rubro existe de verdad: un id inventado asignaría
             // plata a un renglón que nadie puede encontrar.
@@ -313,8 +336,9 @@ Rubros: ${listaRubros}`,
       // justo donde aparece el negocio popular que cobra un IVA que no debe.
       const rucLeido = String(p.ruc || "").replace(/\D/g, "");
       if (clave.length === 49 || rucLeido.length === 13) await revisarEnSri(clave, p.ruc, { iva: n(p.iva) });
-    } catch {
-      setError("NOVA no pudo leer el archivo. Llena los datos a mano.");
+    } catch (e) {
+      setPaso("");
+      setError(/se cortó leyendo/.test(e?.message || "") ? e.message : "NOVA no pudo leer el archivo. Llena los datos a mano.");
     }
     setLeyendo(false);
   }
@@ -945,6 +969,40 @@ Rubros: ${listaRubros}`,
           )}
         </div>
       )}
+
+      {/* ¿SE LEYÓ BIEN? Antes de repartir nada entre rubros: un renglón que
+          falta no se ve faltar, se ve como un dato. Cuadra, no cuadra o no se
+          pudo comprobar, contra el XML del SRI si contestó —viene firmado— y
+          si no contra la base impresa. Se calcula al pintar: cambia si alguien
+          corrige un renglón a mano. */}
+      {(items.length > 0 || paso) && (() => {
+        const rev = revisionDeFactura({ items, p: form, comprobante: sri?.comprobante || null });
+        const quedo = comoQuedo(rev);
+        const tono = quedo === "cuadra" ? colors.success : quedo === "no-cuadra" ? colors.danger : colors.warning;
+        return (
+          <div style={{ borderLeft: `3px solid ${tono}`, background: colors.surface, padding: "7px 10px",
+            marginBottom: 8, fontSize: 11.5, lineHeight: 1.5, color: quedo === "cuadra" ? colors.inkSoft : tono }}>
+            {paso ? <span>{paso}</span> : (
+              <>
+                <strong>{DICHO[quedo]}</strong>{" "}
+                {rev.conclusion}
+                {rev.contra === "sri" && " · contra la base del XML autorizado por el SRI"}
+                {rev.contra === "papel" && " · contra la base impresa"}
+                {lectura?.vuelta != null && (
+                  <span style={{ marginLeft: 6, opacity: 0.75 }}>
+                    · {lectura.vuelta === 1 ? "cerró a la primera" : `necesitó ${lectura.vuelta} de ${lectura.vueltas || 3} vueltas`}
+                  </span>
+                )}
+                {rev.malos.map((m, i) => (
+                  <div key={i} style={{ fontSize: 10.5 }}>
+                    · {String(m.descripcion || "").slice(0, 60)}: cantidad × unitario da ${fmt(m.dice)} y el papel dice ${fmt(m.pero)}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {/* LOS RENGLONES DE LA FACTURA, cada uno a su rubro.
           UNA FACTURA SIRVE A VARIOS CAPÍTULOS: la de ferretería trae cemento,
