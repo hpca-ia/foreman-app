@@ -774,6 +774,24 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                   y lea de nuevo. Los dos terminan en el mismo número: este es
                   el que dice cuánto costó llegar, y con una semana de lecturas
                   decide solo si el modelo del contrato vale lo que cuesta. */}
+              {/* Qué hizo el motor con la planilla: si reconoció el formato,
+                  si la aritmética corrigió una columna, si encontró el IVA en
+                  columna aparte. Lo que se corrigió solo se dice, porque es lo
+                  que alguien querría comprobar contra el papel. */}
+              {revisando.hoja?.recordado && (
+                <div style={{ fontSize: 10.5, opacity: 0.8 }}>
+                  · formato de planilla ya conocido ({revisando.hoja.recordado.veces} {revisando.hoja.recordado.veces === 1 ? "vez" : "veces"}): las columnas no se adivinaron
+                </div>
+              )}
+              {(revisando.hoja?.cambios || []).map((c, i) => (
+                <div key={i} style={{ fontSize: 10.5 }}>· la aritmética corrigió el mapa — {c}</div>
+              ))}
+              {revisando.hoja?.iva && (
+                <div style={{ fontSize: 10.5 }}>· el unitario con IVA ({revisando.hoja.iva.pct}%) estaba en columna aparte: se tomó el precio sin IVA</div>
+              )}
+              {revisando.hoja?.miles && (
+                <div style={{ fontSize: 10.5, opacity: 0.8 }}>· la planilla agrupa los miles con «{revisando.hoja.miles}»: así se leyeron sus cifras</div>
+              )}
               {revisando.vuelta != null && (
                 <span style={{ marginLeft: 6, opacity: 0.75 }}>
                   · {revisando.vuelta === 1

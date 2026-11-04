@@ -267,3 +267,79 @@ test("una celda con letras no es un numero", async () => {
   const items = renglonesDeHoja(filas, columnasDeHoja(filas));
   assert.equal(items.length, 1);
 });
+
+// ── EL MOTOR EN LA PLANILLA: aritmética, convención y memoria ──────────────
+import { leerCotizacion } from "../src/modules/controlObra/leerProforma.js";
+import { firmaEncabezado } from "../src/modules/controlObra/leerPresupuesto.js";
+
+// Una planilla cuyo encabezado NO nombra el precio unitario —dice "VALOR"— y
+// escribe los miles con punto. Todo lo que el motor tiene que resolver solo.
+const PLANILLA = [
+  ["COTIZACION 0045", "", "", "", ""],
+  ["PROVEEDOR: SOLEK", "", "", "", ""],
+  ["DESCRIPCION", "CANT", "UNID", "VALOR", "TOTAL"],
+  ["Punto de iluminación", "100", "U", "33", "3.300"],
+  ["Cable THHN 12", "500", "ML", "4", "2.000"],
+  ["Tablero trifásico", "1", "U", "1.180", "1.180"],
+  ["Breaker 1P-16A", "20", "U", "10", "200"],
+  ["Tubería EMT 1/2", "300", "ML", "2,5", "750"],
+  ["SUBTOTAL", "", "", "", "7.430,00"],
+];
+const comoTexto = () => PLANILLA.map(f => f.join("|")).join("\n");
+const archivoXlsx = { name: "solek.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
+
+test("una planilla se lee sola, cierra, y el modelo no hace falta", async () => {
+  let pedidos = 0;
+  const r = await leerCotizacion(archivoXlsx, {
+    hojaComoTexto: async () => comoTexto(),
+    pedir: async () => { pedidos++; return { texto: "", cortado: false }; },
+  });
+  assert.equal(pedidos, 0, "no se llamó al modelo");
+  assert.equal(r.items.length, 5);
+  assert.equal(r.cerro, true);
+  // El unitario que el encabezado no nombró lo encontró la aritmética.
+  assert.equal(r.hoja.mapa.col_unitario, 3);
+  assert.match(r.hoja.cambios[0], /no estaba en el encabezado, es la columna D/);
+  // Y la convención la dijo el pie: "7.430,00" → el punto agrupa miles.
+  assert.equal(r.hoja.miles, ".");
+  const tablero = r.items.find(x => /Tablero/.test(x.descripcion));
+  assert.equal(tablero.monto, 1180);          // no 1,18
+  assert.equal(tablero.unitario, 1180);
+});
+
+test("renglonesDeHoja lee las cifras con la convención del documento", () => {
+  const m = { fila_encabezado: 2, col_descripcion: 0, col_cantidad: 1, col_unidad: 2, col_unitario: 3, col_total: 4 };
+  const conPunto = renglonesDeHoja(PLANILLA, m, { miles: "." });
+  assert.equal(conPunto.find(x => /Tablero/.test(x.descripcion)).monto, 1180);
+  const sinDecir = renglonesDeHoja(PLANILLA, m);
+  assert.equal(sinDecir.find(x => /Tablero/.test(x.descripcion)).monto, 1.18);   // como siempre, sin evidencia
+});
+
+test("un formato ya conocido se usa primero y se dice", async () => {
+  // El formato guardado viene del lector de presupuestos: llama col_precio a
+  // la columna que acá es col_unitario. Es la misma columna.
+  const formato = {
+    firma: firmaEncabezado(PLANILLA[2]), veces: 3,
+    mapa: { col_item: null, col_descripcion: 0, col_unidad: 2, col_cantidad: 1, col_precio: 3, col_total: 4, col_capitulo: null },
+  };
+  const r = await leerCotizacion(archivoXlsx, {
+    hojaComoTexto: async () => comoTexto(), formatos: [formato],
+    pedir: async () => ({ texto: "", cortado: false }),
+  });
+  assert.equal(r.cerro, true);
+  assert.deepEqual(r.hoja.recordado, { veces: 3 });
+  assert.equal(r.hoja.mapa.col_unitario, 3);
+  assert.deepEqual(r.hoja.cambios, []);        // nada que corregir: ya cuadraba
+});
+
+test("lo que no cierra no trae mapa para recordar", async () => {
+  // El pie dice otra cosa que la suma: la lectura no cierra, y el que llama
+  // no debe guardar este mapa como formato.
+  const rota = PLANILLA.map(f => f[0] === "SUBTOTAL" ? [...f.slice(0, 4), "9.999,00"] : f);
+  const r = await leerCotizacion(archivoXlsx, {
+    hojaComoTexto: async () => rota.map(f => f.join("|")).join("\n"),
+    pedir: async () => ({ texto: "", cortado: false }), vueltas: 1,
+  });
+  assert.equal(r.cerro, false);
+  assert.equal(r.quedo, "no-cuadra");
+});

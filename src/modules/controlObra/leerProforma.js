@@ -19,6 +19,13 @@ import { num, numeroDeCelda } from "../lectura/celdas.js";
 import { cuadrar, revisarLectura } from "../lectura/aritmetica.js";
 // Leer, comprobar, y si no cuadra volver a leer diciendo qué no cuadró.
 import { leerHastaQueCuadre, VUELTAS } from "../lectura/insistir.js";
+// La aritmética elige qué columna es cuál, y la evidencia del papel dice con
+// qué convención de miles está escrito. Mismo motor que el presupuesto.
+import { mapeoQueCuadra, milesDelDocumento, pieDeHoja } from "../lectura/columnas.js";
+// Un formato que ya se leyó una vez se reconoce por su encabezado. Vive en el
+// lector de presupuestos y es el mismo para una proforma: es una lista de
+// columnas, no importa de qué papel.
+import { buscarFormato } from "./leerPresupuesto.js";
 export { cuadrar, revisarLectura };
 // Las reglas para leer una celda son las mismas acá que en el presupuesto: es
 // el mismo papel con otro encabezado. Se re-exporta porque la pantalla y las
@@ -276,7 +283,7 @@ export function columnasDeHoja(filas = []) {
   return null;
 }
 
-export function renglonesDeHoja(filas = [], mapa = {}) {
+export function renglonesDeHoja(filas = [], mapa = {}, { miles = null } = {}) {
   const cD = mapa.col_descripcion, cC = mapa.col_cantidad, cU = mapa.col_unidad, cT = mapa.col_total;
   const cP = mapa.col_unitario;
   if (cD == null || cT == null) return [];
@@ -285,7 +292,7 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
   for (let i = desde; i < filas.length; i++) {
     const f = filas[i] || [];
     const descripcion = String(f[cD] ?? "").trim();
-    const monto = Math.round(numeroDeCelda(f[cT]) * 100) / 100;
+    const monto = Math.round(numeroDeCelda(f[cT], miles) * 100) / 100;
     // Sin descripción o sin monto es una fila vacía, un título de capítulo o
     // una línea de separación. No es un renglón que se compre.
     if (!descripcion || !monto) continue;
@@ -294,11 +301,11 @@ export function renglonesDeHoja(filas = [], mapa = {}) {
     if (TOTALES.test(descripcion)) continue;
     items.push({
       descripcion: descripcion.slice(0, 90),
-      cantidad: numeroDeCelda(cC == null ? 0 : f[cC]),
+      cantidad: numeroDeCelda(cC == null ? 0 : f[cC], miles),
       unidad: String(cU == null ? "" : (f[cU] ?? "")).trim().slice(0, 10),
       monto,
       // El unitario del papel, para comprobar la multiplicación.
-      unitario: cP == null ? null : (numeroDeCelda(f[cP]) || null),
+      unitario: cP == null ? null : (numeroDeCelda(f[cP], miles) || null),
       rubro_id: null,
     });
   }
@@ -452,7 +459,7 @@ lectura. Acá solo se transcribe el papel.`;
  * @param pedir  función que habla con NOVA: (cuerpo) => { texto, cortado }
  * @returns { proveedor, items, cortado }
  */
-export async function leerCotizacion(file, { pedir, lista = "", rubros = [], modelo, onPaso, hojaComoTexto, vueltas = VUELTAS } = {}) {
+export async function leerCotizacion(file, { pedir, lista = "", rubros = [], modelo, onPaso, hojaComoTexto, vueltas = VUELTAS, formatos = [] } = {}) {
   const esHoja = /\.(xlsx|xlsm|xls)$/i.test(file?.name || "");
   const esPdf = file?.type === "application/pdf";
   const sistema = sistemaDeCotizacion();
@@ -477,6 +484,9 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   async function unaLectura(reclamar) {
     const items = [];
     let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0, fecha = null;
+    // Cómo se leyó la planilla, si lo fue: el mapa, la convención, qué se
+    // corrigió. Es lo que se recuerda si la lectura cierra.
+    let hoja = null;
 
     // UNA PLANILLA SE LEE SOLA, SIN MODELO.
     //
@@ -489,12 +499,36 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     // Si no se reconocen los encabezados se sigue preguntando, que es mejor que
     // no leer nada.
     if (esHoja && filas.length && !reclamar) {
-      const mapa = columnasDeHoja(filas);
+      // PRIMERO LO QUE YA SE SABE. Un proveedor que manda siempre la misma
+      // planilla se reconoce por el encabezado, y sus columnas no se vuelven a
+      // adivinar. El formato guarda `col_precio`, que acá se llama
+      // `col_unitario`: es la misma columna con otro nombre.
+      const recordado = buscarFormato(filas, formatos);
+      let mapa = recordado
+        ? { ...recordado.mapa, col_unitario: recordado.mapa.col_precio ?? null }
+        : columnasDeHoja(filas);
       if (mapa) {
-        const solas = renglonesDeHoja(filas, mapa);
+        // CON QUÉ CONVENCIÓN DE MILES ESTÁ ESCRITA, y después LA ARITMÉTICA
+        // CORRIGE EL MAPA: un título que miente, o un unitario que el
+        // encabezado no nombró, se resuelven porque cantidad × precio = total
+        // en una sola combinación de columnas.
+        const miles = milesDelDocumento(filas);
+        const ajuste = mapeoQueCuadra(filas, mapa, { clavePrecio: "col_unitario", miles });
+        mapa = ajuste.mapa;
+        const solas = renglonesDeHoja(filas, mapa, { miles });
         if (solas.length) {
           items.push(...solas);
-          onPaso?.(`${solas.length} renglones leídos de la planilla`);
+          // EL PIE ESTÁ EN LA MISMA HOJA. Sin él la aritmética no tiene contra
+          // qué comprobar, y una planilla leída sin comprobar no es mejor que
+          // una leída por el modelo: es la misma incertidumbre sin el aviso.
+          const pie = pieDeHoja(filas, mapa, { miles });
+          if (pie.subtotal != null) totales = { subtotal: pie.subtotal, iva: pie.iva, total: pie.total };
+          if (pie.descuento) descuento = pie.descuento;
+          hoja = { filas, mapa, miles, cambios: ajuste.cambios || [], iva: ajuste.iva || null,
+            recordado: recordado ? { veces: recordado.formato?.veces || 1 } : null };
+          onPaso?.(`${solas.length} renglones leídos de la planilla`
+            + (recordado ? " · formato ya conocido" : "")
+            + (ajuste.cambios?.length ? " · columnas corregidas por la aritmética" : ""));
         }
       }
     }
@@ -577,11 +611,11 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
       if (sobra > Math.max(0.05, items.length * 0.01)) descuento = sobra;
     }
 
-    return { items, proveedor, cortado, iva, totales, descuento, fecha };
+    return { items, proveedor, cortado, iva, totales, descuento, fecha, hoja };
   }
 
   const leido = await leerHastaQueCuadre({ leer: unaLectura, vueltas, onPaso });
-  const { items, proveedor, cortado, iva, totales, descuento, fecha } = leido;
+  const { items, proveedor, cortado, iva, totales, descuento, fecha, hoja = null } = leido;
 
   // EL DESCUENTO VIAJA ENTERO Y APARTE, no repartido entre los renglones.
   //
@@ -651,7 +685,7 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   // mismo, y así queda claro que es UNA sola comprobación, no dos criterios.
   const { revision, quedo, cerro, vuelta, vueltas: topeDeVueltas, historia } = leido;
 
-  return { proveedor, items, cortado, iva, totales, descuento, fecha, revision,
+  return { proveedor, items, cortado, iva, totales, descuento, fecha, revision, hoja,
     // Cómo quedó la lectura y cuánto costó llegar: `cerro` dice si pasó la
     // comprobación contra el pie del papel, `vuelta` en cuál de las vueltas, e
     // `historia` qué se le reclamó en cada una. Si `cerro` es false la lectura

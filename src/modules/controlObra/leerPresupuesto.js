@@ -34,6 +34,7 @@ const prefijo = c => (texto(c).match(/^(\d+)/) || [])[1] || null;
 // para el presupuesto, la proforma y la cotización. Se re-exportan para no
 // cambiarle el import a quien ya las pedía desde acá.
 import { num, numeroDeCelda } from "../lectura/celdas.js";
+import { mapeoQueCuadra } from "../lectura/columnas.js";
 export { num, numeroDeCelda };
 
 export const MAPA_PROMPT = `Estas son las primeras filas de un presupuesto de construcción en Excel.
@@ -142,111 +143,13 @@ export function precioQueCuadra(filasTodas, m) {
 /**
  * Comprobar el mapa contra los números, y corregirlo si no cuadra.
  *
- * NOVA acierta casi siempre, pero "casi" en un presupuesto de 170 rubros son
- * treinta filas mal leídas que alguien tiene que encontrar a mano. Y el modelo
- * no puede garantizar nada: mira títulos de columna, que a veces mienten
- * —"V. Unitario" en una columna que en realidad trae el precio con IVA—.
- *
- * Los números sí se pueden comprobar: en un presupuesto, cantidad × precio =
- * total en casi todas las filas. Si el mapa que vino no cumple eso, se prueban
- * las combinaciones de columnas numéricas y se elige la que SÍ lo cumple. Es
- * aritmética, no opinión: o reproduce los totales del Excel o no.
- *
- * @returns el mapa corregido, y qué se cambió para poder decirlo en pantalla.
+ * La regla vive en lectura/columnas.js y es la misma para el presupuesto y la
+ * proforma: cantidad × precio = total en una sola combinación de columnas, y
+ * esa es la que vale. Acá solo se le dice cómo se llama la columna del precio
+ * en este mapa. Se conserva el nombre porque ImportarObra, la revisión y las
+ * pruebas lo piden así.
  */
-export function mapaQueCuadra(filasTodas, m) {
-  const desde = (m.fila_encabezado ?? 0) + 1;
-  const filas = filasTodas.slice(desde, desde + 400).filter(f => Array.isArray(f) && f.length);
-  const columnas = Math.max(0, ...filas.map(f => f.length));
-  if (columnas < 3) return { mapa: m, cambios: [] };
-
-  // Cuántas filas cumplen cantidad × precio = total con esta combinación.
-  const calzan = (cc, cp, ct) => filas.filter(f => {
-    const cant = numeroDeCelda(f[cc]), precio = numeroDeCelda(f[cp]), total = numeroDeCelda(f[ct]);
-    if (!(cant > 0 && precio > 0 && total > 0)) return false;
-    return Math.abs(cant * precio - total) <= Math.max(0.02, total * 0.005);
-  }).length;
-
-  // Con cuántas filas se puede medir: sin eso, "0 de 0" parecería un fracaso.
-  const conNumeros = (cc, cp, ct) => filas.filter(f =>
-    num(f[cc]) > 0 && num(f[cp]) > 0 && num(f[ct]) > 0).length;
-
-  const actual = m.col_cantidad != null && m.col_precio != null && m.col_total != null
-    ? { cc: m.col_cantidad, cp: m.col_precio, ct: m.col_total }
-    : null;
-  const base = actual ? calzan(actual.cc, actual.cp, actual.ct) : 0;
-  const posibles = actual ? conNumeros(actual.cc, actual.cp, actual.ct) : 0;
-
-  // Si ya cuadra en la mayoría, no se toca nada: el mapa está bien.
-  if (posibles >= 5 && base >= posibles * 0.8) return { mapa: m, cambios: [] };
-
-  let mejor = actual ? { ...actual, calzan: base, de: posibles } : null;
-  for (let cc = 0; cc < columnas; cc++) {
-    for (let cp = 0; cp < columnas; cp++) {
-      if (cp === cc) continue;
-      for (let ct = 0; ct < columnas; ct++) {
-        if (ct === cc || ct === cp) continue;
-        const de = conNumeros(cc, cp, ct);
-        if (de < 5) continue;
-        const n = calzan(cc, cp, ct);
-        if (n < de * 0.8) continue;
-        if (!mejor || n > mejor.calzan) mejor = { cc, cp, ct, calzan: n, de };
-      }
-    }
-  }
-  if (!mejor || !actual || (mejor.cc === actual.cc && mejor.cp === actual.cp && mejor.ct === actual.ct)) {
-    return { mapa: m, cambios: [] };
-  }
-
-  // ── EL IVA EN COLUMNA APARTE ─────────────────────────────────────────────
-  //
-  // Muchísimas planillas traen P.UNITARIO, IVA 15 % y P.UNITARIO CON IVA, y
-  // el total es cantidad × el precio CON IVA. Visto desde acá, el precio que
-  // "cuadra" es el de la columna con IVA, y hasta ahora se cambiaba a esa y
-  // listo: el presupuesto entraba con precios unitarios inflados un 15 %.
-  //
-  // Eso no es un detalle de presentación. Los honorarios y los indirectos se
-  // calculan como un porcentaje del costo directo, y si el costo directo trae
-  // el impuesto adentro, el honorario se está cobrando sobre el IVA. En una
-  // obra de ocho millones son cien mil dólares que no son de nadie.
-  //
-  // Si lo único que cambia es la columna del precio y la nueva es un
-  // porcentaje parejo por encima de la vieja, eso no es una columna
-  // equivocada: es el IVA. Se queda el precio sin IVA y se anota la tasa.
-  if (mejor.cc === actual.cc && mejor.ct === actual.ct && mejor.cp !== actual.cp) {
-    const razones = filas
-      .map(f => ({ viejo: num(f[actual.cp]), nuevo: num(f[mejor.cp]) }))
-      .filter(x => x.viejo > 0 && x.nuevo > 0)
-      .map(x => x.nuevo / x.viejo - 1)
-      .sort((a2, b2) => a2 - b2);
-    const medio = razones.length >= 5 ? razones[Math.floor(razones.length / 2)] : null;
-    // Una tasa de impuesto, no cualquier diferencia: entre 5 % y 25 %, y
-    // pareja —si cada fila tiene otro recargo, son dos columnas distintas y
-    // no un impuesto—.
-    const pareja = medio != null
-      && razones.filter(v => Math.abs(v - medio) <= 0.004).length >= razones.length * 0.8;
-    if (pareja && medio >= 0.05 && medio <= 0.25) {
-      return {
-        mapa: { ...m, col_cantidad: mejor.cc, col_precio: actual.cp, col_total: mejor.ct },
-        cambios: [],
-        iva: { pct: Math.round(medio * 1000) / 10, columnaConIva: mejor.cp, columnaSinIva: actual.cp },
-        cuadran: mejor.calzan, de: mejor.de,
-      };
-    }
-  }
-
-  const cambios = [];
-  const nombre = { cc: "cantidad", cp: "precio unitario", ct: "total" };
-  const letra = i => String.fromCharCode(65 + (i % 26));
-  ["cc", "cp", "ct"].forEach(k => {
-    if (mejor[k] !== actual[k]) cambios.push(`${nombre[k]}: columna ${letra(actual[k])} → ${letra(mejor[k])}`);
-  });
-  return {
-    mapa: { ...m, col_cantidad: mejor.cc, col_precio: mejor.cp, col_total: mejor.ct },
-    cambios,
-    cuadran: mejor.calzan, de: mejor.de,
-  };
-}
+export const mapaQueCuadra = (filasTodas, m) => mapeoQueCuadra(filasTodas, m, { clavePrecio: "col_precio" });
 
 export function interpretarPresupuesto(filasTodas, mapaNova, { conPendientes = false, respetarMapa = false, bloque: bloqueInicial = null, ivaForzado = null } = {}) {
   // `respetarMapa` salta el saneo automático: lo usa quien corrige la lectura

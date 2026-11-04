@@ -3,6 +3,9 @@ import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { pedirANova, CONTRATO, textoDeNova } from "../../lib/modelos";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import { leerCotizacion } from "./leerProforma.js";
+// Los formatos de planilla ya leídos viven con los del presupuesto: una lista
+// de columnas es una lista de columnas, venga el papel de donde venga.
+import { recordarFormato } from "../../lib/leerExcelPresupuesto";
 import { limpiarEmparejamientos } from "./desconfiarDeNova.js";
 import { hojaComoTexto } from "./beneficios";
 import { codigoDe } from "./nombreOrden";
@@ -35,9 +38,13 @@ export async function leerConNova(original, rubros = [], onPaso) {
   const lista = (rubros || []).filter(r => !r.oculto && !r.anulado_por_oc).slice(0, 220)
     .map(r => `${r.id}:${String(r.descripcion || "").slice(0, 60)}`).join(" | ");
 
+  // Los formatos que ya se leyeron alguna vez. Si la tabla no está o falla,
+  // se lee sin memoria: es más lento, no es distinto.
+  const { data: formatos } = await supabase.from("formatos_presupuesto").select("*").then(r => r, () => ({ data: [] }));
+
   const leida = await leerCotizacion(file, {
     lista, rubros: (rubros || []).filter(r => !r.oculto && !r.anulado_por_oc),
-    modelo: CONTRATO, hojaComoTexto, onPaso,
+    modelo: CONTRATO, hojaComoTexto, onPaso, formatos: formatos || [],
     // UN CORTE DEL SERVIDOR NO ES UNA RESPUESTA, ASÍ QUE SE VUELVE A PREGUNTAR.
     //
     // El servidor corta la petición al minuto, y una proforma larga o un PDF
@@ -73,6 +80,16 @@ export async function leerConNova(original, rubros = [], onPaso) {
   // cara que los buenos. Un renglón sin rubro se señala a mano en dos clics;
   // un rubro equivocado cuesta una orden mal cobrada.
   const revisada = limpiarEmparejamientos(leida.items || [], rubros || []);
+
+  // SE RECUERDA SOLO LO QUE CERRÓ. Un mapa de columnas que no hizo cuadrar la
+  // planilla contra su propio pie no es un formato: es una lectura que falló,
+  // y guardarla sería repetir el error con cada planilla de ese proveedor.
+  // No se espera: si falla el guardado, la lectura de hoy ya está hecha.
+  if (leida.cerro && leida.hoja?.mapa && leida.hoja?.filas?.length) {
+    const m = leida.hoja.mapa;
+    recordarFormato({ filas: leida.hoja.filas, mapa: { ...m, col_precio: m.col_unitario ?? null },
+      archivo: file.name, usuarioId: null }).catch(() => {});
+  }
 
   // Se guarda el archivo que se leyó: si era una foto, la comprimida, que es
   // la que entra en el depósito sin pasarse de tamaño y se ve igual.

@@ -18,8 +18,16 @@ const texto = v => String(v ?? "").trim();
 /**
  * Un número que llega como texto. "1.234,56" o "1,234.56": el último
  * separador es el decimal. Las celdas numéricas de Excel pasan tal cual.
+ *
+ * UN SOLO SEPARADOR CON TRES DÍGITOS DETRÁS ES AMBIGUO. "$ 1.200" es un dólar
+ * con veinte en la convención de Ecuador —punto decimal— y son mil doscientos
+ * si el proveedor escribe a la europea. Por celda no hay forma de saberlo. Por
+ * documento sí: en una proforma cantidad × unitario = total, y solo una de las
+ * dos lecturas hace cuadrar los renglones. Quien lee la hoja prueba las dos y
+ * se queda con la que cuadra; eso es `miles`: "." si el punto agrupa miles,
+ * "," si lo hace la coma. Sin decirlo, se lee como hasta ahora.
  */
-export function num(v) {
+export function num(v, miles = null) {
   if (typeof v === "number") return v;
   const limpio = texto(v).replace(/[^0-9,.-]/g, "");
   if (!limpio) return 0;
@@ -28,8 +36,16 @@ export function num(v) {
     const dec = Math.max(coma, punto);
     return Number(limpio.slice(0, dec).replace(/[.,]/g, "") + "." + limpio.slice(dec + 1)) || 0;
   }
-  if (coma >= 0) return Number(limpio.replace(",", ".")) || 0;
-  return Number(limpio) || 0;
+  const sep = coma >= 0 ? "," : punto >= 0 ? "." : null;
+  if (!sep) return Number(limpio) || 0;
+  const veces = limpio.split(sep).length - 1;
+  // Repetido, agrupa miles: "1.234.567".
+  if (veces > 1) return Number(limpio.split(sep).join("")) || 0;
+  // Una sola vez y exactamente tres dígitos detrás: lo decide la convención
+  // del documento, si se conoce.
+  const [antes, despues] = limpio.split(sep);
+  if (miles === sep && despues.length === 3) return Number(antes + despues) || 0;
+  return Number(antes + "." + despues) || 0;
 }
 
 /**
@@ -58,7 +74,7 @@ export function num(v) {
  * leería cantidad 0. Lo que separa un caso del otro es por dónde EMPIEZA la
  * celda: el importe en letras empieza con letras, la cantidad con su número.
  */
-export function numeroDeCelda(v) {
+export function numeroDeCelda(v, miles = null) {
   if (typeof v === "number") return v;
   // La moneda no descalifica: "$ 1.200" y "USD 340" son importes, no texto.
   const t = String(v ?? "")
@@ -66,5 +82,5 @@ export function numeroDeCelda(v) {
     .replace(/\$/g, "")
     .trim();
   const m = /^-?\d[\d.,]*/.exec(t);
-  return m ? num(m[0]) : 0;
+  return m ? num(m[0], miles) : 0;
 }
