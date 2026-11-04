@@ -155,3 +155,14 @@ test("los que ya gastaron más de lo que se cobra se listan aparte, con o sin co
   // El de pintura compró mejor que su costo y está terminado: es ahorro, no pasado.
   assert.equal(r.filas.find(f => f.id === 3).estado, "ahorro");
 });
+
+test("un rubro en negativo sin gasto —la reducción de una orden— no está pasado de nada", () => {
+  const r = eficienciaDeRubros({
+    rubros: [
+      { id: 1440, numero: 9190, descripcion: "(–) Piso", total_base: -8658.68, iva_pct: 15, cantidad: 95.61 },
+      { id: 1434, numero: 9101, descripcion: "Picado", total_base: 511.28, iva_pct: 15, cantidad: 95.61 },
+    ],
+    porRubro: { 1434: { acumulado: 671.64 } },
+  });
+  assert.deepEqual(r.pasados.map(f => f.id), [1434]);
+});

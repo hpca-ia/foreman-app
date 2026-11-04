@@ -62,3 +62,14 @@ test("un seguido que se pasó cuenta una sola vez, en las pérdidas", () => {
   assert.equal(r.ganadoEnSeguidos, 0);
   assert.equal(r.neto, -160.36);
 });
+
+test("la reducción de una orden de cambio, en negativo y sin gasto, no es una pérdida", () => {
+  // El 9190 "(–) Piso de microcemento" de la OC-01: total −$8.658,68, sin facturas.
+  const reduccion = { id: 1440, numero: 9190, descripcion: "(–) Piso de microcemento", total_base: -8658.68, iva_pct: 15, cantidad: 95.61, origen: "orden_cambio" };
+  const f = seguimientoDeRubro(reduccion, {});
+  assert.equal(f.estado, "sin_empezar");
+  assert.equal(f.cuenta, false);
+  const p = perdidasEnRubros([reduccion, ...rubros], porRubro);
+  assert.deepEqual(p.filas.map(x => x.id), [1434]);
+  assert.equal(p.total, -160.36);
+});

@@ -34,21 +34,26 @@ export function seguimientoDeRubro(r, porRubro = {}) {
   const resultado = c2(presupuestado - gastado);
   const avance = n(r.avance_pct);
   const terminado = avance >= 100;
-  const estado = resultado < 0 ? "pasado" : !gastado ? "sin_empezar" : terminado ? "terminado" : "en_curso";
+  // UNA PÉRDIDA ES HABER GASTADO MÁS DE LO PRESUPUESTADO, no un número
+  // negativo. La reducción de una orden de cambio —"(–) piso de
+  // microcemento", total en negativo— no tiene nada que comprar: sin gasto
+  // no es pérdida de nada, aunque la resta dé negativo.
+  const pasado = gastado > 0 && resultado < 0;
+  const estado = pasado ? "pasado" : !gastado ? "sin_empezar" : terminado ? "terminado" : "en_curso";
   return {
     id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
     unidad: r.unidad || "", cantidad: n(r.cantidad),
     cobrado, costo, gastado, avance, terminado, contra, presupuestado, resultado, estado,
     // Cuenta en el resultado si ya pasó: una pérdida ya pasó; un ahorro,
     // recién cuando el rubro terminó. Antes es lo que falta comprar.
-    cuenta: resultado < 0 || (terminado && gastado > 0),
+    cuenta: pasado || (terminado && gastado > 0),
   };
 }
 
 /** Los rubros que ya gastaron más de su presupuesto, se sigan o no. */
 export function perdidasEnRubros(rubros = [], porRubro = {}) {
   const filas = rubros.filter(vivo).map(r => seguimientoDeRubro(r, porRubro))
-    .filter(f => f.resultado < 0).sort((a, b) => a.resultado - b.resultado);
+    .filter(f => f.estado === "pasado").sort((a, b) => a.resultado - b.resultado);
   return { filas, total: c2(filas.reduce((t, f) => t + f.resultado, 0)) };
 }
 

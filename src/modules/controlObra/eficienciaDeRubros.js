@@ -178,7 +178,10 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
   // está en el presupuesto y el gasto en las facturas. Un rubro pasado ya le
   // cuesta a la obra más de lo que el cliente paga por él, y eso no se
   // arregla comprando el resto más barato.
-  const pasados = filas.filter(f => f.aFavor < 0).sort((a, b) => a.aFavor - b.aFavor);
+  // Con gasto: la reducción de una orden de cambio tiene el total en negativo
+  // y nada que comprar, y sin gasto la resta da negativo sin que se haya
+  // perdido nada.
+  const pasados = filas.filter(f => f.gastado > 0 && f.aFavor < 0).sort((a, b) => a.aFavor - b.aFavor);
 
   return {
     vendido, costoVendido, margenVendido: c2(vendido - costoVendido),
