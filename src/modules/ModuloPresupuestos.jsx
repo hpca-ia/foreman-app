@@ -32,7 +32,7 @@ import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRu
 import ResultadosBase from "./presupuestos/ResultadosBase";
 import { puntaje } from "../lib/buscarRubros";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
-import { LECTURA, textoDeNova } from "../lib/modelos";
+import { CONTRATO, textoDeNova } from "../lib/modelos";
 import { subtotalesPorEtapa, etapasUsadas, tieneEtapas, SIN_ETAPA,
   etiquetaDeEtapa, colorDeEtapa } from "./presupuestos/etapas";
 
@@ -1074,7 +1074,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+prompt}];
       }
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:LECTURA,max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:CONTRATO,max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       console.log("NOVA response:", JSON.stringify(data).slice(0,500));
       if(data.error){setCotizacionResult({error:"Error API: "+JSON.stringify(data.error)});setUploadingCotizacion(false);e.target.value="";return;}
@@ -1186,7 +1186,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
       }
 
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:LECTURA,max_tokens:16000,messages:[{role:"user",content:msgContent}]})});
+        body:JSON.stringify({model:CONTRATO,max_tokens:16000,messages:[{role:"user",content:msgContent}]})});
       const data=await res.json();
       let rawText = (textoDeNova(data)||"").trim();
       let parsed = null;

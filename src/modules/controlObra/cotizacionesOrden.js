@@ -1,6 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
-import { pedirANova, LECTURA, textoDeNova } from "../../lib/modelos";
+import { pedirANova, CONTRATO, textoDeNova } from "../../lib/modelos";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 import { leerCotizacion } from "./leerProforma.js";
 import { limpiarEmparejamientos } from "./desconfiarDeNova.js";
@@ -37,7 +37,7 @@ export async function leerConNova(original, rubros = [], onPaso) {
 
   const leida = await leerCotizacion(file, {
     lista, rubros: (rubros || []).filter(r => !r.oculto && !r.anulado_por_oc),
-    modelo: LECTURA, hojaComoTexto, onPaso,
+    modelo: CONTRATO, hojaComoTexto, onPaso,
     // UN CORTE DEL SERVIDOR NO ES UNA RESPUESTA, ASÍ QUE SE VUELVE A PREGUNTAR.
     //
     // El servidor corta la petición al minuto, y una proforma larga o un PDF

@@ -34,7 +34,9 @@ export const JUICIO = "claude-opus-5-5";
 
 // El que se sabe que funciona. Es a donde cae cualquier llamada cuyo modelo la
 // cuenta no acepte.
-export const CONOCIDO = "claude-sonnet-4-5";
+// Sube de generación: Sonnet 5.5 lleva semanas leyendo facturas y proformas
+// por esta misma puerta y esta misma clave. Es el que se sabe que funciona.
+export const CONOCIDO = "claude-sonnet-5-5";
 
 /**
  * Pedirle algo a NOVA con un modelo y, si ese modelo no está disponible,
@@ -111,6 +113,22 @@ export function porQueFallo(res, data, quehacer = "armarlo") {
 // es exactamente donde se nota el modelo, y acá un renglón mal leído se
 // convierte en una orden de cambio mal cobrada.
 export const LECTURA = "claude-sonnet-5-5";
+
+/**
+ * CONTRATO. Lo que entra al contrato y a las órdenes de cambio.
+ *
+ * El presupuesto que se importa, la proforma que se compara en Diferencias,
+ * el emparejamiento de sus renglones con los rubros. No es volumen: son pocas
+ * lecturas por obra. Y no es lo mismo equivocarse acá que en una factura: la
+ * factura se corrige antes de entrar y el SRI la pisa con el XML; un renglón
+ * mal leído del presupuesto es la base del control durante toda la obra, y
+ * uno mal emparejado es una orden de cambio mal cobrada.
+ *
+ * Por eso lee con el modelo de más arriba. Cuesta el doble que LECTURA por
+ * documento —centavos— y la aritmética del papel igual comprueba todo lo que
+ * devuelve; lo que se compra es que cierre a la primera más seguido.
+ */
+export const CONTRATO = "claude-opus-5-5";
 
 /**
  * CORTO. Una frase que entra, una estructura que sale.
