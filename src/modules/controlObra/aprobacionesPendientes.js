@@ -117,3 +117,43 @@ export function comoSeDice(p) {
   const quienes = p.faltan.map(f => f.nombre || f.email).join(", ");
   return `${p.dias === 0 ? "Mandada hoy" : `${p.dias} ${p.dias === 1 ? "día" : "días"} esperando`} a ${quienes}`;
 }
+
+/**
+ * ¿LO ABRIÓ UNA PERSONA? Un "abierto" a los dos segundos del envío no es
+ * nadie: es el filtro de correo de la empresa, que abre los enlaces para
+ * revisarlos antes de entregarlos. En Diners, una orden figuraba abierta 1,6
+ * segundos después de salir. Se cuenta como abierta solo si pasó un rato.
+ */
+export function loAbrio(f, minutos = 2) {
+  if (!f?.visto_at) return false;
+  if (!f.envio_at) return true;
+  const ms = new Date(f.visto_at) - new Date(f.envio_at);
+  return Number.isFinite(ms) && ms >= minutos * 60000;
+}
+
+/**
+ * LA CONSTANCIA DE LOS ENVÍOS: cuándo salió cada correo, a quién y quién lo
+ * mandó, y cuáles fueron insistencias. Es lo que se muestra cuando el cliente
+ * dice "a mí nunca me llegó". Los correos se dicen con el nombre de la
+ * persona si está entre los firmantes; si no, con el correo tal cual.
+ *
+ * Los reenvíos viejos no guardaban a quién iban —los firmantes viajaban
+ * aparte— y eran todos insistencias: se dice así, no se inventa la lista.
+ */
+export function constanciaDeEnvios(envios = [], firmas = []) {
+  const nombreDe = new Map((firmas || []).filter(f => f?.email)
+    .map(f => [String(f.email).trim().toLowerCase(), f.nombre || f.email]));
+  return [...(envios || [])]
+    .sort((a, b) => String(b.enviado_at || "").localeCompare(String(a.enviado_at || "")))
+    .map(e => {
+      const a = (e.destinatarios || []).map(d => String(d).trim()).filter(Boolean);
+      return {
+        id: e.id,
+        cuando: e.enviado_at,
+        motivo: e.motivo === "insistencia" || (!e.motivo && !a.length) ? "insistencia" : "envío",
+        aQuien: a.map(d => nombreDe.get(d.toLowerCase()) || d),
+        porQuien: e.enviado_nombre || "",
+        sinDestinatarios: !a.length,
+      };
+    });
+}

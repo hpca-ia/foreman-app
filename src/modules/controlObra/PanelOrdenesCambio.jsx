@@ -16,7 +16,7 @@ import {
   pedirElVistoAlDirector, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
-  insistirConLaOrden, genteDeOtrosProyectos,
+  insistirConLaOrden, genteDeOtrosProyectos, enviosDeOrdenes,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
 import {
@@ -24,7 +24,7 @@ import {
   enlacesDeCotizaciones, sincronizarBeneficios, guardarIva, gastosDe, guardarGasto, borrarGasto, releerCotizacion,
 } from "./cotizacionesOrden";
 import { margenDeOrden, partidasDeCotizacion, liquidacionInterna, tieneCosto, costoDeLinea, precioDeLinea, conMargen, emparejarCostos, costosConOtroIva } from "./cuentaOrdenCambio.js";
-import { pendientes, resumenPendientes, comoSeDice } from "./aprobacionesPendientes.js";
+import { pendientes, resumenPendientes, comoSeDice, loAbrio, constanciaDeEnvios } from "./aprobacionesPendientes";
 import { costoDeLaOrden, gastoLimpio, queFaltaSaber } from "./costoDeLaOrden.js";
 import { vigenciaDe, plazosQueAvisan } from "./vigenciaDeOrden.js";
 import ModalOrdenCambio from "./ModalOrdenCambio";
@@ -46,6 +46,9 @@ const TIPOS = [
   "Req. cliente — Rediseño",
   "Req. contratista — necesario para continuar los trabajos",
 ];
+
+/** Día y hora cortos, para la constancia. */
+const fechaHora = f => (f ? new Date(f).toLocaleString("es-EC", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
 export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], currentUser, puede, onCambio }) {
   const [ordenes, setOrdenes] = useState([]);
@@ -74,6 +77,9 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // Quién firma cada orden, por orden_id. Es la lista del CAPÍTULO IV y es la
   // misma de la que sale el envío: no se escribe dos veces.
   const [aprobadores, setAprobadores] = useState({});
+  // Los envíos de cada orden, por orden_id: la constancia de cuándo salió
+  // cada correo, a quién y si fue una insistencia.
+  const [envios, setEnvios] = useState({});
   // Las cotizaciones de cada orden, por orden_id, y sus enlaces para abrirlas.
   const [cotizaciones, setCotizaciones] = useState({});
   // Lo que cuesta la orden y no es una partida: fletes, mano de obra, alquileres.
@@ -120,6 +126,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     const todas = Object.values(r.fotos || {}).flat();
     if (todas.length) setEnlaces(await enlacesDeSoportes(todas));
     setAprobadores(await aprobacionesDeOrdenes((r.ordenes || []).map(o => o.id)));
+    setEnvios(await enviosDeOrdenes((r.ordenes || []).map(o => o.id)));
 
     // LA COTIZACIÓN Y LO QUE DEJA. Se recalcula acá, al abrir, porque una
     // orden también se aprueba sola desde el portal cuando firman todos, y
@@ -894,7 +901,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     {/* Abierto y sin contestar no es lo mismo que no abierto:
                         una es una decisión que no toman y la otra un correo
                         que no llegó, y se resuelven distinto. */}
-                    {p.faltan.some(f => f.visto_at) ? " · lo abrió y no contestó" : ""}
+                    {p.faltan.some(loAbrio) ? " · lo abrió y no contestó" : ""}
                     {p.faltan.some(f => ["bounced", "complained", "failed"].includes(String(f.envio_estado || "").toLowerCase()))
                       ? " · el correo rebotó: hay que corregir la dirección" : ""}
                     {p.sinFirmantes && (
@@ -911,7 +918,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         const r = await insistirConLaOrden(o, p.faltan, currentUser);
                         setInsistiendo(null);
                         if (r?.error) { setAviso(`No se pudo insistir: ${r.error}`); return; }
-                        setAviso(`Se le insistió a ${r.insistidoA.join(", ")}. Queda registrado el envío.`);
+                        setAviso(`Se le insistió a ${r.insistidoA.join(", ")}. Queda en la constancia de envíos de la orden.`);
                         await cargar();
                       }}>
                       <Send size={12} /> {insistiendo === o.id ? "Mandando…" : "Insistir"}
@@ -2132,7 +2139,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                     const estado = a2.aprueba === false ? (a2.envio_at ? "copia enviada" : "solo copia")
                       : a2.aprobado_at ? "aprobó" : a2.observacion ? "objetó"
                       : ["bounced", "failed", "complained"].includes(String(a2.envio_estado || "").toLowerCase()) ? "no le llegó"
-                        : a2.envio_at ? (a2.visto_at ? "lo abrió" : "enviado") : "sin enviar";
+                        : a2.envio_at ? (loAbrio(a2) ? "lo abrió" : "enviado") : "sin enviar";
                     const color = a2.aprobado_at ? colors.success : a2.observacion ? colors.warning
                       : estado === "no le llegó" ? colors.danger : colors.muted;
                     const cerrado = !!a2.envio_at;
@@ -2203,6 +2210,44 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                         {" "}Pueden ser del proyecto o de afuera — el que firma en papel no tiene por qué estar cargado
                         en ningún lado.
                       </span>
+                    </div>
+                  )}
+
+                  {/* LA CONSTANCIA DE LOS ENVÍOS. Cuándo salió cada correo, a
+                      quién y quién lo mandó, con las insistencias. Es lo que se
+                      muestra cuando el cliente dice "a mí nunca me llegó", y lo
+                      que antes decía "queda registrado" sin que se pudiera ver
+                      en ningún lado. */}
+                  {(envios[o.id] || []).length > 0 && (
+                    <div style={{ marginTop: 8, background: colors.bg, border: `1px solid ${colors.border}`,
+                      borderRadius: colors.radiusSm, padding: "8px 11px" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+                        CONSTANCIA DE ENVÍOS · {(envios[o.id] || []).length}
+                      </div>
+                      {constanciaDeEnvios(envios[o.id], aprobadores[o.id]).map(c => (
+                        <div key={c.id} style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ color: colors.muted, whiteSpace: "nowrap", minWidth: 110 }}>{fechaHora(c.cuando)}</span>
+                          <span style={{ fontWeight: 700, color: c.motivo === "insistencia" ? colors.warning : colors.ink, minWidth: 78 }}>
+                            {c.motivo === "insistencia" ? "Insistencia" : "Envío"}
+                          </span>
+                          <span style={{ flex: 1, minWidth: 160 }}>
+                            {c.sinDestinatarios ? "a quien faltaba firmar (no quedó anotado a quién)" : `a ${c.aQuien.join(", ")}`}
+                            {c.porQuien ? ` · lo mandó ${c.porQuien}` : ""}
+                          </span>
+                        </div>
+                      ))}
+                      {(aprobadores[o.id] || []).some(a2 => a2.envio_at) && (
+                        <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.5 }}>
+                          {(aprobadores[o.id] || []).filter(a2 => a2.envio_at).map(a2 => {
+                            const rebote = ["bounced", "failed", "complained"].includes(String(a2.envio_estado || "").toLowerCase());
+                            const dice = rebote ? "el correo rebotó"
+                              : loAbrio(a2) ? `lo abrió el ${fechaHora(a2.visto_at)}`
+                              : a2.visto_at ? "lo abrió el filtro de correo a los segundos, no una persona"
+                              : "sin abrir";
+                            return `${a2.nombre || a2.email}: ${dice}`;
+                          }).join(" · ")}
+                        </div>
+                      )}
                     </div>
                   )}
 

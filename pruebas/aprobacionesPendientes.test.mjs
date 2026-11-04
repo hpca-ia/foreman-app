@@ -86,3 +86,28 @@ test("una orden sin ninguna fecha no dice NaN", () => {
   assert.equal(p.dias, 0);
   assert.ok(!String(comoSeDice(p)).includes("NaN"));
 });
+
+test("un 'abierto' a los segundos del envío es el filtro de correo, no una persona", async () => {
+  const { loAbrio } = await import("../src/modules/controlObra/aprobacionesPendientes.js");
+  // Angie "abrió" la OC-03 1,6 segundos después de que saliera.
+  assert.equal(loAbrio({ envio_at: "2026-11-04T21:21:19.097Z", visto_at: "2026-11-04T21:21:20.758Z" }), false);
+  assert.equal(loAbrio({ envio_at: "2026-10-22T22:24:54.564Z", visto_at: "2026-10-23T00:11:01.251Z" }), true);
+  assert.equal(loAbrio({ envio_at: "2026-10-22T22:24:54.564Z", visto_at: null }), false);
+});
+
+test("la constancia dice cuándo, a quién con nombre, y qué fue insistencia", async () => {
+  const { constanciaDeEnvios } = await import("../src/modules/controlObra/aprobacionesPendientes.js");
+  const firmas = [{ nombre: "Angie Jaramillo", email: "ajaramilloq@dinersclub.com.ec" }];
+  const c = constanciaDeEnvios([
+    { id: 1, enviado_at: "2026-11-01T19:54:07Z", destinatarios: ["ajaramilloq@dinersclub.com.ec", "otro@x.com"], enviado_nombre: "Hernan Cueva" },
+    { id: 2, enviado_at: "2026-11-04T21:21:13Z", destinatarios: [], enviado_nombre: "Hernan Cueva" },   // reenvío viejo: no anotaba a quién
+    { id: 3, enviado_at: "2026-11-05T10:00:00Z", destinatarios: ["ajaramilloq@dinersclub.com.ec"], motivo: "insistencia", enviado_nombre: "Hernan Cueva" },
+  ], firmas);
+  assert.deepEqual(c.map(x => x.id), [3, 2, 1]);   // la más nueva arriba
+  assert.deepEqual(c[2].aQuien, ["Angie Jaramillo", "otro@x.com"]);
+  assert.equal(c[2].motivo, "envío");
+  assert.equal(c[1].motivo, "insistencia");
+  assert.equal(c[1].sinDestinatarios, true);
+  assert.equal(c[0].motivo, "insistencia");
+  assert.equal(c[0].porQuien, "Hernan Cueva");
+});

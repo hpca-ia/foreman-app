@@ -566,7 +566,7 @@ export async function desaprobarOrden(orden) {
  *   compartida cualquiera podría aprobar en nombre de los otros. Los demás
  *   reciben la misma orden sin botón, de puro informativa.
  */
-export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobadores = []) {
+export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobadores = [], motivo = "envio") {
   const limpios = (destinatarios || []).map(d => String(d).trim()).filter(Boolean);
   const firman = (aprobadores || []).filter(a => a?.email);
   if (!limpios.length && !firman.length) return { error: "No hay a quién mandársela." };
@@ -594,10 +594,17 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
   const datos = await r.json().catch(() => ({}));
   if (!r.ok) return { error: datos.error || "No se pudo mandar el correo." };
 
-  await supabase.from("orden_cambio_envios").insert({
-    orden_id: orden.id, destinatarios: limpios,
+  // LA CONSTANCIA, CON TODOS LOS QUE LO RECIBIERON. Al insistir los
+  // destinatarios iban vacíos —los firmantes viajaban aparte— y el registro
+  // decía que se había mandado a nadie.
+  const constancia = {
+    orden_id: orden.id,
+    destinatarios: [...new Set([...limpios, ...firman.map(f => String(f.email).trim())])],
     enviado_por: quien?.id ?? null, enviado_nombre: quien?.name || null,
-  });
+  };
+  const { error: eC } = await supabase.from("orden_cambio_envios").insert({ ...constancia, motivo, cuerpo: cuerpo || null });
+  // Sin la migración 166 no están motivo ni cuerpo: la constancia se guarda igual.
+  if (eC && /column|schema cache/i.test(eC.message)) await supabase.from("orden_cambio_envios").insert(constancia);
   if (orden.estado === "borrador") {
     await guardarOrden(orden.id, { estado: "enviada", enviada_at: new Date().toISOString() });
   }
@@ -631,7 +638,7 @@ export async function insistirConLaOrden(orden, faltan = [], quien, texto = null
     + "Mientras no esté aprobada, este trabajo no se ejecuta y el plazo de obra corre igual. "
     + "Si algo del detalle no está bien, escribilo en el enlace: queda como constancia y lo resolvemos.";
 
-  const r = await enviarOrden(orden, [], cuerpo, quien, firman);
+  const r = await enviarOrden(orden, [], cuerpo, quien, firman, "insistencia");
   if (r?.error) return r;
   return { ok: true, insistidoA: firman.map(f => f.nombre || f.email) };
 }
@@ -844,6 +851,17 @@ export async function aprobacionesDeOrdenes(ids) {
   if (error) return {};
   const por = {};
   for (const f of data || []) (por[f.orden_id] = por[f.orden_id] || []).push(f);
+  return por;
+}
+
+/** Los envíos de cada orden, el más nuevo primero: la constancia. */
+export async function enviosDeOrdenes(ids) {
+  if (!ids?.length) return {};
+  const { data, error } = await supabase.from("orden_cambio_envios")
+    .select("*").in("orden_id", ids).order("enviado_at", { ascending: false });
+  if (error) return {};
+  const por = {};
+  for (const e of data || []) (por[e.orden_id] = por[e.orden_id] || []).push(e);
   return por;
 }
 
