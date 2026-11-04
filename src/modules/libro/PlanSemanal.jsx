@@ -10,6 +10,9 @@ import { cargarPlan, diaDelPlan, guardarDia, agregarItem, borrarItem, marcarHech
   enlacesDeArchivos, cerrarPlan, reabrirPlan, guardarNota } from "./planSemanalDatos";
 import { cargarPlan as cargarGantt, leerPlazo } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
+// Lo que quedó sin hacer la semana anterior pasa a esta, con su motivo como
+// nota. Puro: qué quedó es un dato, no una opinión.
+import { loQueQuedo, propuestaDeArrastre, comoSeDice as comoSeDiceArrastre } from "./arrastrarPendientes.js";
 import { gentePara } from "../controlObra/ordenesDeCambio";
 import { pdfPlanSemanal } from "./pdfPlanSemanal";
 
@@ -62,6 +65,19 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
   const [items, setItems] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
   const [gantt, setGantt] = useState([]);
+  // Lo que el período ANTERIOR dejó sin hacer. Se carga con cada cambio de
+  // fechas, con el mismo corte —si la semana va de miércoles a martes, el
+  // miércoles de antes—, igual que lo listan el PDF y el correo.
+  const [quedaron, setQuedaron] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    if (!lead?.id || !desde || !hasta) { setQuedaron([]); return; }
+    const ant = correrPeriodo(desde, hasta, -1);
+    cargarPlan(lead.id, ant.desde, ant.hasta)
+      .then(r => { if (vivo) setQuedaron(loQueQuedo(r.items || [])); })
+      .catch(() => { if (vivo) setQuedaron([]); });
+    return () => { vivo = false; };
+  }, [lead?.id, desde, hasta]);
   const [nuevo, setNuevo] = useState({});
   const [abierto, setAbierto] = useState(null);
   const [ocupado, setOcupado] = useState(false);
@@ -185,6 +201,33 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
     await cargar();
   }
 
+  // TRAER LO QUE QUEDÓ. Cada tarea al primer día del período —de ahí se la
+  // mueve—, con el motivo de la semana pasada como nota de esta. Lo que ya
+  // está en la semana nueva, porque lo trajo el cronograma o porque alguien lo
+  // escribió, no se repite: eso lo decide propuestaDeArrastre, que tiene
+  // prueba.
+  async function traerPendientes() {
+    const prop = propuestaDeArrastre({ quedaron, items, fechas });
+    if (!prop.traer.length) return;
+    setOcupado(true); setError("");
+    const { periodo: p, error: e0 } = await asegurarPeriodo();
+    if (e0) { setOcupado(false); setError(e0); return; }
+    let puestas = 0;
+    for (const t of prop.traer) {
+      if (!t.fecha) break;
+      const { dia, error: e } = await diaDelPlan(lead.id, t.fecha, currentUser, p?.id || null);
+      if (e) { setError(e); break; }
+      const orden = items.filter(i => i.plan_dia_id === dia.id && (i.tipo || "tarea") === "tarea").length + puestas;
+      const r = await agregarItem(dia, { tipo: "tarea", texto: t.texto, orden,
+        cronograma_actividad_id: t.cronograma_actividad_id, obra_actividad_id: t.obra_actividad_id });
+      if (r.error) { setError(r.error); break; }
+      if (t.nota && r.item?.id) await guardarNota(r.item.id, t.nota);
+      puestas++;
+    }
+    setOcupado(false);
+    await cargar();
+  }
+
   async function tocarCampo(fecha, campo, valor) {
     const { periodo: p } = await asegurarPeriodo();
     const { dia, error: e } = await diaDelPlan(lead.id, fecha, currentUser, p?.id || null);
@@ -248,8 +291,13 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
             trabajan de martes a sábado, las que cierran el jueves— y hasta
             ahora el corte se heredaba del día en que arrancó la obra sin que
             nadie pudiera cambiarlo. Se elige una vez y queda: las dos fechas
-            de arriba siguen siendo libres para un período suelto. */}
-        {puedeArmar && (
+            de arriba siguen siendo libres para un período suelto.
+
+            Y se cambia aunque el período que está abierto esté cerrado: lo que
+            se toca es el corte de la OBRA, no ese plan. Escondido detrás de
+            "puedeArmar" desaparecía justo cuando uno cierra la semana y quiere
+            dejar lista la que viene con otro corte. */}
+        {puedeEscribir && (
           <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: colors.muted }}>
             <span>la semana de esta obra arranca el</span>
             <select value={corte.arranca}
@@ -277,7 +325,10 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                 if (err) setError(err.message);
               }}
               style={{ ...inputStyle, padding: "3px 6px", fontSize: 11, width: 62 }}>
-              {[5, 6, 7].map(n => <option key={n} value={n}>{n} días</option>)}
+              {/* De 5 a 14: la semana corta, la de siete, la de lunes a lunes
+                  (ocho, el domingo de cierre pisa el de apertura) y la
+                  quincena. Más que eso ya no es un plan semanal. */}
+              {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map(n => <option key={n} value={n}>{n} días</option>)}
             </select>
           </div>
         )}
@@ -320,6 +371,45 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
 
       {/* Lo que el cronograma dice que toca esta semana, para no escribirlo a
           mano: se toca y entra como tarea del día que uno elija. */}
+      {/* LO QUE QUEDÓ SIN HACER LA SEMANA PASADA, PARA TRAERLO. El plan no
+          arranca en blanco: arranca con lo que no se alcanzó, que es lo
+          primero que alguien tipeaba de nuevo cada lunes, perdiendo en el
+          camino el motivo. Un botón las trae todas al primer día con el
+          motivo como nota; las que ya están en esta semana no se repiten. */}
+      {quedaron.length > 0 && puedeArmar && (() => {
+        const prop = propuestaDeArrastre({ quedaron, items, fechas });
+        return (
+          <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`,
+            borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: prop.traer.length ? 7 : 0 }}>
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+                <strong style={{ color: colors.ink }}>{comoSeDiceArrastre(prop)}.</strong>
+                {prop.traer.length > 0 && " Se ponen en el primer día, con el motivo de la vez pasada como nota; después las movés al día que toque."}
+              </div>
+              {prop.traer.length > 0 && (
+                <Button variant="primary" size="sm" disabled={ocupado} onClick={traerPendientes}>
+                  Traer {prop.traer.length === 1 ? "la que quedó" : `las ${prop.traer.length} que quedaron`}
+                </Button>
+              )}
+            </div>
+            {prop.traer.length > 0 && (
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {prop.traer.map((t, i) => (
+                  <span key={i} title={t.nota}
+                    style={{ background: "#fff", border: `1px solid ${colors.warningBorder}`, borderRadius: 14,
+                      padding: "3px 10px", fontSize: 11.5, color: colors.ink }}>
+                    {t.texto}
+                    {quedaron.find(q => q.texto === t.texto)?.motivo && (
+                      <span style={{ color: colors.muted }}> · {quedaron.find(q => q.texto === t.texto).motivo}</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {toca.length > 0 && puedeArmar && (
         <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
           <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 7 }}>
