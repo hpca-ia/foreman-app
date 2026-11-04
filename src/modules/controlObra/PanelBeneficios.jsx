@@ -112,6 +112,20 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
   // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
   const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro });
+  // UN RUBRO SE SIGUE UNA SOLA VEZ, PERO PUEDE TENER VARIOS INGRESOS. Son dos
+  // cosas distintas: el seguimiento mide sus facturas; un ingreso es una
+  // compra o una proforma cargada contra él, y puede haber tres. En el
+  // presupuesto se dice qué hay ya sobre cada rubro.
+  const ingresosDe = id => guardados.filter(b => String(b.obra_rubro_id) === String(id)).length;
+  const marcasAMano = {};
+  guardados.forEach(b => {
+    if (!b.obra_rubro_id) return;
+    const k = String(b.obra_rubro_id), cuantos = ingresosDe(k);
+    marcasAMano[k] = { texto: `${cuantos} ${cuantos === 1 ? "ingreso" : "ingresos"}`, bloquea: false };
+  });
+  seguidos.forEach(sg => { marcasAMano[String(sg.obra_rubro_id)] = { ...(marcasAMano[String(sg.obra_rubro_id)] || {}),
+    texto: [marcasAMano[String(sg.obra_rubro_id)]?.texto, "en seguimiento"].filter(Boolean).join(" · "), bloquea: false }; });
+  const marcasParaSeguir = Object.fromEntries(seguidos.map(sg => [String(sg.obra_rubro_id), { texto: "ya se sigue", bloquea: true }]));
   const tc = porOrigen.compras;
   const to = porOrigen.ordenes;
   const hayOrdenes = guardados.some(esDeOrden);
@@ -388,6 +402,10 @@ Rubros de la obra: ${lista}`;
   }
 
   async function seguir(rb) {
+    if (seguidos.some(x => String(x.obra_rubro_id) === String(rb.id))) {
+      setAviso(`El rubro ${rb.numero} ya está en seguimiento: se sigue una sola vez. Lo que sí puede tener varias veces son ingresos cargados contra él.`);
+      return;
+    }
     const r = await seguirRubro({ obra_id: obra.id, obra_rubro_id: rb.id,
       creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null });
     if (r.error) { setError(r.error); return; }
@@ -434,6 +452,7 @@ Rubros de la obra: ${lista}`;
           <div style={{ fontSize: 10.5, color: colors.muted }}>
             se cobra ${fmt(f.cobrado)} · {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}
             {" "}· gastado ${fmt(f.gastado)} en facturas · avance {f.avance}%
+            {ingresosDe(f.id) ? ` · además ${ingresosDe(f.id)} ${ingresosDe(f.id) === 1 ? "ingreso cargado" : "ingresos cargados"} contra este rubro` : ""}
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0, fontSize: 10.5, color: colors.muted }}>
@@ -779,7 +798,7 @@ Rubros de la obra: ${lista}`;
                 su costo cargado, o contra lo que se cobra si no tiene costo. Cuenta en el resultado cuando el rubro
                 termina, o desde ya si se pasó.
               </div>
-              <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+              <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro} marcas={marcasParaSeguir}
                 eligiendo={{ descripcion: "el seguimiento" }}
                 onCerrar={() => setEligiendoSeguir(false)}
                 onElegir={async rb => { await seguir(rb); setEligiendoSeguir(false); }} />
@@ -1150,7 +1169,7 @@ Rubros de la obra: ${lista}`;
           </div>
           </div>
           {verPresupuesto && (
-            <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+            <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro} marcas={marcasAMano}
               eligiendo={{ descripcion: aMano.descripcion || "este beneficio" }}
               onCerrar={() => setVerPresupuesto(false)}
               onElegir={rb => {

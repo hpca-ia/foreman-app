@@ -18,10 +18,14 @@ import { baseSinIva } from "./contratoDeLaObra";
  * @param eligiendo  si hay algo que elegir, el objeto que lo describe (con
  *                   `descripcion` y, opcional, `paraPrecio`); con eso cada
  *                   rubro se vuelve clicable y onElegir recibe el rubro.
+ * @param marcas     { [rubroId]: { texto, bloquea } }: lo que ya hay sobre
+ *                   ese rubro, dicho al lado —"ya se sigue", "3 ingresos"—.
+ *                   Con `bloquea` el rubro no se puede elegir: un rubro se
+ *                   sigue una sola vez, aunque pueda tener varios ingresos.
  */
 const unitario = r => (Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0);
 
-export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar }) {
+export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar, marcas = {} }) {
   const texto = busca.trim().toLowerCase();
   const filtrados = texto
     ? rubros.filter(r => `${r.numero ?? ""} ${r.descripcion || ""} ${r.capitulo || ""}`.toLowerCase().includes(texto))
@@ -87,15 +91,25 @@ export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegi
               letterSpacing: 0.3, background: colors.bg }}>
               {c.capitulo}
             </div>
-            {c.rubros.map(r => (
+            {c.rubros.map(r => {
+              const m = marcas[r.id] || marcas[String(r.id)];
+              const elegible = !!eligiendo && !m?.bloquea;
+              return (
               <div key={r.id}
-                onClick={eligiendo ? () => onElegir(r) : undefined}
+                onClick={elegible ? () => onElegir(r) : undefined}
+                title={m?.bloquea ? m.texto : undefined}
                 style={{ padding: "4px 11px", fontSize: 11, lineHeight: 1.45, color: colors.inkSoft,
-                  cursor: eligiendo ? "pointer" : "default",
+                  cursor: elegible ? "pointer" : "default", opacity: m?.bloquea ? 0.55 : 1,
                   borderBottom: `1px solid ${colors.neutralSoft}` }}>
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
                   <span style={{ color: colors.muted, minWidth: 30 }}>{r.numero ?? ""}</span>
                   <span style={{ flex: 1 }}>{r.descripcion}</span>
+                  {m && (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, whiteSpace: "nowrap", borderRadius: 9, padding: "1px 6px",
+                      color: m.bloquea ? colors.muted : colors.brand, background: m.bloquea ? colors.neutralSoft : colors.brandSoft }}>
+                      {m.texto}
+                    </span>
+                  )}
                 </div>
               {/* CANTIDAD × UNITARIO = TOTAL, que es contra lo que se compara.
                   Con el total solo no se puede decidir nada: la proforma trae
@@ -123,7 +137,8 @@ export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegi
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         ))}
       </div>
