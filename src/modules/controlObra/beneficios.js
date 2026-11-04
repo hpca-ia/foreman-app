@@ -188,3 +188,30 @@ export async function cargarCostosDeRubros(filas = []) {
   }
   return { cuantos };
 }
+
+// ── LOS RUBROS QUE SE SIGUEN ───────────────────────────────────────────────
+//
+// Un beneficio también puede salir de un rubro del presupuesto y de las
+// facturas que se le cargan en la planilla. Acá solo se guarda cuáles se
+// siguen; la cuenta vive en `resultadoDeLaObra.js`.
+
+export const SIN_167 = "Falta correr la migración 167 para seguir rubros en Beneficios.";
+
+export async function seguidosDe(obraId) {
+  const { data, error } = await supabase.from("obra_beneficios_seguimiento")
+    .select("*").eq("obra_id", obraId).order("id");
+  if (error) return { error: falta(error) ? SIN_167 : error.message, seguidos: [] };
+  return { seguidos: data || [] };
+}
+
+export async function seguirRubro(fila) {
+  const { data, error } = await supabase.from("obra_beneficios_seguimiento")
+    .upsert(fila, { onConflict: "obra_id,obra_rubro_id" }).select().single();
+  if (error) return { error: falta(error) ? SIN_167 : error.message };
+  return { seguido: data };
+}
+
+export async function dejarDeSeguir(id) {
+  const { error } = await supabase.from("obra_beneficios_seguimiento").delete().eq("id", id);
+  return error ? error.message : null;
+}

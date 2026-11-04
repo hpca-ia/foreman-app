@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Upload, Sparkles, TrendingUp, TrendingDown, Plus, Trash2, Check, X, Paperclip } from "lucide-react";
+import { Upload, Sparkles, TrendingUp, TrendingDown, Plus, Trash2, Check, X, Paperclip, Pencil } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
@@ -7,7 +7,8 @@ import { fmt } from "./calculos";
 import { compararContraPresupuesto } from "./compararProforma";
 import { derivar, cuentaAMano, explicar } from "./beneficioAMano.js";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
-import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas } from "./beneficios";
+import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas, seguidosDe, seguirRubro, dejarDeSeguir } from "./beneficios";
+import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
 import { ordenesMudas, contraQueSeMide, porProveedor } from "./cuentaBeneficios.js";
 import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
@@ -80,6 +81,10 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const [verDesglose, setVerDesglose] = useState(false);
   // Cómo se ven los guardados: la lista de siempre, o agrupados por proveedor.
   const [vista, setVista] = useState("lista");
+  // Los rubros del presupuesto que se siguen contra sus facturas, y si se
+  // está eligiendo uno en el presupuesto.
+  const [seguidos, setSeguidos] = useState([]);
+  const [eligiendoSeguir, setEligiendoSeguir] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!obra?.id) return;
@@ -92,6 +97,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
     if (r.error) { setError(r.error); return; }
     setGuardados(r.beneficios);
     setEnlaces(await enlacesDeProformas(r.beneficios));
+    setSeguidos((await seguidosDe(obra.id)).seguidos || []);
     // Y las órdenes, para poder decir cuáles NO están sumando y por qué: una
     // orden aprobada que no llega acá se va en silencio y la utilidad de la
     // obra queda más baja de lo que es.
@@ -103,6 +109,9 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
 
   const porOrigen = totalesPorOrigen(guardados);
   const t = porOrigen.obra;
+  // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
+  // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
+  const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro });
   const tc = porOrigen.compras;
   const to = porOrigen.ordenes;
   const hayOrdenes = guardados.some(esDeOrden);
@@ -353,27 +362,97 @@ Rubros de la obra: ${lista}`;
     // el depósito falla se guarda igual el beneficio y se dice.
     let papel = {};
     if (f.archivo) papel = await guardarProforma(obra.id, f.archivo);
-    const res = await guardarBeneficio({
+    const guardado = await guardarBeneficio({
       id: f.id,
       obra_id: obra.id, obra_rubro_id: f.obra_rubro_id ? Number(f.obra_rubro_id) : null,
       descripcion,
       cantidad: n(f.cantidad) || null, unidad: String(f.unidad || "").trim() || null,
       presupuestado: c.presupuestado ?? 0,
-      real: n(f.real), proveedor: f.proveedor || null, nota: f.nota || null,
-      origen: "manual", fecha: f.fecha || undefined,
+      real: n(f.real), proveedor: f.proveedor || null,
+      // La marca [dif:N] es de la máquina —ata la fila a su análisis— y se
+      // conserva aunque se corrija la nota a mano.
+      nota: [String(f.nota || "").trim(), f.marca].filter(Boolean).join(" · ") || null,
+      origen: f.origen || "manual", fecha: f.fecha || undefined,
       ...(papel.path ? { archivo_path: papel.path, archivo_nombre: papel.nombre } : {}),
       // A mano lo decide quien escribe: muchos beneficios reales no tienen
       // papel —se negoció por teléfono— y esos ya están cobrados.
       estado: f.previsto ? "previsto" : "confirmado",
-      creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null,
+      ...(f.id ? {} : { creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null }),
     });
     setOcupado(false);
-    if (res.error) { setError(res.error); return; }
+    if (guardado.error) { setError(guardado.error); return; }
     setAMano(null);
     await cargar();
-    setAviso("Guardado." + (papel.path ? " El respaldo queda guardado con el beneficio." : ""));
+    setAviso((f.id ? "Corregido." : "Guardado.") + (papel.path ? " El respaldo queda guardado con el beneficio." : ""));
     if (papel.error) setFaltan(`El beneficio se guardó, pero el respaldo no se pudo guardar: ${papel.error}`);
   }
+
+  async function seguir(rb) {
+    const r = await seguirRubro({ obra_id: obra.id, obra_rubro_id: rb.id,
+      creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null });
+    if (r.error) { setError(r.error); return; }
+    setSeguidos(xs => [...xs.filter(x => String(x.obra_rubro_id) !== String(rb.id)), r.seguido]);
+  }
+
+  async function quitarSeguido(sg) {
+    const err = await dejarDeSeguir(sg.id);
+    if (err) { setError(err); return; }
+    setSeguidos(xs => xs.filter(x => x.id !== sg.id));
+  }
+
+  // CORREGIR UNO GUARDADO: se abre en el mismo formulario de la carga a mano,
+  // con sus números. El unitario sale del total y la cantidad.
+  function editarBeneficio(b) {
+    const cantidad = n(b.cantidad);
+    const nota = String(b.nota || "");
+    setAMano({
+      id: b.id, descripcion: b.descripcion || "", obra_rubro_id: b.obra_rubro_id ? String(b.obra_rubro_id) : "",
+      cantidad: cantidad ? String(b.cantidad) : "", unidad: b.unidad || "",
+      unitario: cantidad ? String(Math.round((n(b.real) / cantidad) * 10000) / 10000) : "",
+      real: b.real == null ? "" : String(b.real), presupuestado: b.presupuestado == null ? "" : String(b.presupuestado),
+      proveedor: b.proveedor || "", nota: nota.replace(/\s*·?\s*\[dif:\d+\]/g, "").trim(),
+      marca: (nota.match(/\[dif:\d+\]/) || [""])[0],
+      fecha: String(b.fecha || "").slice(0, 10), previsto: esPrevisto(b), origen: b.origen,
+    });
+    setVerPresupuesto(false); setEligiendoSeguir(false);
+    setTimeout(() => cajaRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 50);
+  }
+
+  // Un rubro seguido, o uno pasado: contra qué se mide y cómo va.
+  const FilaRubro = ({ f, onQuitar }) => {
+    const dice = {
+      pasado: ["PASADO", colors.danger, colors.dangerSoft], terminado: ["TERMINADO", colors.success, colors.successSoft],
+      en_curso: ["EN CURSO", colors.inkSoft, colors.neutralSoft], sin_empezar: ["SIN EMPEZAR", colors.muted, colors.neutralSoft],
+    }[f.estado] || ["", colors.muted, colors.neutralSoft];
+    return (
+      <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", borderTop: `1px solid ${colors.neutralSoft}`, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 12.5, color: colors.ink }}>
+            <strong>{f.numero}</strong> · {f.descripcion}
+            <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: dice[1], background: dice[2], borderRadius: 9, padding: "1px 6px" }}>{dice[0]}</span>
+          </div>
+          <div style={{ fontSize: 10.5, color: colors.muted }}>
+            se cobra ${fmt(f.cobrado)} · {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}
+            {" "}· gastado ${fmt(f.gastado)} en facturas · avance {f.avance}%
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0, fontSize: 10.5, color: colors.muted }}>
+          contra {f.contra === "costo" ? "su costo" : "lo que se cobra"}
+          {!f.cuenta && f.estado !== "sin_empezar" ? <div>no cuenta hasta terminar</div> : null}
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700, opacity: f.cuenta ? 1 : 0.55,
+          color: f.resultado >= 0 ? colors.success : colors.danger }}>
+          {f.resultado >= 0 ? "+" : "−"}${fmt(Math.abs(f.resultado))}
+        </div>
+        {onQuitar && (
+          <button onClick={onQuitar} title="Dejar de seguirlo"
+            style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex", flexShrink: 0 }}>
+            <X size={12} />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const Tarjeta = ({ label, valor, color, icono }) => (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
@@ -610,7 +689,7 @@ Rubros de la obra: ${lista}`;
       <div style={{ marginTop: items.length ? 18 : 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 9 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
-            Beneficios de la obra{t.cuantos ? ` · ${t.cuantos}` : ""}
+            Beneficios y pérdidas de la obra{t.cuantos ? ` · ${t.cuantos}` : ""}
           </div>
           {!aMano && (
             <Button variant="outline" size="sm" onClick={() => setAMano({ fecha: new Date().toISOString().slice(0, 10) })}>
@@ -644,9 +723,23 @@ Rubros de la obra: ${lista}`;
             Quien quiera el desglose por origen lo abre; el que no, no tiene
             que entenderlo para usar la pantalla. */}
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-          <Tarjeta label="A FAVOR DEL PROYECTO" valor={t.neto}
-            color={t.neto >= 0 ? colors.success : colors.danger}
-            icono={<TrendingUp size={11} color={t.neto >= 0 ? colors.success : colors.danger} />} />
+          <Tarjeta label={res.neto >= 0 ? "RESULTADO · A FAVOR DEL PROYECTO" : "RESULTADO · EN CONTRA"} valor={res.neto}
+            color={res.neto >= 0 ? colors.success : colors.danger}
+            icono={<TrendingUp size={11} color={res.neto >= 0 ? colors.success : colors.danger} />} />
+          {/* De qué está hecho, cuando no es solo una cosa: lo ganado
+              comprando, lo perdido en rubros pasados, lo que dejaron los
+              rubros seguidos ya terminados. */}
+          {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0) && (
+            <Tarjeta label={`COMPRANDO MEJOR · ${res.cuantosConPapel}`} valor={res.conPapel}
+              color={res.conPapel >= 0 ? colors.success : colors.danger} />
+          )}
+          {res.perdidasTotal !== 0 && (
+            <Tarjeta label={`RUBROS PASADOS · ${res.perdidas.length}`} valor={res.perdidasTotal} color={colors.danger}
+              icono={<TrendingDown size={11} color={colors.danger} />} />
+          )}
+          {res.ganadoEnSeguidos !== 0 && (
+            <Tarjeta label="RUBROS SEGUIDOS, TERMINADOS" valor={res.ganadoEnSeguidos} color={colors.success} />
+          )}
           {t.cuantosPrevistos > 0 && (
             <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin confirmar`} valor={t.previsto}
               color={colors.warning} />
@@ -658,6 +751,59 @@ Rubros de la obra: ${lista}`;
               {verDesglose ? "ocultar el desglose" : "de dónde sale"}
             </button>
           )}
+        </div>
+
+        {/* ── RUBROS EN SEGUIMIENTO ───────────────────────────────────
+            Un beneficio también puede salir de un rubro del presupuesto y de
+            las facturas que se le cargan en la planilla: se trae el rubro acá
+            y se lo sigue, factura a factura, contra su costo si está cargado
+            o contra lo que se cobra si no. Y los que ya se pasaron se listan
+            solos, se sigan o no: esa pérdida ya es de la obra. */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, flex: 1 }}>
+              RUBROS EN SEGUIMIENTO · {res.seguimiento.length}
+            </div>
+            {!eligiendoSeguir && (
+              <button onClick={() => { setEligiendoSeguir(true); setBuscaRubro(""); }}
+                style={{ background: "none", border: `1px solid ${colors.brand}`, color: colors.brand, borderRadius: 14,
+                  padding: "2px 10px", fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
+                + seguir un rubro del presupuesto
+              </button>
+            )}
+          </div>
+          {eligiendoSeguir && (
+            <div style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+                Elegí en el presupuesto el rubro que querés seguir. Se compara lo que lleva gastado en facturas contra
+                su costo cargado, o contra lo que se cobra si no tiene costo. Cuenta en el resultado cuando el rubro
+                termina, o desde ya si se pasó.
+              </div>
+              <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+                eligiendo={{ descripcion: "el seguimiento" }}
+                onCerrar={() => setEligiendoSeguir(false)}
+                onElegir={async rb => { await seguir(rb); setEligiendoSeguir(false); }} />
+            </div>
+          )}
+          {res.seguimiento.length > 0 && (
+            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden", marginBottom: 6 }}>
+              {res.seguimiento.map(f => <FilaRubro key={f.id} f={f} onQuitar={() => quitarSeguido(f.seguido)} />)}
+            </div>
+          )}
+          {(() => {
+            const sueltas = res.perdidas.filter(f => !res.seguimiento.some(s => s.id === f.id));
+            if (!sueltas.length) return null;
+            return (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.danger, letterSpacing: 0.4, margin: "6px 0 4px" }}>
+                  PASADOS DE SU PRESUPUESTO, AUNQUE NO SE SIGAN · {sueltas.length} · ya cuentan como pérdida
+                </div>
+                <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+                  {sueltas.map(f => <FilaRubro key={f.id} f={f} />)}
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {verDesglose && (
@@ -995,7 +1141,7 @@ Rubros de la obra: ${lista}`;
                   style={{ background: "none", border: "none", color: colors.muted, fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>×</button>
               )}
               <Button variant="primary" size="sm" disabled={ocupado} onClick={guardarAMano}>
-                {ocupado ? "Guardando…" : "Guardar"}
+                {ocupado ? "Guardando…" : aMano.id ? "Guardar cambios" : "Guardar"}
               </Button>
               <button onClick={() => setAMano(null)}
                 style={{ background: "none", border: "none", color: colors.muted, fontSize: 11.5,
@@ -1144,6 +1290,12 @@ Rubros de la obra: ${lista}`;
                         color: colors.success, fontSize: 10.5, fontWeight: 700, cursor: "pointer",
                         fontFamily: colors.font, flexShrink: 0 }}>
                       Confirmar
+                    </button>
+                  )}
+                  {!esDeOrden(b) && (
+                    <button onClick={() => editarBeneficio(b)} title="Corregirlo"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex", flexShrink: 0 }}>
+                      <Pencil size={12} />
                     </button>
                   )}
                   <button onClick={async () => {

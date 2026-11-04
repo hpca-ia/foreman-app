@@ -19,7 +19,7 @@ import TablaControl from "./TablaControl";
 // TIENE beneficios cargados, y hasta hoy no había ninguno en toda la base. El
 // día que apareció el primero —el margen de la OC-01 de Plaza Lagos— se llevó
 // la pantalla puesta.
-import { totales as totalesDeBeneficios } from "./cuentaBeneficios.js";
+import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import LibroFacturas from "./LibroFacturas";
@@ -327,14 +327,15 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             Una obra puede ir perfecta en avance y en plazo y haber perdido la
             utilidad entera comprando mal — y hasta ahora eso no se veía en
             ningún número de esta pantalla. */}
-        {beneficios.length > 0 && (() => {
-          // Solo lo ya comprado. Lo previsto sale de una proforma y todavía
-          // puede no pasar: meterlo acá sería decir que la obra tiene una
-          // utilidad que nadie cobró.
-          const t = totalesDeBeneficios(beneficios);
-          if (!t.cuantos) return null;
-          return <Tarjeta label={t.neto >= 0 ? "Beneficio" : "Sobreprecio"} valor={Math.abs(t.neto)}
-            color={t.neto >= 0 ? colors.success : colors.danger} />;
+        {(() => {
+          // Solo lo ya comprado, y con las pérdidas de los rubros pasados
+          // adentro: un beneficio de $5.000 en una obra que ya va perdiendo
+          // en tres rubros no es un beneficio. Lo previsto sale de una
+          // proforma y todavía puede no pasar: no entra.
+          const res = resultadoDeLaObra({ beneficios, rubros, porRubro });
+          if (!res.cuantosConPapel && !res.perdidas.length) return null;
+          return <Tarjeta label={res.neto >= 0 ? "Beneficio" : "Pérdida"} valor={Math.abs(res.neto)}
+            color={res.neto >= 0 ? colors.success : colors.danger} />;
         })()}
         {/* LOS DOS AVANCES, SEPARADOS.
             El económico es invertido sobre presupuesto: dice cuánta plata se
@@ -395,7 +396,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             anticipó el cliente ni cuánto se le debe a cada proveedor. */}
         {vePlata && <button onClick={() => setTab("proveedores")} style={tabS(tab === "proveedores")}>Proveedores</button>}
         {veCaja && <button onClick={() => setTab("fondos")} style={tabS(tab === "fondos")}>Caja del proyecto</button>}
-        <button onClick={() => setTab("beneficios")} style={tabS(tab === "beneficios")}>Beneficios</button>
+        <button onClick={() => setTab("beneficios")} style={tabS(tab === "beneficios")}>Beneficios y pérdidas</button>
         {/* OTRA COSA QUE BENEFICIOS, Y POR ESO OTRA PESTAÑA. Beneficios son
             utilidades nuestras sobre lo ya contratado; esto es el presupuesto
             contra una propuesta nueva o una liquidación, y lo que sale son
