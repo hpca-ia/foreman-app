@@ -173,11 +173,21 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
   const aFavorEnCurso = c2(conDato.filter(f => f.estado === "en_curso").reduce((t, x) => t + x.aFavor, 0));
   const enContra = c2(conDato.filter(f => f.estado === "sobreprecio").reduce((t, x) => t + x.aFavor, 0));
 
+  // LOS QUE YA GASTARON MÁS DE LO QUE SE COBRA, con o sin costo cargado. Es la
+  // pregunta que se puede contestar de todos los rubros: el precio al cliente
+  // está en el presupuesto y el gasto en las facturas. Un rubro pasado ya le
+  // cuesta a la obra más de lo que el cliente paga por él, y eso no se
+  // arregla comprando el resto más barato.
+  const pasados = filas.filter(f => f.aFavor < 0).sort((a, b) => a.aFavor - b.aFavor);
+
   return {
     vendido, costoVendido, margenVendido: c2(vendido - costoVendido),
     // Lo que deja la obra: terminado, en curso, y lo que ya se pasó.
     aFavorHecho, aFavorEnCurso, enContra,
     aFavorNeto: c2(aFavorHecho + enContra),
+    pasados,
+    cuantosPasados: pasados.length,
+    pasadosTotal: c2(pasados.reduce((t, x) => t + x.aFavor, 0)),
     filas: filas.sort((a, b) => Math.abs(b.aFavor) - Math.abs(a.aFavor)),
     ahorro: c2(suma("dif", f => !f.sinCosto && f.estado === "ahorro")),
     sobreprecio: c2(suma("dif", f => !f.sinCosto && f.estado === "sobreprecio")),

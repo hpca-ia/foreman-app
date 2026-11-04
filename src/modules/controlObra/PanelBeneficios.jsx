@@ -658,95 +658,112 @@ Rubros de la obra: ${lista}`;
             cambio regulariza una cantidad, esto se acomoda con aprobarla. */}
         {(sola.cuantos > 0 || porQue) && (
           <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: `1px solid ${colors.border}` }}>
-            {/* SIN COSTOS CARGADOS, ESTE BLOQUE NO DICE NADA Y ENGAÑA.
-                Mostraba cuatro tarjetas y dos frases de las cuales lo único
-                cierto era que no se sabe. Y la peor era "en los que siguen
-                andando $58.906", que no es plata ganada: es presupuesto que
-                todavía no se gastó, leído en verde al lado de un beneficio.
-                Una pantalla que hay que explicar no sirve: cuando no hay con
-                qué medir, se dice en una línea y se ofrece el camino. */}
-            {!sola.cuantos ? (
-              <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55 }}>
-                <strong style={{ color: colors.warning }}>
-                  Esta obra todavía no puede medir si compró mejor o peor que lo presupuestado.
-                </strong>{" "}
-                Ninguno de sus {sola.cuantosRubros} rubros tiene costo cargado, y sin eso lo único que se
-                puede restar es presupuesto menos gastado, que no es un beneficio: es plata que todavía no
-                se gastó. Los beneficios de abajo son los que salieron de análisis, de órdenes de cambio o
-                se cargaron a mano, y esos sí son reales.
-                <div style={{ color: colors.muted, marginTop: 3 }}>
-                  El costo se carga en <strong>Diferencias</strong>, con la propuesta que NOVA ya leyó: el
-                  renglón viene emparejado con su rubro y el botón los carga todos juntos.
-                </div>
-              </div>
-            ) : (
+            {/* DOS PREGUNTAS DISTINTAS, Y SE HACEN POR SEPARADO.
+                1. ¿Algún rubro ya gastó más de lo que se cobra? Se sabe de
+                   todos: el precio al cliente está en el presupuesto y el
+                   gasto en las facturas asignadas.
+                2. ¿Se compró mejor o peor que el COSTO presupuestado? Solo se
+                   sabe de los rubros con costo cargado.
+                Mezcladas en un bloque —un rubro sin costo, pasado de lo que
+                cobra, listado bajo "rubros con costo cargado"— no se entendía
+                qué era ahorro de qué. */}
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+              LO QUE DICE EL CONTROL, RUBRO POR RUBRO · CALCULADO SOLO
+            </div>
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 9 }}>
+              <strong>Se cobra</strong> es el precio del rubro al cliente, el del presupuesto vigente. <strong>Se gastó</strong> son
+              las facturas asignadas a ese rubro. La resta es lo que el rubro le deja a la obra, y adentro hay dos cosas: el margen
+              con el que se vendió y lo que se ganó o se perdió comprando. Para separarlas hace falta el <strong>costo</strong> del rubro.
+            </div>
+
+            <div style={{ fontSize: 10, fontWeight: 700, color: sola.cuantosPasados ? colors.danger : colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+              1 · YA GASTARON MÁS DE LO QUE SE COBRA · {sola.cuantosPasados} {sola.cuantosPasados === 1 ? "rubro" : "rubros"}
+            </div>
+            {sola.cuantosPasados ? (
               <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
-                  LO QUE DEJA LA OBRA · LO QUE SE COBRA MENOS LO QUE SE GASTÓ · CALCULADO SOLO
+                <div style={{ fontSize: 11.5, color: colors.inkSoft, marginBottom: 4, lineHeight: 1.5 }}>
+                  Ya le cuestan a la obra más de lo que el cliente paga por ellos:{" "}
+                  <strong style={{ color: colors.danger }}>−${fmt(Math.abs(sola.pasadosTotal))}</strong>. Eso ya pasó, y no se
+                  arregla comprando el resto más barato.
                 </div>
-                <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
-                  <Tarjeta label="DEJAN LOS TERMINADOS" valor={sola.aFavorHecho}
-                    color={sola.aFavorHecho >= 0 ? colors.success : colors.danger}
-                    icono={<TrendingUp size={11} color={colors.success} />} />
-                  {/* NO ES PLATA GANADA: es lo que todavía no se gastó de los
-                      rubros que siguen abiertos, y puede gastarse entero. */}
-                  {sola.aFavorEnCurso !== 0 && (
-                    <Tarjeta label="SIN TERMINAR · TODAVÍA NO SE SABE" valor={sola.aFavorEnCurso}
-                      color={colors.muted} />
-                  )}
-                  {sola.enContra !== 0 && (
-                    <Tarjeta label="YA SE PASARON DE SU COSTO" valor={sola.enContra} color={colors.danger} />
-                  )}
-                </div>
-                {porQue && (
-                  <div style={{ fontSize: 11.5, color: colors.warning, marginBottom: 7, lineHeight: 1.5 }}>
-                    {porQue}
-                  </div>
-                )}
-              </>
-            )}
-            {sola.cuantos > 0 && (
-              <>
-                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
-                  DE ESO, LO QUE SE GANÓ COMPRANDO · {sola.cuantos} rubros con costo cargado
-                </div>
-                <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-                  <Tarjeta label={`SE AHORRÓ · ${sola.cuantosAhorro} terminados`} valor={sola.ahorro} color={colors.success}
-                    icono={<TrendingDown size={11} color={colors.success} />} />
-                  <Tarjeta label={`SOBREPRECIO · ${sola.cuantosSobreprecio}`} valor={sola.sobreprecio} color={colors.danger} />
-                  <Tarjeta label="NETO DE LO QUE YA PASÓ" valor={sola.neto}
-                    color={sola.neto >= 0 ? colors.success : colors.danger} />
-                  {/* Lo que PARECE a favor en rubros sin terminar: puede ser
-                      nada más lo que todavía falta comprar. Contarlo con el
-                      resto es lo que hace que una obra parezca rentable hasta
-                      el último mes. */}
-                  {sola.cuantosEnCurso > 0 && (
-                    <Tarjeta label={`SIN TERMINAR · ${sola.cuantosEnCurso} rubros`} valor={sola.enCurso} color={colors.warning} />
-                  )}
-                </div>
-                {titular && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{titular}</div>}
-                {/* La vara con la que se lee todo lo de arriba, y que no se
-                    suma con nada: el margen vendido se decidió al firmar. */}
-                {sola.margenVendido !== 0 && (
-                  <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
-                    Esos {sola.cuantos} rubros se vendieron en ${fmt(sola.vendido)} con ${fmt(sola.costoVendido)} de
-                    costo presupuestado: <strong>${fmt(sola.margenVendido)}</strong> de margen vendido, que se decidió
-                    al firmar y no es mérito de la obra. Lo de arriba es lo que la obra le sumó o le restó a eso.
-                  </div>
-                )}
-                <div style={{ marginTop: 7 }}>
-                  {sola.filas.filter(f => f.estado === "sobreprecio" || f.estado === "ahorro").slice(0, 10).map(f => (
+                <div style={{ marginBottom: 10 }}>
+                  {sola.pasados.slice(0, 10).map(f => (
                     <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11.5,
                       padding: "3px 0", borderBottom: `1px solid ${colors.borderSoft || colors.border}` }}>
                       <span style={{ color: colors.muted, fontSize: 10.5, minWidth: 34 }}>{f.numero}</span>
                       <span style={{ flex: 1, color: colors.ink }}>{f.descripcion}</span>
                       <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>
                         se cobra ${fmt(f.contratado)} · se gastó ${fmt(f.gastado)}
-                        {f.presupuestado != null && <> · costaba ${fmt(f.presupuestado)}</>}
+                        {f.presupuestado != null ? <> · costaba ${fmt(f.presupuestado)}</> : <> · sin costo cargado</>}
+                        {f.avance ? <> · {f.avance}% de avance</> : <> · sin avance anotado</>}
                       </span>
-                      <span style={{ fontWeight: 700, whiteSpace: "nowrap",
-                        color: f.aFavor >= 0 ? colors.success : colors.danger }}>
-                        {f.aFavor >= 0 ? "+" : "−"}${fmt(Math.abs(f.aFavor))}
+                      <span style={{ fontWeight: 700, whiteSpace: "nowrap", color: colors.danger }}>−${fmt(Math.abs(f.aFavor))}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>Ninguno: ningún rubro gastó todavía más de lo que se cobra.</div>
+            )}
+
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+              2 · ¿SE COMPRÓ MEJOR QUE EL COSTO PRESUPUESTADO? · {sola.cuantos} de {sola.cuantosRubros} rubros con costo cargado
+            </div>
+            {!sola.cuantos ? (
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55 }}>
+                <strong style={{ color: colors.warning }}>Todavía no se puede medir.</strong>{" "}
+                Ninguno de los {sola.cuantosRubros} rubros tiene costo cargado, y sin eso lo único que se puede restar es lo
+                que se cobra menos lo gastado, que mezcla el margen vendido con lo ganado comprando.
+                <div style={{ color: colors.muted, marginTop: 3 }}>
+                  El costo se carga en <strong>Diferencias</strong>, con la propuesta que NOVA ya leyó: el renglón viene
+                  emparejado con su rubro y el botón los carga todos juntos.
+                </div>
+              </div>
+            ) : !sola.cuantosAhorro && !sola.cuantosSobreprecio && !sola.cuantosEnCurso ? (
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55 }}>
+                {sola.cuantos === 1 ? "El único rubro con costo cargado" : `Los ${sola.cuantos} rubros con costo cargado`}
+                {" "}todavía no {sola.cuantos === 1 ? "tiene" : "tienen"} gasto asignado: no hay nada que comparar.
+                {porQue && <div style={{ color: colors.warning, marginTop: 3 }}>{porQue}</div>}
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 6 }}>
+                  <Tarjeta label={`SE AHORRÓ · ${sola.cuantosAhorro} terminados`} valor={sola.ahorro} color={colors.success}
+                    icono={<TrendingDown size={11} color={colors.success} />} />
+                  <Tarjeta label={`SOBREPRECIO · ${sola.cuantosSobreprecio}`} valor={sola.sobreprecio} color={colors.danger} />
+                  <Tarjeta label="NETO DE LO QUE YA PASÓ" valor={sola.neto}
+                    color={sola.neto >= 0 ? colors.success : colors.danger} />
+                  {sola.cuantosEnCurso > 0 && (
+                    <Tarjeta label={`SIN TERMINAR · ${sola.cuantosEnCurso} rubros`} valor={sola.enCurso} color={colors.warning} />
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 5 }}>
+                  <strong>Se ahorró</strong>: rubros terminados que gastaron menos que su costo. <strong>Sobreprecio</strong>: ya
+                  gastaron más que su costo, terminados o no. <strong>Sin terminar</strong>: parecen a favor, pero todavía falta
+                  comprar y puede ser nada más eso.
+                </div>
+                {titular && <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 3 }}>{titular}</div>}
+                {porQue && <div style={{ fontSize: 11, color: colors.warning, marginBottom: 5, lineHeight: 1.5 }}>{porQue}</div>}
+                {/* La vara con la que se lee lo de arriba, y que no se suma
+                    con nada: el margen vendido se decidió al firmar. */}
+                {sola.margenVendido !== 0 && (
+                  <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 5 }}>
+                    Esos {sola.cuantos} rubros se vendieron en ${fmt(sola.vendido)} con ${fmt(sola.costoVendido)} de costo
+                    cargado: <strong>${fmt(sola.margenVendido)}</strong> de margen vendido, que se decidió al firmar y no es
+                    mérito de la obra. Lo de arriba es lo que la obra le sumó o le restó a eso.
+                  </div>
+                )}
+                <div>
+                  {sola.filas.filter(f => !f.sinCosto && (f.estado === "sobreprecio" || f.estado === "ahorro")).slice(0, 10).map(f => (
+                    <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 11.5,
+                      padding: "3px 0", borderBottom: `1px solid ${colors.borderSoft || colors.border}` }}>
+                      <span style={{ color: colors.muted, fontSize: 10.5, minWidth: 34 }}>{f.numero}</span>
+                      <span style={{ flex: 1, color: colors.ink }}>{f.descripcion}</span>
+                      <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>
+                        costaba ${fmt(f.presupuestado)} · se gastó ${fmt(f.gastado)} · se cobra ${fmt(f.contratado)}
+                      </span>
+                      <span style={{ fontWeight: 700, whiteSpace: "nowrap", color: f.dif >= 0 ? colors.success : colors.danger }}>
+                        {f.dif >= 0 ? "+" : "−"}${fmt(Math.abs(f.dif))}
                       </span>
                     </div>
                   ))}

@@ -136,3 +136,22 @@ test("el costo se lleva a la base del gasto: la factura trae el IVA adentro", ()
   // lo que deja.
   assert.equal(r.ahorro, 0);
 });
+
+test("los que ya gastaron más de lo que se cobra se listan aparte, con o sin costo cargado", () => {
+  // El 9101 de la OC-01 en Diners: sin costo, se cobra $511,28 y se gastó
+  // $671,64. Aparecía bajo "rubros con costo cargado" y nadie entendía qué era.
+  const r = eficienciaDeRubros({
+    rubros: [
+      { id: 1, numero: 9101, descripcion: "Picado", total_base: 511.28, iva_pct: 15, cantidad: 95.61 },
+      { id: 2, numero: 58, descripcion: "Mamparas", total_base: 6900, iva_pct: 15, cantidad: 1, costo_unitario: 150 },
+      { id: 3, numero: 7, descripcion: "Pintura", total_base: 1000, iva_pct: 15, cantidad: 1, costo_unitario: 600, avance_pct: 100 },
+    ],
+    porRubro: { 1: { acumulado: 671.64 }, 3: { acumulado: 650 } },
+  });
+  assert.deepEqual(r.pasados.map(f => f.id), [1]);
+  assert.equal(r.cuantosPasados, 1);
+  assert.equal(r.pasadosTotal, -160.36);
+  assert.equal(r.pasados[0].sinCosto, true);
+  // El de pintura compró mejor que su costo y está terminado: es ahorro, no pasado.
+  assert.equal(r.filas.find(f => f.id === 3).estado, "ahorro");
+});
