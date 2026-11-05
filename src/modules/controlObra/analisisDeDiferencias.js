@@ -1,9 +1,10 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
+import { sinRepetidas } from "./cuentaDiferencias.js";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son las que deciden qué se le cobra al cliente.
 export { DECISIONES, decisionesPara, comoVa, recalcularContra, queSaleDe,
-  queNoSePaga, respaldoDeLoQueNoSePaga } from "./cuentaDiferencias.js";
+  queNoSePaga, respaldoDeLoQueNoSePaga, sinRepetidas, precioSobreLoContratado } from "./cuentaDiferencias.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, GUARDADO.
 //
@@ -31,7 +32,10 @@ export async function lineasDe(analisisId) {
   const { data, error } = await supabase.from("obra_analisis_lineas")
     .select("*").eq("analisis_id", analisisId).order("orden");
   if (error) return { lineas: [], error: falta(error) ? SIN_145 : error.message };
-  return { lineas: data || [] };
+  // UN RENGLÓN DEL PAPEL, UNA SOLA VEZ. Lo que se leyó antes de que la
+  // comparación dejara de partir cantidad y precio en dos sigue guardado
+  // partido: acá se saca la mitad repetida, para todo el que lea las líneas.
+  return sinRepetidas(data || []);
 }
 
 /**

@@ -142,9 +142,24 @@ export function loQueNoEstaPresupuestado(comparacion) {
   // utilidad, que estaba vendida desde el principio. Las dos son beneficio de
   // la casa; una se ganó comprando y la otra vendiendo.
   const varaDe = l => (l.puCosto != null ? l.puCosto : l.puRubro);
+  // UN RENGLÓN DEL PAPEL ES UNA SOLA SITUACIÓN.
+  //
+  // Si trae otra cantidad, es una diferencia de CANTIDAD y nada más: va a la
+  // orden de cambio como aumento o como reducción. Antes el mismo renglón
+  // salía dos veces —una por la cantidad y otra por el precio de las que ya
+  // estaban contratadas— y eso se leía como dos problemas, se decidía dos
+  // veces y duplicaba lo que iba a la orden.
+  //
+  // El precio distinto no se pierde: lo dice la misma tarjeta de la cantidad,
+  // y si es más barato llega a Beneficios como eficiencia. Lo que no hace es
+  // aparecer como otra diferencia.
+  const cambiaCantidad = l => n(l.cantidadRubro) > 0
+    && (n(l.cantidad) > n(l.cantidadRubro) * 1.001
+      || (n(l.cantidad) > 0 && n(l.cantidad) < n(l.cantidadRubro) * 0.999));
   const otroPrecio = lineas.filter(l => {
     const vara = varaDe(l);
     if (!l.rubro || vara == null || l.puProforma == null) return false;
+    if (cambiaCantidad(l)) return false;
     return Math.abs(l.puProforma - vara) > Math.max(0.01, Math.abs(vara) * 0.001);
   }).map(l => {
     const vara = varaDe(l);

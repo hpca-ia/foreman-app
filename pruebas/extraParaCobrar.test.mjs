@@ -155,10 +155,13 @@ test("decidido todo, el análisis queda listo para armar su orden", async () => 
   assert.equal(v.monto, 100, "lo que se le cobra al cliente, no lo que pagamos nosotros");
 });
 
-// ── CANTIDAD Y PRECIO SON DOS DIFERENCIAS ──────────────────────────────────
+// ── UN RENGLÓN DEL PAPEL ES UNA SOLA SITUACIÓN ─────────────────────────────
 //
-// 12 U a $48,50 contratadas contra 16 U a $51,00 cotizadas. Mirar solo el
-// total, o solo la cantidad, esconde la mitad.
+// 12 U a $48,50 contratadas contra 16 U a $51,00 cotizadas. Es una diferencia
+// de CANTIDAD —4 de más, que van a la orden— y nada más. Antes salía dos
+// veces, una por la cantidad y otra por el precio, y eso duplicaba lo que se
+// decidía y lo que iba a la orden. El precio distinto se dice en la misma
+// tarjeta (ver precioSobreLoContratado), sin abrir otra diferencia.
 // El rubro con su COSTO cargado: 12 U que costaban $48,50 cada una. Sin costo
 // no hay contra qué comparar el precio —el del rubro es el de venta, y contra
 // ese todo proveedor parece barato: esa diferencia es el margen—.
@@ -173,18 +176,24 @@ test("la cantidad de más se cobra, y se cobra aparte del precio", () => {
   assert.equal(dos.demas[0].precioUnitario, 68, "al precio que el cliente firmó: 816/12");
 });
 
-test("el precio distinto aparece como su propia diferencia", () => {
-  assert.equal(dos.otroPrecio.length, 1);
-  // SOBRE LAS 12 DEL CONTRATO, NO SOBRE LAS 16 COTIZADAS: las 4 de más ya se
-  // cuentan como cantidad, al precio que el cliente firmó. Medir el precio
-  // sobre las 16 las contaría dos veces.
-  assert.equal(dos.otroPrecio[0].costo, 30, "2,50 de más × las 12 que los dos tienen");
-  assert.equal(dos.otroPrecio[0].sube, true);
-  assert.match(dos.otroPrecio[0].por, /costaba \$48\.5 y ahora lo cotizan a \$51/);
+test("con otra cantidad el renglón sale UNA vez: no se repite como diferencia de precio", () => {
+  assert.equal(dos.otroPrecio.length, 0);
+  assert.equal(dos.subieron.length, 0);
+  assert.equal(dos.todo.length, 1, "una sola diferencia para decidir");
+  assert.equal(partidasParaOrden(dos, 20).length, 1, "y una sola partida en la orden");
 });
 
-test("el precio NO se le cobra al cliente: el del contrato está firmado", () => {
-  assert.equal(dos.otroPrecio[0].precioUnitario, null);
+test("el precio de ese renglón se dice sobre la cantidad ya contratada, sin abrir otra diferencia", async () => {
+  const { precioSobreLoContratado } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const d = dos.demas[0];
+  const linea = { hallazgo: d.hallazgo, cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel, unidad: d.unidad };
+  // SOBRE LAS 12 DEL CONTRATO, NO SOBRE LAS 16 COTIZADAS: las 4 de más ya se
+  // cuentan como cantidad, al precio que el cliente firmó.
+  const p = precioSobreLoContratado(linea, conPrecio[0], 68);
+  assert.equal(p.comun, 12);
+  assert.equal(p.monto, 30, "2,50 de más × las 12 que los dos tienen");
+  assert.equal(p.sube, true, "subió: es una alerta para conversar con el proveedor");
+  assert.equal(p.contraPrecio, false, "contra el costo cargado");
 });
 
 test("mismo precio y otra cantidad: no inventa una diferencia de precio", () => {
@@ -240,27 +249,40 @@ test("el ahorro y el sobreprecio se cuentan por separado: un neto esconde los do
   assert.equal(h.sobreprecio, 50);
 });
 
-test("la diferencia de precio aparece aunque la cantidad tambien haya cambiado", () => {
-  // El rubro son 12 y la proforma trae 15, y encima a otro precio. Son DOS
-  // hallazgos: tres de mas —que se le cobran al cliente al precio que firmo— y
-  // un precio distinto en las que ya estaban. Antes el de cantidad tapaba al de
-  // precio y el rubro salia como si solo hubiera cambiado la cantidad.
+test("mas cantidad y ademas mas barato: una diferencia, y la eficiencia se dice en ella", async () => {
+  // El rubro son 12 y la proforma trae 15, y encima mas baratas. Es UNA
+  // situacion: tres de mas, que van a la orden. Lo que el precio nuevo deja
+  // sobre las 12 que ya estaban es eficiencia del proyecto, y lo dice la misma
+  // tarjeta: no es otra diferencia que decidir.
+  const { precioSobreLoContratado } = await import("../src/modules/controlObra/cuentaDiferencias.js");
   const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
     [{ descripcion: "Luminarias LED", cantidad: 15, unidad: "U", monto: 660, rubro_id: 1 }], conPrecio));
   assert.equal(h.demas.length, 1);
+  assert.equal(h.bajaron.length, 0);
+  assert.equal(h.todo.length, 1);
   // 44 contra 48,50 cargado: bajo 4,50, y sobre las 12 que los dos tienen.
-  assert.equal(h.bajaron.length, 1);
-  assert.equal(h.bajaron[0].cantidad, 12);
-  assert.equal(h.eficiencia, 54);
+  const d = h.demas[0];
+  const p = precioSobreLoContratado(
+    { hallazgo: "mas_cantidad", cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel }, conPrecio[0], 68);
+  assert.equal(p.comun, 12);
+  assert.equal(p.monto, 54);
+  assert.equal(p.sube, false);
 });
 
-test("la diferencia de precio se mide sobre la cantidad comun, no sobre la cotizada", () => {
+test("la diferencia de precio se mide sobre la cantidad comun, no sobre la cotizada", async () => {
   const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
     [{ descripcion: "Luminarias LED", cantidad: 15, unidad: "U", monto: 900, rubro_id: 1 }], conPrecio));
   // 60 por unidad contra 48,50 cargado: subio 11,50 sobre las 12 del contrato.
-  assert.equal(h.subieron.length, 1);
-  assert.equal(h.subieron[0].cantidad, 12);
-  assert.equal(h.sobreprecio, 138);
+  // No es otra diferencia: es la alerta que lleva la tarjeta de la cantidad.
+  assert.equal(h.subieron.length, 0);
+  assert.equal(h.sobreprecio, 0);
+  const { precioSobreLoContratado } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const d = h.demas[0];
+  const p = precioSobreLoContratado(
+    { hallazgo: "mas_cantidad", cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel }, conPrecio[0], 68);
+  assert.equal(p.comun, 12);
+  assert.equal(p.monto, 138);
+  assert.equal(p.sube, true);
 });
 
 test("revisado no es decidido: una mirada y dejada a proposito no es una sin abrir", async () => {

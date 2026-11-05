@@ -78,6 +78,12 @@ export function decisionesPara(hallazgo) {
   // hay nada que negarle, y el botón ahí solo serviría para equivocarse.
   if (hallazgo === "bajo_precio") return todas.filter(k => k !== "cobrar" && k !== "no_se_paga");
   if (hallazgo === "menos_cantidad") return todas.filter(k => k !== "eficiencia" && k !== "no_se_paga");
+  // UNA SUBIDA DE PRECIO DEL PROVEEDOR ES UNA ALERTA, NO UN ADICIONAL. A la
+  // orden de cambio va lo que no estaba en el contrato y lo que cambió de
+  // cantidad; el precio que firmó el cliente no se mueve porque el proveedor
+  // haya subido el suyo. Esto se conversa con él, y lo que salga de esa
+  // conversación es una de dos: no se le paga, o lo pagamos nosotros.
+  if (hallazgo === "subio_precio") return todas.filter(k => k !== "eficiencia" && k !== "cobrar");
   return todas.filter(k => k !== "eficiencia");
 }
 
@@ -127,6 +133,67 @@ export function comoVa(lineas = []) {
     anotadas: anotadas.length,
     aFavor: Math.round(eficiencias.reduce((t, l) => t + (Number(l.monto) || 0), 0) * 100) / 100,
     listo: lineas.length > 0 && sinDecidir === 0,
+  };
+}
+
+const esDePrecio = h => h === "subio_precio" || h === "bajo_precio";
+const esDeCantidad = h => h === "mas_cantidad" || h === "menos_cantidad";
+
+/**
+ * LO QUE QUEDÓ GUARDADO REPETIDO, FUERA.
+ *
+ * Los análisis leídos antes de este arreglo tienen el mismo renglón del papel
+ * dos veces: una como cantidad y otra como precio. La de precio se saca de la
+ * vista —la de cantidad ya lo cuenta, y lo que haya de eficiencia lo dice
+ * ella—. Es el mismo renglón cuando apunta al mismo rubro y el papel trae la
+ * misma cantidad y el mismo total.
+ *
+ * No se borra nada de la base y no se toca ninguna decisión: se deja de
+ * mostrar. La que ya salió en una orden de cambio se queda, porque esa orden
+ * existe.
+ */
+export function sinRepetidas(lineas = []) {
+  const n = v => Number(v) || 0;
+  const clave = l => `${l.obra_rubro_id}|${n(l.cantidad_papel)}|${Math.round(n(l.monto_papel) * 100)}`;
+  const conPapel = l => !!l?.obra_rubro_id && l.cantidad_papel != null && l.monto_papel != null;
+  const deCantidad = new Set(lineas.filter(l => esDeCantidad(l?.hallazgo) && conPapel(l)).map(clave));
+  const quedan = lineas.filter(l => !(esDePrecio(l?.hallazgo) && conPapel(l) && !l.orden_cambio_id
+    && deCantidad.has(clave(l))));
+  return { lineas: quedan, repetidas: lineas.length - quedan.length };
+}
+
+/**
+ * EL PRECIO DE UN RENGLÓN QUE ADEMÁS CAMBIÓ DE CANTIDAD.
+ *
+ * El contrato tiene 65 puntos y la propuesta trae 111, y además más baratos.
+ * La diferencia es de cantidad —46 que van a la orden— y es una sola. Pero el
+ * precio nuevo dice algo sobre los 65 que ya estaban: si bajó, es eficiencia
+ * del proyecto; si subió, es una alerta para conversar con el proveedor. Eso
+ * se dice en la misma tarjeta, sobre la cantidad que los dos tienen, sin
+ * abrir otra diferencia.
+ *
+ * La vara es la de siempre: el costo cargado si existe, y si no el precio que
+ * vio el cliente.
+ *
+ * @returns { comun, unidad, vara, puPapel, monto, sube, contraPrecio } o null
+ */
+export function precioSobreLoContratado(linea, rubro, unitarioSinIva) {
+  const n = v => Number(v) || 0;
+  const c2 = v => Math.round(n(v) * 100) / 100;
+  if (!rubro || !esDeCantidad(linea?.hallazgo)) return null;
+  const cantPapel = n(linea.cantidad_papel), montoPapel = n(linea.monto_papel), cantRubro = n(rubro.cantidad);
+  if (!cantPapel || !montoPapel || !cantRubro) return null;
+  const puPapel = montoPapel / cantPapel;
+  const costo = n(rubro.costo_unitario) > 0 ? n(rubro.costo_unitario) : null;
+  const vara = costo != null ? costo : n(unitarioSinIva);
+  if (!vara || Math.abs(puPapel - vara) <= Math.max(0.01, Math.abs(vara) * 0.001)) return null;
+  const comun = Math.min(cantPapel, cantRubro);
+  return {
+    comun, unidad: rubro.unidad || linea.unidad || "",
+    vara: c2(vara), puPapel: c2(puPapel),
+    monto: c2(Math.abs(puPapel - vara) * comun),
+    sube: puPapel > vara,
+    contraPrecio: costo == null,
   };
 }
 

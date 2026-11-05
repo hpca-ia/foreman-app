@@ -12,7 +12,7 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
-  queNoSePaga,
+  queNoSePaga, precioSobreLoContratado,
   recalcularContra, ponerPrecio, marcarEnOrden, queSaleDe,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
@@ -70,9 +70,9 @@ const GRUPOS = [
   // un solo grupo el ahorro se lee como un problema y se descarta junto con el
   // resto. Los sobreprecios los busca todo el mundo; las eficiencias no las
   // registra nadie, y son las que dicen si la obra compra bien.
-  ["subio_precio", "EL MISMO RUBRO, MÁS CARO DE LO QUE VALE PARA LA OBRA",
-    "Cambió el costo, no la cantidad. El precio que firmó el cliente no se mueve: esto va contra nuestro "
-    + "margen, y la conversación es con el proveedor. Si se decide cobrárselo igual, hay que ponerle precio."],
+  ["subio_precio", "ALERTA: EL MISMO RUBRO, MÁS CARO DE LO QUE VALE PARA LA OBRA",
+    "Cambió el costo, no la cantidad. El precio que firmó el cliente no se mueve, así que esto no va a la "
+    + "orden de cambio: se conversa con el proveedor. Lo que no se le reconozca, marcalo «No se paga» y anotá por qué."],
   ["bajo_precio", "EL MISMO RUBRO, MÁS BARATO: ES BENEFICIO",
     "Lo cotizan por debajo de lo que vale para la obra. Al cliente no se le cobra ni se le devuelve nada "
     + "—paga el precio que firmó—: esta plata queda a favor del proyecto y se registra en Beneficios."],
@@ -507,6 +507,25 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         // Lo que no se paga no es un ahorro: es plata que nunca se debió.
         .filter(x => x.decision !== "incluido" && x.decision !== "nuestro" && x.decision !== "no_se_paga")
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "costo")),
+      // CANTIDAD Y PRECIO EN EL MISMO RENGLÓN: UNA TARJETA, Y LA EFICIENCIA
+      // LLEGA IGUAL. El renglón que trae otra cantidad sale una sola vez, como
+      // cantidad; si además lo cotizan más barato, lo que eso deja sobre la
+      // cantidad ya contratada es beneficio del proyecto y entra acá, sin
+      // necesidad de otra diferencia que alguien tenga que decidir. No se
+      // cuenta cuando el emparejamiento no se sostiene: un global contra
+      // veinticinco metros da un "ahorro" que no existe.
+      ...frescas.filter(x => x.hallazgo === "mas_cantidad" || x.hallazgo === "menos_cantidad").map(x => {
+        const r = vivos.find(v => v.id === x.obra_rubro_id);
+        if (!r) return null;
+        const papel = { unidad: x.unidad_papel, cantidad: x.cantidad_papel, monto: x.monto_papel };
+        if (unidadesDistintas(papel, r) || globalMultiplicado(papel, r) || precioNoSeParece(papel, r)) return null;
+        const p = precioSobreLoContratado(x, r, Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0);
+        if (!p || p.sube) return null;
+        return eficienciaDeLaDiferencia({
+          ...x, hallazgo: "bajo_precio", cantidad: p.comun, unidad: p.unidad, monto: p.monto,
+          descripcion: `${r.descripcion || x.texto_papel || x.descripcion} — bajó de precio`,
+        }, r, an, "costo");
+      }).filter(Boolean),
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
         .filter(x => x.presupuestado > 0),
@@ -1265,7 +1284,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 {/* CINCUENTA DECISIONES DE A UNA NO LAS TOMA NADIE. Casi
                     siempre el grupo entero va para el mismo lado, y lo que se
                     revisa son las tres excepciones. */}
-                {sinDecidir.length > 1 && (
+                {sinDecidir.length > 1 && clave !== "subio_precio" && (
                   <button onClick={() => marcarTodas(sinDecidir, clave === "bajo_precio" ? "eficiencia" : "cobrar")}
                     disabled={ocupado}
                     style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
@@ -1444,6 +1463,32 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                                 ? `al precio del contrato${puRubro != null
                                   ? `: $${fmt(puRubro * Number(l.cantidad))}` : ""}`
                                 : "a costo: todavía no tiene precio"} />
+                        {/* Y SI ADEMÁS CAMBIÓ DE PRECIO, SE DICE ACÁ. El
+                            renglón es uno solo y es de cantidad: eso es lo que
+                            va a la orden. Lo que el precio nuevo le hace a las
+                            unidades que ya estaban contratadas no es otra
+                            diferencia que decidir —es eficiencia si bajó, y
+                            una alerta para el proveedor si subió—. */}
+                        {(() => {
+                          const p = !dudoso && precioSobreLoContratado(l, rubro, puRubro);
+                          if (!p) return null;
+                          const contra = p.contraPrecio ? "el cliente lo paga a" : "costaba";
+                          return (
+                            <div style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.5,
+                              color: p.sube ? colors.danger : colors.success }}>
+                              {p.sube ? (
+                                <><strong>Alerta de precio, para conversar con {abierto.proveedor || "el proveedor"}:</strong>{" "}
+                                  además de la cantidad, lo cotiza a ${fmt(p.puPapel)} y {contra} ${fmt(p.vara)}. Sobre
+                                  las {fmt(p.comun)} {p.unidad} ya contratadas son <strong>${fmt(p.monto)}</strong> contra
+                                  nuestro margen. No va a la orden.</>
+                              ) : (
+                                <>Además viene más barato: lo cotiza a ${fmt(p.puPapel)} y {contra} ${fmt(p.vara)}. Sobre
+                                  las {fmt(p.comun)} {p.unidad} ya contratadas son <strong>${fmt(p.monto)}</strong> de
+                                  eficiencia, y ya están en Beneficios. No es otra diferencia y no va a la orden.</>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {deOrden && (
                           <div style={{ fontSize: 10.5, color: colors.warning, marginTop: 2 }}>
                             Mirá que no se esté cobrando dos veces lo mismo.
