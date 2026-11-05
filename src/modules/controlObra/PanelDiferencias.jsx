@@ -25,6 +25,7 @@ import { pedirANova, CONTRATO, textoDeNova } from "../../lib/modelos";
 import { candidatosPara } from "./emparejarRubros.js";
 import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./compararCotizaciones.js";
 import { baseSinIva } from "./contratoDeLaObra";
+import { costosDelAnalisis } from "./costoDelRubro.js";
 // El presupuesto completo al costado, para mirarlo mientras se decide. Era de
 // esta pantalla; ahora lo usa también Beneficios, y es el mismo.
 import Presupuesto from "./PanelPresupuesto";
@@ -354,18 +355,32 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       return rub && (rub.costo_unitario === null || rub.costo_unitario === undefined || rub.costo_unitario === "");
     });
     if (!candidatos.length) { setAviso("Todos los rubros emparejados ya tienen costo cargado."); return; }
-    if (!window.confirm(`¿Cargar el costo de ${candidatos.length} `
-      + `${candidatos.length === 1 ? "rubro" : "rubros"} con el unitario de esta propuesta?\n\n`
-      + "A los que ya tienen costo no se los toca. Después se puede corregir rubro por rubro.")) return;
+    // EL COSTO ES LO QUE COTIZA EL PAPEL, EN LA UNIDAD DEL RUBRO.
+    //
+    // Antes salía del monto de la diferencia sobre su cantidad, y eso solo es
+    // el precio del papel cuando la diferencia es de cantidad: en una de
+    // precio es lo que el precio CAMBIÓ. Quedaron tableros de $224 con $22 de
+    // costo y un global de $1.350 con el precio de uno de sus veinticinco
+    // tramos, y Beneficios los mostró pasados de su presupuesto con la primera
+    // factura. La cuenta vive en costoDelRubro.js.
+    const { cargar, saltados } = costosDelAnalisis(candidatos, vivos);
+    const noSePudo = saltados.length
+      ? `${saltados.length} ${saltados.length === 1 ? "queda" : "quedan"} sin cargar, porque lo que cotiza el papel `
+        + "no se puede tomar como costo del rubro:\n"
+        + saltados.slice(0, 8).map(s => `· ${s.rubro.numero ?? ""} ${String(s.rubro.descripcion || "").slice(0, 44)}: ${s.porQue}`).join("\n")
+      : "";
+    if (!cargar.length) { setAviso(`De esta propuesta no hay ningún costo que se pueda cargar. ${noSePudo}`); return; }
+    if (!window.confirm(`¿Cargar el costo de ${cargar.length} `
+      + `${cargar.length === 1 ? "rubro" : "rubros"} con el precio unitario de esta propuesta?\n\n`
+      + "A los que ya tienen costo no se los toca. Después se puede corregir rubro por rubro."
+      + (noSePudo ? `\n\n${noSePudo}` : ""))) return;
     setOcupado(true);
-    const r = await cargarCostosDeRubros(candidatos.map(l => ({
-      id: l.obra_rubro_id,
-      costo_unitario: Math.round((Number(l.monto) || 0) / Number(l.cantidad) * 10000) / 10000,
-    })));
+    const r = await cargarCostosDeRubros(cargar);
     setOcupado(false);
     if (r.error) { setError(r.error); return; }
     setAviso(`Quedó cargado el costo de ${r.cuantos} ${r.cuantos === 1 ? "rubro" : "rubros"}. `
-      + "Beneficios ya puede medir si se compró mejor o peor que lo presupuestado.");
+      + "Beneficios ya puede medir si se compró mejor o peor que lo presupuestado."
+      + (noSePudo ? ` ${noSePudo}` : ""));
     setSinCosto(0);
     onCambio?.();
   }
