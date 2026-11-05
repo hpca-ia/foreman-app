@@ -27,6 +27,7 @@ import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./c
 import { baseSinIva } from "./contratoDeLaObra";
 import { costosDelAnalisis, beneficioDeLoContratado, loYaAprobado } from "./costoDelRubro.js";
 import { precioDelContrato } from "./clasesDePartida.js";
+import { cotizacionesDeCompras, bajarCotizacion } from "./cotizacionesDeCompras.js";
 // El presupuesto completo al costado, para mirarlo mientras se decide. Era de
 // esta pantalla; ahora lo usa también Beneficios, y es el mismo.
 import Presupuesto from "./PanelPresupuesto";
@@ -141,6 +142,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   const [abierto, setAbierto] = useState(null);     // el análisis abierto
   const [lineas, setLineas] = useState([]);
   const [leyendo, setLeyendo] = useState("");
+  // Las cotizaciones de los pedidos de compra de la obra, cuando se pide verlas.
+  const [deCompras, setDeCompras] = useState(null);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -226,6 +229,29 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    await leerArchivo(file);
+  }
+
+  // LA COTIZACIÓN DE UN PEDIDO DE COMPRA, SIN BAJARLA NI VOLVER A SUBIRLA.
+  // El papel ya está en FOREMAN, adjunto a su pedido: se trae de ahí y se lee
+  // igual que uno elegido a mano.
+  async function verLasDeCompras() {
+    if (deCompras) { setDeCompras(null); return; }
+    setError("");
+    const r = await cotizacionesDeCompras(obra);
+    if (r.error) { setError(r.error); return; }
+    setDeCompras(r.cotizaciones);
+  }
+
+  async function traerDeCompras(c) {
+    setLeyendo("trayendo el archivo del pedido"); setError(""); setAviso("");
+    const r = await bajarCotizacion(c);
+    if (r.error) { setLeyendo(""); setError(r.error); return; }
+    setDeCompras(null);
+    await leerArchivo(r.file);
+  }
+
+  async function leerArchivo(file) {
     setLeyendo("leyendo"); setError(""); setAviso("");
     try {
       const r = await leerConNova(file, vivos, p => setLeyendo(p || "leyendo"));
@@ -1913,6 +1939,38 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
               : "Subir la PRIMERA cotización (PDF, foto o Excel)")
             : "Subir una propuesta nueva o una liquidación (PDF, foto o Excel)"}
       </label>
+
+      {/* O TRAERLA DE COMPRAS. Un pedido de compra nace con su cotización
+          adjunta: el papel ya está en FOREMAN, y bajarlo a la computadora para
+          volver a subirlo acá es el mismo archivo yendo y viniendo. */}
+      <div style={{ marginTop: -4, marginBottom: 10 }}>
+        <button onClick={verLasDeCompras} disabled={!!leyendo}
+          style={{ background: "none", border: "none", padding: 0, cursor: leyendo ? "wait" : "pointer", fontFamily: colors.font,
+            fontSize: 11.5, color: colors.brand, textDecoration: "underline" }}>
+          {deCompras ? "ocultar las cotizaciones de Compras" : "o traer la cotización de un pedido de Compras"}
+        </button>
+        {deCompras && (deCompras.length ? (
+          <div style={{ marginTop: 6, background: colors.surface, border: `1px solid ${colors.border}`,
+            borderRadius: colors.radiusMd, overflow: "hidden" }}>
+            {deCompras.map(c => (
+              <button key={c.id} onClick={() => traerDeCompras(c)} disabled={!!leyendo}
+                style={{ display: "flex", gap: 10, alignItems: "baseline", width: "100%", textAlign: "left",
+                  background: "none", border: "none", borderTop: `1px solid ${colors.neutralSoft}`, padding: "7px 12px",
+                  cursor: leyendo ? "wait" : "pointer", fontFamily: colors.font, flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 200, fontSize: 12.5, color: colors.ink }}>{c.pedido || "Pedido sin descripción"}</span>
+                <span style={{ fontSize: 10.5, color: colors.muted }}>
+                  {c.fecha}{c.proveedor ? ` · ${c.proveedor}` : ""} · {c.nombre}
+                </span>
+                <span style={{ fontSize: 11, color: colors.brand, fontWeight: 700, whiteSpace: "nowrap" }}>leer esta →</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div style={{ marginTop: 6, fontSize: 11.5, color: colors.muted }}>
+            Ningún pedido de compra de esta obra tiene una cotización adjunta.
+          </div>
+        ))}
+      </div>
 
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}
       {aviso && <div style={{ fontSize: 12, color: colors.success, marginBottom: 10, lineHeight: 1.5 }}>{aviso}</div>}
