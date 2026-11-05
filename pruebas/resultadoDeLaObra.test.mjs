@@ -84,3 +84,98 @@ test("la reducción de una orden de cambio, en negativo y sin gasto, no es una p
   assert.deepEqual(p.filas.map(x => x.id), [1434]);
   assert.equal(p.total, -139.44);
 });
+
+// ── LO YA APROBADO DEJA BENEFICIO DESDE YA ─────────────────────────────────
+//
+// La regla del director. Un rubro que el cliente aprobó a un precio y del que
+// se sabe el costo deja beneficio: precio menos costo, por la cantidad que
+// sigue aprobada. Vive en el rubro, no en una proforma: en Diners Aeropuerto se
+// borró el análisis de donde habían salido los costos y Beneficios quedó sin
+// nada de esos treinta rubros.
+
+test("lo ya aprobado deja precio menos costo por su cantidad, sin IVA", async () => {
+  const { beneficioDeLoAprobado } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const rubros = [
+    { id: 1373, numero: 106, descripcion: "Punto de iluminación", unidad: "U", cantidad: 65, precio_unitario: 36.38, total_base: 2719.51, iva_pct: 15, costo_unitario: 33.074 },
+    { id: 1414, numero: 147, descripcion: "Acometida", unidad: "GL", cantidad: 1, precio_unitario: 1350, total_base: 1552.5, iva_pct: 15, costo_unitario: 1088.5 },
+    // Sin costo no se sabe qué deja: no está.
+    { id: 5, numero: 5, descripcion: "Pintura", unidad: "m2", cantidad: 100, precio_unitario: 8, total_base: 920, iva_pct: 15 },
+  ];
+  const r = beneficioDeLoAprobado({ rubros });
+  assert.deepEqual(r.filas.map(f => [f.numero, f.cantidad, f.seCobra, f.cuesta, f.beneficio]), [
+    ["147", 1, 1350, 1088.5, 261.5],
+    ["106", 65, 2364.7, 2149.81, 214.89],
+  ]);
+  assert.equal(r.total, 476.39);
+});
+
+test("lo que una orden aprobada redujo ya está descontado: lo que queda conserva su beneficio", async () => {
+  const { beneficioDeLoAprobado, reduccionesAprobadas } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const rubros = [{ id: 97, numero: 97, descripcion: "Interruptor doble", unidad: "U", cantidad: 4, precio_unitario: 9.79, total_base: 45.03, iva_pct: 15, costo_unitario: 8.9 }];
+  const ordenes = [
+    { id: 12, estado: "aprobada" },
+    { id: 13, estado: "borrador" },            // todavía no cuenta
+    { id: 14, estado: "aprobada", anulada: true },
+  ];
+  const lineas = {
+    12: [{ tipo: "quita", obra_rubro_id: 97, cantidad: 2 }, { tipo: "aumenta", obra_rubro_id: 97, cantidad: 9 }],
+    13: [{ tipo: "quita", obra_rubro_id: 97, cantidad: 1 }],
+    14: [{ tipo: "quita", obra_rubro_id: 97, cantidad: 1 }],
+  };
+  const reducciones = reduccionesAprobadas(ordenes, lineas);
+  assert.deepEqual(reducciones, { 97: 2 }, "solo la orden aprobada, y solo lo que quita");
+  const r = beneficioDeLoAprobado({ rubros, reducciones });
+  assert.equal(r.filas[0].contratada, 4);
+  assert.equal(r.filas[0].reducida, 2);
+  assert.equal(r.filas[0].cantidad, 2);
+  assert.equal(r.filas[0].beneficio, 1.78, "0,89 por cada una de las 2 que quedan");
+  // Si la orden lo quitó entero, no queda nada aprobado.
+  assert.equal(beneficioDeLoAprobado({ rubros, reducciones: { 97: 4 } }).filas.length, 0);
+});
+
+test("lo que aumenta una orden no está acá, y un beneficio cargado a mano no se cuenta dos veces", async () => {
+  const { beneficioDeLoAprobado } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const rubros = [
+    { id: 1, numero: 1, unidad: "U", cantidad: 10, precio_unitario: 100, total_base: 1150, iva_pct: 15, costo_unitario: 80 },
+    // El rubro que metió una orden de cambio: su beneficio entra con la orden.
+    { id: 2, numero: 9401, unidad: "U", cantidad: 5, precio_unitario: 115, total_base: 575, iva_pct: 15, costo_unitario: 80, origen: "orden_cambio" },
+    { id: 3, numero: 3, unidad: "U", cantidad: 2, precio_unitario: 50, total_base: 115, iva_pct: 15, costo_unitario: 40 },
+    { id: 4, numero: 4, unidad: "U", cantidad: 1, precio_unitario: 50, total_base: 57.5, iva_pct: 15, costo_unitario: 40, oculto: true },
+  ];
+  const beneficios = [
+    { obra_rubro_id: 3, origen: "manual", presupuestado: 100, real: 70 },      // manda el escrito a mano
+    { obra_rubro_id: 1, origen: "proforma", presupuestado: 800, real: 780 },   // mejora el costo: se suma, no reemplaza
+  ];
+  const r = beneficioDeLoAprobado({ rubros, beneficios });
+  assert.deepEqual(r.filas.map(f => f.id), [1]);
+  assert.equal(r.total, 200);
+});
+
+test("un rubro que cuesta más de lo que se cobra aparece en contra", async () => {
+  const { beneficioDeLoAprobado } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const r = beneficioDeLoAprobado({ rubros: [
+    { id: 1, numero: 1, unidad: "U", cantidad: 3, precio_unitario: 10, total_base: 34.5, iva_pct: 15, costo_unitario: 12 }] });
+  assert.equal(r.filas[0].beneficio, -6);
+  assert.equal(r.total, -6);
+});
+
+test("el resultado de la obra trae lo ya aprobado aparte, sin meterlo en el neto", async () => {
+  const { resultadoDeLaObra } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const rubros = [{ id: 1, numero: 1, unidad: "U", cantidad: 10, precio_unitario: 100, total_base: 1150, iva_pct: 15, costo_unitario: 80 }];
+  const res = resultadoDeLaObra({ rubros });
+  assert.equal(res.aprobados.total, 200);
+  assert.equal(res.neto, 0, "es previsto: se confirma con las facturas");
+});
+
+test("un costo que no se parece al precio no se cuenta: se lista aparte para corregirlo", async () => {
+  // Las mamparas de Diners: $6.000 de precio y $150 de costo cargado.
+  const { beneficioDeLoAprobado } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const r = beneficioDeLoAprobado({ rubros: [
+    { id: 58, numero: 58, unidad: "glb", cantidad: 1, precio_unitario: 6000, total_base: 6900, iva_pct: 15, costo_unitario: 150 },
+    { id: 90, numero: 90, unidad: "U", cantidad: 1, precio_unitario: 247.29, total_base: 284.38, iva_pct: 15, costo_unitario: 224.81 },
+  ] });
+  assert.equal(r.total, 22.48, "los $5.850 de las mamparas no entran");
+  assert.equal(r.cuantos, 1);
+  assert.equal(r.dudosos, 1);
+  assert.deepEqual(r.filas.map(f => [f.numero, f.dudoso]), [["90", false], ["58", true]]);
+});

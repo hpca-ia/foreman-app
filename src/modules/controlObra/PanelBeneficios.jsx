@@ -39,6 +39,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const [proveedor, setProveedor] = useState("");
   const [ordenes, setOrdenes] = useState([]);
   const [lineasDeOrdenes, setLineasDeOrdenes] = useState({});
+  const [verAprobados, setVerAprobados] = useState(false);
   const [leyendo, setLeyendo] = useState(false);
   const [paso, setPaso] = useState("");
   // Cuando NOVA se quedó sin espacio antes de terminar la proforma.
@@ -111,7 +112,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const t = porOrigen.obra;
   // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
   // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
-  const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro });
+  const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes });
   // UN RUBRO SE SIGUE UNA SOLA VEZ, PERO PUEDE TENER VARIOS INGRESOS. Son dos
   // cosas distintas: el seguimiento mide sus facturas; un ingreso es una
   // compra o una proforma cargada contra él, y puede haber tres. En el
@@ -764,6 +765,10 @@ Rubros de la obra: ${lista}`;
             <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin confirmar`} valor={t.previsto}
               color={colors.warning} />
           )}
+          {res.aprobados.filas.length > 0 && (
+            <Tarjeta label={`YA APROBADO, CON SU COSTO · ${res.aprobados.cuantos}`} valor={res.aprobados.total}
+              color={res.aprobados.total >= 0 ? colors.success : colors.danger} />
+          )}
           {(t.cuantos > 0 || t.cuantosPrevistos > 0) && (
             <button onClick={() => setVerDesglose(v => !v)}
               style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
@@ -772,6 +777,66 @@ Rubros de la obra: ${lista}`;
             </button>
           )}
         </div>
+
+        {/* ── LO YA APROBADO, CON SU COSTO ────────────────────────────
+            Un rubro que el cliente ya aprobó a un precio deja beneficio desde
+            ese momento: la diferencia con lo que cuesta, sobre la cantidad
+            que sigue aprobada. Sale del rubro mismo —su precio y su costo
+            cargado—, así que está acá aunque la proforma de donde salió el
+            costo ya no esté abierta. */}
+        {res.aprobados.filas.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap", marginBottom: 4 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
+                YA APROBADO, CON SU COSTO · {res.aprobados.cuantos} {res.aprobados.cuantos === 1 ? "RUBRO" : "RUBROS"} · SIN IVA
+              </div>
+              <button onClick={() => setVerAprobados(v => !v)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+                  fontSize: 11, color: colors.brand, textDecoration: "underline", padding: 0 }}>
+                {verAprobados ? "ocultar" : "ver rubro por rubro"}
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: verAprobados ? 6 : 0 }}>
+              El precio que el cliente ya aprobó menos el costo cargado del rubro, por la cantidad que sigue
+              aprobada: <strong style={{ color: res.aprobados.total >= 0 ? colors.success : colors.danger }}>
+                {res.aprobados.total < 0 ? "−" : ""}${fmt(Math.abs(res.aprobados.total))}</strong> previstos.
+              Lo que una orden de cambio aumente entra cuando el cliente la apruebe; lo que una orden aprobada
+              redujo ya está descontado. Se confirma con las facturas.
+              {res.aprobados.dudosos > 0 && (
+                <strong style={{ color: colors.warning }}>
+                  {" "}{res.aprobados.dudosos === 1 ? "Un rubro no se cuenta" : `${res.aprobados.dudosos} rubros no se cuentan`}:
+                  su costo cargado no se parece a su precio. Está al final de la lista.
+                </strong>
+              )}
+            </div>
+            {verAprobados && (
+              <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+                {res.aprobados.filas.map(f => (
+                  <div key={f.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "6px 12px",
+                    borderTop: `1px solid ${colors.neutralSoft}`, flexWrap: "wrap", fontSize: 11.5 }}>
+                    <span style={{ color: colors.muted, fontSize: 10.5, minWidth: 34 }}>{f.numero}</span>
+                    <span style={{ flex: 1, minWidth: 180, color: colors.ink }}>{f.descripcion}</span>
+                    <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>
+                      {fmt(f.cantidad)} {f.unidad}
+                      {f.reducida > 0 && <> · eran {fmt(f.contratada)}, una orden quitó {fmt(f.reducida)}</>}
+                      {" "}· se cobra ${fmt(f.seCobra)} · cuesta ${fmt(f.cuesta)}
+                    </span>
+                    {f.dudoso ? (
+                      <span style={{ fontWeight: 700, whiteSpace: "nowrap", color: colors.warning, fontSize: 10.5 }}>
+                        costo dudoso: no se cuenta
+                      </span>
+                    ) : (
+                    <span style={{ fontWeight: 700, whiteSpace: "nowrap", minWidth: 76, textAlign: "right",
+                      color: f.beneficio < 0 ? colors.danger : colors.success }}>
+                      {f.beneficio < 0 ? "−" : "+"}${fmt(Math.abs(f.beneficio))}
+                    </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── RUBROS EN SEGUIMIENTO ───────────────────────────────────
             Un beneficio también puede salir de un rubro del presupuesto y de

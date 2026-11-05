@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  sinRepetidas, precioSobreLoContratado, decisionesPara, comoVa,
-} from "../src/modules/controlObra/cuentaDiferencias.js";
+import { sinRepetidas, decisionesPara, comoVa } from "../src/modules/controlObra/cuentaDiferencias.js";
+import { beneficioDeLoContratado, loYaAprobado } from "../src/modules/controlObra/costoDelRubro.js";
 
 // ── EL MISMO RENGLÓN, UNA SOLA VEZ ─────────────────────────────────────────
 //
@@ -14,7 +13,7 @@ const cantidad = { id: 592, hallazgo: "mas_cantidad", decision: "cobrar", obra_r
   cantidad: 6, unidad: "U", monto: 39.61, cantidad_papel: "8", unidad_papel: "U", monto_papel: "52.81" };
 const precio = { id: 606, hallazgo: "bajo_precio", decision: "pendiente", obra_rubro_id: 1363,
   cantidad: 2, unidad: "U", monto: 1.32, cantidad_papel: "8", unidad_papel: "U", monto_papel: "52.81" };
-const rubro = { id: 1363, numero: 96, cantidad: 2, unidad: "U", total_base: 16.7, iva_pct: 15, costo_unitario: null };
+const rubro = { id: 1363, numero: 96, cantidad: 2, unidad: "U", precio_unitario: 7.26, total_base: 16.7, iva_pct: 15, costo_unitario: null };
 
 test("lo guardado repetido se saca: queda la de cantidad, con su decisión intacta", () => {
   const r = sinRepetidas([cantidad, precio]);
@@ -53,41 +52,69 @@ test("sacadas las repetidas, el análisis cuenta lo que hay que decidir de verda
   assert.equal(v.listo, true);
 });
 
-test("el precio del renglón se dice en la tarjeta de la cantidad: bajó, es eficiencia", () => {
-  // Sin costo cargado la vara es el precio del cliente sin IVA: 16,70 / 1,15 / 2 = 7,26.
-  const p = precioSobreLoContratado(cantidad, rubro, 16.7 / 1.15 / 2);
-  assert.equal(p.comun, 2, "sobre las 2 que ya estaban contratadas, no sobre las 8");
-  assert.equal(p.puPapel, 6.6);
-  assert.equal(p.vara, 7.26);
-  assert.equal(p.monto, 1.32, "lo mismo que antes decía la tarjeta repetida");
-  assert.equal(p.sube, false);
-  assert.equal(p.contraPrecio, true);
+// ── LO YA APROBADO DEJA BENEFICIO DESDE YA ─────────────────────────────────
+//
+// La regla del director: un rubro ya aprobado a un precio deja beneficio por la
+// diferencia con lo que cuesta, sobre la cantidad aprobada. Si la cantidad
+// aumenta, lo de más espera a su orden de cambio y lo ya aprobado cuenta igual.
+// Si se reduce, lo que queda conserva su beneficio.
+
+test("con más cantidad, lo ya aprobado cuenta sobre la cantidad del contrato, no sobre la del papel", () => {
+  const b = beneficioDeLoContratado(cantidad, rubro);
+  assert.equal(b.cantidad, 2, "las 2 que ya estaban aprobadas, no las 8 del papel");
+  assert.equal(b.contra, "precio", "sin costo cargado, contra el precio aprobado");
+  assert.equal(b.vara, 7.26);
+  assert.equal(b.costoPapel, 6.6013);
+  assert.equal(b.presupuestado, 14.52);
+  assert.equal(b.real, 13.2);
+  assert.equal(b.aFavor, 1.32);
 });
 
-test("con menos cantidad, la cantidad común es la del papel", () => {
-  const menos = { hallazgo: "menos_cantidad", cantidad_papel: 2, monto_papel: 17.8, unidad: "U" };
-  const p = precioSobreLoContratado(menos, { cantidad: 4, unidad: "U" }, 9.79);
-  assert.equal(p.comun, 2);
-  assert.equal(p.monto, 1.78);
+test("con menos cantidad, lo que queda conserva su beneficio", () => {
+  const menos = { hallazgo: "menos_cantidad", cantidad: 2, cantidad_papel: 2, monto_papel: 17.8, unidad_papel: "U" };
+  const b = beneficioDeLoContratado(menos, { id: 97, cantidad: 4, unidad: "U", precio_unitario: 9.79, total_base: 45.03, iva_pct: 15 });
+  assert.equal(b.cantidad, 2, "las 2 que quedan");
+  assert.equal(b.aFavor, 1.78);
 });
 
-test("con costo cargado manda el costo, y si subió es una alerta", () => {
-  const p = precioSobreLoContratado(
-    { hallazgo: "mas_cantidad", cantidad_papel: 16, monto_papel: 816 },
-    { cantidad: 12, unidad: "U", costo_unitario: 48.5 }, 68);
-  assert.equal(p.vara, 48.5);
-  assert.equal(p.sube, true);
-  assert.equal(p.monto, 30);
-  assert.equal(p.contraPrecio, false);
+test("misma cantidad: todo el rubro, aunque el renglón esté marcado «ya estaba incluido»", () => {
+  const tablero = { id: 90, cantidad: 1, unidad: "U", precio_unitario: 247.29, total_base: 284.38, iva_pct: 15 };
+  const linea = { hallazgo: "bajo_precio", decision: "incluido", cantidad: 1, monto: 22.48,
+    cantidad_papel: 1, unidad_papel: "U", monto_papel: 224.81 };
+  const b = beneficioDeLoContratado(linea, tablero);
+  assert.equal(b.cantidad, 1);
+  assert.equal(b.aFavor, 22.48);
 });
 
-test("mismo precio, o un renglón que no es de cantidad: no hay nada que decir", () => {
-  assert.equal(precioSobreLoContratado(
-    { hallazgo: "mas_cantidad", cantidad_papel: 16, monto_papel: 776 },
-    { cantidad: 12, costo_unitario: 48.5 }, 68), null);
-  assert.equal(precioSobreLoContratado(precio, rubro, 7.26), null, "la de precio ya es de precio");
-  assert.equal(precioSobreLoContratado({ hallazgo: "nuevo", cantidad_papel: 1, monto_papel: 10 }, rubro, 7.26), null);
-  assert.equal(precioSobreLoContratado(cantidad, null, 7.26), null);
+test("con costo cargado se anota solo lo que la propuesta mejora ese costo: el margen ya lo cuenta el rubro", () => {
+  const conCosto = { ...rubro, costo_unitario: 6.6013 };
+  // La misma propuesta de la que salió el costo: no mejora nada, no hay fila.
+  assert.equal(beneficioDeLoContratado(cantidad, conCosto).aFavor, 0);
+  assert.equal(beneficioDeLoContratado(cantidad, conCosto).contra, "costo");
+  // Y lo ya aprobado se dice entero: 2 a $7,26 que cuestan $6,60.
+  const a = loYaAprobado(cantidad, conCosto);
+  assert.deepEqual(a, { cantidad: 2, unidad: "U", precio: 7.26, costo: 6.6013, beneficio: 1.32 });
+  // Una propuesta posterior más cara que el costo cargado: en contra.
+  const cara = { hallazgo: "mas_cantidad", cantidad_papel: 8, unidad_papel: "U", monto_papel: 56 };
+  assert.equal(beneficioDeLoContratado(cara, conCosto).aFavor, -0.8);
+});
+
+test("lo nuevo no tiene nada aprobado, y un emparejamiento que no se sostiene tampoco", () => {
+  assert.equal(beneficioDeLoContratado({ hallazgo: "nuevo", cantidad: 1, monto: 5 }, rubro), null);
+  assert.equal(beneficioDeLoContratado(cantidad, null), null);
+  // El alquiler mensual del tablero contra la instalación provisional.
+  const provisional = { id: 3, unidad: "glb", cantidad: 1, precio_unitario: 1008, total_base: 1159.2, iva_pct: 15 };
+  const alquiler = { hallazgo: "bajo_precio", cantidad_papel: 1, unidad_papel: "Mes", monto_papel: 115.56 };
+  assert.equal(beneficioDeLoContratado(alquiler, provisional), null);
+  assert.equal(loYaAprobado(alquiler, provisional), null);
+});
+
+test("un global, total contra total: la acometida de $1.350 que cuesta $1.088,50", () => {
+  const acometida = { id: 147, unidad: "GL", cantidad: 1, precio_unitario: 1350, total_base: 1552.5, iva_pct: 15 };
+  const linea = { hallazgo: "mas_cantidad", cantidad: 24, cantidad_papel: 25, unidad_papel: "GL", monto_papel: 1088.5 };
+  const b = beneficioDeLoContratado(linea, acometida);
+  assert.equal(b.cantidad, 1, "un global es uno, traiga el papel los tramos que traiga");
+  assert.equal(b.aFavor, 261.5);
 });
 
 // ── LAS CONDICIONES, COMO LAS DIJO EL DIRECTOR ─────────────────────────────

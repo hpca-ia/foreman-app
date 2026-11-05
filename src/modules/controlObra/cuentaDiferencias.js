@@ -163,41 +163,6 @@ export function sinRepetidas(lineas = []) {
 }
 
 /**
- * EL PRECIO DE UN RENGLÓN QUE ADEMÁS CAMBIÓ DE CANTIDAD.
- *
- * El contrato tiene 65 puntos y la propuesta trae 111, y además más baratos.
- * La diferencia es de cantidad —46 que van a la orden— y es una sola. Pero el
- * precio nuevo dice algo sobre los 65 que ya estaban: si bajó, es eficiencia
- * del proyecto; si subió, es una alerta para conversar con el proveedor. Eso
- * se dice en la misma tarjeta, sobre la cantidad que los dos tienen, sin
- * abrir otra diferencia.
- *
- * La vara es la de siempre: el costo cargado si existe, y si no el precio que
- * vio el cliente.
- *
- * @returns { comun, unidad, vara, puPapel, monto, sube, contraPrecio } o null
- */
-export function precioSobreLoContratado(linea, rubro, unitarioSinIva) {
-  const n = v => Number(v) || 0;
-  const c2 = v => Math.round(n(v) * 100) / 100;
-  if (!rubro || !esDeCantidad(linea?.hallazgo)) return null;
-  const cantPapel = n(linea.cantidad_papel), montoPapel = n(linea.monto_papel), cantRubro = n(rubro.cantidad);
-  if (!cantPapel || !montoPapel || !cantRubro) return null;
-  const puPapel = montoPapel / cantPapel;
-  const costo = n(rubro.costo_unitario) > 0 ? n(rubro.costo_unitario) : null;
-  const vara = costo != null ? costo : n(unitarioSinIva);
-  if (!vara || Math.abs(puPapel - vara) <= Math.max(0.01, Math.abs(vara) * 0.001)) return null;
-  const comun = Math.min(cantPapel, cantRubro);
-  return {
-    comun, unidad: rubro.unidad || linea.unidad || "",
-    vara: c2(vara), puPapel: c2(puPapel),
-    monto: c2(Math.abs(puPapel - vara) * comun),
-    sube: puPapel > vara,
-    contraPrecio: costo == null,
-  };
-}
-
-/**
  * QUÉ PARTE DEL RENGLÓN ES LA QUE NO SE PAGA.
  *
  * El monto de una diferencia no siempre es el renglón entero: si el contrato

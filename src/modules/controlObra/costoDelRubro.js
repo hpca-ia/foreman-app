@@ -1,5 +1,6 @@
 import { familiaDe, unidadesDistintas } from "./desconfiarDeNova.js";
 import { baseSinIva } from "./contratoDeLaObra.js";
+import { precioDelContrato } from "./clasesDePartida.js";
 
 // EL COSTO DE UN RUBRO, TOMADO DE LO QUE COTIZA EL PAPEL.
 //
@@ -108,4 +109,73 @@ export function costosDelAnalisis(lineas = [], rubros = []) {
     cargar: todos.filter(x => x.costo != null).map(x => ({ id: x.rubro.id, costo_unitario: x.costo })),
     saltados: todos.filter(x => x.costo == null).map(x => ({ rubro: x.rubro, porQue: x.porQue })),
   };
+}
+
+// ── LO QUE YA ESTÁ APROBADO DEJA BENEFICIO DESDE YA ────────────────────────
+//
+// La regla, como la dijo el director:
+//
+//   · un rubro que el cliente ya aprobó a un precio deja beneficio desde ese
+//     momento: la diferencia entre ese precio y lo que cuesta, sobre la
+//     cantidad aprobada;
+//   · si la cantidad AUMENTA, lo de más es beneficio recién cuando el cliente
+//     aprueba la orden de cambio —antes no hay nada vendido—, pero lo que ya
+//     estaba aprobado sigue contando;
+//   · si la cantidad se REDUCE, lo que queda conserva su beneficio.
+//
+// Por eso la cantidad que cuenta es la que los dos tienen: la del contrato
+// cuando el papel trae más, la del papel cuando trae menos.
+
+/** La cantidad ya aprobada que este renglón del papel cubre. */
+function cantidadAprobada(linea, rubro) {
+  const cantRubro = n(rubro?.cantidad);
+  if (esGlobal(rubro)) return cantRubro;
+  const cantPapel = linea?.cantidad_papel != null ? n(linea.cantidad_papel)
+    : linea?.hallazgo === "mas_cantidad" ? cantRubro + n(linea.cantidad)
+      : linea?.hallazgo === "menos_cantidad" ? cantRubro - n(linea.cantidad)
+        : n(linea?.cantidad);
+  return Math.max(0, Math.min(cantPapel, cantRubro));
+}
+
+/**
+ * Lo que una propuesta le deja a Beneficios por lo ya aprobado de un rubro.
+ *
+ * Contra el COSTO cargado si el rubro lo tiene —ahí lo que se mide es si esta
+ * propuesta mejora ese costo; el margen entre el precio y el costo ya lo
+ * cuenta Beneficios desde el rubro— y contra el PRECIO aprobado si no lo
+ * tiene, que es todo lo que ese rubro deja.
+ *
+ * @returns { cantidad, unidad, contra, vara, costoPapel, presupuestado, real, aFavor } o null
+ */
+export function beneficioDeLoContratado(linea, rubro) {
+  if (!rubro || linea?.hallazgo === "nuevo") return null;
+  const { costo: costoPapel } = costoSegunElPapel(linea, rubro);
+  if (costoPapel == null) return null;
+  const cantidad = cantidadAprobada(linea, rubro);
+  if (!(cantidad > 0)) return null;
+  const costoCargado = n(rubro.costo_unitario) > 0 ? n(rubro.costo_unitario) : null;
+  const vara = costoCargado ?? precioDelContrato(rubro);
+  if (vara == null) return null;
+  return {
+    cantidad, unidad: rubro.unidad || "",
+    contra: costoCargado != null ? "costo" : "precio",
+    vara: c4(vara), costoPapel,
+    presupuestado: c2(vara * cantidad), real: c2(costoPapel * cantidad),
+    aFavor: c2((vara - costoPapel) * cantidad),
+  };
+}
+
+/**
+ * Lo ya aprobado de un rubro, dicho entero: cuánto, a qué precio, cuánto
+ * cuesta y cuánto deja. El costo es el cargado en el rubro, y si no tiene, el
+ * que cotiza este papel.
+ */
+export function loYaAprobado(linea, rubro) {
+  if (!rubro || linea?.hallazgo === "nuevo") return null;
+  const precio = precioDelContrato(rubro);
+  const cantidad = cantidadAprobada(linea, rubro);
+  if (precio == null || !(cantidad > 0)) return null;
+  const costo = n(rubro.costo_unitario) > 0 ? n(rubro.costo_unitario) : costoSegunElPapel(linea, rubro).costo;
+  if (costo == null) return null;
+  return { cantidad, unidad: rubro.unidad || "", precio, costo: c4(costo), beneficio: c2((precio - costo) * cantidad) };
 }

@@ -12,7 +12,7 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
-  queNoSePaga, precioSobreLoContratado,
+  queNoSePaga,
   recalcularContra, ponerPrecio, marcarEnOrden, queSaleDe,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
@@ -25,7 +25,7 @@ import { pedirANova, CONTRATO, textoDeNova } from "../../lib/modelos";
 import { candidatosPara } from "./emparejarRubros.js";
 import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./compararCotizaciones.js";
 import { baseSinIva } from "./contratoDeLaObra";
-import { costosDelAnalisis } from "./costoDelRubro.js";
+import { costosDelAnalisis, beneficioDeLoContratado, loYaAprobado } from "./costoDelRubro.js";
 import { precioDelContrato } from "./clasesDePartida.js";
 // El presupuesto completo al costado, para mirarlo mientras se decide. Era de
 // esta pantalla; ahora lo usa también Beneficios, y es el mismo.
@@ -519,28 +519,39 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         nota: `Lo ofrece la proforma al pie${an.titulo ? ` · ${an.titulo}` : ""}`
           + " · hay que pedirlo cuando llegue la factura",
       }] : []),
-      ...frescas.filter(x => x.hallazgo === "bajo_precio" || x.decision === "eficiencia")
-        // Lo que no se paga no es un ahorro: es plata que nunca se debió.
-        .filter(x => x.decision !== "incluido" && x.decision !== "nuestro" && x.decision !== "no_se_paga")
-        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "costo")),
-      // CANTIDAD Y PRECIO EN EL MISMO RENGLÓN: UNA TARJETA, Y LA EFICIENCIA
-      // LLEGA IGUAL. El renglón que trae otra cantidad sale una sola vez, como
-      // cantidad; si además lo cotizan más barato, lo que eso deja sobre la
-      // cantidad ya contratada es beneficio del proyecto y entra acá, sin
-      // necesidad de otra diferencia que alguien tenga que decidir. No se
-      // cuenta cuando el emparejamiento no se sostiene: un global contra
-      // veinticinco metros da un "ahorro" que no existe.
-      ...frescas.filter(x => x.hallazgo === "mas_cantidad" || x.hallazgo === "menos_cantidad").map(x => {
+      // LO YA APROBADO DEJA BENEFICIO DESDE YA.
+      //
+      // Un rubro que el cliente ya aprobó a un precio deja beneficio por la
+      // diferencia con lo que cuesta, sobre la cantidad aprobada: no depende
+      // de ninguna orden ni de ninguna decisión. Si el papel trae MÁS, lo de
+      // más espera a que se apruebe su orden de cambio y lo ya aprobado cuenta
+      // igual; si trae MENOS, lo que queda conserva su beneficio.
+      //
+      // Entra aunque el renglón esté marcado "ya estaba incluido": estar en el
+      // contrato es justamente lo que lo hace beneficio. Lo único que no entra
+      // es lo que se paga con la plata de otro rubro —va más abajo, con su
+      // cuenta— y lo que no se sostiene: unidades que miden otra cosa, o un
+      // precio que no se parece al del rubro.
+      //
+      // Contra el costo cargado cuando el rubro lo tiene: ahí lo que se anota
+      // es lo que esta propuesta MEJORA ese costo, porque el margen entre el
+      // precio y el costo Beneficios ya lo cuenta desde el rubro. Contra el
+      // precio aprobado cuando no lo tiene.
+      ...frescas.filter(x => x.obra_rubro_id && x.hallazgo !== "nuevo" && x.decision !== "nuestro").map(x => {
         const r = vivos.find(v => v.id === x.obra_rubro_id);
-        if (!r) return null;
-        const papel = { unidad: x.unidad_papel, cantidad: x.cantidad_papel, monto: x.monto_papel };
-        if (unidadesDistintas(papel, r) || globalMultiplicado(papel, r) || precioNoSeParece(papel, r)) return null;
-        const p = precioSobreLoContratado(x, r, Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0);
-        if (!p || p.sube) return null;
-        return eficienciaDeLaDiferencia({
-          ...x, hallazgo: "bajo_precio", cantidad: p.comun, unidad: p.unidad, monto: p.monto,
-          descripcion: `${r.descripcion || x.texto_papel || x.descripcion} — bajó de precio`,
-        }, r, an, "costo");
+        const b = r ? beneficioDeLoContratado(x, r) : null;
+        if (!b || !(b.aFavor > 0.005)) return null;
+        return {
+          obra_rubro_id: r.id,
+          descripcion: String(r.descripcion || x.texto_papel || x.descripcion || "").slice(0, 200),
+          cantidad: b.cantidad, unidad: b.unidad || null,
+          presupuestado: b.presupuestado, real: b.real,
+          proveedor: an.proveedor || null,
+          nota: (b.contra === "costo"
+            ? `Lo cotizan a $${b.costoPapel}, por debajo del costo cargado de $${b.vara}`
+            : `Ya aprobado a $${b.vara} y lo cotizan a $${b.costoPapel}`)
+            + (an.titulo ? ` · ${an.titulo}` : ""),
+        };
       }).filter(Boolean),
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
@@ -1485,28 +1496,29 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                                 ? `al precio del contrato${puRubro != null
                                   ? `: $${fmt(puRubro * Number(l.cantidad))}` : ""}`
                                 : "a costo: todavía no tiene precio"} />
-                        {/* Y SI ADEMÁS CAMBIÓ DE PRECIO, SE DICE ACÁ. El
-                            renglón es uno solo y es de cantidad: eso es lo que
-                            va a la orden. Lo que el precio nuevo le hace a las
-                            unidades que ya estaban contratadas no es otra
-                            diferencia que decidir —es eficiencia si bajó, y
-                            una alerta para el proveedor si subió—. */}
+                        {/* LO YA APROBADO DEJA BENEFICIO DESDE YA, Y SE DICE
+                            ACÁ. El renglón es uno solo y es de cantidad: eso es
+                            lo que va a la orden. Pero lo que ya estaba aprobado
+                            —la cantidad del contrato si el papel trae más, la
+                            que queda si trae menos— ya tiene su beneficio, y
+                            no espera a ninguna orden. */}
                         {(() => {
-                          const p = !dudoso && precioSobreLoContratado(l, rubro, puRubro);
-                          if (!p) return null;
-                          const contra = p.contraPrecio ? "el cliente lo paga a" : "costaba";
+                          const a = !dudoso && (l.hallazgo === "mas_cantidad" || l.hallazgo === "menos_cantidad")
+                            ? loYaAprobado(l, rubro) : null;
+                          if (!a || Math.abs(a.beneficio) <= 0.005) return null;
                           return (
                             <div style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.5,
-                              color: p.sube ? colors.danger : colors.success }}>
-                              {p.sube ? (
+                              color: a.beneficio < 0 ? colors.danger : colors.success }}>
+                              {a.beneficio < 0 ? (
                                 <><strong>Alerta de precio, para conversar con {abierto.proveedor || "el proveedor"}:</strong>{" "}
-                                  además de la cantidad, lo cotiza a ${fmt(p.puPapel)} y {contra} ${fmt(p.vara)}. Sobre
-                                  las {fmt(p.comun)} {p.unidad} ya contratadas son <strong>${fmt(p.monto)}</strong> contra
-                                  nuestro margen. No va a la orden.</>
+                                  lo ya aprobado se cobra a ${fmt(a.precio)} y cuesta ${fmt(a.costo)}. Sobre
+                                  {" "}{fmt(a.cantidad)} {a.unidad} son <strong>${fmt(Math.abs(a.beneficio))}</strong> en contra.</>
                               ) : (
-                                <>Además viene más barato: lo cotiza a ${fmt(p.puPapel)} y {contra} ${fmt(p.vara)}. Sobre
-                                  las {fmt(p.comun)} {p.unidad} ya contratadas son <strong>${fmt(p.monto)}</strong> de
-                                  eficiencia, y ya están en Beneficios. No es otra diferencia y no va a la orden.</>
+                                <>Lo ya aprobado deja beneficio desde ya: {fmt(a.cantidad)} {a.unidad} a ${fmt(a.precio)}, que
+                                  cuestan ${fmt(a.costo)}. Son <strong>${fmt(a.beneficio)}</strong> y están en Beneficios.
+                                  {l.hallazgo === "mas_cantidad"
+                                    ? " Lo de más entra cuando se apruebe la orden de cambio."
+                                    : " Lo que se reduce sale; lo que queda conserva su beneficio."}</>
                               )}
                             </div>
                           );

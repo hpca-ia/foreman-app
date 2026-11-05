@@ -4,7 +4,7 @@ import { sinRepetidas } from "./cuentaDiferencias.js";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son las que deciden qué se le cobra al cliente.
 export { DECISIONES, decisionesPara, comoVa, recalcularContra, queSaleDe,
-  queNoSePaga, respaldoDeLoQueNoSePaga, sinRepetidas, precioSobreLoContratado } from "./cuentaDiferencias.js";
+  queNoSePaga, respaldoDeLoQueNoSePaga, sinRepetidas } from "./cuentaDiferencias.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, GUARDADO.
 //

@@ -1,6 +1,8 @@
 import { conCosto, vivo, sinIvaDelGasto } from "./eficienciaDeRubros.js";
 import { baseSinIva } from "./contratoDeLaObra.js";
 import { totales } from "./cuentaBeneficios.js";
+import { precioDelContrato } from "./clasesDePartida.js";
+import { ordenCuenta } from "./cuentaOrdenCambio.js";
 // EL RESULTADO DE LA OBRA, no solo los beneficios.
 //
 // Tres cosas lo hacen, y van juntas en un número y separadas abajo:
@@ -69,7 +71,75 @@ export function perdidasEnRubros(rubros = [], porRubro = {}) {
  * @param seguidos    [{ id, obra_rubro_id }] los que se siguen
  * @param porRubro    lo que calculó calcularControl: `acumulado` es lo gastado
  */
-export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {} } = {}) {
+/**
+ * LO QUE UNA ORDEN APROBADA LE QUITÓ A CADA RUBRO, en cantidad.
+ *
+ * Una reducción no borra el rubro: entra en negativo en el capítulo de su
+ * orden y el rubro del contrato queda como estaba. Para saber cuánto queda
+ * aprobado de verdad hay que restarle lo que las órdenes que cuentan le
+ * sacaron.
+ */
+export function reduccionesAprobadas(ordenes = [], lineasDeOrdenes = {}) {
+  const por = {};
+  for (const o of ordenes) {
+    if (!ordenCuenta(o)) continue;
+    for (const l of lineasDeOrdenes[o.id] || []) {
+      if (l.tipo !== "quita" || !l.obra_rubro_id) continue;
+      por[l.obra_rubro_id] = (por[l.obra_rubro_id] || 0) + n(l.cantidad);
+    }
+  }
+  return por;
+}
+
+/**
+ * EL BENEFICIO DE LO YA APROBADO, RUBRO POR RUBRO.
+ *
+ * Un rubro que el cliente aprobó a un precio y del que se sabe el costo ya
+ * deja beneficio: precio menos costo, por la cantidad que sigue aprobada. No
+ * hace falta una proforma abierta ni una decisión de nadie —vive en el rubro—,
+ * así que borrar el análisis de donde salió el costo no lo hace desaparecer.
+ *
+ *   · Lo que una orden de cambio AUMENTA no está acá: eso entra con la orden,
+ *     el día que el cliente la aprueba.
+ *   · Lo que una orden aprobada REDUJO ya está descontado: lo que queda
+ *     conserva su beneficio.
+ *   · El rubro que ya tiene un beneficio cargado a mano no se cuenta dos
+ *     veces: manda el que alguien escribió con su papel.
+ *
+ * Sin IVA, como todo Beneficios. Es PREVISTO: el costo es lo que cotizaron, y
+ * hasta que llega la factura sigue siendo una cotización.
+ *
+ * Y UN COSTO QUE NO SE PARECE AL PRECIO NO SE CUENTA. Unas mamparas de $6.000
+ * con $150 de costo cargado no dejan $5.850: tienen un costo mal puesto. Se
+ * listan aparte, marcadas, para que alguien lo corrija, y no entran al total.
+ */
+export function beneficioDeLoAprobado({ rubros = [], beneficios = [], reducciones = {} } = {}) {
+  const aMano = new Set(beneficios.filter(b => b?.obra_rubro_id && b.origen === "manual").map(b => String(b.obra_rubro_id)));
+  const filas = rubros.filter(vivo)
+    .filter(r => r.origen !== "orden_cambio" && conCosto(r) && !aMano.has(String(r.id)))
+    .map(r => {
+      const contratada = n(r.cantidad);
+      const reducida = Math.min(contratada, n(reducciones[r.id]));
+      const cantidad = Math.round((contratada - reducida) * 10000) / 10000;
+      const precio = precioDelContrato(r);
+      const costo = n(r.costo_unitario);
+      if (precio == null || !(cantidad > 0)) return null;
+      return {
+        id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
+        unidad: r.unidad || "", contratada, reducida, cantidad, precio, costo,
+        seCobra: c2(precio * cantidad), cuesta: c2(costo * cantidad),
+        beneficio: c2((precio - costo) * cantidad),
+        dudoso: costo < precio / 2 || costo > precio * 2,
+      };
+    }).filter(Boolean).sort((a, b) => (a.dudoso - b.dudoso) || (b.beneficio - a.beneficio));
+  const firmes = filas.filter(f => !f.dudoso);
+  return {
+    filas, cuantos: firmes.length, dudosos: filas.length - firmes.length,
+    total: c2(firmes.reduce((t, f) => t + f.beneficio, 0)),
+  };
+}
+
+export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {} } = {}) {
   const t = totales(beneficios);
   const perdidas = perdidasEnRubros(rubros, porRubro);
   const porId = new Map(rubros.map(r => [String(r.id), r]));
@@ -87,6 +157,9 @@ export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [],
     previsto: t.previsto, cuantosPrevistos: t.cuantosPrevistos,
     perdidas: perdidas.filas, perdidasTotal: perdidas.total,
     seguimiento, ganadoEnSeguidos,
+    // Lo que deja lo ya aprobado, rubro por rubro. Es previsto —el costo es una
+    // cotización hasta que llega la factura— y por eso no entra en el neto.
+    aprobados: beneficioDeLoAprobado({ rubros, beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes) }),
     neto: c2(t.neto + perdidas.total + ganadoEnSeguidos),
   };
 }

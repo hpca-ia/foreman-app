@@ -183,17 +183,16 @@ test("con otra cantidad el renglón sale UNA vez: no se repite como diferencia d
   assert.equal(partidasParaOrden(dos, 20).length, 1, "y una sola partida en la orden");
 });
 
-test("el precio de ese renglón se dice sobre la cantidad ya contratada, sin abrir otra diferencia", async () => {
-  const { precioSobreLoContratado } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+test("lo que ese precio le hace a lo ya aprobado se mide sobre la cantidad del contrato, sin abrir otra diferencia", async () => {
+  const { beneficioDeLoContratado } = await import("../src/modules/controlObra/costoDelRubro.js");
   const d = dos.demas[0];
-  const linea = { hallazgo: d.hallazgo, cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel, unidad: d.unidad };
+  const linea = { hallazgo: d.hallazgo, cantidad: d.cantidad, cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel, unidad_papel: d.unidadPapel };
   // SOBRE LAS 12 DEL CONTRATO, NO SOBRE LAS 16 COTIZADAS: las 4 de más ya se
   // cuentan como cantidad, al precio que el cliente firmó.
-  const p = precioSobreLoContratado(linea, conPrecio[0], 68);
-  assert.equal(p.comun, 12);
-  assert.equal(p.monto, 30, "2,50 de más × las 12 que los dos tienen");
-  assert.equal(p.sube, true, "subió: es una alerta para conversar con el proveedor");
-  assert.equal(p.contraPrecio, false, "contra el costo cargado");
+  const b = beneficioDeLoContratado(linea, conPrecio[0]);
+  assert.equal(b.cantidad, 12);
+  assert.equal(b.contra, "costo", "contra el costo cargado");
+  assert.equal(b.aFavor, -30, "2,50 de más × las 12 ya aprobadas: es una alerta para el proveedor");
 });
 
 test("mismo precio y otra cantidad: no inventa una diferencia de precio", () => {
@@ -252,9 +251,9 @@ test("el ahorro y el sobreprecio se cuentan por separado: un neto esconde los do
 test("mas cantidad y ademas mas barato: una diferencia, y la eficiencia se dice en ella", async () => {
   // El rubro son 12 y la proforma trae 15, y encima mas baratas. Es UNA
   // situacion: tres de mas, que van a la orden. Lo que el precio nuevo deja
-  // sobre las 12 que ya estaban es eficiencia del proyecto, y lo dice la misma
+  // sobre las 12 que ya estaban es beneficio del proyecto, y lo dice la misma
   // tarjeta: no es otra diferencia que decidir.
-  const { precioSobreLoContratado } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const { beneficioDeLoContratado } = await import("../src/modules/controlObra/costoDelRubro.js");
   const h = loQueNoEstaPresupuestado(compararContraPresupuesto(
     [{ descripcion: "Luminarias LED", cantidad: 15, unidad: "U", monto: 660, rubro_id: 1 }], conPrecio));
   assert.equal(h.demas.length, 1);
@@ -262,11 +261,10 @@ test("mas cantidad y ademas mas barato: una diferencia, y la eficiencia se dice 
   assert.equal(h.todo.length, 1);
   // 44 contra 48,50 cargado: bajo 4,50, y sobre las 12 que los dos tienen.
   const d = h.demas[0];
-  const p = precioSobreLoContratado(
-    { hallazgo: "mas_cantidad", cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel }, conPrecio[0], 68);
-  assert.equal(p.comun, 12);
-  assert.equal(p.monto, 54);
-  assert.equal(p.sube, false);
+  const b = beneficioDeLoContratado(
+    { hallazgo: "mas_cantidad", cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel, unidad_papel: "U" }, conPrecio[0]);
+  assert.equal(b.cantidad, 12);
+  assert.equal(b.aFavor, 54);
 });
 
 test("la diferencia de precio se mide sobre la cantidad comun, no sobre la cotizada", async () => {
@@ -276,13 +274,12 @@ test("la diferencia de precio se mide sobre la cantidad comun, no sobre la cotiz
   // No es otra diferencia: es la alerta que lleva la tarjeta de la cantidad.
   assert.equal(h.subieron.length, 0);
   assert.equal(h.sobreprecio, 0);
-  const { precioSobreLoContratado } = await import("../src/modules/controlObra/cuentaDiferencias.js");
+  const { beneficioDeLoContratado } = await import("../src/modules/controlObra/costoDelRubro.js");
   const d = h.demas[0];
-  const p = precioSobreLoContratado(
-    { hallazgo: "mas_cantidad", cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel }, conPrecio[0], 68);
-  assert.equal(p.comun, 12);
-  assert.equal(p.monto, 138);
-  assert.equal(p.sube, true);
+  const b = beneficioDeLoContratado(
+    { hallazgo: "mas_cantidad", cantidad_papel: d.cantidadPapel, monto_papel: d.montoPapel, unidad_papel: "U" }, conPrecio[0]);
+  assert.equal(b.cantidad, 12);
+  assert.equal(b.aFavor, -138);
 });
 
 test("revisado no es decidido: una mirada y dejada a proposito no es una sin abrir", async () => {
