@@ -12,6 +12,7 @@ import { pdfDiferencias } from "./pdfDiferencias";
 import {
   analisisDe, lineasDe, guardarAnalisis, decidir, cerrarAnalisis, borrarAnalisis,
   enlacesDeAnalisis, DECISIONES, decisionesPara, comoVa, marcarRevisada, anotar, reEmparejar,
+  queNoSePaga,
   recalcularContra, ponerPrecio, marcarEnOrden, queSaleDe,
 } from "./analisisDeDiferencias";
 import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
@@ -53,7 +54,7 @@ import Presupuesto from "./PanelPresupuesto";
 
 const COLOR_DECISION = {
   pendiente: colors.muted, cobrar: colors.brand, incluido: colors.inkSoft, nuestro: colors.danger,
-  eficiencia: colors.success,
+  no_se_paga: colors.warning, eficiencia: colors.success,
 };
 
 // LAS TRES COSAS QUE PUEDE ENCONTRAR, Y QUE SE RESUELVEN DISTINTO. Juntas en
@@ -447,6 +448,13 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         decidido_at: new Date().toISOString(), revisado_at: x.revisado_at || new Date().toISOString() }
       : x));
     setLineas(frescas);
+    // "NO SE PAGA" SIN PORQUÉ NO RESPALDA NADA. La nota no se pide en una
+    // ventanita —esa se contesta con una "x"—, pero el cursor queda puesto en
+    // el campo: lo que sigue a esa decisión es escribir la razón, y es lo que
+    // va a salir en el PDF cuando el proveedor vuelva a reclamarlo.
+    if (decision === "no_se_paga" && !String(l.nota || "").trim()) {
+      setTimeout(() => document.getElementById(`nota-dif-${l.id}`)?.focus(), 60);
+    }
     await pasarLasEficiencias(frescas);
   }
 
@@ -496,7 +504,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           + " · hay que pedirlo cuando llegue la factura",
       }] : []),
       ...frescas.filter(x => x.hallazgo === "bajo_precio" || x.decision === "eficiencia")
-        .filter(x => x.decision !== "incluido" && x.decision !== "nuestro")
+        // Lo que no se paga no es un ahorro: es plata que nunca se debió.
+        .filter(x => x.decision !== "incluido" && x.decision !== "nuestro" && x.decision !== "no_se_paga")
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "costo")),
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
@@ -1124,12 +1133,15 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       : filtro === "sinMirar" ? !l.revisado_at && l.decision === "pendiente"
       : filtro === "pendientes" ? l.decision === "pendiente"
       : filtro === "anotadas" ? !!String(l.nota || "").trim()
+      : filtro === "noSePagan" ? l.decision === "no_se_paga"
       : true);
     const FILTROS = [
       ["todas", `Todas · ${lineas.length}`],
       ["sinMirar", `Sin mirar · ${va.sinMirar}`],
       ["pendientes", `Sin decidir · ${va.sinDecidir}`],
       ["anotadas", `Con nota · ${va.anotadas}`],
+      // Solo cuando hay alguna: un filtro que siempre da cero es ruido.
+      ...(va.noSePagan > 0 ? [["noSePagan", `No se pagan · ${va.noSePagan}`]] : []),
     ];
     return (
       <div ref={cajaRef} style={{ fontFamily: colors.font, display: "flex", gap: 12,
@@ -1149,6 +1161,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
           {lineas.length} {lineas.length === 1 ? "diferencia" : "diferencias"} · {va.revisadas} revisadas
           {va.miradasSinDecidir > 0 && <> · {va.miradasSinDecidir} miradas y dejadas pendientes</>}
           {porDecidir > 0 && <> · {porDecidir} sin decidir</>}
+          {va.noSePagan > 0 && (
+            <> · <strong style={{ color: colors.warning }}>
+              {va.noSePagan} no se {va.noSePagan === 1 ? "paga" : "pagan"}, ${fmt(va.montoNoSePaga)}</strong></>
+          )}
           {Number(abierto.descuento) > 0 && (
             <> · <strong style={{ color: colors.success }}>
               ${fmt(abierto.descuento)} de descuento ofrecido</strong>, hay que pedirlo al facturar</>
@@ -1541,7 +1557,34 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             lo que convierte una lista de números en una
                             conversación que se puede retomar, y es lo que se
                             lee en la reunión. Se guarda al salir del campo. */}
-                        <input defaultValue={l.nota || ""} key={`n${l.id}-${l.nota || ""}`}
+                        {/* EN "NO SE PAGA" LA NOTA ES LA DECISIÓN. Por eso deja
+                            de ser un renglón finito al pie y pasa a ser un
+                            campo con lugar para escribir: la razón de no pagar
+                            algo no suele entrar en seis palabras, y es lo que
+                            sale en el PDF cuando el proveedor lo reclame. */}
+                        {l.decision === "no_se_paga" ? (
+                          <>
+                            <textarea id={`nota-dif-${l.id}`} rows={2}
+                              defaultValue={l.nota || ""} key={`n${l.id}-${l.nota || ""}`}
+                              placeholder="Por qué no se paga… (sale en el PDF como respaldo)"
+                              onClick={e => e.stopPropagation()}
+                              onBlur={e => guardarNota(l, e.target.value)}
+                              style={{ width: "100%", marginTop: 4, padding: "5px 7px", fontSize: 11.5,
+                                fontFamily: colors.font, color: colors.ink, lineHeight: 1.45, resize: "vertical",
+                                border: `1px solid ${String(l.nota || "").trim() ? colors.border : colors.warning}`,
+                                background: "#fff", borderRadius: colors.radiusSm, outline: "none",
+                                boxSizing: "border-box" }} />
+                            <div style={{ fontSize: 10.5, marginTop: 2, lineHeight: 1.5,
+                              color: String(l.nota || "").trim() ? colors.inkSoft : colors.warning }}>
+                              No se le paga{abierto.proveedor ? ` a ${abierto.proveedor}` : " al proveedor"}:{" "}
+                              <strong>${fmt(l.monto)}</strong>, {queNoSePaga(l)}.{" "}
+                              {String(l.nota || "").trim()
+                                ? "Sale en el PDF, en la hoja de lo que no se paga, con esta nota, tu nombre y la fecha."
+                                : <strong>Falta escribir por qué: sin la nota, el PDF no respalda nada.</strong>}
+                            </div>
+                          </>
+                        ) : (
+                        <input id={`nota-dif-${l.id}`} defaultValue={l.nota || ""} key={`n${l.id}-${l.nota || ""}`}
                           placeholder="Anotar algo sobre este renglón…"
                           onClick={e => e.stopPropagation()}
                           onBlur={e => guardarNota(l, e.target.value)}
@@ -1551,6 +1594,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             border: `1px solid ${l.nota ? colors.border : "transparent"}`,
                             background: l.nota ? "#fff" : colors.bg,
                             borderRadius: colors.radiusSm, outline: "none" }} />
+                        )}
                         {dejaria != null && !dudoso && (l.decision === "pendiente" || l.decision === "cobrar") && (
                           <div style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 3 }}>
                             Si el cliente la aprueba deja <strong style={{ color: colors.success }}>${fmt(dejaria)}</strong>:
@@ -1648,6 +1692,43 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         {!lineas.length && (
           <div style={{ ...caja, fontSize: 12.5, color: colors.success }}>
             Esta propuesta no trae diferencias contra el contrato vigente.
+          </div>
+        )}
+
+        {/* LO QUE NO SE PAGA, JUNTO Y CON SU PAPEL. Decidirlo renglón por
+            renglón no alcanza: lo que hace falta el día que el proveedor
+            reclama es la hoja con todos, el monto y el porqué de cada uno. */}
+        {va.noSePagan > 0 && (
+          <div style={{ ...caja, borderLeft: `3px solid ${colors.warning}` }}>
+            <div style={{ fontSize: 12.5, color: colors.ink, marginBottom: 5 }}>
+              <strong>{va.noSePagan} {va.noSePagan === 1 ? "renglón no se paga" : "renglones no se pagan"}</strong>
+              {" "}· ${fmt(va.montoNoSePaga)} de costo, sin IVA
+            </div>
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 7 }}>
+              No van a la orden de cambio ni a Beneficios. En el PDF salen en una hoja aparte —lo que cobra la
+              propuesta, qué parte no se paga, cuánto, por qué, y quién lo decidió y cuándo—, para entregarla
+              sola como respaldo.
+              {va.noSePaganSinNota > 0 && (
+                <strong style={{ color: colors.warning }}>
+                  {" "}A {va.noSePaganSinNota === 1 ? "uno le" : `${va.noSePaganSinNota} les`} falta escribir por qué.
+                </strong>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+              <Button variant="outline" size="sm" disabled={ocupado}
+                onClick={async () => {
+                  setOcupado(true); setError("");
+                  try {
+                    await pdfDiferencias({ analisis: abierto, lineas, rubros: vivos, obra, proyecto: obra?.nombre }, "bajar");
+                  } catch (e) { setError("No se pudo armar el PDF: " + e.message); }
+                  setOcupado(false);
+                }}>
+                <Download size={13} /> Bajar el PDF con el respaldo
+              </Button>
+              {filtro !== "noSePagan" && (
+                <Button variant="outline" size="sm" onClick={() => setFiltro("noSePagan")}>Ver solo esos</Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -1783,6 +1864,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     ? `${v.revisadas} de ${v.total} revisadas · faltan ${v.sinDecidir} por decidir`
                       + (v.aFavor ? ` · $${fmt(v.aFavor)} a favor` : "")
                     : `Listo para armar la orden · ${v.aCobrar} a cobrar, $${fmt(v.monto)}`}
+                {v.noSePagan > 0 && ` · ${v.noSePagan} no se ${v.noSePagan === 1 ? "paga" : "pagan"}, $${fmt(v.montoNoSePaga)}`}
               </div>
             )}
           </button>

@@ -34,6 +34,24 @@ export const DECISIONES = {
     label: "Lo pagamos nosotros",
     pista: "Se hace con la plata de un rubro ya contratado: el cliente no aprueba nada y lo que sobre de ese rubro queda a favor",
   },
+  // EL "NO" AL PROVEEDOR QUE NO CABE EN UNA ETIQUETA.
+  //
+  // "Ya estaba incluido" trae su razón puesta: el contrato ya lo cubre. Pero
+  // hay renglones que no se pagan por otra cosa —no se hizo, se hizo mal, nadie
+  // lo autorizó, viene cobrado dos veces—, y marcarlos como "ya estaba" deja en
+  // el papel una razón que no es la verdadera.
+  //
+  // Acá la razón va ESCRITA, y es lo único que importa: el proveedor va a
+  // volver a reclamarlo, y lo que se le pone delante es el PDF con el renglón,
+  // el monto, el porqué y el nombre de quien lo decidió. Un "no se paga" sin
+  // nota es una decisión que no se puede defender.
+  //
+  // No sale plata de ningún lado: no va a la orden de cambio y no llega a
+  // Beneficios.
+  no_se_paga: {
+    label: "No se paga",
+    pista: "No se le paga al proveedor: no se hizo, no se autorizó o no corresponde. Escribí por qué: la nota sale en el PDF como respaldo",
+  },
   // UN AHORRO NO ES UNA DIFERENCIA CON EL CLIENTE.
   //
   // Si el proveedor cotiza por debajo del costo cargado, no hay nada que
@@ -55,7 +73,11 @@ export const DECISIONES = {
  */
 export function decisionesPara(hallazgo) {
   const todas = Object.keys(DECISIONES).filter(k => k !== "pendiente");
-  if (hallazgo === "bajo_precio") return todas.filter(k => k !== "cobrar");
+  // "NO SE PAGA" ES UN NO A PLATA QUE EL PROVEEDOR PIDE DE MÁS. Donde la
+  // diferencia ya es a favor —lo cotiza más barato, o trae menos cantidad— no
+  // hay nada que negarle, y el botón ahí solo serviría para equivocarse.
+  if (hallazgo === "bajo_precio") return todas.filter(k => k !== "cobrar" && k !== "no_se_paga");
+  if (hallazgo === "menos_cantidad") return todas.filter(k => k !== "eficiencia" && k !== "no_se_paga");
   return todas.filter(k => k !== "eficiencia");
 }
 
@@ -75,6 +97,10 @@ export function comoVa(lineas = []) {
   // Lo que quedó a favor nuestro se cuenta aparte de lo que se le cobra al
   // cliente: son dos plata distintas y van a dos lados distintos.
   const eficiencias = lineas.filter(l => l.decision === "eficiencia");
+  // Lo que se le niega al proveedor, aparte de todo lo demás: no es plata del
+  // cliente ni nuestra, y lo que hay que saber es cuánto es y si cada uno
+  // tiene escrito por qué.
+  const noSePagan = lineas.filter(l => l.decision === "no_se_paga");
   // REVISADO NO ES DECIDIDO. Un renglón mirado y dejado a propósito para
   // hablarlo el lunes no es lo mismo que uno que nadie abrió, y sin
   // distinguirlos volver al análisis obliga a empezar desde arriba.
@@ -90,6 +116,9 @@ export function comoVa(lineas = []) {
     montoDevuelto: suma(seDevuelven),
     enLaOrden: aCobrar.length,
     eficiencias: eficiencias.length,
+    noSePagan: noSePagan.length,
+    montoNoSePaga: suma(noSePagan),
+    noSePaganSinNota: noSePagan.filter(l => !String(l.nota || "").trim()).length,
     revisadas: revisadas.length,
     sinMirar: lineas.length - revisadas.length,
     // Las que alguien ya miró y dejó pendientes a propósito: son las que hay
@@ -98,6 +127,61 @@ export function comoVa(lineas = []) {
     anotadas: anotadas.length,
     aFavor: Math.round(eficiencias.reduce((t, l) => t + (Number(l.monto) || 0), 0) * 100) / 100,
     listo: lineas.length > 0 && sinDecidir === 0,
+  };
+}
+
+/**
+ * QUÉ PARTE DEL RENGLÓN ES LA QUE NO SE PAGA.
+ *
+ * El monto de una diferencia no siempre es el renglón entero: si el contrato
+ * tiene 65 puntos y la propuesta trae 111, lo que se discute son los 46 de
+ * más, y si la cantidad es la misma lo que se discute es el sobreprecio. Decir
+ * "no se paga" sin decir cuál de las tres cosas deja al proveedor creyendo que
+ * se le niega todo el trabajo, o a nosotros creyendo que se negó más de lo que
+ * se negó.
+ */
+export function queNoSePaga(linea) {
+  const n = v => Number(v) || 0;
+  const c = Math.round(n(linea?.cantidad) * 100) / 100;
+  if (linea?.hallazgo === "mas_cantidad") {
+    return `${c} ${linea.unidad || ""}`.trim() + " de más sobre lo contratado";
+  }
+  if (linea?.hallazgo === "subio_precio") return "el sobreprecio sobre lo presupuestado";
+  return "el renglón entero";
+}
+
+/**
+ * EL RESPALDO DE LO QUE NO SE PAGA: lo que va a la hoja que se le muestra al
+ * proveedor.
+ *
+ * Cada renglón lleva lo que DICE SU PAPEL —con sus palabras, su cantidad y su
+ * total, que es lo que él va a reconocer—, qué parte de eso no se paga, cuánto
+ * es, por qué, y quién lo decidió y cuándo. La nota va entera: es la razón, y
+ * una razón cortada a la mitad no respalda nada.
+ */
+export function respaldoDeLoQueNoSePaga(lineas = []) {
+  const n = v => Number(v) || 0;
+  const c2 = v => Math.round(n(v) * 100) / 100;
+  const renglones = lineas.filter(l => l.decision === "no_se_paga").map(l => {
+    const cantidad = n(l.cantidad_papel ?? l.cantidad);
+    const total = c2(l.monto_papel ?? l.monto);
+    return {
+      id: l.id,
+      descripcion: String(l.texto_papel || l.descripcion || "").trim(),
+      cantidad, unidad: l.unidad_papel || l.unidad || "",
+      unitario: cantidad ? c2(total / cantidad) : null,
+      total,
+      que: queNoSePaga(l),
+      monto: c2(l.monto),
+      porque: String(l.nota || "").trim(),
+      quien: l.decidido_nombre || "",
+      cuando: l.decidido_at || null,
+    };
+  });
+  return {
+    renglones,
+    total: c2(renglones.reduce((t, r) => t + r.monto, 0)),
+    sinNota: renglones.filter(r => !r.porque).length,
   };
 }
 

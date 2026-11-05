@@ -3,6 +3,7 @@ import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
+import { respaldoDeLoQueNoSePaga } from "./cuentaDiferencias.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, EN PAPEL.
 //
@@ -25,6 +26,11 @@ const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDig
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`)
   .toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
 
+// Cuándo se decidió, en la hora de acá: una decisión tomada a las ocho de la
+// noche en Quito ya es el día siguiente en la hora en que se guarda.
+const diaCorto = f => (f ? new Date(f)
+  .toLocaleDateString("es-EC", { day: "numeric", month: "short", year: "numeric" }) : "");
+
 const GRUPOS = [
   ["nuevo", "NO ESTÁ EN EL CONTRATO", "Trabajo que el presupuesto no cubre. Hay que ponerle precio."],
   ["mas_cantidad", "MÁS CANTIDAD QUE LA CONTRATADA", "El rubro existe y su precio ya está acordado: se cobra la diferencia."],
@@ -36,7 +42,7 @@ const GRUPOS = [
 ];
 
 const DICE = { cobrar: "SE COBRA", incluido: "YA ESTABA", nuestro: "ES NUESTRO",
-  eficiencia: "A FAVOR", pendiente: "" };
+  no_se_paga: "NO SE PAGA", eficiencia: "A FAVOR", pendiente: "" };
 
 /**
  * @param analisis  la fila de obra_analisis
@@ -104,8 +110,10 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
           pu == null ? "" : `$${plata(pu)}`,
           r && n(r.costo_unitario) > 0 ? `$${plata(r.costo_unitario)}` : "",
           // Lo anotado viaja al papel: es lo que se lee en la reunión, y sin
-          // esto la hoja impresa pierde justo la parte que alguien pensó.
-          (l.nota || "").slice(0, 120),
+          // esto la hoja impresa pierde justo la parte que alguien pensó. Va
+          // ENTERO: la nota es la razón de la decisión, y cortada en la letra
+          // ciento veinte es media razón.
+          String(l.nota || "").trim(),
           // La decisión tomada, o el espacio para escribirla a mano.
           DICE[l.decision] || "",
         ];
@@ -116,7 +124,7 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
       columnStyles: {
         0: { cellWidth: "auto" }, 1: { cellWidth: 32, halign: "right" }, 2: { cellWidth: 28, halign: "center" },
         3: { cellWidth: 46, halign: "right" }, 4: { cellWidth: 52, halign: "right", fontStyle: "bold" },
-        5: { cellWidth: 160 }, 6: { cellWidth: 54, halign: "right" }, 7: { cellWidth: 46, halign: "right" },
+        5: { cellWidth: 152 }, 6: { cellWidth: 62, halign: "right" }, 7: { cellWidth: 46, halign: "right" },
         8: { cellWidth: 50, halign: "right" }, 9: { cellWidth: 110, fontSize: 7 },
         10: { cellWidth: 56, halign: "center", fontStyle: "bold" },
       },
@@ -130,11 +138,72 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
   const devolver = lineas.filter(l => l.hallazgo === "menos_cantidad").reduce((t, l) => t + n(l.monto), 0);
   if (y > doc.internal.pageSize.getHeight() - 70) { doc.addPage(); y = 44; }
   doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...NEGRO);
+  const resp = respaldoDeLoQueNoSePaga(lineas);
   doc.text(`En discusión: $${plata(enJuego)} de costo a cobrar`
-    + (devolver ? `  ·  $${plata(devolver)} a devolver` : ""), M, y);
+    + (devolver ? `  ·  $${plata(devolver)} a devolver` : "")
+    + (resp.total ? `  ·  de eso, $${plata(resp.total)} no se paga: el detalle va en la hoja siguiente` : ""), M, y);
   doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(...GRIS);
   doc.text("Los precios son de costo, sin IVA. Lo que se le cobre al cliente sale de una orden de cambio,"
     + " con su margen y su IVA al pie.", M, y + 11);
+
+  // ── LO QUE NO SE PAGA, EN SU PROPIA HOJA ─────────────────────────────────
+  //
+  // Es la hoja que se pone delante del proveedor cuando vuelve a reclamar un
+  // renglón: lo que dice SU papel, qué parte no se paga, cuánto es, por qué, y
+  // quién lo decidió y cuándo. Va aparte del análisis —que es un papel de
+  // trabajo nuestro, con costos cargados y precios al cliente— para poder
+  // sacarla sola y entregarla sin mostrar lo demás.
+  if (resp.renglones.length) {
+    doc.addPage();
+    y = 44;
+    doc.setFont("helvetica", "bold").setFontSize(13).setTextColor(...TINTA);
+    doc.text("LO QUE NO SE PAGA", M, y);
+    doc.setFont("helvetica", "normal").setFontSize(10).setTextColor(...NEGRO);
+    doc.text(proyecto || obra?.nombre || "", ANCHO - M, y, { align: "right" });
+    doc.setFontSize(8.5).setTextColor(...GRIS);
+    doc.text([analisis?.proveedor, analisis?.archivo_nombre, dia(analisis?.created_at)].filter(Boolean).join("  ·  "),
+      M, y + 14);
+    doc.setFontSize(7.5);
+    doc.text(`${resp.renglones.length === 1 ? "Este renglón de la propuesta no se paga" : `Estos ${resp.renglones.length} renglones de la propuesta no se pagan`}.`
+      + " Al lado de cada uno: qué parte, cuánto es, por qué, y quién lo decidió y cuándo.", M, y + 26);
+    y += 38;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["LO QUE COBRA LA PROPUESTA", "CANT", "UNID", "P. UNIT", "TOTAL",
+        "QUÉ NO SE PAGA", "MONTO", "POR QUÉ", "LO DECIDIÓ"]],
+      body: resp.renglones.map(r => [
+        r.descripcion,
+        plata(r.cantidad), r.unidad,
+        r.unitario == null ? "" : `$${plata(r.unitario)}`,
+        `$${plata(r.total)}`,
+        r.que,
+        `$${plata(r.monto)}`,
+        // Sin nota queda el espacio en blanco, para escribirla a mano: una
+        // razón inventada por el programa sería peor que ninguna.
+        r.porque,
+        [r.quien, diaCorto(r.cuando)].filter(Boolean).join("\n"),
+      ]),
+      foot: [[
+        { content: "TOTAL QUE NO SE PAGA", colSpan: 6, styles: { halign: "right" } },
+        { content: `$${plata(resp.total)}`, styles: { halign: "right" } },
+        { content: "a costo, sin IVA", colSpan: 2, styles: { fontStyle: "normal", textColor: GRIS } },
+      ]],
+      showFoot: "lastPage",
+      theme: "grid",
+      headStyles: { fillColor: [249, 250, 251], textColor: GRIS, fontSize: 7, fontStyle: "bold", lineColor: [229, 231, 235] },
+      footStyles: { fillColor: [249, 250, 251], textColor: NEGRO, fontSize: 8, fontStyle: "bold",
+        lineColor: [229, 231, 235], lineWidth: 0.5 },
+      styles: { fontSize: 7.5, cellPadding: 4, lineColor: [229, 231, 235], textColor: NEGRO, minCellHeight: 22 },
+      columnStyles: {
+        0: { cellWidth: "auto" }, 1: { cellWidth: 38, halign: "right" }, 2: { cellWidth: 30, halign: "center" },
+        3: { cellWidth: 50, halign: "right" }, 4: { cellWidth: 58, halign: "right" },
+        5: { cellWidth: 92 }, 6: { cellWidth: 60, halign: "right", fontStyle: "bold" },
+        7: { cellWidth: 200 }, 8: { cellWidth: 78, fontSize: 7 },
+      },
+      margin: { left: M, right: M },
+    });
+  }
 
   pieDePdf(doc, {
     elemento: `Diferencias · ${analisis?.archivo_nombre || ""}`.trim(),
