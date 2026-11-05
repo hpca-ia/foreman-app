@@ -7,6 +7,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import {
   CLASES, claseDePartida, adicionesPorClase, contratadoDe, contraLoPactado, fueraDeLoPactado, porcentajeSobreCosto,
+  precioConPorcentaje,
 } from "./clasesDePartida.js";
 import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
@@ -1676,11 +1677,38 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                   {tieneCosto(l) && (() => {
                                     const m = precioDeLinea(l) - costoDeLinea(l);
                                     const pct = porcentajeSobreCosto(l);
+                                    // EL PORCENTAJE SE MUEVE A MANO, PARTIDA POR
+                                    // PARTIDA. La orden nace con el mismo margen
+                                    // para todo lo nuevo, y casi nunca es el que
+                                    // corresponde a cada cosa: un desmontaje y
+                                    // un patch cord no llevan el mismo. Al
+                                    // cambiarlo se recalcula el precio desde el
+                                    // costo. Lo que tiene precio pactado en el
+                                    // contrato no se mueve: ahí el porcentaje
+                                    // solo se muestra.
+                                    const seMueve = editable && pct != null && claseDePartida(l) !== "mas";
                                     return (
-                                      <div style={{ fontSize: 9.5, whiteSpace: "nowrap",
+                                      <div style={{ fontSize: 9.5, whiteSpace: "nowrap", marginTop: seMueve ? 2 : 0,
                                         color: m < 0 ? colors.danger : m > 0 ? colors.success : colors.muted }}>
                                         {m < 0 ? "−" : "+"}${fmt(Math.abs(m))}
-                                        {pct != null && <strong> · {pct > 0 ? "+" : pct < 0 ? "−" : ""}{fmt(Math.abs(pct))}%</strong>}
+                                        {pct != null && (seMueve ? (
+                                          <>
+                                            {" · "}
+                                            <input type="number" step="0.5" defaultValue={pct}
+                                              key={`m${l.id}-${l.precio_unitario}-${l.costo_unitario}`}
+                                              title="Porcentaje sobre el costo. Al cambiarlo se recalcula el precio, redondeado al centavo."
+                                              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                              onBlur={e => {
+                                                const v = e.target.value;
+                                                if (v === "" || Number(v) === pct) return;
+                                                hacer(async () => (await guardarLinea(l.id, {
+                                                  precio_unitario: precioConPorcentaje(l.costo_unitario, v) })).error || null);
+                                              }}
+                                              style={{ ...celda, width: 52, padding: "1px 4px", fontSize: 10.5,
+                                                textAlign: "right", fontWeight: 700 }} />
+                                            {" %"}
+                                          </>
+                                        ) : <strong> · {pct > 0 ? "+" : pct < 0 ? "−" : ""}{fmt(Math.abs(pct))}%</strong>)}
                                       </div>
                                     );
                                   })()}
@@ -2097,7 +2125,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       {editable && cuenta.conCosto > 0 && (
                         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8,
                           fontSize: 11.5, color: colors.inkSoft }}>
-                          <span>Precio = costo +</span>
+                          <span>A todas las nuevas: precio = costo +</span>
                           <input type="number" step="1" value={pctMargen[o.id] ?? ""}
                             onChange={e => setPctMargen(v => ({ ...v, [o.id]: e.target.value }))}
                             placeholder="15" style={{ ...inputStyle, padding: "3px 6px", fontSize: 11.5, width: 64, textAlign: "right" }} />

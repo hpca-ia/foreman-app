@@ -170,6 +170,18 @@ export function porcentajeSobreCosto(l) {
 }
 
 /**
+ * El precio que sale de subirle un porcentaje al costo, al centavo.
+ *
+ * Al centavo y no más fino: el documento muestra el unitario con dos
+ * decimales, y cantidad por unitario tiene que dar el total que el cliente ve.
+ * Por eso en una partida de poco precio el porcentaje que queda puede no ser
+ * exactamente el que se escribió: $1,71 más 20% son $2,05, que es 19,9%.
+ */
+export function precioConPorcentaje(costo, pct) {
+  return c2(n(costo) * (1 + n(pct) / 100));
+}
+
+/**
  * Cuánto había contratado, para leer el cambio de cantidad sin ir al contrato.
  *
  * Solo lo contratado. No dice en cuánto queda: otra orden pudo haber movido el

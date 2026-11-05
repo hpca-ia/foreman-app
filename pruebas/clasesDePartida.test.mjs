@@ -186,3 +186,17 @@ test("el margen de la orden no le sube el precio a lo que ya está pactado", asy
   ], 20);
   assert.deepEqual(r.map(l => l.precio_unitario), [120, 7.26, 36.38]);
 });
+
+test("el porcentaje se mueve a mano: el precio sale del costo, al centavo", async () => {
+  const { precioConPorcentaje, porcentajeSobreCosto } = await import("../src/modules/controlObra/clasesDePartida.js");
+  assert.equal(precioConPorcentaje(380, 20), 456);
+  assert.equal(precioConPorcentaje(250, 35.5), 338.75);
+  assert.equal(precioConPorcentaje(45, 0), 45);
+  assert.equal(precioConPorcentaje(100, -5), 95);
+  assert.equal(precioConPorcentaje("52.54", "25"), 65.68, "lo que llega del campo es texto");
+  // Y lo que queda escrito es el porcentaje que el precio de verdad tiene: en
+  // una partida de poco precio, un centavo de redondeo se nota.
+  const precio = precioConPorcentaje(1.7134, 20);
+  assert.equal(precio, 2.06);
+  assert.equal(porcentajeSobreCosto({ tipo: "aumenta", precio_unitario: precio, costo_unitario: 1.7134 }), 20.2);
+});
