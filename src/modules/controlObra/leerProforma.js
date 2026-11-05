@@ -36,14 +36,7 @@ export const FORMATO = `Contestá en LÍNEAS, sin JSON, sin markdown y sin ningu
 explicación. Una línea por cada renglón de la proforma, con los campos separados
 por barras, exactamente así:
 
-ítem | descripción | cantidad | unidad | precio unitario | monto | rubro_id
-
-"ítem" es el número de ítem impreso en el papel, tal cual. Si el papel no numera
-sus renglones, poné un guion. Sirve para saber cuáles faltan y para seguir donde
-se cortó una respuesta larga.
-
-LOS RENGLONES CON CANTIDAD 0 Y SIN MONTO NO SE TRANSCRIBEN: figuran en el papel
-pero no se están cotizando.
+descripción | cantidad | unidad | precio unitario | monto | rubro_id
 
 La primera línea es el proveedor:  PROVEEDOR | nombre del proveedor
 
@@ -451,12 +444,13 @@ export function continuacion(items = []) {
  *          al final.
  */
 export async function leerSinCortes({ pedir, cuerpoPara, onPaso, partes = 8 }) {
-  const junto = { items: [], proveedor: "", iva: 0, totales: null, descuento: 0 };
+  const junto = { items: [], proveedor: "", iva: 0, totales: null, descuento: 0, crudo: "" };
   let cortado = false, sigue = null, hechas = 0;
   for (let parte = 1; parte <= partes; parte++) {
     if (parte > 1) onPaso?.(`el papel sigue · leyendo desde el renglón ${junto.items.length + 1}`);
     const { texto, cortado: seCorto } = await pedir(cuerpoPara(sigue));
     hechas = parte;
+    if (!junto.crudo) junto.crudo = String(texto || "").slice(0, 600);
     const leido = interpretarRespuesta(texto);
     // La última línea de una respuesta cortada quedó a medio escribir: un
     // monto cortado —"48" de "48,90"— entra como un renglón que parece bueno.
@@ -569,6 +563,9 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   async function unaLectura(reclamar) {
     const items = [];
     let proveedor = "", cortado = false, iva = 0, totales = null, descuento = 0, fecha = null;
+    // Lo que contestó el modelo, tal cual: si no sale ni un renglón, es lo
+    // único que explica por qué.
+    let crudo = "";
     // Cómo se leyó la planilla, si lo fue: el mapa, la convención, qué se
     // corrigió. Es lo que se recuerda si la lectura cierra.
     let hoja = null;
@@ -643,6 +640,7 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
         }),
       });
       if (leido.cortado) cortado = true;
+      if (leido.crudo && !crudo) crudo = leido.crudo;
       if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
       if (leido.iva && !iva) iva = leido.iva;
       if (leido.totales && !totales) totales = leido.totales;
@@ -703,11 +701,11 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
     // renglón sin cantidad contra un rubro con sesenta se leería como sesenta
     // de menos.
     const cotizados = items.filter(x => (Number(x.cantidad) || 0) !== 0 || (Number(x.monto) || 0) !== 0);
-    return { items: cotizados, proveedor, cortado, iva, totales, descuento, fecha, hoja };
+    return { items: cotizados, proveedor, cortado, iva, totales, descuento, fecha, hoja, crudo };
   }
 
   const leido = await leerHastaQueCuadre({ leer: unaLectura, vueltas, onPaso });
-  const { items, proveedor, cortado, iva, totales, descuento, fecha, hoja = null } = leido;
+  const { items, proveedor, cortado, iva, totales, descuento, fecha, hoja = null, crudo = "" } = leido;
 
   // EL DESCUENTO VIAJA ENTERO Y APARTE, no repartido entre los renglones.
   //
@@ -777,7 +775,7 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
   // mismo, y así queda claro que es UNA sola comprobación, no dos criterios.
   const { revision, quedo, cerro, vuelta, vueltas: topeDeVueltas, historia } = leido;
 
-  return { proveedor, items, cortado, iva, totales, descuento, fecha, revision, hoja,
+  return { proveedor, items, cortado, iva, totales, descuento, fecha, revision, hoja, crudo,
     // Cómo quedó la lectura y cuánto costó llegar: `cerro` dice si pasó la
     // comprobación contra el pie del papel, `vuelta` en cuál de las vueltas, e
     // `historia` qué se le reclamó en cada una. Si `cerro` es false la lectura

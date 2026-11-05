@@ -226,7 +226,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     setLeyendo("leyendo"); setError(""); setAviso("");
     try {
       const r = await leerConNova(file, vivos, p => setLeyendo(p || "leyendo"));
-      if (!r.items?.length) throw new Error("NOVA no encontró renglones con precios en el archivo.");
+      // UN VACÍO TIENE QUE DECIR QUÉ PASÓ. "No encontró renglones" de un papel
+      // que tiene sesenta no se arregla sin saber qué contestó el modelo.
+      if (!r.items?.length) {
+        throw new Error("NOVA no encontró renglones con precios en el archivo."
+          + (r.crudo ? ` Esto fue lo que contestó: «${String(r.crudo).slice(0, 300)}»` : " No contestó nada."));
+      }
       // NADA SE COMPARA ANTES DE QUE ALGUIEN MIRE LOS EMPAREJAMIENTOS.
       //
       // De qué rubro es cada renglón es la decisión de la que cuelga todo lo

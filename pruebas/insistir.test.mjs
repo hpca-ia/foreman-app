@@ -122,3 +122,29 @@ test("entre dos que no cuadran, la que tiene menos renglones rotos", () => {
   assert.equal(laMejor(a, b), b);
   assert.equal(laMejor(b, a), b);
 });
+
+test("una lectura vacía no le gana a una con renglones, aunque tenga cero errores", () => {
+  // La segunda vuelta contesta con una explicación en vez de renglones: cero
+  // renglones, cero multiplicaciones rotas. Antes ganaba por "menos rotos".
+  const conRotos = { revision: revisarLectura(COMPLETA.map((x, i) => i < 2 ? { ...x, monto: x.monto + 7 } : x), PAPEL, 0) };
+  const vacia = { revision: revisarLectura([], PAPEL, 0) };
+  assert.equal(laMejor(conRotos, vacia), conRotos);
+  assert.equal(laMejor(vacia, conRotos), conRotos);
+});
+
+test("la que perdió un pedazo del papel pierde contra la que quedó cerca, tenga los rotos que tenga", () => {
+  const cerca = { revision: revisarLectura(COMPLETA.map((x, i) => i < 2 ? { ...x, monto: x.monto + 7 } : x), PAPEL, 0) };
+  const mitad = { revision: revisarLectura(COMPLETA.slice(0, 2), PAPEL, 0) };   // sin rotos, y sin medio documento
+  assert.equal(laMejor(mitad, cerca), cerca);
+});
+
+test("si la suma ya cierra y la segunda vuelta no mejora, no hay tercera", async () => {
+  // Todos los renglones están y suman lo del papel; uno no multiplica. La
+  // segunda vuelta vuelve vacía: se queda con la primera y no insiste más.
+  const casi = COMPLETA.map((x, i) => (i === 0 ? { ...x, unitario: 30 } : x));   // 100 × 30 ≠ 3300
+  const m = modeloDe({ items: casi, totales: PAPEL }, { items: [], totales: PAPEL }, { items: [], totales: PAPEL });
+  const r = await leerHastaQueCuadre({ leer: m.leer, vueltas: 3 });
+  assert.equal(m.llamadas(), 2);
+  assert.equal(r.items.length, 4);
+  assert.equal(r.cerro, false);            // sigue sin cerrar: hay un renglón que mirar
+});

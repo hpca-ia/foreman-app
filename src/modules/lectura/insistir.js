@@ -100,10 +100,24 @@ export function laMejor(a, b) {
   if (!b) return a;
   const okA = comoQuedo(a.revision) === "cuadra", okB = comoQuedo(b.revision) === "cuadra";
   if (okA !== okB) return okA ? a : b;
-  const malosA = a.revision.malos?.length || 0, malosB = b.revision.malos?.length || 0;
-  if (malosA !== malosB) return malosA < malosB ? a : b;
+  // UNA LECTURA VACÍA NO LE GANA A NADA. Si en la segunda vuelta el modelo
+  // contesta con una explicación en vez de renglones, eso son cero renglones
+  // y cero errores de multiplicación: con la regla de abajo le ganaba a una
+  // lectura de cuarenta y ocho renglones con dos que no multiplicaban, y la
+  // pantalla decía "no encontró renglones" de un papel que sí se había leído.
+  const nA = a.revision.renglones || 0, nB = b.revision.renglones || 0;
+  if (!nA !== !nB) return nA ? a : b;
   const fA = a.revision.falta == null ? Infinity : Math.abs(a.revision.falta);
   const fB = b.revision.falta == null ? Infinity : Math.abs(b.revision.falta);
+  // Y LA QUE PERDIÓ UN PEDAZO DEL PAPEL TAMPOCO: si a una le falta mucho más
+  // que a la otra —diez puntos del subtotal o más—, gana la que quedó cerca,
+  // tenga los renglones rotos que tenga. Un renglón que no multiplica se ve y
+  // se corrige; la mitad del documento sin leer, no.
+  const lejos = (f, r) => (Number.isFinite(f) && r.esperado ? f / Math.abs(r.esperado) : null);
+  const lA = lejos(fA, a.revision), lB = lejos(fB, b.revision);
+  if (lA != null && lB != null && Math.abs(lA - lB) >= 0.10) return lA < lB ? a : b;
+  const malosA = a.revision.malos?.length || 0, malosB = b.revision.malos?.length || 0;
+  if (malosA !== malosB) return malosA < malosB ? a : b;
   if (fA !== fB) return fA < fB ? a : b;
   return a;
 }
@@ -138,6 +152,13 @@ export async function leerHastaQueCuadre({ leer, vueltas = VUELTAS, onPaso } = {
       falta: revision.falta, malos: revision.malos?.length || 0,
       quedo: comoQuedo(revision), reclamo: queReclamar });
     mejor = laMejor(mejor, intento);
+
+    // SI LA SUMA YA CIERRA Y VOLVER A LEER NO MEJORÓ, NO SE INSISTE MÁS. Con la
+    // suma igual a la del papel están todos los renglones y sus montos; lo que
+    // queda son unitarios que no multiplican, y eso se ve marcado en pantalla.
+    // Una proforma larga se lee en tres o cuatro partes: otra vuelta entera son
+    // dos minutos más para volver a lo mismo.
+    if (vuelta > 1 && mejor !== intento && mejor.revision.cuadra === true) break;
 
     // Cuadró: no hay nada que ganar leyendo otra vez.
     if (comoQuedo(revision) === "cuadra") break;
