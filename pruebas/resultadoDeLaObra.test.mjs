@@ -51,7 +51,13 @@ test("el resultado: lo ganado comprando, menos las pérdidas, más lo que dejaro
   assert.equal(r.conPapel, 5070.02);
   assert.equal(r.perdidasTotal, -139.44);
   assert.equal(r.ganadoEnSeguidos, 34.78);
-  assert.equal(r.neto, 4965.36);
+  // LO YA APROBADO SUMA. La pintura se cobra $1.000 y tiene $600 de costo: esos
+  // $400 ya son beneficio. Con los $34,78 que además se ahorró comprando, el
+  // rubro dejó $434,78: lo que se cobra menos lo que se gastó. Las mamparas,
+  // con $150 de costo contra $6.000 de precio, no se cuentan: costo dudoso.
+  assert.equal(r.aprobados.total, 400);
+  assert.equal(r.aprobados.dudosos, 1);
+  assert.equal(r.neto, 5365.36);
   assert.deepEqual(r.seguimiento.map(f => f.id), [7, 1325]);   // el 999 ya no existe
   assert.equal(r.seguimiento[1].estado, "sin_empezar");
 });
@@ -64,14 +70,18 @@ test("un seguido en curso se muestra pero no cuenta hasta terminar", () => {
   assert.equal(r.seguimiento[0].estado, "en_curso");
   assert.equal(r.seguimiento[0].cuenta, false);
   assert.equal(r.ganadoEnSeguidos, 0);
-  assert.equal(r.neto, 0);
+  // Lo que no cuenta hasta terminar es lo que se gana o se pierde COMPRANDO.
+  // El margen de lo ya aprobado —$1.000 que se cobran, $600 de costo— sí.
+  assert.equal(r.neto, 400);
 });
 
 test("un seguido que se pasó cuenta una sola vez, en las pérdidas", () => {
   const r = resultadoDeLaObra({ rubros, porRubro, seguidos: [{ id: 1, obra_rubro_id: 1434 }] });
   assert.equal(r.perdidasTotal, -139.44);
   assert.equal(r.ganadoEnSeguidos, 0);
-  assert.equal(r.neto, -139.44);
+  // La pérdida del pasado, una sola vez, y aparte los $400 de la pintura ya aprobada.
+  assert.equal(r.aprobados.total, 400);
+  assert.equal(r.neto, 260.56);
 });
 
 test("la reducción de una orden de cambio, en negativo y sin gasto, no es una pérdida", () => {
@@ -159,12 +169,17 @@ test("un rubro que cuesta más de lo que se cobra aparece en contra", async () =
   assert.equal(r.total, -6);
 });
 
-test("el resultado de la obra trae lo ya aprobado aparte, sin meterlo en el neto", async () => {
+test("lo ya aprobado es beneficio: suma al resultado de la obra", async () => {
   const { resultadoDeLaObra } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
   const rubros = [{ id: 1, numero: 1, unidad: "U", cantidad: 10, precio_unitario: 100, total_base: 1150, iva_pct: 15, costo_unitario: 80 }];
   const res = resultadoDeLaObra({ rubros });
   assert.equal(res.aprobados.total, 200);
-  assert.equal(res.neto, 0, "es previsto: se confirma con las facturas");
+  assert.equal(res.neto, 200, "ya es beneficio: está en el contrato, no en una proforma");
+  // Y cierra con los pasados: si el rubro gasta $900 sin IVA contra $800 de
+  // costo, pierde $100, y lo que de verdad dejó es precio menos lo gastado.
+  const pasado = resultadoDeLaObra({ rubros, porRubro: { 1: { acumulado: 1035 } } });
+  assert.equal(pasado.perdidasTotal, -100);
+  assert.equal(pasado.neto, 100, "1.000 que se cobran menos 900 gastados");
 });
 
 test("un costo que no se parece al precio no se cuenta: se lista aparte para corregirlo", async () => {

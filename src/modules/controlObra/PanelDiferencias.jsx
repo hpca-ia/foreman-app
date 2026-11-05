@@ -553,7 +553,13 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
             + (an.titulo ? ` · ${an.titulo}` : ""),
         };
       }).filter(Boolean),
+      // LO QUE CUESTA ES LO QUE COBRA EL PAPEL. En una diferencia de precio el
+      // monto guardado es cuánto cambió el precio, no lo que cuesta el renglón:
+      // el alquiler de $115,56 pagado con un rubro vendido en $1.008 entraba
+      // como "$1.008 que cuestan $892,44", la cuenta al revés.
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
+        .map(x => ((x.hallazgo === "bajo_precio" || x.hallazgo === "subio_precio") && x.monto_papel != null
+          ? { ...x, monto: x.monto_papel } : x))
         .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
         .filter(x => x.presupuestado > 0),
     ];

@@ -161,7 +161,10 @@ export function beneficioDeLoContratado(linea, rubro) {
     contra: costoCargado != null ? "costo" : "precio",
     vara: c4(vara), costoPapel,
     presupuestado: c2(vara * cantidad), real: c2(costoPapel * cantidad),
-    aFavor: c2((vara - costoPapel) * cantidad),
+    // Un centavo de redondeo no es una mejora: $23,5633 contra $23,565 es el
+    // mismo precio escrito con otra cantidad de decimales.
+    aFavor: Math.abs(vara - costoPapel) <= Math.max(0.01, Math.abs(vara) * 0.001)
+      ? 0 : c2((vara - costoPapel) * cantidad),
   };
 }
 

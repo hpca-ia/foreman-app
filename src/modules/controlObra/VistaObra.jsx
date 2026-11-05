@@ -120,6 +120,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // a la tabla: el beneficio nace en su propia pestaña, pero la pregunta
   // "¿cómo vamos en este rubro?" se hace mirando el control.
   const [beneficios, setBeneficios] = useState([]);
+  const [ordenesDeCambio, setOrdenesDeCambio] = useState({ ordenes: [], lineas: {} });
   const [planillas, setPlanillas] = useState([]);
   const [facturas, setFacturas] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
@@ -161,8 +162,20 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").eq("obra_id", obra.id);
     setPagos(pg || []);
     const { data: ben } = await supabase.from("obra_beneficios")
-      .select("obra_rubro_id,descripcion,presupuestado,real,estado").eq("obra_id", obra.id);
+      .select("obra_rubro_id,descripcion,presupuestado,real,estado,origen").eq("obra_id", obra.id);
     setBeneficios(ben || []);
+    // Las órdenes y lo que quitan: lo ya aprobado deja beneficio sobre la
+    // cantidad que SIGUE aprobada, y para eso hay que saber cuánto le sacó
+    // cada orden aprobada a cada rubro.
+    const { data: ocs } = await supabase.from("ordenes_cambio")
+      .select("id,estado,anulada,reemplazada_at").eq("obra_id", obra.id);
+    const quitan = {};
+    if ((ocs || []).length) {
+      const { data: ls } = await supabase.from("orden_cambio_lineas")
+        .select("orden_id,tipo,obra_rubro_id,cantidad").in("orden_id", ocs.map(o => o.id)).eq("tipo", "quita");
+      (ls || []).forEach(l => { (quitan[l.orden_id] = quitan[l.orden_id] || []).push(l); });
+    }
+    setOrdenesDeCambio({ ordenes: ocs || [], lineas: quitan });
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
     const facturasConNumero = (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null }));
@@ -328,12 +341,13 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             utilidad entera comprando mal — y hasta ahora eso no se veía en
             ningún número de esta pantalla. */}
         {(() => {
-          // Solo lo ya comprado, y con las pérdidas de los rubros pasados
-          // adentro: un beneficio de $5.000 en una obra que ya va perdiendo
-          // en tres rubros no es un beneficio. Lo previsto sale de una
-          // proforma y todavía puede no pasar: no entra.
-          const res = resultadoDeLaObra({ beneficios, rubros, porRubro });
-          if (!res.cuantosConPapel && !res.perdidas.length) return null;
+          // Lo ya comprado, lo que deja lo ya aprobado, y las pérdidas de los
+          // rubros pasados adentro: un beneficio de $5.000 en una obra que ya
+          // va perdiendo en tres rubros no es un beneficio. Lo previsto sale
+          // de una proforma y todavía puede no pasar: no entra.
+          const res = resultadoDeLaObra({ beneficios, rubros, porRubro,
+            ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas });
+          if (!res.cuantosConPapel && !res.perdidas.length && !res.aprobados.cuantos) return null;
           return <Tarjeta label={res.neto >= 0 ? "Beneficio" : "Pérdida"} valor={Math.abs(res.neto)}
             color={res.neto >= 0 ? colors.success : colors.danger} />;
         })()}

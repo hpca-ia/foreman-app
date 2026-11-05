@@ -750,7 +750,7 @@ Rubros de la obra: ${lista}`;
           {/* De qué está hecho, cuando no es solo una cosa: lo ganado
               comprando, lo perdido en rubros pasados, lo que dejaron los
               rubros seguidos ya terminados. */}
-          {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0) && (
+          {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0 || res.aprobados.total !== 0) && (
             <Tarjeta label={`COMPRANDO MEJOR · ${res.cuantosConPapel}`} valor={res.conPapel}
               color={res.conPapel >= 0 ? colors.success : colors.danger} />
           )}
@@ -761,13 +761,13 @@ Rubros de la obra: ${lista}`;
           {res.ganadoEnSeguidos !== 0 && (
             <Tarjeta label="RUBROS SEGUIDOS, TERMINADOS" valor={res.ganadoEnSeguidos} color={colors.success} />
           )}
-          {t.cuantosPrevistos > 0 && (
-            <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin confirmar`} valor={t.previsto}
-              color={colors.warning} />
-          )}
           {res.aprobados.filas.length > 0 && (
             <Tarjeta label={`YA APROBADO, CON SU COSTO · ${res.aprobados.cuantos}`} valor={res.aprobados.total}
               color={res.aprobados.total >= 0 ? colors.success : colors.danger} />
+          )}
+          {t.cuantosPrevistos > 0 && (
+            <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin confirmar`} valor={t.previsto}
+              color={colors.warning} />
           )}
           {(t.cuantos > 0 || t.cuantosPrevistos > 0) && (
             <button onClick={() => setVerDesglose(v => !v)}
@@ -799,9 +799,10 @@ Rubros de la obra: ${lista}`;
             <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: verAprobados ? 6 : 0 }}>
               El precio que el cliente ya aprobó menos el costo cargado del rubro, por la cantidad que sigue
               aprobada: <strong style={{ color: res.aprobados.total >= 0 ? colors.success : colors.danger }}>
-                {res.aprobados.total < 0 ? "−" : ""}${fmt(Math.abs(res.aprobados.total))}</strong> previstos.
-              Lo que una orden de cambio aumente entra cuando el cliente la apruebe; lo que una orden aprobada
-              redujo ya está descontado. Se confirma con las facturas.
+                {res.aprobados.total < 0 ? "−" : ""}${fmt(Math.abs(res.aprobados.total))}</strong>, que ya
+              suman al resultado. Es solo sobre lo aprobado: lo que está en una orden de cambio sin aprobar no
+              cuenta todavía, y entra cuando el cliente la apruebe. Lo que una orden aprobada redujo ya está
+              descontado. Si un rubro después gasta más que su costo, esa pérdida entra por los rubros pasados.
               {res.aprobados.dudosos > 0 && (
                 <strong style={{ color: colors.warning }}>
                   {" "}{res.aprobados.dudosos === 1 ? "Un rubro no se cuenta" : `${res.aprobados.dudosos} rubros no se cuentan`}:

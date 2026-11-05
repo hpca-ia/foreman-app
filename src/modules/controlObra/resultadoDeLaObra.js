@@ -106,8 +106,8 @@ export function reduccionesAprobadas(ordenes = [], lineasDeOrdenes = {}) {
  *   · El rubro que ya tiene un beneficio cargado a mano no se cuenta dos
  *     veces: manda el que alguien escribió con su papel.
  *
- * Sin IVA, como todo Beneficios. Es PREVISTO: el costo es lo que cotizaron, y
- * hasta que llega la factura sigue siendo una cotización.
+ * Sin IVA, como todo Beneficios. Solo sobre la cantidad YA aprobada: lo que
+ * está en una orden de cambio sin aprobar no cuenta todavía.
  *
  * Y UN COSTO QUE NO SE PARECE AL PRECIO NO SE CUENTA. Unas mamparas de $6.000
  * con $150 de costo cargado no dejan $5.850: tienen un costo mal puesto. Se
@@ -152,14 +152,20 @@ export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [],
   const ganadoEnSeguidos = c2(seguimiento
     .filter(f => f.terminado && f.gastado > 0 && f.resultado > 0)
     .reduce((s, f) => s + f.resultado, 0));
+  const aprobados = beneficioDeLoAprobado({ rubros, beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes) });
   return {
     conPapel: t.neto, cuantosConPapel: t.cuantos,
     previsto: t.previsto, cuantosPrevistos: t.cuantosPrevistos,
     perdidas: perdidas.filas, perdidasTotal: perdidas.total,
     seguimiento, ganadoEnSeguidos,
-    // Lo que deja lo ya aprobado, rubro por rubro. Es previsto —el costo es una
-    // cotización hasta que llega la factura— y por eso no entra en el neto.
-    aprobados: beneficioDeLoAprobado({ rubros, beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes) }),
-    neto: c2(t.neto + perdidas.total + ganadoEnSeguidos),
+    // Lo que deja lo ya aprobado, rubro por rubro.
+    aprobados,
+    // LO YA APROBADO ES BENEFICIO, Y SUMA. Un rubro que el cliente aprobó a un
+    // precio y del que se sabe el costo ya dejó esa diferencia: no es una
+    // promesa de una proforma, es el contrato. Y cierra con lo demás: si
+    // después el rubro gasta más que su costo, esa pérdida entra por los
+    // pasados, y la suma de las dos es lo que de verdad dejó —precio menos lo
+    // gastado—.
+    neto: c2(t.neto + perdidas.total + ganadoEnSeguidos + aprobados.total),
   };
 }

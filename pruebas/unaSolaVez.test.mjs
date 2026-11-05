@@ -94,6 +94,9 @@ test("con costo cargado se anota solo lo que la propuesta mejora ese costo: el m
   // Y lo ya aprobado se dice entero: 2 a $7,26 que cuestan $6,60.
   const a = loYaAprobado(cantidad, conCosto);
   assert.deepEqual(a, { cantidad: 2, unidad: "U", precio: 7.26, costo: 6.6013, beneficio: 1.32 });
+  // Un centavo de redondeo no es una mejora.
+  const casi = { hallazgo: "mas_cantidad", cantidad_papel: 3, unidad_papel: "U", monto_papel: 19.8 };
+  assert.equal(beneficioDeLoContratado(casi, conCosto).aFavor, 0, "6,60 contra 6,6013 es el mismo precio");
   // Una propuesta posterior más cara que el costo cargado: en contra.
   const cara = { hallazgo: "mas_cantidad", cantidad_papel: 8, unidad_papel: "U", monto_papel: 56 };
   assert.equal(beneficioDeLoContratado(cara, conCosto).aFavor, -0.8);
