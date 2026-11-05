@@ -39,7 +39,6 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const [proveedor, setProveedor] = useState("");
   const [ordenes, setOrdenes] = useState([]);
   const [lineasDeOrdenes, setLineasDeOrdenes] = useState({});
-  const [verAprobados, setVerAprobados] = useState(false);
   const [leyendo, setLeyendo] = useState(false);
   const [paso, setPaso] = useState("");
   // Cuando NOVA se quedó sin espacio antes de terminar la proforma.
@@ -439,6 +438,49 @@ Rubros de la obra: ${lista}`;
   }
 
   // Un rubro seguido, o uno pasado: contra qué se mide y cómo va.
+  // LO YA APROBADO, EN LA LISTA DE BENEFICIOS. Rubro por rubro y siempre a la
+  // vista, con la misma forma que los demás: qué es, cuánto se cobra, cuánto
+  // cuesta y cuánto deja. No tienen lápiz ni tacho porque no los escribió
+  // nadie: salen del precio y del costo del rubro, y se corrigen ahí.
+  const filasAprobadas = () => (
+    <>
+      <div style={{ padding: "6px 12px", fontSize: 10, fontWeight: 700, letterSpacing: 0.4, color: colors.muted,
+        background: colors.bg, borderTop: `1px solid ${colors.neutralSoft}` }}>
+        YA APROBADO, CON SU COSTO · {res.aprobados.cuantos} {res.aprobados.cuantos === 1 ? "RUBRO" : "RUBROS"} ·{" "}
+        <span style={{ color: res.aprobados.total >= 0 ? colors.success : colors.danger }}>
+          {res.aprobados.total >= 0 ? "+" : "−"}${fmt(Math.abs(res.aprobados.total))}</span> · SUMAN AL RESULTADO
+      </div>
+      {res.aprobados.filas.map(f => (
+        <div key={`ap${f.id}`} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px",
+          borderTop: `1px solid ${colors.neutralSoft}` }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, color: colors.ink }}>{f.descripcion}</div>
+            <div style={{ fontSize: 10.5, color: colors.muted }}>
+              rubro {f.numero} · {fmt(f.cantidad)} {f.unidad}
+              {f.reducida > 0 ? ` · eran ${fmt(f.contratada)}, una orden quitó ${fmt(f.reducida)}` : ""}
+              {" "}· aprobado a ${fmt(f.precio)} y cuesta ${fmt(f.costo)} · ya aprobado en el contrato
+            </div>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0, fontSize: 11, color: colors.muted }}>
+            ${fmt(f.seCobra)} → ${fmt(f.cuesta)}
+          </div>
+          {f.dudoso ? (
+            <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 10.5, fontWeight: 700, color: colors.warning }}>
+              costo dudoso:<br />no se cuenta
+            </div>
+          ) : (
+            <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700,
+              color: f.beneficio >= 0 ? colors.success : colors.danger }}>
+              {f.beneficio >= 0 ? "+" : "−"}${fmt(Math.abs(f.beneficio))}
+            </div>
+          )}
+          {/* El lugar del lápiz y del tacho de las otras filas, para que las columnas queden alineadas. */}
+          <div style={{ width: 36, flexShrink: 0 }} />
+        </div>
+      ))}
+    </>
+  );
+
   const FilaRubro = ({ f, onQuitar }) => {
     const dice = {
       pasado: ["PASADO", colors.danger, colors.dangerSoft], terminado: ["TERMINADO", colors.success, colors.successSoft],
@@ -710,7 +752,7 @@ Rubros de la obra: ${lista}`;
       <div style={{ marginTop: items.length ? 18 : 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 9 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, flex: 1 }}>
-            Beneficios y pérdidas de la obra{t.cuantos ? ` · ${t.cuantos}` : ""}
+            Beneficios y pérdidas de la obra{(t.cuantos + res.aprobados.cuantos) ? ` · ${t.cuantos + res.aprobados.cuantos}` : ""}
           </div>
           {!aMano && (
             <Button variant="outline" size="sm" onClick={() => setAMano({ fecha: new Date().toISOString().slice(0, 10) })}>
@@ -769,6 +811,10 @@ Rubros de la obra: ${lista}`;
             <Tarjeta label={`PREVISTO · ${t.cuantosPrevistos} sin confirmar`} valor={t.previsto}
               color={colors.warning} />
           )}
+          {res.porAprobar.filas.length > 0 && (
+            <Tarjeta label={`ÓRDENES POR APROBAR · ${res.porAprobar.filas.length} · no suma`} valor={res.porAprobar.total}
+              color={colors.muted} />
+          )}
           {(t.cuantos > 0 || t.cuantosPrevistos > 0) && (
             <button onClick={() => setVerDesglose(v => !v)}
               style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
@@ -778,64 +824,89 @@ Rubros de la obra: ${lista}`;
           )}
         </div>
 
+        {/* ── LA CUENTA DEL RESULTADO, A LA VISTA ─────────────────────
+            Cuatro tarjetas con cuatro números no dicen cuáles suman y cuáles
+            no: el que mira tiene que hacer la cuenta para saber si lo ya
+            aprobado está adentro del resultado. Se escribe la cuenta. */}
+        {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0 || res.aprobados.total !== 0) && (
+          <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.6, marginBottom: 10 }}>
+            <strong style={{ color: colors.ink }}>El resultado es la suma de:</strong>{" "}
+            comprando mejor <strong>${fmt(res.conPapel)}</strong>
+            {res.aprobados.total !== 0 && <> · ya aprobado, con su costo <strong>{res.aprobados.total < 0 ? "−" : "+"}${fmt(Math.abs(res.aprobados.total))}</strong></>}
+            {res.ganadoEnSeguidos !== 0 && <> · rubros seguidos y terminados <strong>+${fmt(res.ganadoEnSeguidos)}</strong></>}
+            {res.perdidasTotal !== 0 && <> · rubros pasados <strong style={{ color: colors.danger }}>−${fmt(Math.abs(res.perdidasTotal))}</strong></>}
+            {" "}= <strong style={{ color: res.neto >= 0 ? colors.success : colors.danger }}>
+              {res.neto < 0 ? "−" : ""}${fmt(Math.abs(res.neto))}</strong>.
+            {(t.cuantosPrevistos > 0 || res.porAprobar.filas.length > 0) && (
+              <> No suman todavía: lo previsto sin confirmar
+                {res.porAprobar.filas.length > 0 && <> y las órdenes de cambio por aprobar</>}.</>
+            )}
+          </div>
+        )}
+
         {/* ── LO YA APROBADO, CON SU COSTO ────────────────────────────
             Un rubro que el cliente ya aprobó a un precio deja beneficio desde
             ese momento: la diferencia con lo que cuesta, sobre la cantidad
             que sigue aprobada. Sale del rubro mismo —su precio y su costo
             cargado—, así que está acá aunque la proforma de donde salió el
-            costo ya no esté abierta. */}
+            costo ya no esté abierta. El detalle va abajo, en la lista de
+            beneficios, rubro por rubro y siempre a la vista. */}
         {res.aprobados.filas.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap", marginBottom: 4 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
-                YA APROBADO, CON SU COSTO · {res.aprobados.cuantos} {res.aprobados.cuantos === 1 ? "RUBRO" : "RUBROS"} · SIN IVA
-              </div>
-              <button onClick={() => setVerAprobados(v => !v)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
-                  fontSize: 11, color: colors.brand, textDecoration: "underline", padding: 0 }}>
-                {verAprobados ? "ocultar" : "ver rubro por rubro"}
-              </button>
-            </div>
-            <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: verAprobados ? 6 : 0 }}>
-              El precio que el cliente ya aprobó menos el costo cargado del rubro, por la cantidad que sigue
-              aprobada: <strong style={{ color: res.aprobados.total >= 0 ? colors.success : colors.danger }}>
-                {res.aprobados.total < 0 ? "−" : ""}${fmt(Math.abs(res.aprobados.total))}</strong>, que ya
-              suman al resultado. Es solo sobre lo aprobado: lo que está en una orden de cambio sin aprobar no
-              cuenta todavía, y entra cuando el cliente la apruebe. Lo que una orden aprobada redujo ya está
-              descontado. Si un rubro después gasta más que su costo, esa pérdida entra por los rubros pasados.
-              {res.aprobados.dudosos > 0 && (
-                <strong style={{ color: colors.warning }}>
-                  {" "}{res.aprobados.dudosos === 1 ? "Un rubro no se cuenta" : `${res.aprobados.dudosos} rubros no se cuentan`}:
-                  su costo cargado no se parece a su precio. Está al final de la lista.
-                </strong>
-              )}
-            </div>
-            {verAprobados && (
-              <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-                {res.aprobados.filas.map(f => (
-                  <div key={f.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "6px 12px",
-                    borderTop: `1px solid ${colors.neutralSoft}`, flexWrap: "wrap", fontSize: 11.5 }}>
-                    <span style={{ color: colors.muted, fontSize: 10.5, minWidth: 34 }}>{f.numero}</span>
-                    <span style={{ flex: 1, minWidth: 180, color: colors.ink }}>{f.descripcion}</span>
-                    <span style={{ color: colors.muted, fontSize: 10.5, whiteSpace: "nowrap" }}>
-                      {fmt(f.cantidad)} {f.unidad}
-                      {f.reducida > 0 && <> · eran {fmt(f.contratada)}, una orden quitó {fmt(f.reducida)}</>}
-                      {" "}· se cobra ${fmt(f.seCobra)} · cuesta ${fmt(f.cuesta)}
-                    </span>
-                    {f.dudoso ? (
-                      <span style={{ fontWeight: 700, whiteSpace: "nowrap", color: colors.warning, fontSize: 10.5 }}>
-                        costo dudoso: no se cuenta
-                      </span>
-                    ) : (
-                    <span style={{ fontWeight: 700, whiteSpace: "nowrap", minWidth: 76, textAlign: "right",
-                      color: f.beneficio < 0 ? colors.danger : colors.success }}>
-                      {f.beneficio < 0 ? "−" : "+"}${fmt(Math.abs(f.beneficio))}
-                    </span>
-                    )}
-                  </div>
-                ))}
-              </div>
+          <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 12 }}>
+            <strong style={{ color: colors.ink }}>Ya aprobado, con su costo:</strong> el precio que el cliente ya aprobó
+            menos el costo cargado del rubro, por la cantidad que sigue aprobada. Son{" "}
+            <strong style={{ color: res.aprobados.total >= 0 ? colors.success : colors.danger }}>
+              {res.aprobados.total < 0 ? "−" : ""}${fmt(Math.abs(res.aprobados.total))}</strong> en {res.aprobados.cuantos}{" "}
+            {res.aprobados.cuantos === 1 ? "rubro" : "rubros"}, listados abajo uno por uno. Lo que una orden aprobada redujo
+            ya está descontado.
+            {res.aprobados.dudosos > 0 && (
+              <strong style={{ color: colors.warning }}>
+                {" "}{res.aprobados.dudosos === 1 ? "Un rubro no se cuenta" : `${res.aprobados.dudosos} rubros no se cuentan`}:
+                su costo cargado no se parece a su precio. Está al final de la lista.
+              </strong>
             )}
+          </div>
+        )}
+
+        {/* ── LAS ÓRDENES DE CAMBIO POR APROBAR ───────────────────────
+            Lo que aumenta o se agrega en una orden es beneficio recién cuando
+            el cliente la aprueba. Pero hace falta verlo antes: es lo que dice
+            cuánto hay en juego en esa firma. Se muestra como los rubros en
+            seguimiento que todavía no terminaron: a la vista y sin sumar. */}
+        {res.porAprobar.filas.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+              ÓRDENES DE CAMBIO POR APROBAR · {res.porAprobar.filas.length} · BENEFICIO APROXIMADO, NO CUENTA TODAVÍA
+            </div>
+            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
+              {res.porAprobar.filas.map(f => (
+                <div key={f.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px",
+                  borderTop: `1px solid ${colors.neutralSoft}`, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 12.5, color: colors.ink }}>
+                      <strong>{f.codigo}</strong> · {f.titulo}{" "}
+                      <span style={{ fontSize: 9.5, fontWeight: 700, borderRadius: 9, padding: "1px 6px", letterSpacing: 0.3,
+                        color: colors.inkSoft, background: colors.neutralSoft }}>
+                        {f.estado === "enviada" ? "ENVIADA" : "BORRADOR"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: colors.muted }}>
+                      {f.partidas} {f.partidas === 1 ? "partida" : "partidas"} · lo que agrega deja ${fmt(f.dejan)}
+                      {f.sacan !== 0 && <> · lo que reduce saca ${fmt(Math.abs(f.sacan))}</>}
+                      {f.sinCosto > 0 && <> · {f.sinCosto} {f.sinCosto === 1 ? "partida sin costo, que no se puede medir" : "partidas sin costo, que no se pueden medir"}</>}
+                      {f.esModificacion && <> · es una modificación: reemplaza a la orden anterior</>}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", fontSize: 10.5, color: colors.muted, lineHeight: 1.3 }}>
+                    sobre lo que se cobra<br />no cuenta hasta que se apruebe
+                  </div>
+                  <div style={{ textAlign: "right", minWidth: 90, fontSize: 12.5, fontWeight: 700, opacity: 0.55,
+                    color: f.beneficio >= 0 ? colors.success : colors.danger }}>
+                    {f.beneficio >= 0 ? "+" : "−"}${fmt(Math.abs(f.beneficio))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1323,7 +1394,7 @@ Rubros de la obra: ${lista}`;
           </div>
         )}
 
-        {guardados.length > 0 && vista === "lista" && (
+        {(guardados.length > 0 || res.aprobados.filas.length > 0) && vista === "lista" && (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
             borderRadius: colors.radiusMd, overflow: "hidden" }}>
             {guardados.map(b => {
@@ -1402,6 +1473,13 @@ Rubros de la obra: ${lista}`;
                 </div>
               );
             })}
+            {res.aprobados.filas.length > 0 && filasAprobadas()}
+          </div>
+        )}
+        {res.aprobados.filas.length > 0 && vista === "proveedor" && (
+          <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
+            borderRadius: colors.radiusMd, overflow: "hidden", marginTop: 8 }}>
+            {filasAprobadas()}
           </div>
         )}
       </div>

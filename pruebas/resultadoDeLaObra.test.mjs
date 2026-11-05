@@ -194,3 +194,50 @@ test("un costo que no se parece al precio no se cuenta: se lista aparte para cor
   assert.equal(r.dudosos, 1);
   assert.deepEqual(r.filas.map(f => [f.numero, f.dudoso]), [["90", false], ["58", true]]);
 });
+
+// ── LAS ÓRDENES DE CAMBIO POR APROBAR ──────────────────────────────────────
+//
+// Lo que una orden agrega es beneficio recién cuando el cliente la aprueba.
+// Pero hace falta verlo antes, a la vista y sin sumar, como un rubro en
+// seguimiento que todavía no terminó.
+
+test("una orden por aprobar muestra lo que dejaría, y no suma al resultado", async () => {
+  const { ordenesPorAprobar, resultadoDeLaObra } = await import("../src/modules/controlObra/resultadoDeLaObra.js");
+  const rubros = [
+    { id: 97, numero: 97, unidad: "U", cantidad: 4, precio_unitario: 9.79, total_base: 45.03, iva_pct: 15, costo_unitario: 8.9 },
+    { id: 50, numero: 50, unidad: "m2", cantidad: 10, precio_unitario: 20, total_base: 230, iva_pct: 15 },   // sin costo
+  ];
+  const ordenes = [
+    { id: 13, numero: 4, codigo: "OC-04", titulo: "Diferencias eléctricas", estado: "enviada" },
+    { id: 14, numero: 5, codigo: "OC-05", titulo: "Otra", estado: "aprobada" },
+    { id: 15, numero: 6, codigo: "OC-06", titulo: "Anulada", estado: "enviada", anulada: true },
+    { id: 16, numero: 7, codigo: "OC-07", titulo: "Reemplazada", estado: "enviada", reemplazada_at: "2026-11-05" },
+    { id: 17, numero: 8, codigo: "OC-08", titulo: "Vacía", estado: "borrador" },
+  ];
+  const lineasDeOrdenes = {
+    13: [
+      { tipo: "aumenta", cantidad: 1, precio_unitario: 456, costo_unitario: 380 },         // deja 76
+      { tipo: "aumenta", cantidad: 46, precio_unitario: 36.38, costo_unitario: 33.07 },    // deja 152,26
+      { tipo: "aumenta", cantidad: 2, precio_unitario: 50 },                               // sin costo: no se mide
+      { tipo: "quita", obra_rubro_id: 97, cantidad: 2, precio_unitario: 9.79 },            // saca 2 × 0,89
+      { tipo: "quita", obra_rubro_id: 50, cantidad: 3, precio_unitario: 20 },              // el rubro no tiene costo
+    ],
+    14: [{ tipo: "aumenta", cantidad: 1, precio_unitario: 100, costo_unitario: 60 }],
+    15: [{ tipo: "aumenta", cantidad: 1, precio_unitario: 100, costo_unitario: 60 }],
+    16: [{ tipo: "aumenta", cantidad: 1, precio_unitario: 100, costo_unitario: 60 }],
+  };
+  const p = ordenesPorAprobar({ ordenes, lineasDeOrdenes, rubros });
+  assert.deepEqual(p.filas.map(f => f.codigo), ["OC-04"], "ni la aprobada, ni la anulada, ni la reemplazada, ni la vacía");
+  const [f] = p.filas;
+  assert.equal(f.partidas, 5);
+  assert.equal(f.dejan, 228.26);
+  assert.equal(f.sacan, 1.78);
+  assert.equal(f.sinCosto, 1);
+  assert.equal(f.beneficio, 226.48);
+  assert.equal(p.total, 226.48);
+  // Está a la vista y no cuenta: el resultado es solo lo ya aprobado.
+  const res = resultadoDeLaObra({ rubros, ordenes, lineasDeOrdenes });
+  assert.equal(res.porAprobar.total, 226.48);
+  assert.equal(res.aprobados.total, 3.56, "los 4 interruptores del contrato: la orden enviada todavía no les quitó nada");
+  assert.equal(res.neto, 3.56);
+});

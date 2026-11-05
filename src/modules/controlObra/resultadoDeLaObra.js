@@ -3,6 +3,7 @@ import { baseSinIva } from "./contratoDeLaObra.js";
 import { totales } from "./cuentaBeneficios.js";
 import { precioDelContrato } from "./clasesDePartida.js";
 import { ordenCuenta } from "./cuentaOrdenCambio.js";
+import { codigoDe } from "./nombreOrden.js";
 // EL RESULTADO DE LA OBRA, no solo los beneficios.
 //
 // Tres cosas lo hacen, y van juntas en un número y separadas abajo:
@@ -139,6 +140,48 @@ export function beneficioDeLoAprobado({ rubros = [], beneficios = [], reduccione
   };
 }
 
+/**
+ * LAS ÓRDENES DE CAMBIO POR APROBAR, Y LO QUE DEJARÍAN.
+ *
+ * Lo que una orden agrega o aumenta es beneficio recién cuando el cliente la
+ * aprueba: antes no hay nada vendido. Pero hace falta verlo antes —es lo que
+ * dice cuánto hay en juego en esa firma—, igual que un rubro en seguimiento se
+ * muestra aunque no cuente hasta terminar.
+ *
+ *   · Lo que AGREGA deja su precio menos su costo, por su cantidad. Una partida
+ *     sin costo no se puede medir, y se dice cuántas son.
+ *   · Lo que REDUCE saca el beneficio que esas unidades tenían en el rubro: su
+ *     precio aprobado menos su costo cargado. Si el rubro no tiene costo, no se
+ *     sabe cuánto dejaba y no se resta nada.
+ *
+ * Es aproximado y no suma al resultado. En borrador o enviada; la anulada y la
+ * reemplazada por una modificación ya no esperan ninguna firma.
+ */
+export function ordenesPorAprobar({ ordenes = [], lineasDeOrdenes = {}, rubros = [] } = {}) {
+  const porId = new Map(rubros.map(r => [String(r.id), r]));
+  const filas = ordenes
+    .filter(o => (o.estado === "borrador" || o.estado === "enviada") && !o.anulada && !o.reemplazada_at)
+    .map(o => {
+      const ls = lineasDeOrdenes[o.id] || [];
+      const agrega = ls.filter(l => l.tipo !== "quita");
+      const conSuCosto = agrega.filter(l => n(l.costo_unitario) > 0);
+      const dejan = c2(conSuCosto.reduce((t, l) => t + (n(l.precio_unitario) - n(l.costo_unitario)) * n(l.cantidad), 0));
+      const sacan = c2(ls.filter(l => l.tipo === "quita" && l.obra_rubro_id).reduce((t, l) => {
+        const r = porId.get(String(l.obra_rubro_id));
+        const precio = r && conCosto(r) ? precioDelContrato(r) : null;
+        return precio == null ? t : t + (precio - n(r.costo_unitario)) * Math.min(n(l.cantidad), n(r.cantidad));
+      }, 0));
+      return {
+        id: o.id, codigo: codigoDe(o), titulo: o.titulo || "", estado: o.estado,
+        esModificacion: !!o.revision_de, partidas: ls.length,
+        dejan, sacan, sinCosto: agrega.length - conSuCosto.length,
+        beneficio: c2(dejan - sacan),
+      };
+    })
+    .filter(x => x.partidas > 0);
+  return { filas, total: c2(filas.reduce((t, x) => t + x.beneficio, 0)) };
+}
+
 export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {} } = {}) {
   const t = totales(beneficios);
   const perdidas = perdidasEnRubros(rubros, porRubro);
@@ -160,6 +203,8 @@ export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [],
     seguimiento, ganadoEnSeguidos,
     // Lo que deja lo ya aprobado, rubro por rubro.
     aprobados,
+    // Lo que dejarían las órdenes que esperan firma: a la vista, sin sumar.
+    porAprobar: ordenesPorAprobar({ ordenes, lineasDeOrdenes, rubros }),
     // LO YA APROBADO ES BENEFICIO, Y SUMA. Un rubro que el cliente aprobó a un
     // precio y del que se sabe el costo ya dejó esa diferencia: no es una
     // promesa de una proforma, es el contrato. Y cierra con lo demás: si
