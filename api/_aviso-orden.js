@@ -198,7 +198,6 @@ export default async function handler(req, res) {
 
       ${capitulo("I", "Argumentos para la solicitud.")}
       <div style="font-size:12.5px;color:#374151;line-height:1.6">${esc(orden.justificacion || "—")}</div>
-      ${orden.soportes ? `<div style="font-size:11.5px;color:#6B7280;margin-top:6px"><strong>Soportes gráficos:</strong> ${esc(orden.soportes)}</div>` : ""}
       ${soportes?.length ? `<div style="font-size:11.5px;color:#6B7280;margin-top:6px"><strong>Soportes gráficos:</strong> ${soportes.length} ${soportes.length === 1 ? "imagen adjunta" : "imágenes adjuntas"} a este correo${soportes.map(f => f.descripcion).filter(Boolean).length ? ` — ${esc(soportes.map(f => f.descripcion).filter(Boolean).join("; "))}` : ""}.</div>` : ""}
 
       ${capitulo("II", "Propuesta de imprevisto y cotización preliminar.")}

@@ -472,14 +472,18 @@ async function siFirmaronTodos(ordenId) {
   // por el enlace desaparecían los 4. La oficina dejó de hacerlo hace rato —el
   // presupuesto firmado no se toca; la orden suma lo suyo y resta lo suyo en su
   // capítulo— y esta puerta se había quedado con la regla vieja.
+  // El número de SU orden, sacado del código: una modificación —OC-04-A—
+  // comparte capítulo y numeración con la orden que modifica. Es la misma
+  // regla que numeracionDeOrdenes.js en la oficina.
+  const deSuOrden = Number(/^OC-(\d+)/i.exec(String(orden.codigo || ""))?.[1]) || Number(orden.numero) || 0;
   const filas = lineas.map((l, i) => {
     const signo = l.tipo === "quita" ? -1 : 1;
     return {
       obra_id: orden.obra_id,
-      numero: 9000 + orden.numero * 100 + i,
+      numero: 9000 + deSuOrden * 100 + i,
       capitulo: l.capitulo || `ADICIONALES · ${codigo}`,
-      capitulo_orden: 9000 + orden.numero,
-      orden: 9000000 + orden.numero * 1000 + i,
+      capitulo_orden: 9000 + deSuOrden,
+      orden: 9000000 + deSuOrden * 1000 + i,
       descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigo}`,
       unidad: l.unidad || "",
       cantidad: Number(l.cantidad) || 0,

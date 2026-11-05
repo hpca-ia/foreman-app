@@ -13,10 +13,11 @@ import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js"
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import { comoSeDice as parentescoDe, codigoDeLaRevision, mandaEnElControl } from "./revisionesDeOrden.js";
 import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice, capitulosPartidos } from "./cuadreDeOrdenes.js";
+import { huecosQueSeCierran, numerosQueFaltan, codigoPrincipal } from "./numeracionDeOrdenes.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
-  anularOrden, desanularOrden, crearRevision,
+  anularOrden, desanularOrden, crearRevision, cerrarHuecos,
   pedirElVistoAlDirector, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
   guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
@@ -528,6 +529,40 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
           con el mismo nombre: están y suman, pero el que los busca en su capítulo no los encuentra.
         </div>
       )}
+
+      {/* LAS ÓRDENES GUARDAN SU ORDEN. Si falta un número en la serie se dice
+          acá, y si la que le sigue todavía no salió de la oficina, baja a
+          ocupar el lugar con un clic. La que ya se mandó o se aprobó no se
+          toca: su número está en un papel que alguien tiene. */}
+      {(() => {
+        const faltan = numerosQueFaltan(ordenes);
+        if (!faltan.length) return null;
+        const plan = huecosQueSeCierran(ordenes);
+        return (
+          <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
+            padding: "9px 12px", margin: "8px 0", fontSize: 12, color: colors.ink, lineHeight: 1.5 }}>
+            <strong style={{ color: colors.warning }}>
+              La numeración tiene un hueco: {faltan.length === 1 ? "falta la" : "faltan las"} {faltan.map(codigoPrincipal).join(", ")}.
+            </strong>{" "}
+            {plan.length > 0 ? (
+              <>
+                {plan.map(p => `La ${p.codigoDe} pasa a ser la ${p.codigoA}`).join(". ")}:
+                {" "}{plan.length === 1 ? "está en borrador y nunca se mandó" : "están en borrador y nunca se mandaron"}.
+                {puedeEditar && (
+                  <button disabled={ocupado} onClick={() => hacer(async () => (await cerrarHuecos(obra.id)).error || null)}
+                    style={{ marginLeft: 8, background: colors.warning, color: "#fff", border: "none", borderRadius: 7,
+                      padding: "4px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: colors.font }}>
+                    Renumerar
+                  </button>
+                )}
+              </>
+            ) : (
+              <>Las órdenes que siguen ya se mandaron o se aprobaron, y su número no se cambia. La próxima orden
+                nueva va a tomar ese número.</>
+            )}
+          </div>
+        );
+      })()}
 
       {cuadre.mal.length > 0 && (
         <div style={{ background: "#FEF2F2", border: `1px solid ${colors.danger}`, borderRadius: colors.radiusMd,

@@ -162,11 +162,11 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   doc.text(seguro("Argumentos:"), margen, y); y += 12;
   parrafo(orden.justificacion);
 
-  if (orden.soportes) {
-    doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(...GRIS);
-    doc.text(seguro("Soportes gráficos:"), margen, y); y += 12;
-    parrafo(orden.soportes);
-  }
+  // LA LISTA DE "SOPORTES" YA NO VA. Era el nombre del archivo de la proforma
+  // y una fila por cada rubro citado —"Rubro 96 del presupuesto contractual",
+  // doce veces—: media página que no le dice nada al que aprueba, porque cada
+  // partida ya trae su rubro en su columna. Los soportes de verdad —las fotos y
+  // los planos— siguen al final, en su hoja.
 
   // ── CAPÍTULO II ─────────────────────────────────────────────────────────
   capitulo("II", "Propuesta de imprevisto y cotización preliminar.");

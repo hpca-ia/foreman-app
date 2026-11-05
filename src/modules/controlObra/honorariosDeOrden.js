@@ -1,3 +1,4 @@
+import { numeroPrincipal } from "./numeracionDeOrdenes.js";
 // LOS HONORARIOS DE UNA ORDEN DE CAMBIO, Y QUÉ AFECTA ESA ORDEN.
 //
 // Dos cosas que hasta ahora el papel no decía, y las dos se discuten en cada
@@ -137,10 +138,10 @@ export function rubroDeHonorarios(orden, cuenta, { capitulo = "HONORARIOS", conI
   const codigo = orden?.codigo || `OC-${String(orden?.numero ?? "").padStart(2, "0")}`;
   return {
     obra_id: orden.obra_id,
-    numero: 9000 + n(orden.numero) * 100 + 99,
+    numero: 9000 + numeroPrincipal(orden) * 100 + 99,
     capitulo,
-    capitulo_orden: 9000 + n(orden.numero),
-    orden: 9000000 + n(orden.numero) * 1000 + 999,
+    capitulo_orden: 9000 + numeroPrincipal(orden),
+    orden: 9000000 + numeroPrincipal(orden) * 1000 + 999,
     descripcion: `Honorarios ${cuenta.pct}% sobre ${cuenta.devuelve ? "la reducción de " : ""}${codigo}`,
     unidad: "glb",
     cantidad: 1,

@@ -635,7 +635,6 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     const r = await crearOrden(obra.id, {
       titulo: `Diferencias contra el presupuesto${abierto.proveedor ? ` · ${abierto.proveedor}` : ""}`,
       justificacion: borrador.justificacion,
-      soportes: borrador.soportes || null,
       tipo: "Requerimiento cliente",
     }, currentUser);
     if (r.error) { setOcupado(false); setError(r.error); return; }

@@ -107,9 +107,6 @@ QUÉ ESCRIBÍS, en este orden y con estos títulos exactos:
 JUSTIFICACION:
 Dos o tres párrafos. Primero qué se comparó y contra qué (la cotización del proveedor contra el presupuesto contractual). Después qué apareció: agrupá las partidas por lo que pasó —trabajos nuevos, más cantidad, precio— sin repetir la lista una por una. Al final qué se pide: la aprobación de la orden y, si las hay, los descuentos que corresponden.
 
-SOPORTES:
-Una o dos líneas: el documento del proveedor con su fecha, y los rubros del contrato que se citan.
-
 PARTIDA 1: una o dos oraciones que expliquen esa partida sola: qué es, por qué no la cubre el contrato, y las cifras que lo muestran (lo contratado contra lo necesario, o el precio contratado contra el del proveedor).
 PARTIDA 2: ...
 (una línea PARTIDA N por cada partida que te pasé, en el mismo orden y con el mismo número)
@@ -203,9 +200,6 @@ export function borradorDeRespaldo(ins) {
   return {
     justificacion: `Al comparar ${ins.archivo || "la propuesta del proveedor"}${ins.proveedor ? ` (${ins.proveedor})` : ""} contra el presupuesto contractual aparecieron diferencias que el contrato no cubre:\n\n`
       + ins.partidas.map(p => `· ${p.descripcion}${p.nota ? ` — ${p.nota}` : ""}`).join("\n"),
-    soportes: [ins.archivo ? `${ins.archivo}${ins.fechaCotizacion ? ` del ${ins.fechaCotizacion}` : ""}` : null,
-      ...ins.partidas.filter(p => p.rubro?.codigo).map(p => `Rubro ${p.rubro.codigo} del presupuesto contractual`)]
-      .filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join("\n"),
     partidas: ins.partidas.map(p => ({ n: p.n, especificacion: "" })),
     deRespaldo: true,
   };
@@ -246,7 +240,6 @@ export async function redactarOrden({ insumos, pedir, onPaso } = {}) {
   const porN = new Map(partes.partidas.map(p => [p.n, p.especificacion]));
   const borrador = {
     justificacion: partes.justificacion,
-    soportes: partes.soportes,
     partidas: insumos.partidas.map(p => ({ n: p.n, especificacion: porN.get(p.n) || "" })),
     deRespaldo: false,
   };

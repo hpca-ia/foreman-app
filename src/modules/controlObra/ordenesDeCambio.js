@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { honorariosDe, rubroDeHonorarios, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { codigoDeLaRevision } from "./revisionesDeOrden.js";
+import { siguienteNumero, numeroDeModificacion, numeroPrincipal, huecosQueSeCierran, codigoPrincipal } from "./numeracionDeOrdenes.js";
 
 // Las órdenes de cambio: lo que se pactó después.
 //
@@ -64,15 +65,21 @@ export async function cargarOrdenes(obraId) {
   return { ordenes: data || [], lineas, fotos, sinTablas: false };
 }
 
-/** La siguiente, numerada sola: dos con el mismo número no se pueden citar. */
+/**
+ * La siguiente, numerada sola: dos con el mismo número no se pueden citar.
+ *
+ * Toma el PRIMER NÚMERO LIBRE, no "el último más uno": las órdenes guardan su
+ * orden, y si se borró la OC-04 la que se crea ahora es la OC-04 y no una
+ * OC-05 con un hueco antes. Las modificaciones no cuentan: llevan letra.
+ */
 export async function crearOrden(obraId, datos, quien) {
-  const { data: ultimas } = await supabase.from("ordenes_cambio")
-    .select("numero").eq("obra_id", obraId).order("numero", { ascending: false }).limit(1);
-  const numero = (ultimas?.[0]?.numero || 0) + 1;
+  const { data: existentes } = await supabase.from("ordenes_cambio")
+    .select("numero,codigo,revision_de").eq("obra_id", obraId);
+  const numero = siguienteNumero(existentes || []);
 
   const { data, error } = await supabase.from("ordenes_cambio").insert({
     obra_id: obraId, numero,
-    codigo: `OC-${String(numero).padStart(2, "0")}`,
+    codigo: codigoPrincipal(numero),
     titulo: datos.titulo?.trim() || `Orden de cambio N°${numero}`,
     tipo: datos.tipo?.trim() || null,
     lugar: datos.lugar?.trim() || "Quito",
@@ -96,7 +103,7 @@ export async function crearOrden(obraId, datos, quien) {
     // frenar una orden entera por un campo nuevo.
     const { data: d2, error: e2 } = await supabase.from("ordenes_cambio").insert({
       obra_id: obraId, numero,
-      codigo: `OC-${String(numero).padStart(2, "0")}`,
+      codigo: codigoPrincipal(numero),
       titulo: datos.titulo?.trim() || `Orden de cambio N°${numero}`,
       tipo: datos.tipo?.trim() || null,
       lugar: datos.lugar?.trim() || "Quito",
@@ -130,9 +137,13 @@ export async function crearOrden(obraId, datos, quien) {
  * manda sigue siendo ella, con sus rubros en el control y su PDF firmado.
  */
 export async function crearRevision(orden, ordenes, quien) {
-  const { data: ultimas } = await supabase.from("ordenes_cambio")
-    .select("numero").eq("obra_id", orden.obra_id).order("numero", { ascending: false }).limit(1);
-  const numero = (ultimas?.[0]?.numero || 0) + 1;
+  // UNA MODIFICACIÓN NO CONSUME NÚMERO. Es la misma orden con una letra
+  // —OC-04-A, OC-04-B—, y la orden que venga después sigue la serie como si
+  // nada. Su número interno va por encima de mil, solo para que la base no
+  // tenga dos iguales: el que se ve es el de su orden.
+  const { data: existentes } = await supabase.from("ordenes_cambio")
+    .select("numero").eq("obra_id", orden.obra_id);
+  const numero = numeroDeModificacion(existentes || []);
   const codigo = codigoDeLaRevision(orden, ordenes || []);
 
   const { data, error } = await supabase.from("ordenes_cambio").insert({
@@ -265,6 +276,7 @@ export async function guardarOrden(id, campos) {
  * Los soportes también: son archivos de una orden que ya no existe.
  */
 export async function borrarOrden(id) {
+  const { data: laOrden } = await supabase.from("ordenes_cambio").select("obra_id").eq("id", id).maybeSingle();
   await supabase.from("obra_rubros").delete().eq("orden_cambio_id", id);
   // Lo que la orden prometía de beneficio se va con ella. Lo ya comprado se
   // queda —fue plata de verdad— y pierde la referencia a la orden sola.
@@ -277,7 +289,33 @@ export async function borrarOrden(id) {
   const rutas = (fotos || []).map(f => f.storage_path).filter(Boolean);
   if (rutas.length) await supabase.storage.from("task-files").remove(rutas);
   const { error } = await supabase.from("ordenes_cambio").delete().eq("id", id);
-  return error ? error.message : null;
+  if (error) return error.message;
+  // LAS QUE LE SIGUEN OCUPAN SU LUGAR, si todavía no salieron de la oficina.
+  // Borrar la OC-04 con una OC-05 en borrador deja una 05 sin 04: la 05 baja.
+  if (laOrden?.obra_id) await cerrarHuecos(laOrden.obra_id);
+  return null;
+}
+
+/**
+ * CERRAR LOS HUECOS DE LA NUMERACIÓN.
+ *
+ * Solo baja las órdenes que todavía están en borrador y nunca se mandaron: el
+ * número de una orden enviada o aprobada está en un papel que alguien tiene, y
+ * ese no se cambia. Va de menor a mayor para que ninguna pise a otra.
+ *
+ * @returns { cambios: [{ codigoDe, codigoA }] } o { error }
+ */
+export async function cerrarHuecos(obraId) {
+  const { data, error } = await supabase.from("ordenes_cambio")
+    .select("id,numero,codigo,estado,anulada,revision_de,visto_pedido_at,visto_at").eq("obra_id", obraId);
+  if (error) return { error: error.message, cambios: [] };
+  const plan = huecosQueSeCierran(data || []);
+  for (const p of plan) {
+    const { error: e } = await supabase.from("ordenes_cambio")
+      .update({ numero: p.a, codigo: p.codigoA }).eq("id", p.id);
+    if (e) return { error: e.message, cambios: [] };
+  }
+  return { cambios: plan };
 }
 
 /** El ITEM de la tabla: ADIC-01, ADIC-02, RED-01… numerado por su lado. */
@@ -437,10 +475,12 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
       .filter(Boolean).join(" · ");
     return {
       obra_id: orden.obra_id,
-      numero: 9000 + orden.numero * 100 + i,
+      // Con el número de SU orden: una modificación —OC-04-A— comparte
+      // capítulo y numeración con la orden que modifica.
+      numero: 9000 + numeroPrincipal(orden) * 100 + i,
       capitulo: `ADICIONALES · ${codigoDe(orden)}`,
-      capitulo_orden: 9000 + orden.numero,
-      orden: 9000000 + orden.numero * 1000 + i,
+      capitulo_orden: 9000 + numeroPrincipal(orden),
+      orden: 9000000 + numeroPrincipal(orden) * 1000 + i,
       descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigoDe(orden)}`
         + (yaExistia ? `  ·  ya existía: ${yaExistia}` : ""),
       unidad: l.unidad || "",

@@ -109,7 +109,9 @@ test("si el modelo no contesta, la orden sale con el borrador de siempre: nunca 
   assert.equal(borrador.deRespaldo, true);
   assert.match(borrador.justificacion, /proforma-solek\.pdf \(SOLEK\) contra el presupuesto contractual/);
   assert.match(borrador.justificacion, /· Cable THHN 12 AWG — el tendido va por el otro lado/);
-  assert.match(borrador.soportes, /Rubro 3\.04 del presupuesto contractual/);
+  // La lista de "soportes" ya no se arma: era el nombre del archivo y una
+  // fila por rubro citado, que no le decía nada al que aprueba.
+  assert.equal("soportes" in borrador, false);
   assert.equal(avisos.length, 1);
 });
 
