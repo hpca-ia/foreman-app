@@ -126,8 +126,11 @@ export default function TablaGantt({
   // dos tercios del ancho y a las barras —que es lo que se viene a mirar— les
   // quedaba una franja. Compacta deja nombre, días y botones: las fechas se
   // leen en la barra y se escriben en la ficha. Queda elegida para la próxima.
-  // De entrada, compacta: lo que se viene a mirar son las barras.
-  const [compacta, setCompacta] = useState(() => { try { return localStorage.getItem("foreman_gantt_compacta") !== "0"; } catch { return true; } });
+  // DE ENTRADA, CON LAS FECHAS. Arrancaba compacta —"lo que se viene a mirar
+  // son las barras"— y lo que se vio fue un cronograma sin una sola fecha,
+  // con el botón para traerlas escondido en el encabezado. Compacta queda
+  // para quien la elija, y aun así cada fila dice de qué día a qué día va.
+  const [compacta, setCompacta] = useState(() => { try { return localStorage.getItem("foreman_gantt_compacta") === "1"; } catch { return false; } });
   const alternarCompacta = () => setCompacta(c => { try { localStorage.setItem("foreman_gantt_compacta", c ? "0" : "1"); } catch {} return !c; });
   const COLS = compacta ? "minmax(230px,1fr) 54px 68px" : "minmax(230px,1fr) 54px 112px 112px 52px 68px";
   const IZQ = compacta ? 230 + 54 + 68 + 2 * 7 + 12 : 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12;
@@ -704,6 +707,15 @@ export default function TablaGantt({
                               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}
                               title="No depende de nada, así que arranca el día uno. Si tiene que ir después de algo, encadenala.">
                               arranca el día 1
+                            </span>
+                          )}
+                          {/* Sin las columnas de fechas, la fila las dice igual:
+                              un cronograma donde no se ve ninguna fecha no es
+                              un cronograma. */}
+                          {compacta && a.inicio && a.fin && (
+                            <span style={{ display: "block", fontSize: 10.5, color: colors.muted, whiteSpace: "nowrap", letterSpacing: 0.2 }}
+                              title="De qué día a qué día va. Para verlo en columnas, el botón FECHAS del encabezado.">
+                              {dia(a.inicio)} → {dia(a.fin)}
                             </span>
                           )}
                         </button>
