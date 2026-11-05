@@ -57,8 +57,8 @@ export default function FotosAlVuelo({ fotos = [], onCambio, etiqueta = "Sacale 
         <button onClick={() => camara.current?.click()} style={boton}>
           <Camera size={15} /> {fotos.length ? "Otra foto" : etiqueta}
         </button>
-        <button onClick={() => archivo.current?.click()} style={{ ...boton, flex: "0 0 auto", padding: "11px 14px" }} title="Elegir del teléfono o la computadora">
-          <ImagePlus size={15} />
+        <button onClick={() => archivo.current?.click()} style={{ ...boton, flex: "0 0 auto", padding: "11px 14px" }} title="Elegir de la galería o de Archivos">
+          <ImagePlus size={15} /> Galería
         </button>
       </div>
 

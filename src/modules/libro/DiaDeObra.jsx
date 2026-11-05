@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, Plus, X, Check, Lock, Unlock, FileText } from "lucide-react";
+import { Camera, ImagePlus, Plus, X, Check, Lock, Unlock, FileText } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { esEHS } from "../../lib/roles";
 import { inputStyle } from "../../components/ui/Input";
@@ -40,6 +40,9 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
   const [reabriendo, setReabriendo] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
   const camRef = useRef(null);
+  // La galería o Archivos del teléfono: `capture` manda derecho a la cámara y
+  // no dejaba subir una foto ya sacada ni un PDF que mandaron por WhatsApp.
+  const galRef = useRef(null);
 
   const esHoy = fecha === hoyEnObra();
   // El estado lo dice `estadoDelDia`, igual que la lista. Cuando cada pantalla
@@ -385,14 +388,22 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
 
         {sePuede && (
           <>
-            <button onClick={() => camRef.current?.click()} disabled={subiendo}
-              style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "12px",
-                color: colors.inkSoft, fontSize: 13, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-              <Camera size={16} /> {subiendo ? "Subiendo…" : "Sacar una foto"}
-            </button>
-            {/* capture manda directo a la cámara trasera en el teléfono; en la
-                computadora abre el explorador de archivos, como siempre. */}
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => camRef.current?.click()} disabled={subiendo}
+                style={{ flex: 1, background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "12px",
+                  color: colors.inkSoft, fontSize: 13, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                <Camera size={16} /> {subiendo ? "Subiendo…" : "Sacar una foto"}
+              </button>
+              <button onClick={() => galRef.current?.click()} disabled={subiendo} title="Elegir una foto de la galería o un archivo del teléfono"
+                style={{ flex: "0 0 auto", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "12px 14px",
+                  color: colors.inkSoft, fontSize: 13, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 7 }}>
+                <ImagePlus size={16} /> Galería
+              </button>
+            </div>
+            {/* capture manda directo a la cámara trasera en el teléfono; el
+                otro campo, sin capture, abre la galería o Archivos. */}
             <input ref={camRef} type="file" accept="image/*" capture="environment" onChange={ponerFoto} style={{ display: "none" }} />
+            <input ref={galRef} type="file" accept="image/*" onChange={ponerFoto} style={{ display: "none" }} />
           </>
         )}
       </div>

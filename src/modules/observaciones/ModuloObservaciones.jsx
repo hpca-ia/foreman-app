@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Camera, Check, X, Eye, RotateCcw, ChevronLeft, ClipboardList, AlertTriangle } from "lucide-react";
+import { Plus, Camera, ImagePlus, Check, X, Eye, RotateCcw, ChevronLeft, ClipboardList, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -81,6 +81,9 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
   const [aviso, setAviso] = useState("");
   const [nota, setNota] = useState("");
   const camRef = useRef(null);
+  // Sin `capture`: la galería o Archivos del teléfono, para la foto que ya se
+  // sacó o la que mandaron por WhatsApp.
+  const galRef = useRef(null);
   const momentoRef = useRef("problema");
 
   // Dos permisos, no uno.
@@ -518,12 +521,21 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
                       </div>
                     )}
                     {(puedeAnotar || esMiObservacion(o)) && (
-                      <button onClick={() => { momentoRef.current = momento; setAbierta(o.id); camRef.current?.click(); }}
-                        style={{ width: "100%", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px",
-                          color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font,
-                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                        <Camera size={12} /> {momento === "problema" ? "Foto del problema" : "Foto de cómo quedó"}
-                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => { momentoRef.current = momento; setAbierta(o.id); camRef.current?.click(); }}
+                          style={{ flex: 1, background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px",
+                            color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font,
+                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                          <Camera size={12} /> {momento === "problema" ? "Foto del problema" : "Foto de cómo quedó"}
+                        </button>
+                        <button onClick={() => { momentoRef.current = momento; setAbierta(o.id); galRef.current?.click(); }}
+                          title="Elegir de la galería o de Archivos"
+                          style={{ flex: "0 0 auto", background: colors.bg, border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px 10px",
+                            color: colors.inkSoft, fontSize: 11.5, cursor: "pointer", fontFamily: colors.font,
+                            display: "flex", alignItems: "center", gap: 5 }}>
+                          <ImagePlus size={12} /> Galería
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -604,6 +616,18 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
       {/* Una sola entrada de cámara para todas: en el teléfono va directo a la
           trasera, en la computadora abre el explorador. */}
       <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+        onChange={async ev => {
+          const archivo = ev.target.files?.[0]; ev.target.value = "";
+          const o = observaciones.find(x => x.id === abierta);
+          if (!archivo || !o) return;
+          setOcupado(true);
+          const res = await subirFotoObs(o, archivo, { momento: momentoRef.current, quien: currentUser });
+          setOcupado(false);
+          if (res.error) { setAviso(res.error); return; }
+          await cargar();
+        }} />
+      {/* El mismo destino, elegido de la galería o de Archivos en vez de la cámara. */}
+      <input ref={galRef} type="file" accept="image/*" style={{ display: "none" }}
         onChange={async ev => {
           const archivo = ev.target.files?.[0]; ev.target.value = "";
           const o = observaciones.find(x => x.id === abierta);
