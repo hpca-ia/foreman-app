@@ -2,6 +2,7 @@ import { cargarPDF } from "../../lib/exportar";
 import { pieDePdf } from "../../lib/piePdf";
 import { honorariosDe, comoSeDice, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
+import { adicionesPorClase, contratadoDe } from "./clasesDePartida.js";
 
 // Las órdenes de cambio en PDF, con el formato que la oficina ya firma.
 //
@@ -70,7 +71,7 @@ async function comoJpeg(url, maxAncho = 900) {
 }
 
 /** Pinta una orden completa, empezando en la página actual del documento. */
-async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [], iva = 0 }) {
+async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enlaces = {}, obra, proyecto, codigo, subtotales, resumenContrato, aprobadores = [], iva = 0, rubros = [] }) {
   // El honorario del contrato sobre el neto de esta orden, para el pie.
   const hon = honorariosDe({ lineas, pct: pctQueCorresponde(orden, obra), iva });
   const afecta = comoSeDice(orden);
@@ -169,14 +170,37 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
 
   // ── CAPÍTULO II ─────────────────────────────────────────────────────────
   capitulo("II", "Propuesta de imprevisto y cotización preliminar.");
-  const filasDe = tipo => lineas
-    .filter(l => (tipo === "quita" ? l.tipo === "quita" : l.tipo !== "quita"))
-    .map(l => [
-      l.item || "", l.rubro_codigo || "",
-      l.especificacion ? `${l.descripcion}\n${l.especificacion}` : l.descripcion,
-      l.unidad || "", plata(l.cantidad), plata(l.precio_unitario),
-      plata((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0)),
+  // CUÁNTO HABÍA CONTRATADO, debajo de la partida que cambia una cantidad: un
+  // "46 pto de más" no se puede leer sin saber que el contrato tenía 65.
+  const filaDe = l => [
+    l.item || "", l.rubro_codigo || "",
+    [l.descripcion, l.especificacion, contratadoDe(l, rubros, plata)].filter(Boolean).join("\n"),
+    l.unidad || "", plata(l.cantidad), plata(l.precio_unitario),
+    plata((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0)),
+  ];
+
+  // LAS ADICIONES, PARTIDAS POR LO QUE SON.
+  //
+  // Lo que no estaba cotizado —una especificación o un pedido nuevo del
+  // cliente— y lo que es más cantidad de un rubro que ya tiene precio firmado
+  // son dos conversaciones distintas, y en una sola lista de ADICIONES el que
+  // aprueba no puede saber cuál está leyendo. Cada bloque lleva su rótulo, y
+  // su subtotal cuando hay de los dos. El orden dentro de cada bloque es el
+  // que se le dio a las partidas.
+  const adic = adicionesPorClase(lineas);
+  const rotulo = b => [{ content: `${b.titulo}  ·  ${b.pista}`, colSpan: 7,
+    styles: { fontStyle: "bold", fontSize: 7, textColor: [75, 85, 99], fillColor: [249, 250, 251] } }];
+  const subDe = b => [
+    { content: `Subtotal ${b.titulo.toLowerCase()}`, colSpan: 6, styles: { halign: "right", fontSize: 7.5, textColor: GRIS } },
+    { content: `$${plata(b.subtotal)}`, styles: { halign: "right", fontSize: 7.5, textColor: GRIS } },
+  ];
+  const filasDe = tipo => {
+    if (tipo === "quita") return lineas.filter(l => l.tipo === "quita").map(filaDe);
+    if (!adic.separar) return adic.bloques.flatMap(b => b.lineas.map(filaDe));
+    return adic.bloques.flatMap(b => [
+      rotulo(b), ...b.lineas.map(filaDe), ...(adic.bloques.length > 1 ? [subDe(b)] : []),
     ]);
+  };
 
   const seccion = (titulo, tipo, subtotal) => {
     const filas = filasDe(tipo);
@@ -380,7 +404,7 @@ export async function pdfDeOrden(datos) {
  * hojas para saber cuánto sumaron los adicionales: ahí está la lista con su
  * monto, lo que se ejecutó y lo que no, y el total al pie.
  */
-export async function pdfConsolidado({ ordenes = [], lineasPorOrden = {}, fotosPorOrden = {}, enlaces = {}, obra, proyecto, resumenContrato, subtotalesDe, codigoDe }) {
+export async function pdfConsolidado({ ordenes = [], lineasPorOrden = {}, fotosPorOrden = {}, enlaces = {}, obra, proyecto, resumenContrato, subtotalesDe, codigoDe, rubros = [] }) {
   const { jsPDF, autoTable } = await cargarPDF();
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const ancho = doc.internal.pageSize.getWidth();
@@ -466,7 +490,7 @@ export async function pdfConsolidado({ ordenes = [], lineasPorOrden = {}, fotosP
     await pintarOrden({
       doc, autoTable, orden: o, lineas,
       fotos: fotosPorOrden[o.id] || [], enlaces, obra, proyecto,
-      codigo: codigoDe(o), subtotales: subtotalesDe(lineas), resumenContrato,
+      codigo: codigoDe(o), subtotales: subtotalesDe(lineas), resumenContrato, rubros,
     });
   }
 

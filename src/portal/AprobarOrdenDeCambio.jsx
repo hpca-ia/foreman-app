@@ -153,7 +153,15 @@ export default function AprobarOrdenDeCambio({ token }) {
             solo esconde la mitad de la conversación. */}
         {lineas.length > 0 && (
           <Caja titulo="QUÉ CAMBIA">
-            {[["SE AGREGA", agrega], ["SE QUITA", quita]].map(([rotulo, lista]) => (lista.length ? (
+            {/* Y LO QUE SE AGREGA, POR LO QUE ES: lo que no estaba cotizado y
+                lo que es más cantidad de un rubro que ya tiene precio firmado
+                son dos cosas distintas que aprobar. */}
+            {(agrega.some(l => l.clase)
+              ? [["SE AGREGA · TRABAJOS NUEVOS, que no estaban cotizados", agrega.filter(l => l.clase !== "mas")],
+                ["SE AGREGA · MÁS CANTIDAD de rubros del contrato", agrega.filter(l => l.clase === "mas")],
+                ["SE QUITA · MENOS CANTIDAD de rubros del contrato", quita]]
+              : [["SE AGREGA", agrega], ["SE QUITA", quita]]
+            ).map(([rotulo, lista]) => (lista.length ? (
               <div key={rotulo} style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: C.gris, letterSpacing: 0.4, marginBottom: 4 }}>{rotulo}</div>
                 {lista.map((l, k) => (

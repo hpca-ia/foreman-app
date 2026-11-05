@@ -6,6 +6,7 @@
 // manda es un correo que puede decir otra cosa.
 
 import { rest, configurado, SUPABASE_URL } from "./_supabase.js";
+import { bloquesDeAdiciones } from "./_clasesDePartida.js";
 
 // `db()` no existe en _supabase.js: nunca existió. Este archivo lo importaba
 // igual, así que el módulo fallaba AL IMPORTARSE y la orden de cambio por
@@ -110,11 +111,24 @@ export default async function handler(req, res) {
       <td style="padding:5px 6px;border-bottom:1px solid #F3F4F6;font-size:12px;text-align:right;font-weight:600">${plata(l.monto)}</td>
     </tr>`;
 
+  // LAS ADICIONES, PARTIDAS POR LO QUE SON, igual que en el PDF: lo que no
+  // estaba cotizado por un lado y lo que es más cantidad de un rubro del
+  // contrato por el otro, cada bloque con su rótulo.
+  const bloques = bloquesDeAdiciones(conMonto);
+  const rotulo = b => `<tr><td colspan="7" style="background:#F9FAFB;padding:4px 6px;font-size:10px;font-weight:700;color:#4B5563">${esc(b.titulo)} · <span style="font-weight:400">${esc(b.pista)}</span></td></tr>`;
+  const subDe = b => `<tr>
+        <td colspan="6" style="padding:3px 6px;text-align:right;font-size:10.5px;color:#6B7280">Subtotal ${esc(b.titulo.toLowerCase())}</td>
+        <td style="padding:3px 6px;text-align:right;font-size:11px;color:#6B7280">$${plata(b.lineas.reduce((s, l) => s + l.monto, 0))}</td>
+      </tr>`;
+
   const seccion = (titulo, tipo, subtotal) => {
     const suyas = conMonto.filter(l => (tipo === "quita" ? l.tipo === "quita" : l.tipo !== "quita"));
+    const cuerpo = tipo !== "quita" && bloques
+      ? bloques.map(b => rotulo(b) + b.lineas.map(fila).join("") + (bloques.length > 1 ? subDe(b) : "")).join("")
+      : suyas.map(fila).join("");
     return `
       <tr><td colspan="7" style="background:#F3F4F6;padding:4px 6px;font-size:10.5px;font-weight:700;letter-spacing:.4px;color:#374151">${titulo}</td></tr>
-      ${suyas.length ? suyas.map(fila).join("") : `<tr><td colspan="7" style="padding:6px;font-size:11.5px;color:#9CA3AF">—</td></tr>`}
+      ${suyas.length ? cuerpo : `<tr><td colspan="7" style="padding:6px;font-size:11.5px;color:#9CA3AF">—</td></tr>`}
       <tr>
         <td colspan="6" style="padding:5px 6px;text-align:right;font-size:11.5px;font-weight:700;color:#374151">SUBTOTAL ${titulo}</td>
         <td style="padding:5px 6px;text-align:right;font-size:12.5px;font-weight:700">$${plata(subtotal)}</td>

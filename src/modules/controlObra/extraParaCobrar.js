@@ -21,6 +21,8 @@
 //
 // Sin base de datos: se le pasa lo que devolvió la comparación.
 
+import { claseDelHallazgo } from "./clasesDePartida.js";
+
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
 
@@ -340,6 +342,11 @@ export function partidasParaOrden(hallazgos, pct = 0) {
   return [...(hallazgos?.todo || []).filter(x => x.hallazgo !== "bajo_precio"),
     ...(hallazgos?.menos || [])].map(x => ({
     tipo: x.quita ? "quita" : "aumenta",
+    // QUÉ CLASE DE CAMBIO ES, para que la orden lo diga: trabajo nuevo que no
+    // estaba cotizado, o más o menos cantidad de un rubro del contrato. Acá se
+    // sabe de entrada —es justo lo que la comparación encontró— y en la orden,
+    // sin esto, lo nuevo sale mezclado con lo que solo cambió de medida.
+    clase: x.quita ? "menos" : claseDelHallazgo(x.hallazgo),
     descripcion: x.descripcion,
     unidad: x.unidad,
     cantidad: x.cantidad,

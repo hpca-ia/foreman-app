@@ -657,6 +657,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       descripcion: l.descripcion, unidad: l.unidad || "u", cantidad: cant,
       costo: Number(l.monto) || 0, costoUnitario,
       precioUnitario: puRubro, rubro_id: l.obra_rubro_id || null,
+      // Lo que se encontró viaja a la orden: de ahí sale la clase de la partida.
+      hallazgo: l.hallazgo,
       rubro_codigo: rubro ? String(rubro.numero ?? rubro.codigo ?? "") : "",
     };
   }

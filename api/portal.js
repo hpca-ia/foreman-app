@@ -2,6 +2,7 @@ import { rest, SUPABASE_URL, configurado } from "./_supabase.js";
 import { enviarCorreo, plantilla } from "./_correo.js";
 import { enviarActa } from "./_aviso-acta.js";
 import { quienesDanElVisto } from "./_aviso-visto.js";
+import { claseDe, seSeparan } from "./_clasesDePartida.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -379,6 +380,11 @@ async function ordenParaFirmar(req, res, firma) {
         item: l.item, descripcion: l.descripcion, especificacion: l.especificacion,
         unidad: l.unidad, cantidad: l.cantidad, precio_unitario: l.precio_unitario,
         tipo: l.tipo,
+        // QUÉ CLASE DE CAMBIO ES: trabajo nuevo que no estaba cotizado, o más
+        // cantidad de un rubro del contrato. Quien aprueba tiene que saber cuál
+        // de las dos cosas está aceptando. Va vacío cuando la orden no tiene
+        // nada que distinguir.
+        clase: l.tipo !== "quita" && seSeparan(lineas) ? claseDe(l) : null,
         total: signo * (Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0),
       };
     }),
@@ -457,15 +463,16 @@ async function siFirmaronTodos(ordenId) {
   const iva = Number(conIvaFila?.[0]?.iva_pct) || 0;
   const conIva = v => Math.round(v * (1 + iva / 100) * 100) / 100;
 
-  const anulan = lineas.filter(l => l.tipo === "quita" && l.obra_rubro_id);
-  if (anulan.length) {
-    await rest(`obra_rubros?id=in.(${anulan.map(l => Number(l.obra_rubro_id)).join(",")})`, {
-      method: "PATCH", headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ anulado_por_oc: orden.id }),
-    });
-  }
-
-  const filas = lineas.filter(l => !(l.tipo === "quita" && l.obra_rubro_id)).map((l, i) => {
+  // TODAS LAS LÍNEAS ENTRAN, las que suman y las que restan, igual que cuando
+  // aprueba la oficina.
+  //
+  // Por esta puerta la reducción todavía iba a buscar el rubro del contrato y
+  // lo TACHABA ENTERO. Con una reducción de cantidad eso es plata mal contada:
+  // el contrato tiene 4 interruptores, la orden quita 2, y al firmar el cliente
+  // por el enlace desaparecían los 4. La oficina dejó de hacerlo hace rato —el
+  // presupuesto firmado no se toca; la orden suma lo suyo y resta lo suyo en su
+  // capítulo— y esta puerta se había quedado con la regla vieja.
+  const filas = lineas.map((l, i) => {
     const signo = l.tipo === "quita" ? -1 : 1;
     return {
       obra_id: orden.obra_id,
@@ -1163,6 +1170,7 @@ async function armarInforme(lead) {
         ...o,
         lineas: suyas.map(l => ({
           tipo: l.tipo, item: l.item, descripcion: l.descripcion, unidad: l.unidad,
+          clase: l.tipo !== "quita" && seSeparan(suyas) ? claseDe(l) : null,
           cantidad: num(l.cantidad), precio_unitario: num(l.precio_unitario),
           monto: Math.round(monto(l) * 100) / 100,
         })),

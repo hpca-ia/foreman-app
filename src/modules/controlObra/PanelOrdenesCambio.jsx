@@ -5,6 +5,7 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
+import { CLASES, claseDePartida, adicionesPorClase, contratadoDe } from "./clasesDePartida.js";
 import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import { comoSeDice as parentescoDe, codigoDeLaRevision, mandaEnElControl } from "./revisionesDeOrden.js";
@@ -590,7 +591,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
               try {
                 const doc = await pdfConsolidado({
                   ordenes, lineasPorOrden: lineas, fotosPorOrden: fotos, enlaces,
-                  obra, proyecto, resumenContrato: resumen, subtotalesDe: subtotales, codigoDe,
+                  obra, proyecto, resumenContrato: resumen, subtotalesDe: subtotales, codigoDe, rubros,
                 });
                 doc.save(`Órdenes de cambio - ${proyecto || obra.nombre}.pdf`);
               } catch (e) { setAviso("No se pudo armar el consolidado: " + e.message); }
@@ -1552,6 +1553,26 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                   ) : l.descripcion}
                                   {l.especificacion && <div style={{ fontSize: 10, color: colors.muted }}>{l.especificacion}</div>}
                                   {l.capitulo && <div style={{ fontSize: 10, color: colors.muted }}>{l.capitulo}</div>}
+                                  {/* QUÉ CLASE DE CAMBIO ES. Trabajo nuevo
+                                      que no estaba cotizado, o más o menos
+                                      cantidad de un rubro del contrato: son
+                                      conversaciones distintas con el cliente,
+                                      y el documento las separa en bloques.
+                                      Acá va en cada partida, para no desarmar
+                                      el orden en que se acomodaron. */}
+                                  {(l.tipo === "quita" || adicionesPorClase(suyas).separar) && (() => {
+                                    const clase = claseDePartida(l);
+                                    const contratado = contratadoDe(l, rubros, fmt);
+                                    return (
+                                      <div style={{ fontSize: 9.5, marginTop: 1, color: colors.muted }}>
+                                        <strong style={{ letterSpacing: 0.3,
+                                          color: clase === "nuevo" ? colors.brand : clase === "mas" ? colors.inkSoft : colors.danger }}>
+                                          {CLASES[clase].corto.toUpperCase()}
+                                        </strong>
+                                        {clase === "nuevo" ? " · no estaba cotizado" : contratado ? ` · ${contratado.toLowerCase()}` : ""}
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                                 <td style={{ padding: "5px 6px", textAlign: "center", color: colors.muted }}>
                                   {editable ? (
@@ -2437,7 +2458,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             // la carátula la menciona para que el cliente sepa
                             // cuál de los dos papeles vale.
                             orden: { ...o, reemplazada: ordenes.find(x => Number(x.id) === Number(o.reemplaza_a)) || null },
-                            lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
+                            lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto, rubros,
                             codigo: codigoDe(o), subtotales: sub,
                             // A cuánto asciende el contrato va solo si alguien
                             // lo decidió para ESTA orden.
@@ -2484,7 +2505,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             // la carátula la menciona para que el cliente sepa
                             // cuál de los dos papeles vale.
                             orden: { ...o, reemplazada: ordenes.find(x => Number(x.id) === Number(o.reemplaza_a)) || null },
-                            lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto,
+                            lineas: suyas, fotos: suyasFotos, enlaces, obra, proyecto, rubros,
                             codigo: codigoDe(o), subtotales: sub,
                             resumenContrato: o.mostrar_contrato ? resumen : null,
                             aprobadores: aprobadores[o.id] || [], iva: ivaDeLaObra,

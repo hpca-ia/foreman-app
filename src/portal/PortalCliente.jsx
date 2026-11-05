@@ -268,6 +268,8 @@ function OrdenCambio({ o, onContestar, enviando }) {
               borderTop: i ? `1px solid ${colors.neutralSoft}` : "none", fontSize: 12.5 }}>
               <span style={{ color: colors.ink }}>
                 {l.tipo === "quita" && <span style={{ color: colors.danger, fontWeight: 700 }}>Se quita · </span>}
+                {l.clase === "nuevo" && <span style={{ color: colors.muted, fontWeight: 700 }}>Trabajo nuevo · </span>}
+                {l.clase === "mas" && <span style={{ color: colors.muted, fontWeight: 700 }}>Más cantidad · </span>}
                 {l.descripcion}
                 <span style={{ color: colors.muted }}> · {l.cantidad} {l.unidad}</span>
               </span>

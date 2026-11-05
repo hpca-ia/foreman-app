@@ -309,7 +309,21 @@ export async function agregarLinea(ordenId, linea, yaPuestas = []) {
   const tieneCosto = linea.costo_unitario !== undefined && linea.costo_unitario !== null && linea.costo_unitario !== "";
   if (tieneCosto) fila.costo_unitario = Number(linea.costo_unitario) || 0;
   if (linea.cotizacion_id) fila.cotizacion_id = Number(linea.cotizacion_id);
+  // LA CLASE SE GUARDA AL NACER LA PARTIDA: trabajo nuevo, o más cantidad de
+  // un rubro del contrato. Quien arma la orden lo sabe —Diferencias lo trae
+  // dicho— y si no lo dice se deduce de lo único seguro: una adición que
+  // apunta a un rubro es más de ese rubro. Una reducción no la necesita.
+  if (tipo !== "quita") {
+    fila.clase = linea.clase === "nuevo" || linea.clase === "mas" ? linea.clase
+      : (fila.obra_rubro_id || fila.rubro_codigo ? "mas" : "nuevo");
+  }
   let { data, error } = await supabase.from("orden_cambio_lineas").insert(fila).select().single();
+  // Sin la 168 la partida entra igual —sin la partida no hay orden—, y su
+  // clase se deduce cada vez del rubro al que apunta.
+  if (error && /clase/i.test(error.message || "") && "clase" in fila) {
+    delete fila.clase;
+    ({ data, error } = await supabase.from("orden_cambio_lineas").insert(fila).select().single());
+  }
   if (error && falta(error) && (tieneCosto || fila.cotizacion_id)) {
     const { costo_unitario, cotizacion_id, ...sinCosto } = fila;
     ({ data, error } = await supabase.from("orden_cambio_lineas").insert(sinCosto).select().single());

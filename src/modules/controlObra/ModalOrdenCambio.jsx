@@ -323,7 +323,7 @@ Si el texto ya está bien escrito, devolvelo igual.`,
       try {
         const { pdfDeOrden } = await import("./pdfOrdenCambio");
         const doc = await pdfDeOrden({
-          orden: { ...orden }, lineas: puestas, fotos: [], enlaces: {}, obra, proyecto,
+          orden: { ...orden }, lineas: puestas, fotos: [], enlaces: {}, obra, proyecto, rubros,
           codigo: orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`,
           subtotales: subtotales(puestas), resumenContrato: null, aprobadores: [],
         });
