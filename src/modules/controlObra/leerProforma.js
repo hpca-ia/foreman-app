@@ -41,7 +41,10 @@ descripción | cantidad | unidad | precio unitario | monto | rubro_id
 La primera línea es el proveedor:  PROVEEDOR | nombre del proveedor
 
 Sin encabezados, sin totales, sin subtotales y sin líneas en blanco. La
-descripción va corta y sin barras adentro.
+descripción va COMPLETA, con todas sus palabras, sin barras adentro: es con el
+texto entero que se decide si un renglón es el mismo trabajo que un rubro, y
+"Punto para Sensor de iluminación…" cortado antes de llegar al final se
+confunde con "Punto de iluminación…".
 
 EL PRECIO UNITARIO ES EL QUE DICE EL PAPEL, sin calcularlo. Si el renglón no lo
 trae, poné un guion: no lo deduzcas dividiendo. Sirve para comprobar la lectura
@@ -154,7 +157,7 @@ export function renglonesDeTexto(txt = "") {
     if (/^descripci/i.test(descripcion)) continue;     // repitió el encabezado
     const id = String(rubro || "").trim();
     items.push({
-      descripcion: descripcion.slice(0, 90),
+      descripcion,
       cantidad: num(cantidad),
       unidad: String(unidad || "").slice(0, 10),
       // El unitario del papel, tal cual: sirve para comprobar la lectura, y
@@ -183,7 +186,7 @@ export function interpretarRespuesta(txt = "") {
     const items = (Array.isArray(p.items) ? p.items : [])
       .filter(x => x && (x.descripcion || num(x.monto)))
       .map(x => ({
-        descripcion: String(x.descripcion || "").trim().slice(0, 90),
+        descripcion: String(x.descripcion || "").trim(),
         cantidad: num(x.cantidad),
         unidad: String(x.unidad || "").slice(0, 10),
         monto: Math.round(num(x.monto) * 100) / 100,
@@ -300,7 +303,7 @@ export function renglonesDeHoja(filas = [], mapa = {}, { miles = null } = {}) {
     // proforma dos veces, y el beneficio saldría del doble de lo que es.
     if (TOTALES.test(descripcion)) continue;
     items.push({
-      descripcion: descripcion.slice(0, 90),
+      descripcion,
       cantidad: numeroDeCelda(cC == null ? 0 : f[cC], miles),
       unidad: String(cU == null ? "" : (f[cU] ?? "")).trim().slice(0, 10),
       monto,

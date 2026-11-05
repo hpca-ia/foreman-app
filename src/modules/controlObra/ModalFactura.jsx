@@ -191,7 +191,9 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       // el archivo no llegó a salir. Cuando sabemos qué pasó, se dice.
       const pesa = noEntraElArchivo(b64, file);
       if (pesa) { setError(pesa); setLeyendo(false); return; }
-      const listaRubros = rubros.slice(0, 220).map(r => `${r.id}:${r.descripcion.slice(0, 60)}`).join(" | ");
+      // LA DESCRIPCIÓN ENTERA, no sesenta letras: tres rubros de "Punto de red
+      // Categoría 6…" se distinguen recién al final, y cortados son el mismo.
+      const listaRubros = rubros.slice(0, 220).map(r => `${r.id}:${r.descripcion}`).join(" | ");
 
       // UNA LECTURA DE LA FACTURA. El lazo de abajo la vuelve a pedir, con el
       // reclamo en la mano, si los renglones no suman la base impresa: "lo

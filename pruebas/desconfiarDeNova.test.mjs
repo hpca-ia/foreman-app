@@ -83,3 +83,24 @@ test("unidades de la misma familia no molestan, y una rara no opina", () => {
     [{ descripcion: "Juego de herrajes", cantidad: 2, unidad: "jgo", rubro_id: 9 }], [porML]);
   assert.equal(raro.items[0].rubro_id, 9);
 });
+
+test("el precio es la prueba que el texto no da: a cinco veces no es la misma pieza", async () => {
+  const { precioNoSeParece } = await import("../src/modules/controlObra/desconfiarDeNova.js");
+  // Rubro 108: 9 piezas a $8,91 sin IVA → total con IVA 92,22.
+  const rubro = { cantidad: 9, total_base: 92.22, iva_pct: 15 };
+  assert.match(precioNoSeParece({ cantidad: 2, monto: 90 }, rubro), /45.*8\.91.*veces más/);
+  assert.equal(precioNoSeParece({ cantidad: 9, monto: 72.86 }, rubro), null);    // $8,10: el mismo renglón, más barato
+  assert.equal(precioNoSeParece({ cantidad: 0, monto: 90 }, rubro), null);       // sin número no opina
+});
+
+test("otro renglón sobre el mismo rubro se dice, con el renglón que lo comparte", async () => {
+  const { mismoRubroQueOtro } = await import("../src/modules/controlObra/desconfiarDeNova.js");
+  const lineas = [
+    { id: 1, obra_rubro_id: 106, texto_papel: "Punto de iluminación con tubería" },
+    { id: 2, obra_rubro_id: 106, texto_papel: "Punto para Sensor de iluminación" },
+    { id: 3, obra_rubro_id: 103, texto_papel: "Otro" },
+  ];
+  assert.match(mismoRubroQueOtro(lineas[0], lineas), /Punto para Sensor/);
+  assert.equal(mismoRubroQueOtro(lineas[2], lineas), null);
+  assert.equal(mismoRubroQueOtro({ obra_rubro_id: null }, lineas), null);
+});

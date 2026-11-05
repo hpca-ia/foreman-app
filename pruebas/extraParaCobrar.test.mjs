@@ -346,3 +346,28 @@ test("al emparejar se dice si la orden va a ser de mas o de menos", async () => 
   assert.match(queSaleDe({ cantidad_papel: 65, monto_papel: 2000 }, rubro, pu), /a favor/);
   assert.equal(queSaleDe({ cantidad_papel: 1 }, null, 0), "entra como trabajo nuevo");
 });
+
+test("dos renglones al mismo precio sobre un rubro se suman; a precios distintos, uno vuelve sin rubro", async () => {
+  const { agruparPorRubro } = await import("../src/modules/controlObra/extraParaCobrar.js");
+  const rubro = { id: 111, descripcion: "Punto de tomacorriente doble normal", cantidad: 30, unidad: "U" };
+  const juntos = agruparPorRubro([
+    { descripcion: "Punto de tomacorriente doble normal", cantidad: 70, cotizado: 2339.33, puProforma: 33.42, puRubro: 36.76, rubro, cantidadRubro: 30, unidadRubro: "U" },
+    { descripcion: "Punto de tomacorriente doble EN PISO", cantidad: 2, cotizado: 66.84, puProforma: 33.42, puRubro: 36.76, rubro, cantidadRubro: 30, unidadRubro: "U" },
+  ]);
+  assert.equal(juntos.length, 1);
+  assert.equal(juntos[0].cantidad, 72);
+  assert.equal(juntos[0].cotizado, 2406.17);
+  assert.match(juntos[0].porJuntos, /70 \+ 2 = 72/);
+  // 111 puntos de luz a $33,07 y 3 puntos de sensor a $19,77 sobre el rubro de
+  // 65: el sensor no es el mismo trabajo, y antes salía "62 de menos".
+  const luz = { id: 106, descripcion: "Punto de iluminación", cantidad: 65, unidad: "U" };
+  const aparte = agruparPorRubro([
+    { descripcion: "Punto de iluminación", cantidad: 111, cotizado: 3671.21, puProforma: 33.07, puRubro: 36.38, rubro: luz, cantidadRubro: 65 },
+    { descripcion: "Punto para Sensor de iluminación", cantidad: 3, cotizado: 59.31, puProforma: 19.77, puRubro: 36.38, rubro: luz, cantidadRubro: 65 },
+  ]);
+  assert.equal(aparte.length, 2);
+  assert.equal(aparte[0].cantidad, 111);
+  assert.equal(aparte[0].rubro, luz);
+  assert.equal(aparte[1].rubro, null);
+  assert.match(aparte[1].dudoso, /otro trabajo/);
+});

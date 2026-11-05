@@ -1,3 +1,4 @@
+import { baseSinIva } from "./contratoDeLaObra.js";
 // LO QUE NOVA NO PUEDE AFIRMAR, NO LO AFIRMA.
 //
 // Emparejar un renglón de una proforma con un rubro del contrato es la decisión
@@ -173,3 +174,41 @@ export const unidadesDistintas = (linea, rubro) => {
   const b = familiaDe(rubro?.unidad);
   return !!a && !!b && a !== b;
 };
+
+/**
+ * EL PRECIO ES LA PRUEBA QUE EL TEXTO NO DA. "Pieza tomacorriente doble caja
+ * de PISO" y "Pieza tomacorriente doble" comparten todas las palabras que
+ * cuentan; a $45 contra $8,91 no son la misma pieza. Se compara el unitario
+ * del papel con el del rubro sin IVA, y si uno es más del doble del otro el
+ * emparejamiento se marca para mirarlo. No opina cuando falta un número.
+ *
+ * @param linea  { cantidad, monto } del papel (sin IVA)
+ */
+export function precioNoSeParece(linea, rubro, tolerancia = 2) {
+  const cant = n(linea?.cantidad), monto = n(linea?.monto), cantRubro = n(rubro?.cantidad);
+  if (!cant || !monto || !cantRubro) return null;
+  const puPapel = monto / cant;
+  const puRubro = baseSinIva(rubro) / cantRubro;
+  if (!(puPapel > 0) || !(puRubro > 0)) return null;
+  const razon = puPapel / puRubro;
+  if (razon <= tolerancia && razon >= 1 / tolerancia) return null;
+  const c2 = v => Math.round(v * 100) / 100;
+  return `El papel lo cotiza a $${c2(puPapel)} y el rubro vale $${c2(puRubro)} sin IVA: `
+    + (razon > 1 ? `${c2(razon)} veces más` : `${c2(1 / razon)} veces menos`) + ". Casi seguro no es el mismo trabajo.";
+}
+
+/**
+ * OTRO RENGLÓN APUNTA AL MISMO RUBRO. O es el mismo trabajo partido en dos, o
+ * uno de los dos está mal emparejado; lo que no puede ser es comparar cada
+ * uno contra el rubro entero: 111 y 3 contra 65 daban "46 de más" y "62 de
+ * menos" sobre los mismos puntos de luz.
+ */
+export function mismoRubroQueOtro(linea, lineas = []) {
+  const id = linea?.obra_rubro_id ?? linea?.rubro_id;
+  if (!id) return null;
+  const otros = (lineas || []).filter(l => l && l !== linea && String(l.obra_rubro_id ?? l.rubro_id ?? "") === String(id));
+  if (!otros.length) return null;
+  const dice = otros.map(o => `«${String(o.texto_papel || o.descripcion || "").slice(0, 40)}»`).join(", ");
+  return `${otros.length === 1 ? "Otro renglón también apunta" : `Otros ${otros.length} renglones también apuntan`} a este rubro: ${dice}. `
+    + "O es el mismo trabajo partido en dos, o uno está mal emparejado: no se compara cada uno contra el rubro entero.";
+}

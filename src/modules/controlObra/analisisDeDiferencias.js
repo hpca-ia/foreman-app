@@ -83,7 +83,7 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
 
   const filas = (lineas || []).map((l, i) => ({
     analisis_id: data.id,
-    descripcion: String(l.descripcion || "").slice(0, 300),
+    descripcion: String(l.descripcion || ""),
     unidad: l.unidad || null,
     cantidad: Number(l.cantidad) || 0,
     monto: Number(l.monto) || 0,

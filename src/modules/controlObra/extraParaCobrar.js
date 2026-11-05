@@ -28,8 +28,60 @@ const c2 = v => Math.round(n(v) * 100) / 100;
  * @param comparacion lo que devuelve compararContraPresupuesto
  * @returns { nuevos, demas, costo, cuantos }
  */
+/**
+ * DOS RENGLONES SOBRE EL MISMO RUBRO SE MIRAN JUNTOS, no cada uno contra el
+ * rubro entero. El contrato tiene 65 puntos de iluminación; la proforma trae
+ * 111 en un renglón y 3 en otro que apunta al mismo rubro. Comparados de a
+ * uno salían "46 de más" y "62 de menos" sobre los mismos 65: una orden que
+ * cobra y devuelve el mismo rubro.
+ *
+ * Si los renglones cotizan al mismo precio son el mismo trabajo partido en
+ * dos —"en piso" y normal a $33,42— y se suman. Si cotizan a precios
+ * distintos casi seguro no son el mismo trabajo: se compara el que se parece
+ * en precio al rubro, y el otro vuelve sin rubro, dicho así, para que alguien
+ * le señale el suyo.
+ */
+export function agruparPorRubro(lineas = []) {
+  const salida = [];
+  const porRubro = new Map();
+  for (const l of lineas) {
+    if (!l.rubro) { salida.push(l); continue; }
+    const k = String(l.rubro.id);
+    if (!porRubro.has(k)) porRubro.set(k, []);
+    porRubro.get(k).push(l);
+  }
+  for (const grupo of porRubro.values()) {
+    if (grupo.length === 1) { salida.push(grupo[0]); continue; }
+    const pus = grupo.map(l => n(l.puProforma));
+    const parejos = pus.every(p => p > 0) && Math.max(...pus) <= Math.min(...pus) * 1.25;
+    if (parejos) {
+      const cantidad = c2(grupo.reduce((t, l) => t + n(l.cantidad), 0));
+      const cotizado = c2(grupo.reduce((t, l) => t + n(l.cotizado), 0));
+      salida.push({
+        ...grupo[0], cantidad, cotizado, monto: cotizado,
+        puProforma: cantidad ? Math.round((cotizado / cantidad) * 10000) / 10000 : grupo[0].puProforma,
+        descripcion: grupo.map(l => l.descripcion).join(" + "),
+        juntos: grupo.length,
+        porJuntos: `${grupo.length} renglones de la proforma apuntan a este rubro y se suman: `
+          + `${grupo.map(l => n(l.cantidad)).join(" + ")} = ${cantidad} ${grupo[0].unidadRubro || grupo[0].unidad || ""}`.trim(),
+      });
+    } else {
+      const vara = n(grupo[0].puRubro);
+      const [queda, ...otros] = [...grupo].sort((a, b) => Math.abs(n(a.puProforma) - vara) - Math.abs(n(b.puProforma) - vara));
+      salida.push({ ...queda, dudoso: "otro renglón de la proforma apuntaba a este rubro a otro precio y se dejó aparte" });
+      for (const o of otros) salida.push({
+        ...o, rubro: null, rubroDudoso: queda.rubro,
+        dudoso: `apuntaba al mismo rubro que «${String(queda.descripcion || "").slice(0, 50)}» pero a otro precio `
+          + `($${c2(o.puProforma)} contra $${c2(queda.puProforma)}): casi seguro es otro trabajo. Señalale su rubro.`,
+      });
+    }
+  }
+  return salida;
+}
+
 export function loQueNoEstaPresupuestado(comparacion) {
-  const lineas = comparacion?.lineas || [];
+  const lineas = agruparPorRubro(comparacion?.lineas || []);
+  const juntos = l => (l.porJuntos ? `${l.porJuntos} · ` : "");
 
   // DE DÓNDE VIENE EL RUBRO CONTRA EL QUE SE COMPARA.
   //
@@ -44,14 +96,14 @@ export function loQueNoEstaPresupuestado(comparacion) {
 
   // Trabajo nuevo: la proforma lo cotiza y no hay rubro que lo contenga.
   const nuevos = lineas.filter(l => !l.rubro).map(l => ({
-    descripcion: String(l.descripcion || "").slice(0, 160),
+    descripcion: String(l.descripcion || "").slice(0, 400),
     unidad: l.unidad || "u",
     cantidad: n(l.cantidad) || 1,
     costo: c2(l.cotizado),
     costoUnitario: c2(n(l.cotizado) / (n(l.cantidad) || 1)),
     // No hay precio acordado: hay que ponerle uno.
     precioUnitario: null,
-    por: "no está en el presupuesto",
+    por: l.dudoso || "no está en el presupuesto",
     // Acá los dos textos coinciden —no hay rubro con el cual confundirse— pero
     // se guarda igual: así todas las diferencias se miran del mismo modo.
     textoPapel: l.descripcion || null,
@@ -112,7 +164,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
     const comun = n(l.cantidadRubro) > 0 ? Math.min(n(l.cantidad), n(l.cantidadRubro)) : n(l.cantidad);
     const dif = c2((n(l.puProforma) - n(vara)) * comun);
     return {
-      descripcion: `${l.rubro.descripcion || l.descripcion} — ${dif > 0 ? "subió" : "bajó"} de precio`.slice(0, 160),
+      descripcion: `${l.rubro.descripcion || l.descripcion} — ${dif > 0 ? "subió" : "bajó"} de precio`.slice(0, 400),
       unidad: l.unidadRubro || l.unidad || "u",
       cantidad: comun,
       costo: Math.abs(dif),
@@ -122,7 +174,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
       // la orden, y esa es una decisión de alguien, no un automatismo.
       precioUnitario: null,
       contraPrecio,
-      por: `${contraPrecio ? "el cliente lo vio a" : "costaba"} $${c2(vara)} y ahora lo cotizan a $${c2(l.puProforma)}`
+      por: juntos(l) + `${contraPrecio ? "el cliente lo vio a" : "costaba"} $${c2(vara)} y ahora lo cotizan a $${c2(l.puProforma)}`
         + (n(l.cantidad) !== n(l.cantidadRubro) && n(l.cantidadRubro) > 0
           ? ` · sobre las ${comun} ${l.unidadRubro || l.unidad || "u"} que los dos tienen, la cantidad va aparte` : ""),
       // EL RENGLÓN TAL COMO LO ESCRIBIÓ EL PROVEEDOR. La descripción de arriba
@@ -150,7 +202,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
   const demas = lineas.filter(l => l.rubro && n(l.cantidad) > n(l.cantidadRubro) * 1.001).map(l => {
     const extra = c2(n(l.cantidad) - n(l.cantidadRubro));
     return {
-      descripcion: `${l.rubro.descripcion || l.descripcion} — ${extra} ${l.unidadRubro || l.unidad || "u"} de más`.slice(0, 160),
+      descripcion: `${l.rubro.descripcion || l.descripcion} — ${extra} ${l.unidadRubro || l.unidad || "u"} de más`.slice(0, 400),
       unidad: l.unidadRubro || l.unidad || "u",
       cantidad: extra,
       // SOLO LA CANTIDAD, al precio de la propuesta: lo que ese precio tenga de
@@ -162,7 +214,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
       // ponerle precio a un rubro que el cliente ya firmó es abrir una
       // negociación que no hacía falta.
       precioUnitario: l.puRubro != null ? c2(l.puRubro) : null,
-      por: `el rubro tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y la proforma trae ${n(l.cantidad)}`.trim(),
+      por: juntos(l) + `el rubro tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y la proforma trae ${n(l.cantidad)}`.trim(),
       // EL RENGLÓN TAL COMO LO ESCRIBIÓ EL PROVEEDOR. La descripción de arriba
       // usa el nombre del rubro del contrato —es lo correcto, lo que cambió es
       // su precio y no su nombre— y entonces el papel desaparece de la
@@ -192,13 +244,13 @@ export function loQueNoEstaPresupuestado(comparacion) {
   const menos = lineas.filter(l => l.rubro && n(l.cantidad) > 0 && n(l.cantidad) < n(l.cantidadRubro) * 0.999).map(l => {
     const falta = c2(n(l.cantidadRubro) - n(l.cantidad));
     return {
-      descripcion: `${l.rubro.descripcion || l.descripcion} — ${falta} ${l.unidadRubro || l.unidad || "u"} de menos`.slice(0, 160),
+      descripcion: `${l.rubro.descripcion || l.descripcion} — ${falta} ${l.unidadRubro || l.unidad || "u"} de menos`.slice(0, 400),
       unidad: l.unidadRubro || l.unidad || "u",
       cantidad: falta,
       costo: c2(falta * (n(l.puProforma) || 0)),
       costoUnitario: c2(l.puProforma),
       precioUnitario: l.puRubro != null ? c2(l.puRubro) : null,
-      por: `el contrato tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y acá figuran ${n(l.cantidad)}`.trim(),
+      por: juntos(l) + `el contrato tiene ${n(l.cantidadRubro)} ${l.unidadRubro || ""} y acá figuran ${n(l.cantidad)}`.trim(),
       // EL RENGLÓN TAL COMO LO ESCRIBIÓ EL PROVEEDOR. La descripción de arriba
       // usa el nombre del rubro del contrato —es lo correcto, lo que cambió es
       // su precio y no su nombre— y entonces el papel desaparece de la

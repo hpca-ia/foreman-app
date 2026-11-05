@@ -89,14 +89,22 @@ function parecido(a, b) {
   // espacios son idénticos, que es lo que cualquiera ve al leerlos.
   if (a.replace(/ /g, "") === b.replace(/ /g, "")) return 1;
   if (a.startsWith(b) || b.startsWith(a)) return 0.95;
-  const largas = t => new Set(t.split(" ").filter(w => w.length >= 5));
-  const A = largas(a);
-  const B = largas(b);
-  const chico = A.size <= B.size ? A : B;
-  if (chico.size < 2) return 0;
+  // LAS PALABRAS DE LOS DOS LADOS, no solo las del más corto. Contar cuántas
+  // palabras del texto corto están en el largo premiaba al rubro genérico:
+  // "Punto de iluminación con tubería EMT" tiene todas sus palabras adentro de
+  // "Punto para SENSOR de iluminación con tubería EMT" y sacaba 1,0, más que
+  // el rubro del sensor, que es el que corresponde. Así salieron 3 puntos de
+  // sensor comparados contra 65 puntos de luz. Se cuenta lo compartido sobre
+  // lo que hay entre los dos: la palabra que sobra a un lado descuenta. Y
+  // desde cuatro letras, que "piso" y "caja" son las que distinguen un
+  // tomacorriente de piso de uno de pared.
+  const palabras = t => new Set(t.split(" ").filter(w => w.length >= 4));
+  const A = palabras(a);
+  const B = palabras(b);
+  if (A.size < 2 || B.size < 2) return 0;
   let juntas = 0;
-  for (const w of chico) if ((A === chico ? B : A).has(w)) juntas += 1;
-  return juntas / chico.size;
+  for (const w of A) if (B.has(w)) juntas += 1;
+  return juntas / (A.size + B.size - juntas);
 }
 
 /**
@@ -177,7 +185,7 @@ export function pedidoDeEmparejamiento(items = [], rubros = [], cuantos = 5) {
     if (!cands.length) return;
     indices.push(i);
     lineas.push(`${indices.length}. ${it.descripcion} (${it.cantidad || ""} ${it.unidad || ""})\n`
-      + cands.map(r => `   ${r.id} = ${String(r.descripcion || "").slice(0, 90)} (${r.cantidad} ${r.unidad || ""})`).join("\n"));
+      + cands.map(r => `   ${r.id} = ${String(r.descripcion || "")} (${r.cantidad} ${r.unidad || ""})`).join("\n"));
   });
   return { texto: lineas.join("\n\n"), indices };
 }
