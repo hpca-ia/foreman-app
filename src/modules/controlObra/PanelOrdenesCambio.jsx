@@ -925,7 +925,18 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
         const hon = honorariosDe({ lineas: suyas, pct: pctQueCorresponde(o, obra) });
         const suyasFotos = fotos[o.id] || [];
         const esta = abierta === o.id;
-        const editable = puedeEditar && o.estado !== "aprobada";
+        // UNA ORDEN QUE YA SALIÓ DE LA OFICINA NO SE EDITA.
+        //
+        // Lo que el cliente tiene en la mano es lo que dice el sistema. Antes
+        // una orden enviada seguía con todos sus campos abiertos: se le podía
+        // cambiar un precio después de mandada y el papel firmado ya no era
+        // el que estaba guardado. Se edita en borrador y nada más. Para
+        // cambiar una enviada, una aprobada o una que se rechazó, se hace una
+        // modificación —OC-04-A—, que nace en borrador con las mismas partidas.
+        //
+        // Lo que sigue pudiéndose tocar es lo interno, que no está en el papel:
+        // el costo de cada partida, las cotizaciones, los gastos, quién firma.
+        const editable = puedeEditar && o.estado === "borrador";
         return (
           <div key={o.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 8 }}>
             {/* Una fila que se abre y no lo dice es una fila que nadie abre:
@@ -997,7 +1008,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       </span>
                     )}
                   </div>
-                  {puedeEditar && p.seMando && p.faltan.length > 0 && (
+                  {puedeEditar && p.seMando && p.faltan.length > 0 && !o.reemplazada_at && (
                     <Button variant="outline" size="sm" disabled={insistiendo === o.id}
                       onClick={async e => {
                         e.stopPropagation();
@@ -1488,7 +1499,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                               style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
                               {verRenglones === c.id ? "ocultar lo leído" : "ver lo leído"}
                             </button>
-                            {puedeEditar && o.estado !== "aprobada" && (c.items || []).length > 0 && (
+                            {editable && (c.items || []).length > 0 && (
                               <button onClick={() => hacer(() => agregarPartidas(o, c, suyas))} disabled={ocupado}
                                 style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11, color: colors.brand, textDecoration: "underline" }}>
                                 agregar sus renglones como partidas
@@ -2561,32 +2572,60 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   </div>
                 )}
 
-                {/* REVISAR UNA ORDEN APROBADA. No es anularla —esa no
+                {/* MODIFICAR UNA ORDEN QUE YA SALIÓ. No es anularla —esa no
                     existió— ni mandar otra nueva por el mismo trabajo: es la
-                    misma conversación con otro alcance, y el número lo dice. */}
-                {puedeEditar && o.estado === "aprobada" && !o.anulada && !o.reemplazada_at && (
-                  <div style={{ marginBottom: 8 }}>
-                    <Button variant="outline" size="sm" disabled={ocupado}
-                      onClick={async () => {
-                        if (!window.confirm(`¿Hacer una revisión de la ${codigoDe(o)}?\n\n`
-                          + "Nace en borrador con las mismas partidas, para editarlas. La "
-                          + `${codigoDe(o)} sigue siendo la que manda hasta que el cliente apruebe la revisión.`)) return;
-                        setOcupado(true);
-                        const r = await crearRevision(o, ordenes, currentUser);
-                        setOcupado(false);
-                        if (r.error) { setAviso(r.error); return; }
-                        await cargar();
-                        setAbierta(r.orden.id);
-                        setAviso(`Quedó la ${codigoDe(r.orden)} en borrador con ${r.cuantas} `
-                          + `${r.cuantas === 1 ? "partida" : "partidas"} copiadas. Editala y mandala a aprobar.`);
-                      }}>
-                      Hacer una revisión · {codigoDeLaRevision(o, ordenes)}
-                    </Button>
-                    <span style={{ fontSize: 10.5, color: colors.muted, marginLeft: 8 }}>
-                      Cuando se apruebe, sus rubros reemplazan a los de esta en el control.
-                    </span>
-                  </div>
-                )}
+                    misma orden con otro alcance, y el código lo dice. La
+                    OC-04 pasa a OC-04-A, después OC-04-B. No consume número:
+                    la orden que sigue es la OC-05. */}
+                {puedeEditar && o.estado !== "borrador" && !o.anulada && !o.reemplazada_at && (() => {
+                  // Una sola modificación abierta por orden: la siguiente se
+                  // hace sobre la última, no dos veces sobre la misma.
+                  const hija = ordenes.find(x => Number(x.revision_de) === Number(o.id) && !x.anulada);
+                  const aprobada = o.estado === "aprobada";
+                  return (
+                    <div style={{ marginBottom: 8, background: colors.bg, borderRadius: 8, padding: "8px 10px",
+                      fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+                      <strong style={{ color: colors.ink }}>
+                        {aprobada ? "Esta orden está aprobada" : o.estado === "rechazada" ? "Esta orden se rechazó" : "Esta orden ya se envió"}:
+                        su contenido no se edita.
+                      </strong>{" "}
+                      {hija ? (
+                        <>Ya tiene su modificación, la <strong>{codigoDe(hija)}</strong>
+                          {hija.estado === "borrador" ? ", en borrador: editala y mandala." : "."}</>
+                      ) : (
+                        <>
+                          Para cambiarla se hace una modificación, que lleva el mismo número con una letra.
+                          <div style={{ marginTop: 6 }}>
+                            <Button variant="outline" size="sm" disabled={ocupado}
+                              onClick={async () => {
+                                const nueva = codigoDeLaRevision(o, ordenes);
+                                if (!window.confirm(`¿Hacer la modificación ${nueva} de la ${codigoDe(o)}?\n\n`
+                                  + "Nace en borrador con las mismas partidas, para editarlas. "
+                                  + (aprobada
+                                    ? `La ${codigoDe(o)} sigue siendo la que manda hasta que el cliente apruebe la ${nueva}.`
+                                    : `Cuando mandes la ${nueva}, la ${codigoDe(o)} deja de valer: su enlace de aprobación se cierra y dice que fue reemplazada.`))) return;
+                                setOcupado(true);
+                                const r = await crearRevision(o, ordenes, currentUser);
+                                setOcupado(false);
+                                if (r.error) { setAviso(r.error); return; }
+                                await cargar();
+                                setAbierta(r.orden.id);
+                                setAviso(`Quedó la ${codigoDe(r.orden)} en borrador con ${r.cuantas} `
+                                  + `${r.cuantas === 1 ? "partida" : "partidas"} copiadas. Editala y mandala a aprobar.`);
+                              }}>
+                              Hacer la modificación · {codigoDeLaRevision(o, ordenes)}
+                            </Button>
+                            <span style={{ fontSize: 10.5, color: colors.muted, marginLeft: 8 }}>
+                              {aprobada
+                                ? "Cuando se apruebe, sus rubros reemplazan a los de esta en el control."
+                                : "Al mandarla, esta deja de valer."}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {/* El PDF, con líneas o sin ellas: es el formato de la orden,
@@ -2666,7 +2705,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       {o.visto_pedido_at ? "Volver a pedir el visto" : "Pedir el visto al Director"}
                     </Button>
                   )}
-                  {puedeEditar && suyas.length > 0 && (
+                  {puedeEditar && suyas.length > 0 && !o.reemplazada_at && (
                     <Button variant={o.visto_at || esDirector ? "outline" : "secondary"} size="sm"
                       title={o.visto_at || esDirector ? "" : "Todavía no la aprobó el Director"}
                       onClick={() => {
@@ -2696,7 +2735,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                       camino normal es mandarla y que firmen por su enlace —eso
                       la aprueba solo—; esto es para cuando la aceptaron en una
                       reunión o por WhatsApp y hay que dejarlo escrito. */}
-                  {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && (
+                  {puedeEditar && o.estado !== "aprobada" && suyas.length > 0 && !o.reemplazada_at && (
                     <button disabled={ocupado}
                       title="Solo si la aprobaron por fuera de FOREMAN. Si firman por el enlace del correo, la orden se aprueba sola."
                       style={{ background: "none", border: "none", padding: "0 4px", cursor: "pointer",

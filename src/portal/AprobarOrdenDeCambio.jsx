@@ -83,10 +83,27 @@ export default function AprobarOrdenDeCambio({ token }) {
           </div>
         )}
 
+        {orden.reemplazada && !orden.anulada && (
+          <div style={{ marginTop: 12, background: "#FFF7ED", border: "1px solid #FDBA74", color: C.ambar,
+            borderRadius: 10, padding: "10px 14px", fontWeight: 700, fontSize: 13, textAlign: "center" }}>
+            ESTA ORDEN FUE REEMPLAZADA{orden.reemplazadaPor ? ` POR LA ${orden.reemplazadaPor}` : " POR UNA MODIFICACIÓN"}
+          </div>
+        )}
+
         {/* LO QUE SE LE PIDE, ARRIBA. Quien abre esto desde el correo quiere
             saber en dos segundos qué tiene que hacer. */}
         <Caja>
-          {yaFirmo ? (
+          {(orden.reemplazada || orden.anulada) && !yaFirmo ? (
+            <div style={{ fontSize: 14, color: C.ink, lineHeight: 1.5 }}>
+              <strong>Esta orden ya no se aprueba.</strong>
+              <div style={{ color: C.gris, fontSize: 13, marginTop: 3 }}>
+                {orden.anulada
+                  ? "Fue anulada por el equipo de la obra."
+                  : `La reemplazó ${orden.reemplazadaPor ? `la ${orden.reemplazadaPor}` : "una modificación"}, que te llegó en otro correo. Aprobá esa.`}
+                {" "}Abajo queda el detalle de lo que decía, solo para consulta.
+              </div>
+            </div>
+          ) : yaFirmo ? (
             <div style={{ color: C.verde, fontSize: 15, fontWeight: 600 }}>
               ✓ Aprobaste esta orden de cambio.
               <div style={{ fontSize: 12.5, color: C.gris, fontWeight: 400, marginTop: 4 }}>

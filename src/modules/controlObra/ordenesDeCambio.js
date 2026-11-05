@@ -125,7 +125,12 @@ export async function crearOrden(obraId, datos, quien) {
 }
 
 /**
- * UNA REVISIÓN DE UNA ORDEN QUE YA SE APROBÓ.
+ * UNA MODIFICACIÓN DE UNA ORDEN QUE YA SALIÓ DE LA OFICINA: OC-04 → OC-04-A.
+ *
+ * Una orden enviada o aprobada no se edita: lo que el cliente tiene en la mano
+ * es lo que dice el sistema, y si después cambia un precio sin que cambie el
+ * papel, nadie puede saber qué fue lo que se aprobó. Para cambiarla se hace
+ * una modificación, que lleva su mismo número y una letra.
  *
  * Nace en borrador y con las partidas de la que revisa, porque casi nunca se
  * rehace todo: se agregan cuarenta metros, se cambia un acabado, se saca un
@@ -661,6 +666,21 @@ export async function enviarOrden(orden, destinatarios, cuerpo, quien, aprobador
   if (eC && /column|schema cache/i.test(eC.message)) await supabase.from("orden_cambio_envios").insert(constancia);
   if (orden.estado === "borrador") {
     await guardarOrden(orden.id, { estado: "enviada", enviada_at: new Date().toISOString() });
+  }
+  // LA MODIFICACIÓN REEMPLAZA A LA QUE TODAVÍA NO SE APROBÓ, DESDE QUE SALE.
+  //
+  // Si la OC-04 está enviada y sin firmar y sale la OC-04-A, el cliente tiene
+  // dos papeles por el mismo cambio y dos enlaces para aprobar. La anterior
+  // deja de valer en este momento: su enlace se cierra y dice cuál la
+  // reemplaza. Una que ya estaba APROBADA es distinta —sigue mandando en el
+  // control hasta que el cliente apruebe la modificación—, y esa se reemplaza
+  // recién al aprobarse.
+  if (orden.revision_de) {
+    const { data: anterior } = await supabase.from("ordenes_cambio")
+      .select("id,estado,reemplazada_at").eq("id", orden.revision_de).maybeSingle();
+    if (anterior && anterior.estado !== "aprobada" && !anterior.reemplazada_at) {
+      await guardarOrden(anterior.id, { reemplazada_at: new Date().toISOString() });
+    }
   }
   return { ok: true, enviadoA: datos.enviadoA || limpios };
 }

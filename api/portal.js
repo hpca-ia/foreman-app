@@ -366,6 +366,10 @@ async function ordenParaFirmar(req, res, firma) {
       // el documento pero no la pantalla donde aprueba.
       honorarios_pct: orden.honorarios_pct ?? obras?.[0]?.honorarios_pct ?? null,
       anulada: orden.anulada,
+      // Si una modificación la reemplazó, el que abre el enlace tiene que
+      // saberlo antes de firmar un papel que ya no vale, y cuál es el que vale.
+      reemplazada: !!orden.reemplazada_at,
+      reemplazadaPor: orden.reemplazada_at ? await laQueLaReemplaza(orden.id) : null,
     },
     // EL MONTO SE CALCULA ACÁ. Se mandaban `l.total` y `l.accion`, dos
     // columnas que la tabla no tiene: la línea guarda cantidad y precio, y lo
@@ -393,7 +397,24 @@ async function ordenParaFirmar(req, res, firma) {
   });
 }
 
+/** El código de la modificación que reemplazó a una orden, si la hay. */
+async function laQueLaReemplaza(ordenId) {
+  const hijas = await json(await rest(`ordenes_cambio?revision_de=eq.${ordenId}&anulada=not.is.true&select=codigo,numero&order=id.desc&limit=1`));
+  const h = hijas?.[0];
+  return h ? (h.codigo || `OC-${String(h.numero).padStart(2, "0")}`) : null;
+}
+
 async function firmarOrden(req, res, firma) {
+  // UN PAPEL QUE YA NO VALE NO SE FIRMA. La orden que se anuló, o la que fue
+  // reemplazada por su modificación, sigue teniendo su enlace en un correo
+  // viejo: si se pudiera aprobar desde ahí, entraría al control una orden que
+  // la oficina ya había cambiado por otra.
+  const vigente = (await json(await rest(`ordenes_cambio?id=eq.${firma.orden_id}&select=id,anulada,reemplazada_at`)))?.[0];
+  if (vigente?.anulada) return res.status(409).json({ error: "Esta orden de cambio fue anulada: ya no se puede aprobar." });
+  if (vigente?.reemplazada_at) {
+    const por = await laQueLaReemplaza(firma.orden_id);
+    return res.status(409).json({ error: `Esta orden de cambio fue reemplazada${por ? ` por la ${por}` : " por una modificación"}: ya no se puede aprobar. Revisá el correo de la orden nueva.` });
+  }
   const { aprueba, observacion } = req.body || {};
   const texto = String(observacion || "").trim().slice(0, 2000);
   if (!aprueba && !texto) return res.status(400).json({ error: "Decí si la aprobás o escribí qué objetás." });
@@ -450,7 +471,7 @@ async function siFirmaronTodos(ordenId) {
   const orden = ordenes?.[0];
   // Idempotente: si ya se aplicó, no se aplica dos veces. Un adicional
   // duplicado es plata inventada en el control.
-  if (!orden || orden.aprobada_at) return null;
+  if (!orden || orden.aprobada_at || orden.anulada || orden.reemplazada_at) return null;
 
   const lineas = await json(await rest(`orden_cambio_lineas?orden_id=eq.${ordenId}&select=*&order=orden`)) || [];
   const codigo = orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`;
@@ -509,6 +530,21 @@ async function siFirmaronTodos(ordenId) {
       ejecucion: orden.ejecucion === "por_definir" ? "ejecutado" : orden.ejecucion,
     }),
   });
+
+  // EN EL CONTROL MANDA LA ÚLTIMA VERSIÓN, también cuando aprueba el cliente.
+  // Si esta orden es la modificación de otra, los rubros de la anterior salen
+  // del control y la anterior queda reemplazada: con las dos adentro, el
+  // contrato vigente sumaría el mismo trabajo dos veces. La oficina ya lo
+  // hacía; por esta puerta no.
+  if (orden.revision_de) {
+    await rest(`obra_rubros?orden_cambio_id=eq.${Number(orden.revision_de)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    await rest(`obra_rubros?anulado_por_oc=eq.${Number(orden.revision_de)}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ anulado_por_oc: null }),
+    });
+    await rest(`ordenes_cambio?id=eq.${Number(orden.revision_de)}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ reemplazada_at: ahora }),
+    });
+  }
 
   const monto = filas.reduce((t, f) => t + (Number(f.total_base) || 0), 0);
   return { codigo, rubros: filas.length, monto: Math.round(monto * 100) / 100 };
