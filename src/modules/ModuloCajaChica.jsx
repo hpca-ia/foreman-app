@@ -23,6 +23,7 @@ import CampoProveedor from "../components/CampoProveedor";
 import { LECTURA, textoDeNova } from "../lib/modelos";
 import { leerRenglones } from "./controlObra/renglones";
 import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
+import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
 
 export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -669,7 +670,14 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
     // Lo que apunta a algo: un rubro exacto o una agrupación entera. Antes
     // solo se miraba la agrupación, así que elegir el rubro exacto no servía
     // de nada —se guardaba en la pantalla y se perdía al grabar.
-    const conRubros = rubrosGasto.filter(r=>r.obra_actividad_id||r.obra_rubro_id);
+    //
+    // Y CUÁNTO VA A CADA UNO SE DECIDE ACÁ, AL GRABAR. El renglón guardaba el
+    // monto que el documento tenía en el momento de elegir el rubro: cero, si
+    // todavía no estaba leído. Lo que vale cero no se guardaba, y el gasto
+    // entraba al control sin rubro y sin un solo aviso. La regla vive en
+    // repartoDelGasto.js: un solo rubro se lleva el documento entero.
+    const conRubros = repartoDelGasto(rubrosGasto, gastoForm.monto);
+    let errorDeRubro = null;
     // LO QUE SE CARGA AL RUBRO TIENE EL SIGNO DEL DOCUMENTO, SIEMPRE.
     //
     // Se guardaba tal como estaba escrito en el renglón. Si el documento era
@@ -717,11 +725,16 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           clase:claseDeGasto(tipoGasto),
           ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
         }).eq("id",gastoEditando.obra_factura_id);
-        if (conRubros.length) {
-          await supabase.from("obra_asignaciones").delete().eq("factura_id",gastoEditando.obra_factura_id);
-          await supabase.from("obra_asignaciones").insert(conRubros
-            .map(r=>aAsignacion(gastoEditando.obra_factura_id, r))
-            .filter(f=>f.monto!==0));
+        const filasNuevas = conRubros
+          .map(r=>aAsignacion(gastoEditando.obra_factura_id, r))
+          .filter(f=>f.monto!==0);
+        if (filasNuevas.length) {
+          // SE GUARDA Y SE COMPRUEBA. Nadie miraba si esto había entrado: si
+          // fallaba, el rubro anterior ya estaba borrado y el nuevo no existía.
+          const {error:eBorrar} = await supabase.from("obra_asignaciones").delete().eq("factura_id",gastoEditando.obra_factura_id);
+          const {error:eRubro} = eBorrar ? {error:eBorrar}
+            : await supabase.from("obra_asignaciones").insert(filasNuevas);
+          if (eRubro) errorDeRubro = eRubro.message;
         } else {
           // SI NO SE TOCARON LOS RUBROS, AL MENOS QUE NO CONTRADIGAN AL
           // DOCUMENTO. Corregir un gasto a devolución dejaba las asignaciones
@@ -771,8 +784,13 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
       // El saldo se vuelve a sumar de las filas que hay en la base, no de lo
       // que esta pantalla tiene en memoria: es la única cifra que cualquiera
       // puede verificar contando los papeles.
-      setGastos(gastos.map(g=>g.id===gastoEditando.id?{...g,...campos}:g));
+      // LA LISTA SE VUELVE A LEER DE LA BASE, CON SUS RUBROS. Se actualizaba
+      // solo el gasto en memoria y el rubro no se volvía a leer: recién
+      // grabado, el renglón seguía diciendo "sin rubro todavía", y quien lo
+      // había asignado lo asignaba de nuevo creyendo que no había entrado.
+      await fetchGastos(cajaActiva.id);
       await recalcularSaldos(cajaActiva.id);
+      if (errorDeRubro) window.alert("El gasto se corrigió, pero el rubro no se pudo guardar: " + errorDeRubro);
       setGastoEditando(null);
       setGastoForm({descripcion:"",proveedor:"",ruc:"",numero_factura:"",monto:"",fecha:new Date().toISOString().split("T")[0],tipo:"factura",notas:"",presupuesto_id:""});
       setDupsGasto({exactos:[],posibles:[]}); setDupJustificacion(""); setArchivoHash(null); setNovaError("");
@@ -854,11 +872,19 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
           const filas = conRubros
             .map(r=>aAsignacion(facturaObra.id, r))
             .filter(f=>f.monto!==0);
-          if (filas.length) await supabase.from("obra_asignaciones").insert(filas);
+          if (filas.length) {
+            const {error:eRubro} = await supabase.from("obra_asignaciones").insert(filas);
+            if (eRubro) errorDeRubro = eRubro.message;
+          }
         }
         else if (errObra) setNovaError("El gasto se guardó, pero no entró al control de la obra: " + errObra.message);
       }
-      setGastos(prev=>[data,...prev]);
+      // SE VUELVE A LEER LA CAJA ENTERA. Poniendo en la lista la fila recién
+      // insertada, el gasto aparecía sin su factura del control —se la ata un
+      // paso después— y decía "No está en Control de Obra" y "sin rubro" de un
+      // gasto que tenía las dos cosas.
+      await fetchGastos(cajaActiva.id);
+      if (errorDeRubro) window.alert("El gasto entró al control, pero el rubro no se pudo guardar: " + errorDeRubro);
       // Sumando de a uno sobre el saldo anterior, cualquier gasto que después
       // se borre queda adentro para siempre: la caja decía $1.325,40 sobre
       // gastos que sumaban $1.225,43. Se vuelve a sumar lo que hay.
@@ -1571,6 +1597,19 @@ export default function ModuloCajaChica({ currentUser, puede, projects, users, n
                         numero_factura:g.numero_factura||"",monto:g.monto||"",fecha:(g.fecha||"").slice(0,10),
                         tipo:g.tipo||"factura",notas:g.notas||"",presupuesto_id:""});
                       setRubrosGasto([]); setArchivoGasto(null); setArchivoPreview(null);
+                      // EL RUBRO QUE YA TIENE, A LA VISTA. El formulario abría
+                      // vacío aunque el gasto estuviera asignado: no había
+                      // forma de saber, desde acá, a qué rubro estaba yendo.
+                      if (g.obra_factura_id) {
+                        supabase.from("obra_asignaciones").select("obra_rubro_id,obra_actividad_id,monto")
+                          .eq("factura_id", g.obra_factura_id).then(({ data: ya }) => {
+                            const suyas = (ya || []).filter(a => a.obra_rubro_id || a.obra_actividad_id);
+                            if (suyas.length) setRubrosGasto(suyas.map(a => ({
+                              ...(a.obra_rubro_id ? { obra_rubro_id: a.obra_rubro_id } : { obra_actividad_id: a.obra_actividad_id }),
+                              monto: Math.abs(Number(a.monto) || 0),
+                            })));
+                          });
+                      }
                       setDupsGasto({exactos:[],posibles:[]}); setNovaError("");
                       // Lo que ya se había pagado con vales vuelve al
                       // formulario: si no, corregir la fecha de un gasto le
