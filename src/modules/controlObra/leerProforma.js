@@ -36,7 +36,14 @@ export const FORMATO = `Contestá en LÍNEAS, sin JSON, sin markdown y sin ningu
 explicación. Una línea por cada renglón de la proforma, con los campos separados
 por barras, exactamente así:
 
-descripción | cantidad | unidad | precio unitario | monto | rubro_id
+ítem | descripción | cantidad | unidad | precio unitario | monto | rubro_id
+
+"ítem" es el número de ítem impreso en el papel, tal cual. Si el papel no numera
+sus renglones, poné un guion. Sirve para saber cuáles faltan y para seguir donde
+se cortó una respuesta larga.
+
+LOS RENGLONES CON CANTIDAD 0 Y SIN MONTO NO SE TRANSCRIBEN: figuran en el papel
+pero no se están cotizando.
 
 La primera línea es el proveedor:  PROVEEDOR | nombre del proveedor
 
@@ -143,6 +150,16 @@ export function renglonesDeTexto(txt = "") {
     // tendría que ser la cantidad: si no es un número, la barra estaba en el
     // texto y los campos son cinco.
     const esNumero = t => /^[\s$]*-?[\d.,]+\s*$/.test(String(t || ""));
+    // EL NÚMERO DE ÍTEM, SI VINO. Es un entero corto o un guion delante de la
+    // descripción; una descripción nunca es eso, y si el segundo campo es un
+    // número entonces el primero era la descripción de un renglón viejo.
+    let item = null;
+    // Vacío también: el guion del ítem se va con las viñetas que se limpian al
+    // principio de la línea, y deja el primer campo en blanco.
+    if (campos.length >= 6 && /^(\d{1,4}|[-–—]?)$/.test(campos[0]) && !esNumero(campos[1])) {
+      item = /^\d+$/.test(campos[0]) ? Number(campos[0]) : null;
+      campos = campos.slice(1);
+    }
     const conUnitario = campos.length >= 6
       && esNumero(campos[campos.length - 5]) && esNumero(campos[campos.length - 3]);
     const cuantos = conUnitario ? 5 : 4;
@@ -157,6 +174,7 @@ export function renglonesDeTexto(txt = "") {
     if (/^descripci/i.test(descripcion)) continue;     // repitió el encabezado
     const id = String(rubro || "").trim();
     items.push({
+      ...(item != null ? { item } : {}),
       descripcion,
       cantidad: num(cantidad),
       unidad: String(unidad || "").slice(0, 10),
@@ -393,6 +411,70 @@ export function asignacionDeTexto(txt = "") {
   return mapa;
 }
 
+// ── SEGUIR DONDE SE CORTÓ, HASTA EL FINAL DEL PAPEL ───────────────────────
+//
+// El modelo tiene un techo de escritura por llamada, y la función un minuto
+// de tiempo: una proforma de 69 ítems con la descripción entera no entra en
+// una sola respuesta. Se cortaba en el ítem 31, se tiraba la línea a medio
+// escribir y se seguía como si el papel terminara ahí: $12.014 leídos de
+// $18.298. El aviso estaba, pero una lectura a la que le falta la mitad no se
+// arregla con un aviso.
+//
+// Cuando la respuesta se corta, se pide la continuación: "el último renglón
+// fue este, seguí desde el siguiente". Cada parte entra en su techo y en su
+// minuto, y el papel se lee hasta el final, tenga treinta renglones o
+// trescientos. Lo repetido en el empalme se descarta por número de ítem, o
+// por texto y monto si el papel no numera.
+
+const mismoRenglon = (a, b) => (a.item != null && b.item != null
+  ? Number(a.item) === Number(b.item)
+  : String(a.descripcion || "").trim().toLowerCase() === String(b.descripcion || "").trim().toLowerCase()
+    && Math.abs((Number(a.monto) || 0) - (Number(b.monto) || 0)) < 0.005
+    && (Number(a.cantidad) || 0) === (Number(b.cantidad) || 0));
+
+/** Lo que se le dice al modelo para que siga, con el último renglón entero a la vista. */
+export function continuacion(items = []) {
+  const u = items[items.length - 1];
+  if (!u) return null;
+  return `Ya transcribiste ${items.length} renglones de este documento. El último fue`
+    + `${u.item != null ? ` el ítem ${u.item}:` : ":"} «${u.descripcion}» por ${u.monto}. `
+    + "Seguí desde el renglón SIGUIENTE a ese, sin repetir ninguno de los anteriores, hasta el final "
+    + "del documento, incluidas las páginas que siguen. El mismo formato, sin encabezados.";
+}
+
+/**
+ * @param pedir       (cuerpo) => { texto, cortado }
+ * @param cuerpoPara  (sigue) => cuerpo. `sigue` es null en la primera parte y
+ *                    el texto de continuación en las que vienen después.
+ * @returns { items, proveedor, iva, totales, descuento, cortado, partes }.
+ *          `cortado` queda en true solo si ni con todas las partes se llegó
+ *          al final.
+ */
+export async function leerSinCortes({ pedir, cuerpoPara, onPaso, partes = 8 }) {
+  const junto = { items: [], proveedor: "", iva: 0, totales: null, descuento: 0 };
+  let cortado = false, sigue = null, hechas = 0;
+  for (let parte = 1; parte <= partes; parte++) {
+    if (parte > 1) onPaso?.(`el papel sigue · leyendo desde el renglón ${junto.items.length + 1}`);
+    const { texto, cortado: seCorto } = await pedir(cuerpoPara(sigue));
+    hechas = parte;
+    const leido = interpretarRespuesta(texto);
+    // La última línea de una respuesta cortada quedó a medio escribir: un
+    // monto cortado —"48" de "48,90"— entra como un renglón que parece bueno.
+    if (seCorto) leido.items.pop();
+    const nuevos = leido.items.filter(x => !junto.items.some(y => mismoRenglon(x, y)));
+    junto.items.push(...nuevos);
+    if (leido.proveedor && !junto.proveedor) junto.proveedor = leido.proveedor;
+    if (leido.iva && !junto.iva) junto.iva = leido.iva;
+    if (leido.totales && !junto.totales) junto.totales = leido.totales;
+    if (leido.descuento && !junto.descuento) junto.descuento = leido.descuento;
+    cortado = !!seCorto;
+    // Terminó, o se cortó sin avanzar: seguir pidiendo no agrega nada.
+    if (!seCorto || !nuevos.length) break;
+    sigue = continuacion(junto.items);
+  }
+  return { ...junto, cortado, partes: hechas };
+}
+
 // ── LEER UNA COTIZACIÓN, DE DONDE VENGA ───────────────────────────────────
 //
 // La misma lectura sirve en dos lados: comparar una proforma contra el
@@ -540,24 +622,27 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
 
     for (let i = 0; i < bloques.length; i++) {
       onPaso?.(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
-      const { texto: salida, cortado: seCorto } = await pedir({
-        model: modelo, max_tokens: 3000, system: sistema,
-        messages: [{
-          role: "user",
-          content: esHoja
-            ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.${reclamar ? `\n\n${reclamar}` : ""}` }]
-            : [
-              esPdf
-                ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-                : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
-              { type: "text", text: `Extrae los renglones de esta proforma.${reclamar ? `\n\n${reclamar}` : ""}` },
-            ],
-        }],
+      // SI EL PAPEL ES LARGO, SE SIGUE DONDE SE CORTÓ: cada parte entra en su
+      // techo de escritura y en su minuto, y se lee hasta el final.
+      const cola = reclamar ? `\n\n${reclamar}` : "";
+      const leido = await leerSinCortes({
+        pedir, onPaso,
+        cuerpoPara: sigue => ({
+          model: modelo, max_tokens: 3000, system: sistema,
+          messages: [{
+            role: "user",
+            content: esHoja
+              ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.${sigue ? `\n\n${sigue}` : ""}${cola}` }]
+              : [
+                esPdf
+                  ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+                  : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+                { type: "text", text: `Extrae los renglones de esta proforma.${sigue ? `\n\n${sigue}` : ""}${cola}` },
+              ],
+          }],
+        }),
       });
-      const leido = interpretarRespuesta(salida);
-      // Si se quedó sin espacio, la última línea quedó a medio escribir: un monto
-      // cortado —"48" de "48,90"— entra como un renglón que parece bueno.
-      if (seCorto) { leido.items.pop(); cortado = true; }
+      if (leido.cortado) cortado = true;
       if (leido.proveedor && !proveedor) proveedor = leido.proveedor;
       if (leido.iva && !iva) iva = leido.iva;
       if (leido.totales && !totales) totales = leido.totales;
@@ -614,7 +699,11 @@ export async function leerCotizacion(file, { pedir, lista = "", rubros = [], mod
       if (sobra > Math.max(0.05, items.length * 0.01)) descuento = sobra;
     }
 
-    return { items, proveedor, cortado, iva, totales, descuento, fecha, hoja };
+    // LO QUE FIGURA EN CERO NO SE ESTÁ COTIZANDO, y no entra a comparar: un
+    // renglón sin cantidad contra un rubro con sesenta se leería como sesenta
+    // de menos.
+    const cotizados = items.filter(x => (Number(x.cantidad) || 0) !== 0 || (Number(x.monto) || 0) !== 0);
+    return { items: cotizados, proveedor, cortado, iva, totales, descuento, fecha, hoja };
   }
 
   const leido = await leerHastaQueCuadre({ leer: unaLectura, vueltas, onPaso });

@@ -29,6 +29,19 @@ import { revisarLectura, comoQuedo } from "./aritmetica.js";
 // a repetir la misma lectura y lo único que se gana es demora.
 export const VUELTAS = 3;
 
+/** 35, 36, 37, 40 → "35 a 37, 40". */
+export function enRangos(numeros = []) {
+  const ns = [...new Set(numeros)].sort((a, b) => a - b);
+  const partes = [];
+  for (let i = 0; i < ns.length; i++) {
+    let j = i;
+    while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j++;
+    partes.push(j > i ? `${ns[i]} a ${ns[j]}` : String(ns[i]));
+    i = j;
+  }
+  return partes.join(", ");
+}
+
 const plata = v => `$${(Math.round((Number(v) || 0) * 100) / 100).toFixed(2)}`;
 
 /**
@@ -50,6 +63,10 @@ export function reclamo(revision) {
       ? `Faltan ${plata(falta)}: quedó al menos un renglón sin transcribir. Fijate si hay `
         + `renglones después de donde cortaste, si el documento sigue en otra hoja o en otra `
         + `página, y si algún renglón trae su precio en una columna distinta a los demás.`
+        + (revision.saltados?.length
+          ? ` El papel numera sus ítems y no transcribiste los ítems ${enRangos(revision.saltados)}: `
+            + "los que tengan cantidad y monto son los que faltan."
+          : "")
       : `Sobran ${plata(Math.abs(falta))}: entró algo que no es un renglón que se compra. `
         + `Suele ser un subtotal de capítulo, un título que lleva monto al lado, el total `
         + `escrito en letras al pie, o un renglón transcrito dos veces.`);

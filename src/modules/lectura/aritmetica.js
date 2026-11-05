@@ -89,7 +89,18 @@ export function revisarLectura(items = [], totales = null, descuento = 0) {
   }));
 
   const sub = totales?.subtotal == null ? null : c2(totales.subtotal);
-  const esperado = sub == null ? null : c2(sub + (Number(descuento) || 0));
+  // EL SUBTOTAL DEL PIE PUEDE ESTAR ANTES O DESPUÉS DEL DESCUENTO. Hay papeles
+  // que escriben "SUBTOTAL" ya descontado, y hay que sumarle el descuento para
+  // llegar a los renglones; y hay papeles —el de SOLEK— que ponen SUBTOTAL
+  // $18.298,27, DESCUENTO $1.049,41 y recién después el subtotal descontado.
+  // Sumarle el descuento a ese pedía $19.347,68, un número que no está en el
+  // papel. Los renglones tienen que dar uno de los dos: se compara contra el
+  // que queda más cerca.
+  const desc = c2(descuento);
+  const candidatos = sub == null ? [] : (desc ? [sub, c2(sub + desc)] : [sub]);
+  const esperado = candidatos.length
+    ? candidatos.reduce((a, b) => (Math.abs(a - suman) <= Math.abs(b - suman) ? a : b))
+    : null;
   const falta = esperado == null ? null : c2(esperado - suman);
   const tolerancia = Math.max(0.05, items.length * 0.01);
   const cuadra = falta == null ? null : Math.abs(falta) <= tolerancia;
@@ -107,7 +118,17 @@ export function revisarLectura(items = [], totales = null, descuento = 0) {
       + "cantidad por unitario no da su total");
   }
 
-  return { renglones: items.length, suman, subtotal: sub, esperado, falta, cuadra, malos,
+  // LOS ÍTEMS QUE NO ESTÁN, cuando el papel numera. No es una alarma por sí
+  // sola —un renglón en cero no se transcribe— pero cuando falta plata dice
+  // dónde mirar.
+  const numeros = items.map(x => Number(x.item)).filter(v => Number.isInteger(v) && v > 0);
+  const saltados = [];
+  if (numeros.length >= Math.max(3, items.length * 0.6)) {
+    const estan = new Set(numeros);
+    for (let k = 1; k <= Math.max(...numeros); k++) if (!estan.has(k)) saltados.push(k);
+  }
+
+  return { renglones: items.length, suman, subtotal: sub, esperado, falta, cuadra, malos, saltados,
     confiable: cuadra !== false && !malos.length, conclusion: partes.join(" · ") };
 }
 

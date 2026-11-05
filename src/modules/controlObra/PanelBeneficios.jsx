@@ -13,7 +13,7 @@ import { ordenesMudas, contraQueSeMide, porProveedor } from "./cuentaBeneficios.
 import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
-import { FORMATO, interpretarRespuesta, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto } from "./leerProforma.js";
+import { FORMATO, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto, leerSinCortes } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 // El presupuesto completo al costado, el mismo de Diferencias: cantidad,
@@ -270,26 +270,27 @@ Rubros de la obra: ${lista}`;
 
         for (let i = 0; i < bloques.length; i++) {
           setPaso(bloques.length > 1 ? `parte ${i + 1} de ${bloques.length}` : "");
-          const { texto: salida, cortado: seCorto } = await pedirTexto({
-            model: LECTURA, max_tokens: 3000, system: sistema,
-            messages: [{
-              role: "user",
-              content: esHoja
-                ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.` }]
-                : [
-                  esPdf
-                    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-                    : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
-                  { type: "text", text: "Extrae los renglones de esta proforma." },
-                ],
-            }],
+          // SI EL PAPEL ES LARGO, SE SIGUE DONDE SE CORTÓ, igual que en
+          // Diferencias: es el mismo lector.
+          const leido = await leerSinCortes({
+            pedir: pedirTexto, onPaso: setPaso,
+            cuerpoPara: sigue => ({
+              model: LECTURA, max_tokens: 3000, system: sistema,
+              messages: [{
+                role: "user",
+                content: esHoja
+                  ? [{ type: "text", text: `Esta es una planilla de Excel volcada tal cual, una fila por renglón y las celdas separadas por |. Encontrá la columna de descripción, la de cantidad, la de unidad y la del total de cada renglón. Ignorá encabezados, subtotales y totales generales.\n\n${bloques[i]}\n\nExtrae los renglones.${sigue ? `\n\n${sigue}` : ""}` }]
+                  : [
+                    esPdf
+                      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+                      : { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: b64 } },
+                    { type: "text", text: `Extrae los renglones de esta proforma.${sigue ? `\n\n${sigue}` : ""}` },
+                  ],
+              }],
+            }),
           });
-          const leido = interpretarRespuesta(salida);
-          // SE QUEDÓ SIN ESPACIO ANTES DE TERMINAR. La última línea quedó a
-          // medio escribir, y un monto cortado —"48" de "48,90"— entra como un
-          // renglón que parece bueno. Se tira: un renglón de menos se ve, un
-          // monto mal no.
-          if (seCorto) { leido.items.pop(); cortado = true; }
+          // Solo queda cortado si ni con todas las partes se llegó al final.
+          if (leido.cortado) cortado = true;
           if (leido.proveedor && !quien) quien = leido.proveedor;
           juntos.push(...leido.items);
         }
