@@ -150,6 +150,28 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   }, [obra.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
+  // LAS ÓRDENES GUARDAN SU ORDEN, SOLAS.
+  //
+  // Si falta un número en la serie y la orden que le sigue todavía no salió
+  // de la oficina —en borrador, sin haberse mandado ni pedido el visto—, baja
+  // a ocupar el lugar en cuanto se abre la pantalla. Con un botón dependía de
+  // que alguien lo viera y lo apretara, y mientras tanto el PDF salía con el
+  // número equivocado. La que ya se mandó o se aprobó no se toca nunca.
+  const acomodando = useRef(false);
+  useEffect(() => {
+    if (!puedeEditar || acomodando.current || !huecosQueSeCierran(ordenes).length) return;
+    acomodando.current = true;
+    (async () => {
+      const h = await cerrarHuecos(obra.id);
+      if (h.error) setAviso(h.error);
+      else if (h.cambios.length) {
+        await cargar(); onCambio?.();
+        setAviso(`Se acomodó la numeración: ${h.cambios.map(p => `la ${p.codigoDe} ahora es la ${p.codigoA}`).join(", ")}.`);
+      }
+      acomodando.current = false;
+    })();
+  }, [ordenes, puedeEditar, obra?.id, cargar, onCambio]);
+
   // A quién se le manda: la gente del proyecto que ya está cargada, de las
   // dos listas donde vive —los convocados del acta y los invitados del
   // pipeline—. El que arma la orden no tiene por qué saber en cuál quedó cada
