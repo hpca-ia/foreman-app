@@ -5,7 +5,9 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
-import { CLASES, claseDePartida, adicionesPorClase, contratadoDe } from "./clasesDePartida.js";
+import {
+  CLASES, claseDePartida, adicionesPorClase, contratadoDe, contraLoPactado, fueraDeLoPactado, porcentajeSobreCosto,
+} from "./clasesDePartida.js";
 import { AFECTA, honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import { comoSeDice as parentescoDe, codigoDeLaRevision, mandaEnElControl } from "./revisionesDeOrden.js";
@@ -1494,6 +1496,43 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                   CAPÍTULO II · ADICIONES Y REDUCCIONES
                 </div>
 
+                {/* UN PRECIO YA FIRMADO NO SE MUEVE EN UNA ORDEN DE CAMBIO.
+                    Si alguna partida sobre un rubro del contrato no está al
+                    precio pactado, se dice arriba de todo y se corrige de una
+                    vez: es lo primero que va a mirar quien la aprueba. */}
+                {(() => {
+                  const fuera = fueraDeLoPactado(suyas, rubros);
+                  if (!fuera.length) return null;
+                  const arriba = fuera.filter(x => x.diferencia > 0).length;
+                  return (
+                    <div style={{ background: colors.dangerSoft, border: `1px solid ${colors.dangerBorder}`,
+                      borderRadius: 8, padding: "8px 10px", marginBottom: 8, fontSize: 11.5, color: colors.ink, lineHeight: 1.5 }}>
+                      <strong style={{ color: colors.danger }}>
+                        {fuera.length} {fuera.length === 1 ? "partida no está" : "partidas no están"} al precio pactado en el contrato
+                      </strong>
+                      {arriba > 0 && <> · {arriba === fuera.length ? "todas" : arriba} por encima</>}.
+                      {" "}Lo que es más o menos cantidad de un rubro del contrato va al precio que el cliente firmó, sin IVA:
+                      el impuesto se suma al pie.
+                      {editable && (
+                        <div style={{ marginTop: 6 }}>
+                          <button disabled={ocupado}
+                            onClick={() => hacer(async () => {
+                              for (const x of fuera) {
+                                const r = await guardarLinea(x.linea.id, { precio_unitario: x.pactado });
+                                if (r.error) return r.error;
+                              }
+                              return null;
+                            })}
+                            style={{ background: colors.danger, color: "#fff", border: "none", borderRadius: 7,
+                              padding: "5px 11px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: colors.font }}>
+                            Poner el precio del contrato en {fuera.length === 1 ? "esa partida" : `las ${fuera.length}`}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Lo que cambia, línea por línea. */}
                 {suyas.length > 0 && (
                   <div style={{ overflowX: "auto", marginBottom: 8 }}>
@@ -1597,6 +1636,21 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                         && hacer(() => guardarLinea(l.id, { precio_unitario: e.target.value }))}
                                       style={{ ...celda, width: 82, textAlign: "right" }} />
                                   ) : fmt(l.precio_unitario)}
+                                  {/* CONTRA EL PRECIO PACTADO. Lo que es más o
+                                      menos cantidad de un rubro del contrato
+                                      va al precio que el cliente firmó, y acá
+                                      se ve si esta partida lo respeta. */}
+                                  {(() => {
+                                    const p = contraLoPactado(l, rubros);
+                                    if (!p) return null;
+                                    return p.fuera ? (
+                                      <div style={{ fontSize: 9.5, color: colors.danger, whiteSpace: "nowrap" }}>
+                                        pactado ${fmt(p.pactado)} · {p.diferencia > 0 ? "+" : "−"}{fmt(Math.abs(p.pct))}%
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: 9.5, color: colors.muted, whiteSpace: "nowrap" }}>precio pactado</div>
+                                    );
+                                  })()}
                                 </td>
                                 <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>${fmt((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0))}</td>
                                 {/* EL COSTO SE PUEDE CORREGIR AUNQUE ESTÉ APROBADA:
@@ -1616,11 +1670,17 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                                       }}
                                       style={{ ...celda, width: 76, textAlign: "right" }} />
                                   ) : (tieneCosto(l) ? fmt(l.costo_unitario) : "—")}
+                                  {/* CUÁNTO SE LE SUBE AL COSTO, en plata y en
+                                      porcentaje: es la pregunta con la que se
+                                      mira cada partida antes de mandarla. */}
                                   {tieneCosto(l) && (() => {
                                     const m = precioDeLinea(l) - costoDeLinea(l);
+                                    const pct = porcentajeSobreCosto(l);
                                     return (
-                                      <div style={{ fontSize: 9.5, color: m < 0 ? colors.danger : m > 0 ? colors.success : colors.muted }}>
+                                      <div style={{ fontSize: 9.5, whiteSpace: "nowrap",
+                                        color: m < 0 ? colors.danger : m > 0 ? colors.success : colors.muted }}>
                                         {m < 0 ? "−" : "+"}${fmt(Math.abs(m))}
+                                        {pct != null && <strong> · {pct > 0 ? "+" : pct < 0 ? "−" : ""}{fmt(Math.abs(pct))}%</strong>}
                                       </div>
                                     );
                                   })()}
@@ -2055,7 +2115,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
                             style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 7,
                               padding: "3px 9px", fontSize: 11, fontWeight: 600, color: colors.brand,
                               cursor: "pointer", fontFamily: colors.font }}>
-                            Aplicar a las {cuenta.conCosto} con costo
+                            Aplicar a las {suyas.filter(l => l.tipo !== "quita" && tieneCosto(l) && claseDePartida(l) !== "mas").length} nuevas con costo
                           </button>
                         </div>
                       )}

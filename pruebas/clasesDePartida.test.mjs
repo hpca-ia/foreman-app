@@ -130,3 +130,59 @@ test("el servidor clasifica igual que la oficina, partida por partida", async ()
       oficina.bloques.map(b => [b.clase, b.titulo, b.pista, b.lineas.length]));
   }
 });
+
+// ── EL PRECIO PACTADO NO SE MUEVE ──────────────────────────────────────────
+//
+// La OC-04 de Diners Aeropuerto: las partidas sobre rubros del contrato
+// salieron un 15% por encima de lo pactado, porque el total del rubro del
+// control lleva el IVA adentro y la orden lo suma otra vez al pie.
+
+const interruptor = { id: 1363, numero: 96, unidad: "U", cantidad: 2, precio_unitario: 7.26, total_base: 16.7, iva_pct: 15, origen: "base" };
+const punto = { id: 1373, numero: 106, unidad: "U", cantidad: 65, precio_unitario: 36.38, total_base: 2719.51, iva_pct: 15, origen: "base" };
+
+test("el precio del contrato es sin IVA: $7,26, no los $8,35 que salen del total con el impuesto", async () => {
+  const { precioDelContrato } = await import("../src/modules/controlObra/clasesDePartida.js");
+  assert.equal(precioDelContrato(interruptor), 7.26);
+  assert.equal(precioDelContrato(punto), 36.38);
+  // Un rubro que entró por una orden guarda su unitario CON IVA: vale el que sale del total.
+  assert.equal(precioDelContrato({ cantidad: 10, precio_unitario: 115, total_base: 1150, iva_pct: 15, origen: "orden_cambio" }), 100);
+  assert.equal(precioDelContrato({ cantidad: 0, total_base: 10 }), null);
+});
+
+test("una partida por encima de lo pactado se denuncia, con cuánto y con el precio que corresponde", async () => {
+  const { contraLoPactado, fueraDeLoPactado } = await import("../src/modules/controlObra/clasesDePartida.js");
+  const mala = { id: 1, tipo: "aumenta", obra_rubro_id: 1363, rubro_codigo: "96", cantidad: 6, precio_unitario: 8.35, costo_unitario: 6.6017 };
+  const p = contraLoPactado(mala, [interruptor, punto]);
+  assert.equal(p.pactado, 7.26);
+  assert.equal(p.diferencia, 1.09);
+  assert.equal(p.pct, 15);
+  assert.equal(p.fuera, true);
+  // Al precio pactado, nada que decir. Y una reducción se mide igual.
+  const buena = { id: 2, tipo: "aumenta", obra_rubro_id: 1373, cantidad: 46, precio_unitario: 36.38 };
+  assert.equal(contraLoPactado(buena, [interruptor, punto]).fuera, false);
+  const reduccion = { id: 3, tipo: "quita", rubro_codigo: "96", cantidad: 1, precio_unitario: 8.35 };
+  assert.equal(contraLoPactado(reduccion, [interruptor, punto]).fuera, true);
+  // Lo nuevo no tiene precio pactado: por eso se le pone uno.
+  assert.equal(contraLoPactado({ tipo: "aumenta", cantidad: 1, precio_unitario: 420 }, [interruptor]), null);
+  const fuera = fueraDeLoPactado([mala, buena, reduccion, { tipo: "aumenta", precio_unitario: 5 }], [interruptor, punto]);
+  assert.deepEqual(fuera.map(x => [x.linea.id, x.pactado]), [[1, 7.26], [3, 7.26]]);
+});
+
+test("cuánto se le sube al costo, en porcentaje", async () => {
+  const { porcentajeSobreCosto } = await import("../src/modules/controlObra/clasesDePartida.js");
+  assert.equal(porcentajeSobreCosto({ tipo: "aumenta", precio_unitario: 420, costo_unitario: 380 }), 10.5);
+  assert.equal(porcentajeSobreCosto({ tipo: "aumenta", precio_unitario: 7.26, costo_unitario: 6.6017 }), 10);
+  assert.equal(porcentajeSobreCosto({ tipo: "aumenta", precio_unitario: 90, costo_unitario: 100 }), -10);
+  assert.equal(porcentajeSobreCosto({ tipo: "aumenta", precio_unitario: 90 }), null, "sin costo no hay contra qué medir");
+  assert.equal(porcentajeSobreCosto({ tipo: "quita", precio_unitario: 9, costo_unitario: 8 }), null);
+});
+
+test("el margen de la orden no le sube el precio a lo que ya está pactado", async () => {
+  const { conMargen } = await import("../src/modules/controlObra/cuentaOrdenCambio.js");
+  const r = conMargen([
+    { id: 1, tipo: "aumenta", costo_unitario: 100, precio_unitario: 0 },
+    { id: 2, tipo: "aumenta", clase: "mas", obra_rubro_id: 1363, costo_unitario: 6.6017, precio_unitario: 7.26 },
+    { id: 3, tipo: "aumenta", rubro_codigo: "106", costo_unitario: 33.07, precio_unitario: 36.38 },
+  ], 20);
+  assert.deepEqual(r.map(l => l.precio_unitario), [120, 7.26, 36.38]);
+});

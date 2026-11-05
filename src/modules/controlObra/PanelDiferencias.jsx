@@ -26,6 +26,7 @@ import { candidatosPara } from "./emparejarRubros.js";
 import { compararCotizaciones, comoSeDice as comoSeDiceLaComparacion } from "./compararCotizaciones.js";
 import { baseSinIva } from "./contratoDeLaObra";
 import { costosDelAnalisis } from "./costoDelRubro.js";
+import { precioDelContrato } from "./clasesDePartida.js";
 // El presupuesto completo al costado, para mirarlo mientras se decide. Era de
 // esta pantalla; ahora lo usa también Beneficios, y es el mismo.
 import Presupuesto from "./PanelPresupuesto";
@@ -664,9 +665,13 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // si no, el que se eligió a mano o se tomó de un rubro parecido; y recién
     // si no hay ninguno, costo más el porcentaje de la caja de abajo.
     const dePrecio = l.hallazgo !== "subio_precio" && l.hallazgo !== "bajo_precio";
+    // SIN IVA. El total del rubro del control lleva el impuesto adentro, y la
+    // orden se cotiza sin él y lo suma al pie: tomando el total tal cual, cada
+    // partida salía un 15% por encima de lo pactado y el cliente pagaba el IVA
+    // dos veces.
     const puRubro = !dePrecio ? null
       : rubro && Number(rubro.cantidad)
-        ? Math.round((Number(rubro.total_base) / Number(rubro.cantidad)) * 10000) / 10000
+        ? precioDelContrato(rubro)
         : Number(l.precio_unitario) > 0 ? Number(l.precio_unitario) : null;
     return {
       descripcion: l.descripcion, unidad: l.unidad || "u", cantidad: cant,

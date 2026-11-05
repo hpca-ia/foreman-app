@@ -17,6 +17,8 @@
 // guardada se deduce de lo único seguro: una reducción es una reducción, y una
 // adición que apunta a un rubro del contrato es más de ese rubro.
 
+import { baseSinIva } from "./contratoDeLaObra.js";
+
 export const CLASES = {
   nuevo: {
     titulo: "TRABAJOS NUEVOS",
@@ -37,6 +39,7 @@ export const CLASES = {
 
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
+const c4 = v => Math.round(n(v) * 10000) / 10000;
 const apuntaAUnRubro = l => !!l?.obra_rubro_id || !!String(l?.rubro_codigo || "").trim();
 
 /** nuevo | mas | menos. El signo manda: lo que resta nunca es trabajo nuevo. */
@@ -98,6 +101,72 @@ export function rubroDeLaPartida(l, rubros = []) {
   const codigo = String(l?.rubro_codigo || "").trim();
   if (!codigo) return null;
   return delContrato.find(x => String(x.numero ?? x.codigo ?? "").trim() === codigo) || null;
+}
+
+// ── EL PRECIO PACTADO NO SE MUEVE ──────────────────────────────────────────
+//
+// Una orden de cambio le pone precio a lo que no lo tenía. Lo que ya estaba en
+// el contrato —más metros del mismo piso, o menos— va al precio que el cliente
+// firmó: subirlo en una orden es cambiarle el contrato por la puerta de atrás,
+// y bajarlo es regalar margen sin que nadie lo haya decidido.
+//
+// Y hay una manera muy fácil de subirlo sin querer: el rubro del control lleva
+// el IVA ADENTRO de su total. Dividiendo ese total por la cantidad sale el
+// precio con IVA, y la orden —que se cotiza sin IVA y lo suma al pie— termina
+// cobrando el impuesto dos veces: un 15% por encima de lo pactado en cada
+// partida. Así nació la OC-04 de Diners Aeropuerto.
+
+/**
+ * El precio unitario que el cliente firmó para ese rubro, sin IVA.
+ *
+ * El escrito en el contrato cuando es ese mismo número; si no —los rubros que
+ * entraron por una orden lo guardan con el IVA adentro— el que sale de su
+ * total sin IVA.
+ */
+export function precioDelContrato(rubro) {
+  const cant = n(rubro?.cantidad);
+  if (!cant) return null;
+  const calculado = baseSinIva(rubro) / cant;
+  if (!(calculado > 0)) return null;
+  const escrito = n(rubro.precio_unitario);
+  return escrito > 0 && Math.abs(escrito - calculado) <= Math.max(0.01, calculado * 0.005)
+    ? escrito : c4(calculado);
+}
+
+/**
+ * Esta partida contra el precio pactado de su rubro.
+ *
+ * Solo opina de las partidas que son más o menos cantidad de un rubro del
+ * contrato: lo nuevo no tiene precio pactado, y por eso se le pone uno.
+ *
+ * @returns { pactado, diferencia, pct, fuera } o null si no hay precio pactado
+ */
+export function contraLoPactado(l, rubros = []) {
+  if (claseDePartida(l) === "nuevo") return null;
+  const rubro = rubroDeLaPartida(l, rubros);
+  const pactado = rubro ? precioDelContrato(rubro) : null;
+  if (pactado == null) return null;
+  const diferencia = c4(n(l.precio_unitario) - pactado);
+  return {
+    pactado, diferencia,
+    pct: Math.round((diferencia / pactado) * 1000) / 10,
+    fuera: Math.abs(diferencia) > Math.max(0.01, pactado * 0.002),
+  };
+}
+
+/** Las partidas de la orden que no están al precio pactado, con cuál debería ser. */
+export function fueraDeLoPactado(lineas = [], rubros = []) {
+  return lineas.map(l => ({ linea: l, ...(contraLoPactado(l, rubros) || {}) })).filter(x => x.fuera);
+}
+
+/**
+ * Cuánto se le sube al costo, en porcentaje: lo que se pregunta al mirar una
+ * partida. Null si no hay costo contra el cual medirlo.
+ */
+export function porcentajeSobreCosto(l) {
+  const costo = n(l?.costo_unitario);
+  if (!(costo > 0) || l?.tipo === "quita") return null;
+  return Math.round((n(l.precio_unitario) / costo - 1) * 1000) / 10;
 }
 
 /**

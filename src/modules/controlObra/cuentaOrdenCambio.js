@@ -9,6 +9,8 @@
 // costo: una partida sin costo no tiene margen cero, tiene margen desconocido,
 // y sumarla como cero haría parecer que la orden se cobró al costo.
 
+import { claseDePartida } from "./clasesDePartida.js";
+
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
 
@@ -193,6 +195,10 @@ export function conMargen(lineas = [], pct) {
   const p = n(pct);
   return lineas.map(l => {
     if (l.tipo === "quita" || !tieneCosto(l)) return l;
+    // LO QUE YA TIENE PRECIO EN EL CONTRATO NO SE TOCA. Más cantidad de un
+    // rubro contratado va al precio que el cliente firmó, no a costo más un
+    // porcentaje: aplicarle el margen de la orden es subirle un precio pactado.
+    if (claseDePartida(l) === "mas") return l;
     return { ...l, precio_unitario: c2(n(l.costo_unitario) * (1 + p / 100)) };
   });
 }
