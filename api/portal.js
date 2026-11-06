@@ -3,6 +3,7 @@ import { enviarCorreo, plantilla } from "./_correo.js";
 import { enviarActa } from "./_aviso-acta.js";
 import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
+import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -441,17 +442,22 @@ async function firmarOrden(req, res, firma) {
  * ¿Ya firmaron todos? Entonces la orden se aplica al presupuesto.
  *
  * Es el momento en que una orden de cambio deja de ser un pedido y pasa a ser
- * plata del contrato: sus rubros entran al control como ADICIONALES —en más o
- * en menos— y los que la orden quita quedan tachados. Hacerlo a mano después,
- * cuando alguien se acuerde, es como se llega a fin de obra con cuatro órdenes
- * aprobadas que el control nunca contó.
+ * plata del contrato: sus partidas entran al control como ADICIONALES —en más
+ * o en menos— y su honorario al capítulo de honorarios de la obra. Hacerlo a
+ * mano después, cuando alguien se acuerde, es como se llega a fin de obra con
+ * cuatro órdenes aprobadas que el control nunca contó.
  *
  * NO SE APLICA SI ALGUIEN OBJETÓ, aunque después haya aprobado: una objeción
  * sin resolver es trabajo que no se ejecuta.
  *
- * La misma cuenta vive en src/modules/controlObra/ordenesDeCambio.js, que es
- * la que usa la oficina cuando aprueba desde adentro. Si una cambia, la otra
- * también: son el mismo documento entrando por dos puertas.
+ * ES EL MISMO DOCUMENTO ENTRANDO POR DOS PUERTAS. La otra es `aprobarOrden`,
+ * en src/modules/controlObra/ordenesDeCambio.js, que usa la oficina cuando
+ * aprueba desde adentro, y las dos tienen que dejar el contrato vigente igual.
+ * Acá decía "si una cambia, la otra también", y no alcanzó: por esta puerta la
+ * orden entraba sin su honorario, con las partidas repartidas en capítulos
+ * ajenos, y una revisión dejaba a la versión anterior sumando al lado. Las
+ * filas ya no se arman acá: salen de _rubrosDeLaOrden.js, que está probado
+ * contra la cuenta de la oficina fila por fila.
  */
 async function siFirmaronTodos(ordenId) {
   // SOLO CUENTAN LOS QUE RECIBIERON SU ENLACE.
@@ -474,7 +480,7 @@ async function siFirmaronTodos(ordenId) {
   if (!orden || orden.aprobada_at || orden.anulada || orden.reemplazada_at) return null;
 
   const lineas = await json(await rest(`orden_cambio_lineas?orden_id=eq.${ordenId}&select=*&order=orden`)) || [];
-  const codigo = orden.codigo || `OC-${String(orden.numero).padStart(2, "0")}`;
+  const codigo = codigoDe(orden);
 
   // EN LA BASE DEL CONTROL, QUE ES CON IVA, igual que cuando aprueba la
   // oficina. La orden se cotiza sin IVA; los rubros del control llevan el
@@ -482,47 +488,71 @@ async function siFirmaronTodos(ordenId) {
   // porcentaje: un 15% corto en el contrato vigente, y nada lo decía.
   const conIvaFila = await json(await rest(`obra_rubros?obra_id=eq.${orden.obra_id}&iva_pct=not.is.null&select=iva_pct&limit=1`));
   const iva = Number(conIvaFila?.[0]?.iva_pct) || 0;
-  const conIva = v => Math.round(v * (1 + iva / 100) * 100) / 100;
 
-  // TODAS LAS LÍNEAS ENTRAN, las que suman y las que restan, igual que cuando
-  // aprueba la oficina.
+  // EL HONORARIO, QUE POR ESTA PUERTA NO ENTRABA.
   //
-  // Por esta puerta la reducción todavía iba a buscar el rubro del contrato y
-  // lo TACHABA ENTERO. Con una reducción de cantidad eso es plata mal contada:
-  // el contrato tiene 4 interruptores, la orden quita 2, y al firmar el cliente
-  // por el enlace desaparecían los 4. La oficina dejó de hacerlo hace rato —el
-  // presupuesto firmado no se toca; la orden suma lo suyo y resta lo suyo en su
-  // capítulo— y esta puerta se había quedado con la regla vieja.
-  // El número de SU orden, sacado del código: una modificación —OC-04-A—
-  // comparte capítulo y numeración con la orden que modifica. Es la misma
-  // regla que numeracionDeOrdenes.js en la oficina.
-  const deSuOrden = Number(/^OC-(\d+)/i.exec(String(orden.codigo || ""))?.[1]) || Number(orden.numero) || 0;
-  const filas = lineas.map((l, i) => {
-    const signo = l.tipo === "quita" ? -1 : 1;
-    return {
-      obra_id: orden.obra_id,
-      numero: 9000 + deSuOrden * 100 + i,
-      capitulo: l.capitulo || `ADICIONALES · ${codigo}`,
-      capitulo_orden: 9000 + deSuOrden,
-      orden: 9000000 + deSuOrden * 1000 + i,
-      descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigo}`,
-      unidad: l.unidad || "",
-      cantidad: Number(l.cantidad) || 0,
-      precio_unitario: signo * conIva(Number(l.precio_unitario) || 0),
-      total_base: signo * conIva((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0)),
-      iva_pct: iva,
-      origen: "orden_cambio",
-      orden_cambio_id: orden.id,
-    };
+  // El papel que el cliente firma lleva el honorario al pie —el 10% del
+  // contrato sobre el neto de la orden— y la pantalla donde aprueba también se
+  // lo muestra. Lo aceptaba, y al control no llegaba: la orden firmada por el
+  // enlace dejaba el contrato vigente un 10% más corto que la misma orden
+  // aprobada por la oficina.
+  //
+  // Va con el porcentaje de la orden si lo tiene y si no con el de la obra, y
+  // al capítulo de honorarios que la obra ya tiene, con el nombre que le puso
+  // su presupuesto: abrir otro a nombre fijo deja dos capítulos de honorarios,
+  // que es la forma más segura de que alguien sume solo la mitad.
+  const obras = await json(await rest(`obras?id=eq.${orden.obra_id}&select=honorarios_pct`));
+  const capsHon = await json(await rest(
+    `obra_rubros?obra_id=eq.${orden.obra_id}&capitulo=ilike.*honorario*&select=capitulo,capitulo_orden&order=capitulo_orden&limit=1`));
+
+  // LAS FILAS SON LAS MISMAS QUE ARMA LA OFICINA: una por partida, las que
+  // suman y las que restan, todas en el capítulo de la orden aunque el rubro ya
+  // exista en el presupuesto —eso se menciona, no cambia dónde vive—, y al
+  // final el honorario en el suyo.
+  const filas = rubrosDeLaOrden({
+    orden, lineas, iva,
+    obra: obras?.[0] || null,
+    capHon: capsHon?.[0] || null,
   });
+  const partidas = filas.slice(0, lineas.length);
+  const honorario = filas[lineas.length] || null;
+
+  // SI LOS RUBROS NO ENTRARON, LA ORDEN NO QUEDA APROBADA.
+  //
+  // Acá no se miraba la respuesta: si el control rechazaba las filas, la orden
+  // se marcaba aprobada igual y el correo decía que ya había entrado al
+  // presupuesto. La oficina nunca aprueba así. Queda enviada, con todas sus
+  // firmas a la vista, y se aprueba desde adentro.
   if (filas.length) {
-    await rest("obra_rubros", {
+    const r = await rest("obra_rubros", {
       method: "POST", headers: { Prefer: "return=minimal" },
       body: JSON.stringify(filas),
     });
+    if (!r.ok) return null;
   }
 
   const ahora = new Date().toISOString();
+
+  // EN EL CONTROL MANDA LA ÚLTIMA VERSIÓN, igual que cuando aprueba la oficina.
+  // Si esta orden es la revisión de otra —la OC-01.1 de la OC-01—, los rubros
+  // de la versión anterior salen del control: quedando las dos, el contrato
+  // vigente suma el mismo trabajo dos veces. La vieja no se borra —queda con su
+  // PDF y sus firmas— pero deja de contar. Por esta puerta se quedaban las dos.
+  const anterior = Number(orden.revision_de) || 0;
+  if (anterior > 0) {
+    await rest(`obra_rubros?orden_cambio_id=eq.${anterior}`, {
+      method: "DELETE", headers: { Prefer: "return=minimal" },
+    });
+    await rest(`obra_rubros?anulado_por_oc=eq.${anterior}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ anulado_por_oc: null }),
+    });
+    await rest(`ordenes_cambio?id=eq.${anterior}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ reemplazada_at: ahora }),
+    });
+  }
+
   await rest(`ordenes_cambio?id=eq.${orden.id}`, {
     method: "PATCH", headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
@@ -531,23 +561,16 @@ async function siFirmaronTodos(ordenId) {
     }),
   });
 
-  // EN EL CONTROL MANDA LA ÚLTIMA VERSIÓN, también cuando aprueba el cliente.
-  // Si esta orden es la modificación de otra, los rubros de la anterior salen
-  // del control y la anterior queda reemplazada: con las dos adentro, el
-  // contrato vigente sumaría el mismo trabajo dos veces. La oficina ya lo
-  // hacía; por esta puerta no.
-  if (orden.revision_de) {
-    await rest(`obra_rubros?orden_cambio_id=eq.${Number(orden.revision_de)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
-    await rest(`obra_rubros?anulado_por_oc=eq.${Number(orden.revision_de)}`, {
-      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ anulado_por_oc: null }),
-    });
-    await rest(`ordenes_cambio?id=eq.${Number(orden.revision_de)}`, {
-      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ reemplazada_at: ahora }),
-    });
-  }
-
-  const monto = filas.reduce((t, f) => t + (Number(f.total_base) || 0), 0);
-  return { codigo, rubros: filas.length, monto: Math.round(monto * 100) / 100 };
+  // Para el aviso a la oficina: las partidas por un lado y el honorario por el
+  // otro, que es como quedaron en el control.
+  const monto = partidas.reduce((t, f) => t + (Number(f.total_base) || 0), 0);
+  return {
+    codigo, rubros: partidas.length, monto: Math.round(monto * 100) / 100,
+    quita: lineas.some(l => l.tipo === "quita"),
+    honorario: honorario
+      ? { descripcion: honorario.descripcion, capitulo: honorario.capitulo, monto: honorario.total_base }
+      : null,
+  };
 }
 
 /**
@@ -558,6 +581,7 @@ async function siFirmaronTodos(ordenId) {
  * correo que nadie abrió.
  */
 async function avisarDeLaOrden(firma, aprueba, texto, aplicada) {
+  const enPlata = v => Number(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   try {
     const ordenes = await json(await rest(`ordenes_cambio?id=eq.${firma.orden_id}&select=codigo,numero,titulo,obra_id,created_by`));
     const orden = ordenes?.[0];
@@ -592,8 +616,12 @@ async function avisarDeLaOrden(firma, aprueba, texto, aplicada) {
             <div style="font-size:12.5px;color:#374151;line-height:1.6">
               Sus ${aplicada.rubros} ${aplicada.rubros === 1 ? "rubro entró" : "rubros entraron"} al control de obra
               como <strong>ADICIONALES · ${escaparHtml(aplicada.codigo)}</strong>, por
-              <strong>$${Number(aplicada.monto).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>.
-              Lo que la orden quita quedó tachado del presupuesto original.
+              <strong>$${enPlata(aplicada.monto)}</strong>.
+              ${aplicada.honorario ? `Su honorario —${escaparHtml(aplicada.honorario.descripcion)}— entró aparte, al capítulo
+              <strong>${escaparHtml(aplicada.honorario.capitulo)}</strong>, por
+              <strong>$${enPlata(aplicada.honorario.monto)}</strong>.` : ""}
+              ${aplicada.quita ? "Lo que la orden quita entró en negativo en ese mismo capítulo: el presupuesto original no se toca." : ""}
+              Los montos van con IVA, como los lleva el control.
             </div>
           </div>` : ""}`,
         pie: "Correo automático de FOREMAN · HCA Studio.",

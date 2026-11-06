@@ -1,5 +1,5 @@
 import { supabase } from "../../lib/supabase";
-import { honorariosDe, rubroDeHonorarios, pctQueCorresponde } from "./honorariosDeOrden.js";
+import { rubrosDeLaOrden } from "./rubrosDeLaOrden.js";
 import { codigoDeLaRevision } from "./revisionesDeOrden.js";
 import { siguienteNumero, numeroDeModificacion, numeroPrincipal, huecosQueSeCierran, codigoPrincipal } from "./numeracionDeOrdenes.js";
 
@@ -446,68 +446,11 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   const { data: unRubro } = await supabase.from("obra_rubros")
     .select("iva_pct").eq("obra_id", orden.obra_id).not("iva_pct", "is", null).limit(1).maybeSingle();
   const iva = Number(unRubro?.iva_pct) || 0;
-  const conIva = v => Math.round(v * (1 + iva / 100) * 100) / 100;
 
-  // TODAS LAS LÍNEAS ENTRAN, las que suman y las que restan.
-  //
-  // Antes la reducción iba a buscar el rubro original del contrato y lo
-  // tachaba. Eso editaba el presupuesto firmado, sacaba el rubro entero aunque
-  // la orden redujera una parte, y dejaba el capítulo de la orden mostrando
-  // solo las adiciones: ADICIONALES · OC-01 por $12.508,62 cuando esa orden
-  // movía $3.849,94.
-  //
-  // El presupuesto original no se toca. La orden suma lo suyo y resta lo suyo,
-  // en el mismo capítulo, y ahí se lee lo que de verdad hizo.
-  // TODAS LAS PARTIDAS VAN AL CAPÍTULO DE LA ORDEN.
-  //
-  // Aunque el rubro ya exista en el presupuesto. El capítulo de una orden de
-  // cambio tiene que mostrar lo que ESA orden costó, completo y en un solo
-  // lugar: es lo que el cliente aprobó y es lo que se le va a cobrar. Si el
-  // desalojo se sienta en PRELIMINARES Y VARIOS porque ese rubro ya existía, el
-  // capítulo de la orden muestra menos de lo que la orden vale y la plata del
-  // cambio queda repartida entre el presupuesto original y el adicional, que
-  // son dos conversaciones distintas con dos documentos distintos.
-  //
-  // Que el rubro ya existiera se MENCIONA —sirve para no cobrarlo dos veces y
-  // para saber contra qué precio se comparó— pero no cambia dónde vive.
-  //
-  // La única excepción son los honorarios, que se pagan aparte y por eso tienen
-  // su propio capítulo.
-  const filas = (lineas || []).map((l, i) => {
-    const signo = l.tipo === "quita" ? -1 : 1;
-    // La mención del rubro que ya existía: su número y su capítulo.
-    const yaExistia = [l.rubro_codigo && `rubro ${l.rubro_codigo}`, l.capitulo]
-      .filter(Boolean).join(" · ");
-    return {
-      obra_id: orden.obra_id,
-      // Con el número de SU orden: una modificación —OC-04-A— comparte
-      // capítulo y numeración con la orden que modifica.
-      numero: 9000 + numeroPrincipal(orden) * 100 + i,
-      capitulo: `ADICIONALES · ${codigoDe(orden)}`,
-      capitulo_orden: 9000 + numeroPrincipal(orden),
-      orden: 9000000 + numeroPrincipal(orden) * 1000 + i,
-      descripcion: `${l.tipo === "quita" ? "(–) " : ""}${l.descripcion}  ·  ${codigoDe(orden)}`
-        + (yaExistia ? `  ·  ya existía: ${yaExistia}` : ""),
-      unidad: l.unidad || "",
-      cantidad: Number(l.cantidad) || 0,
-      precio_unitario: signo * conIva(Number(l.precio_unitario) || 0),
-      total_base: signo * conIva((Number(l.cantidad) || 0) * (Number(l.precio_unitario) || 0)),
-      iva_pct: iva,
-      origen: "orden_cambio",
-      orden_cambio_id: orden.id,
-    };
-  });
-
-  // EL HONORARIO ENTRA APARTE, EN SU PROPIO CAPÍTULO.
-  //
-  // Sobre el neto de la orden se cobra el porcentaje del contrato —administrar
-  // un adicional es trabajo igual que administrar el resto— pero no se reparte
-  // dentro de los precios: cada partida tiene que seguir diciendo lo que
-  // cuesta, porque ese es el número contra el que después se compara una
-  // cotización. Y si la orden es negativa, el honorario también lo es.
+  // EL HONORARIO SALE DEL CONTRATO DE LA OBRA, salvo que la orden traiga el
+  // suyo: por eso hace falta la obra.
   const { data: laObra } = await supabase.from("obras")
     .select("honorarios_pct").eq("id", orden.obra_id).maybeSingle();
-  const cuenta = honorariosDe({ lineas, pct: pctQueCorresponde(orden, laObra) });
   // AL CAPÍTULO DE HONORARIOS QUE LA OBRA YA TIENE, con el nombre que le puso
   // su presupuesto: en Plaza Lagos se llama "HONORARIOS Y CARGOS" y en el
   // Aéreo "HONORARIOS". Creando uno nuevo a nombre fijo, la obra terminaría con
@@ -516,12 +459,13 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
   const { data: capHon } = await supabase.from("obra_rubros")
     .select("capitulo,capitulo_orden").eq("obra_id", orden.obra_id)
     .ilike("capitulo", "%honorario%").order("capitulo_orden").limit(1).maybeSingle();
-  const honorario = rubroDeHonorarios(orden, cuenta, {
-    conIva, iva,
-    capitulo: capHon?.capitulo || "HONORARIOS",
-  });
-  if (honorario && capHon) honorario.capitulo_orden = capHon.capitulo_orden;
-  if (honorario) filas.push(honorario);
+
+  // LAS FILAS SE ARMAN EN UN SOLO LUGAR: una por partida, todas en el capítulo
+  // de la orden, y el honorario aparte en el suyo. Es la misma cuenta que corre
+  // el servidor cuando el cliente firma por su enlace (api/portal.js), y está
+  // probada contra ella fila por fila: acá solo se trae lo que hay que leer de
+  // la base.
+  const filas = rubrosDeLaOrden({ orden, lineas, iva, obra: laObra, capHon });
 
   if (filas.length) {
     let { error } = await supabase.from("obra_rubros").insert(filas);

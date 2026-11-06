@@ -13,32 +13,47 @@ const lineas = [
   { tipo: "aumenta", cantidad: 2, precio_unitario: 125 },
   { tipo: "quita", cantidad: 95.61, precio_unitario: 78.75 },
 ];
+// Como los deja hoy la aprobacion: cada partida con su IVA, sumando lo que
+// dice el documento de la orden, $4.234,92.
 const rubros = [
-  { capitulo: "ADICIONALES · OC-01", total_base: 10830.23 },
+  { capitulo: "ADICIONALES · OC-01", total_base: 10830.22 },
   { capitulo: "ADICIONALES · OC-01", total_base: 879.61 },
-  { capitulo: "ADICIONALES · OC-01", total_base: 511.28 },
+  { capitulo: "ADICIONALES · OC-01", total_base: 511.27 },
   { capitulo: "ADICIONALES · OC-01", total_base: -8658.68 },
   { capitulo: "PRELIMINARES Y VARIOS", total_base: 287.50 },
   { capitulo: "HONORARIOS", descripcion: "Honorarios 10% sobre OC-01", total_base: 385.00 },
 ];
 
 test("un capitulo no es una orden: sus lineas caen en capitulos distintos", () => {
-  // El capitulo que lleva el nombre de la orden dice $3.562,44 y la orden puso
-  // $4.234,94 en el control, repartidos en tres capitulos. Leer el capitulo
+  // El capitulo que lleva el nombre de la orden dice $3.562,42 y la orden puso
+  // $4.234,92 en el control, repartidos en tres capitulos. Leer el capitulo
   // como si fuera la orden es el error que esto evita.
   const c = cuadreDeUnaOrden({ orden, lineas, rubros, obra, iva: 15 });
-  assert.equal(c.enControl, 4234.94);
+  assert.equal(c.enControl, 4234.92);
+  assert.equal(c.esperado, 4234.92, "lo esperado es el total con IVA del documento");
+  assert.equal(c.esperadoHonorarios, 385);
+  assert.equal(c.esperadoTrabajo, 3849.92);
   assert.equal(c.capitulos.length, 3);
-  assert.equal(c.capitulos.find(x => x.capitulo === "ADICIONALES · OC-01").total, 3562.44);
+  assert.equal(c.capitulos.find(x => x.capitulo === "ADICIONALES · OC-01").total, 3562.42);
+  assert.equal(c.diferencia, 0);
   assert.equal(c.cuadra, true);
 });
 
-test("los centavos del redondeo no son un error", () => {
-  // Cada rubro se guarda con IVA y redondeado, asi que cinco lineas pueden
-  // separarse unos centavos del total calculado de una vez.
-  const c = cuadreDeUnaOrden({ orden, lineas, rubros, obra, iva: 15 });
-  assert.ok(Math.abs(c.diferencia) <= 0.06, `diferencia ${c.diferencia}`);
-  assert.equal(c.problema, null);
+test("dos centavos tambien se dicen: el control contra el documento, al centavo", () => {
+  // Asi estaba la OC-01 del Aereo: dos de sus rubros con un centavo de mas
+  // cada uno, por un IVA sumado sobre un monto ya redondeado. El documento
+  // dice $4.234,92 y el control $4.234,94. Antes se toleraba; el contrato
+  // vigente quedaba a dos centavos del presupuesto actualizado.
+  const comoEstaba = rubros.map(r => (r.total_base === 10830.22 ? { ...r, total_base: 10830.23 }
+    : r.total_base === 511.27 ? { ...r, total_base: 511.28 } : r));
+  const c = cuadreDeUnaOrden({ orden, lineas, rubros: comoEstaba, obra, iva: 15 });
+  assert.equal(c.enControl, 4234.94);
+  assert.equal(c.diferencia, 0.02);
+  assert.equal(c.cuadra, false);
+  assert.match(c.problema, /el control tiene \$0\.02 de más por esta orden/);
+  // Y un centavo de menos, igual.
+  const corto = rubros.map(r => (r.total_base === 879.61 ? { ...r, total_base: 879.6 } : r));
+  assert.match(cuadreDeUnaOrden({ orden, lineas, rubros: corto, obra, iva: 15 }).problema, /al control le faltan \$0\.01/);
 });
 
 test("si falta el rubro de honorarios lo dice con el monto", () => {

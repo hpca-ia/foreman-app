@@ -16,10 +16,15 @@
 // es el error que esto evita: la OC-01 del Aéreo pone $4.234,94 en el control,
 // repartidos en tres capítulos, y su capítulo homónimo dice $3.562,44.
 //
-// LOS CENTAVOS NO SON UN ERROR. El control guarda cada rubro con IVA y
-// redondeado al centavo, así que diez líneas pueden separarse unos centavos del
-// total calculado de una vez. Eso se tolera; lo que no se tolera es un rubro
-// que falta.
+// LOS CENTAVOS TAMBIÉN CUENTAN. Antes se toleraban: el control guarda cada
+// rubro con IVA y redondeado, y diez líneas podían separarse unos centavos del
+// total del documento. Pero el documento es lo que el cliente firmó, y la
+// OC-01 del Aéreo decía $4.234,92 en su papel y $4.234,94 en el control: el
+// contrato vigente y el presupuesto actualizado quedaban a dos centavos uno
+// del otro, y dos centavos son una pregunta. Ahora, al aprobar, los centavos
+// se reparten para que los rubros sumen exactamente el total del documento
+// (rubrosDeLaOrden.js), así que acá ya no hay nada que perdonar: lo que se
+// compara es el total con IVA que dice la orden, al centavo.
 
 import { honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 
@@ -39,22 +44,24 @@ export const cuenta = o => o?.estado === "aprobada" && !o?.anulada && !o?.reempl
  */
 export function cuadreDeUnaOrden({ orden, lineas = [], rubros = [], obra, iva = 0 } = {}) {
   const pct = pctQueCorresponde(orden, obra);
-  const cuenta = honorariosDe({ lineas, pct });
+  const cuenta = honorariosDe({ lineas, pct, iva });
   const factor = 1 + n(iva) / 100;
 
-  // Lo que debería haber en el control: el neto y el honorario, los dos en la
-  // base del control, que lleva el IVA adentro.
-  const esperadoTrabajo = c2(cuenta.neto * factor);
+  // Lo que debería haber en el control: EL TOTAL CON IVA DEL DOCUMENTO, que es
+  // lo que el cliente firmó. De eso, el honorario con su IVA va en su rubro y
+  // el resto son las partidas.
+  const esperado = cuenta.total;
   const esperadoHonorarios = c2(cuenta.honorarios * factor);
-  const esperado = c2(esperadoTrabajo + esperadoHonorarios);
+  const esperadoTrabajo = c2(esperado - esperadoHonorarios);
 
   const esHonorario = r => /honorario/i.test(r?.capitulo || "") || /honorario/i.test(r?.descripcion || "");
   const enHonorarios = c2(rubros.filter(esHonorario).reduce((t, r) => t + n(r.total_base), 0));
   const enTrabajo = c2(rubros.filter(r => !esHonorario(r)).reduce((t, r) => t + n(r.total_base), 0));
   const enControl = c2(enTrabajo + enHonorarios);
 
-  // Un centavo por línea, que es lo que puede moverse al redondear cada rubro.
-  const tolerancia = Math.max(0.05, (lineas.length + 1) * 0.01);
+  // Al centavo: desde que aprobar reparte los centavos, no hay redondeo que
+  // explique una diferencia.
+  const tolerancia = 0.005;
   const diferencia = c2(enControl - esperado);
 
   const capitulos = [];
