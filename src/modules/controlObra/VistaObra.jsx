@@ -20,6 +20,7 @@ import TablaControl from "./TablaControl";
 // día que apareció el primero —el margen de la OC-01 de Plaza Lagos— se llevó
 // la pantalla puesta.
 import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
+import { cuadreConElPresupuesto, comoSeDice as comoSeDiceElCuadre } from "./cuadreConElPresupuesto.js";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import LibroFacturas from "./LibroFacturas";
@@ -49,6 +50,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // presupuesto del que salió va de detalle. Se leen ahora y no se copian, así
   // renombrar cualquiera de los dos se ve acá sin tocar nada más.
   const [cadena, setCadena] = useState({ proyecto: null, presupuesto: null });
+  // El presupuesto que se firmó y sus renglones, para revisar que el control
+  // siga diciendo lo mismo.
+  const [firmado, setFirmado] = useState(null);
   // Las solicitudes de compra vivas de esta obra: lo que piden gastar y
   // todavía no es factura. Se muestra al lado del invertido, no sumado: una
   // cosa es lo que salió y otra lo que está por salir.
@@ -104,9 +108,16 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     (async () => {
       const [{ data: l }, { data: p }] = await Promise.all([
         obra.lead_id ? supabase.from("leads").select("nombre").eq("id", obra.lead_id).maybeSingle() : Promise.resolve({ data: null }),
-        obra.presupuesto_id ? supabase.from("presupuestos").select("nombre").eq("id", obra.presupuesto_id).maybeSingle() : Promise.resolve({ data: null }),
+        obra.presupuesto_id ? supabase.from("presupuestos").select("*").eq("id", obra.presupuesto_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
       if (vivo) setCadena({ proyecto: l?.nombre || null, presupuesto: p?.nombre || null });
+      // EL PAPEL CONTRA EL QUE SE REVISA EL CONTROL: el presupuesto y sus
+      // renglones. La línea base es una copia, y una copia puede dejar de
+      // decir lo mismo que el original sin que nadie lo vea.
+      if (!p) { if (vivo) setFirmado(null); return; }
+      const { data: its } = await supabase.from("presupuesto_items")
+        .select("id,total,descripcion,capitulo").eq("presupuesto_id", obra.presupuesto_id);
+      if (vivo) setFirmado({ presupuesto: p, items: its || [] });
     })();
     return () => { vivo = false; };
   }, [obra.lead_id, obra.presupuesto_id]);
@@ -238,6 +249,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   }
 
   const totales = totalesObra(grupos);
+  // ¿El control sigue diciendo lo mismo que el presupuesto que se firmó?
+  const noCuadra = firmado
+    ? comoSeDiceElCuadre(cuadreConElPresupuesto({ rubros, presupuesto: firmado.presupuesto, items: firmado.items }))
+    : null;
   // EL AVANCE DE OBRA: lo que cada rubro dice que tiene ejecutado, pesado por
   // lo que vale. Un rubro de cien mil al 50% pesa cincuenta veces más que uno
   // de mil al 100%, y un promedio simple diría cualquier cosa.
@@ -275,6 +290,22 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           </select>
         )}
       </div>
+
+      {/* EL CONTROL NO DICE LO MISMO QUE EL PRESUPUESTO. Va arriba de todo y en
+          rojo, en cualquier pestaña: es la línea base contra la que se mide
+          la obra y el número que el cliente tiene en su papel. Si no cuadra,
+          todo lo que está abajo —el saldo, el avance, el presupuesto
+          actualizado, el "Contrato original" de cada orden— está corrido. */}
+      {noCuadra && (
+        <div style={{ background: colors.dangerSoft, border: `1px solid ${colors.danger}`, borderLeft: `4px solid ${colors.danger}`,
+          borderRadius: colors.radiusMd, padding: "10px 13px", marginBottom: 12, fontSize: 12.5, color: colors.ink, lineHeight: 1.55 }}>
+          <div style={{ fontWeight: 700, color: colors.danger }}>{noCuadra.titulo}</div>
+          {noCuadra.lineas.map((l, i) => <div key={i} style={{ marginTop: 3 }}>· {l}</div>)}
+          <div style={{ marginTop: 5, fontSize: 11.5, color: colors.inkSoft }}>
+            Hasta que se corrija, el presupuesto actualizado y el «Contrato original» de las órdenes de cambio salen con esa diferencia.
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 14 }}>
         <Tarjeta label="Presupuesto" valor={totales.base} />
