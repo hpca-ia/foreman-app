@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { presupuestoActualizado, conIva, esperaFirma, aclaracionDelBloque, renglonesDeLaMatriz }
+import { presupuestoActualizado, conIva, esperaFirma, aclaracionDelBloque, renglonesDeLaMatriz, nuevosLimpios, BLOQUE_PROYECTADO,
+  ajustesLimpios, nuevosDe, loQueSeGuarda, CLAVE_NUEVOS }
   from "../src/modules/controlObra/presupuestoActualizado.js";
 
 // ── EL PRESUPUESTO ACTUALIZADO ─────────────────────────────────────────────
@@ -218,7 +219,7 @@ test("un ajuste a mano mueve el proyectado de su rubro, al precio del contrato",
 test("los honorarios siguen al ajuste: el porcentaje del contrato sobre lo que se sumó y se restó", () => {
   const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, ajustes: { 106: -5, 1: 3 } });
   // −181,90 y +300: 118,10 de neto, y su 10% son 11,81 de honorarios.
-  assert.deepEqual(m.ajuste, { hay: true, neto: 118.1, honorarios: 11.81, total: 129.91 });
+  assert.deepEqual(m.ajuste, { hay: true, neto: 118.1, enRubros: 118.1, enNuevos: 0, cuantosNuevos: 0, honorarios: 11.81, total: 129.91 });
   const honor = m.capitulos.flatMap(c => c.filas).find(x => x.honorario);
   assert.equal(honor.manual.total, 11.81);
   assert.equal(honor.manual.calculado, true, "no lo escribió nadie: sale de la cuenta");
@@ -226,13 +227,13 @@ test("los honorarios siguen al ajuste: el porcentaje del contrato sobre lo que s
   assert.equal(m.totales.proyectado, Math.round((m.totales.vigente + m.totales.porAprobar + 129.91) * 100) / 100);
   // Sacar un rubro entero baja también su honorario.
   const sin = presupuestoActualizado({ rubros, obra, ajustes: { 1: -10 } });
-  assert.deepEqual(sin.ajuste, { hay: true, neto: -1000, honorarios: -100, total: -1100 });
+  assert.deepEqual(sin.ajuste, { hay: true, neto: -1000, enRubros: -1000, enNuevos: 0, cuantosNuevos: 0, honorarios: -100, total: -1100 });
   assert.deepEqual(filaDe(sin, 1).proyectado, { cantidad: 0, total: 0 });
 });
 
 test("sin honorarios en el contrato, el ajuste no inventa ninguno; y un ajuste a nada no hace nada", () => {
   const m = presupuestoActualizado({ rubros, obra: { honorarios_pct: 0 }, ajustes: { 1: 2, 999: 5, 106: 0 } });
-  assert.deepEqual(m.ajuste, { hay: true, neto: 200, honorarios: 0, total: 200 });
+  assert.deepEqual(m.ajuste, { hay: true, neto: 200, enRubros: 200, enNuevos: 0, cuantosNuevos: 0, honorarios: 0, total: 200 });
   assert.deepEqual(m.capitulos.map(c => c.nombre), ["OBRA CIVIL", "ELÉCTRICO"]);
   assert.equal(presupuestoActualizado({ rubros, obra }).ajuste.hay, false);
 });
@@ -241,7 +242,7 @@ test("el rubro de honorarios no se ajusta a mano: se calcula", () => {
   const honor = { id: 9191, numero: 9191, descripcion: "Honorarios de administración (10 %)", unidad: "glb", cantidad: 1,
     precio_unitario: 340.39, total_base: 391.45, iva_pct: 15, capitulo: "HONORARIOS", capitulo_orden: 9, orden: 9191, origen: "base" };
   const m = presupuestoActualizado({ rubros: [...rubros, honor], obra, ajustes: { 9191: -1, 1: 1 } });
-  assert.deepEqual(m.ajuste, { hay: true, neto: 100, honorarios: 10, total: 110 });
+  assert.deepEqual(m.ajuste, { hay: true, neto: 100, enRubros: 100, enNuevos: 0, cuantosNuevos: 0, honorarios: 10, total: 110 });
   assert.equal(filaDe(m, 9191).manual.total, 10);
 });
 
@@ -252,4 +253,116 @@ test("los renglones de la matriz traen el ajuste y cierran al pie", () => {
   assert.equal(pies[0].valores.manual, 330, "300 del rubro y 30 de su honorario");
   assert.equal(pies[2].valores.manual, 379.5);
   assert.equal(pies[2].valores.proyectado, conIva(m.totales.proyectado, 15));
+});
+
+// ── LOS RUBROS QUE TODAVÍA NO SON DE NADIE ─────────────────────────────────
+//
+// "Quiero poder agregar rubros a mano que no están en una orden de cambio y
+// todavía no se cotizan, pero proyectan el presupuesto. Pueden ir al final."
+// Un trabajo que se sabe que viene: ni contrato ni orden, una estimación.
+
+const nuevos = [
+  { id: "a", descripcion: "Letrero luminoso de fachada", unidad: "glb", cantidad: "1", precio: "2500" },
+  { id: "b", descripcion: "Cortinas enrollables", unidad: "u", cantidad: "6", precio: "180,5" },   // mal escrito: no es un número
+  { id: "c", descripcion: "Cortinas enrollables", unidad: "u", cantidad: 6, precio: 180.5 },
+  { id: "d", descripcion: "", unidad: "", cantidad: "", precio: "" },                                // se abrió y no se llenó
+];
+
+test("los rubros escritos a mano se limpian: números, y fuera los renglones vacíos", () => {
+  const l = nuevosLimpios(nuevos);
+  // El vacío no va. El que tiene descripción y un precio que no se entiende sí:
+  // "falta cotizar" también es un dato, y va en cero hasta que tenga número.
+  assert.deepEqual(l.map(x => x.id), ["a", "b", "c"]);
+  assert.deepEqual(l[0], { id: "a", descripcion: "Letrero luminoso de fachada", unidad: "glb", cantidad: 1, precio: 2500 });
+  assert.equal(l[1].precio, 0);
+  assert.deepEqual(nuevosLimpios(null), []);
+  assert.deepEqual(nuevosLimpios("cualquier cosa"), []);
+});
+
+test("un rubro escrito a mano va al final, suma solo al proyectado y no toca ni la base ni el vigente", () => {
+  const sin = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra });
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, nuevos: [nuevos[0], nuevos[2]] });
+  assert.equal(m.proyectados.filas.length, 2);
+  const [letrero, cortinas] = m.proyectados.filas;
+  assert.equal(letrero.numero, "P-01");
+  assert.equal(letrero.descripcion, "Letrero luminoso de fachada");
+  assert.deepEqual(letrero.base, { cantidad: 0, total: 0 });
+  assert.deepEqual(letrero.vigente, { cantidad: 0, total: 0 });
+  assert.equal(letrero.manual.total, 2500);
+  assert.equal(letrero.proyectado.total, 2500);
+  assert.equal(cortinas.numero, "P-02");
+  assert.equal(cortinas.manual.total, 1083);
+  assert.equal(m.proyectados.sub.manual, 3583);
+  // Lo firmado y lo aprobado no se movieron un centavo.
+  assert.equal(m.totales.base, sin.totales.base);
+  assert.equal(m.totales.aprobado, sin.totales.aprobado);
+  assert.equal(m.totales.vigente, sin.totales.vigente);
+  assert.equal(m.totales.porAprobar, sin.totales.porAprobar);
+  // Y el proyectado sube por lo escrito más su honorario: 3.583 + 10 %.
+  assert.equal(m.totales.manual, 3941.3);
+  assert.equal(m.totales.proyectado, Math.round((sin.totales.proyectado + 3941.3) * 100) / 100);
+});
+
+test("los rubros a mano arrastran honorarios como cualquier otro trabajo, y se suman con los ajustes de cantidad", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, ajustes: { 1: 3 }, nuevos: [nuevos[0]] });
+  // 3 × 100 en un rubro del contrato + 2.500 de un rubro nuevo; 10 % de los dos.
+  assert.deepEqual(m.ajuste, { hay: true, neto: 2800, enRubros: 300, enNuevos: 2500, cuantosNuevos: 1, honorarios: 280, total: 3080 });
+  const sinHonorarios = presupuestoActualizado({ rubros, obra: { honorarios_pct: 0 }, nuevos: [nuevos[0]] });
+  assert.equal(sinHonorarios.ajuste.honorarios, 0);
+  assert.equal(sinHonorarios.totales.manual, 2500);
+});
+
+test("un rubro a mano todavía sin precio se lista igual, en cero: falta cotizar también es un dato", () => {
+  const m = presupuestoActualizado({ rubros, obra, nuevos: [{ id: "x", descripcion: "Señalética", unidad: "glb", cantidad: 1, precio: "" }] });
+  assert.equal(m.proyectados.filas.length, 1);
+  assert.equal(m.proyectados.filas[0].manual.total, 0);
+  assert.equal(m.ajuste.hay, true);
+  assert.equal(m.ajuste.neto, 0);
+  // Y sin nada escrito, no hay bloque ni ajuste.
+  const nada = presupuestoActualizado({ rubros, obra, nuevos: [nuevos[3]] });
+  assert.equal(nada.proyectados.filas.length, 0);
+  assert.equal(nada.ajuste.hay, false);
+});
+
+test("en la matriz van después de las órdenes, en su bloque, y el pie los suma", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, nuevos: [nuevos[0]] });
+  const r = renglonesDeLaMatriz(m);
+  const bloques = r.filter(x => x.tipo === "bloque");
+  const ultimo = bloques[bloques.length - 1];
+  assert.equal(ultimo.nombre, BLOQUE_PROYECTADO);
+  assert.equal(ultimo.estado, "ESTIMADO");
+  assert.equal(ultimo.manual, true);
+  assert.match(ultimo.aclaracion, /no son parte del contrato ni de ninguna orden/);
+  assert.equal(ultimo.sub.manual, 2500);
+  // Es lo último antes del pie.
+  const i = r.indexOf(ultimo);
+  assert.equal(r[i + 1].tipo, "fila");
+  assert.equal(r[i + 1].descripcion, "Letrero luminoso de fachada");
+  assert.equal(r[i + 2].tipo, "pie");
+  const pie = r.find(x => x.tipo === "pie");
+  assert.equal(pie.valores.manual, 2750);
+  // Sin rubros a mano, la matriz es la de siempre.
+  assert.equal(renglonesDeLaMatriz(presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra })).some(x => x.tipo === "bloque" && x.manual), false);
+});
+
+test("una simulación guarda los ajustes por rubro y los rubros nuevos en un solo dato, y los devuelve iguales", () => {
+  const guardado = loQueSeGuarda({ 106: "-5", 1: "3", 50: "0", 97: "" }, nuevos);
+  // Los ajustes en cero o vacíos no se guardan; los rubros nuevos van bajo su clave.
+  assert.deepEqual(Object.keys(guardado).sort(), ["1", "106", CLAVE_NUEVOS].sort());
+  assert.equal(guardado[106], -5);
+  assert.equal(guardado[CLAVE_NUEVOS].length, 3);
+  // Al abrirla: los ajustes por un lado, sin la clave de los nuevos…
+  assert.deepEqual(ajustesLimpios(guardado), { 1: 3, 106: -5 });
+  // …y los rubros nuevos por el otro, como se escribieron.
+  assert.deepEqual(nuevosDe(guardado).map(x => x.descripcion), ["Letrero luminoso de fachada", "Cortinas enrollables", "Cortinas enrollables"]);
+  // Guardar lo que se abrió da lo mismo: así se sabe si hay algo sin guardar.
+  assert.deepEqual(loQueSeGuarda(ajustesLimpios(guardado), nuevosDe(guardado)), guardado);
+  // Una simulación de antes, sin rubros nuevos, se lee igual que siempre.
+  assert.deepEqual(nuevosDe({ 106: -5 }), []);
+  assert.deepEqual(loQueSeGuarda({ 106: -5 }, []), { 106: -5 });
+  assert.deepEqual(nuevosDe(null), []);
+  // Y la clave de los nuevos nunca se lee como el ajuste de un rubro.
+  const m = presupuestoActualizado({ rubros, obra, ajustes: guardado });
+  assert.equal(m.ajuste.enRubros, 118.1);
+  assert.equal(m.ajuste.cuantosNuevos, 0);
 });

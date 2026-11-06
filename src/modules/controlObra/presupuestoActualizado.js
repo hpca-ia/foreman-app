@@ -22,7 +22,8 @@ import { codigoDe } from "./nombreOrden.js";
 //   POR APROBAR   lo mismo de las órdenes que esperan firma. No suma al
 //                 vigente: es lo que cambiaría si se aprueban.
 //   AJUSTE        lo que alguien proyecta a mano: más o menos cantidad de un
-//                 rubro, o sacarlo. No es de nadie todavía: es una simulación.
+//                 rubro, sacarlo, o un rubro que todavía no existe. No es de
+//                 nadie todavía: es una simulación.
 //   PROYECTADO    vigente más por aprobar más el ajuste.
 //
 // LOS HONORARIOS SE MUEVEN CON TODO LO DEMÁS. Administrar más obra es más
@@ -32,6 +33,11 @@ import { codigoDe } from "./nombreOrden.js";
 //
 // Lo que una orden agrega y no estaba en el contrato no tiene rubro donde ir:
 // va al final, en un bloque por orden.
+//
+// Y LO QUE TODAVÍA NO ES NI UNA ORDEN: un trabajo que se sabe que viene, que no
+// se cotizó y que no tiene orden de cambio, pero que ya mueve el número que el
+// cliente quiere ver. Se escribe a mano —qué es, cuánto y a cuánto se estima—
+// y va al final de todo, en su propio bloque, sumando solo al proyectado.
 //
 // No toca nada: es una lectura de los rubros y las órdenes. Todo sin IVA; el
 // impuesto se suma al pie, como en el contrato y en cada orden.
@@ -48,6 +54,49 @@ const vacio = () => ({ cantidad: 0, total: 0, ordenes: [] });
 const esDeHonorarios = r => /honorario/i.test(String(r?.capitulo_original ?? r?.capitulo ?? ""))
   || /honorario/i.test(String(r?.descripcion ?? ""));
 
+/**
+ * Los rubros escritos a mano, limpios: con su cantidad y su precio en número.
+ *
+ * Un renglón sin descripción y sin monto es uno que se abrió y no se llenó: no
+ * va. Uno con descripción y sin precio sí: "falta cotizar" también es un dato.
+ *
+ * @param lista  [{ id, descripcion, unidad, cantidad, precio }], como se escriben
+ */
+export function nuevosLimpios(lista = []) {
+  return (Array.isArray(lista) ? lista : [])
+    .map((x, i) => ({
+      id: x?.id ?? `n${i + 1}`,
+      descripcion: String(x?.descripcion ?? "").trim(),
+      unidad: String(x?.unidad ?? "").trim(),
+      cantidad: c4(x?.cantidad),
+      precio: c4(x?.precio),
+    }))
+    .filter(x => x.descripcion || c2(x.cantidad * x.precio) !== 0);
+}
+
+// CÓMO SE GUARDA UNA SIMULACIÓN. Los ajustes son un mapa de rubro a cantidad;
+// los rubros escritos a mano viajan adentro del mismo mapa, bajo una clave que
+// no puede ser el id de ningún rubro. Así una simulación es un solo dato y no
+// hace falta otra columna para lo que es, al final, parte del mismo ajuste.
+export const CLAVE_NUEVOS = "_nuevos";
+
+/** Solo lo que es un ajuste de verdad: un número distinto de cero, por rubro. */
+export function ajustesLimpios(ajustes = {}) {
+  return Object.fromEntries(Object.entries(ajustes || {})
+    .filter(([k]) => k !== CLAVE_NUEVOS)
+    .map(([k, v]) => [k, c4(v)])
+    .filter(([, v]) => v !== 0));
+}
+
+/** Los rubros escritos a mano que trae una simulación guardada. */
+export const nuevosDe = ajustes => nuevosLimpios(ajustes?.[CLAVE_NUEVOS]);
+
+/** Lo que va a la base: los ajustes por rubro y, si los hay, los rubros nuevos. */
+export function loQueSeGuarda(ajustes = {}, nuevos = []) {
+  const limpios = nuevosLimpios(nuevos);
+  return { ...ajustesLimpios(ajustes), ...(limpios.length ? { [CLAVE_NUEVOS]: limpios } : {}) };
+}
+
 /** ¿Espera la firma del cliente? Enviada y viva; un borrador solo si se pide. */
 export const esperaFirma = (o, conBorradores = false) =>
   (o?.estado === "enviada" || (conBorradores && o?.estado === "borrador")) && !o?.anulada && !o?.reemplazada_at;
@@ -59,9 +108,11 @@ export const esperaFirma = (o, conBorradores = false) =>
  * @param obra              para el honorario del contrato
  * @param conBorradores     si las que todavía no se mandaron entran en "por aprobar"
  * @param ajustes           { [rubroId]: ± cantidad }: lo que se proyecta a mano
+ * @param nuevos            [{ id, descripcion, unidad, cantidad, precio }]: rubros
+ *                          que todavía no están en el contrato ni en ninguna orden
  */
 export function presupuestoActualizado({
-  rubros = [], ordenes = [], lineasDeOrdenes = {}, obra = null, conBorradores = false, ajustes = {},
+  rubros = [], ordenes = [], lineasDeOrdenes = {}, obra = null, conBorradores = false, ajustes = {}, nuevos = [],
 } = {}) {
   // EL PRESUPUESTO COMO SE FIRMÓ: con el capítulo y el orden originales, y sin
   // lo que se agregó después en el control ni lo que metieron las órdenes.
@@ -197,7 +248,25 @@ export function presupuestoActualizado({
     fila.manual = { cantidad, total: c2(cantidad * fila.precio), ordenes: [] };
     netoManual += fila.manual.total;
   }
+  const netoDeRubros = c2(netoManual);
+
+  // LOS RUBROS QUE TODAVÍA NO EXISTEN. Ni contrato ni orden: una estimación de
+  // algo que viene. No tienen base ni vigente —no son de nadie—, así que todo
+  // lo suyo es ajuste. Y arrastran honorario como cualquier otro trabajo:
+  // administrar esa obra también se cobra, y un proyectado sin eso se queda
+  // corto justo en lo que después hay que explicar.
+  const filasNuevas = nuevosLimpios(nuevos).map((x, i) => {
+    const total = c2(x.cantidad * x.precio);
+    netoManual += total;
+    return {
+      id: `nuevo-${x.id}`, numero: `P-${String(i + 1).padStart(2, "0")}`, descripcion: x.descripcion,
+      unidad: x.unidad, precio: x.precio, proyectada: true,
+      base: { cantidad: 0, total: 0 }, aprobado: vacio(), porAprobar: vacio(),
+      manual: { cantidad: x.cantidad, total, ordenes: [] },
+    };
+  });
   netoManual = c2(netoManual);
+  const netoDeNuevos = c2(netoManual - netoDeRubros);
   const honorarioManual = pctContrato > 0 ? c2(netoManual * pctContrato / 100) : 0;
   if (honorarioManual) {
     const f = honorariosEn();
@@ -250,6 +319,10 @@ export function presupuestoActualizado({
       || (numeroDe(a) - numeroDe(b)) || String(a.orden.codigo).localeCompare(String(b.orden.codigo)));
   for (const b of deOrdenes) b.sub = sumar(b.filas);
 
+  // Y al final de todo, lo escrito a mano que todavía no es de ninguna orden.
+  const proyectadas = filasNuevas.map(cerrar);
+  const proyectados = { filas: proyectadas, sub: sumar(proyectadas) };
+
   // ── CUÁNTO VALE CADA ORDEN, ENTERA, como lo dice su propio papel ──────────
   //
   // En la matriz una orden queda repartida en tres lugares: sus cambios de
@@ -292,13 +365,19 @@ export function presupuestoActualizado({
   }
 
   return {
-    capitulos, bloques: deOrdenes,
-    totales: sumar([...capitulos.flatMap(c => c.filas), ...deOrdenes.flatMap(b => b.filas)]),
+    capitulos, bloques: deOrdenes, proyectados,
+    totales: sumar([...capitulos.flatMap(c => c.filas), ...deOrdenes.flatMap(b => b.filas), ...proyectadas]),
     iva, honorariosPct: pctContrato,
     ordenes: resumen, ordenesAprobadas: sumaDe("aprobado"), ordenesPorAprobar: sumaDe("porAprobar"),
     aprobadas: aprobadas.map(codigoDe), porAprobar: pendientes.map(codigoDe),
     // Lo proyectado a mano: cuánto suman los ajustes y cuánto honorario arrastran.
-    ajuste: { hay: netoManual !== 0 || honorarioManual !== 0, neto: netoManual, honorarios: honorarioManual, total: c2(netoManual + honorarioManual) },
+    // `enRubros` es lo que se movió en rubros del contrato y `enNuevos` lo que
+    // suman los rubros escritos a mano: las dos mitades del neto.
+    ajuste: {
+      hay: netoManual !== 0 || honorarioManual !== 0 || proyectadas.length > 0,
+      neto: netoManual, enRubros: netoDeRubros, enNuevos: netoDeNuevos, cuantosNuevos: proyectadas.length,
+      honorarios: honorarioManual, total: c2(netoManual + honorarioManual),
+    },
   };
 }
 
@@ -319,12 +398,17 @@ export function aclaracionDelBloque(orden) {
     + "es lo que no estaba en el contrato, que va acá.";
 }
 
+/** El nombre del bloque de los rubros escritos a mano, y lo que hay que aclarar de ellos. */
+export const BLOQUE_PROYECTADO = "RUBROS PROYECTADOS · sin cotizar y sin orden de cambio";
+export const ACLARACION_PROYECTADO = "Todavía no son parte del contrato ni de ninguna orden de cambio: son una estimación, "
+  + "para ver en cuánto quedaría el presupuesto. Suman solo al proyectado.";
+
 /**
  * LA MATRIZ, RENGLÓN POR RENGLÓN, EN EL ORDEN EN QUE SE LEE.
  *
  * La pantalla, el Excel y el PDF dibujan lo mismo: de acá salen los tres, así
  * que no pueden decir cosas distintas. Capítulo, sus rubros; después los
- * bloques de las órdenes; y el pie, que cierra sin IVA, con el IVA y con el
+ * bloques de las órdenes; después lo proyectado a mano; y el pie, que cierra sin IVA, con el IVA y con el
  * total, como el contrato.
  *
  * @returns [{ tipo: "capitulo" | "fila" | "bloque" | "pie", ... }]
@@ -343,6 +427,11 @@ export function renglonesDeLaMatriz(m) {
       aclaracion: aclaracionDelBloque(b.orden),
     });
     for (const f of b.filas) out.push({ tipo: "fila", deOrden: true, ...f });
+  }
+  if (m.proyectados?.filas?.length) {
+    out.push({ tipo: "bloque", manual: true, orden: null, sub: m.proyectados.sub,
+      nombre: BLOQUE_PROYECTADO, estado: "ESTIMADO", aclaracion: ACLARACION_PROYECTADO });
+    for (const f of m.proyectados.filas) out.push({ tipo: "fila", deOrden: true, ...f });
   }
   const t = m.totales;
   const cada = fn => Object.fromEntries(COLUMNAS.map(k => [k, fn(k)]));

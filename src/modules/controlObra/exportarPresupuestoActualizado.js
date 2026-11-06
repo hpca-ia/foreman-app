@@ -28,7 +28,10 @@ const nombreLimpio = s => String(s || "obra").replace(/[^\w\sáéíóúñÁÉÍ�
 // Un movimiento se escribe con su signo; lo que no se movió queda en blanco.
 const mov = v => (!v ? "" : `${v > 0 ? "+" : "-"}${plata(Math.abs(v))}`);
 const cant = v => (!v ? "" : plata(v));
-const pesos = v => `${v < 0 ? "-" : ""}$${plata(Math.abs(v))}`;
+const pesos = v => `${v < 0 ? "-" : ""}${plata(Math.abs(v))}`;
+// Un rubro escrito a mano que todavía no tiene precio va con su aviso: en un
+// papel, un renglón con el total en blanco parece un error.
+const descripcion = r => r.descripcion + (r.proyectada && !r.manual.total ? " (por cotizar: todavía no suma)" : "");
 
 const columnas = conAjuste => ["N°", "DESCRIPCIÓN", "UND", "P. UNIT",
   "CANT", "TOTAL",
@@ -68,7 +71,8 @@ export async function excelDelPresupuesto({ matriz, obra, simulacion = null }) {
     [obra?.nombre || ""],
     [`Al ${hoy()}  ·  ${queOrdenes(matriz)}`],
     ["Valores sin IVA. El impuesto se suma al pie."
-      + (conAjuste ? " La columna AJUSTE A MANO es una proyección: no forma parte del contrato ni de ninguna orden." : "")],
+      + (conAjuste ? " La columna AJUSTE A MANO es una proyección: no forma parte del contrato ni de ninguna orden." : "")
+      + (matriz.proyectados?.filas?.length ? " Los RUBROS PROYECTADOS, al final, son trabajos estimados que todavía no se cotizaron ni tienen orden de cambio." : "")],
     [],
     grupos(conAjuste).flatMap(([t, n]) => [t, ...Array(n - 1).fill("")]),
     columnas(conAjuste),
@@ -80,7 +84,7 @@ export async function excelDelPresupuesto({ matriz, obra, simulacion = null }) {
         "", r.sub.base || "", "", r.sub.aprobado || "", "", "", r.sub.vigente || "", "", r.sub.porAprobar || "", "",
         ...aj("", r.sub.manual || ""), "", r.sub.proyectado || ""]);
     } else if (r.tipo === "fila") {
-      filas.push([r.numero, r.descripcion, r.unidad, r.precio || "",
+      filas.push([r.numero, descripcion(r), r.unidad, r.precio || "",
         r.base.cantidad || "", r.base.total || "",
         r.aprobado.cantidad || "", r.aprobado.total || "", r.aprobado.ordenes.join(", "),
         r.vigente.cantidad || "", r.vigente.total || "",
@@ -185,7 +189,7 @@ export async function pdfDelPresupuesto({ matriz, obra, simulacion = null }, mod
       const rojo = v => (v < 0 ? { textColor: ROJO } : {});
       const violeta = v => (v < 0 ? { textColor: ROJO } : { textColor: VIOLETA });
       body.push([
-        r.numero, r.descripcion, r.unidad, r.precio ? plata(r.precio) : "",
+        r.numero, descripcion(r), r.unidad, r.precio ? plata(r.precio) : "",
         cant(r.base.cantidad), r.base.total ? plata(r.base.total) : "",
         { content: mov(r.aprobado.cantidad), styles: rojo(r.aprobado.cantidad) },
         { content: mov(r.aprobado.total), styles: rojo(r.aprobado.total) }, r.aprobado.ordenes.join(", "),
@@ -245,6 +249,9 @@ export async function pdfDelPresupuesto({ matriz, obra, simulacion = null }, mod
       + (conAjuste ? " AJUSTE A MANO es una proyección, al precio del contrato. PROYECTADO es el vigente más lo que está por aprobar y el ajuste."
         : " PROYECTADO es el vigente más lo que está por aprobar."),
     "Los honorarios de cada orden" + (conAjuste ? " y del ajuste" : "") + " van en el rubro de honorarios. Los trabajos que no estaban en el presupuesto van al final, por su orden de cambio.",
+    ...(matriz.proyectados?.filas?.length
+      ? ["RUBROS PROYECTADOS, al final, son trabajos estimados que todavía no se cotizaron ni tienen orden de cambio: no forman parte del contrato y suman solo al proyectado."]
+      : []),
     "Los valores de cada renglón son sin IVA; el impuesto se suma al pie.",
   ];
   if (y > doc.internal.pageSize.getHeight() - 34 - notas.length * 10) { doc.addPage(); y = 40; }

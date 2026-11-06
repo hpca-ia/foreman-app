@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Download, FileSpreadsheet, Save, Trash2 } from "lucide-react";
+import { Download, FileSpreadsheet, Save, Trash2, Plus, X } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { cargarOrdenes } from "./ordenesDeCambio";
-import { presupuestoActualizado, renglonesDeLaMatriz, conIva } from "./presupuestoActualizado.js";
+import { presupuestoActualizado, renglonesDeLaMatriz, conIva, ajustesLimpios, nuevosLimpios, nuevosDe, loQueSeGuarda } from "./presupuestoActualizado.js";
 import { excelDelPresupuesto, pdfDelPresupuesto } from "./exportarPresupuestoActualizado.js";
-import { simulacionesDe, guardarSimulacion, borrarSimulacion, ajustesLimpios } from "./simulacionesDePresupuesto.js";
+import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacionesDePresupuesto.js";
 
 // EL PRESUPUESTO ACTUALIZADO, EN PANTALLA.
 //
@@ -17,7 +17,8 @@ import { simulacionesDe, guardarSimulacion, borrarSimulacion, ajustesLimpios } f
 // —los rubros y las órdenes— y no se guardan: abrirlo mañana con una orden más
 // aprobada da otra matriz, y eso es lo que tiene que pasar.
 //
-// Lo único que se guarda es el ajuste a mano, como una simulación con nombre.
+// Lo único que se guarda es el ajuste a mano —las cantidades que se mueven y
+// los rubros que todavía no existen—, como una simulación con nombre.
 // El presupuesto original, al lado, no cambia: es el papel que se firmó.
 
 const th = { padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700, whiteSpace: "nowrap" };
@@ -44,6 +45,9 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
   // LO QUE SE PROYECTA A MANO. Se guarda tal como se escribe —"-", "-5"— para
   // que el campo no pelee con quien está tipeando; la cuenta lo lee como número.
   const [ajustes, setAjustes] = useState({});
+  // LOS RUBROS QUE TODAVÍA NO SON DE NADIE: algo que viene, sin cotizar y sin
+  // orden de cambio, escrito a mano con una estimación. Van al final.
+  const [nuevos, setNuevos] = useState([]);
   const [simulaciones, setSimulaciones] = useState([]);
   const [simulacion, setSimulacion] = useState(null);   // la guardada que está abierta
   const [nombre, setNombre] = useState("");
@@ -69,15 +73,17 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
   }, [obra?.id, cargarSimulaciones]);
 
   const numeros = useMemo(() => ajustesLimpios(ajustes), [ajustes]);
+  const escritos = useMemo(() => nuevosLimpios(nuevos), [nuevos]);
   const matriz = useMemo(
-    () => presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes: lineas, obra, conBorradores, ajustes: numeros }),
-    [rubros, ordenes, lineas, obra, conBorradores, numeros]);
+    () => presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes: lineas, obra, conBorradores, ajustes: numeros, nuevos: escritos }),
+    [rubros, ordenes, lineas, obra, conBorradores, numeros, escritos]);
   const renglones = useMemo(() => renglonesDeLaMatriz(matriz), [matriz]);
   const t = matriz.totales;
   const borradores = ordenes.filter(o => o.estado === "borrador" && !o.anulada && (lineas[o.id] || []).length).length;
-  const hayAjustes = Object.keys(numeros).length > 0;
+  const hayAjustes = Object.keys(numeros).length > 0 || escritos.length > 0;
   // ¿Lo que está en pantalla es lo mismo que quedó guardado?
-  const sinGuardar = JSON.stringify(numeros) !== JSON.stringify(ajustesLimpios(simulacion?.ajustes || {}))
+  const guardado = simulacion?.ajustes || {};
+  const sinGuardar = JSON.stringify(loQueSeGuarda(numeros, escritos)) !== JSON.stringify(loQueSeGuarda(guardado, nuevosDe(guardado)))
     || (simulacion && nombre.trim() !== (simulacion.nombre || ""));
 
   async function bajar(que) {
@@ -92,13 +98,15 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
 
   function abrir(id) {
     const s = simulaciones.find(x => String(x.id) === String(id)) || null;
-    setSimulacion(s); setNombre(s?.nombre || ""); setAjustes(s ? { ...s.ajustes } : {}); setAviso("");
+    setSimulacion(s); setNombre(s?.nombre || ""); setAviso("");
+    setAjustes(s ? ajustesLimpios(s.ajustes) : {});
+    setNuevos(s ? nuevosDe(s.ajustes) : []);
   }
 
   async function guardar(comoNueva = false) {
     if (!nombre.trim()) { setError("Ponele un nombre a la simulación para poder encontrarla después."); return; }
     setOcupado("guardar"); setError("");
-    const r = await guardarSimulacion({ id: comoNueva ? null : simulacion?.id, obraId: obra.id, nombre, ajustes: numeros, quien: currentUser });
+    const r = await guardarSimulacion({ id: comoNueva ? null : simulacion?.id, obraId: obra.id, nombre, ajustes: numeros, nuevos: escritos, quien: currentUser });
     setOcupado("");
     if (r.error) { setError(r.error); return; }
     setSimulacion(r.simulacion); setNombre(r.simulacion.nombre);
@@ -110,9 +118,15 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
     if (!simulacion || !window.confirm(`¿Borrar la simulación «${simulacion.nombre}»?`)) return;
     const err = await borrarSimulacion(simulacion.id);
     if (err) { setError(err); return; }
-    setSimulacion(null); setNombre(""); setAjustes({}); setAviso("");
+    setSimulacion(null); setNombre(""); setAjustes({}); setNuevos([]); setAviso("");
     await cargarSimulaciones();
   }
+
+  // Un rubro nuevo, vacío, para llenar. El id es solo para reconocerlo acá.
+  const agregarNuevo = () => setNuevos(l => [...l,
+    { id: `n${Date.now().toString(36)}${Math.round(Math.random() * 1e4)}`, descripcion: "", unidad: "", cantidad: "1", precio: "" }]);
+  const cambiarNuevo = (id, campo, valor) => setNuevos(l => l.map(x => (x.id === id ? { ...x, [campo]: valor } : x)));
+  const quitarNuevo = id => setNuevos(l => l.filter(x => x.id !== id));
 
   const poner = (id, valor) => setAjustes(a => {
     const b = { ...a };
@@ -233,7 +247,8 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
         <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.55 }}>
           <strong style={{ color: colors.ink }}>Proyectar a mano.</strong> En la columna <strong style={{ color: VIOLETA }}>AJUSTE</strong> de
           cada rubro escribí cuánta cantidad sumás o restás: <strong>5</strong> para aumentar, <strong>−5</strong> para reducir, o
-          «quitar» para sacar el rubro entero. Va al precio del contrato.
+          «quitar» para sacar el rubro entero. Va al precio del contrato. Y lo que todavía no está en ninguna orden ni se
+          cotizó se agrega abajo, como rubro nuevo, con una estimación.
           {matriz.honorariosPct > 0
             ? <> Los honorarios se ajustan solos, con el {matriz.honorariosPct} % del contrato, en su rubro.</>
             : <> Esta obra no tiene honorarios cargados en el contrato, así que el ajuste no mueve ninguno.</>}
@@ -242,10 +257,83 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
         {matriz.ajuste.hay && (
           <div style={{ fontSize: 12, color: colors.ink, marginTop: 6 }}>
             El ajuste suma <strong style={{ color: matriz.ajuste.neto < 0 ? colors.danger : VIOLETA }}>{plata(matriz.ajuste.neto)}</strong> en rubros
+            {matriz.ajuste.cuantosNuevos > 0 && matriz.ajuste.enNuevos !== 0 && (
+              <> ({plata(matriz.ajuste.enNuevos)} {matriz.ajuste.cuantosNuevos === 1 ? "del rubro nuevo" : `de los ${matriz.ajuste.cuantosNuevos} rubros nuevos`}
+                {matriz.ajuste.enRubros !== 0 && <> y {plata(matriz.ajuste.enRubros)} de cantidades del contrato</>})</>
+            )}
             {matriz.ajuste.honorarios !== 0 && <> y <strong style={{ color: matriz.ajuste.honorarios < 0 ? colors.danger : VIOLETA }}>{plata(matriz.ajuste.honorarios)}</strong> en honorarios</>}
             : <strong>{plata(matriz.ajuste.total)}</strong> sin IVA, {plata(conIva(matriz.ajuste.total, matriz.iva))} con IVA.
           </div>
         )}
+        {/* ── LO QUE TODAVÍA NO ES NI UNA ORDEN ──────────────────────────
+            Un trabajo que se sabe que viene: no está en el contrato, no se
+            cotizó y no tiene orden de cambio, pero ya mueve el número que el
+            cliente quiere ver. Se escribe con una estimación y va al final de
+            la matriz, en su bloque, sumando solo al proyectado. */}
+        <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${colors.border}` }}>
+          <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.55 }}>
+            <strong style={{ color: colors.ink }}>Rubros nuevos, todavía sin cotizar.</strong> Lo que no está en el contrato ni en
+            ninguna orden de cambio pero ya se sabe que viene. Poné qué es, cuánto y a cuánto lo estimás: va al final de la
+            matriz y suma solo al proyectado{matriz.honorariosPct > 0 ? `, con su ${matriz.honorariosPct} % de honorarios` : ""}.
+          </div>
+          {nuevos.length > 0 && (
+            <div style={{ overflowX: "auto", marginTop: 7 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...th, textAlign: "left" }}>DESCRIPCIÓN</th>
+                    <th style={{ ...th, width: 70 }}>UND</th>
+                    <th style={{ ...th, ...num, width: 90 }}>CANTIDAD</th>
+                    <th style={{ ...th, ...num, width: 120 }}>P. UNIT ESTIMADO</th>
+                    <th style={{ ...th, ...num, width: 110 }}>TOTAL SIN IVA</th>
+                    <th style={{ ...th, width: 28 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {nuevos.map(x => {
+                    const total = Math.round((Number(x.cantidad) || 0) * (Number(x.precio) || 0) * 100) / 100;
+                    const campo = { ...inputStyle, padding: "4px 7px", fontSize: 12, width: "100%", boxSizing: "border-box" };
+                    return (
+                      <tr key={x.id}>
+                        <td style={{ padding: "2px 4px 2px 0" }}>
+                          <input value={x.descripcion} onChange={e => cambiarNuevo(x.id, "descripcion", e.target.value)}
+                            placeholder="Qué es: letrero de fachada, cortinas, señalética…" style={campo} />
+                        </td>
+                        <td style={{ padding: "2px 4px" }}>
+                          <input value={x.unidad} onChange={e => cambiarNuevo(x.id, "unidad", e.target.value)} placeholder="u, m2, glb"
+                            style={{ ...campo, textAlign: "center" }} />
+                        </td>
+                        <td style={{ padding: "2px 4px" }}>
+                          <input type="number" step="any" value={x.cantidad} onChange={e => cambiarNuevo(x.id, "cantidad", e.target.value)}
+                            style={{ ...campo, textAlign: "right" }} />
+                        </td>
+                        <td style={{ padding: "2px 4px" }}>
+                          <input type="number" step="any" value={x.precio} onChange={e => cambiarNuevo(x.id, "precio", e.target.value)}
+                            placeholder="sin IVA" style={{ ...campo, textAlign: "right" }} />
+                        </td>
+                        <td style={{ padding: "2px 4px", ...num, fontSize: 12, fontWeight: 600, color: total ? VIOLETA : colors.muted }}>
+                          {total ? plata(total) : "falta el precio"}
+                        </td>
+                        <td style={{ padding: "2px 0", textAlign: "center" }}>
+                          <button onClick={() => quitarNuevo(x.id)} title="Quitar este rubro"
+                            style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
+                            <X size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <button onClick={agregarNuevo}
+            style={{ marginTop: 7, display: "inline-flex", alignItems: "center", gap: 5, background: "none", cursor: "pointer",
+              border: `1px dashed ${VIOLETA}`, borderRadius: 6, padding: "4px 10px", fontFamily: colors.font, fontSize: 11.5, color: VIOLETA }}>
+            <Plus size={12} /> Agregar un rubro
+          </button>
+        </div>
+
         <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", marginTop: 9 }}>
           {simulaciones.length > 0 && (
             <select value={simulacion?.id || ""} onChange={e => abrir(e.target.value)}
@@ -263,7 +351,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
             <Button variant="outline" size="sm" disabled={!!ocupado} onClick={() => guardar(true)}>Guardar como otra</Button>
           )}
           {hayAjustes && (
-            <button onClick={() => { setAjustes({}); setAviso(""); }}
+            <button onClick={() => { setAjustes({}); setNuevos([]); setAviso(""); }}
               style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 11.5,
                 color: colors.muted, textDecoration: "underline" }}>
               limpiar los ajustes
@@ -321,8 +409,8 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
                       {r.nombre}
                       {r.tipo === "bloque" && (
                         <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, borderRadius: 9, padding: "1px 6px",
-                          color: r.estado === "APROBADA" ? colors.success : colors.warning,
-                          background: r.estado === "APROBADA" ? colors.successSoft : colors.warningSoft }}>{r.estado}</span>
+                          color: r.manual ? VIOLETA : r.estado === "APROBADA" ? colors.success : colors.warning,
+                          background: r.manual ? "#EDE9FE" : r.estado === "APROBADA" ? colors.successSoft : colors.warningSoft }}>{r.estado}</span>
                       )}
                       {/* EL SUBTOTAL DE ESTE BLOQUE NO ES LA ORDEN ENTERA: lo dice acá. */}
                       {r.tipo === "bloque" && r.aclaracion && (
@@ -366,10 +454,13 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
               const escrito = ajustes[r.id];
               return (
                 <tr key={r.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`,
-                  background: r.manual.total ? "#F5F3FF" : movido && !r.deOrden ? "#FFFBEB" : "transparent" }}>
+                  background: r.manual.total || r.proyectada ? "#F5F3FF" : movido && !r.deOrden ? "#FFFBEB" : "transparent" }}>
                   <td style={{ ...td, color: colors.muted, whiteSpace: "nowrap" }}>{r.numero}</td>
                   <td style={{ ...td, color: colors.ink, minWidth: 220 }}>
                     {r.descripcion}
+                    {r.proyectada && !r.manual.total && (
+                      <div style={{ fontSize: 10, color: colors.warning }}>falta el precio: todavía no suma</div>
+                    )}
                     {r.honorario && !r.deOrden && (
                       <div style={{ fontSize: 10, color: colors.muted }}>se mueve con las órdenes y con el ajuste a mano</div>
                     )}
@@ -405,7 +496,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
                           </div>
                         )}
                       </>
-                    ) : null}
+                    ) : r.proyectada ? <Mov v={r.manual.cantidad} color={VIOLETA} /> : null}
                   </td>
                   <td style={{ ...td, ...num }}><Mov v={r.manual.total} color={VIOLETA} /></td>
                   <td style={{ ...td, ...num, ...borde }}>{r.proyectado.cantidad ? fmt(r.proyectado.cantidad) : ""}</td>

@@ -1,20 +1,14 @@
 import { supabase } from "../../lib/supabase";
+import { loQueSeGuarda } from "./presupuestoActualizado.js";
 
 // LAS SIMULACIONES GUARDADAS DEL PRESUPUESTO ACTUALIZADO.
 //
-// Un nombre y una lista de ajustes por rubro. Lo demás —el contrato, las
+// Un nombre, una lista de ajustes por rubro y los rubros escritos a mano. Lo demás —el contrato, las
 // órdenes, los honorarios— se calcula cada vez que se abre, así que una
 // simulación guardada hace un mes se lee contra el contrato de hoy.
 
 const falta = e => /relation|does not exist|schema cache|obra_presupuesto_simulaciones/i.test(e?.message || "");
 export const SIN_169 = "Falta correr la migración 169 para guardar las simulaciones. Mientras tanto podés ajustar y bajar el PDF o el Excel, pero al salir se pierde.";
-
-/** Solo lo que es un ajuste de verdad: un número distinto de cero. */
-export function ajustesLimpios(ajustes = {}) {
-  return Object.fromEntries(Object.entries(ajustes || {})
-    .map(([k, v]) => [k, Math.round((Number(v) || 0) * 10000) / 10000])
-    .filter(([, v]) => v !== 0));
-}
 
 export async function simulacionesDe(obraId) {
   const { data, error } = await supabase.from("obra_presupuesto_simulaciones")
@@ -24,8 +18,8 @@ export async function simulacionesDe(obraId) {
 }
 
 /** Guarda una simulación nueva, o la que ya existía si trae su id. */
-export async function guardarSimulacion({ id, obraId, nombre, ajustes, quien }) {
-  const fila = { nombre: String(nombre || "").trim() || "Simulación", ajustes: ajustesLimpios(ajustes), updated_at: new Date().toISOString() };
+export async function guardarSimulacion({ id, obraId, nombre, ajustes, nuevos = [], quien }) {
+  const fila = { nombre: String(nombre || "").trim() || "Simulación", ajustes: loQueSeGuarda(ajustes, nuevos), updated_at: new Date().toISOString() };
   const q = id
     ? supabase.from("obra_presupuesto_simulaciones").update(fila).eq("id", id)
     : supabase.from("obra_presupuesto_simulaciones").insert({ ...fila, obra_id: obraId,
