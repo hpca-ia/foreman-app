@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { sincronizarCapitulos } from "./sincronizarCapitulos";
+import { agruparOrdenesAprobadas } from "./agruparOrdenes.js";
 import Button from "../../components/ui/Button";
 import { fmt, calcularControl, agrupar, totalesObra, repartirSolicitudes } from "./calculos";
 import TablaControl from "./TablaControl";
@@ -161,6 +162,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     // renombró o se reorganizó, acá se dice lo mismo. Mueve nombre y orden de
     // capítulo y ningún monto — la línea base no se toca.
     await sincronizarCapitulos(obra);
+    // Y los rubros de las órdenes aprobadas, con su agrupación: una orden que
+    // el cliente firmó por su enlace entra al control sin pasar por acá.
+    await agruparOrdenesAprobadas(obra.id).catch(() => 0);
     const [{ data: r }, { data: p }, { data: f }, { data: act }] = await Promise.all([
       supabase.from("obra_rubros").select("*").eq("obra_id", obra.id).order("capitulo_orden").order("orden"),
       supabase.from("planillas").select("*").eq("obra_id", obra.id).order("numero"),

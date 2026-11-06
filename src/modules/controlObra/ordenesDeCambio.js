@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { rubrosDeLaOrden } from "./rubrosDeLaOrden.js";
+import { agruparOrdenesAprobadas } from "./agruparOrdenes.js";
 import { codigoDeLaRevision } from "./revisionesDeOrden.js";
 import { siguienteNumero, numeroDeModificacion, numeroPrincipal, huecosQueSeCierran, codigoPrincipal } from "./numeracionDeOrdenes.js";
 
@@ -487,7 +488,7 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
     await guardarOrden(orden.revision_de, { reemplazada_at: new Date().toISOString() });
   }
 
-  return guardarOrden(orden.id, {
+  const quedo = await guardarOrden(orden.id, {
     estado: "aprobada",
     aprobada_at: new Date().toISOString(),
     // Aprobar deja también el visto interno: son la misma decisión. Separados,
@@ -502,6 +503,12 @@ export async function aprobarOrden(orden, lineas, quien, { aprobada_por, observa
     contratante_comentario: observaciones?.trim() || orden.contratante_comentario || null,
     ejecucion: orden.ejecucion === "por_definir" ? "ejecutado" : orden.ejecucion,
   });
+  // Y SUS RUBROS QUEDAN CON SU AGRUPACIÓN —«OC-01 · título»—, que es contra lo
+  // que se pide una compra. Sin eso estaban en el control y no había desde
+  // dónde comprarles nada. Si esto falla la orden ya está aprobada: se
+  // acomoda sola la próxima vez que alguien abra la obra o un pedido.
+  if (!quedo) await agruparOrdenesAprobadas(orden.obra_id).catch(() => 0);
+  return quedo;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
+import { agruparOrdenesAprobadas } from "../controlObra/agruparOrdenes.js";
 import { solicitudesDeLaObra } from "../controlObra/calculos";
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
@@ -206,12 +207,17 @@ export async function rubrosDelProyecto(leadId) {
   // el presupuesto después de activar la obra, acá salían los viejos y no
   // había desde dónde arreglarlo. No toca un solo monto.
   await sincronizarCapitulos(obra);
+  // LAS ÓRDENES DE CAMBIO APROBADAS TAMBIÉN SE COMPRAN. Sus rubros entran al
+  // control sin agrupación, y como acá se elige primero la agrupación, no
+  // había desde dónde apuntarles un pedido. Cada orden aprobada tiene la suya
+  // —«OC-01 · título»—; si a alguna le falta, se arma ahora.
+  await agruparOrdenesAprobadas(obra.id).catch(() => 0);
   // Las agrupaciones son contra qué se pide: "obra civil", "instalaciones".
   // El capítulo —cómo se contrató— se deduce del rubro cuando hay uno.
   const [{ data }, { data: acts }] = await Promise.all([
     supabase.from("obra_rubros")
       .select("id,numero,capitulo,descripcion,total_base,actividad_id").eq("obra_id", obra.id).order("orden"),
-    supabase.from("obra_actividades").select("id,nombre,codigo,orden").eq("obra_id", obra.id).order("orden"),
+    supabase.from("obra_actividades").select("id,nombre,codigo,orden,origen").eq("obra_id", obra.id).order("orden"),
   ]);
   return { obra, rubros: data || [], actividades: acts || [] };
 }

@@ -10,6 +10,7 @@ import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, h
   moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe } from "./compras";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
+import { esDeOrden } from "../controlObra/agrupacionesDeOrdenes.js";
 import VisorAdjuntos from "./VisorAdjuntos";
 import { CLASES_PEDIDO, vaABodega } from "./bodega";
 import CampoProveedor from "../../components/CampoProveedor";
@@ -230,7 +231,15 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   }, [form.lead_id]);
   // Contra qué se pide: la agrupación, que es cómo se ejecuta la obra. El
   // capítulo —cómo se contrató— sale solo del rubro, cuando se elige uno.
-  const deLaAgrupacion = rubros.filter(r => String(r.actividad_id || "") === String(form.obra_actividad_id || ""));
+  // Lo que una orden QUITA —su renglón en negativo— no es algo que se compre:
+  // está en la agrupación de la orden para que su total cuadre, pero no se
+  // ofrece como destino de un pedido.
+  const deLaAgrupacion = rubros.filter(r => String(r.actividad_id || "") === String(form.obra_actividad_id || "")
+    && !(Number(r.total_base) < 0));
+  // Las agrupaciones de las órdenes de cambio aprobadas, aparte en la lista:
+  // son adicionales al contrato y se buscan por su número.
+  const agrupacionesDeOrdenes = actividades.filter(esDeOrden);
+  const agrupacionesDelContrato = actividades.filter(a => !esDeOrden(a));
   // Contra qué va este pedido, en palabras. El capítulo aparece solo en los
   // pedidos viejos, de cuando se apuntaba así; se muestra igual para no dejar
   // en blanco algo que sí estaba decidido.
@@ -636,7 +645,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               <select value={form.obra_actividad_id || ""} disabled={!puedeEditarImputacion || !actividades.length}
                 onChange={ev => setForm(p => ({ ...p, obra_actividad_id: ev.target.value, obra_rubro_id: "", capitulo: "" }))} style={mini}>
                 <option value="">Elegí la agrupación…</option>
-                {actividades.map(a => <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
+                {agrupacionesDelContrato.map(a => <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
+                {agrupacionesDeOrdenes.length > 0 && (
+                  <optgroup label="Órdenes de cambio aprobadas">
+                    {agrupacionesDeOrdenes.map(a => <option key={a.id} value={a.id}>{a.codigo ? `${a.codigo} · ` : ""}{a.nombre}</option>)}
+                  </optgroup>
+                )}
               </select>
             </div>
             {/* GUARDAR LA ASIGNACIÓN, acá mismo.
