@@ -26,6 +26,7 @@ import LibroFacturas from "./LibroFacturas";
 import PanelDuplicados from "./PanelDuplicados";
 import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
+import PanelPresupuestoActualizado from "./PanelPresupuestoActualizado";
 import PanelCurar from "./PanelCurar";
 import PanelBeneficios from "./PanelBeneficios";
 import PanelDiferencias from "./PanelDiferencias";
@@ -120,6 +121,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // a la tabla: el beneficio nace en su propia pestaña, pero la pregunta
   // "¿cómo vamos en este rubro?" se hace mirando el control.
   const [beneficios, setBeneficios] = useState([]);
+  const [vistaPresupuesto, setVistaPresupuesto] = useState("original");
   const [ordenesDeCambio, setOrdenesDeCambio] = useState({ ordenes: [], lineas: {} });
   const [planillas, setPlanillas] = useState([]);
   const [facturas, setFacturas] = useState([]);
@@ -506,7 +508,28 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                 currentUser={currentUser} puede={puede} onCambio={cargar} />
             </SiSeRompe>
           )}
-          {tab === "original" && <PresupuestoOriginal obra={obra} rubros={rubros} currentUser={currentUser} />}
+          {/* EL PRESUPUESTO, DE DOS MANERAS. El original es el papel que se
+              firmó y no cambia. El actualizado es ese mismo presupuesto con lo
+              que le hicieron las órdenes de cambio: lo que el cliente pide
+              cuando dice "mandame el presupuesto actualizado". */}
+          {tab === "original" && (
+            <>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                {[["original", "Original, como se firmó"], ["actualizado", "Actualizado, con las órdenes de cambio"]].map(([k, txt]) => (
+                  <button key={k} onClick={() => setVistaPresupuesto(k)}
+                    style={{ border: `1px solid ${vistaPresupuesto === k ? colors.brand : colors.border}`,
+                      background: vistaPresupuesto === k ? colors.brand : "#fff", color: vistaPresupuesto === k ? "#fff" : colors.inkSoft,
+                      borderRadius: 20, padding: "4px 13px", fontSize: 12, cursor: "pointer", fontFamily: colors.font,
+                      fontWeight: vistaPresupuesto === k ? 700 : 400 }}>
+                    {txt}
+                  </button>
+                ))}
+              </div>
+              {vistaPresupuesto === "actualizado"
+                ? <PanelPresupuestoActualizado obra={obra} rubros={rubros} />
+                : <PresupuestoOriginal obra={obra} rubros={rubros} currentUser={currentUser} />}
+            </>
+          )}
 
           {tab === "fondos" && veCaja && (
             <Suspense fallback={<Cargando />}>
