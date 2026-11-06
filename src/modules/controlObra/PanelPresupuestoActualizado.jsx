@@ -78,18 +78,21 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
     let vivo = true;
     (async () => {
       setCargando(true);
-      const r = await cargarOrdenes(obra.id);
+      // LAS DOS COSAS ANTES DE DEJAR ESCRIBIR: las órdenes y la proyección
+      // guardada. Si la matriz se abriera antes de que llegue la proyección,
+      // lo que se escribiera en ese rato lo pisaría la guardada al llegar —o
+      // nacería una segunda proyección al lado de la primera—.
+      const [r, lista] = await Promise.all([cargarOrdenes(obra.id), cargarSimulaciones()]);
       if (!vivo) return;
-      setOrdenes(r.ordenes || []); setLineas(r.lineas || {}); setCargando(false);
+      setOrdenes(r.ordenes || []); setLineas(r.lineas || {});
+      // AL ENTRAR SE ABRE LA ÚLTIMA PROYECCIÓN. Arrancar en blanco y dejar la
+      // guardada escondida en una lista es lo mismo que no haberla guardado.
+      const s = lista[0] || null;
+      setSimulacion(s); setNombre(s?.nombre || "");
+      setAjustes(s ? ajustesLimpios(s.ajustes) : {}); setNuevos(s ? nuevosDe(s.ajustes) : []);
+      setGuardado({ estado: "", error: "", hora: null });
+      setCargando(false);
     })();
-    // AL ENTRAR SE ABRE LA ÚLTIMA PROYECCIÓN. Arrancar en blanco y dejar la
-    // guardada escondida en una lista es lo mismo que no haberla guardado.
-    cargarSimulaciones().then(lista => {
-      if (!vivo || !lista.length) return;
-      const s = lista[0];
-      setSimulacion(s); setNombre(s.nombre || "");
-      setAjustes(ajustesLimpios(s.ajustes)); setNuevos(nuevosDe(s.ajustes));
-    });
     return () => { vivo = false; };
   }, [obra?.id, cargarSimulaciones]);
 
