@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { presupuestoActualizado, conIva, esperaFirma } from "../src/modules/controlObra/presupuestoActualizado.js";
+import { presupuestoActualizado, conIva, esperaFirma, aclaracionDelBloque, renglonesDeLaMatriz }
+  from "../src/modules/controlObra/presupuestoActualizado.js";
 
 // ── EL PRESUPUESTO ACTUALIZADO ─────────────────────────────────────────────
 //
@@ -79,19 +80,64 @@ test("lo que espera firma va aparte: no mueve el vigente, sí el proyectado", ()
   assert.deepEqual(m.porAprobar, ["OC-04"], "el borrador todavía no salió de la oficina");
 });
 
-test("lo que no estaba en el contrato va en el bloque de su orden, con su honorario", () => {
+test("lo que no estaba en el contrato va en el bloque de su orden", () => {
   const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra });
   assert.deepEqual(m.bloques.map(b => [b.orden.codigo, b.orden.columna]), [["OC-01", "aprobado"], ["OC-04", "porAprobar"]]);
   const [uno, cuatro] = m.bloques;
-  assert.deepEqual(uno.filas.map(f => [f.descripcion, f.aprobado.total]),
-    [["Picado de masillado", 500], ["Honorarios 10 % sobre OC-01", 70]]);
-  // El honorario es sobre el neto de TODA la orden: los 500 nuevos y los 200 del rubro 1.
-  assert.equal(uno.sub.aprobado, 570);
-  assert.equal(uno.sub.vigente, 570);
-  // OC-04: 1.673,48 + 456 − 19,58 = 2.109,90 de neto; su 10% son 210,99.
-  assert.deepEqual(cuatro.filas.map(f => [f.descripcion, f.porAprobar.total]),
-    [["Tablero de control", 456], ["Honorarios 10 % sobre OC-04", 210.99]]);
+  assert.deepEqual(uno.filas.map(f => [f.descripcion, f.aprobado.total]), [["Picado de masillado", 500]]);
+  assert.equal(uno.sub.aprobado, 500);
+  assert.deepEqual(cuatro.filas.map(f => [f.descripcion, f.porAprobar.total]), [["Tablero de control", 456]]);
   assert.equal(cuatro.sub.vigente, 0, "nada de esto está en el contrato todavía");
+});
+
+test("los honorarios de cada orden van al rubro de honorarios, que muestra su nuevo total", () => {
+  // El contrato trae su rubro de honorarios: 10% sobre los 3.403,86 de la obra.
+  const honor = { id: 9191, numero: 9191, descripcion: "Honorarios de administración (10 %)", unidad: "glb", cantidad: 1,
+    precio_unitario: 340.39, total_base: 391.45, iva_pct: 15, capitulo: "HONORARIOS", capitulo_orden: 9, orden: 9191, origen: "base" };
+  const m = presupuestoActualizado({ rubros: [...rubros, honor], ordenes, lineasDeOrdenes, obra });
+  const f = filaDe(m, 9191);
+  assert.equal(f.honorario, true);
+  assert.equal(f.base.total, 340.39);
+  // OC-01, aprobada: 10% de sus 700 de neto. OC-04, que espera: 10% de 2.109,90.
+  assert.deepEqual(f.aprobado, { cantidad: 0, total: 70, ordenes: ["OC-01"] });
+  assert.deepEqual(f.vigente, { cantidad: 1, total: 410.39 });
+  assert.deepEqual(f.porAprobar, { cantidad: 0, total: 210.99, ordenes: ["OC-04"] });
+  assert.deepEqual(f.proyectado, { cantidad: 1, total: 621.38 });
+  assert.deepEqual(m.capitulos.map(c => c.nombre), ["OBRA CIVIL", "ELÉCTRICO", "HONORARIOS"]);
+  // Y ninguna orden lleva su honorario suelto en su bloque.
+  assert.ok(m.bloques.every(b => b.filas.every(x => !/honorario/i.test(x.descripcion))));
+});
+
+test("si el contrato no tiene rubro de honorarios, se abre uno: el honorario de una orden no puede no estar", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra });
+  const cap = m.capitulos[m.capitulos.length - 1];
+  assert.equal(cap.nombre, "HONORARIOS");
+  assert.equal(cap.filas[0].descripcion, "Honorarios de administración (10 %)");
+  assert.equal(cap.filas[0].base.total, 0);
+  assert.equal(cap.filas[0].aprobado.total, 70);
+  assert.equal(cap.filas[0].porAprobar.total, 210.99);
+  // Sin órdenes con honorario y sin ajustes, no se abre nada.
+  assert.deepEqual(presupuestoActualizado({ rubros, obra }).capitulos.map(c => c.nombre), ["OBRA CIVIL", "ELÉCTRICO"]);
+});
+
+test("cada orden dice cuánto vale entera, como en su papel, y dónde está cada parte", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra });
+  const [uno, cuatro] = m.ordenes;
+  assert.deepEqual([uno.codigo, uno.estado, uno.adiciones, uno.reducciones, uno.neto, uno.honorarios, uno.subtotal, uno.iva, uno.total],
+    ["OC-01", "APROBADA", 700, 0, 700, 70, 770, 115.5, 885.5]);
+  assert.deepEqual([cuatro.codigo, cuatro.estado, cuatro.neto, cuatro.honorarios, cuatro.subtotal, cuatro.total],
+    ["OC-04", "POR APROBAR", 2109.9, 210.99, 2320.89, 2669.02]);
+  // Lo que suman las órdenes es lo que la matriz les atribuye.
+  assert.equal(m.ordenesAprobadas.subtotal, m.totales.aprobado);
+  assert.equal(m.ordenesPorAprobar.subtotal, m.totales.porAprobar);
+  // El bloque de la OC-04 no es la orden entera: tiene 456 de 2.320,89.
+  const b = m.bloques.find(x => x.orden.codigo === "OC-04").orden;
+  assert.deepEqual([b.valor, b.enRubros, b.honorarios, b.enBloque], [2320.89, 1653.9, 210.99, 456]);
+  const dice = aclaracionDelBloque(b);
+  assert.match(dice, /La orden vale \$2\.320,89 sin IVA/);
+  assert.match(dice, /\$1\.653,90 son cambios de cantidad en rubros del contrato/);
+  assert.match(dice, /\$210,99 son sus honorarios/);
+  assert.match(dice, /\$456,00 es lo que no estaba en el contrato/);
 });
 
 test("los totales cierran: vigente es base más aprobadas, proyectado es vigente más lo que espera", () => {
@@ -137,9 +183,12 @@ test("una modificación que espera firma cuenta por lo que cambia, no por entero
   assert.equal(f.porAprobar.cantidad, 1);
   assert.equal(f.porAprobar.total, 100);
   assert.deepEqual(f.proyectado, { cantidad: 13, total: 1300 });
-  // En el bloque de la modificación, lo nuevo entra y lo que reemplaza sale: neto, solo el honorario de la diferencia.
+  // En el bloque de la modificación, lo nuevo entra y lo que reemplaza sale: no cambia nada.
   const b = m.bloques.find(x => x.orden.codigo === "OC-01-A");
-  assert.equal(b.sub.porAprobar, 10, "500 que entran, 500 que salen, y 80 de honorarios contra los 70 de antes");
+  assert.equal(b.sub.porAprobar, 0, "500 que entran y 500 que salen");
+  // Y el honorario cambia por la diferencia: 80 de la nueva contra los 70 de la anterior.
+  const honor = m.capitulos.flatMap(c => c.filas).find(x => x.honorario);
+  assert.equal(honor.porAprobar.total, 10);
   assert.equal(m.totales.proyectado, Math.round((m.totales.vigente + 110) * 100) / 100);
 });
 
@@ -149,4 +198,58 @@ test("un rubro que una orden vieja tachó entero sale del vigente", () => {
   const f = filaDe(m, 97);
   assert.deepEqual(f.aprobado, { cantidad: -4, total: -39.16, ordenes: ["OC-01"] });
   assert.deepEqual(f.vigente, { cantidad: 0, total: 0 });
+});
+
+// ── LO QUE SE PROYECTA A MANO ──────────────────────────────────────────────
+//
+// Más o menos cantidad de un rubro, o sacarlo, para ver cómo quedaría el
+// presupuesto. Y los honorarios se mueven solos: administrar menos obra es
+// menos honorario.
+
+test("un ajuste a mano mueve el proyectado de su rubro, al precio del contrato", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, ajustes: { 106: -5, 1: 3 } });
+  const luz = filaDe(m, 106);
+  assert.deepEqual(luz.manual, { cantidad: -5, total: -181.9, ordenes: [] });
+  assert.deepEqual(luz.vigente, { cantidad: 65, total: 2364.7 }, "el vigente no se toca: es el contrato");
+  assert.deepEqual(luz.proyectado, { cantidad: 106, total: 3856.28 }, "65 del contrato, 46 por aprobar, 5 que se sacan");
+  assert.deepEqual(filaDe(m, 1).manual, { cantidad: 3, total: 300, ordenes: [] });
+});
+
+test("los honorarios siguen al ajuste: el porcentaje del contrato sobre lo que se sumó y se restó", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, ajustes: { 106: -5, 1: 3 } });
+  // −181,90 y +300: 118,10 de neto, y su 10% son 11,81 de honorarios.
+  assert.deepEqual(m.ajuste, { hay: true, neto: 118.1, honorarios: 11.81, total: 129.91 });
+  const honor = m.capitulos.flatMap(c => c.filas).find(x => x.honorario);
+  assert.equal(honor.manual.total, 11.81);
+  assert.equal(honor.manual.calculado, true, "no lo escribió nadie: sale de la cuenta");
+  assert.equal(m.totales.manual, 129.91);
+  assert.equal(m.totales.proyectado, Math.round((m.totales.vigente + m.totales.porAprobar + 129.91) * 100) / 100);
+  // Sacar un rubro entero baja también su honorario.
+  const sin = presupuestoActualizado({ rubros, obra, ajustes: { 1: -10 } });
+  assert.deepEqual(sin.ajuste, { hay: true, neto: -1000, honorarios: -100, total: -1100 });
+  assert.deepEqual(filaDe(sin, 1).proyectado, { cantidad: 0, total: 0 });
+});
+
+test("sin honorarios en el contrato, el ajuste no inventa ninguno; y un ajuste a nada no hace nada", () => {
+  const m = presupuestoActualizado({ rubros, obra: { honorarios_pct: 0 }, ajustes: { 1: 2, 999: 5, 106: 0 } });
+  assert.deepEqual(m.ajuste, { hay: true, neto: 200, honorarios: 0, total: 200 });
+  assert.deepEqual(m.capitulos.map(c => c.nombre), ["OBRA CIVIL", "ELÉCTRICO"]);
+  assert.equal(presupuestoActualizado({ rubros, obra }).ajuste.hay, false);
+});
+
+test("el rubro de honorarios no se ajusta a mano: se calcula", () => {
+  const honor = { id: 9191, numero: 9191, descripcion: "Honorarios de administración (10 %)", unidad: "glb", cantidad: 1,
+    precio_unitario: 340.39, total_base: 391.45, iva_pct: 15, capitulo: "HONORARIOS", capitulo_orden: 9, orden: 9191, origen: "base" };
+  const m = presupuestoActualizado({ rubros: [...rubros, honor], obra, ajustes: { 9191: -1, 1: 1 } });
+  assert.deepEqual(m.ajuste, { hay: true, neto: 100, honorarios: 10, total: 110 });
+  assert.equal(filaDe(m, 9191).manual.total, 10);
+});
+
+test("los renglones de la matriz traen el ajuste y cierran al pie", () => {
+  const m = presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes, obra, ajustes: { 1: 3 } });
+  const pies = renglonesDeLaMatriz(m).filter(r => r.tipo === "pie");
+  assert.deepEqual(pies.map(p => p.etiqueta), ["SUBTOTAL, SIN IVA", "IVA 15 %", "TOTAL"]);
+  assert.equal(pies[0].valores.manual, 330, "300 del rubro y 30 de su honorario");
+  assert.equal(pies[2].valores.manual, 379.5);
+  assert.equal(pies[2].valores.proyectado, conIva(m.totales.proyectado, 15));
 });

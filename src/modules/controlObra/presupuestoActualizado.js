@@ -4,13 +4,14 @@ import { ordenCuenta } from "./cuentaOrdenCambio.js";
 import { honorariosDe, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { codigoDe } from "./nombreOrden.js";
 
-// EL PRESUPUESTO ACTUALIZADO: el contrato, lo que las órdenes le hicieron, y
-// lo que le harían las que todavía no se aprobaron.
+// EL PRESUPUESTO ACTUALIZADO: el contrato, lo que las órdenes le hicieron, lo
+// que le harían las que todavía no se aprobaron, y lo que se quiera proyectar
+// a mano.
 //
-// El cliente pide "el presupuesto actualizado" y hoy la respuesta son tres
+// El cliente pide "el presupuesto actualizado" y la respuesta eran tres
 // papeles: el presupuesto que firmó, y una orden de cambio por cada vez que
-// algo se movió. Para saber en cuánto está un rubro hay que leerlos todos y
-// hacer la cuenta, y esa cuenta la hace cada uno por su lado.
+// algo se movió. Para saber en cuánto está un rubro había que leerlos todos y
+// hacer la cuenta, y esa cuenta la hacía cada uno por su lado.
 //
 // Esto es una sola matriz, rubro por rubro, con los capítulos y el orden del
 // contrato:
@@ -20,13 +21,19 @@ import { codigoDe } from "./nombreOrden.js";
 //   VIGENTE       base más aprobadas: el contrato de hoy.
 //   POR APROBAR   lo mismo de las órdenes que esperan firma. No suma al
 //                 vigente: es lo que cambiaría si se aprueban.
-//   PROYECTADO    vigente más por aprobar.
+//   AJUSTE        lo que alguien proyecta a mano: más o menos cantidad de un
+//                 rubro, o sacarlo. No es de nadie todavía: es una simulación.
+//   PROYECTADO    vigente más por aprobar más el ajuste.
+//
+// LOS HONORARIOS SE MUEVEN CON TODO LO DEMÁS. Administrar más obra es más
+// honorario y administrar menos es menos: cada orden trae el suyo, y cada
+// ajuste a mano lo arrastra. Van en el rubro de honorarios del contrato, que
+// es donde el cliente los busca, y así ese rubro muestra su nuevo total.
 //
 // Lo que una orden agrega y no estaba en el contrato no tiene rubro donde ir:
-// va al final, en un bloque por orden, con el honorario de esa orden.
+// va al final, en un bloque por orden.
 //
-// No guarda nada y no toca nada: es una lectura de lo que ya está —los rubros
-// y las órdenes—, y por eso no puede desacomodarse de ellos. Todo sin IVA; el
+// No toca nada: es una lectura de los rubros y las órdenes. Todo sin IVA; el
 // impuesto se suma al pie, como en el contrato y en cada orden.
 
 const n = v => Number(v) || 0;
@@ -36,8 +43,10 @@ const c4 = v => Math.round(n(v) * 10000) / 10000;
 /** Un monto con su IVA: para el pie, donde se dice lo que de verdad se paga. */
 export const conIva = (monto, iva) => c2(n(monto) * (1 + n(iva) / 100));
 
+const COLUMNAS = ["base", "aprobado", "vigente", "porAprobar", "manual", "proyectado"];
 const vacio = () => ({ cantidad: 0, total: 0, ordenes: [] });
-const sumas = () => ({ base: 0, aprobado: 0, vigente: 0, porAprobar: 0, proyectado: 0 });
+const esDeHonorarios = r => /honorario/i.test(String(r?.capitulo_original ?? r?.capitulo ?? ""))
+  || /honorario/i.test(String(r?.descripcion ?? ""));
 
 /** ¿Espera la firma del cliente? Enviada y viva; un borrador solo si se pide. */
 export const esperaFirma = (o, conBorradores = false) =>
@@ -49,8 +58,11 @@ export const esperaFirma = (o, conBorradores = false) =>
  * @param lineasDeOrdenes   { [ordenId]: [partidas] }
  * @param obra              para el honorario del contrato
  * @param conBorradores     si las que todavía no se mandaron entran en "por aprobar"
+ * @param ajustes           { [rubroId]: ± cantidad }: lo que se proyecta a mano
  */
-export function presupuestoActualizado({ rubros = [], ordenes = [], lineasDeOrdenes = {}, obra = null, conBorradores = false } = {}) {
+export function presupuestoActualizado({
+  rubros = [], ordenes = [], lineasDeOrdenes = {}, obra = null, conBorradores = false, ajustes = {},
+} = {}) {
   // EL PRESUPUESTO COMO SE FIRMÓ: con el capítulo y el orden originales, y sin
   // lo que se agregó después en el control ni lo que metieron las órdenes.
   const cap = r => r.capitulo_original ?? r.capitulo ?? "SIN CAPÍTULO";
@@ -58,16 +70,37 @@ export function presupuestoActualizado({ rubros = [], ordenes = [], lineasDeOrde
   const delContrato = rubros
     .filter(r => r && r.origen !== "orden_cambio" && r.origen !== "control")
     .slice().sort((a, b) => (capOrden(a) - capOrden(b)) || (n(a.orden) - n(b.orden)));
+  const iva = n((rubros.find(r => r?.iva_pct != null) || {}).iva_pct);
+  const pctContrato = n(obra?.honorarios_pct);
 
-  const filaDe = new Map(delContrato.map(r => {
-    const precio = precioDelContrato(r);
-    return [String(r.id), {
-      id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
-      unidad: r.unidad || "", precio: precio ?? 0, capitulo: cap(r),
-      base: { cantidad: c4(r.cantidad), total: baseSinIva(r) },
-      aprobado: vacio(), porAprobar: vacio(),
-    }];
-  }));
+  const filaDe = new Map(delContrato.map(r => [String(r.id), {
+    id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
+    unidad: r.unidad || "", precio: precioDelContrato(r) ?? 0, capitulo: cap(r),
+    honorario: esDeHonorarios(r),
+    base: { cantidad: c4(r.cantidad), total: baseSinIva(r) },
+    // LO MISMO, SIN REDONDEAR, para sumar. Redondeando fila por fila el total
+    // quedaba tres centavos arriba del contrato: el cliente compara este papel
+    // con el que firmó, y tres centavos son una pregunta.
+    baseExacta: n(r.total_base) / (1 + n(r.iva_pct) / 100),
+    aprobado: vacio(), porAprobar: vacio(), manual: vacio(),
+  }]));
+
+  // EL RUBRO DE HONORARIOS DEL CONTRATO: ahí va el honorario de cada orden y
+  // el de cada ajuste. Si el contrato no tiene uno, se abre al final: el
+  // honorario de una orden es plata que el cliente paga y no puede no estar.
+  const rubroDeHonorarios = delContrato.find(esDeHonorarios);
+  let filaHonorarios = rubroDeHonorarios ? filaDe.get(String(rubroDeHonorarios.id)) : null;
+  const honorariosEn = () => {
+    if (!filaHonorarios) {
+      filaHonorarios = {
+        id: "honorarios", numero: "", descripcion: `Honorarios de administración${pctContrato ? ` (${pctContrato} %)` : ""}`,
+        unidad: "glb", precio: 0, capitulo: "HONORARIOS", honorario: true, agregada: true,
+        base: { cantidad: 0, total: 0 }, baseExacta: 0,
+        aprobado: vacio(), porAprobar: vacio(), manual: vacio(),
+      };
+    }
+    return filaHonorarios;
+  };
 
   const aprobadas = ordenes.filter(ordenCuenta);
   const pendientes = ordenes.filter(o => esperaFirma(o, conBorradores));
@@ -94,10 +127,6 @@ export function presupuestoActualizado({ rubros = [], ordenes = [], lineasDeOrde
     const lineas = lineasDeOrdenes[deOrden.id] || [];
     const codigo = codigoDe(enBloque);
     const marca = signo < 0 ? `(se reemplaza, de la ${codigoDe(deOrden)}) ` : "";
-    const enColumna = (cantidad, total) => ({
-      aprobado: columna === "aprobado" ? { cantidad, total, ordenes: [codigo] } : vacio(),
-      porAprobar: columna === "porAprobar" ? { cantidad, total, ordenes: [codigo] } : vacio(),
-    });
     lineas.forEach((l, i) => {
       const s = signo * (l.tipo === "quita" ? -1 : 1);
       const cantidad = c4(s * n(l.cantidad));
@@ -114,20 +143,19 @@ export function presupuestoActualizado({ rubros = [], ordenes = [], lineasDeOrde
         id: `o${deOrden.id}-${l.id ?? i}${signo < 0 ? "-r" : ""}`,
         numero: l.item || "", descripcion: marca + (l.descripcion || ""),
         unidad: l.unidad || "", precio: c4(l.precio_unitario),
-        base: { cantidad: 0, total: 0 }, ...enColumna(cantidad, total),
+        base: { cantidad: 0, total: 0 },
+        aprobado: columna === "aprobado" ? { cantidad, total, ordenes: [codigo] } : vacio(),
+        porAprobar: columna === "porAprobar" ? { cantidad, total, ordenes: [codigo] } : vacio(),
+        manual: vacio(),
       });
     });
-    // EL HONORARIO DE LA ORDEN, que es parte de lo que el cliente firma: va
-    // al pie de cada orden, y acá en su bloque, sobre el neto de todas sus
-    // partidas —también las que cayeron en un rubro del contrato—.
+    // EL HONORARIO DE LA ORDEN, sobre el neto de todas sus partidas, al rubro
+    // de honorarios del contrato. Es parte de lo que el cliente firma.
     const h = honorariosDe({ lineas, pct: pctQueCorresponde(deOrden, obra) });
     if (h.hay) {
-      bloqueDe(enBloque, columna).filas.push({
-        id: `h${deOrden.id}${signo < 0 ? "-r" : ""}`, numero: "",
-        descripcion: `${marca}Honorarios ${h.pct} % sobre ${codigoDe(deOrden)}`,
-        unidad: "glb", precio: c2(h.honorarios), honorario: true,
-        base: { cantidad: 0, total: 0 }, ...enColumna(signo, c2(signo * h.honorarios)),
-      });
+      const f = honorariosEn();
+      f[columna].total = c2(f[columna].total + signo * h.honorarios);
+      if (!f[columna].ordenes.includes(codigo)) f[columna].ordenes.push(codigo);
     }
   };
 
@@ -154,34 +182,63 @@ export function presupuestoActualizado({ rubros = [], ordenes = [], lineasDeOrde
     if (!fila.aprobado.ordenes.includes(codigoDe(o))) fila.aprobado.ordenes.push(codigoDe(o));
   }
 
+  // ── LO QUE SE PROYECTA A MANO ─────────────────────────────────────────────
+  //
+  // Más o menos cantidad de un rubro del contrato, al precio del contrato: el
+  // precio está pactado y no es lo que se está simulando. El honorario se
+  // mueve solo, con el porcentaje del contrato, sobre la suma de los ajustes:
+  // sacar un rubro de $1.000 baja $100 de honorarios, y eso también es parte
+  // de lo que cambia.
+  let netoManual = 0;
+  for (const [id, delta] of Object.entries(ajustes || {})) {
+    const fila = filaDe.get(String(id));
+    const cantidad = c4(delta);
+    if (!fila || !cantidad || fila.honorario) continue;
+    fila.manual = { cantidad, total: c2(cantidad * fila.precio), ordenes: [] };
+    netoManual += fila.manual.total;
+  }
+  netoManual = c2(netoManual);
+  const honorarioManual = pctContrato > 0 ? c2(netoManual * pctContrato / 100) : 0;
+  if (honorarioManual) {
+    const f = honorariosEn();
+    f.manual = { cantidad: 0, total: honorarioManual, ordenes: [], calculado: true };
+  }
+
   const cerrar = f => ({
     ...f,
     vigente: { cantidad: c4(f.base.cantidad + f.aprobado.cantidad), total: c2(f.base.total + f.aprobado.total) },
     proyectado: {
-      cantidad: c4(f.base.cantidad + f.aprobado.cantidad + f.porAprobar.cantidad),
-      total: c2(f.base.total + f.aprobado.total + f.porAprobar.total),
+      cantidad: c4(f.base.cantidad + f.aprobado.cantidad + f.porAprobar.cantidad + f.manual.cantidad),
+      total: c2(f.base.total + f.aprobado.total + f.porAprobar.total + f.manual.total),
     },
   });
   const sumar = filas => {
-    const t = sumas();
+    const t = Object.fromEntries(COLUMNAS.map(k => [k, 0]));
     for (const f of filas) {
-      t.base += f.base.total; t.aprobado += f.aprobado.total; t.vigente += f.vigente.total;
-      t.porAprobar += f.porAprobar.total; t.proyectado += f.proyectado.total;
+      const base = f.baseExacta ?? f.base.total;
+      t.base += base; t.aprobado += f.aprobado.total; t.vigente += base + f.aprobado.total;
+      t.porAprobar += f.porAprobar.total; t.manual += f.manual.total;
+      t.proyectado += base + f.aprobado.total + f.porAprobar.total + f.manual.total;
     }
     return Object.fromEntries(Object.entries(t).map(([k, v]) => [k, c2(v)]));
   };
 
-  // Los capítulos del contrato, en su orden. Un rubro en cero al que ninguna
-  // orden tocó no dice nada y no va: son los renglones vacíos del archivo.
+  // Los capítulos del contrato, en su orden. Un rubro en cero al que nadie
+  // tocó no dice nada y no va: son los renglones vacíos del archivo.
   const capitulos = [];
-  for (const r of delContrato) {
-    const f = cerrar(filaDe.get(String(r.id)));
-    const seMovio = f.aprobado.ordenes.length || f.porAprobar.ordenes.length;
-    if (!f.base.total && !seMovio) continue;
+  const sumarFila = f => {
     let c = capitulos[capitulos.length - 1];
     if (!c || c.nombre !== f.capitulo) { c = { nombre: f.capitulo, filas: [] }; capitulos.push(c); }
     c.filas.push(f);
+  };
+  for (const r of delContrato) {
+    const f = cerrar(filaDe.get(String(r.id)));
+    const seMovio = f.aprobado.total || f.porAprobar.total || f.manual.total
+      || f.aprobado.ordenes.length || f.porAprobar.ordenes.length;
+    if (!f.base.total && !seMovio) continue;
+    sumarFila(f);
   }
+  if (filaHonorarios?.agregada) sumarFila(cerrar(filaHonorarios));
   for (const c of capitulos) c.sub = sumar(c.filas);
 
   // Los bloques de las órdenes: primero las aprobadas, después las que esperan.
@@ -193,15 +250,74 @@ export function presupuestoActualizado({ rubros = [], ordenes = [], lineasDeOrde
       || (numeroDe(a) - numeroDe(b)) || String(a.orden.codigo).localeCompare(String(b.orden.codigo)));
   for (const b of deOrdenes) b.sub = sumar(b.filas);
 
-  const iva = n((rubros.find(r => r?.iva_pct != null) || {}).iva_pct);
+  // ── CUÁNTO VALE CADA ORDEN, ENTERA, como lo dice su propio papel ──────────
+  //
+  // En la matriz una orden queda repartida en tres lugares: sus cambios de
+  // cantidad en la fila de cada rubro del contrato, su honorario en el rubro
+  // de honorarios, y lo que no estaba en el contrato en su bloque. Las tres
+  // partes suman lo que la orden vale, pero ninguna lo dice. Acá va cada una
+  // con su neto, su honorario, su IVA y su total —los números del documento
+  // que el cliente firma—.
+  const valorDe = (o, signo = 1) => {
+    const h = honorariosDe({ lineas: lineasDeOrdenes[o.id] || [], pct: pctQueCorresponde(o, obra), iva });
+    return {
+      adiciones: c2(signo * h.adiciones), reducciones: c2(signo * h.reducciones), neto: c2(signo * h.neto),
+      honorarios: c2(signo * h.honorarios), subtotal: c2(signo * h.subtotal), iva: c2(signo * h.iva), total: c2(signo * h.total),
+    };
+  };
+  const resumen = [];
+  for (const o of aprobadas) resumen.push({ id: o.id, codigo: codigoDe(o), titulo: o.titulo || "", columna: "aprobado", estado: "APROBADA", ...valorDe(o) });
+  for (const o of pendientes) {
+    resumen.push({ id: o.id, codigo: codigoDe(o), titulo: o.titulo || "", columna: "porAprobar",
+      estado: o.estado === "borrador" ? "EN BORRADOR" : "POR APROBAR", ...valorDe(o) });
+    const anterior = o.revision_de ? porId.get(String(o.revision_de)) : null;
+    if (anterior && ordenCuenta(anterior)) {
+      resumen.push({ id: `r${o.id}`, codigo: codigoDe(anterior), titulo: `La reemplaza la ${codigoDe(o)}`, columna: "porAprobar",
+        estado: "SE REEMPLAZA", ...valorDe(anterior, -1) });
+    }
+  }
+  const sumaDe = columna => {
+    const suyas = resumen.filter(x => x.columna === columna);
+    const t = { adiciones: 0, reducciones: 0, neto: 0, honorarios: 0, subtotal: 0, iva: 0, total: 0 };
+    for (const x of suyas) for (const k of Object.keys(t)) t[k] += x[k];
+    return { cuantas: suyas.length, ...Object.fromEntries(Object.entries(t).map(([k, v]) => [k, c2(v)])) };
+  };
+  // Y en cada bloque, cuánto vale su orden y dónde está lo que no va acá.
+  for (const b of deOrdenes) {
+    const suyas = resumen.filter(x => String(x.id) === String(b.orden.id) || String(x.id) === `r${b.orden.id}`);
+    const valor = c2(suyas.reduce((t, x) => t + x.subtotal, 0));
+    const honorarios = c2(suyas.reduce((t, x) => t + x.honorarios, 0));
+    const enBloque = c2(b.sub.aprobado + b.sub.porAprobar);
+    b.orden = { ...b.orden, valor, honorarios, enBloque, enRubros: c2(valor - honorarios - enBloque) };
+  }
+
   return {
     capitulos, bloques: deOrdenes,
     totales: sumar([...capitulos.flatMap(c => c.filas), ...deOrdenes.flatMap(b => b.filas)]),
-    iva,
+    iva, honorariosPct: pctContrato,
+    ordenes: resumen, ordenesAprobadas: sumaDe("aprobado"), ordenesPorAprobar: sumaDe("porAprobar"),
     aprobadas: aprobadas.map(codigoDe), porAprobar: pendientes.map(codigoDe),
+    // Lo proyectado a mano: cuánto suman los ajustes y cuánto honorario arrastran.
+    ajuste: { hay: netoManual !== 0 || honorarioManual !== 0, neto: netoManual, honorarios: honorarioManual, total: c2(netoManual + honorarioManual) },
   };
 }
 
+const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const conSigno = v => `${v < 0 ? "−" : ""}$${plata(Math.abs(v))}`;
+
+/**
+ * Lo que hay que decir al lado del subtotal de un bloque: que ese número no
+ * es la orden entera, cuánto vale la orden y dónde está el resto.
+ */
+export function aclaracionDelBloque(orden) {
+  if (!orden || orden.valor == null) return "";
+  const partes = [];
+  if (Math.abs(orden.enRubros) >= 0.005) partes.push(`${conSigno(orden.enRubros)} son cambios de cantidad en rubros del contrato, que están arriba en su fila`);
+  if (Math.abs(orden.honorarios) >= 0.005) partes.push(`${conSigno(orden.honorarios)} son sus honorarios, que van en el rubro de honorarios`);
+  if (!partes.length) return `La orden vale ${conSigno(orden.valor)} sin IVA, y está toda acá.`;
+  return `La orden vale ${conSigno(orden.valor)} sin IVA: ${partes.join("; ")}; y ${conSigno(orden.enBloque)} `
+    + "es lo que no estaba en el contrato, que va acá.";
+}
 
 /**
  * LA MATRIZ, RENGLÓN POR RENGLÓN, EN EL ORDEN EN QUE SE LEE.
@@ -224,15 +340,15 @@ export function renglonesDeLaMatriz(m) {
       tipo: "bloque", sub: b.sub, orden: b.orden,
       nombre: `${b.orden.codigo} · ${b.orden.titulo}`.trim(),
       estado: b.orden.columna === "aprobado" ? "APROBADA" : b.orden.estado === "borrador" ? "EN BORRADOR" : "POR APROBAR",
+      aclaracion: aclaracionDelBloque(b.orden),
     });
     for (const f of b.filas) out.push({ tipo: "fila", deOrden: true, ...f });
   }
   const t = m.totales;
-  const por = k => (m.iva > 0 ? c2(conIva(t[k], m.iva) - t[k]) : 0);
-  const cada = fn => ({ base: fn("base"), aprobado: fn("aprobado"), vigente: fn("vigente"), porAprobar: fn("porAprobar"), proyectado: fn("proyectado") });
+  const cada = fn => Object.fromEntries(COLUMNAS.map(k => [k, fn(k)]));
   out.push({ tipo: "pie", etiqueta: m.iva > 0 ? "SUBTOTAL, SIN IVA" : "TOTAL", valores: cada(k => t[k]), fuerte: !(m.iva > 0) });
   if (m.iva > 0) {
-    out.push({ tipo: "pie", etiqueta: `IVA ${m.iva} %`, valores: cada(por) });
+    out.push({ tipo: "pie", etiqueta: `IVA ${m.iva} %`, valores: cada(k => c2(conIva(t[k], m.iva) - t[k])) });
     out.push({ tipo: "pie", etiqueta: "TOTAL", valores: cada(k => conIva(t[k], m.iva)), fuerte: true });
   }
   return out;

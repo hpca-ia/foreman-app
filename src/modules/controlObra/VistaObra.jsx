@@ -526,7 +526,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                 ))}
               </div>
               {vistaPresupuesto === "actualizado"
-                ? <PanelPresupuestoActualizado obra={obra} rubros={rubros} />
+                ? <PanelPresupuestoActualizado obra={obra} rubros={rubros} currentUser={currentUser} />
                 : <PresupuestoOriginal obra={obra} rubros={rubros} currentUser={currentUser} />}
             </>
           )}
