@@ -3,7 +3,7 @@ import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
-import { renglonesDeLaMatriz } from "./presupuestoActualizado.js";
+import { renglonesDeLaMatriz, pesosDelPapel } from "./presupuestoActualizado.js";
 
 // EL PRESUPUESTO ACTUALIZADO, PARA MANDARLE AL CLIENTE.
 //
@@ -28,7 +28,9 @@ const nombreLimpio = s => String(s || "obra").replace(/[^\w\sáéíóúñÁÉÍ�
 // Un movimiento se escribe con su signo; lo que no se movió queda en blanco.
 const mov = v => (!v ? "" : `${v > 0 ? "+" : "-"}${plata(Math.abs(v))}`);
 const cant = v => (!v ? "" : plata(v));
-const pesos = v => `${v < 0 ? "-" : ""}${plata(Math.abs(v))}`;
+// La plata con su signo sale de un solo lugar, y ese lugar tiene su prueba: un
+// total sin el «$» en el papel del cliente ya pasó una vez sin que nada avisara.
+const pesos = pesosDelPapel;
 // Un rubro escrito a mano que todavía no tiene precio va con su aviso: en un
 // papel, un renglón con el total en blanco parece un error.
 const descripcion = r => r.descripcion + (r.proyectada && !r.manual.total ? " (por cotizar: todavía no suma)" : "");
@@ -252,7 +254,7 @@ export async function pdfDelPresupuesto({ matriz, obra, simulacion = null }, mod
     ...(matriz.proyectados?.filas?.length
       ? ["RUBROS PROYECTADOS, al final, son trabajos estimados que todavía no se cotizaron ni tienen orden de cambio: no forman parte del contrato y suman solo al proyectado."]
       : []),
-    "Los valores de cada renglón son sin IVA; el impuesto se suma al pie.",
+    "Los valores de cada renglón son sin IVA; el impuesto se suma al pie: el de la base como en el presupuesto, y el de las órdenes como en el documento de cada una.",
   ];
   if (y > doc.internal.pageSize.getHeight() - 34 - notas.length * 10) { doc.addPage(); y = 40; }
   doc.setFont("helvetica", "normal").setFontSize(7.2).setTextColor(...GRIS);

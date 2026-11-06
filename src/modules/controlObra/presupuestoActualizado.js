@@ -41,6 +41,16 @@ import { codigoDe } from "./nombreOrden.js";
 //
 // No toca nada: es una lectura de los rubros y las órdenes. Todo sin IVA; el
 // impuesto se suma al pie, como en el contrato y en cada orden.
+//
+// EL IVA DEL PIE ES EL DE CADA PAPEL, NO UNO CALCULADO DE NUEVO. El presupuesto
+// calcula su IVA una vez sobre el subtotal; cada orden calcula el suyo y lo
+// redondea en su documento, que es el que el cliente firma. Sumar los
+// subtotales y volver a multiplicar por 1,15 da otro centavo: dos órdenes con
+// $552,38 y $47,55 de IVA suman $599,93, y el 15 % de la suma es $599,94. En
+// el mismo papel, el cuadro de órdenes decía $4.599,50 y el pie $4.599,51.
+// Así que el pie no recalcula: la base lleva el IVA con el que está en el
+// control —que es el del presupuesto, al centavo— y las columnas de órdenes
+// llevan la suma del IVA de sus órdenes.
 
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
@@ -133,6 +143,8 @@ export function presupuestoActualizado({
     // quedaba tres centavos arriba del contrato: el cliente compara este papel
     // con el que firmó, y tres centavos son una pregunta.
     baseExacta: n(r.total_base) / (1 + n(r.iva_pct) / 100),
+    // Y CON IVA, como está en el control: es el número del presupuesto firmado.
+    baseConIva: n(r.total_base),
     aprobado: vacio(), porAprobar: vacio(), manual: vacio(),
   }]));
 
@@ -364,11 +376,32 @@ export function presupuestoActualizado({
     b.orden = { ...b.orden, valor, honorarios, enBloque, enRubros: c2(valor - honorarios - enBloque) };
   }
 
+  // ── EL PIE: SIN IVA, EL IVA Y EL TOTAL, COLUMNA POR COLUMNA ───────────────
+  const totales = sumar([...capitulos.flatMap(c => c.filas), ...deOrdenes.flatMap(b => b.filas), ...proyectadas]);
+  const ordenesAprobadas = sumaDe("aprobado");
+  const ordenesPorAprobar = sumaDe("porAprobar");
+  // El impuesto como lo calcula una orden: sobre su subtotal, redondeado ahí.
+  const impuesto = v => (iva > 0 ? c2(n(v) * iva / 100) : 0);
+  // El de una columna de órdenes es la suma del de sus órdenes. Si en la
+  // columna hay algo que no vino de una orden con partidas —un rubro que una
+  // orden vieja tachó entero—, ese resto lleva su impuesto aparte.
+  const ivaDeOrdenes = (columna, suma) => c2(suma.iva + impuesto(c2(totales[columna] - suma.subtotal)));
+  const baseConIva = c2(capitulos.flatMap(c => c.filas).reduce((t, f) => t + n(f.baseConIva), 0));
+  const ivas = {
+    base: iva > 0 ? c2(baseConIva - totales.base) : 0,
+    aprobado: ivaDeOrdenes("aprobado", ordenesAprobadas),
+    porAprobar: ivaDeOrdenes("porAprobar", ordenesPorAprobar),
+    manual: impuesto(totales.manual),
+  };
+  ivas.vigente = c2(ivas.base + ivas.aprobado);
+  ivas.proyectado = c2(ivas.vigente + ivas.porAprobar + ivas.manual);
+  const totalesConIva = Object.fromEntries(COLUMNAS.map(k => [k, c2(totales[k] + ivas[k])]));
+
   return {
     capitulos, bloques: deOrdenes, proyectados,
-    totales: sumar([...capitulos.flatMap(c => c.filas), ...deOrdenes.flatMap(b => b.filas), ...proyectadas]),
+    totales, ivas, totalesConIva,
     iva, honorariosPct: pctContrato,
-    ordenes: resumen, ordenesAprobadas: sumaDe("aprobado"), ordenesPorAprobar: sumaDe("porAprobar"),
+    ordenes: resumen, ordenesAprobadas, ordenesPorAprobar,
     aprobadas: aprobadas.map(codigoDe), porAprobar: pendientes.map(codigoDe),
     // Lo proyectado a mano: cuánto suman los ajustes y cuánto honorario arrastran.
     // `enRubros` es lo que se movió en rubros del contrato y `enNuevos` lo que
@@ -383,6 +416,12 @@ export function presupuestoActualizado({
 
 const plata = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const conSigno = v => `${v < 0 ? "−" : ""}$${plata(Math.abs(v))}`;
+
+/**
+ * Un monto para el papel del cliente: con su signo de dólar y dos decimales.
+ * El menos es el del teclado, que es el que traen las fuentes del PDF.
+ */
+export const pesosDelPapel = v => `${n(v) < 0 ? "-" : ""}$${plata(Math.abs(n(v)))}`;
 
 /**
  * Lo que hay que decir al lado del subtotal de un bloque: que ese número no
@@ -437,8 +476,10 @@ export function renglonesDeLaMatriz(m) {
   const cada = fn => Object.fromEntries(COLUMNAS.map(k => [k, fn(k)]));
   out.push({ tipo: "pie", etiqueta: m.iva > 0 ? "SUBTOTAL, SIN IVA" : "TOTAL", valores: cada(k => t[k]), fuerte: !(m.iva > 0) });
   if (m.iva > 0) {
-    out.push({ tipo: "pie", etiqueta: `IVA ${m.iva} %`, valores: cada(k => c2(conIva(t[k], m.iva) - t[k])) });
-    out.push({ tipo: "pie", etiqueta: "TOTAL", valores: cada(k => conIva(t[k], m.iva)), fuerte: true });
+    // El IVA y el total de cada columna ya vienen cerrados: el de la base como
+    // en el presupuesto y el de las órdenes como en el documento de cada una.
+    out.push({ tipo: "pie", etiqueta: `IVA ${m.iva} %`, valores: cada(k => m.ivas[k]) });
+    out.push({ tipo: "pie", etiqueta: "TOTAL", valores: cada(k => m.totalesConIva[k]), fuerte: true });
   }
   return out;
 }

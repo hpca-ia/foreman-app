@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { presupuestoActualizado, conIva, esperaFirma, aclaracionDelBloque, renglonesDeLaMatriz, nuevosLimpios, BLOQUE_PROYECTADO,
-  ajustesLimpios, nuevosDe, loQueSeGuarda, CLAVE_NUEVOS }
+  ajustesLimpios, nuevosDe, loQueSeGuarda, CLAVE_NUEVOS, pesosDelPapel }
   from "../src/modules/controlObra/presupuestoActualizado.js";
 
 // ── EL PRESUPUESTO ACTUALIZADO ─────────────────────────────────────────────
@@ -365,4 +365,118 @@ test("una simulación guarda los ajustes por rubro y los rubros nuevos en un sol
   const m = presupuestoActualizado({ rubros, obra, ajustes: guardado });
   assert.equal(m.ajuste.enRubros, 118.1);
   assert.equal(m.ajuste.cuantosNuevos, 0);
+});
+
+// ── EL PIE NO RECALCULA EL IVA: USA EL DE CADA PAPEL ───────────────────────
+//
+// En el mismo PDF, el cuadro de órdenes decía $4.599,50 y el pie de la matriz
+// $4.599,51. Cada orden redondea su IVA en su documento, que es el que el
+// cliente firma; sumar los subtotales y multiplicar de nuevo da otro centavo.
+
+const unRubro = (id, sinIva, extra = {}) => ({
+  id, numero: id, descripcion: `Rubro ${id}`, unidad: "glb", cantidad: 1, precio_unitario: sinIva,
+  total_base: Math.round(sinIva * 1.15 * 100) / 100, iva_pct: 15,
+  capitulo: "OBRA", capitulo_orden: 1, orden: id, origen: "base", ...extra,
+});
+const deUnaLinea = (id, monto) => [{ id, tipo: "aumenta", clase: "nuevo", item: `ADIC-${id}`, descripcion: "Trabajo nuevo", unidad: "glb", cantidad: 1, precio_unitario: monto }];
+const pieDe = m => {
+  const pies = renglonesDeLaMatriz(m).filter(r => r.tipo === "pie");
+  return { sub: pies[0].valores, iva: pies[1]?.valores, total: pies[pies.length - 1].valores };
+};
+
+test("dos órdenes aprobadas: el pie suma el IVA de cada una, como el cuadro de órdenes (Diners Aéreo)", () => {
+  // OC-01: 3.347,76 + 10 % = 3.682,54 → IVA 552,38.  OC-03: 288,21 + 10 % = 317,03 → IVA 47,55.
+  // La suma de los IVA es 599,93; el 15 % de 3.999,57 es 599,94.
+  const m = presupuestoActualizado({
+    rubros: [unRubro(1, 1000)], obra: { honorarios_pct: 10 },
+    ordenes: [{ id: 1, numero: 1, codigo: "OC-01", estado: "aprobada" }, { id: 3, numero: 3, codigo: "OC-03", estado: "aprobada" }],
+    lineasDeOrdenes: { 1: deUnaLinea(11, 3347.76), 3: deUnaLinea(31, 288.21) },
+  });
+  assert.equal(m.ordenesAprobadas.subtotal, 3999.57);
+  assert.equal(m.ordenesAprobadas.iva, 599.93);
+  assert.equal(m.ordenesAprobadas.total, 4599.5);
+  const pie = pieDe(m);
+  assert.equal(pie.sub.aprobado, 3999.57);
+  assert.equal(pie.iva.aprobado, 599.93, "no 599,94: el IVA es el de las órdenes");
+  assert.equal(pie.total.aprobado, m.ordenesAprobadas.total);
+  // Y el vigente es la base con su IVA más las órdenes con el suyo.
+  assert.equal(pie.total.base, 1150);
+  assert.equal(pie.total.vigente, 5749.5);
+  assert.equal(pie.total.proyectado, 5749.5);
+  // Las tarjetas de la pantalla leen el mismo número.
+  assert.equal(m.totalesConIva.aprobado, 4599.5);
+});
+
+test("una sola orden también se separaba un centavo: el pie usa su IVA, no otra fórmula (Plaza Lagos)", () => {
+  // 1.726,64 + 10 % = 1.899,30. Su IVA en la orden es 284,90; 1.899,30 × 1,15
+  // redondea a 2.184,19 por medio centavo de coma flotante.
+  const m = presupuestoActualizado({
+    rubros: [unRubro(1, 1000)], obra: { honorarios_pct: 10 },
+    ordenes: [{ id: 6, numero: 1, codigo: "OC-01", estado: "aprobada" }],
+    lineasDeOrdenes: { 6: deUnaLinea(61, 1726.64) },
+  });
+  assert.equal(m.ordenesAprobadas.total, 2184.2);
+  const pie = pieDe(m);
+  assert.equal(pie.iva.aprobado, 284.9);
+  assert.equal(pie.total.aprobado, 2184.2);
+});
+
+test("las que esperan firma llevan en el pie el mismo total que en el cuadro de órdenes", () => {
+  const m = presupuestoActualizado({
+    rubros: [unRubro(1, 1000)], obra: { honorarios_pct: 10 },
+    ordenes: [{ id: 1, numero: 1, codigo: "OC-01", estado: "enviada" }, { id: 3, numero: 3, codigo: "OC-03", estado: "enviada" }],
+    lineasDeOrdenes: { 1: deUnaLinea(11, 3347.76), 3: deUnaLinea(31, 288.21) },
+  });
+  const pie = pieDe(m);
+  assert.equal(pie.total.porAprobar, m.ordenesPorAprobar.total);
+  assert.equal(pie.total.porAprobar, 4599.5);
+  // No suman al vigente, sí al proyectado.
+  assert.equal(pie.total.vigente, 1150);
+  assert.equal(pie.total.proyectado, 5749.5);
+});
+
+test("la base con IVA es la del control, que es la del presupuesto firmado al centavo", () => {
+  // Al activar la obra, los centavos que sobran van al rubro más grande: la
+  // suma de los rubros con IVA es el total del presupuesto, y eso va al pie.
+  const rs = [unRubro(1, 17875, { total_base: 20556.28 }), unRubro(2, 207.9, { total_base: 239.07 }), unRubro(3, 207.9, { total_base: 239.07 })];
+  const m = presupuestoActualizado({ rubros: rs, obra: { honorarios_pct: 10 } });
+  const pie = pieDe(m);
+  assert.equal(pie.total.base, 21034.42);
+  assert.equal(pie.iva.base, Math.round((21034.42 - pie.sub.base) * 100) / 100);
+  assert.equal(pie.sub.base + pie.iva.base, pie.total.base);
+  assert.equal(pie.total.vigente, 21034.42);
+});
+
+test("lo que una orden vieja tachó entero no tiene partidas: su IVA va por el resto de la columna", () => {
+  const m = presupuestoActualizado({
+    rubros: [unRubro(1, 1000), unRubro(2, 100, { anulado_por_oc: 9 })], obra: { honorarios_pct: 0 },
+    ordenes: [{ id: 9, numero: 1, codigo: "OC-01", estado: "aprobada" }], lineasDeOrdenes: {},
+  });
+  const pie = pieDe(m);
+  assert.equal(pie.sub.aprobado, -100);
+  assert.equal(pie.iva.aprobado, -15);
+  assert.equal(pie.total.aprobado, -115);
+  assert.equal(pie.total.vigente, 1150);
+});
+
+test("el ajuste a mano lleva su IVA como lo llevaría una orden, y una obra sin IVA cierra sin él", () => {
+  const m = presupuestoActualizado({ rubros: [unRubro(1, 1000)], obra: { honorarios_pct: 10 }, nuevos: [{ id: "a", descripcion: "Letrero", cantidad: 1, precio: 1726.64 }] });
+  // 1.726,64 + 10 % = 1.899,30 → IVA 284,90: lo mismo que diría la orden el día que exista.
+  assert.equal(m.totales.manual, 1899.3);
+  assert.equal(m.ivas.manual, 284.9);
+  assert.equal(m.totalesConIva.manual, 2184.2);
+  const sinIva = presupuestoActualizado({ rubros: [unRubro(1, 1000, { iva_pct: 0, total_base: 1000 })], obra: { honorarios_pct: 0 } });
+  assert.equal(sinIva.iva, 0);
+  assert.deepEqual(sinIva.totalesConIva, sinIva.totales);
+  assert.equal(renglonesDeLaMatriz(sinIva).filter(r => r.tipo === "pie").length, 1);
+});
+
+test("la plata del papel lleva su signo de dólar, siempre", () => {
+  // Un reemplazo de texto se comió el «$» de los totales del PDF y salió
+  // publicado así: "TOTAL 189.340,00". En un papel para el cliente, no.
+  assert.equal(pesosDelPapel(189340), "$189.340,00");
+  assert.equal(pesosDelPapel(4599.5), "$4.599,50");
+  assert.equal(pesosDelPapel(-115), "-$115,00");
+  assert.equal(pesosDelPapel(0), "$0,00");
+  assert.equal(pesosDelPapel("no es un número"), "$0,00");
 });

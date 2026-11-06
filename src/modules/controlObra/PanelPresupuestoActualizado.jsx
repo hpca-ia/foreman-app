@@ -5,7 +5,7 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { cargarOrdenes } from "./ordenesDeCambio";
-import { presupuestoActualizado, renglonesDeLaMatriz, conIva, ajustesLimpios, nuevosLimpios, nuevosDe, loQueSeGuarda } from "./presupuestoActualizado.js";
+import { presupuestoActualizado, renglonesDeLaMatriz, ajustesLimpios, nuevosLimpios, nuevosDe, loQueSeGuarda } from "./presupuestoActualizado.js";
 import { excelDelPresupuesto, pdfDelPresupuesto } from "./exportarPresupuestoActualizado.js";
 import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacionesDePresupuesto.js";
 
@@ -143,7 +143,8 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
       <div style={{ fontSize: 10, color: colors.muted }}>{nota}</div>
     </div>
   );
-  const con = v => (matriz.iva > 0 ? `${plata(conIva(v, matriz.iva))} con IVA` : "");
+  // Con IVA, el número del pie: el mismo que el del presupuesto y el de cada orden.
+  const con = k => (matriz.iva > 0 ? `${plata(matriz.totalesConIva[k])} con IVA` : "");
   const caja = { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 14, marginBottom: 12 };
 
   return (
@@ -180,12 +181,12 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
       </div>
 
       <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 12 }}>
-        {tarjeta("PRESUPUESTO BASE", t.base, colors.ink, con(t.base))}
-        {tarjeta(`ÓRDENES APROBADAS · ${matriz.ordenesAprobadas.cuantas}`, t.aprobado, t.aprobado < 0 ? colors.danger : colors.ink, con(t.aprobado))}
-        {tarjeta("VIGENTE", t.vigente, colors.brand, con(t.vigente))}
-        {tarjeta(`POR APROBAR · ${matriz.porAprobar.length}`, t.porAprobar, colors.warning, con(t.porAprobar))}
-        {matriz.ajuste.hay && tarjeta("AJUSTE A MANO", t.manual, VIOLETA, con(t.manual))}
-        {tarjeta("PROYECTADO", t.proyectado, colors.inkSoft, con(t.proyectado))}
+        {tarjeta("PRESUPUESTO BASE", t.base, colors.ink, con("base"))}
+        {tarjeta(`ÓRDENES APROBADAS · ${matriz.ordenesAprobadas.cuantas}`, t.aprobado, t.aprobado < 0 ? colors.danger : colors.ink, con("aprobado"))}
+        {tarjeta("VIGENTE", t.vigente, colors.brand, con("vigente"))}
+        {tarjeta(`POR APROBAR · ${matriz.porAprobar.length}`, t.porAprobar, colors.warning, con("porAprobar"))}
+        {matriz.ajuste.hay && tarjeta("AJUSTE A MANO", t.manual, VIOLETA, con("manual"))}
+        {tarjeta("PROYECTADO", t.proyectado, colors.inkSoft, con("proyectado"))}
       </div>
 
       {/* ── CADA ORDEN, ENTERA ────────────────────────────────────────
@@ -262,7 +263,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
                 {matriz.ajuste.enRubros !== 0 && <> y {plata(matriz.ajuste.enRubros)} de cantidades del contrato</>})</>
             )}
             {matriz.ajuste.honorarios !== 0 && <> y <strong style={{ color: matriz.ajuste.honorarios < 0 ? colors.danger : VIOLETA }}>{plata(matriz.ajuste.honorarios)}</strong> en honorarios</>}
-            : <strong>{plata(matriz.ajuste.total)}</strong> sin IVA, {plata(conIva(matriz.ajuste.total, matriz.iva))} con IVA.
+            : <strong>{plata(matriz.ajuste.total)}</strong> sin IVA, {plata(matriz.totalesConIva.manual)} con IVA.
           </div>
         )}
         {/* ── LO QUE TODAVÍA NO ES NI UNA ORDEN ──────────────────────────
