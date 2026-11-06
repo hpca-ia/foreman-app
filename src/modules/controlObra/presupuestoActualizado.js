@@ -107,6 +107,35 @@ export function loQueSeGuarda(ajustes = {}, nuevos = []) {
   return { ...ajustesLimpios(ajustes), ...(limpios.length ? { [CLAVE_NUEVOS]: limpios } : {}) };
 }
 
+/**
+ * ¿Hay algo en pantalla que todavía no está guardado?
+ *
+ * La proyección se guarda sola, y esta es la pregunta que decide cuándo: se
+ * compara lo que hay contra lo que quedó, las dos cosas pasadas por la misma
+ * limpieza, para que un "5" escrito y un 5 guardado no parezcan un cambio.
+ *
+ * @param abierta  la proyección guardada que está abierta, o null si es nueva
+ */
+export function faltaGuardar({ abierta = null, ajustes = {}, nuevos = [], nombre = "" } = {}) {
+  const hay = JSON.stringify(loQueSeGuarda(ajustes, nuevos));
+  // Una nueva y vacía no es nada que guardar.
+  if (!abierta) return hay !== "{}";
+  const guardado = abierta.ajustes || {};
+  if (hay !== JSON.stringify(loQueSeGuarda(guardado, nuevosDe(guardado)))) return true;
+  // Un nombre borrado no es un nombre nuevo: se queda el que tenía.
+  const escrito = String(nombre || "").trim();
+  return escrito !== "" && escrito !== String(abierta.nombre || "");
+}
+
+/** El nombre con que nace una proyección que nadie nombró: sin repetir. */
+export function nombrePorDefecto(simulaciones = []) {
+  const usados = new Set((simulaciones || []).map(s => String(s?.nombre || "").trim().toLowerCase()));
+  if (!usados.has("proyección")) return "Proyección";
+  let k = 2;
+  while (usados.has(`proyección ${k}`)) k += 1;
+  return `Proyección ${k}`;
+}
+
 /** ¿Espera la firma del cliente? Enviada y viva; un borrador solo si se pide. */
 export const esperaFirma = (o, conBorradores = false) =>
   (o?.estado === "enviada" || (conBorradores && o?.estado === "borrador")) && !o?.anulada && !o?.reemplazada_at;

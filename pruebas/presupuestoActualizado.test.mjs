@@ -480,3 +480,47 @@ test("la plata del papel lleva su signo de dólar, siempre", () => {
   assert.equal(pesosDelPapel(0), "$0,00");
   assert.equal(pesosDelPapel("no es un número"), "$0,00");
 });
+
+// ── LA PROYECCIÓN SE GUARDA SOLA ───────────────────────────────────────────
+//
+// "Hago cambios en la matriz y no se está guardando." Había que ponerle nombre
+// y apretar un botón; en la base no quedó ni una. Ahora cada cambio se guarda
+// solo, y esta es la pregunta que decide cuándo hay algo que guardar.
+
+test("una proyección nueva y vacía no es nada que guardar; con algo escrito, sí", async () => {
+  const { faltaGuardar } = await import("../src/modules/controlObra/presupuestoActualizado.js");
+  assert.equal(faltaGuardar({}), false);
+  assert.equal(faltaGuardar({ abierta: null, ajustes: {}, nuevos: [], nombre: "Con nombre y nada más" }), false);
+  // Un cero, un vacío o un renglón sin llenar tampoco son un cambio.
+  assert.equal(faltaGuardar({ ajustes: { 106: "0", 97: "" }, nuevos: [{ id: "a", descripcion: "", cantidad: "1", precio: "" }] }), false);
+  assert.equal(faltaGuardar({ ajustes: { 106: "-5" } }), true);
+  assert.equal(faltaGuardar({ nuevos: [{ id: "a", descripcion: "Letrero", cantidad: "1", precio: "" }] }), true);
+});
+
+test("con una abierta, falta guardar solo cuando lo escrito ya no es lo guardado", async () => {
+  const { faltaGuardar } = await import("../src/modules/controlObra/presupuestoActualizado.js");
+  // Como vuelve de la base: los números como números, las claves en otro orden.
+  const abierta = { id: 3, nombre: "Proyección", ajustes: {
+    106: -5, 1: 3,
+    [CLAVE_NUEVOS]: [{ precio: 2500, unidad: "glb", cantidad: 1, id: "a", descripcion: "Letrero" }],
+  } };
+  const igual = { abierta, ajustes: { 1: "3", 106: "-5" }, nuevos: [{ id: "a", descripcion: "Letrero", unidad: "glb", cantidad: "1", precio: "2500" }], nombre: "Proyección" };
+  assert.equal(faltaGuardar(igual), false, "un 5 escrito y un 5 guardado no son un cambio");
+  assert.equal(faltaGuardar({ ...igual, ajustes: { 1: "3", 106: "-6" } }), true);
+  assert.equal(faltaGuardar({ ...igual, ajustes: { 1: "3" } }), true, "sacar un ajuste también se guarda");
+  // Editar un rubro proyectado, y borrarlo: las dos cosas se guardan.
+  assert.equal(faltaGuardar({ ...igual, nuevos: [{ ...igual.nuevos[0], precio: "2800" }] }), true);
+  assert.equal(faltaGuardar({ ...igual, nuevos: [] }), true);
+  // El nombre: cambiarlo se guarda; borrarlo no lo cambia.
+  assert.equal(faltaGuardar({ ...igual, nombre: "Con lo que viene" }), true);
+  assert.equal(faltaGuardar({ ...igual, nombre: "   " }), false);
+});
+
+test("una proyección que nadie nombró nace con un nombre, sin repetir", async () => {
+  const { nombrePorDefecto } = await import("../src/modules/controlObra/presupuestoActualizado.js");
+  assert.equal(nombrePorDefecto([]), "Proyección");
+  assert.equal(nombrePorDefecto([{ nombre: "Ahorro" }]), "Proyección");
+  assert.equal(nombrePorDefecto([{ nombre: "proyección " }]), "Proyección 2");
+  assert.equal(nombrePorDefecto([{ nombre: "Proyección" }, { nombre: "Proyección 2" }]), "Proyección 3");
+  assert.equal(nombrePorDefecto(null), "Proyección");
+});

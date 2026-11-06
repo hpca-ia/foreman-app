@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { Download, FileSpreadsheet, Save, Trash2, Plus, X } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from "react";
+import { Download, FileSpreadsheet, Trash2, Plus, X } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { fmt } from "./calculos";
 import { cargarOrdenes } from "./ordenesDeCambio";
-import { presupuestoActualizado, renglonesDeLaMatriz, ajustesLimpios, nuevosLimpios, nuevosDe, loQueSeGuarda } from "./presupuestoActualizado.js";
+import { presupuestoActualizado, renglonesDeLaMatriz, ajustesLimpios, nuevosLimpios, nuevosDe, faltaGuardar, nombrePorDefecto } from "./presupuestoActualizado.js";
 import { excelDelPresupuesto, pdfDelPresupuesto } from "./exportarPresupuestoActualizado.js";
 import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacionesDePresupuesto.js";
 
@@ -18,7 +18,13 @@ import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacio
 // aprobada da otra matriz, y eso es lo que tiene que pasar.
 //
 // Lo único que se guarda es el ajuste a mano —las cantidades que se mueven y
-// los rubros que todavía no existen—, como una simulación con nombre.
+// los rubros que todavía no existen—, como una proyección con nombre.
+//
+// SE GUARDA SOLA. Antes había que ponerle nombre y apretar "Guardar", y si
+// faltaba el nombre el aviso salía arriba de todo, lejos del botón: se
+// escribían los ajustes, se salía de la pantalla, y al volver no había nada.
+// En la base no quedó ni una. Ahora cada cambio se guarda un segundo después
+// de escribirlo, al entrar se abre la última, y al lado dice si quedó guardado.
 // El presupuesto original, al lado, no cambia: es el papel que se firmó.
 
 const th = { padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700, whiteSpace: "nowrap" };
@@ -40,7 +46,13 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
   const [conBorradores, setConBorradores] = useState(false);
   const [ocupado, setOcupado] = useState("");
   const [error, setError] = useState("");
-  const [aviso, setAviso] = useState("");
+  // Cómo va el guardado de la proyección, para decirlo donde se escribe.
+  const [guardado, setGuardado] = useState({ estado: "", error: "", hora: null });
+  const [intento, setIntento] = useState(0);
+  const enVuelo = useRef(false);      // hay un guardado viajando
+  const pendiente = useRef(false);    // hay algo escrito que todavía no salió
+  const ultimo = useRef(null);        // lo que se guardaría ahora mismo
+  const montado = useRef(true);
 
   // LO QUE SE PROYECTA A MANO. Se guarda tal como se escribe —"-", "-5"— para
   // que el campo no pelee con quien está tipeando; la cuenta lo lee como número.
@@ -48,6 +60,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
   // LOS RUBROS QUE TODAVÍA NO SON DE NADIE: algo que viene, sin cotizar y sin
   // orden de cambio, escrito a mano con una estimación. Van al final.
   const [nuevos, setNuevos] = useState([]);
+  const [recien, setRecien] = useState(null);
   const [simulaciones, setSimulaciones] = useState([]);
   const [simulacion, setSimulacion] = useState(null);   // la guardada que está abierta
   const [nombre, setNombre] = useState("");
@@ -58,6 +71,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
     setSimulaciones(r.simulaciones || []);
     setSinTabla(!!r.sinTabla);
     if (r.error && !r.sinTabla) setError(r.error);
+    return r.simulaciones || [];
   }, [obra?.id]);
 
   useEffect(() => {
@@ -68,7 +82,14 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
       if (!vivo) return;
       setOrdenes(r.ordenes || []); setLineas(r.lineas || {}); setCargando(false);
     })();
-    cargarSimulaciones();
+    // AL ENTRAR SE ABRE LA ÚLTIMA PROYECCIÓN. Arrancar en blanco y dejar la
+    // guardada escondida en una lista es lo mismo que no haberla guardado.
+    cargarSimulaciones().then(lista => {
+      if (!vivo || !lista.length) return;
+      const s = lista[0];
+      setSimulacion(s); setNombre(s.nombre || "");
+      setAjustes(ajustesLimpios(s.ajustes)); setNuevos(nuevosDe(s.ajustes));
+    });
     return () => { vivo = false; };
   }, [obra?.id, cargarSimulaciones]);
 
@@ -78,18 +99,102 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
     () => presupuestoActualizado({ rubros, ordenes, lineasDeOrdenes: lineas, obra, conBorradores, ajustes: numeros, nuevos: escritos }),
     [rubros, ordenes, lineas, obra, conBorradores, numeros, escritos]);
   const renglones = useMemo(() => renglonesDeLaMatriz(matriz), [matriz]);
+  // LO PROYECTADO A MANO SE ESCRIBE EN LA MISMA MATRIZ, AL FINAL, que es donde
+  // se lo busca: después de los bloques de las órdenes y antes del pie. Esos
+  // renglones se dibujan aparte —son campos para escribir, no una lectura—,
+  // así que acá se sacan los de la matriz y se deja la marca de dónde van.
+  const filasDeLaTabla = useMemo(() => {
+    const sin = renglones.filter(r => !(r.tipo === "bloque" && r.manual) && !r.proyectada);
+    const pie = sin.findIndex(r => r.tipo === "pie");
+    return pie < 0 ? [...sin, { tipo: "proyectados" }] : [...sin.slice(0, pie), { tipo: "proyectados" }, ...sin.slice(pie)];
+  }, [renglones]);
   const t = matriz.totales;
   const borradores = ordenes.filter(o => o.estado === "borrador" && !o.anulada && (lineas[o.id] || []).length).length;
   const hayAjustes = Object.keys(numeros).length > 0 || escritos.length > 0;
-  // ¿Lo que está en pantalla es lo mismo que quedó guardado?
-  const guardado = simulacion?.ajustes || {};
-  const sinGuardar = JSON.stringify(loQueSeGuarda(numeros, escritos)) !== JSON.stringify(loQueSeGuarda(guardado, nuevosDe(guardado)))
-    || (simulacion && nombre.trim() !== (simulacion.nombre || ""));
+  // ── SE GUARDA SOLA ──────────────────────────────────────────────────────
+  // Lo que se guardaría ahora mismo va en una referencia: el guardado sale un
+  // segundo después del último cambio, y tiene que llevarse lo último escrito,
+  // no lo que había cuando se armó el reloj.
+  const idAbierta = simulacion?.id ?? null;
+  const sinGuardar = faltaGuardar({ abierta: simulacion, ajustes: numeros, nuevos: escritos, nombre });
+  const hayQueGuardar = !cargando && !sinTabla && sinGuardar;
+  const firma = JSON.stringify([numeros, escritos, nombre.trim()]);
+  ultimo.current = {
+    id: idAbierta, obraId: obra.id, ajustes: numeros, nuevos: escritos, quien: currentUser,
+    nombre: nombre.trim() || simulacion?.nombre || nombrePorDefecto(simulaciones),
+  };
+
+  const guardarAhora = useCallback(async () => {
+    const que = ultimo.current;
+    if (!que || enVuelo.current) return;
+    enVuelo.current = true; pendiente.current = false;
+    setGuardado({ estado: "guardando", error: "", hora: null });
+    const r = await guardarSimulacion(que);
+    enVuelo.current = false;
+    if (!montado.current) return;
+    if (r.error) { setGuardado({ estado: "error", error: r.error, hora: null }); return; }
+    // Al quedar guardada pasa a ser la abierta: si mientras viajaba se escribió
+    // algo más, deja de coincidir con lo guardado y sale otro guardado solo.
+    setSimulacion(r.simulacion);
+    setSimulaciones(l => [r.simulacion, ...l.filter(x => String(x.id) !== String(r.simulacion.id))]);
+    setNombre(n => (n.trim() ? n : r.simulacion.nombre || ""));
+    setGuardado({ estado: "guardado", error: "", hora: new Date() });
+  }, []);
+
+  useEffect(() => {
+    if (!hayQueGuardar) { pendiente.current = false; return undefined; }
+    pendiente.current = true;
+    // Con uno viajando no sale otro: cuando vuelva, esto corre de nuevo.
+    if (enVuelo.current) return undefined;
+    const reloj = setTimeout(guardarAhora, 900);
+    return () => clearTimeout(reloj);
+  }, [hayQueGuardar, firma, idAbierta, intento, guardarAhora]);
+
+  // AL SALIR DE LA PANTALLA, LO QUE QUEDÓ ESCRITO SE VA GUARDADO. Sin esto, lo
+  // tipeado en el último segundo antes de cambiar de pestaña se perdía.
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+      const que = ultimo.current;
+      if (pendiente.current && que && (que.id || !enVuelo.current)) guardarSimulacion(que);
+    };
+  }, []);
+
+  async function duplicar() {
+    if (!simulacion) return;
+    setOcupado("duplicar");
+    const r = await guardarSimulacion({ ...ultimo.current, id: null, nombre: `${ultimo.current.nombre} (copia)` });
+    setOcupado("");
+    if (r.error) { setGuardado({ estado: "error", error: r.error, hora: null }); return; }
+    setSimulaciones(l => [r.simulacion, ...l]);
+    setSimulacion(r.simulacion); setNombre(r.simulacion.nombre || "");
+    setGuardado({ estado: "guardado", error: "", hora: new Date() });
+  }
+
+  // Cómo quedó, dicho al lado de donde se escribe.
+  const estadoDelGuardado = sinTabla ? null
+    : guardado.estado === "error" ? (
+      <span style={{ fontSize: 11.5, color: colors.danger, fontWeight: 600 }}>
+        No se guardó: {guardado.error}{" "}
+        <button onClick={() => setIntento(k => k + 1)}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11.5,
+            color: colors.danger, textDecoration: "underline" }}>reintentar</button>
+      </span>
+    ) : (hayQueGuardar || guardado.estado === "guardando") ? (
+      <span style={{ fontSize: 11.5, color: colors.warning }}>Guardando…</span>
+    ) : simulacion ? (
+      <span style={{ fontSize: 11.5, color: colors.success, fontWeight: 600 }}>
+        Guardado ✓{guardado.hora ? ` ${guardado.hora.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" })}` : ""}
+      </span>
+    ) : (
+      <span style={{ fontSize: 11.5, color: colors.muted }}>Se guarda sola apenas escribas algo</span>
+    );
 
   async function bajar(que) {
     setOcupado(que); setError("");
     try {
-      const datos = { matriz, obra, simulacion: hayAjustes ? (nombre.trim() || "Simulación") : null };
+      const datos = { matriz, obra, simulacion: hayAjustes ? (nombre.trim() || simulacion?.nombre || "Proyección") : null };
       if (que === "excel") await excelDelPresupuesto(datos);
       else await pdfDelPresupuesto(datos);
     } catch (e) { setError("No se pudo armar el archivo: " + e.message); }
@@ -98,33 +203,27 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
 
   function abrir(id) {
     const s = simulaciones.find(x => String(x.id) === String(id)) || null;
-    setSimulacion(s); setNombre(s?.nombre || ""); setAviso("");
+    setSimulacion(s); setNombre(s?.nombre || ""); setGuardado({ estado: "", error: "", hora: null });
     setAjustes(s ? ajustesLimpios(s.ajustes) : {});
     setNuevos(s ? nuevosDe(s.ajustes) : []);
   }
 
-  async function guardar(comoNueva = false) {
-    if (!nombre.trim()) { setError("Ponele un nombre a la simulación para poder encontrarla después."); return; }
-    setOcupado("guardar"); setError("");
-    const r = await guardarSimulacion({ id: comoNueva ? null : simulacion?.id, obraId: obra.id, nombre, ajustes: numeros, nuevos: escritos, quien: currentUser });
-    setOcupado("");
-    if (r.error) { setError(r.error); return; }
-    setSimulacion(r.simulacion); setNombre(r.simulacion.nombre);
-    setAviso(`Quedó guardada «${r.simulacion.nombre}».`);
-    await cargarSimulaciones();
-  }
-
   async function borrar() {
-    if (!simulacion || !window.confirm(`¿Borrar la simulación «${simulacion.nombre}»?`)) return;
+    if (!simulacion || !window.confirm(`¿Borrar la proyección «${simulacion.nombre}»? Se pierden sus ajustes y sus rubros proyectados.`)) return;
     const err = await borrarSimulacion(simulacion.id);
     if (err) { setError(err); return; }
-    setSimulacion(null); setNombre(""); setAjustes({}); setNuevos([]); setAviso("");
+    setSimulacion(null); setNombre(""); setAjustes({}); setNuevos([]); setGuardado({ estado: "", error: "", hora: null });
     await cargarSimulaciones();
   }
 
   // Un rubro nuevo, vacío, para llenar. El id es solo para reconocerlo acá.
-  const agregarNuevo = () => setNuevos(l => [...l,
-    { id: `n${Date.now().toString(36)}${Math.round(Math.random() * 1e4)}`, descripcion: "", unidad: "", cantidad: "1", precio: "" }]);
+  const agregarNuevo = () => {
+    const id = `n${Date.now().toString(36)}${Math.round(Math.random() * 1e4)}`;
+    setNuevos(l => [...l, { id, descripcion: "", unidad: "", cantidad: "1", precio: "" }]);
+    // El cursor queda en la descripción del renglón nuevo, y la pantalla baja
+    // hasta él: está al final de la matriz, lejos del botón de arriba.
+    setRecien(id);
+  };
   const cambiarNuevo = (id, campo, valor) => setNuevos(l => l.map(x => (x.id === id ? { ...x, [campo]: valor } : x)));
   const quitarNuevo = id => setNuevos(l => l.filter(x => x.id !== id));
 
@@ -146,6 +245,92 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
   // Con IVA, el número del pie: el mismo que el del presupuesto y el de cada orden.
   const con = k => (matriz.iva > 0 ? `${plata(matriz.totalesConIva[k])} con IVA` : "");
   const caja = { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 14, marginBottom: 12 };
+
+  // ── LOS RUBROS PROYECTADOS, AL FINAL DE LA MATRIZ ───────────────────────
+  // El bloque está siempre, aunque esté vacío: es la única forma de que se
+  // encuentre dónde se agregan. Cada renglón se escribe en las mismas
+  // columnas de la matriz —descripción, unidad y precio a la izquierda, la
+  // cantidad en AJUSTE A MANO— y su total cae en PROYECTADO.
+  const campoDeMatriz = { width: "100%", boxSizing: "border-box", padding: "3px 6px", fontSize: 11.5, fontFamily: colors.font,
+    border: `1px solid ${VIOLETA}`, borderRadius: 5, outline: "none", background: "#fff", color: colors.ink };
+  const subProyectados = matriz.proyectados.sub;
+  const numeroDe = id => {
+    const k = escritos.findIndex(x => x.id === id);
+    return k < 0 ? "" : `P-${String(k + 1).padStart(2, "0")}`;
+  };
+  const seccionProyectados = (
+    <Fragment key="proyectados">
+      <tr style={{ background: "#EDE9FE", borderTop: `2px solid ${VIOLETA}` }}>
+        <td colSpan={4} style={{ ...td, fontWeight: 700, fontSize: 11, color: colors.ink, letterSpacing: 0.2 }}>
+          RUBROS PROYECTADOS · sin cotizar y sin orden de cambio
+          <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, borderRadius: 9, padding: "1px 6px", color: VIOLETA, background: "#fff" }}>ESTIMADO</span>
+          <div style={{ fontWeight: 400, fontSize: 10.5, color: colors.inkSoft, marginTop: 2, lineHeight: 1.45, maxWidth: 560 }}>
+            Lo que todavía no está en el contrato ni en ninguna orden de cambio, pero ya se sabe que viene. Escribí acá qué es,
+            cuánto y a cuánto lo estimás, sin IVA: suma solo al proyectado
+            {matriz.honorariosPct > 0 ? `, con su ${matriz.honorariosPct} % de honorarios en el rubro de honorarios` : ""}.
+          </div>
+        </td>
+        <td colSpan={10} style={{ ...td, ...borde }} />
+        <td style={{ ...td, ...borde }} />
+        <td style={{ ...td, ...num, fontWeight: 700, fontSize: 11 }}><Mov v={subProyectados.manual} color={VIOLETA} /></td>
+        <td style={{ ...td, ...borde }} />
+        <td style={{ ...td, ...num, fontWeight: 700, fontSize: 11, color: colors.inkSoft }}>{subProyectados.proyectado ? fmt(subProyectados.proyectado) : ""}</td>
+      </tr>
+      {nuevos.map(x => {
+        const cantidad = Number(x.cantidad) || 0;
+        const total = Math.round(cantidad * (Number(x.precio) || 0) * 100) / 100;
+        return (
+          <tr key={x.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`, background: "#F5F3FF" }}>
+            <td style={{ ...td, color: colors.muted, whiteSpace: "nowrap" }}>{numeroDe(x.id)}</td>
+            <td style={{ ...td, minWidth: 220 }}>
+              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                <input value={x.descripcion} autoFocus={x.id === recien}
+                  onChange={e => cambiarNuevo(x.id, "descripcion", e.target.value)}
+                  placeholder="Qué es: letrero de fachada, cortinas, señalética…" style={campoDeMatriz} />
+                <button onClick={() => quitarNuevo(x.id)} title="Quitar este rubro"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex", padding: 0 }}>
+                  <X size={14} />
+                </button>
+              </div>
+            </td>
+            <td style={td}>
+              <input value={x.unidad} onChange={e => cambiarNuevo(x.id, "unidad", e.target.value)} placeholder="und"
+                title="Unidad: u, m2, glb…" style={{ ...campoDeMatriz, width: 48, textAlign: "center" }} />
+            </td>
+            <td style={{ ...td, ...num }}>
+              <input type="number" step="any" value={x.precio} onChange={e => cambiarNuevo(x.id, "precio", e.target.value)}
+                placeholder="precio" title="Precio unitario estimado, sin IVA" style={{ ...campoDeMatriz, width: 78, textAlign: "right" }} />
+            </td>
+            <td colSpan={10} style={{ ...td, ...borde }} />
+            <td style={{ ...td, ...num, ...borde }}>
+              <input type="number" step="any" value={x.cantidad} onChange={e => cambiarNuevo(x.id, "cantidad", e.target.value)}
+                placeholder="cant" title="Cantidad" style={{ ...campoDeMatriz, width: 62, textAlign: "right" }} />
+            </td>
+            <td style={{ ...td, ...num }}>
+              {total ? <Mov v={total} color={VIOLETA} /> : <span style={{ fontSize: 10, color: colors.warning }}>falta el precio</span>}
+            </td>
+            <td style={{ ...td, ...num, ...borde }}>{cantidad ? fmt(cantidad) : ""}</td>
+            <td style={{ ...td, ...num, fontWeight: 600 }}>{total ? fmt(total) : ""}</td>
+          </tr>
+        );
+      })}
+      <tr style={{ background: "#F5F3FF" }}>
+        <td colSpan={18} style={{ ...td, padding: "8px 6px" }}>
+          <button onClick={agregarNuevo}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", background: VIOLETA, color: "#fff",
+              border: "none", borderRadius: 6, padding: "5px 12px", fontFamily: colors.font, fontSize: 12, fontWeight: 600 }}>
+            <Plus size={13} /> Agregar un rubro
+          </button>
+          <span style={{ marginLeft: 10, fontSize: 11, color: colors.inkSoft }}>
+            {nuevos.length
+              ? "Se guardan solos y salen en el PDF y el Excel. Cuando uno pase a una orden de cambio o al presupuesto, quitalo de acá con la ✕ para que no se cuente dos veces."
+              : "Todavía no agregaste ninguno."}
+          </span>
+          <span style={{ marginLeft: 10 }}>{estadoDelGuardado}</span>
+        </td>
+      </tr>
+    </Fragment>
+  );
 
   return (
     <div style={{ fontFamily: colors.font }}>
@@ -243,7 +428,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
           "Si sacamos esto y bajamos aquello, ¿en cuánto queda?". Se escribe
           la cantidad que se suma o se resta en la columna AJUSTE de cada
           rubro, y los honorarios se mueven solos. No toca el contrato ni el
-          control: es una simulación, y se guarda con nombre para volver. */}
+          control: es una proyección, y se guarda sola. */}
       <div style={{ ...caja, borderLeft: `3px solid ${VIOLETA}` }}>
         <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.55 }}>
           <strong style={{ color: colors.ink }}>Proyectar a mano.</strong> En la columna <strong style={{ color: VIOLETA }}>AJUSTE</strong> de
@@ -269,110 +454,58 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
         {/* ── LO QUE TODAVÍA NO ES NI UNA ORDEN ──────────────────────────
             Un trabajo que se sabe que viene: no está en el contrato, no se
             cotizó y no tiene orden de cambio, pero ya mueve el número que el
-            cliente quiere ver. Se escribe con una estimación y va al final de
-            la matriz, en su bloque, sumando solo al proyectado. */}
-        <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${colors.border}` }}>
-          <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.55 }}>
+            cliente quiere ver. Se escribe AL FINAL DE LA MATRIZ, en su bloque;
+            este botón agrega el renglón y lleva hasta ahí. */}
+        <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px dashed ${colors.border}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 260, fontSize: 12, color: colors.inkSoft, lineHeight: 1.55 }}>
             <strong style={{ color: colors.ink }}>Rubros nuevos, todavía sin cotizar.</strong> Lo que no está en el contrato ni en
-            ninguna orden de cambio pero ya se sabe que viene. Poné qué es, cuánto y a cuánto lo estimás: va al final de la
-            matriz y suma solo al proyectado{matriz.honorariosPct > 0 ? `, con su ${matriz.honorariosPct} % de honorarios` : ""}.
+            ninguna orden de cambio pero ya se sabe que viene se escribe <strong>al final de la matriz</strong>, en el bloque
+            violeta «Rubros proyectados»: qué es, cuánto y a cuánto lo estimás.
+            {nuevos.length > 0 && <> Hay {nuevos.length === 1 ? "uno escrito" : `${nuevos.length} escritos`}.</>}
           </div>
-          {nuevos.length > 0 && (
-            <div style={{ overflowX: "auto", marginTop: 7 }}>
-              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640 }}>
-                <thead>
-                  <tr>
-                    <th style={{ ...th, textAlign: "left" }}>DESCRIPCIÓN</th>
-                    <th style={{ ...th, width: 70 }}>UND</th>
-                    <th style={{ ...th, ...num, width: 90 }}>CANTIDAD</th>
-                    <th style={{ ...th, ...num, width: 120 }}>P. UNIT ESTIMADO</th>
-                    <th style={{ ...th, ...num, width: 110 }}>TOTAL SIN IVA</th>
-                    <th style={{ ...th, width: 28 }} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {nuevos.map(x => {
-                    const total = Math.round((Number(x.cantidad) || 0) * (Number(x.precio) || 0) * 100) / 100;
-                    const campo = { ...inputStyle, padding: "4px 7px", fontSize: 12, width: "100%", boxSizing: "border-box" };
-                    return (
-                      <tr key={x.id}>
-                        <td style={{ padding: "2px 4px 2px 0" }}>
-                          <input value={x.descripcion} onChange={e => cambiarNuevo(x.id, "descripcion", e.target.value)}
-                            placeholder="Qué es: letrero de fachada, cortinas, señalética…" style={campo} />
-                        </td>
-                        <td style={{ padding: "2px 4px" }}>
-                          <input value={x.unidad} onChange={e => cambiarNuevo(x.id, "unidad", e.target.value)} placeholder="u, m2, glb"
-                            style={{ ...campo, textAlign: "center" }} />
-                        </td>
-                        <td style={{ padding: "2px 4px" }}>
-                          <input type="number" step="any" value={x.cantidad} onChange={e => cambiarNuevo(x.id, "cantidad", e.target.value)}
-                            style={{ ...campo, textAlign: "right" }} />
-                        </td>
-                        <td style={{ padding: "2px 4px" }}>
-                          <input type="number" step="any" value={x.precio} onChange={e => cambiarNuevo(x.id, "precio", e.target.value)}
-                            placeholder="sin IVA" style={{ ...campo, textAlign: "right" }} />
-                        </td>
-                        <td style={{ padding: "2px 4px", ...num, fontSize: 12, fontWeight: 600, color: total ? VIOLETA : colors.muted }}>
-                          {total ? plata(total) : "falta el precio"}
-                        </td>
-                        <td style={{ padding: "2px 0", textAlign: "center" }}>
-                          <button onClick={() => quitarNuevo(x.id)} title="Quitar este rubro"
-                            style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}>
-                            <X size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
           <button onClick={agregarNuevo}
-            style={{ marginTop: 7, display: "inline-flex", alignItems: "center", gap: 5, background: "none", cursor: "pointer",
-              border: `1px dashed ${VIOLETA}`, borderRadius: 6, padding: "4px 10px", fontFamily: colors.font, fontSize: 11.5, color: VIOLETA }}>
-            <Plus size={12} /> Agregar un rubro
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", background: VIOLETA, color: "#fff",
+              border: "none", borderRadius: 6, padding: "6px 12px", fontFamily: colors.font, fontSize: 12, fontWeight: 600 }}>
+            <Plus size={13} /> Agregar un rubro nuevo
           </button>
         </div>
 
         <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", marginTop: 9 }}>
           {simulaciones.length > 0 && (
-            <select value={simulacion?.id || ""} onChange={e => abrir(e.target.value)}
+            <select value={simulacion?.id || ""} onChange={e => abrir(e.target.value)} title="Qué proyección está abierta"
               style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, width: "auto", maxWidth: 260 }}>
-              <option value="">Simulación nueva</option>
               {simulaciones.map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
+              <option value="">＋ Otra proyección, en blanco</option>
             </select>
           )}
-          <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre de la simulación"
+          <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre de la proyección (opcional)"
             style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, width: 230 }} />
-          <Button variant="outline" size="sm" disabled={!!ocupado || (!hayAjustes && !simulacion)} onClick={() => guardar(false)}>
-            <Save size={12} /> {ocupado === "guardar" ? "Guardando…" : simulacion ? "Guardar cambios" : "Guardar"}
-          </Button>
+          {estadoDelGuardado}
           {simulacion && (
-            <Button variant="outline" size="sm" disabled={!!ocupado} onClick={() => guardar(true)}>Guardar como otra</Button>
+            <Button variant="outline" size="sm" disabled={!!ocupado || hayQueGuardar} onClick={duplicar}>
+              {ocupado === "duplicar" ? "Copiando…" : "Hacer una copia"}
+            </Button>
           )}
           {hayAjustes && (
-            <button onClick={() => { setAjustes({}); setNuevos([]); setAviso(""); }}
+            <button onClick={() => { if (window.confirm("¿Sacar todos los ajustes y los rubros proyectados de esta proyección?")) { setAjustes({}); setNuevos([]); } }}
               style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 11.5,
                 color: colors.muted, textDecoration: "underline" }}>
               limpiar los ajustes
             </button>
           )}
           {simulacion && (
-            <button onClick={borrar} title="Borrar esta simulación"
+            <button onClick={borrar} title="Borrar esta proyección"
               style={{ background: "none", border: "none", cursor: "pointer", color: colors.danger, display: "flex" }}>
               <Trash2 size={13} />
             </button>
           )}
-          {hayAjustes && sinGuardar && <span style={{ fontSize: 11, color: colors.warning }}>sin guardar</span>}
         </div>
         {sinTabla && (
           <div style={{ fontSize: 11.5, color: colors.warning, marginTop: 7, lineHeight: 1.5 }}>
-            Para guardar simulaciones falta correr la migración 169. Mientras tanto podés ajustar y bajar el PDF o el
+            Para guardar la proyección falta correr la migración 169. Mientras tanto podés ajustar y bajar el PDF o el
             Excel, pero al salir de esta pantalla los ajustes se pierden.
           </div>
         )}
-        {aviso && <div style={{ fontSize: 12, color: colors.success, marginTop: 7 }}>{aviso}</div>}
       </div>
 
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflowX: "auto" }}>
@@ -401,7 +534,8 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
             </tr>
           </thead>
           <tbody>
-            {renglones.map((r, i) => {
+            {filasDeLaTabla.map((r, i) => {
+              if (r.tipo === "proyectados") return seccionProyectados;
               if (r.tipo === "capitulo" || r.tipo === "bloque") {
                 const e = { ...td, ...num, fontWeight: 700, fontSize: 11, color: colors.inkSoft };
                 return (
