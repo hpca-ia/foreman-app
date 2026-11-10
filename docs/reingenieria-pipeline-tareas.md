@@ -32,8 +32,10 @@ Tres reglas, y todo lo demás sale de ellas.
    Pipeline. Cuando se aprueba, sale del Pipeline y vive en Control. Si se
    pierde, se cierra con su motivo. (RES BG, con sus ingenierías en
    preparación, se persigue: es del Pipeline.)
-2. **En el Pipeline, un proyecto está en una sola etapa.** Una, elegida de una
-   lista corta. No hay etapas «en curso» en paralelo ni «estamos acá».
+2. **En el Pipeline, un proyecto está en una sola etapa.** Una, elegida de un
+   desplegable. Las etapas dependen del TIPO de lead —construcción,
+   arquitectura, simple—, porque no todos pasan por lo mismo. No hay etapas
+   «en curso» en paralelo ni «estamos acá».
 3. **Lo que hay que hacer es una tarea, y vive en un solo lugar.** Una tarea
    puede ser de un proyecto —del pipeline o aprobado— o de ninguno. Al abrir un
    proyecto se ven sus tareas: las mismas que en Tareas. No hay «actividades»
@@ -52,11 +54,14 @@ encima.
 Hernán lo pidió aparte: que Pipeline y Tareas sean más interactivos y amables.
 Vale para todas las fases; no es una fase más.
 
-- **El pipeline es un tablero.** Una columna por etapa y una tarjeta por
-  proyecto. Cambiar de etapa es arrastrar la tarjeta. Con una sola etapa por
-  proyecto, el tablero por fin dice la verdad.
-- **Aprobar o perder es soltar la tarjeta** en su casillero, al pie. Perder
-  pide el motivo; aprobar ofrece crear la obra en Control.
+- **El pipeline se lee por tipo.** Construcción, Arquitectura y Simple, cada
+  grupo con sus leads y cuántos hay en cada etapa.
+- **La etapa se elige de un desplegable** en la tarjeta misma, con las etapas
+  de su tipo. Lo pidió Hernán así: «hay leads de construcción, otros de
+  arquitectura, otros más simples, y sus etapas varían». El tipo también se
+  cambia desde la tarjeta.
+- **Aprobar o perder están en el mismo desplegable**, al final. Perder pide el
+  motivo; aprobar ofrece crear la obra en Control.
 - **Cada tarjeta dice su próximo paso** y cuándo vence. Si no tiene, lo dice
   en amarillo: «sin próximo paso».
 - **Una tarea se completa con un toque** y se le cambia la fecha desde la
@@ -66,8 +71,7 @@ Vale para todas las fases; no es una fase más.
 - **Todo se guarda solo**, con el estado dicho al lado, y lo que se cambia en
   un lugar se ve en el otro al instante: la tarea que se completa en Tareas
   deja de ser el próximo paso en la tarjeta del proyecto.
-- **En el teléfono**, donde no se arrastra cómodo, la etapa se cambia tocando
-  la tarjeta y eligiendo.
+- **En el teléfono es igual**: un desplegable se toca bien con el dedo.
 
 ## Las fases
 
@@ -99,13 +103,22 @@ fila. No hay dos listas.
 Lo que arregla: el «estamos acá» y los proyectos aprobados metidos en el
 pipeline.
 
-- Cada proyecto del pipeline tiene una etapa, en `leads.etapa`. Se cambia a
-  mano, con un clic, a cualquier otra: no hay orden obligado, porque un
-  proyecto puede presupuestar antes del plan masa.
-- Etapas propuestas, editables en Ajustes (los nombres los define Hernán):
-  Contacto · Levantamiento · Plan masa / Anteproyecto · Ingenierías ·
-  Presupuesto · Propuesta enviada · Negociación.
-  Salidas: **Aprobado** y **Perdido** (con motivo).
+- Cada lead tiene un tipo (`leads.tunel`, que ya existe) y una etapa
+  (`leads.etapa`). La etapa se elige de un desplegable con las de su tipo y se
+  cambia a cualquier otra: no hay orden obligado, porque un proyecto puede
+  presupuestar antes del plan masa.
+- El catálogo de etapas por tipo ya vive en `pipeline_etapas` y se edita en
+  Ajustes. Hoy mezcla etapas de perseguir con etapas de ejecutar (Obra gris,
+  Acabados, Entrega): quedan solo las de perseguir. Propuesta de arranque,
+  que Hernán ajusta:
+  - **Construcción:** Contacto · Levantamiento · Ingenierías · Presupuesto ·
+    Propuesta enviada · Negociación.
+  - **Arquitectura:** Contacto · Levantamiento · Plan masa · Anteproyecto ·
+    Propuesta de honorarios · Negociación.
+  - **Simple:** Contacto · Propuesta enviada · Negociación.
+  Salidas, iguales para los tres: **Aprobado** y **Perdido** (con motivo).
+- Hoy solo RES BG tiene tipo (construcción); los otros seis están como «lead»
+  a secas. En la migración Hernán dice de qué tipo es cada uno.
 - Migración: los 7 proyectos que se persiguen quedan en la etapa que les
   corresponde. La lista exacta se le muestra a Hernán antes de correrla.
 - El listado muestra, por proyecto: etapa, próximo paso (su tarea abierta más
@@ -114,8 +127,8 @@ pipeline.
   etapas que ya no existen.
 - Al aprobar, el proyecto sale del pipeline. Si es obra, se ofrece crearla en
   Control, como hoy.
-- Se quitan los tres «túneles» y las etapas por proyecto (`lead_etapas`): con
-  una sola etapa no hacen falta.
+- Se quitan las etapas por proyecto (`lead_etapas`), con sus estados y su
+  «estamos acá»: con una sola etapa por lead no hacen falta. El tipo se queda.
 
 Al terminar: el pipeline tiene 7 proyectos, cada uno en un lugar, y las dos
 obras de Diners ya no están ahí.
