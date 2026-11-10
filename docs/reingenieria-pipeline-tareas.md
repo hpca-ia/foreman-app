@@ -82,6 +82,37 @@ Vale para todas las fases; no es una fase más.
   deja de ser el próximo paso en la tarjeta del proyecto.
 - **En el teléfono es igual**: un desplegable se toca bien con el dedo.
 
+## El panel de avisos
+
+Hernán lo pidió así: los recordatorios van al correo de la mañana «y también
+en el dashboard, así como salen las compras… todas las notificaciones que
+haya activas aparezcan a un lado en el dashboard».
+
+- En el dashboard —la pantalla de inicio, donde están las tareas—, a un
+  costado, un panel **Avisos** con todo lo que está activo en FOREMAN. En el
+  teléfono va arriba, plegado.
+- Un aviso es algo que sigue pasando: aparece mientras sea cierto y se va solo
+  cuando se resuelve. No es una lista de cosas que ya ocurrieron.
+- Cada módulo aporta los suyos, con su cuenta, y tocarlo lleva al lugar donde
+  se resuelve:
+  - **Pipeline:** leads para insistir con el cliente (llegó el día del
+    recordatorio) y leads sin próximo paso.
+  - **Compras:** por aprobar, por comprar, por recibir y devueltas. Hoy ya
+    sale como una línea suelta arriba de las tareas; pasa al panel.
+  - **Órdenes de cambio:** esperando firma del cliente, y las que el correo
+    rebotó.
+  - **Control:** el control no cuadra con el presupuesto firmado; una orden
+    no cuadra con su documento.
+  - **Actas:** compromisos vencidos.
+  - **Observaciones de obra** para arreglar (hoy también es una línea suelta).
+  - **Alquileres** que se pasan de plazo.
+- Cada quien ve los suyos; el Director ve los de toda la oficina.
+- **El correo de la mañana sale de la misma lista**: el panel y el correo no
+  pueden decir cosas distintas.
+
+El panel nace en la fase 2 —con el pipeline, y llevándose ahí las líneas de
+compras y observaciones que ya existen— y se completa en la fase 4.
+
 ## Las fases
 
 Cada fase se publica sola y se puede probar antes de seguir. Las migraciones
@@ -153,6 +184,9 @@ pipeline.
   paso ni espera, paso vencido, y recordatorio cumplido. El aviso de «sin
   movimiento» de hoy no salta nunca —mira nombres de etapas que ya no
   existen— y se reemplaza por estos.
+- Nace el **panel de avisos** del dashboard, con los del pipeline y las dos
+  líneas que ya existen (compras y observaciones). El recordatorio de un lead
+  que espera al cliente sale ahí y en el correo de la mañana.
 - Al aprobar, el proyecto sale del pipeline. Si es obra, se ofrece crearla en
   Control, como hoy.
 - Se quitan las etapas por proyecto (`lead_etapas`), con sus estados y su
@@ -188,7 +222,8 @@ nada a mano.
 - «Urgente» se quita: con todo urgente, nada lo es. Manda la fecha.
 - La vista de tablero por columnas se quita: en los datos solo hay dos
   estados, abierta y hecha. Quedan lista y calendario.
-- El correo de la mañana se arma con la misma bandeja.
+- El panel de avisos se completa con los de todos los módulos, y el correo
+  de la mañana se arma con la misma bandeja y los mismos avisos.
 
 ### Fase 5 — Los compromisos de las actas
 
