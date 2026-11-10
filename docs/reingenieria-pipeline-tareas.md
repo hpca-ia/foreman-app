@@ -41,7 +41,15 @@ Tres reglas, y todo lo demás sale de ellas.
    proyecto se ven sus tareas: las mismas que en Tareas. No hay «actividades»
    ni «gestiones» aparte.
 
-Y una cuarta, que sale de las anteriores: **lo que ya tiene su módulo no se
+4. **Un lead siempre tiene una fecha en la que alguien lo vuelve a mirar.** O
+   nos toca a nosotros —tiene un próximo paso, que es una tarea suya con
+   fecha—, o le toca al cliente: está «esperando respuesta del cliente», con
+   el día en que FOREMAN lo recuerda. Lo pidió Hernán: «en el pipeline hay un
+   estado de espera respuesta del cliente, y de alguna manera ser recordados».
+   Un lead sin ninguna de las dos cosas es el que se pierde sin que nadie lo
+   decida, y se marca.
+
+Y una quinta, que sale de las anteriores: **lo que ya tiene su módulo no se
 copia como tarea.** Una compra se sigue en Compras; en la bandeja aparece como
 una línea que lleva ahí.
 
@@ -126,10 +134,25 @@ pipeline.
   a secas. En la migración Hernán dice de qué tipo es cada uno.
 - Migración: los 7 proyectos que se persiguen quedan en la etapa que les
   corresponde. La lista exacta se le muestra a Hernán antes de correrla.
-- El listado muestra, por proyecto: etapa, próximo paso (su tarea abierta más
-  próxima) y fecha. Tres avisos y nada más: sin próximo paso, paso vencido,
-  sin movimiento. El de «sin movimiento» hoy no salta nunca: mira nombres de
-  etapas que ya no existen.
+- **Un lead puede tener tareas**: son tareas comunes con ese lead como
+  proyecto. Se crean desde su tarjeta o desde Tareas, y se ven en los dos
+  lados. La más próxima es su «próximo paso».
+- **Esperando respuesta del cliente** es un estado del lead, aparte de la
+  etapa: se puede esperar al cliente en Presupuesto o en Negociación. Se marca
+  desde la tarjeta con un toque, diciendo qué se espera y cuándo recordarlo
+  (en 3 días, en una semana, o una fecha).
+  - Mientras espera, la tarjeta dice «esperando al cliente hace N días» y el
+    lead aparece en «Espero de otros».
+  - El día del recordatorio pasa a «Me toca» y al correo de la mañana:
+    «Insistir con CHRONIX: sin respuesta hace 5 días». Tres salidas, de un
+    toque: **ya respondió** (y pide el próximo paso), **insistí hoy** (queda
+    anotado en la historia y se vuelve a recordar) o **recordarme el…**.
+  - Cada insistencia queda en la historia del lead, con su fecha.
+- El listado muestra, por lead: etapa, y o bien su próximo paso con fecha o
+  bien desde cuándo espera al cliente. Tres avisos y nada más: sin próximo
+  paso ni espera, paso vencido, y recordatorio cumplido. El aviso de «sin
+  movimiento» de hoy no salta nunca —mira nombres de etapas que ya no
+  existen— y se reemplaza por estos.
 - Al aprobar, el proyecto sale del pipeline. Si es obra, se ofrece crearla en
   Control, como hoy.
 - Se quitan las etapas por proyecto (`lead_etapas`), con sus estados y su
