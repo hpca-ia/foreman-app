@@ -46,7 +46,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
     setCargando(true);
     const [{ data: ls }, { data: ts }, { data: cat }, { data: es }, { data: ms }] = await Promise.all([
       supabase.from("leads").select("*").order("actualizado_at", { ascending: false }),
-      supabase.from("tasks").select("id,lead_id,title,due_date,status,ruta_orden").not("lead_id", "is", null),
+      supabase.from("tasks").select("id,lead_id,title,due_date,status,ruta_orden,type,compra_id").not("lead_id", "is", null),
       supabase.from("pipeline_etapas").select("*").eq("activa", true).order("orden"),
       supabase.from("lead_etapas").select("*").order("orden"),
       supabase.from("lead_movimientos").select("lead_id,etapa_a").eq("tipo", "etapa"),
@@ -56,8 +56,11 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
     // La ruta entera, no solo el siguiente: cuántos pasos tiene, cuántos van y
     // cuál toca ahora. Un proyecto sin pasos pendientes se quedó sin ruta.
+    // Las compras no son un paso del proyecto: son avisos de su módulo. Con
+    // ellas adentro, el «próximo paso» del Aéreo era siempre «Comprar: …» y el
+    // proyecto figuraba atrasado por un pedido que nadie había marcado.
     const porLead = {};
-    (ts || []).forEach(t => {
+    (ts || []).filter(t => !t.compra_id && t.type !== "Compra").forEach(t => {
       const r = porLead[t.lead_id] || (porLead[t.lead_id] = { total: 0, hechos: 0, siguiente: null });
       r.total++;
       if (t.status === "listo") r.hechos++;

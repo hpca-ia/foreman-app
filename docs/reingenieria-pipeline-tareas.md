@@ -124,16 +124,20 @@ Nada se borra hasta la última fase: las tablas viejas quedan de respaldo.
 Lo que arregla: la duplicación, que es lo que más confunde.
 
 - `tasks` gana lo poco que tenía la actividad y la tarea no: a qué etapa
-  pertenecía (`etapa_id`, como etiqueta), si espera a un tercero (`espera`,
-  `espera_nota`) y cuándo y quién la cerró.
-- Migración: cada actividad le pasa esos datos a su tarea gemela. Son 41, todas
-  con tarea; una apunta a una tarea que ya no existe y se recrea.
-- La pantalla del proyecto lista `tasks` de ese proyecto. Deja de leer y de
-  escribir `lead_etapa_items`.
+  pertenece (`lead_etapa_id`, y `etapa_id` como etiqueta que sobrevive a la
+  fase 2), si espera a un tercero (`espera`), su nota (`nota`) y cuándo y
+  quién la cerró (`hecha_at`, `hecha_por`). Migración 170.
+- Migración: cada actividad le pasa esos datos a su tarea gemela. Son 41; una
+  apuntaba a una tarea que ya no existía y se le recrea.
+- La pantalla del proyecto lista `tasks` de ese proyecto, cada una en su
+  etapa, y aparte las que no están en ninguna. Deja de leer y de escribir
+  `lead_etapa_items`. Las reglas están en
+  `src/modules/leads/tareasDelProyecto.js`.
 - Se va todo el código de sincronización entre actividad y tarea.
 - En Tareas, «Gestiones de proyectos» y «Tareas» pasan a ser un solo bloque.
-- Error que se corrige de paso: el «Presupuesto enviado» deja de crear una
-  tarea que nunca se cierra; queda como nota en la historia del proyecto.
+- El «próximo paso» de un proyecto deja de contar las compras.
+- Error que se corrige de paso: el «Presupuesto enviado» nace cerrado. Antes
+  quedaba abierto para siempre, a nombre del cliente.
 
 Al terminar: marcar algo hecho en el proyecto o en Tareas es tocar la misma
 fila. No hay dos listas.
@@ -260,7 +264,7 @@ fase 5), los permisos por proyecto y el portal del cliente.
 
 ## En qué va
 
-- [ ] Fase 1 — Una sola tarea
+- [x] Fase 1 — Una sola tarea (11/11/2026; requiere la migración 170)
 - [ ] Fase 2 — El Pipeline es lo que se persigue
 - [ ] Fase 3 — Proyectos aprobados
 - [ ] Fase 4 — Tareas: una bandeja que se pueda creer

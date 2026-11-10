@@ -9,16 +9,22 @@ import { etapaInfo } from "./constantes";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import {
   TUNELES, etapasDelTunel, cargarTubo, asegurarEtapas, sembrarChecklist,
-  agregarItem, marcarItem, marcarEspera, guardarNota, borrarItem, itemATarea, asegurarTarea, anotarCorreccion,
+  agregarTarea, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, anotarCorreccion,
   anotar, cambiarEstadoEtapa, moverEtapa,
 } from "./tubo";
 
 // El proyecto: sus etapas, y dentro de cada etapa lo que hay que hacer.
 //
-// Una columna por etapa, y en la columna sus pasos, uno debajo del otro. Así
+// Una columna por etapa, y en la columna sus tareas, una debajo de la otra. Así
 // se ve todo el proyecto de una: en qué va, qué le falta a cada etapa y dónde
-// está trabado. Un paso que necesita que alguien haga algo se vuelve tarea del
-// equipo, con responsable y fecha, y al completarse queda marcado.
+// está trabado.
+//
+// SON LAS MISMAS TAREAS QUE SE VEN EN TAREAS. Antes cada renglón de acá era
+// una «actividad» con una tarea gemela al lado, y marcar una había que
+// copiarlo a la otra. Ahora el renglón ES la tarea: lo que se marca acá queda
+// marcado allá porque es la misma fila. Las del proyecto que no están en
+// ninguna etapa —las que se crearon desde Tareas o desde un acta— van en una
+// columna aparte, para que nada del proyecto quede sin verse.
 //
 // Arquitectura y Construcción traen sus etapas puestas y van en orden; un lead
 // las suma cuando pasan, porque ahí el plan masa puede ir antes que el
@@ -33,7 +39,10 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
   const info = TUNELES[tunel] || TUNELES.lead;
   const [etapas, setEtapas] = useState([]);
   const [items, setItems] = useState([]);
+  // Las tareas del proyecto que no están en ninguna etapa.
+  const [sueltas, setSueltas] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
+  const [sinMigracion, setSinMigracion] = useState(false);
   const [nuevo, setNuevo] = useState({});        // etapa → texto del paso que se escribe
   const [agregando, setAgregando] = useState(false);
   const [aTarea, setATarea] = useState(null);
@@ -74,8 +83,12 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       supabase.from("pipeline_invitados").select("id,nombre,rol").eq("lead_id", lead.id).order("nombre"),
     ]);
     setSinTablas(r.sinTablas);
+    setSinMigracion(!!r.sinMigracion);
     setEtapas(r.etapas);
     setItems(r.items);
+    setSueltas(r.sueltas || []);
+    // La fila entera de cada tarea, por id: de quién es, para cuándo, qué es.
+    setTareas(r.tareas || {});
     setInvitados(inv || []);
 
     // En qué va la tarea que salió de una actividad: decirlo acá evita ir a
@@ -89,17 +102,6 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
       setPredeterminadas(cuenta);
     }
 
-    const ids = (r.items || []).map(i => i.tarea_id).filter(Boolean);
-    if (ids.length) {
-      // Con la 045 puesta viene la hora; sin ella, la misma consulta sin hora.
-      let { data: ts, error } = await supabase.from("tasks")
-        .select("id,title,status,due_date,hora,priority,type,notes,assignee_id,responsable_externo").in("id", ids);
-      if (error) {
-        ({ data: ts } = await supabase.from("tasks")
-          .select("id,title,status,due_date,priority,type,notes,assignee_id").in("id", ids));
-      }
-      setTareas(Object.fromEntries((ts || []).map(t => [t.id, t])));
-    } else setTareas({});
     // eslint-disable-next-line
   }, [lead.id, catalogo]);
 
@@ -110,6 +112,14 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
   if (sinTablas) {
     return <div style={{ fontSize: 12, color: colors.warning, padding: "10px 0" }}>Falta correr la migración 040 en Supabase.</div>;
+  }
+  if (sinMigracion) {
+    return (
+      <div style={{ fontSize: 12, color: colors.warning, padding: "10px 0", lineHeight: 1.5 }}>
+        Falta correr la migración 170 en Supabase. Las tareas del proyecto están a salvo y se siguen viendo en Tareas;
+        acá vuelven a aparecer en sus etapas apenas se corra.
+      </div>
+    );
   }
 
   const delTunel = etapasDelTunel(catalogo, tunel);
@@ -164,28 +174,27 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
     setErrores(e => ({ ...e, [etapa.id]: "" }));
 
     await hacer(async () => {
-      const r = await agregarItem(lead, etapa, texto, cuantas + 1, currentUser);
-      if (r?.error) { setErrores(e => ({ ...e, [etapa.id]: r.error })); return; }
-      // Todo lo que se suma entra también a las tareas del proyecto, tenga
-      // dueño o no: sin responsable igual es algo pendiente de ese proyecto.
       const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
-      const hecha = await itemATarea(r.item, {
-        lead, titulo: texto, due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
-        tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : tipo === "envio" ? "Envío" : "Otro", urgente: !!n.urgente,
-        creadoPor: currentUser?.id, quien: currentUser,
+      // UNA SOLA FILA: la tarea, que ya nace en su etapa. Tenga dueño o no, es
+      // algo pendiente de este proyecto y se ve acá y en Tareas.
+      const r = await agregarTarea({
+        lead, etapa, titulo: texto, orden: cuantas + 1,
+        tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : tipo === "envio" ? "Envío" : "Otro",
+        due_date: n.due_date || null, hora: (n.due_date && n.hora) || null, urgente: !!n.urgente,
         assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
         nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
         // A quién se le mandó va en el responsable externo: es alguien de
         // afuera, y así sale en la tarjeta y en la bitácora sin inventar otro
         // campo que después haya que mantener.
         responsable_externo: tipo === "envio" ? n.destinatario.trim() : externo,
+        // Un envío ya ocurrió: nace cerrado y queda de registro.
+        hecha: tipo === "envio",
+        quien: currentUser, nombreEtapa: etapa ? etapaInfo(etapa.etapa_id, catalogo).nombre : undefined,
       });
-      if (hecha?.tarea?.assignee_id) await avisarPorCorreo(hecha.tarea.id);
-      // Un envío ya ocurrió: nace marcado y queda de registro. Dejarlo
-      // pendiente obligaría a marcarlo justo después de crearlo.
-      if (tipo === "envio" && r.item) {
-        await marcarItem(r.item, true, currentUser?.name, currentUser, etapaInfo(etapa.etapa_id, catalogo).nombre);
-        await anotar(lead, "nota", `Envío a ${n.destinatario.trim()}: ${texto}.`, currentUser);
+      if (r?.error) { setErrores(e => ({ ...e, [etapa.id]: r.error })); return; }
+      if (r.tarea?.assignee_id) await avisarPorCorreo(r.tarea.id);
+      if (tipo === "envio") {
+        await anotar(lead.id, { tipo: "nota", detalle: `Envío a ${n.destinatario.trim()}: ${texto}.`, quien: currentUser });
         onBitacora?.();
       }
       // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
@@ -200,11 +209,11 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
   const quitarEtapa = etapa => {
     const suyos = itemsDe(etapa.id);
-    if (!window.confirm(`¿Quitar esta etapa del proyecto?${suyos.length ? ` Se van con ella sus ${suyos.length} ${suyos.length === 1 ? "gestión" : "gestiones"}.` : ""}`)) return;
+    if (!window.confirm(`¿Quitar esta etapa del proyecto?${suyos.length ? ` Se ${suyos.length === 1 ? "borra" : "borran"} con ella ${suyos.length === 1 ? "su tarea" : `sus ${suyos.length} tareas`}, también de Tareas.` : ""}`)) return;
     hacer(async () => {
-      // Y sus tareas: la etapa se borra en cascada con sus gestiones, pero las
-      // tareas que salieron de ellas quedaban vivas en el tablero, huérfanas.
-      const tareasSuyas = suyos.map(i => i.tarea_id).filter(Boolean);
+      // Sus tareas se van con ella: si quedaran, aparecerían en Tareas sin
+      // etapa que las explique.
+      const tareasSuyas = suyos.map(i => i.id);
       if (tareasSuyas.length) await supabase.from("tasks").delete().in("id", tareasSuyas);
       await supabase.from("lead_etapas").delete().eq("id", etapa.id);
     });
@@ -287,7 +296,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
               {/* Las actividades de esta etapa, una debajo de la otra: primero lo
                   que falta, al fondo lo hecho. Una etapa puede tener muchas. */}
               <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: "60vh", overflowY: "auto" }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>GESTIONES</div>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 2 }}>TAREAS</div>
                 {porHacer.map(item => (
                   <Actividad key={item.id} item={item} etapa={etapa} nombreEtapa={cat.nombre} tarea={tareas[item.tarea_id]} users={users}
                     abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
@@ -311,15 +320,15 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
 
                 {/* Las que esa etapa trae predeterminadas desde Ajustes, si tiene. */}
                 {editable && !suyos.length && predeterminadas[etapa.etapa_id] > 0 && (
-                  <button onClick={() => hacer(() => sembrarChecklist(lead, etapa))} disabled={ocupado}
-                    title={`Trae las ${predeterminadas[etapa.etapa_id]} gestiones que esta etapa tiene puestas en Ajustes`}
+                  <button onClick={() => hacer(() => sembrarChecklist(lead, etapa, currentUser))} disabled={ocupado}
+                    title={`Trae las ${predeterminadas[etapa.etapa_id]} tareas que esta etapa tiene puestas en Ajustes`}
                     style={{ background: "none", border: `1px dashed ${colors.border}`, borderRadius: 6, padding: "5px 8px", textAlign: "left",
                       fontSize: 11, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font, marginBottom: 2 }}>
                     Traer manualmente ({predeterminadas[etapa.etapa_id]})
                   </button>
                 )}
                 {!suyos.length && !predeterminadas[etapa.etapa_id] && (
-                  <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin gestiones.</div>
+                  <div style={{ fontSize: 11, color: colors.muted, padding: "2px 0" }}>Todavía sin tareas.</div>
                 )}
 
                 {/* Agregar está guardado detrás de un botón: con el formulario
@@ -457,7 +466,7 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
                     )}
                     <button onClick={() => hacer(async () => {
                       const faltan = suyos.filter(i => !i.hecho).length;
-                      if (faltan && !window.confirm(`Quedan ${faltan} ${faltan === 1 ? "gestión" : "gestiones"} sin marcar. ¿Cerrar la etapa igual?`)) return;
+                      if (faltan && !window.confirm(`${faltan === 1 ? "Queda 1 tarea" : `Quedan ${faltan} tareas`} sin marcar. ¿Cerrar la etapa igual?`)) return;
                       await cambiarEstadoEtapa(etapa, "hecha", currentUser, true, cat.nombre);
                       onBitacora?.();
                     })} disabled={ocupado} style={boton(false)}>
@@ -470,6 +479,34 @@ export default function TuboProyecto({ lead, catalogo = [], users = [], currentU
             </div>
           );
         })}
+
+        {/* LAS TAREAS DEL PROYECTO QUE NO ESTÁN EN NINGUNA ETAPA.
+            Las que se crearon desde Tareas eligiendo este proyecto, o salieron
+            de un acta. Son de este proyecto igual, y antes acá no se veían:
+            el proyecto parecía tener menos pendientes de los que tenía. La
+            columna aparece solo si hay alguna. */}
+        {sueltas.length > 0 && (
+          <div className="tubo-columna" style={{ width: 236, flexShrink: 0, background: colors.surface, border: `1px dashed ${colors.border}`,
+            borderRadius: colors.radiusMd, display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.neutralSoft}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: colors.inkSoft }}>Sin etapa</span>
+                <span style={{ fontSize: 10.5, color: colors.muted }}>{sueltas.filter(i => i.hecho).length}/{sueltas.length}</span>
+              </div>
+              <div style={{ fontSize: 10, color: colors.muted, marginTop: 2, lineHeight: 1.35 }}>Tareas de este proyecto que se crearon fuera de sus etapas.</div>
+            </div>
+            <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 2, maxHeight: "60vh", overflowY: "auto" }}>
+              {[...sueltas.filter(i => !i.hecho), ...sueltas.filter(i => i.hecho)].map(item => (
+                <Actividad key={item.id} item={item} etapa={null} tarea={tareas[item.tarea_id]} users={users}
+                  abierta={abierta === item.id} onAbrir={() => setAbierta(x => (x === item.id ? null : item.id))}
+                  ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable}
+                  onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
+                  onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
+                    assignee_id: t?.responsable_externo ? `x:${t.responsable_externo}` : t?.assignee_id || "", due_date: t?.due_date || "", hora: t?.hora || "" }); }} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* En un lead las etapas se suman cuando pasan. */}
         {!info.enOrden && editable && (
@@ -778,14 +815,14 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
               : item.espera ? "Ya se hizo lo nuestro: espera a un tercero."
               : "Todavía por hacer."}
             {tomada(tarea) ? (
-              <> Salió una tarea: <strong style={{ color: colors.ink }}>{tarea.title}</strong>
-                {` · ${deQuien(tarea)}${tarea.responsable_externo ? " (de afuera)" : ""}`}
+              <> A cargo de <strong style={{ color: colors.ink }}>{deQuien(tarea)}</strong>{tarea.responsable_externo ? " (de afuera)" : ""}
                 {tarea.due_date ? ` · ${cuando(tarea.due_date)}${tarea.hora ? ` a las ${tarea.hora}` : ""}` : ""}
-                {tarea.status === "listo" ? " · completada" : tarea.status === "bloqueado" ? " · pausada" : " · en proceso"}.
+                {tarea.status === "bloqueado" ? " · pausada" : ""}.
               </>
             ) : tarea ? (
-              <> Es una gestión del proyecto, todavía sin responsable.</>
+              <> Todavía sin responsable.</>
             ) : null}
+            {" "}Es la misma tarea que se ve en Tareas.
           </div>
 
           {/* Lo que se habla de esto: la conversación vive con la cosa, no en
@@ -821,7 +858,7 @@ function Actividad({ item, etapa, nombreEtapa, tarea, users = [], abierta, onAbr
             <button onClick={() => hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser, nombreEtapa))} disabled={ocupado} style={mini(false)}>
               <Check size={11} /> {item.hecho ? "Desmarcar" : "Marcar hecha"}
             </button>
-            <button onClick={() => { if (window.confirm("¿Quitar esta gestión?")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
+            <button onClick={() => { if (window.confirm("¿Borrar esta tarea? Es la misma que está en Tareas: se borra de los dos lados.")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
               style={{ ...mini(false), color: colors.danger, marginLeft: "auto" }}><X size={11} /> Quitar</button>
           </div>
           )}

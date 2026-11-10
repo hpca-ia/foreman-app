@@ -24,6 +24,7 @@ import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
+import { alDiaElHito } from "./modules/leads/tubo";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import Header from "./components/Header";
@@ -251,12 +252,13 @@ export default function App() {
 
   async function eliminarTarea(id) {
     if (!window.confirm("¿Borrar esta tarea? No se puede deshacer.")) return false;
+    const borrada = tareas.find(t => t.id === id);
     const { error } = await supabase.from("tasks").delete().eq("id", id);
     if (error) { alert("No se pudo borrar: " + error.message); return false; }
-    // Si salió de una gestión del pipeline, se corta el vínculo: si no, esa
-    // gestión queda apuntando a una tarea que ya no existe y editarla no
-    // guardaba en ningún lado.
-    await supabase.from("lead_etapa_items").update({ tarea_id: null }).eq("tarea_id", id);
+    // Si era de una etapa de un proyecto, la etapa se entera: es la misma
+    // tarea que se veía ahí, y con ella de menos puede que el hito ya esté
+    // completo. No hay ningún vínculo que cortar: no hay otra fila.
+    if (borrada?.lead_etapa_id) await alDiaElHito(borrada.lead_etapa_id, usuario);
     setTareas(prev => prev.filter(t => t.id !== id));
     return true;
   }
@@ -276,8 +278,15 @@ export default function App() {
         campos.aprobacion_nota = cierre.nota || null;
       }
     }
-    setTareas(prev => prev.map(t => t.id === id ? { ...t, ...campos } : t));
-    let { error } = await supabase.from("tasks").update(campos).eq("id", id);
+    // Cuándo se cerró y quién, escrito en la tarea. Lo lee la etapa del
+    // proyecto donde esté, que muestra esta misma fila.
+    const cerrada = { hecha_at: estado === "listo" ? new Date().toISOString() : null, hecha_por: estado === "listo" ? usuario.name : null };
+    setTareas(prev => prev.map(t => t.id === id ? { ...t, ...campos, ...cerrada } : t));
+    let { error } = await supabase.from("tasks").update({ ...campos, ...cerrada }).eq("id", id);
+    // Sin la migración 170 esas dos columnas no existen: se guarda sin ellas.
+    if (error && /column|schema cache/i.test(error.message)) {
+      ({ error } = await supabase.from("tasks").update(campos).eq("id", id));
+    }
     if (error && /column|schema cache/i.test(error.message)) {
       alert("Falta correr la migración 038 en Supabase: por ahora se guarda el estado, pero no la prueba ni quién aprobó.");
       ({ error } = await supabase.from("tasks").update({ status: estado }).eq("id", id));
@@ -292,13 +301,11 @@ export default function App() {
     }
     if (error) { console.error("Error updating status:", error); fetchTareas(); return; }
 
-    // Si la tarea salió de un punto del checklist de un proyecto, ese punto
-    // queda marcado: si no, habría que acordarse de ir a marcarlo a mano.
-    if (estado === "listo") {
-      await supabase.from("lead_etapa_items")
-        .update({ hecho: true, hecho_at: new Date().toISOString(), hecho_por: usuario.name })
-        .eq("tarea_id", id);
-    }
+    // Si la tarea es de una etapa de un proyecto, la etapa se pone al día: es
+    // la misma fila que se ve allá, así que no hay nada que ir a marcar. Antes
+    // había una «actividad» gemela que se tildaba desde acá, y solo al cerrar:
+    // reabrir la tarea dejaba la actividad hecha.
+    if (tarea?.lead_etapa_id) await alDiaElHito(tarea.lead_etapa_id, usuario);
 
     // Al completarla, las que la estaban esperando se destraban solas.
     if (estado === "listo") {
@@ -617,8 +624,11 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   const sinNadie = t => !t.assignee_id && !t.responsable_externo && t.status !== "listo";
   const bloques = [
     { clase: "reunion", titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
-    { clase: "tarea", titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => claseDe(t) === "tarea") },
-    { clase: "gestion", titulo: "Gestiones de proyectos", etiqueta: "GESTIÓN", tareas: ordenadas.filter(esGestion) },
+    // UN SOLO BLOQUE. Antes había «Tareas» y «Gestiones de proyectos», y la
+    // diferencia era dónde se había escrito cada una: en el tablero o dentro
+    // de una etapa del pipeline. Son lo mismo —algo que alguien tiene que
+    // hacer— y verlas en dos listas era la mitad de la confusión.
+    { clase: "tarea", titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => claseDe(t) === "tarea" || esGestion(t)) },
     // Las compras van últimas y juntas: no son trabajo de uno, son un paso que
     // uno destraba. Antes caían entre las gestiones, donde se perdían.
     { clase: "compra", titulo: "Compras", etiqueta: "COMPRA", tareas: ordenadas.filter(t => claseDe(t) === "compra") },

@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { COLUMNAS, comoActividad, delProyecto, filaNueva, alMarcar, estadoDelHito, notaDeOrigen } from "./tareasDelProyecto.js";
 
 // El tubo de un proyecto: por qué hitos pasa y qué le falta a cada uno.
 //
@@ -8,9 +9,10 @@ import { supabase } from "../../lib/supabase";
 // cuando pasan, porque en un lead primero puede salir el plan masa y después
 // el presupuesto.
 //
-// Lo vertical —el checklist de cada hito— sale de una plantilla y después es
-// de ese proyecto: se le agrega y se le quita sin tocar la plantilla. Un ítem
-// se puede volver tarea, y cuando la tarea se completa el ítem queda marcado.
+// Lo vertical —lo que hay que hacer en cada hito— son TAREAS: las mismas que
+// se ven en Tareas. Una tarea que pertenece a un hito lo dice en su fila
+// (`lead_etapa_id`). No hay una «actividad» aparte que copiar ni que mantener
+// pareja: ver tareasDelProyecto.js.
 
 export const TUNELES = {
   arquitectura: { label: "Arquitectura", enOrden: true, color: "#4A7C8C" },
@@ -49,14 +51,34 @@ const enCriollo = f => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-EC"
 export const etapasDelTunel = (catalogo = [], tunel) =>
   catalogo.filter(e => (e.tunel || "lead") === tunel && e.activa !== false).sort((a, b) => a.orden - b.orden);
 
-/** @returns { etapas, items, sinTablas } */
+const SIN_170 = "Falta correr la migración 170 en Supabase.";
+
+/**
+ * Las etapas del proyecto y sus tareas.
+ *
+ * @returns { etapas, items, sueltas, tareas, sinTablas, sinMigracion }
+ *   `items` son las tareas que están en una etapa, con los nombres que usa la
+ *   pantalla; `sueltas`, las del proyecto que no están en ninguna; `tareas`,
+ *   las mismas filas enteras, por id.
+ */
 export async function cargarTubo(leadId) {
-  const [{ data: etapas, error }, { data: items, error: e2 }] = await Promise.all([
+  const [{ data: etapas, error }, { data: ts, error: e2 }] = await Promise.all([
     supabase.from("lead_etapas").select("*").eq("lead_id", leadId).order("orden"),
-    supabase.from("lead_etapa_items").select("*").eq("lead_id", leadId).order("orden"),
+    supabase.from("tasks").select(COLUMNAS).eq("lead_id", leadId).order("ruta_orden").order("id"),
   ]);
-  if (falta(error)) return { etapas: [], items: [], sinTablas: true };
-  return { etapas: etapas || [], items: falta(e2) ? [] : items || [], sinTablas: false };
+  const vacio = { etapas: [], items: [], sueltas: [], tareas: {} };
+  if (falta(error)) return { ...vacio, sinTablas: true };
+  // Sin la 170 la tarea no sabe de qué etapa es: no hay con qué armar las
+  // columnas, y es mejor decirlo que mostrar el proyecto vacío.
+  if (falta(e2)) return { ...vacio, etapas: etapas || [], sinTablas: false, sinMigracion: true };
+  const { enEtapas, sueltas } = delProyecto(ts || [], etapas || []);
+  return {
+    etapas: etapas || [],
+    items: enEtapas.map(comoActividad),
+    sueltas: sueltas.map(comoActividad),
+    tareas: Object.fromEntries([...enEtapas, ...sueltas].map(t => [t.id, t])),
+    sinTablas: false, sinMigracion: false,
+  };
 }
 
 // Dos llamadas a la vez ponían las etapas dos veces: las dos leían "faltan" y
@@ -94,182 +116,151 @@ async function ponerEtapasQueFaltan(lead, catalogo) {
   return e2 ? e2.message : null;
 }
 
-/** El checklist de fábrica de una etapa, copiado a este proyecto. */
-export async function sembrarChecklist(lead, etapa) {
+/** Las tareas que una etapa trae puestas en Ajustes, sumadas a este proyecto. */
+export async function sembrarChecklist(lead, etapa, quien) {
   const { data: plantilla, error } = await supabase.from("pipeline_etapa_items")
     .select("texto,orden").eq("etapa_id", etapa.etapa_id).eq("activo", true).order("orden");
   if (error || !plantilla?.length) return [];
-  const { data } = await supabase.from("lead_etapa_items").insert(
-    plantilla.map(p => ({ lead_id: lead.id, lead_etapa_id: etapa.id, texto: p.texto, orden: p.orden }))
-  ).select();
+  const { data } = await supabase.from("tasks").insert(
+    plantilla.map(p => filaNueva({ lead, etapa, titulo: p.texto, orden: p.orden, tipo: "Gestión", creadoPor: quien?.id ?? lead.created_by ?? null }))
+  ).select(COLUMNAS);
   return data || [];
 }
 
-export async function agregarItem(lead, etapa, texto, orden, quien) {
-  const { data, error } = await supabase.from("lead_etapa_items")
-    .insert({ lead_id: lead.id, lead_etapa_id: etapa.id, texto: texto.trim(), orden })
-    .select().single();
-  if (error) return { error: falta(error) ? "Falta correr la migración 040." : error.message };
-  await anotar(lead.id, { detalle: `Sumó "${texto.trim()}"`, quien });
-  await alDiaElHito(etapa.id, quien);
-  return { item: data };
+/**
+ * Sumar una tarea al proyecto, en una etapa o en ninguna.
+ *
+ * Una sola fila en `tasks`: la misma que ve su responsable en Tareas. Antes
+ * eran dos —la actividad de la etapa y la tarea— y había que crearlas una
+ * detrás de la otra y dejarlas enganchadas.
+ *
+ * @param hecha        un envío ya ocurrió: nace cerrado y queda de registro
+ * @param nombreEtapa  para decirlo en la bitácora si con esto el hito cierra
+ * @returns { tarea, item } o { error }
+ */
+export async function agregarTarea({
+  lead, etapa = null, titulo, orden = 0, tipo = "Gestión", assignee_id = null, due_date = null, hora = null,
+  urgente = false, responsable_externo = null, hecha = false, quien = null, nombreResponsable = null, nombreEtapa,
+}) {
+  const fila = filaNueva({
+    lead, etapa, titulo, orden, tipo, assignee_id, due_date, hora, urgente, responsable_externo, hecha,
+    creadoPor: quien?.id ?? lead.created_by ?? null, quienNombre: quien?.name || null,
+  });
+  if (!fila.title) return { error: "Escribí qué hay que hacer." };
+  const { data: tarea, error } = await supabase.from("tasks").insert(fila).select(COLUMNAS).single();
+  if (error) return { error: falta(error) ? SIN_170 : error.message };
+
+  // Un envío no se «suma» ni se «encarga»: se registra, y eso lo anota quien
+  // lo llama, con a quién fue.
+  if (!hecha) {
+    await anotar(lead.id, { detalle: `Sumó "${tarea.title}"`, quien });
+    // Encargarle algo a alguien es de las cosas que hay que poder rastrear.
+    if (assignee_id || responsable_externo) {
+      await anotar(lead.id, {
+        detalle: `Le encargó "${tarea.title}" a ${responsable_externo || nombreResponsable || "alguien del equipo"}`
+          + (due_date ? `, para el ${enCriollo(due_date)}${hora ? ` a las ${hora}` : ""}` : ""),
+        quien,
+      });
+    }
+  }
+  await alDiaElHito(tarea.lead_etapa_id, quien, nombreEtapa);
+  return { tarea, item: comoActividad(tarea) };
 }
 
 /**
- * El estado de un hito sale de sus actividades: arranca cuando se marca la
- * primera y cierra cuando se marca la última. Antes había que acordarse de
- * apretar "Arrancar" y "Cerrar", y el tubo mostraba en pendiente etapas donde
- * ya se estaba trabajando.
+ * El estado de un hito sale de sus tareas: arranca cuando se cierra la primera
+ * y cierra cuando se cierra la última. Antes había que acordarse de apretar
+ * "Arrancar" y "Cerrar", y el tubo mostraba en pendiente etapas donde ya se
+ * estaba trabajando.
  *
- * Esto corre al tocar una actividad, nunca al abrir el proyecto: si corriera
- * al abrirlo, una etapa reabierta a mano —con todo marcado— se volvía a cerrar
+ * Esto corre al tocar una tarea, nunca al abrir el proyecto: si corriera al
+ * abrirlo, una etapa reabierta a mano —con todo marcado— se volvía a cerrar
  * sola al primer refresco y el botón "Reabrir" parecía roto. Reabrir es una
- * decisión de una persona y manda hasta que alguien vuelva a mover una
- * actividad de esa etapa.
+ * decisión de una persona y manda hasta que alguien vuelva a mover una tarea
+ * de esa etapa.
+ *
+ * Corre también cuando la tarea se cierra desde Tareas: es la misma fila, así
+ * que el hito se entera venga de donde venga el cambio.
  */
 export async function alDiaElHito(leadEtapaId, quien, nombre) {
   if (!leadEtapaId) return null;
-  const [{ data: etapa }, { data: suyos }] = await Promise.all([
-    supabase.from("lead_etapas").select("*").eq("id", leadEtapaId).single(),
-    supabase.from("lead_etapa_items").select("id,hecho").eq("lead_etapa_id", leadEtapaId),
+  const [{ data: etapa }, { data: suyas }] = await Promise.all([
+    supabase.from("lead_etapas").select("*").eq("id", leadEtapaId).maybeSingle(),
+    supabase.from("tasks").select("id,status,type,compra_id").eq("lead_etapa_id", leadEtapaId),
   ]);
-  if (!etapa || etapa.estado === "omitida" || !suyos?.length) return null;
-  const hechas = suyos.filter(i => i.hecho).length;
-  // Nunca hacia atrás: un hito que alguien marcó "Estamos aquí" se quedaba en
-  // pendiente al sumarle la primera gestión, porque todavía no había ninguna
-  // hecha. Esto solo adelanta: arranca al marcarse la primera y cierra con la
-  // última; volver atrás lo decide una persona.
-  const debe = hechas === suyos.length ? "hecha" : hechas > 0 ? "en_curso" : etapa.estado;
-  if (debe === etapa.estado) return null;
+  if (!etapa) return null;
+  // Las compras no cuentan: no son trabajo del hito, son avisos de su módulo.
+  const debe = estadoDelHito(etapa.estado, (suyas || []).filter(t => !t.compra_id && t.type !== "Compra"));
+  if (!debe) return null;
   // El cierre sí es noticia del proyecto; arrancar no: sería una fila de
   // bitácora por cada tilde.
   return cambiarEstadoEtapa(etapa, debe, quien, debe === "hecha", nombre);
 }
 
+/**
+ * Marcar una tarea del proyecto como hecha, o volver a abrirla.
+ *
+ * @param item    la tarea como la ve la columna (comoActividad)
+ * @param quien   el nombre de quien la marca, que queda escrito en ella
+ * @param autor   la persona, para la bitácora
+ */
 export async function marcarItem(item, hecho, quien, autor, nombreEtapa) {
-  const campos = { hecho, hecho_at: hecho ? new Date().toISOString() : null, hecho_por: hecho ? quien || null : null };
-  const { error } = await supabase.from("lead_etapa_items").update(campos).eq("id", item.id);
-  if (!error) {
-    await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor });
-    await alDiaElHito(item.lead_etapa_id, autor, nombreEtapa);
-  }
-  // Su tarea va con ella: marcar la actividad y que la tarea siga abierta en el
-  // tablero de alguien es la forma de que nadie vuelva a confiar en el tablero.
-  if (!error && item.tarea_id) {
-    await supabase.from("tasks").update({ status: hecho ? "listo" : "en-progreso" }).eq("id", item.tarea_id);
-  }
-  return error ? error.message : null;
+  const { error } = await supabase.from("tasks").update(alMarcar(hecho, quien || autor?.name || null)).eq("id", item.id);
+  if (error) return falta(error) ? SIN_170 : error.message;
+  await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor });
+  await alDiaElHito(item.lead_etapa_id, autor, nombreEtapa);
+  return null;
 }
 
 /**
- * La tarea de una actividad: se crea si no la tiene, se actualiza si ya existe.
+ * Corregir una tarea del proyecto: qué dice, de quién es, para cuándo y qué es.
  * @returns { tarea } o { error }
  */
 export async function asegurarTarea(item, datos) {
-  if (!item.tarea_id) return itemATarea(item, datos);
-  // Si le corrigieron el texto, la actividad se llama igual que su tarea: dos
-  // nombres para la misma cosa es cómo se pierde la pista de qué se arregló.
-  if (datos.titulo && datos.titulo !== item.texto) {
-    await supabase.from("lead_etapa_items").update({ texto: datos.titulo }).eq("id", item.id);
-  }
   const campos = {
-    title: datos.titulo || item.texto,
+    title: (datos.titulo || item.texto || "").trim(),
     assignee_id: datos.assignee_id || null,
     due_date: datos.due_date || null,
     hora: datos.hora || null,
     // Corregir qué es —gestión, tarea o reunión— cambia dónde se la ve, así que
     // se guarda igual que al crearla: en el tipo y en la nota.
-    ...(datos.tipo ? { type: datos.tipo, notes: `${datos.tipo === "Reunión" ? "Reunión" : datos.tipo === "Gestión" ? "Gestión" : "Tarea"} de ${datos.lead?.nombre || ""}`.trim() } : {}),
+    ...(datos.tipo ? { type: datos.tipo, notes: notaDeOrigen(datos.tipo, datos.lead?.nombre) } : {}),
     ...(datos.responsable_externo !== undefined ? { responsable_externo: datos.responsable_externo } : {}),
   };
-  let { data, error } = await supabase.from("tasks").update(campos).eq("id", item.tarea_id).select().maybeSingle();
-  if (error && /column|schema cache/i.test(error.message)) {
-    const { responsable_externo, hora, ...resto } = campos;
-    ({ data, error } = await supabase.from("tasks").update(resto).eq("id", item.tarea_id).select().maybeSingle());
-  }
-  // Si la tarea ya no existe —alguien la borró desde el tablero y el vínculo
-  // quedó apuntando al vacío—, se crea de nuevo en vez de guardar en la nada:
-  // así el cambio aparece, que es lo único que esperaba quien lo hizo.
-  if (!error && !data) return itemATarea({ ...item, tarea_id: null }, datos);
-  return error ? { error: error.message } : { tarea: data };
+  const { data, error } = await supabase.from("tasks").update(campos).eq("id", item.id).select(COLUMNAS).maybeSingle();
+  if (error) return { error: falta(error) ? SIN_170 : error.message };
+  // La borraron mientras se la editaba: se dice, en vez de guardar en la nada.
+  if (!data) return { error: "Esa tarea ya no existe: alguien la borró." };
+  return { tarea: data };
 }
 
-/**
- * Una actividad que ya se hizo de nuestro lado y ahora depende de un tercero:
- * el permiso pedido, la respuesta del cliente, la muestra del proveedor. No es
- * pendiente —no hay nada que hacer— ni hecha —todavía no llega—.
- */
-/** Lo que hay que saber de esa actividad y solo sabe quien la trabajó. */
+/** Lo que hay que saber de esa tarea y solo sabe quien la trabajó. */
 export async function guardarNota(item, nota) {
-  const { error } = await supabase.from("lead_etapa_items").update({ nota: nota || null }).eq("id", item.id);
+  const { error } = await supabase.from("tasks").update({ nota: nota || null }).eq("id", item.id);
   return error ? (falta(error) ? "falta_migracion" : error.message) : null;
 }
 
+/**
+ * Una tarea que ya se hizo de nuestro lado y ahora depende de un tercero: el
+ * permiso pedido, la respuesta del cliente, la muestra del proveedor. No es
+ * pendiente —no hay nada que hacer— ni hecha —todavía no llega—.
+ */
 export async function marcarEspera(item, espera, quien) {
-  const { error } = await supabase.from("lead_etapa_items").update({ espera }).eq("id", item.id);
+  const { error } = await supabase.from("tasks").update({ espera: !!espera }).eq("id", item.id);
   if (!error) {
     await anotar(item.lead_id, { detalle: `"${item.texto}" ${espera ? "queda esperando a un tercero" : "ya no espera"}`, quien });
   }
   return error ? (falta(error) ? "falta_migracion" : error.message) : null;
 }
 
+/** Borrar una tarea del proyecto. Es la misma de Tareas: se va de los dos lados. */
 export async function borrarItem(item, quien) {
-  const id = typeof item === "object" ? item.id : item;
-  // La tarea se va con ella. Quedaba viva en el tablero, sin etapa ni proyecto
-  // que la explique: "esto no está en ningún lugar del pipeline".
-  if (typeof item === "object" && item.tarea_id) {
-    await supabase.from("tasks").delete().eq("id", item.tarea_id);
-  }
-  const { error } = await supabase.from("lead_etapa_items").delete().eq("id", id);
-  if (!error && typeof item === "object") {
+  const { error } = await supabase.from("tasks").delete().eq("id", item.id);
+  if (!error) {
     await anotar(item.lead_id, { detalle: `Quitó "${item.texto}"`, quien });
     await alDiaElHito(item.lead_etapa_id, quien);
   }
   return error ? error.message : null;
-}
-
-/**
- * Toda actividad es también una tarea del proyecto, tenga responsable o no.
- *
- * Una actividad sin dueño igual es algo pendiente de ese proyecto, y tiene que
- * verse entre las tareas: si solo aparecieran las asignadas, el tablero diría
- * que el proyecto está limpio cuando en realidad le faltan seis cosas.
- *
- * Con responsable y fecha es una tarea como cualquier otra; sin ellos es una
- * actividad del proyecto esperando que alguien la tome. Al completarse la
- * tarea, la actividad se marca sola, y al marcar la actividad, la tarea se
- * cierra.
- */
-export async function itemATarea(item, { lead, titulo, assignee_id, due_date, hora, tipo, urgente, creadoPor, quien, nombreResponsable, responsable_externo = null }) {
-  const fila = {
-    title: titulo || item.texto, lead_id: lead.id, assignee_id: assignee_id || null,
-    due_date: due_date || null, priority: urgente ? "urgente" : "media", status: "en-progreso", type: tipo || "Otro",
-    created_by: creadoPor ?? null,
-    // La nota dice qué es: sin esto, una tarea y una gestión del tubo se
-    // guardaban idénticas y el tablero tenía que adivinar de qué lado ponerlas.
-    notes: `${tipo === "Reunión" ? "Reunión" : tipo === "Gestión" ? "Gestión" : tipo === "Envío" ? "Envío" : "Tarea"} de ${lead.nombre}`,
-    ...(hora ? { hora } : {}),
-    ...(responsable_externo ? { responsable_externo } : {}),
-  };
-  let { data: tarea, error } = await supabase.from("tasks").insert(fila).select().single();
-  // Sin las migraciones 041 y 045 la tarea entra igual: el responsable de
-  // afuera y la hora quedan escritos en las notas, que es donde se pueden leer.
-  if (error && /column|schema cache/i.test(error.message)) {
-    const { responsable_externo: fuera, hora: aLaHora, ...resto } = fila;
-    ({ data: tarea, error } = await supabase.from("tasks")
-      .insert({ ...resto, notes: `${resto.notes}${fuera ? ` · Responsable: ${fuera}` : ""}${aLaHora ? ` · ${aLaHora}` : ""}` }).select().single());
-  }
-  if (error) return { error: error.message };
-  const { error: e2 } = await supabase.from("lead_etapa_items").update({ tarea_id: tarea.id }).eq("id", item.id);
-  // Encargarle algo a alguien es de las cosas que hay que poder rastrear.
-  if (assignee_id || responsable_externo) {
-    await anotar(lead.id, {
-      detalle: `Le encargó "${tarea.title}" a ${responsable_externo || nombreResponsable || "alguien del equipo"}`
-        + (due_date ? `, para el ${enCriollo(due_date)}${hora ? ` a las ${hora}` : ""}` : ""),
-      quien: quien || { id: creadoPor ?? null },
-    });
-  }
-  return e2 ? { tarea, error: e2.message } : { tarea };
 }
 
 /**
@@ -385,9 +376,12 @@ export function avanceDe(items = []) {
  * "¿en qué va este proyecto?"— no aparecía nada. El resultado era el clásico
  * "¿ya le mandamos la propuesta?" preguntado por WhatsApp.
  *
- * Entra como Envío en la etapa que se diga —Presupuesto, por defecto—, ya
- * marcado, porque ya pasó. Si esa etapa no existe en el tubo del proyecto se
- * crea: que falte la etapa no es razón para perder el registro.
+ * Entra como Envío en la etapa que se diga —Presupuesto, por defecto—, YA
+ * CERRADO, porque ya pasó. Antes nacía abierto y se lo marcaba después, y ese
+ * segundo paso no llegaba a la tarea: el «Presupuesto enviado» del Aéreo
+ * estuvo abierto y vencido desde el 7 de octubre, a nombre del cliente.
+ * Si esa etapa no existe en el tubo del proyecto se crea: que falte la etapa
+ * no es razón para perder el registro.
  */
 export async function registrarEnvio(lead, { titulo, destinatario, fecha, quien, etapaId = "presupuesto", nombreEtapa = "Presupuesto" }) {
   if (!lead?.id) return { error: "Sin proyecto" };
@@ -405,17 +399,15 @@ export async function registrarEnvio(lead, { titulo, destinatario, fecha, quien,
     etapa = creada;
   }
 
-  const { count } = await supabase.from("lead_etapa_items")
+  const { count } = await supabase.from("tasks")
     .select("id", { count: "exact", head: true }).eq("lead_etapa_id", etapa.id);
 
-  const r = await agregarItem(lead, etapa, titulo, (count || 0) + 1, quien);
+  const r = await agregarTarea({
+    lead, etapa, titulo, orden: (count || 0) + 1, tipo: "Envío", due_date: fecha || null,
+    responsable_externo: destinatario || null, hecha: true, quien, nombreEtapa,
+  });
   if (r.error) return { error: r.error };
 
-  await itemATarea(r.item, {
-    lead, titulo, due_date: fecha || null, tipo: "Envío", creadoPor: quien?.id ?? null, quien,
-    responsable_externo: destinatario || null,
-  });
-  await marcarItem(r.item, true, quien?.name, quien, nombreEtapa);
   await anotar(lead.id, { detalle: `Envío a ${destinatario || "el cliente"}: ${titulo}.`, quien, tipo: "nota" });
   return { item: r.item };
 }
