@@ -854,6 +854,27 @@ export async function borrarAprobador(id) {
   return error ? error.message : null;
 }
 
+/**
+ * ¿Le llegó el correo a cada firmante? Se le pide al servidor que vuelva a
+ * preguntar por estas órdenes. Si no se puede preguntar no es un error: queda
+ * como estaba y se pregunta la próxima vez.
+ *
+ * @returns { cambiaron, rebotaron: [{ orden_id, nombre, email }] }
+ */
+export async function confirmarEntregas(ordenIds = []) {
+  if (!ordenIds.length) return { cambiaron: 0, rebotaron: [] };
+  try {
+    const r = await fetch("/api/aviso?de=orden", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revisar: true, orden_ids: ordenIds }),
+    });
+    const d = await r.json().catch(() => null);
+    return r.ok && d ? { cambiaron: d.cambiaron || 0, rebotaron: d.rebotaron || [] } : { cambiaron: 0, rebotaron: [] };
+  } catch {
+    return { cambiaron: 0, rebotaron: [] };
+  }
+}
+
 /** Quiénes tienen que firmar esta orden, y quién firmó ya. */
 export async function aprobacionesDe(ordenId) {
   const { data, error } = await supabase.from("orden_cambio_aprobaciones")

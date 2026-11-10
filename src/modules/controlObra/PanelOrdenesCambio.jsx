@@ -14,13 +14,14 @@ import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import { comoSeDice as parentescoDe, codigoDeLaRevision, mandaEnElControl } from "./revisionesDeOrden.js";
 import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice, capitulosPartidos } from "./cuadreDeOrdenes.js";
 import { huecosQueSeCierran, numerosQueFaltan, codigoPrincipal } from "./numeracionDeOrdenes.js";
+import { porConfirmar } from "./entregaDeOrdenes.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
   anularOrden, desanularOrden, crearRevision, cerrarHuecos,
   pedirElVistoAlDirector, darVisto,
   subirSoporte, borrarSoporte, enlacesDeSoportes,
-  guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, nombreDelArchivo, moverLinea, gentePara,
+  guardarAprobador, borrarAprobador, aprobacionesDeOrdenes, confirmarEntregas, nombreDelArchivo, moverLinea, gentePara,
   insistirConLaOrden, genteDeOtrosProyectos, enviosDeOrdenes,
 } from "./ordenesDeCambio";
 import { pdfDeOrden, pdfConsolidado, pdfLiquidacionInterna } from "./pdfOrdenCambio";
@@ -122,6 +123,8 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // que sale de la oficina.
   const esDirector = currentUser?.role === "owner";
 
+  // Los envíos por los que ya se preguntó si llegaron, para no repetir.
+  const preguntados = useRef(new Set());
   const cargar = useCallback(async () => {
     const r = await cargarOrdenes(obra.id);
     setSinTablas(r.sinTablas);
@@ -130,7 +133,21 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
     setFotos(r.fotos || {});
     const todas = Object.values(r.fotos || {}).flat();
     if (todas.length) setEnlaces(await enlacesDeSoportes(todas));
-    setAprobadores(await aprobacionesDeOrdenes((r.ordenes || []).map(o => o.id)));
+    const firmantes = await aprobacionesDeOrdenes((r.ordenes || []).map(o => o.id));
+    setAprobadores(firmantes);
+    // ¿LES LLEGÓ? Al mandar queda "enviado", que solo dice que el pedido
+    // entró; el rebote aparece minutos después. Acá se vuelve a preguntar por
+    // los envíos de los que todavía no se sabe —una vez por envío, y sin
+    // frenar la pantalla—, y si alguno cambió se vuelven a leer los firmantes:
+    // el "no le llegó" y el "el correo rebotó" ya estaban dibujados, les
+    // faltaba el dato.
+    const falta = porConfirmar(firmantes, preguntados.current);
+    if (falta.ordenes.length) {
+      falta.claves.forEach(k => preguntados.current.add(k));
+      confirmarEntregas(falta.ordenes).then(async e => {
+        if (e.cambiaron) setAprobadores(await aprobacionesDeOrdenes((r.ordenes || []).map(o => o.id)));
+      });
+    }
     setEnvios(await enviosDeOrdenes((r.ordenes || []).map(o => o.id)));
 
     // LA COTIZACIÓN Y LO QUE DEJA. Se recalcula acá, al abrir, porque una

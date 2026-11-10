@@ -15,7 +15,8 @@ import { bloquesDeAdiciones } from "./_clasesDePartida.js";
 // contestó. Se consulta con `rest`, como los demás avisos.
 const json = async r => { try { return await r.json(); } catch { return null; } };
 const uno = async ruta => (await json(await rest(ruta)))?.[0] || null;
-import { enviarCorreo, plantilla, esc } from "./_correo.js";
+import { enviarCorreo, plantilla, esc, estadoDeCorreo } from "./_correo.js";
+import { sinConfirmar, leReboto } from "./_entregaDeOrdenes.js";
 import { randomUUID } from "crypto";
 
 const APP = process.env.APP_URL || "https://foreman-app-ebon.vercel.app";
@@ -27,6 +28,7 @@ const fecha = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric"
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Solo POST" });
   if (!configurado()) return res.status(503).json({ error: "Falta SUPABASE_SECRET_KEY" });
+  if ((req.body || {}).revisar) return revisarEntregas(req, res);
 
   const { orden_id, destinatarios, cuerpo, aprobadores, de } = req.body || {};
   // La respuesta va a quien la mandó, no a la casilla de avisos.
@@ -393,6 +395,48 @@ export default async function handler(req, res) {
 }
 
 /** El bloque con el botón de aprobar, que es lo único que cambia por persona. */
+/**
+ * ¿LLEGARON? Se le vuelve a preguntar al servidor de correo.
+ *
+ * Mandar deja "sent" —entró el pedido— y el rebote aparece minutos después.
+ * Las órdenes guardaban ese "sent" para siempre: una que el servidor del
+ * cliente rechazó se veía igual que una entregada, con el plazo de aprobación
+ * corriendo contra un correo que nadie recibió.
+ *
+ * Se pregunta solo por los que todavía no se sabe: los que ya llegaron, los
+ * que ya rebotaron y los que ya contestaron no cambian. Y de a uno, con una
+ * pausa: el servidor de correo corta a los que preguntan muy seguido, y un
+ * corte se lee igual que "no sé".
+ */
+async function revisarEntregas(req, res) {
+  const ids = [...new Set((Array.isArray(req.body?.orden_ids) ? req.body.orden_ids : [])
+    .map(Number).filter(n => Number.isInteger(n) && n > 0))].slice(0, 60);
+  if (!ids.length) return res.status(400).json({ error: "Faltan las órdenes." });
+
+  const firmas = await json(await rest(
+    `orden_cambio_aprobaciones?orden_id=in.(${ids.join(",")})&envio_id=not.is.null`
+    + "&select=id,orden_id,nombre,email,envio_id,envio_estado,envio_at,aprobado_at,observacion")) || [];
+  const pendientes = firmas.filter(f => sinConfirmar(f)).slice(0, 25);
+
+  let cambiaron = 0;
+  for (let i = 0; i < pendientes.length; i++) {
+    const f = pendientes[i];
+    if (i) await pausa(550);
+    const estado = await estadoDeCorreo(f.envio_id);
+    if (!estado || estado === f.envio_estado) continue;
+    await rest(`orden_cambio_aprobaciones?id=eq.${f.id}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ envio_estado: estado }),
+    });
+    f.envio_estado = estado;
+    cambiaron++;
+  }
+  return res.status(200).json({
+    revisados: pendientes.length, cambiaron,
+    rebotaron: firmas.filter(leReboto).map(f => ({ orden_id: f.orden_id, nombre: f.nombre || f.email, email: f.email })),
+  });
+}
+
 function bloqueDeFirma(url, quien) {
   return `
   <div style="margin:0 0 18px;padding:14px 16px;background:#F0F7F5;border:1px solid #CFE3DD;border-radius:8px">
