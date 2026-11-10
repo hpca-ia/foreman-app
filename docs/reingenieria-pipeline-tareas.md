@@ -33,8 +33,8 @@ Tres reglas, y todo lo demás sale de ellas.
    pierde, se cierra con su motivo. (RES BG, con sus ingenierías en
    preparación, se persigue: es del Pipeline.)
 2. **En el Pipeline, un proyecto está en una sola etapa.** Una, elegida de un
-   desplegable. Las etapas dependen del TIPO de lead —construcción,
-   arquitectura, simple—, porque no todos pasan por lo mismo. No hay etapas
+   desplegable. Las etapas dependen del TIPO de lead —Diseño, Construcción,
+   o Diseño y construcción—, porque no todos pasan por lo mismo. No hay etapas
    «en curso» en paralelo ni «estamos acá».
 3. **Lo que hay que hacer es una tarea, y vive en un solo lugar.** Una tarea
    puede ser de un proyecto —del pipeline o aprobado— o de ninguno. Al abrir un
@@ -54,8 +54,9 @@ encima.
 Hernán lo pidió aparte: que Pipeline y Tareas sean más interactivos y amables.
 Vale para todas las fases; no es una fase más.
 
-- **El pipeline se lee por tipo.** Construcción, Arquitectura y Simple, cada
-  grupo con sus leads y cuántos hay en cada etapa.
+- **El título principal es el tipo de lead**, y son tres, definidos por
+  Hernán: **Diseño**, **Construcción** y **Diseño y construcción**. Cada grupo
+  con sus leads y cuántos hay en cada etapa.
 - **La etapa se elige de un desplegable** en la tarjeta misma, con las etapas
   de su tipo. Lo pidió Hernán así: «hay leads de construcción, otros de
   arquitectura, otros más simples, y sus etapas varían». El tipo también se
@@ -111,13 +112,17 @@ pipeline.
   Ajustes. Hoy mezcla etapas de perseguir con etapas de ejecutar (Obra gris,
   Acabados, Entrega): quedan solo las de perseguir. Propuesta de arranque,
   que Hernán ajusta:
+  - **Diseño:** Contacto · Levantamiento · Plan masa · Anteproyecto ·
+    Propuesta de honorarios · Negociación.
   - **Construcción:** Contacto · Levantamiento · Ingenierías · Presupuesto ·
     Propuesta enviada · Negociación.
-  - **Arquitectura:** Contacto · Levantamiento · Plan masa · Anteproyecto ·
-    Propuesta de honorarios · Negociación.
-  - **Simple:** Contacto · Propuesta enviada · Negociación.
+  - **Diseño y construcción:** Contacto · Levantamiento · Plan masa ·
+    Anteproyecto · Ingenierías · Presupuesto · Propuesta enviada · Negociación.
   Salidas, iguales para los tres: **Aprobado** y **Perdido** (con motivo).
-- Hoy solo RES BG tiene tipo (construcción); los otros seis están como «lead»
+  Un lead más simple no necesita otro tipo: se salta las etapas que no usa.
+- En la base el tipo es `leads.tunel`, que hoy vale `lead`, `arquitectura` o
+  `construccion`. Pasa a `diseno`, `construccion` o `diseno_construccion`.
+  Hoy solo RES BG tiene tipo (construcción); los otros seis están como «lead»
   a secas. En la migración Hernán dice de qué tipo es cada uno.
 - Migración: los 7 proyectos que se persiguen quedan en la etapa que les
   corresponde. La lista exacta se le muestra a Hernán antes de correrla.
