@@ -19,8 +19,7 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 // etapa, que se elige de un desplegable en su misma tarjeta, y dice qué sigue:
 // su próximo paso con fecha, o desde cuándo espera al cliente.
 //
-// Lo aprobado ya no está acá: vive en Control. Queda abajo, plegado, hasta que
-// tenga su propia lista.
+// Lo aprobado ya no está acá: vive en Control y se lista en «En marcha».
 //
 // Antes cada proyecto llevaba una fila por etapa con su estado y un «estamos
 // acá» que se podía marcar en tres a la vez; la lista mostraba una y adentro
@@ -28,7 +27,7 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 
 const COLUMNAS_TAREA = "id,lead_id,title,due_date,hora,status,type,compra_id,ruta_orden,assignee_id,espera";
 
-export default function ModuloLeads({ currentUser, users = [], puede = () => true, nivelProyecto = () => null, onIrAObra }) {
+export default function ModuloLeads({ currentUser, users = [], puede = () => true, nivelProyecto = () => null, onIrAObra, onIrEnMarcha }) {
   const [leads, setLeads] = useState([]);
   // El catálogo vive en la base porque cambia con el tiempo. Se trae entero
   // —también las etapas apagadas—: las tareas viejas las llevan de etiqueta.
@@ -37,12 +36,10 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const [abierto, setAbierto] = useState(null);
   const [nuevo, setNuevo] = useState(false);
   const [cargando, setCargando] = useState(true);
-  const [verAprobados, setVerAprobados] = useState(false);
   const [verPerdidos, setVerPerdidos] = useState(false);
   // Tocar un aviso o una etapa deja ver solo eso.
   const [soloAviso, setSoloAviso] = useState(null);
   const [soloEtapa, setSoloEtapa] = useState(null);
-  const [convirtiendo, setConvirtiendo] = useState(null);
   // Obras que entraron directo por Control de Obra y todavía no tienen proyecto.
   const [sueltas, setSueltas] = useState([]);
   const [trayendo, setTrayendo] = useState(false);
@@ -74,31 +71,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
     await cargar();
   }
 
-  // Aprobarlo no termina el trabajo: recién ahí empieza la obra. Esto cierra
-  // el hilo entre lo comercial y lo que se construye.
-  async function convertirEnObra(lead) {
-    setConvirtiendo(lead.id);
-    const fila = {
-      nombre: lead.nombre, cliente_nombre: lead.contacto || lead.nombre,
-      notas: `Viene del lead ${lead.nombre}`, created_by: currentUser?.id, lead_id: lead.id,
-    };
-    let { data: obra, error } = await supabase.from("obras").insert(fila).select().single();
-    // Sin la migración 046 la obra se crea igual, sin el vínculo de vuelta.
-    if (error && /column|schema cache/i.test(error.message)) {
-      const { lead_id, ...resto } = fila;
-      ({ data: obra, error } = await supabase.from("obras").insert(resto).select().single());
-    }
-    if (!error && obra) {
-      await supabase.from("leads").update({ obra_id: obra.id }).eq("id", lead.id);
-      await supabase.from("lead_movimientos").insert({
-        lead_id: lead.id, tipo: "nota", detalle: `Arrancó como obra: ${obra.nombre}`,
-        autor_id: currentUser?.id, autor_nombre: currentUser?.name,
-      });
-      await cargar();
-    }
-    setConvirtiendo(null);
-  }
-
   // A qué proyectos llega esta persona. Todo lo que se cuenta o se lista en
   // esta pantalla pasa por acá: las cuentas de arriba no pueden hablar de
   // negocios que la lista de abajo no le muestra.
@@ -125,10 +97,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   // Las cuentas por etapa salen de todos, no de lo filtrado: si no, al tocar
   // una etapa las demás quedarían en cero y no se podría cambiar de una a otra.
   const cuentas = Object.fromEntries(porTipo(perseguidos, catalogo).map(g => [g.tipo, g.etapas]));
-
-  // El final del camino: aprobado y sin obra es justo donde se pierde el hilo
-  // entre vender y construir.
-  const porArrancar = aprobados.filter(l => !l.obra_id && tipoDe(l) !== "diseno");
 
   const alCambiar = l => setLeads(ls => ls.map(x => (x.id === l.id ? { ...x, ...l } : x)));
 
@@ -184,22 +152,6 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
           <Button variant="primary" size="sm" onClick={traerObras} disabled={trayendo}>
             {trayendo ? "Creando…" : "Crear su proyecto"}
           </Button>
-        </div>
-      )}
-
-      {porArrancar.length > 0 && (
-        <div style={{ background: colors.successSoft, border: `1px solid ${colors.success}33`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.success, marginBottom: 7 }}>
-            {porArrancar.length === 1 ? "Un proyecto aprobado sin obra en Control" : `${porArrancar.length} proyectos aprobados sin obra en Control`}
-          </div>
-          {porArrancar.map(l => (
-            <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: colors.ink, flex: 1, minWidth: 120 }}>{l.nombre}</span>
-              <Button variant="primary" size="sm" onClick={() => convertirEnObra(l)} disabled={convirtiendo === l.id}>
-                {convirtiendo === l.id ? "Creando..." : <>Crear la obra <ArrowRight size={12} /></>}
-              </Button>
-            </div>
-          ))}
         </div>
       )}
 
@@ -272,12 +224,17 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
               </div>
             ))}
 
-            {/* Lo aprobado salió del pipeline: vive en Control. Queda acá
-                abajo, plegado, para poder abrir su proyecto —sus tareas, su
-                historia, su gente—. */}
-            <Cerrados titulo="Aprobados" lista={aprobados} abierto={verAprobados} onAbrir={() => setVerAprobados(v => !v)}
-              onElegir={setAbierto} detalle={l => (l.obra_id ? "en Control" : "sin obra")} color={colors.success}
-              ayuda="Salieron del pipeline: se llevan en Control." />
+            {/* Lo aprobado salió del pipeline: tiene su lista, con la ficha de
+                cada proyecto armada sola. Acá queda solo la puerta. */}
+            {aprobados.length > 0 && (
+              <button onClick={onIrEnMarcha} disabled={!onIrEnMarcha}
+                style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 6, background: colors.successSoft,
+                  border: `1px solid ${colors.successBorder}`, borderRadius: colors.radiusMd, padding: "8px 12px",
+                  cursor: onIrEnMarcha ? "pointer" : "default", fontFamily: colors.font, fontSize: 12, color: colors.inkSoft }}>
+                <strong style={{ color: colors.success }}>{aprobados.length} {aprobados.length === 1 ? "aprobado" : "aprobados"}</strong>
+                {" "}{aprobados.length === 1 ? "está" : "están"} en «En marcha» <ArrowRight size={12} />
+              </button>
+            )}
             <Cerrados titulo="Perdidos" lista={perdidos} abierto={verPerdidos} onAbrir={() => setVerPerdidos(v => !v)}
               onElegir={setAbierto} detalle={l => l.motivo_perdida || "sin motivo"} color={colors.muted} />
           </>

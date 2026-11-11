@@ -37,6 +37,7 @@ import Sidebar from "./components/Sidebar";
 // FOREMAN en el teléfono para ver sus tareas del día esperaba por cosas que usa
 // una vez por semana.
 const ModuloLeads = lazy(() => import("./modules/leads/ModuloLeads"));
+const ModuloEnMarcha = lazy(() => import("./modules/leads/ModuloEnMarcha"));
 const ModuloPresupuestos = lazy(() => import("./modules/ModuloPresupuestos"));
 const ModuloControlObra = lazy(() => import("./modules/controlObra/ModuloControlObra"));
 const ModuloCajaChica = lazy(() => import("./modules/ModuloCajaChica"));
@@ -790,7 +791,11 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
               <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {verPipeline && vista === "leads" && (
-              <ModuloLeads currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIrAObra={() => setVista("controlObra")} />
+              <ModuloLeads currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIrAObra={() => setVista("controlObra")}
+                onIrEnMarcha={() => setVista("enMarcha")} />
+            )}
+            {verPipeline && vista === "enMarcha" && (
+              <ModuloEnMarcha currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIr={setVista} />
             )}
             {puede("cajaChica.ver") && vista === "cajaChica" && (
               <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />

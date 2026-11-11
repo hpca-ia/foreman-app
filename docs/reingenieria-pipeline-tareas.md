@@ -242,6 +242,25 @@ Lo que arregla: que un aprobado no tenga dónde verse fuera de Control.
 Al terminar: se abre una obra y se ve en qué anda sin que nadie haya movido
 nada a mano.
 
+**Cómo quedó hecho (11/11/2026, sin migración):**
+
+- «En marcha» es una entrada propia del menú, bajo Pipeline (lo eligió
+  Hernán). El Pipeline ya no lista lo aprobado: tiene la puerta a esa lista.
+- Cada ficha (`ModuloEnMarcha.jsx`, reglas en `enMarcha.js`) dice en qué
+  planilla va la obra y trae un renglón por módulo —órdenes de cambio que
+  esperan firma, compras abiertas, tareas, libro—; tocar un renglón lleva a
+  donde eso se resuelve, y el de tareas abre el proyecto.
+- **La plata es la de Control.** Presupuesto, invertido, saldo y lo cargado
+  sin asignar salen de `controlObra/resumenDeObras.js`, que es la cuenta de
+  la lista de Control de Obra sacada a un solo lugar: los dos la usan, así que
+  no pueden decir números distintos de la misma obra. Solo la ve quien tiene
+  permiso de montos; a quien no, ni se le trae.
+- Un aprobado sin obra lo dice, y ahí mismo se le crea la obra en Control.
+- No se creó ninguna tarea por las etapas viejas que quedaron sin tarea
+  (Pólizas en las dos obras; Documentación e Ingenierías en Plaza Lagos): se
+  le preguntó a Hernán cuáles seguían pendientes y no eligió ninguna. Se
+  suman a mano desde el proyecto si hacen falta.
+
 ### Fase 4 — Tareas: una bandeja que se pueda creer
 
 - Las compras dejan de crear tareas. En la bandeja aparece «Compras: 3 esperan
@@ -294,8 +313,8 @@ fase 5), los permisos por proyecto y el portal del cliente.
 ## En qué va
 
 - [x] Fase 1 — Una sola tarea (11/11/2026; migración 170, corrida y publicada)
-- [x] Fase 2 — El Pipeline es lo que se persigue (11/11/2026; requiere la migración 171)
-- [ ] Fase 3 — Proyectos aprobados
+- [x] Fase 2 — El Pipeline es lo que se persigue (11/11/2026; migración 171, corrida y publicada)
+- [x] Fase 3 — Proyectos aprobados (11/11/2026; sin migración)
 - [ ] Fase 4 — Tareas: una bandeja que se pueda creer
 - [ ] Fase 5 — Los compromisos de las actas
 - [ ] Fase 6 — Limpieza

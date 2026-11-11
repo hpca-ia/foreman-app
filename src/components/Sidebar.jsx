@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ListTodo, Wallet, HardHat, PiggyBank, Target, ShoppingCart, BookOpen, ClipboardList,
-  GanttChartSquare, MoreHorizontal, X, FileSignature } from "lucide-react";
+  GanttChartSquare, MoreHorizontal, X, FileSignature, Hammer } from "lucide-react";
 import { rolInfo } from "../lib/roles";
 import { colors } from "../theme/colors";
 import Avatar from "./ui/Avatar";
@@ -94,6 +94,9 @@ export default function Sidebar({ puede, usuario, empresa, vista, setVista, admi
     [null, [puede("tareas.ver") && item("tareas", "Tablero", ListTodo)]],
     ["PROYECTOS", [
       verPipeline && item("leads", "Pipeline", Target),
+      // Lo aprobado ya no está en el pipeline: tiene su lista, con la ficha de
+      // cada proyecto armada sola.
+      verPipeline && item("enMarcha", "En marcha", Hammer, "Marcha"),
       puede("presupuestos.ver") && item("presupuestos", "Presupuestos", Wallet, "Presup."),
     ]],
     ["OBRA", [
