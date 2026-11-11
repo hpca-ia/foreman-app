@@ -4,6 +4,7 @@ import { enviarActa } from "./_aviso-acta.js";
 import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
+import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -981,31 +982,26 @@ async function decidirElVisto(req, res, acta) {
 }
 
 /**
- * Los compromisos asignados, en el tablero de cada uno.
+ * Los compromisos que tienen quién los siga, en la bandeja que les toca.
  *
  * SE CREAN AL DAR EL VISTO, no antes: mientras el acta es borrador lo escrito
- * todavía se puede cambiar, y una tarea que aparece y desaparece del tablero de
- * alguien es peor que ninguna. Es la misma regla que aplica la pantalla del
- * acta (src/modules/actas/aTareas.js) cuando el visto se da desde FOREMAN:
- * solo las asignadas a alguien del equipo y sin tarea creada, porque una tarea
- * en el tablero de nadie es ruido.
+ * todavía se puede cambiar, y una tarea que aparece y desaparece de la bandeja
+ * de alguien es peor que ninguna. Es la misma regla que aplica la pantalla del
+ * acta cuando el visto se da desde FOREMAN (src/modules/actas/compromisos.js):
+ * los del equipo van a la bandeja de cada uno; los de terceros, a «Espero de
+ * otros» de quien lleva el proyecto; los que no tienen a nadie elegido quedan
+ * solo en el acta.
  */
 async function tareasDeLosCompromisos(acta, quien) {
   const todos = await json(await rest(`acta_compromisos?acta_id=eq.${acta.id}&select=*&order=orden`));
-  const van = (todos || []).filter(c => c.asignado_a && !c.tarea_id && c.estado !== "cumplido" && c.estado !== "anulado");
+  const lead = acta.lead_id ? (await json(await rest(`leads?id=eq.${acta.lead_id}&select=id,responsable_id,created_by`)))[0] || null : null;
   let creadas = 0;
-  for (const c of van) {
-    const r = await rest("tasks", {
-      method: "POST", headers: { Prefer: "return=representation" },
-      body: JSON.stringify({
-        title: String(c.texto || "").slice(0, 200), lead_id: acta.lead_id ?? null,
-        assignee_id: c.asignado_a, type: "Gestión", due_date: c.fecha_limite || null,
-        priority: c.urgente ? "urgente" : "media", status: "en-progreso",
-        notes: `Compromiso del acta de reunión N° ${acta.numero}${acta.fecha ? ` del ${acta.fecha}` : ""}`
-          + (c.responsable_nombre ? `\nResponsable según el acta: ${c.responsable_nombre}` : ""),
-        created_by: quien?.id ?? null,
-      }),
-    });
+  for (const c of paraTarea(todos || [])) {
+    const fila = tareaDelCompromiso({ c, acta, lead, quien });
+    if (!fila) continue;
+    // La tabla exige quién la creó: si no hay nadie más, quien abrió el proyecto.
+    if (fila.created_by == null) fila.created_by = lead?.created_by ?? null;
+    const r = await rest("tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(fila) });
     const tarea = (await json(r))[0];
     if (!tarea?.id) continue;
     await rest(`acta_compromisos?id=eq.${c.id}`, {

@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { subirArchivo } from "../../lib/archivos";
+import { alArrastrar } from "./compromisos.js";
 
 // Las actas de reunión de obra.
 //
@@ -120,15 +121,14 @@ export async function abrirActa({ leadId, obraId, fecha, quien }) {
     const { data: abiertos } = await supabase.from("acta_compromisos")
       .select("*").eq("acta_id", anterior).in("estado", ["pendiente", "reprogramado"]).order("orden");
     if (abiertos?.length) {
-      await supabase.from("acta_compromisos").insert(abiertos.map((c, i) => ({
-        acta_id: acta.id, texto: c.texto,
-        responsable_nombre: c.responsable_nombre, responsable_email: c.responsable_email,
-        fecha_limite: c.fecha_limite, estado: "pendiente",
-        // Lo urgente sigue siendo urgente en la reunión siguiente: si no se
-        // hizo y paraba la obra, ahora para más.
-        urgente: !!c.urgente,
-        viene_de: c.viene_de || c.id, orden: i,
-      })));
+      // Cada copia se lleva quién lo sigue y su tarea: es el mismo compromiso,
+      // y si naciera sin eso se le crearía una segunda tarea al dar el visto.
+      const copias = abiertos.map((c, i) => alArrastrar(c, acta.id, i));
+      const { error: mal } = await supabase.from("acta_compromisos").insert(copias);
+      // Sin la migración 173 no existe `tercero`: se arrastran igual, sin eso.
+      if (mal && /tercero|column|schema cache/i.test(mal.message)) {
+        await supabase.from("acta_compromisos").insert(copias.map(({ tercero, ...resto }) => resto));
+      }
       arrastrados = abiertos.length;
     }
   }

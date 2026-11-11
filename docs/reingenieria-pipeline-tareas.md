@@ -21,7 +21,7 @@ Lo que dicen los datos (consultados el 10/11/2026):
 | Obras en el pipeline | El Aéreo figura en «Documentación» con Obra gris, Instalaciones y Acabados en pendiente, y tiene 161 facturas, 2 planillas y 4 órdenes de cambio. |
 | Tareas | 23 abiertas, 16 vencidas. 11 son pasos de compras copiados. De las otras 12, 9 son de Hernán, todas «urgentes», 6 vencidas hace 15–36 días. |
 | Leads | 6. Cuatro sin movimiento hace 18–41 días. Ninguno cerrado nunca como ganado o perdido. |
-| Compromisos de actas | 75, 49 abiertos, 37 vencidos. Ninguno asignado a una persona (dicen «HCARQ», «DINERS») y ninguno aparece en Tareas. |
+| Compromisos de actas | 75 filas; ninguno asignado a una persona (dicen «HCARQ», «DINERS») y ninguno aparece en Tareas. **Corrección del 11/11/2026:** acá decía «49 abiertos, 37 vencidos» y estaba mal contado. Cada reunión copia los pendientes de la anterior y la copia vieja queda «pendiente»: abiertos de verdad había 9, todos del acta N° 4. |
 | Sin uso | Dependencias entre tareas, acompañantes, plantillas de actividades: 0 filas. Tabla vieja `proyectos`: 15 filas, ninguna tarea. |
 
 ## Cómo queda
@@ -317,6 +317,31 @@ nada a mano.
   en «Espero de otros» de quien lleva el proyecto.
 - Los 49 abiertos se reparten una vez, en una pantalla, a quién corresponda.
 
+**Cómo quedó hecho (11/11/2026, migración 173):**
+
+- **Eran 9, no 49.** Un compromiso que se arrastra de reunión en reunión es
+  uno solo: vale el de la última acta de su cadena (`viene_de`). La regla está
+  en `src/modules/actas/compromisos.js` (`vivos`), y la usan la pantalla, el
+  panel de avisos y el correo. El aviso de Actas de la fase 4 contaba filas y
+  decía 37 vencidos; quedó corregido acá.
+- En el acta, lo que figura sigue siendo texto libre —«HCARQ», «DINERS», como
+  se habla en la reunión y como sale en el PDF—. Al lado se ELIGE quién lo
+  sigue: alguien del equipo (`asignado_a`) o un tercero (`tercero`, columna
+  nueva). Sin elegir, el compromiso vive solo en el acta. Elegirlo no hace
+  caer el visto: no es parte del documento.
+- Al dar el visto —en la pantalla o por el enlace del correo— se crea la tarea
+  de cada uno: la del equipo va a la bandeja de esa persona; la de un tercero
+  no es de nadie del equipo, dice quién de afuera la tiene, y queda en «Espero
+  de otros» de quien lleva el proyecto.
+- En cada proyecto, arriba de sus actas, un panel dice cuántos compromisos
+  siguen abiertos y lista los que no tienen quién los siga, para repartirlos.
+  Al elegir, la tarea se crea en el momento, salvo que el acta siga en
+  borrador.
+- Cerrar un compromiso en el acta —cumplido o «ya no aplica»— cierra su tarea,
+  y reabrirlo la reabre.
+- La copia que se arrastra a la reunión siguiente se lleva quién lo sigue y su
+  tarea: antes nacía sin eso, y se le habría creado una segunda tarea.
+
 ### Fase 6 — Limpieza
 
 - Fuera lo que no se usa: dependencias entre tareas, acompañantes, plantillas
@@ -347,6 +372,6 @@ fase 5), los permisos por proyecto y el portal del cliente.
 - [x] Fase 1 — Una sola tarea (11/11/2026; migración 170, corrida y publicada)
 - [x] Fase 2 — El Pipeline es lo que se persigue (11/11/2026; migración 171, corrida y publicada)
 - [x] Fase 3 — Proyectos aprobados (11/11/2026; sin migración, publicada)
-- [x] Fase 4 — Tareas: una bandeja que se pueda creer (11/11/2026; requiere la migración 172)
-- [ ] Fase 5 — Los compromisos de las actas
+- [x] Fase 4 — Tareas: una bandeja que se pueda creer (11/11/2026; migración 172, corrida y publicada)
+- [x] Fase 5 — Los compromisos de las actas (11/11/2026; requiere la migración 173)
 - [ ] Fase 6 — Limpieza

@@ -14,7 +14,8 @@ import { pedirElVisto } from "./pedirVisto";
 import { repetidos, comoQuedan, correosCompartidos, cuantosDeVerdad } from "./repetidos";
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
-import { crearTareas, paraTarea, estadoDeTareas, yaSeHizo } from "./aTareas";
+import { crearTareas, paraTarea, estadoDeTareas, yaSeHizo, cerrarTareaDe, crearTareaDe, decirQuienLoSigue, compromisosDelProyecto } from "./aTareas";
+import { abierto, quienLoSigue, valorDe, decisionDe, abiertosDeVerdad, sinRepartir, quienDelEquipo } from "./compromisos.js";
 import { esProyecto } from "../leads/pipeline";
 
 // Las actas de reunión de obra.
@@ -72,7 +73,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
   });
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,es_lead").order("nombre").then(({ data }) => {
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,es_lead,responsable_id,created_by").order("nombre").then(({ data }) => {
       // Las actas son de los proyectos: lo que se persigue todavía no tiene
       // reuniones de obra que levantar.
       setProyectos((data || []).filter(l => l.resultado !== "perdido" && esProyecto(l)));
@@ -150,6 +151,28 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
     if (e) { setError(e); return; }
     setError(""); setCont(c => ({ ...c, [lista]: [...c[lista], puesta] }));
     await elVistoSeCae();
+  }
+
+  /**
+   * Tocar un compromiso. Dos cosas que una fila cualquiera no tiene:
+   *
+   *   · QUIÉN LO SIGUE NO ES PARTE DEL DOCUMENTO. No sale en el acta ni en su
+   *     PDF, así que elegirlo no hace caer el visto.
+   *   · CERRARLO —O REABRIRLO— HACE LO MISMO CON SU TAREA. Es la misma cosa
+   *     vista desde dos lados: no puede quedar hecho acá y pendiente en la
+   *     bandeja de alguien.
+   */
+  async function tocarCompromiso(c, campos) {
+    const soloQuien = Object.keys(campos).every(k => k === "asignado_a" || k === "tercero");
+    const { error: e } = await guardarFila("acta_compromisos", { id: c.id, ...campos });
+    if (e) { setError(/tercero/.test(e) ? "Falta correr la migración 173 en Supabase." : e); return; }
+    setError("");
+    setCont(x => ({ ...x, compromisos: x.compromisos.map(y => (y.id === c.id ? { ...y, ...campos } : y)) }));
+    if (!soloQuien) await elVistoSeCae();
+    if ("estado" in campos && c.tarea_id) {
+      await cerrarTareaDe(c, campos.estado, currentUser);
+      setTareas(await estadoDeTareas(cont.compromisos));
+    }
   }
 
   async function tocarFila(tabla, lista, id, campos) {
@@ -344,10 +367,17 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               // tarea que aparece y desaparece del tablero de alguien es peor
               // que ninguna.
               const van = paraTarea(cont.compromisos);
-              if (van.length && !window.confirm(
-                `Al dar el visto se le crea la tarea a ${van.length === 1 ? "una persona" : `${van.length} personas`}:\n\n`
-                + van.map(c => `  · ${equipo.find(u => u.id === c.asignado_a)?.name || "?"} — ${c.texto.slice(0, 60)}`).join("\n")
-                + "\n\nVan a su tablero de Tareas con la fecha del compromiso. ¿Seguimos?")) return;
+              // Los que nadie eligió quién los sigue: no van a ninguna bandeja.
+              const sinNadie = cont.compromisos.filter(c => abierto(c) && !quienLoSigue(c) && !c.tarea_id);
+              const linea = c => (quienLoSigue(c) === "equipo"
+                ? `  · ${equipo.find(u => u.id === c.asignado_a)?.name || "?"} — ${c.texto.slice(0, 60)}`
+                : `  · ${(c.responsable_nombre || "un tercero").trim()} (tercero) — ${c.texto.slice(0, 60)}`);
+              if ((van.length || sinNadie.length) && !window.confirm(
+                "Al dar el visto:\n\n"
+                + (van.length ? `${van.length === 1 ? "Un compromiso va" : `${van.length} compromisos van`} a Tareas:\n${van.map(linea).join("\n")}\n\n`
+                  + "Los del equipo, a la bandeja de cada uno. Los de terceros, a «Espero de otros» de quien lleva el proyecto.\n\n" : "")
+                + (sinNadie.length ? `${sinNadie.length === 1 ? "Uno no tiene" : `${sinNadie.length} no tienen`} quién lo siga y ${sinNadie.length === 1 ? "queda" : "quedan"} solo en el acta.\n\n` : "")
+                + "¿Seguimos?")) return;
               setOcupado(true);
               await tocarActa({ estado: "revisada", revisada_at: new Date().toISOString(),
                 revisada_por: currentUser?.id ?? null, revisada_nombre: currentUser?.name || null });
@@ -355,7 +385,9 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
               setOcupado(false);
               if (r.error) { setError("El acta quedó revisada, pero una tarea no se pudo crear: " + r.error); return; }
               await cargarActa(abierta.id);
-              setAviso(`Revisada. Ya se puede enviar.${r.creadas ? ` Y ${r.creadas} ${r.creadas === 1 ? "tarea creada" : "tareas creadas"} en el tablero del equipo.` : ""}`);
+              setAviso("Revisada. Ya se puede enviar."
+                + (r.delEquipo ? ` ${r.delEquipo} ${r.delEquipo === 1 ? "tarea quedó" : "tareas quedaron"} en la bandeja del equipo.` : "")
+                + (r.deTerceros ? ` ${r.deTerceros} ${r.deTerceros === 1 ? "compromiso de un tercero quedó" : "compromisos de terceros quedaron"} en «Espero de otros» de quien lleva el proyecto.` : ""));
             }}><Check size={13} /> Dar el visto</Button>
           )}
           {/* UNA PRUEBA A MI PROPIO CORREO, SIN TRABAR EL ACTA.
@@ -783,8 +815,8 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
             <div style={{ fontSize: 11, color: colors.muted, marginBottom: 9, lineHeight: 1.45 }}>
               Lo primero de la reunión: compromiso por compromiso, qué se cumplió y qué sigue pendiente.
             </div>
-            {arrastrados.map(c => <Repaso key={c.id} c={c} sePuede={sePuede} tareaHecha={tareaHecha}
-              onTocar={campos => tocarFila("acta_compromisos", "compromisos", c.id, campos)}
+            {arrastrados.map(c => <Repaso key={c.id} c={c} sePuede={sePuede} tareaHecha={tareaHecha} equipo={equipo}
+              onTocar={campos => tocarCompromiso(c, campos)}
               quien={currentUser} />)}
             <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.45 }}>
               Lo que quede sin tildar sigue pendiente y vuelve a aparecer en la próxima reunión. Si cambió la
@@ -1160,7 +1192,7 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
             para reclamar algo, y lo que la próxima reunión va a traer de vuelta.
           </div>
           {nuevos.map(c => <Compromiso key={c.id} c={c} sePuede={sePuede} equipo={equipo}
-            onTocar={campos => tocarFila("acta_compromisos", "compromisos", c.id, campos)}
+            onTocar={campos => tocarCompromiso(c, campos)}
             onQuitar={() => quitarFila("acta_compromisos", "compromisos", c.id)} quien={currentUser} />)}
           {/* LOS TRES CAMPOS AL AGREGAR, no uno solo.
               Un compromiso sin responsable y sin fecha es una buena intención,
@@ -1736,6 +1768,12 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
       </div>
       {error && <div style={{ fontSize: 12, color: colors.danger, marginBottom: 10 }}>{error}</div>}
 
+      {/* Los compromisos que siguen abiertos en este proyecto, y a quién le
+          toca seguir cada uno. */}
+      {actas.length > 0 && (
+        <Repartir lead={lead} actas={actas} equipo={users.filter(u => u.activo !== false)} quien={currentUser} sePuede={editable} />
+      )}
+
       {!actas.length ? (
         <div style={{ fontSize: 12.5, color: colors.muted, background: colors.surface,
           border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 18, lineHeight: 1.55 }}>
@@ -1806,7 +1844,7 @@ const Chip = ({ estado }) => {
  * pasar. Y si no se hizo, el campo que aparece es el que importa: por qué —eso
  * es lo que después explica un atraso— y para cuándo queda ahora.
  */
-const Repaso = ({ c, sePuede, onTocar, quien, tareaHecha = () => false }) => {
+const Repaso = ({ c, sePuede, onTocar, quien, tareaHecha = () => false, equipo = [] }) => {
   const hecho = c.estado === "cumplido";
   const anulado = c.estado === "anulado";
   const vencido = !hecho && !anulado && c.fecha_limite && c.fecha_limite < hoy();
@@ -1869,6 +1907,7 @@ const Repaso = ({ c, sePuede, onTocar, quien, tareaHecha = () => false }) => {
               estado: e.target.value && e.target.value !== c.fecha_limite ? "reprogramado" : c.estado,
             })}
             style={{ ...inputStyle, width: 142, fontSize: 11.5, padding: "4px 6px", height: 26 }} />
+          <QuienLoSigue c={c} equipo={equipo} sePuede={sePuede} onElegir={onTocar} alto={26} />
         </div>
       )}
       {!hecho && !anulado && !sePuede && c.nota && (
@@ -1877,6 +1916,141 @@ const Repaso = ({ c, sePuede, onTocar, quien, tareaHecha = () => false }) => {
     </div>
   );
 };
+
+/**
+ * QUIÉN SIGUE UN COMPROMISO: alguien del equipo, un tercero, o todavía nadie.
+ *
+ * Con la tarea ya creada no se cambia desde acá: se delega la tarea, que es
+ * donde está ahora.
+ */
+const QuienLoSigue = ({ c, equipo = [], sePuede, onElegir, alto = 28, ancho = 148 }) => {
+  const sigue = quienLoSigue(c);
+  return (
+    <select value={valorDe(c)} disabled={!sePuede || !!c.tarea_id} aria-label="Quién lo sigue"
+      onChange={e => onElegir(decisionDe(e.target.value))}
+      title={c.tarea_id ? "Ya está en Tareas: si cambia de manos, se delega desde ahí"
+        : sigue === "equipo" ? "Recibe su tarea al dar el visto"
+        : sigue === "tercero" ? "Queda en «Espero de otros» de quien lleva el proyecto"
+        : "Elegí quién lo sigue: sin eso, vive solo en el acta"}
+      style={{ ...inputStyle, width: ancho, fontSize: 11, padding: "4px 6px", height: alto,
+        color: sigue === "equipo" ? colors.brand : sigue ? colors.inkSoft : colors.warning,
+        borderColor: sigue ? colors.border : colors.warningBorder }}>
+      <option value="">¿quién lo sigue?</option>
+      <option value="tercero">un tercero</option>
+      <optgroup label="Del equipo">
+        {equipo.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </optgroup>
+    </select>
+  );
+};
+
+/**
+ * LOS COMPROMISOS ABIERTOS DEL PROYECTO, Y A QUIÉN LE TOCA SEGUIR CADA UNO.
+ *
+ * Los que se escribieron antes de que esto existiera no tienen a nadie
+ * elegido: figuran a nombre de «HCARQ» o «DINERS» y no están en la bandeja de
+ * ninguna persona. Acá se reparten una vez. Al elegir, la tarea se crea en el
+ * momento —esto es poner al día lo atrasado—, salvo que el acta siga en
+ * borrador: ahí se crea al dar el visto, como siempre.
+ *
+ * Se cuentan los VIVOS: un compromiso que se arrastró cuatro reuniones es uno,
+ * el de la última acta (ver compromisos.js).
+ */
+function Repartir({ lead, actas, equipo, quien, sePuede }) {
+  const [todos, setTodos] = useState(null);
+  const [ocupado, setOcupado] = useState(null);
+  const [error, setError] = useState("");
+  const [abiertoElPanel, setAbiertoElPanel] = useState(true);
+
+  const cargar = useCallback(async () => { setTodos(await compromisosDelProyecto(actas)); }, [actas]);
+  useEffect(() => { cargar(); }, [cargar]);
+  if (!todos) return null;
+
+  const abiertos = abiertosDeVerdad(todos, actas);
+  const faltan = sinRepartir(todos, actas);
+  if (!abiertos.length) return null;
+  const actaDe = c => actas.find(a => a.id === c.acta_id);
+  const delEquipo = abiertos.filter(c => quienLoSigue(c) === "equipo").length;
+  const deTerceros = abiertos.filter(c => quienLoSigue(c) === "tercero").length;
+
+  async function elegir(c, decision) {
+    setOcupado(c.id); setError("");
+    const e = await decirQuienLoSigue(c, decision);
+    if (e) { setError(e); setOcupado(null); return; }
+    const acta = actaDe(c), decidido = { ...c, ...decision };
+    if (acta && acta.estado !== "borrador" && quienLoSigue(decidido)) {
+      const r = await crearTareaDe(decidido, { acta, lead, quien });
+      if (r.error) setError("Quedó elegido, pero la tarea no se pudo crear: " + r.error);
+    }
+    await cargar();
+    setOcupado(null);
+  }
+  async function cerrar(c, estado) {
+    setOcupado(c.id); setError("");
+    const { error: e } = await guardarFila("acta_compromisos", {
+      id: c.id, estado, cerrado_at: new Date().toISOString(), cerrado_por: quien?.id ?? null, cerrado_nombre: quien?.name || null,
+    });
+    if (e) setError(e);
+    await cargar();
+    setOcupado(null);
+  }
+
+  return (
+    <div style={{ background: colors.surface, border: `1px solid ${faltan.length ? colors.warningBorder : colors.border}`,
+      borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12 }}>
+      <button onClick={() => setAbiertoElPanel(v => !v)}
+        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, textAlign: "left", width: "100%" }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>
+          {abiertos.length} {abiertos.length === 1 ? "compromiso abierto" : "compromisos abiertos"}
+          {faltan.length > 0 && <span style={{ color: colors.warning }}> · {faltan.length} sin decidir quién {faltan.length === 1 ? "lo" : "los"} sigue</span>}
+        </div>
+        <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 2, lineHeight: 1.5 }}>
+          {[delEquipo && `${delEquipo} ${delEquipo === 1 ? "lo sigue" : "los sigue"} el equipo`, deTerceros && `${deTerceros} de terceros`].filter(Boolean).join(" · ")
+            || "Ninguno está en la bandeja de nadie todavía."}
+          {faltan.length > 0 && " Elegí quién sigue cada uno: los del equipo reciben su tarea, y los de terceros quedan en «Espero de otros» de quien lleva el proyecto."}
+        </div>
+      </button>
+      {error && <div style={{ fontSize: 11.5, color: colors.danger, marginTop: 6 }}>{error}</div>}
+
+      {abiertoElPanel && faltan.map(c => {
+        const acta = actaDe(c);
+        const vencido = c.fecha_limite && c.fecha_limite < hoy();
+        const sugerido = quienDelEquipo(c, equipo);
+        // Un acta enviada está trabada: su texto no se toca. Quién lo sigue sí, porque no es parte del documento.
+        const seCierra = sePuede && acta && acta.estado !== "enviada";
+        return (
+          <div key={c.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`, marginTop: 8, paddingTop: 8, display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ flex: "2 1 260px", minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.4, overflowWrap: "anywhere" }}>{c.texto}</div>
+              <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2 }}>
+                Según el acta N° {acta?.numero ?? "?"}: <strong style={{ color: colors.inkSoft }}>{(c.responsable_nombre || "sin responsable").trim()}</strong>
+                {c.fecha_limite && <span style={{ color: vencido ? colors.danger : colors.muted, fontWeight: vencido ? 600 : 400 }}> · para el {dia(c.fecha_limite)}{vencido ? " · vencido" : ""}</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {sugerido && sePuede && (
+                <button disabled={ocupado === c.id} onClick={() => elegir(c, decisionDe(String(sugerido)))}
+                  style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: 14, padding: "3px 10px", fontSize: 11, fontWeight: 600,
+                    color: colors.brand, cursor: "pointer", fontFamily: colors.font }}>
+                  ¿{equipo.find(u => u.id === sugerido)?.name}?
+                </button>
+              )}
+              <QuienLoSigue c={c} equipo={equipo} sePuede={sePuede && ocupado !== c.id} onElegir={d => elegir(c, d)} />
+              {seCierra && (
+                <>
+                  <button disabled={ocupado === c.id} onClick={() => cerrar(c, "cumplido")}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: colors.success, fontSize: 11, fontFamily: colors.font, fontWeight: 600 }}>ya se cumplió</button>
+                  <button disabled={ocupado === c.id} onClick={() => cerrar(c, "anulado")}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, fontSize: 11, fontFamily: colors.font }}>ya no aplica</button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * UN COMPROMISO: lo único del acta que sirve para reclamar algo.
@@ -1913,23 +2087,14 @@ const Compromiso = ({ c, sePuede, onTocar, onQuitar, quien, equipo = [] }) => {
         onChange={e => onTocar({ fecha_limite: e.target.value || null })}
         style={{ ...inputStyle, width: 136, fontSize: 11.5, padding: "4px 6px", height: 28,
           color: vencido ? colors.danger : colors.ink, fontWeight: vencido ? 600 : 400 }} />
-      {/* A QUIÉN DEL EQUIPO SE LE PONE LA TAREA.
-          Quién lo hace no se puede deducir del texto: en un acta real el
-          responsable se escribe "HCARQ", "Especialidades / Eléctrica", "Área
-          Mecánica" —empresas y frentes, no personas— y está bien así, es como
-          se habla en la reunión. Por eso la asignación es aparte y explícita.
-          Vacío quiere decir que lo hace alguien de afuera y no se crea
-          ninguna tarea: una tarea en el tablero de nadie es ruido. */}
-      {equipo.length > 0 && (
-        <select value={c.asignado_a || ""} disabled={!sePuede || !!c.tarea_id}
-          onChange={e => onTocar({ asignado_a: e.target.value ? Number(e.target.value) : null })}
-          title={c.tarea_id ? "Ya tiene su tarea creada" : "Si lo hace alguien del equipo, se le crea la tarea al dar el visto"}
-          style={{ ...inputStyle, width: 124, fontSize: 11, padding: "4px 6px", height: 28,
-            color: c.asignado_a ? colors.brand : colors.muted }}>
-          <option value="">lo hace un externo</option>
-          {equipo.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
-      )}
+      {/* QUIÉN LO SIGUE, que no es lo mismo que quién figura.
+          En un acta real el responsable se escribe "HCARQ", "Especialidades /
+          Eléctrica", "Área Mecánica" —empresas y frentes, no personas— y está
+          bien así, es como se habla en la reunión. Por eso esto va aparte y se
+          ELIGE: alguien del equipo, que recibe su tarea al dar el visto, o un
+          tercero, que queda en «Espero de otros» de quien lleva el proyecto.
+          Sin elegir, el compromiso vive solo en el acta. */}
+      <QuienLoSigue c={c} equipo={equipo} sePuede={sePuede} onElegir={onTocar} />
       <select value={c.estado} disabled={!sePuede}
         onChange={e => onTocar({
           estado: e.target.value,

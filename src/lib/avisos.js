@@ -106,7 +106,9 @@ export function avisosDelTablero({ pipeline = [], compras = [], devueltas = 0, o
     lista.push({
       clave: "actas", modulo: "Actas", vista: "actas", tono: "atencion", cuenta: modulos.actas,
       texto: modulos.actas === 1 ? "compromiso de un acta está vencido" : "compromisos de actas están vencidos",
-      detalle: "",
+      detalle: modulos.actasSinRepartir
+        ? `${modulos.actasSinRepartir} sin decidir quién ${modulos.actasSinRepartir === 1 ? "lo" : "los"} sigue: no están en la bandeja de nadie`
+        : "",
     });
   }
 

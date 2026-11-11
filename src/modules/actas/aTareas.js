@@ -1,62 +1,93 @@
 import { supabase } from "../../lib/supabase";
+import { paraTarea, tareaDelCompromiso, alCerrarLaTarea, quienLoSigue } from "./compromisos.js";
 
-// Del compromiso del acta a la tarea de quien lo tiene que hacer.
+// Del compromiso del acta a la bandeja de quien lo tiene que seguir.
 //
-// Un compromiso vive dentro del acta. El tablero donde la gente mira lo que le
-// toca cada día es otro, y ahí no aparece: "Lizeth queda en pedir la proforma
-// para el viernes" depende de que Lizeth se acuerde, o de que alguien se lo
-// pregunte en la reunión siguiente — que es cuando ya es tarde.
+// Un compromiso vive dentro del acta. La bandeja donde la gente mira lo que le
+// toca cada día es otra, y ahí no aparecía: "Lizeth queda en pedir la proforma
+// para el viernes" dependía de que Lizeth se acordara, o de que alguien se lo
+// preguntara en la reunión siguiente — que es cuando ya es tarde.
 //
 // SE CREAN AL DAR EL VISTO, no antes. Mientras el acta es borrador lo escrito
-// todavía se puede cambiar, y una tarea que aparece y desaparece del tablero
+// todavía se puede cambiar, y una tarea que aparece y desaparece de la bandeja
 // de alguien es peor que ninguna.
 //
-// Y SOLO LAS ASIGNADAS. El proveedor de ascensores y la fiscalización no
-// tienen cuenta acá; una tarea en el tablero de nadie es ruido. Esos
-// compromisos siguen viviendo en el acta, que es donde se les reclama.
+// Y LAS QUE TIENEN QUIÉN LAS SIGA. Si lo sigue alguien del equipo, es su
+// tarea. Si es de un tercero —el cliente, la fiscalización, el proveedor—,
+// nadie del equipo la hace, pero alguien la tiene que reclamar: queda en
+// «Espero de otros» de quien lleva el proyecto. Las que no tienen a nadie
+// elegido siguen viviendo solo en el acta.
+//
+// Las reglas —qué tarea le toca a cada una— están en compromisos.js.
 
-const ESTADO_NUEVO = "en-progreso";
+export { paraTarea };
 
-/** Los que van a convertirse en tarea: asignados y sin una tarea ya creada. */
-export function paraTarea(compromisos = []) {
-  return compromisos.filter(c => c.asignado_a && !c.tarea_id && c.estado !== "cumplido" && c.estado !== "anulado");
+const SIN_173 = "Falta correr la migración 173 en Supabase.";
+const falta = e => /tercero|column|schema cache/i.test(e?.message || "");
+
+/** Crea la tarea de un compromiso y la deja enganchada. @returns { tarea } | { error } | {} si no le toca */
+export async function crearTareaDe(c, { acta, lead, quien }) {
+  const fila = tareaDelCompromiso({ c, acta, lead, quien });
+  if (!fila) return {};
+  // La tabla exige quién la creó: si no hay nadie más, quien abrió el proyecto.
+  if (fila.created_by == null) fila.created_by = lead?.created_by ?? null;
+  const { data, error } = await supabase.from("tasks").insert(fila).select("id").single();
+  if (error) return { error: error.message };
+  await supabase.from("acta_compromisos").update({ tarea_id: data.id }).eq("id", c.id);
+  return { tarea: data };
 }
 
+/** @returns { creadas, delEquipo, deTerceros } o { error, creadas } */
 export async function crearTareas({ compromisos = [], acta, lead, quien }) {
   const van = paraTarea(compromisos);
-  if (!van.length) return { creadas: 0 };
-  const hechas = [];
+  let delEquipo = 0, deTerceros = 0;
   for (const c of van) {
-    const { data, error } = await supabase.from("tasks").insert({
-      title: c.texto.slice(0, 200),
-      lead_id: lead?.id ?? null,
-      assignee_id: c.asignado_a,
-      // Un tipo de los que el tablero ya conoce. "Obra" no existe en la lista
-      // y la tarea aparecía sin tipo, fuera de los filtros con los que la
-      // gente mira su día.
-      type: "Gestión",
-      due_date: c.fecha_limite || null,
-      // Lo urgente del acta es lo que detiene a los demás: entra como alta.
-      priority: c.urgente ? "urgente" : "media",
-      status: ESTADO_NUEVO,
-      // De dónde salió. Sin esto, dentro de un mes nadie sabe por qué está esa
-      // tarea ahí ni con quién discutirla.
-      notes: `Compromiso del acta de reunión N° ${acta.numero}${acta.fecha ? ` del ${acta.fecha}` : ""}`
-        + (c.responsable_nombre ? `\nResponsable según el acta: ${c.responsable_nombre}` : ""),
-      created_by: quien?.id ?? null,
-    }).select("id").single();
-    if (error) return { error: error.message, creadas: hechas.length };
-    await supabase.from("acta_compromisos").update({ tarea_id: data.id }).eq("id", c.id);
-    hechas.push(data.id);
+    const r = await crearTareaDe(c, { acta, lead, quien });
+    if (r.error) return { error: r.error, creadas: delEquipo + deTerceros };
+    if (r.tarea) { if (quienLoSigue(c) === "equipo") delEquipo++; else deTerceros++; }
   }
-  return { creadas: hechas.length };
+  return { creadas: delEquipo + deTerceros, delEquipo, deTerceros };
+}
+
+/**
+ * Cerrar —o reabrir— el compromiso en el acta hace lo mismo con su tarea: no
+ * puede quedar hecho en el acta y pendiente en la bandeja de alguien.
+ */
+export async function cerrarTareaDe(c, estado, quien) {
+  if (!c?.tarea_id) return null;
+  const campos = alCerrarLaTarea(estado, quien?.name || null);
+  let { error } = await supabase.from("tasks").update(campos).eq("id", c.tarea_id);
+  // Sin la migración 172 no existe `descartada`: se cierra igual, sin la marca.
+  if (error && /descartada/.test(error.message)) {
+    const { descartada, ...resto } = campos;
+    ({ error } = await supabase.from("tasks").update(resto).eq("id", c.tarea_id));
+  }
+  return error ? error.message : null;
+}
+
+/** Decir quién sigue un compromiso. @returns el error, si lo hubo */
+export async function decirQuienLoSigue(c, decision) {
+  let { error } = await supabase.from("acta_compromisos").update(decision).eq("id", c.id);
+  // Sin la migración 173 no existe `tercero`. Elegir a alguien del equipo no
+  // la necesita: se guarda igual. Elegir «un tercero» sí, y se dice.
+  if (error && falta(error) && !decision.tercero) {
+    ({ error } = await supabase.from("acta_compromisos").update({ asignado_a: decision.asignado_a }).eq("id", c.id));
+  }
+  return error ? (falta(error) ? SIN_173 : error.message) : null;
+}
+
+/** Todos los compromisos de las actas de un proyecto, para saber cuáles siguen abiertos de verdad. */
+export async function compromisosDelProyecto(actas = []) {
+  if (!actas.length) return [];
+  const { data, error } = await supabase.from("acta_compromisos").select("*").in("acta_id", actas.map(a => a.id)).order("orden");
+  return error ? [] : data || [];
 }
 
 /**
  * Qué pasó con las tareas que salieron de este acta.
  *
  * Es lo que deja que el repaso de la próxima reunión diga "ya se hizo" sin que
- * nadie lo marque dos veces: el que la hizo la cerró en su tablero, que es
+ * nadie lo marque dos veces: el que la hizo la cerró en su bandeja, que es
  * donde trabaja, y el acta se entera sola.
  */
 export async function estadoDeTareas(compromisos = []) {

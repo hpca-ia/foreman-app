@@ -4,6 +4,7 @@ import { cuadreDeOrdenes } from "../modules/controlObra/cuadreDeOrdenes.js";
 import { leReboto } from "../modules/controlObra/entregaDeOrdenes.js";
 import { ordenesEsperando } from "../modules/leads/enMarcha.js";
 import { hoyISO, diasEntre } from "../modules/leads/pipeline.js";
+import { vencidos, sinRepartir } from "../modules/actas/compromisos.js";
 
 // LO QUE LOS MÓDULOS TIENEN PARA AVISAR.
 //
@@ -23,17 +24,25 @@ const de = (lista, campo, id) => lista.filter(x => String(x[campo]) === String(i
  * @param obras    las obras a las que entra esta persona: [{ id, nombre, lead_id, presupuesto_id }]
  * @param conActas si ve las actas
  * @returns { ordenes: { cuantas, dias, vencidas, objetadas }, rebotadas, alquileres,
- *            noCuadran: [nombre de obra], ordenesMal: { cuantas, obras }, actas }
+ *            noCuadran: [nombre de obra], ordenesMal: { cuantas, obras },
+ *            actas, actasSinRepartir }
  */
 export async function cargarAvisosDeModulos({ obras = [], conActas = false } = {}) {
   const hoy = hoyISO();
-  const vacio = { ordenes: { cuantas: 0, dias: 0, vencidas: 0, objetadas: 0 }, rebotadas: 0, alquileres: 0, noCuadran: [], ordenesMal: { cuantas: 0, obras: [] }, actas: 0 };
+  const vacio = { ordenes: { cuantas: 0, dias: 0, vencidas: 0, objetadas: 0 }, rebotadas: 0, alquileres: 0, noCuadran: [], ordenesMal: { cuantas: 0, obras: [] }, actas: 0, actasSinRepartir: 0 };
   const r = { ...vacio };
 
   if (conActas) {
-    // Un compromiso de un acta que pasó su fecha y nadie cerró.
-    const vencidos = await filas(supabase.from("acta_compromisos").select("id").in("estado", ["pendiente", "reprogramado"]).lt("fecha_limite", hoy));
-    r.actas = vencidos.length;
+    // Los compromisos que pasaron su fecha y nadie cerró. SE CUENTAN LOS VIVOS:
+    // cada reunión copia los pendientes de la anterior, y contar todas las
+    // filas «pendientes» cuenta el mismo compromiso una vez por reunión. Así
+    // salió un aviso de 37 vencidos cuando había 9.
+    const [compromisos, actas] = await Promise.all([
+      filas(supabase.from("acta_compromisos").select("id,acta_id,viene_de,estado,fecha_limite,asignado_a,tercero,tarea_id")),
+      filas(supabase.from("obra_actas").select("id,numero")),
+    ]);
+    r.actas = vencidos(compromisos, actas, hoy).length;
+    r.actasSinRepartir = sinRepartir(compromisos, actas).length;
   }
   if (!obras.length) return r;
 

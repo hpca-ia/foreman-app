@@ -6,6 +6,7 @@ import { enviarCorreo, plantilla, esc } from "./_correo.js";
 import { json, traer } from "./_pipeline.js";
 import { armarResumen, hoyISO } from "./_resumen.js";
 import { avisosDelPipeline } from "./_avisosDelPipeline.js";
+import { vencidos as compromisosVencidos } from "./_compromisos.js";
 
 const COLOR = { gestion: "#B45309", tarea: "#0F3D3E", reunion: "#6D28D9" };
 const NOMBRE = { gestion: "Gestión", tarea: "Tarea", reunion: "Reunión" };
@@ -326,7 +327,14 @@ export async function mandarResumen(soloPara = null) {
   // Los compromisos de actas que pasaron su fecha y nadie cerró.
   let actasVencidas = 0;
   try {
-    actasVencidas = (await json(await rest(`acta_compromisos?estado=in.(pendiente,reprogramado)&fecha_limite=lt.${hoyISO()}&select=id`))).length;
+    // Los VIVOS: un compromiso que se arrastra de reunión en reunión es uno
+    // solo, el de la última acta. Contar todas las filas «pendientes» dio 37
+    // cuando había 9.
+    const [compromisos, actas] = await Promise.all([
+      json(await rest("acta_compromisos?select=id,acta_id,viene_de,estado,fecha_limite")),
+      json(await rest("obra_actas?select=id,numero")),
+    ]);
+    actasVencidas = compromisosVencidos(compromisos, actas, hoyISO()).length;
   } catch { /* el resumen sale igual */ }
 
   const enviados = [];
