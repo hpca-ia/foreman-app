@@ -1,13 +1,17 @@
 import { supabase } from "./supabase";
 
 // Toda obra es un proyecto: la que nació de una oportunidad y la que entró
-// directo con su Excel. Si una obra no tiene su proyecto en el pipeline, la
-// oficina termina mirando dos listas distintas de lo mismo, y la historia de
-// cómo llegó ese trabajo se pierde justo cuando empieza a costar plata.
+// directo con su Excel. De su proyecto cuelgan sus tareas, sus compras, su
+// libro y sus actas; una obra sin proyecto no tiene dónde colgarlos, y la
+// historia de cómo llegó ese trabajo se pierde justo cuando empieza a costar
+// plata.
+//
+// Un proyecto con obra es un proyecto APROBADO: no está en el pipeline, que es
+// solo lo que se persigue.
 //
 // Y al revés duele más: crear un proyecto nuevo para una obra que YA venía de
-// un lead deja el pipeline con el mismo trabajo dos veces —el lead viejo con
-// toda su historia, y un proyecto recién nacido con el mismo nombre—. Por eso
+// un lead deja el mismo trabajo dos veces —el lead viejo con toda su historia,
+// y un proyecto recién nacido con el mismo nombre—. Por eso
 // acá primero se busca de quién viene la obra, por los tres caminos que
 // existen, y solo se crea cuando de verdad no viene de ningún lado.
 
@@ -48,47 +52,46 @@ export async function asegurarProyecto(obra, usuario) {
   if (lead && yaEstaba) return lead;
 
   if (lead) {
-    // El lead se gana y se pone a ejecutar. El túnel no se toca acá: cambiarlo
-    // le rearma las etapas, y eso lo decide él en el pipeline, no un botón de
-    // Control de Obra.
+    // El lead se aprueba: sale del pipeline y deja de esperar al cliente. Su
+    // tipo no se toca acá.
     await supabase.from("leads").update({
       obra_id: obra.id,
-      resultado: "ganado",
+      resultado: "ganado", es_lead: false,
       actualizado_at: new Date().toISOString(),
     }).eq("id", lead.id);
+    // Aparte, porque sin la migración 171 esas columnas no existen y no puede
+    // ser eso lo que impida enganchar la obra.
+    await supabase.from("leads").update({ espera_desde: null, espera_que: null, recordar_el: null }).eq("id", lead.id);
     await supabase.from("lead_movimientos").insert({
       lead_id: lead.id, tipo: "nota", automatico: true,
       detalle: `Se aprobó el presupuesto y entró a ejecución como obra “${obra.nombre}”.`,
       autor_id: usuario?.id ?? null, autor_nombre: usuario?.name || null,
     });
-    return { ...lead, obra_id: obra.id, resultado: "ganado" };
+    return { ...lead, obra_id: obra.id, resultado: "ganado", es_lead: false };
   }
 
-  // No viene de ningún lado: una obra que entró directo con su Excel.
+  // No viene de ningún lado: una obra que entró directo con su Excel. Nace
+  // aprobada —ya se está construyendo— y por eso no aparece en el pipeline.
   const { data: nuevo, error } = await supabase.from("leads").insert({
     nombre: obra.nombre,
     contacto: obra.cliente_nombre || null,
-    etapa: "ejecucion",
+    tunel: "construccion", etapa: "ejecucion",
+    resultado: "ganado", es_lead: false,
     obra_id: obra.id,
     created_by: usuario?.id ?? null,
     actualizado_at: new Date().toISOString(),
   }).select().single();
   if (error || !nuevo) return null;
 
-  // Nace con su etapa en curso: el proyecto ya está en ejecución, no arrancando.
-  await supabase.from("lead_etapas").insert({
-    lead_id: nuevo.id, etapa_id: "ejecucion", orden: 1, estado: "en_curso",
-    responsable_id: usuario?.id ?? null, responsable_nombre: usuario?.name || null,
-  });
   await supabase.from("lead_movimientos").insert({
     lead_id: nuevo.id, tipo: "nota", automatico: true,
-    detalle: "Entró al pipeline en ejecución: viene de Control de Obra.",
+    detalle: "Proyecto aprobado: viene de Control de Obra.",
     autor_id: usuario?.id ?? null, autor_nombre: usuario?.name || null,
   });
   return nuevo;
 }
 
-/** Las obras que todavía no tienen proyecto en el pipeline. */
+/** Las obras que todavía no tienen su proyecto. */
 export async function obrasSueltas() {
   const [{ data: obras }, { data: leads }] = await Promise.all([
     supabase.from("obras").select("id,nombre,cliente_nombre,lead_id,presupuesto_id").order("created_at", { ascending: false }),

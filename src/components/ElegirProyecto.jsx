@@ -89,7 +89,7 @@ export default function ElegirProyecto({
               style={{ ...fila, color: colors.ink, background: String(p.id) === String(value) ? colors.bg : "#fff" }}>
               {p.nombre}
               <span style={{ fontSize: 10.5, color: colors.muted }}>
-                {" · "}{p.resultado === "ganado" ? "proyecto aprobado" : (p.tunel || "lead") === "lead" ? "lead" : "en curso"}
+                {" · "}{p.resultado === "ganado" ? "proyecto aprobado" : "lead"}
               </span>
             </div>
           ))}

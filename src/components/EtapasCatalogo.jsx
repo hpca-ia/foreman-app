@@ -1,29 +1,28 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, ChevronUp, ChevronDown, Trash2, ListChecks, X } from "lucide-react";
-import { TUNELES } from "../modules/leads/tubo";
+import { Plus, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
+import { TIPOS, ORDEN_DE_TIPOS } from "../modules/leads/pipeline";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
 import { inputStyle } from "./ui/Input";
 import Button from "./ui/Button";
 
-// La ruta estándar de la oficina: por dónde pasa un proyecto, en qué orden y
-// cuáles son sus puntos de revisión. Cada proyecto arma después su propio
-// camino con estas etapas, pero esta lista es la vara con la que se mide si
-// avanza o si volvió atrás. Por eso se edita acá y no en el código.
+// LAS ETAPAS DEL PIPELINE, POR TIPO DE LEAD.
+//
+// Por dónde pasa un lead mientras se persigue. No todos pasan por lo mismo: uno
+// de Diseño va del plan masa a la propuesta de honorarios; uno de Construcción,
+// de las ingenierías al presupuesto. Por eso cada tipo tiene su lista, y es la
+// que ofrece el desplegable de etapa de cada lead.
+//
+// Se edita acá y no en el código porque la define la oficina. Las etapas de
+// EJECUTAR un trabajo —obra gris, acabados, entrega— no van: lo aprobado sale
+// del pipeline y se lleva en Control.
 
-const clave = nombre => nombre.normalize("NFKD").replace(/[̀-ͯ]/g, "")
+const clave = nombre => nombre.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
   .toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30);
 
 export default function EtapasCatalogo() {
   const [etapas, setEtapas] = useState([]);
-  // Cada tubo tiene sus propias etapas: las de Arquitectura no son las de
-  // Construcción, y las de un lead pasan sin orden.
-  const [tubo, setTubo] = useState("arquitectura");
-  // El checklist de fábrica de una etapa: lo que normalmente hay que tener
-  // para cerrar ese hito. Después cada proyecto lo ajusta a lo suyo.
-  const [abierta, setAbierta] = useState(null);
-  const [plantilla, setPlantilla] = useState([]);
-  const [punto, setPunto] = useState("");
+  const [tipo, setTipo] = useState(ORDEN_DE_TIPOS[0]);
   const [nombre, setNombre] = useState("");
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -36,34 +35,14 @@ export default function EtapasCatalogo() {
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const cargarPlantilla = useCallback(async etapaId => {
-    if (!etapaId) { setPlantilla([]); return; }
-    const { data } = await supabase.from("pipeline_etapa_items").select("*").eq("etapa_id", etapaId).eq("activo", true).order("orden");
-    setPlantilla(data || []);
-  }, []);
-  useEffect(() => { cargarPlantilla(abierta); }, [abierta, cargarPlantilla]);
-
-  async function agregarPunto() {
-    const t = punto.trim();
-    if (!t || !abierta) return;
-    await supabase.from("pipeline_etapa_items").insert({ etapa_id: abierta, texto: t, orden: plantilla.length + 1 });
-    setPunto("");
-    cargarPlantilla(abierta);
-  }
-  async function quitarPunto(id) {
-    await supabase.from("pipeline_etapa_items").delete().eq("id", id);
-    cargarPlantilla(abierta);
-  }
-
   async function agregar() {
     const n = nombre.trim();
     if (!n) return;
     setOcupado(true); setError("");
-    const id = clave(n);
-    if (etapas.some(e => e.id === `${tubo.slice(0, 3)}_${id}` || (e.id === id && (e.tunel || "lead") === tubo))) { setError("Ya existe una etapa con ese nombre en este tubo."); setOcupado(false); return; }
-    const delTubo = etapas.filter(e => (e.tunel || "lead") === tubo);
-    const orden = Math.max(0, ...delTubo.filter(e => !e.cierra).map(e => e.orden || 0)) + 5;
-    const { error: e } = await supabase.from("pipeline_etapas").insert({ id: `${tubo.slice(0, 3)}_${id}`, nombre: n, orden, color: "#4A7C8C", tunel: tubo });
+    const id = `${TIPOS[tipo].prefijo}_${clave(n)}`;
+    if (etapas.some(e => e.id === id)) { setError("Ya existe una etapa con ese nombre en este tipo."); setOcupado(false); return; }
+    const orden = Math.max(0, ...etapas.filter(e => e.tunel === tipo).map(e => e.orden || 0)) + 10;
+    const { error: e } = await supabase.from("pipeline_etapas").insert({ id, nombre: n, orden, color: "#4A7C8C", tunel: tipo, principal: true });
     if (e) setError("No se pudo agregar: " + e.message);
     setNombre(""); setOcupado(false);
     await cargar();
@@ -75,25 +54,30 @@ export default function EtapasCatalogo() {
   }
 
   async function mover(fila, dir) {
-    const lista = etapas.filter(e => (e.tunel || "lead") === (fila.tunel || "lead"));
+    const lista = etapas.filter(e => e.tunel === fila.tunel);
     const i = lista.findIndex(e => e.id === fila.id);
     const otro = lista[i + dir];
     if (!otro) return;
-    await Promise.all([
-      supabase.from("pipeline_etapas").update({ orden: otro.orden }).eq("id", fila.id),
-      supabase.from("pipeline_etapas").update({ orden: fila.orden }).eq("id", otro.id),
-    ]);
+    // Si dos tienen el mismo número, intercambiarlos no mueve nada: se
+    // renumera la lista entera en el orden nuevo.
+    const nueva = [...lista];
+    [nueva[i], nueva[i + dir]] = [nueva[i + dir], nueva[i]];
+    await Promise.all(nueva.map((e, k) => supabase.from("pipeline_etapas").update({ orden: (k + 1) * 10 }).eq("id", e.id)));
     await cargar();
   }
 
-  // Una etapa que algún proyecto usó no se borra: se apaga. Borrarla dejaría
-  // proyectos apuntando a algo que ya no existe.
+  // Una etapa en la que hay algún lead, o que alguna tarea lleva de etiqueta,
+  // no se borra: se apaga. Borrarla dejaría leads y tareas apuntando a algo
+  // que ya no tiene nombre.
   async function quitar(fila) {
     setOcupado(true); setError("");
-    const { count } = await supabase.from("lead_etapas").select("id", { count: "exact", head: true }).eq("etapa_id", fila.id);
-    if (count) {
+    const [{ count: enLeads }, { count: enTareas }] = await Promise.all([
+      supabase.from("leads").select("id", { count: "exact", head: true }).eq("etapa", fila.id),
+      supabase.from("tasks").select("id", { count: "exact", head: true }).eq("etapa_id", fila.id),
+    ]);
+    if (enLeads || enTareas) {
       await guardar(fila, { activa: false });
-      setError(`"${fila.nombre}" está en uso en ${count} ${count === 1 ? "proyecto" : "proyectos"}: se apagó en vez de borrarse.`);
+      setError(`"${fila.nombre}" está en uso (${[enLeads ? `${enLeads} ${enLeads === 1 ? "lead" : "leads"}` : "", enTareas ? `${enTareas} ${enTareas === 1 ? "tarea" : "tareas"}` : ""].filter(Boolean).join(" y ")}): se apagó en vez de borrarse.`);
     } else {
       await supabase.from("pipeline_etapas").delete().eq("id", fila.id);
     }
@@ -106,76 +90,55 @@ export default function EtapasCatalogo() {
   }
 
   const mini = { ...inputStyle, padding: "5px 8px", fontSize: 12 };
-  const visibles = etapas.filter(e => (e.tunel || "lead") === tubo);
+  // Las apagadas quedan al fondo: siguen ahí porque algún lead o tarea vieja
+  // las nombra, pero ya no se ofrecen.
+  const visibles = etapas.filter(e => e.tunel === tipo).sort((a, b) => (a.activa === false) - (b.activa === false) || a.orden - b.orden);
 
   return (
     <div>
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 10, lineHeight: 1.6 }}>
-        Por dónde pasa un proyecto, en orden, y qué hay que tener para cerrar cada hito.
-        Arquitectura y Construcción van en orden; un lead pasa sus etapas cuando pasan.
-        Cada proyecto ajusta después su propio checklist sin tocar esta plantilla.
+        Por dónde pasa un lead mientras se persigue, según su tipo. Es la lista que ofrece el desplegable de etapa de cada
+        lead, en este orden. Un lead no está obligado a recorrerlas todas ni en fila: se elige la que corresponde.
       </div>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-        {Object.entries(TUNELES).map(([id, t]) => (
-          <button key={id} onClick={() => { setTubo(id); setAbierta(null); }}
-            style={{ border: `1px solid ${tubo === id ? colors.ink : colors.border}`, background: tubo === id ? colors.ink : "#fff",
-              color: tubo === id ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "5px 13px", fontSize: 12, fontWeight: 600,
+        {ORDEN_DE_TIPOS.map(id => (
+          <button key={id} onClick={() => { setTipo(id); setError(""); }}
+            style={{ border: `1px solid ${tipo === id ? colors.ink : colors.border}`, background: tipo === id ? colors.ink : "#fff",
+              color: tipo === id ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "5px 13px", fontSize: 12, fontWeight: 600,
               cursor: "pointer", fontFamily: colors.font }}>
-            {t.label}
+            {TIPOS[id].label}
           </button>
         ))}
       </div>
 
       <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, marginBottom: 10 }}>
         {visibles.map((e, i) => (
-          <div key={e.id} style={{ display: "grid", gridTemplateColumns: "16px 1fr 70px 76px 22px 22px", gap: 8, alignItems: "center", padding: "4px 0", opacity: e.activa === false ? 0.5 : 1 }}>
+          <div key={e.id} style={{ display: "grid", gridTemplateColumns: "16px 1fr 76px 22px", gap: 8, alignItems: "center", padding: "4px 0", opacity: e.activa === false ? 0.5 : 1 }}>
             <div style={{ display: "flex", flexDirection: "column" }}>
               <button onClick={() => mover(e, -1)} disabled={i === 0} style={flechita}><ChevronUp size={10} /></button>
               <button onClick={() => mover(e, 1)} disabled={i === visibles.length - 1} style={flechita}><ChevronDown size={10} /></button>
             </div>
             <input value={e.nombre} onChange={ev => guardar(e, { nombre: ev.target.value })} style={mini} />
-            <label style={casilla} title="Se puede poner varias veces en el mismo proyecto, como la reunión con cliente">
-              <input type="checkbox" checked={!!e.repetible} onChange={ev => guardar(e, { repetible: ev.target.checked })} /> repetible
-            </label>
-            <label style={casilla} title="Apagada deja de ofrecerse en los proyectos nuevos">
+            <label style={casilla} title="Apagada deja de ofrecerse en el desplegable">
               <input type="checkbox" checked={e.activa !== false} onChange={ev => guardar(e, { activa: ev.target.checked })} /> activa
             </label>
-            <button onClick={() => setAbierta(abierta === e.id ? null : e.id)} title="El checklist de fábrica de este hito"
-              style={{ background: "none", border: "none", color: abierta === e.id ? colors.ink : colors.muted, cursor: "pointer", display: "flex", padding: 2 }}>
-              <ListChecks size={12} />
-            </button>
-            <button onClick={() => quitar(e)} disabled={ocupado} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}>
+            <button onClick={() => quitar(e)} disabled={ocupado} title="Quitar"
+              style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}>
               <Trash2 size={11} />
             </button>
           </div>
         ))}
-        {abierta && visibles.some(e => e.id === abierta) && (
-          <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: 10, marginTop: 6 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, marginBottom: 6 }}>
-              Checklist de fábrica · {visibles.find(e => e.id === abierta)?.nombre}
-            </div>
-            {plantilla.map(p => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", fontSize: 12, color: colors.inkSoft }}>
-                <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>• {p.texto}</span>
-                <button onClick={() => quitarPunto(p.id)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><X size={12} /></button>
-              </div>
-            ))}
-            {!plantilla.length && <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 6 }}>Sin puntos todavía. Lo que pongas acá aparece sugerido en cada proyecto nuevo.</div>}
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <input value={punto} onChange={ev => setPunto(ev.target.value)} onKeyDown={ev => ev.key === "Enter" && agregarPunto()}
-                placeholder="Ej: Planos aprobados por el cliente" style={{ ...mini, flex: 1 }} />
-              <Button variant="outline" size="sm" onClick={agregarPunto} disabled={!punto.trim()}><Plus size={12} /></Button>
-            </div>
-          </div>
-        )}
-        {visibles.length === 0 && <div style={{ fontSize: 12, color: colors.muted }}>Este tubo todavía no tiene etapas.</div>}
+        {visibles.length === 0 && <div style={{ fontSize: 12, color: colors.muted }}>Este tipo todavía no tiene etapas.</div>}
       </div>
 
       <div style={{ display: "flex", gap: 6 }}>
         <input value={nombre} onChange={e => setNombre(e.target.value)} onKeyDown={e => e.key === "Enter" && agregar()}
-          placeholder={`Nueva etapa de ${TUNELES[tubo].label}`} style={{ ...mini, flex: 1 }} />
+          placeholder={`Nueva etapa de ${TIPOS[tipo].label}`} style={{ ...mini, flex: 1 }} />
         <Button variant="primary" size="sm" onClick={agregar} disabled={!nombre.trim() || ocupado}><Plus size={12} /> Agregar</Button>
+      </div>
+      <div style={{ fontSize: 11, color: colors.muted, marginTop: 8, lineHeight: 1.5 }}>
+        Aprobado y Perdido no son etapas: son las dos salidas del pipeline, y están al final del desplegable de cada lead.
       </div>
       {error && <div style={{ fontSize: 11, color: colors.warning, marginTop: 8 }}>{error}</div>}
     </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { ListTodo, ClipboardList, ShoppingCart } from "lucide-react";
+import { ListTodo } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
@@ -20,11 +20,13 @@ import AIBriefing from "./components/AIBriefing";
 import TarjetaTarea from "./components/TarjetaTarea";
 import TareasListaMovil from "./components/TareasListaMovil";
 import AvisoTareas from "./components/AvisoTareas";
+import PanelAvisos from "./components/PanelAvisos";
+import { avisosDelTablero } from "./lib/avisos";
+import { avisosDelPipeline, esMiAviso } from "./modules/leads/pipeline";
 import TareasTabla from "./components/TareasTabla";
 import TareasKanban from "./components/TareasKanban";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
-import { alDiaElHito } from "./modules/leads/tubo";
 import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import Header from "./components/Header";
@@ -137,18 +139,26 @@ export default function App() {
   const [misObs, setMisObs] = useState([]);
   const [misCompras, setMisCompras] = useState([]);
   const tienePipeline = Object.keys(leadsPorId).length > 0;
+  // Los proyectos de la oficina: los que se persiguen y los aprobados. Las
+  // tareas se cuelgan de ahí igual que de los proyectos de Ajustes, para que
+  // no haya dos listas con el mismo nombre y haya que adivinar cuál elegir.
+  //
+  // Vienen con su etapa y con si esperan al cliente: de ahí salen los avisos
+  // del pipeline. Si esas columnas todavía no existen (migración 171) se
+  // traen sin ellas: los nombres de los proyectos no pueden depender de eso.
+  const cargarLeads = useCallback(async () => {
+    const base = "id,nombre,tunel,es_lead,resultado,color,created_by,responsable_id,obra_id";
+    let { data, error } = await supabase.from("leads").select(`${base},etapa,espera_desde,espera_que,recordar_el`);
+    if (error) ({ data, error } = await supabase.from("leads").select(base));
+    const filas = error ? [] : data || [];
+    setLeadsPorId(Object.fromEntries(filas.map(l => [l.id, l.nombre])));
+    setProyectosPipeline(filas.filter(l => l.resultado !== "perdido"));
+  }, []);
+  // Al volver al tablero se traen de nuevo: un lead que se movió en el
+  // pipeline tiene que dejar de avisar acá sin recargar la página.
+  useEffect(() => { if (usuario && vistaPedida === "tareas") cargarLeads(); }, [usuario, vistaPedida, cargarLeads]);
   useEffect(() => {
     if (!usuario) return;
-    // El pipeline es la lista de proyectos de la oficina: los que se persiguen
-    // y los que se están haciendo. Las tareas se cuelgan de ahí igual que de
-    // los proyectos de Ajustes, para que no haya dos listas con el mismo
-    // nombre y haya que adivinar cuál elegir.
-    supabase.from("leads").select("id,nombre,tunel,es_lead,resultado,color,created_by,responsable_id,obra_id")
-      .then(({ data, error }) => {
-        const filas = error ? [] : data || [];
-        setLeadsPorId(Object.fromEntries(filas.map(l => [l.id, l.nombre])));
-        setProyectosPipeline(filas.filter(l => l.resultado !== "perdido"));
-      });
     // Quién entra a cada proyecto del pipeline: es lo que antes decían los
     // miembros del proyecto de Ajustes.
     // Quién entra a cada proyecto y con qué nivel: ver o editar.
@@ -255,10 +265,8 @@ export default function App() {
     const borrada = tareas.find(t => t.id === id);
     const { error } = await supabase.from("tasks").delete().eq("id", id);
     if (error) { alert("No se pudo borrar: " + error.message); return false; }
-    // Si era de una etapa de un proyecto, la etapa se entera: es la misma
-    // tarea que se veía ahí, y con ella de menos puede que el hito ya esté
-    // completo. No hay ningún vínculo que cortar: no hay otra fila.
-    if (borrada?.lead_etapa_id) await alDiaElHito(borrada.lead_etapa_id, usuario);
+    // Si era de un proyecto, allá deja de verse sola: es la misma fila. No
+    // hay ningún vínculo que cortar ni etapa que poner al día.
     setTareas(prev => prev.filter(t => t.id !== id));
     return true;
   }
@@ -301,11 +309,8 @@ export default function App() {
     }
     if (error) { console.error("Error updating status:", error); fetchTareas(); return; }
 
-    // Si la tarea es de una etapa de un proyecto, la etapa se pone al día: es
-    // la misma fila que se ve allá, así que no hay nada que ir a marcar. Antes
-    // había una «actividad» gemela que se tildaba desde acá, y solo al cerrar:
-    // reabrir la tarea dejaba la actividad hecha.
-    if (tarea?.lead_etapa_id) await alDiaElHito(tarea.lead_etapa_id, usuario);
+    // Si la tarea es de un proyecto, allá se ve cerrada sin hacer nada más:
+    // es la misma fila. Y si era su próximo paso, deja de serlo.
 
     // Al completarla, las que la estaban esperando se destraban solas.
     if (estado === "listo") {
@@ -558,6 +563,18 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     if (c.estado === "aprobada") return leToca("compras.gestionar") || !hayQuienCompre;
     return c.solicitante_id === usuario.id;        // requiere_info: se la devolvieron
   });
+  // LOS AVISOS: todo lo activo que pide que esta persona haga algo. Del
+  // pipeline, los leads a los que llega; cada quien ve los suyos y el Director
+  // los de toda la oficina. Es la misma regla que arma el correo de la mañana.
+  const avisos = avisosDelTablero({
+    pipeline: verPipeline
+      ? avisosDelPipeline({ leads: proyectosPipeline.filter(l => nivelProyecto(l.id)), tareas })
+          .filter(a => esMiAviso(a, usuario.id, entraATodo))
+      : [],
+    compras: puede("compras.ver") ? comprasQueMeTocan : [],
+    devueltas: puede("compras.ver") ? comprasQueMeTocan.filter(volvioAlVisto).length : 0,
+    observaciones: puede("observaciones.ver") ? misObs : [],
+  });
   // El nivel de esta persona en el proyecto de una tarea. Las de los proyectos
   // viejos de Ajustes se resuelven por sus miembros, mientras convivan.
   const nivelDeTarea = t => {
@@ -658,61 +675,17 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
 
         <div className="app-content" style={{ flex: 1, overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
           {puede("tareas.ver") && vista === "tareas" && (
-            <>
+            <div className={avisos.length ? "tablero-con-avisos" : undefined}>
+            <div style={{ minWidth: 0 }}>
               {/* Lo primero de la pantalla y para todos los roles: antes las
                   herramientas de NOVA se comían el tope y una tarea vencida
                   aparecía cuarta, debajo del pliegue en el teléfono. */}
               <AvisoTareas tasks={paraAvisar} filtro={filtro} onFiltrar={setFiltro} />
 
-              {/* Las observaciones no son tareas y no entran al tablero: una
-                  observación es un defecto, no un encargo, y mezclarlas haría
-                  que alguien la tilde sin mirar la pared. Pero tienen que
-                  recordarse, o el que las tiene encima se entera por WhatsApp.
-                  Una línea, con lo urgente adelante, que lleva al módulo. */}
-              {/* Lo mismo para compras: lo que te devolvieron y lo que te
-                  toca destrabar. El correo ya avisó una vez; esto está cada
-                  vez que entrás, que es cuando se puede hacer algo. */}
-              {comprasQueMeTocan.length > 0 && puede("compras.ver") && (
-                <button onClick={() => setVista("compras")}
-                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 8,
-                    padding: "9px 14px", marginBottom: 12, background: colors.brandSoft,
-                    border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
-                    fontSize: 13, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
-                  <ShoppingCart size={15} color={colors.brand} />
-                  <span>
-                    <strong style={{ color: colors.ink }}>{comprasQueMeTocan.length}</strong>{" "}
-                    {comprasQueMeTocan.length === 1 ? "compra espera" : "compras esperan"} por vos
-                    {/* Cuántas de esas volvieron después de aprobadas. Sin
-                        esto, el que aprueba ve "sigue pendiente" después de
-                        que compras la devolvió y entiende que devolverla no
-                        hizo nada — cuando lo que hizo fue mandársela a él. */}
-                    {comprasQueMeTocan.filter(volvioAlVisto).length > 0 && (
-                      <span style={{ color: colors.warning, fontWeight: 600 }}>
-                        {" "}· {comprasQueMeTocan.filter(volvioAlVisto).length} que compras te devolvió
-                      </span>
-                    )}
-                  </span>
-                </button>
-              )}
-
-              {misObs.length > 0 && puede("observaciones.ver") && (
-                <button onClick={() => setVista("observaciones")}
-                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 8,
-                    padding: "9px 14px", marginBottom: 12, background: colors.warningSoft,
-                    border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd,
-                    fontSize: 13, color: colors.inkSoft, cursor: "pointer", fontFamily: colors.font }}>
-                  <ClipboardList size={15} color={colors.warning} />
-                  <span>
-                    Tenés <strong style={{ color: colors.ink }}>{misObs.length}</strong>{" "}
-                    {misObs.length === 1 ? "observación de obra" : "observaciones de obra"} para arreglar
-                    {misObs.some(o => o.prioridad === "urgente") && (
-                      <strong style={{ color: colors.danger }}>
-                        {" "}· {misObs.filter(o => o.prioridad === "urgente").length} urgente{misObs.filter(o => o.prioridad === "urgente").length === 1 ? "" : "s"}
-                      </strong>
-                    )}
-                  </span>
-                </button>
-              )}
+              {/* Lo que no es tarea pero hay que recordarlo —una compra que
+                  espera tu visto, una observación de obra, un lead al que hay
+                  que insistirle— ya no son líneas sueltas acá arriba: están en
+                  el panel de Avisos, al costado. */}
 
               {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
                   Solo cierra tareas que esa persona puede cambiar. */}
@@ -803,7 +776,9 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
                   </div>
                 </>
               )}
-            </>
+            </div>
+            <PanelAvisos avisos={avisos} onIr={setVista} />
+            </div>
           )}
 
           <Suspense fallback={<Cargando />}>

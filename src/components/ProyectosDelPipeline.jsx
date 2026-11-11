@@ -7,7 +7,7 @@ import { fusionarLead, duplicadosProbables } from "../lib/fusionarLead";
 import QueVeEstaPersona from "./QueVeEstaPersona";
 import ProyectosRepetidos from "./ProyectosRepetidos";
 import { repararCadena, engancharAlProyecto } from "../lib/cadena";
-import { TUNELES, esProyecto } from "../modules/leads/tubo";
+import { TIPOS, tipoDe, esProyecto } from "../modules/leads/pipeline";
 import { AREAS_PROYECTO, NIVELES, filaDeAcceso, sinNingunAcceso } from "../lib/acceso";
 
 // Los proyectos, de verdad: los del pipeline.
@@ -257,7 +257,7 @@ export default function ProyectosDelPipeline({ users = [], permisos = {}, permis
           <div style={{ fontSize: 10, color: colors.muted, marginBottom: 6 }}>{explicacion}</div>
           {!grupo.length && <div style={{ fontSize: 11, color: colors.muted, paddingBottom: 4 }}>Ninguno por ahora.</div>}
           {grupo.map(l => {
-        const tubo = TUNELES[l.tunel || "lead"] || TUNELES.lead;
+        const tubo = TIPOS[tipoDe(l)] || { label: "Sin tipo", color: "#8B92A5" };
         const suyos = accesos[l.id] || {};
         const propios = presupuestos.filter(p => p.lead_id === l.id);
         const editando = abierto === l.id;

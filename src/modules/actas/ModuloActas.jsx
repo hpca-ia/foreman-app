@@ -15,6 +15,7 @@ import { repetidos, comoQuedan, correosCompartidos, cuantosDeVerdad } from "./re
 import { armarActa } from "./novaActa";
 import { revisarActa } from "./revisarActa";
 import { crearTareas, paraTarea, estadoDeTareas, yaSeHizo } from "./aTareas";
+import { esProyecto } from "../leads/pipeline";
 
 // Las actas de reunión de obra.
 //
@@ -71,8 +72,10 @@ export default function ModuloActas({ currentUser, users = [], puede, nivelProye
   });
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id").order("nombre").then(({ data }) => {
-      setProyectos((data || []).filter(l => l.resultado !== "perdido" && (l.tunel || "lead") !== "lead"));
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,es_lead").order("nombre").then(({ data }) => {
+      // Las actas son de los proyectos: lo que se persigue todavía no tiene
+      // reuniones de obra que levantar.
+      setProyectos((data || []).filter(l => l.resultado !== "perdido" && esProyecto(l)));
     });
   }, []);
 

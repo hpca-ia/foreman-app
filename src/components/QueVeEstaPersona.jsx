@@ -3,7 +3,7 @@ import { colors } from "../theme/colors";
 import { esAdmin } from "../lib/roles";
 import { POR_DEFECTO } from "../lib/permisos";
 import { nivelDeArea } from "../lib/acceso";
-import { esProyecto } from "../modules/leads/tubo";
+import { esProyecto } from "../modules/leads/pipeline";
 
 // "Le di permiso y no lo ve." Tres veces seguidas, y cada vez la causa era
 // otra: el presupuesto colgaba del proyecto duplicado, o el rol no le abría la

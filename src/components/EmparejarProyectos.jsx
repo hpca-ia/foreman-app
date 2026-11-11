@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Link2, Plus, Check, X } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { colors } from "../theme/colors";
-import { TUNELES, asegurarEtapas } from "../modules/leads/tubo";
+import { TIPOS, ORDEN_DE_TIPOS } from "../modules/leads/pipeline";
 import Button from "./ui/Button";
 
 // Empatar los proyectos de Ajustes con los del pipeline.
@@ -84,11 +84,12 @@ export default function EmparejarProyectos({ onCambio }) {
       if (opcion === "nuevo") {
         const tunel = tunelNuevo[p.id] || "construccion";
         const { data: creado, error: e } = await supabase.from("leads")
-          .insert({ nombre: nombreDe(p), tunel, es_lead: tunel === "lead", etapa: "lead" })
+          // Lo que estaba en la lista de Ajustes es trabajo en marcha, no algo
+          // que se persigue: entra como proyecto aprobado, fuera del pipeline.
+          .insert({ nombre: nombreDe(p), tunel, es_lead: false, resultado: "ganado", etapa: "ejecucion" })
           .select().single();
         if (e) throw new Error(e.message);
         leadId = creado.id;
-        await asegurarEtapas(creado, []);   // el catálogo lo completa el proyecto al abrirse
       }
       const { error: e2 } = await supabase.from("proyectos").update({ lead_id: leadId }).eq("id", p.id);
       if (e2) throw new Error(e2.message);
@@ -136,11 +137,11 @@ export default function EmparejarProyectos({ onCambio }) {
                     {l.nombre}{sug?.id === l.id ? "  (parece este)" : ""}
                   </option>
                 ))}
-                <option value="nuevo">+ No está: crearlo en el pipeline</option>
+                <option value="nuevo">+ No está: crearlo como proyecto aprobado</option>
               </select>
               {valor === "nuevo" && (
                 <select value={tunelNuevo[p.id] || "construccion"} onChange={e => setTunelNuevo(x => ({ ...x, [p.id]: e.target.value }))} style={mini}>
-                  {Object.entries(TUNELES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
+                  {ORDEN_DE_TIPOS.map(id => <option key={id} value={id}>{TIPOS[id].label}</option>)}
                 </select>
               )}
             </div>

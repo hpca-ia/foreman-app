@@ -11,10 +11,11 @@ import InformeLead from "./InformeLead";
 import ObraDelProyecto from "./ObraDelProyecto";
 import { esAdmin } from "../../lib/roles";
 import { mensajeError } from "../../lib/sesion";
-import { etapaInfo, ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
+import { ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import EtapasLead from "./EtapasLead";
-import TuboProyecto from "./TuboProyecto";
-import { TUNELES, asegurarEtapas } from "./tubo";
+import ListaDeTareas from "./ListaDeTareas";
+import EstadoDelLead from "./EstadoDelLead";
+import { TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, sePersigue, estaAprobado } from "./pipeline";
 import { useDictado } from "../../lib/dictado";
 import ArchivosDelProyecto from "./ArchivosDelProyecto";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
@@ -29,9 +30,18 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
   const editando = !!lead;
   const [form, setForm] = useState(lead ? { ...lead } : {
     nombre: "", contacto: "", telefono: "", email: "", origen: "Referido",
-    etapa: "lead", temperatura: "tibio", resultado: null, valor_estimado: "", fecha_cierre: "", notas: "",
+    etapa: "nuevo", tunel: "", temperatura: "tibio", resultado: null, valor_estimado: "", fecha_cierre: "", notas: "",
     responsable_id: currentUser?.id || null, responsable_nombre: currentUser?.name || "",
   });
+  // El lead como está AHORA en la base. Su etapa, su tipo y si espera al
+  // cliente se guardan solos al tocarlos (EstadoDelLead), sin pasar por
+  // «Guardar cambios»; esto los sigue para que la pantalla no muestre lo viejo.
+  const [vivo, setVivo] = useState(lead);
+  // Sus tareas, como las dejó la lista de abajo: de ahí sale el próximo paso
+  // que dice el encabezado. `vuelta` le pide a la lista que se recargue cuando
+  // el encabezado creó o movió una.
+  const [tareasDelLead, setTareasDelLead] = useState([]);
+  const [vuelta, setVuelta] = useState(0);
   const [ruta, setRuta] = useState([]);
   const [movs, setMovs] = useState([]);
   const [presupuestos, setPresupuestos] = useState([]);
@@ -115,47 +125,36 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
     setGuardando(true); setError("");
     const payload = {
       nombre: form.nombre.trim(), contacto: form.contacto || null, telefono: form.telefono || null,
-      email: form.email || null, origen: form.origen || null, etapa: form.etapa,
-      temperatura: form.temperatura || null, resultado: form.resultado || null,
+      email: form.email || null, origen: form.origen || null,
+      temperatura: form.temperatura || null,
       valor_estimado: Number(form.valor_estimado) || null,
       fecha_cierre: form.fecha_cierre || null, notas: form.notas || null,
       responsable_id: Number(form.responsable_id) || null,
       responsable_nombre: users.find(u => u.id === Number(form.responsable_id))?.name || form.responsable_nombre || null,
-      motivo_perdida: form.resultado === "perdido" ? (form.motivo_perdida || null) : null,
-      // De qué es el proyecto: eso decide con qué etapas arranca.
-      tunel: form.tunel || "lead",
-      es_lead: (form.tunel || "lead") === "lead",
       actualizado_at: new Date().toISOString(),
     };
-    // Sin la migración 040 esas dos columnas no existen todavía.
-    const sinTubo = ({ tunel, es_lead, ...resto }) => resto;
 
+    // LO QUE SE GUARDA SOLO NO SE GUARDA ACÁ. La etapa, el tipo, el resultado
+    // y la espera del cliente se guardan al tocarlos; si este botón los
+    // mandara también, pisaría con lo que había al abrir la ventana lo que se
+    // acaba de cambiar arriba.
     if (editando) {
-      let { error: e } = await supabase.from("leads").update(payload).eq("id", lead.id);
-      if (e && /column|schema cache/i.test(e.message)) ({ error: e } = await supabase.from("leads").update(sinTubo(payload)).eq("id", lead.id));
+      const { error: e } = await supabase.from("leads").update(payload).eq("id", lead.id);
       if (e) { setError(e.message); setGuardando(false); return; }
-      if (lead.etapa !== form.etapa) {
-        await anotar(lead.id, "etapa", `${etapaInfo(lead.etapa, catalogo).nombre} → ${etapaInfo(form.etapa, catalogo).nombre}`,
-          { etapa_de: lead.etapa, etapa_a: form.etapa });
-      }
       setGuardando(false); onGuardado(); return;
     }
 
-    let { data: creado, error: e } = await supabase.from("leads")
-      .insert({ ...payload, created_by: currentUser?.id }).select().single();
-    if (e && /column|schema cache/i.test(e.message)) {
-      ({ data: creado, error: e } = await supabase.from("leads").insert({ ...sinTubo(payload), created_by: currentUser?.id }).select().single());
-    }
+    // Uno nuevo nace con su tipo —que decide sus etapas— y en la primera.
+    if (!TIPOS[form.tunel]) { setError("Elegí de qué tipo es: Diseño, Construcción, o Diseño y construcción."); setGuardando(false); return; }
+    const primera = etapasDelTipo(catalogo, form.tunel)[0]?.id || "nuevo";
+    const { data: creado, error: e } = await supabase.from("leads")
+      .insert({ ...payload, tunel: form.tunel, etapa: primera, es_lead: true, created_by: currentUser?.id }).select().single();
     if (e || !creado) { setError(e?.message || "No se pudo crear"); setGuardando(false); return; }
 
-    // Un proyecto de Arquitectura o de Construcción arranca con sus etapas
-    // puestas, en orden: para eso están predeterminadas.
-    if ((form.tunel || "lead") !== "lead") await asegurarEtapas(creado, catalogo);
-
-    // El lead nace en blanco: su ruta la va escribiendo NOVA a medida que
-    // aparecen los pasos. Una ruta de plantilla se llena de pasos que nadie
-    // pensó, y eso entrena a ignorarla.
-    await anotar(creado.id, "nota", "Lead creado");
+    // El lead nace en blanco: sus tareas se le van sumando a medida que
+    // aparecen. Una lista de plantilla se llena de pasos que nadie pensó, y
+    // eso entrena a ignorarla.
+    await anotar(creado.id, "nota", `Lead creado: ${TIPOS[form.tunel].label}`);
     setGuardando(false); onGuardado();
   }
 
@@ -262,13 +261,10 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       }
       await supabase.from("leads").update({ obra_id: null }).eq("id", lead.id);
     }
-    const [{ count: etapas }, { count: invitados }] = await Promise.all([
-      supabase.from("lead_etapas").select("id", { count: "exact", head: true }).eq("lead_id", lead.id),
-      supabase.from("pipeline_invitados").select("id", { count: "exact", head: true }).eq("lead_id", lead.id),
-    ]);
+    const { count: invitados } = await supabase.from("pipeline_invitados")
+      .select("id", { count: "exact", head: true }).eq("lead_id", lead.id);
     return { bloqueo: null, detalle: [
-      `${ruta.length} pasos de la ruta (tareas)`,
-      `${etapas || 0} etapas del proyecto`,
+      `${ruta.length} tareas`,
       `${movs.length} movimientos de la bitácora`,
       `${invitados || 0} personas invitadas al proyecto`,
     ] };
@@ -299,10 +295,9 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
 
-  // El rótulo de la esquina dice qué es el proyecto: Arquitectura, Construcción
-  // o Lead. Antes decía la etapa guardada en `leads.etapa`, que nace en "lead"
-  // para todos, y un proyecto de Construcción aparecía marcado como Lead.
-  const tuboActual = TUNELES[form.tunel || "lead"] || TUNELES.lead;
+  // El rótulo de la esquina dice de qué tipo es: Diseño, Construcción, o
+  // Diseño y construcción.
+  const tipoActual = TIPOS[tipoDe(editando ? vivo : form)] || null;
   const temp = TEMPERATURAS.find(t => t.id === form.temperatura);
   // Los datos del proyecto —valor, contacto, origen, resultado— son del
   // Director y de quien lo abrió. Quien trabaja una etapa ve el plan y lo suyo,
@@ -316,17 +311,19 @@ Si no se dice cuándo, pon la fecha de hoy.`,
     <Modal onClose={onCerrar} maxWidth={560}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>
-          {editando ? lead.nombre : "Nuevo proyecto"}
+          {editando ? lead.nombre : "Nuevo lead"}
         </div>
         {editando && (
           <>
             {temp && <span title={temp.label} style={{ width: 8, height: 8, borderRadius: "50%", background: temp.color }} />}
-            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: tuboActual.color }}>
-              {tuboActual.label}
+            <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: tipoActual?.color || colors.muted }}>
+              {tipoActual?.label || "Sin tipo"}
             </span>
-            {/* Solo el tubo. La etapa en la que va el proyecto se ve abajo,
-                hito por hito y con lo que le falta a cada uno; repetirla acá
-                como una etiqueta suelta no decía de qué estaba hablando. */}
+            {estaAprobado(vivo) && (
+              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: colors.success, border: `1px solid ${colors.success}` }}>
+                APROBADO
+              </span>
+            )}
           </>
         )}
       </div>
@@ -362,27 +359,29 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             )}
           </div>
 
-          {/* De qué es el proyecto: eso decide sus etapas. Arquitectura y
-              Construcción vienen con las suyas puestas, en orden; un lead es
-              lo que todavía se persigue y suma etapas cuando pasan. */}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={lbl}>TIPO DE PROYECTO</label>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {Object.entries(TUNELES).map(([id, t]) => (
-                <button key={id} type="button" onClick={() => setForm(p => ({ ...p, tunel: id, es_lead: id === "lead" }))}
-                  style={{ border: `1px solid ${(form.tunel || "lead") === id ? colors.ink : colors.border}`, borderRadius: 20, padding: "5px 13px",
-                    background: (form.tunel || "lead") === id ? colors.ink : "#fff", color: (form.tunel || "lead") === id ? "#fff" : colors.inkSoft,
-                    fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
-                  {t.label}
-                </button>
-              ))}
+          {/* De qué tipo es: eso decide por qué etapas pasa. Se elige al
+              crearlo; después se cambia en «El proyecto», al lado de la etapa,
+              donde se guarda solo. */}
+          {!editando && (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={lbl}>TIPO DE LEAD</label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {ORDEN_DE_TIPOS.map(id => (
+                  <button key={id} type="button" onClick={() => setForm(p => ({ ...p, tunel: id }))}
+                    style={{ border: `1px solid ${form.tunel === id ? colors.ink : colors.border}`, borderRadius: 20, padding: "5px 13px",
+                      background: form.tunel === id ? colors.ink : "#fff", color: form.tunel === id ? "#fff" : colors.inkSoft,
+                      fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                    {TIPOS[id].label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 4 }}>
+                {TIPOS[form.tunel]
+                  ? `Pasa por: ${etapasDelTipo(catalogo, form.tunel).map(e => e.nombre).join(" · ") || "sin etapas en Ajustes"}.`
+                  : "Decide por qué etapas pasa. Se editan en Ajustes → Etapas."}
+              </div>
             </div>
-            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 4 }}>
-              {(form.tunel || "lead") === "lead"
-                ? "Lead: todavía se persigue. Sale con una (L) y sus etapas se suman cuando pasan."
-                : `Arranca con las etapas de ${TUNELES[form.tunel].label}, en orden. Se editan en Ajustes → Etapas.`}
-            </div>
-          </div>
+          )}
           <div><label style={lbl}>CONTACTO</label><input value={form.contacto || ""} onChange={e => inp("contacto", e.target.value)} style={mini} /></div>
           <div><label style={lbl}>TELÉFONO</label><input value={form.telefono || ""} onChange={e => inp("telefono", e.target.value)} style={mini} /></div>
           <div><label style={lbl}>ORIGEN</label>
@@ -411,39 +410,27 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               ))}
             </div>
           </div>
-          <div>
-            <label style={lbl}>RESULTADO</label>
-            <div style={{ display: "flex", gap: 4 }}>
-              {[[null, "Abierto", colors.inkSoft], ["ganado", "Ganado", colors.success], ["perdido", "Perdido", colors.muted]].map(([v, t, c]) => (
-                <button key={t} onClick={() => inp("resultado", v)}
-                  style={{ flex: 1, padding: "5px 8px", borderRadius: colors.radiusSm, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
-                    border: `1px solid ${(form.resultado || null) === v ? c : colors.border}`,
-                    background: (form.resultado || null) === v ? c : "transparent",
-                    color: (form.resultado || null) === v ? "#fff" : colors.inkSoft }}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          {form.resultado === "perdido" && (
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={lbl}>¿POR QUÉ SE PERDIÓ?</label>
-              <input value={form.motivo_perdida || ""} onChange={e => inp("motivo_perdida", e.target.value)} placeholder="Precio, plazo, se fue con otro..." style={mini} />
+          {editando && (
+            <div style={{ gridColumn: "1 / -1", fontSize: 11.5, color: colors.muted }}>
+              La etapa, el tipo y si se aprobó o se perdió se cambian en «El proyecto», y se guardan solos.
+              Acá van los datos de contacto.
             </div>
           )}
-          <div style={{ gridColumn: "1 / -1", fontSize: 11.5, color: colors.muted }}>
-            La etapa en la que va el proyecto sale de sus etapas, en "El proyecto": la que esté en curso manda.
-            Acá solo van los datos del proyecto.
-          </div>
         </div>
       )}
 
-      {/* El tubo, igual para los tres tipos: los hitos en fila, y abajo lo que
-          le falta al que se esté mirando. En un lead las etapas se agregan
-          cuando pasan; en Arquitectura y Construcción vienen puestas, en orden. */}
+      {/* El proyecto: arriba en qué está —su etapa, y qué sigue— y abajo sus
+          tareas, que son las mismas de Tareas. */}
       {editando && seccionVisible === "plan" && (
         <div style={{ marginBottom: 14 }}>
-          <TuboProyecto lead={{ ...lead, tunel: form.tunel }} catalogo={catalogo} users={users} currentUser={currentUser} puede={puede} editable={editable} onBitacora={recargarBitacora} />
+          <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 14 }}>
+            <EstadoDelLead lead={vivo} tareas={tareasDelLead} catalogo={catalogo} currentUser={currentUser} editable={editable} ancho
+              onCambio={l => { setVivo(l); recargarBitacora(); }}
+              onTareas={() => { setVuelta(v => v + 1); recargarBitacora(); }} />
+          </div>
+
+          <ListaDeTareas key={vuelta} lead={vivo} etapaId={sePersigue(vivo) ? vivo.etapa : null} catalogo={catalogo} users={users}
+            currentUser={currentUser} puede={puede} editable={editable} onBitacora={recargarBitacora} onTareas={setTareasDelLead} />
 
           {/* Los presupuestos de este proyecto: que existen y en qué estado
               están. Sin montos, que el pipeline no habla de plata —eso se
@@ -545,7 +532,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       {editando && seccionVisible === "plan" && (
         <>
           <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
-            Qué pasó, en orden. Se llena sola con el plan y los pasos; lo que escribes tú se puede corregir.
+            Qué pasó, en orden. Se llena sola con lo que se hace en el proyecto; lo que escribes tú se puede corregir.
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "flex-end" }}>
             <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2}
@@ -603,7 +590,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
             el botón que lo guarda. */}
         {editable && (
           <Button variant="primary" onClick={guardar} disabled={guardando}>
-            {guardando ? "Guardando..." : editando ? "Guardar cambios" : "Crear proyecto"}
+            {guardando ? "Guardando..." : editando ? "Guardar datos" : "Crear lead"}
           </Button>
         )}
         <Button variant="outline" onClick={onCerrar}>Cerrar</Button>
@@ -623,7 +610,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
 
       {borrar && (
         <ConfirmarBorrado
-          titulo="Borrar este proyecto del pipeline" nombre={lead.nombre}
+          titulo="Borrar este proyecto" nombre={lead.nombre}
           usuarioId={currentUser?.id}
           revisar={revisarBorrado} borrar={ejecutarBorrado}
           onCancelar={() => setBorrar(false)}

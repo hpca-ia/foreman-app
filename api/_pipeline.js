@@ -1,5 +1,5 @@
-// Lo que hace falta saber de un proyecto del pipeline para contarlo: en qué
-// etapa va, qué sigue, con qué fechas y quién responde. Lo usan el informe que
+// Lo que hace falta saber de un proyecto para contarlo: en qué etapa está, qué
+// sigue, con qué fechas y quién responde. Lo usan el informe que
 // se manda a mano y el resumen diario.
 
 import { rest } from "./_supabase.js";
@@ -45,55 +45,60 @@ export async function traer(tabla, intentos) {
   return { filas: [], columnas: null };
 }
 
+/**
+ * Lo que hay que saber de un proyecto para contarlo.
+ *
+ * La etapa es UNA y la dice el lead (`leads.etapa`): no hay etapas por proyecto
+ * con su estado. Lo que sigue son sus tareas abiertas —las mismas de Tareas—,
+ * sin las compras, que tienen su módulo.
+ */
 export async function datosDelProyecto(leadId) {
   const [lead] = await json(await rest(`leads?id=eq.${leadId}&select=*`));
   if (!lead) return null;
-  const [etapas, catalogo, pasos, invitados, accesos, movs, usuarios] = await Promise.all([
-    json(await rest(`lead_etapas?lead_id=eq.${leadId}&select=*&order=orden`)),
+  const [catalogo, tareas, invitados, accesos, movs, usuarios] = await Promise.all([
     json(await rest(`pipeline_etapas?select=id,nombre,orden&order=orden`)),
-    json(await rest(`tasks?lead_id=eq.${leadId}&select=id,title,due_date,status,assignee_id&order=ruta_orden`)),
+    json(await rest(`tasks?lead_id=eq.${leadId}&select=id,title,due_date,status,assignee_id,type,compra_id&order=due_date.asc.nullslast`)),
     json(await rest(`pipeline_invitados?lead_id=eq.${leadId}&select=*`)),
     json(await rest(`lead_accesos?lead_id=eq.${leadId}&select=usuario_id`)),
     json(await rest(`lead_movimientos?lead_id=eq.${leadId}&select=detalle,created_at,autor_nombre&order=created_at.desc&limit=12`)),
     json(await rest(`usuarios?select=id,nombre,email,rol,activo`)),
   ]);
-  const nombreEtapa = id => catalogo.find(c => c.id === id)?.nombre || id;
-  const actual = etapas.find(e => e.estado === "en_curso") || null;
+  const nombreEtapa = id => catalogo.find(c => c.id === id)?.nombre || null;
+  const pasos = tareas.filter(t => !t.compra_id && t.type !== "Compra");
   return {
-    lead, etapas, catalogo, pasos, invitados, accesos, movs, usuarios, nombreEtapa, actual,
-    hechas: etapas.filter(e => e.estado === "hecha").length,
-    pendientes: pasos.filter(p => p.status === "pendiente"),
+    lead, catalogo, pasos, invitados, accesos, movs, usuarios, nombreEtapa,
+    // Un aprobado ya no está en ninguna etapa del pipeline: está aprobado.
+    etapa: lead.resultado === "ganado" ? "Aprobado" : lead.resultado === "perdido" ? "Perdido" : nombreEtapa(lead.etapa) || "Sin etapa",
+    responsable: usuarios.find(u => u.id === lead.responsable_id) || null,
+    pendientes: pasos.filter(p => p.status !== "listo"),
+    hechas: pasos.filter(p => p.status === "listo"),
+    // Si la pelota está del lado del cliente, se dice: es la mitad de «en qué va».
+    espera: lead.espera_desde && !lead.resultado
+      ? { desde: String(lead.espera_desde).slice(0, 10), que: lead.espera_que || null } : null,
   };
 }
 
-/** A quién le llega: el responsable de la etapa, el equipo del proyecto, o todos. */
+/** A quién le llega: a quien lleva el proyecto, a su equipo, o a todos. */
 export function destinatarios(d, a) {
   if (Array.isArray(a)) return a.filter(x => /@/.test(x));
   const conAcceso = new Set([d.lead.created_by, ...d.accesos.map(x => x.usuario_id)]);
   const equipo = d.usuarios.filter(u => conAcceso.has(u.id) && u.email && u.activo !== false).map(u => u.email);
   if (a === "equipo") return equipo;
   if (a === "todos") return [...equipo, ...d.invitados.map(i => i.email).filter(Boolean)];
-  // responsable de la etapa en curso: puede ser del equipo o de fuera
-  if (!d.actual) return equipo.slice(0, 1);
-  if (d.actual.invitado_id) {
-    const inv = d.invitados.find(i => i.id === d.actual.invitado_id);
-    return [inv?.email].filter(Boolean);
-  }
-  const u = d.usuarios.find(x => x.id === d.actual.responsable_id);
-  return [u?.email].filter(Boolean);
+  // «responsable»: quien lleva el proyecto. Si no tiene correo, el primero del equipo.
+  return d.responsable?.email && d.responsable.activo !== false ? [d.responsable.email] : equipo.slice(0, 1);
 }
 
 /** El resumen en texto plano, por si NOVA no contesta: nunca se queda sin informe. */
 export function resumenPlano(d) {
   const lineas = [];
-  lineas.push(`Etapa actual: ${d.actual ? d.nombreEtapa(d.actual.etapa_id) : "sin etapa en curso"}${d.actual?.fecha_objetivo ? ` (para el ${d.actual.fecha_objetivo})` : ""}.`);
-  lineas.push(`Avance: ${d.hechas} de ${d.etapas.length} etapas.`);
-  const siguen = d.etapas.filter(e => e.estado === "pendiente").slice(0, 4);
-  if (siguen.length) lineas.push("Lo que viene:");
-  siguen.forEach(e => lineas.push(`- ${d.nombreEtapa(e.etapa_id)}${e.fecha_objetivo ? ` · ${e.fecha_objetivo}` : ""}${e.responsable_nombre ? ` · ${e.responsable_nombre}` : ""}`));
-  const pasos = d.pendientes.slice(0, 5);
-  if (pasos.length) lineas.push("Próximos pasos:");
-  pasos.forEach(p => lineas.push(`- ${p.title}${p.due_date ? ` · ${p.due_date}` : ""}`));
+  lineas.push(`Etapa: ${d.etapa}.`);
+  if (d.espera) lineas.push(`Esperando respuesta del cliente desde el ${d.espera.desde}${d.espera.que ? `: ${d.espera.que}` : ""}.`);
+  if (d.hechas.length) lineas.push(`Hecho hasta ahora: ${d.hechas.length} ${d.hechas.length === 1 ? "tarea" : "tareas"}.`);
+  const pasos = d.pendientes.slice(0, 6);
+  if (pasos.length) lineas.push("Lo que sigue:");
+  pasos.forEach(p => lineas.push(`- ${p.title}${p.due_date ? ` · ${p.due_date}` : " · sin fecha"}`));
+  if (!pasos.length && !d.espera) lineas.push("No tiene próximo paso anotado.");
   return lineas.join("\n");
 }
 
@@ -106,11 +111,11 @@ export async function informeDeNova(d, { motivo, paraCliente }) {
   const contexto = {
     proyecto: d.lead.nombre,
     cliente: d.lead.contacto || null,
-    etapa_actual: d.actual ? d.nombreEtapa(d.actual.etapa_id) : null,
-    fecha_objetivo: d.actual?.fecha_objetivo || null,
-    responsable: d.actual?.responsable_nombre || null,
-    etapas: d.etapas.map(e => ({ etapa: d.nombreEtapa(e.etapa_id), estado: e.estado, para: e.fecha_objetivo, responsable: e.responsable_nombre })),
+    etapa_actual: d.etapa,
+    responsable: d.responsable?.nombre || d.lead.responsable_nombre || null,
+    esperando_al_cliente: d.espera,
     pasos_pendientes: d.pendientes.map(p => ({ paso: p.title, para: p.due_date })),
+    pasos_hechos: d.hechas.slice(-8).map(p => ({ paso: p.title, cuando: p.due_date })),
     ultimos_movimientos: d.movs.slice(0, 8).map(m => ({ que: m.detalle, cuando: (m.created_at || "").slice(0, 10) })),
   };
   const sistema = `Escribes informes de avance de proyectos de arquitectura y construcción en Ecuador.

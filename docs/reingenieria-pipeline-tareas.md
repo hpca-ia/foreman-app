@@ -199,6 +199,35 @@ pipeline.
 Al terminar: el pipeline tiene 7 proyectos, cada uno en un lugar, y las dos
 obras de Diners ya no están ahí.
 
+**Cómo quedó hecho (11/11/2026, migración 171):**
+
+- Los tipos los dijo Hernán: Diseño — Plaza Comercial Puembo, RES ZULETA,
+  Concurso PRONACA; Construcción — RES BG, MINDKIDS; Diseño y construcción —
+  CHRONIX, Grupo Global. Cada uno quedó en la etapa que tenía abierta.
+- Las reglas están en `src/modules/leads/pipeline.js` (sin base ni pantalla,
+  con sus pruebas en `pruebas/pipeline.test.mjs`); lo que guarda, en
+  `proyecto.js`. La tarjeta del lead y el encabezado del proyecto son la misma
+  pieza (`EstadoDelLead.jsx`): etapa, tipo, qué sigue, y los toques de la
+  espera. Se guarda solo.
+- La espera del cliente son tres columnas de `leads`: `espera_desde`,
+  `espera_que`, `recordar_el`. Cada insistencia queda en `lead_movimientos`.
+- Adentro del proyecto, sus tareas son una lista (`ListaDeTareas.jsx`): lo
+  abierto por fecha y lo hecho plegado. La tarea lleva de etiqueta la etapa en
+  la que estaba el lead cuando se escribió (`tasks.etapa_id`).
+- `lead_etapas` ya no se lee ni se escribe; queda de respaldo hasta la fase 6.
+  Las etapas viejas del catálogo se apagaron, no se borraron.
+- Lo aprobado se ve al pie del Pipeline, plegado («Aprobados»), hasta que la
+  fase 3 le dé su lista. Sus tareas, su historia y su gente se abren desde ahí.
+- Quién lleva libro, actas y observaciones no cambió: lo aprobado, lo que
+  tiene obra, y lo marcado como proyecto (`es_lead` en falso). RES BG se
+  persigue y sigue llevando libro.
+- El panel de avisos (`PanelAvisos.jsx`, lista en `src/lib/avisos.js`) nació
+  con el pipeline, compras y observaciones. El correo de la mañana lleva un
+  bloque PIPELINE armado con la misma regla (`api/_avisosDelPipeline.js`, que
+  una prueba mantiene igual a la de la pantalla).
+- NOVA del pipeline entiende los tres tipos, «ya firmamos», «lo perdimos» y
+  «recordámelo el lunes», y guarda con las mismas reglas que la pantalla.
+
 ### Fase 3 — Proyectos aprobados
 
 Lo que arregla: que un aprobado no tenga dónde verse fuera de Control.
@@ -264,8 +293,8 @@ fase 5), los permisos por proyecto y el portal del cliente.
 
 ## En qué va
 
-- [x] Fase 1 — Una sola tarea (11/11/2026; requiere la migración 170)
-- [ ] Fase 2 — El Pipeline es lo que se persigue
+- [x] Fase 1 — Una sola tarea (11/11/2026; migración 170, corrida y publicada)
+- [x] Fase 2 — El Pipeline es lo que se persigue (11/11/2026; requiere la migración 171)
 - [ ] Fase 3 — Proyectos aprobados
 - [ ] Fase 4 — Tareas: una bandeja que se pueda creer
 - [ ] Fase 5 — Los compromisos de las actas

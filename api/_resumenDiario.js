@@ -5,6 +5,7 @@ import { rest } from "./_supabase.js";
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
 import { json, traer } from "./_pipeline.js";
 import { armarResumen, hoyISO } from "./_resumen.js";
+import { avisosDelPipeline } from "./_avisosDelPipeline.js";
 
 const COLOR = { gestion: "#B45309", tarea: "#0F3D3E", reunion: "#6D28D9" };
 const NOMBRE = { gestion: "Gestión", tarea: "Tarea", reunion: "Reunión" };
@@ -70,6 +71,27 @@ async function ordenesSinFirmar() {
     .filter(p => p.faltan.length || p.objetaron.length)
     .sort((a2, b2) => (a2.vencida === b2.vencida ? b2.dias - a2.dias : a2.vencida ? -1 : 1));
 }
+
+/**
+ * EL PIPELINE: A QUIÉN HAY QUE INSISTIRLE, Y QUÉ LEAD SE QUEDÓ SIN PASO.
+ *
+ * Un lead que espera al cliente no tiene nada que hacer hasta el día en que se
+ * dijo «recordámelo». Ese día sale acá, con hace cuánto espera. Y el que no
+ * tiene próximo paso ni espera sale también, porque es el que se pierde sin
+ * que nadie lo decida. Es la misma lista del panel de Avisos del tablero.
+ */
+const bloqueDelPipeline = lista => (lista.length ? `
+  <div style="font-size:11px;font-weight:700;color:#0F3D3E;letter-spacing:.4px;margin:20px 0 6px">
+    PIPELINE · ${lista.length}
+  </div>
+  ${lista.slice(0, 10).map(a => `<div style="font-size:13px;color:#374151;padding:3px 0">
+    <strong>${esc(a.nombre)}</strong>
+    <span style="color:${a.clase === "insistir" ? "#B91C1C" : "#B45309"}">· ${esc(a.texto)}</span>
+  </div>`).join("")}
+  ${lista.length > 10 ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${lista.length - 10} más.</div>` : ""}
+  <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
+    En el Pipeline, cada lead tiene sus tres salidas de un toque: ya respondió, insistí hoy, o recordarme otro día.
+  </div>` : "");
 
 const plata = v => `$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -172,13 +194,15 @@ function cuerpoDelCorreo(s) {
         </tr>`).join("")}
       </table>` : "",
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
+    // Los leads que hoy piden algo: insistirle al cliente, o ponerles próximo paso.
+    bloqueDelPipeline(s.pipeline || []),
     // Las órdenes que el cliente no firma, a quien puede levantar el teléfono.
     s.esAdmin ? bloqueDeOrdenes(s.ordenes || [], String(s.usuario?.email || "").trim().toLowerCase()) : "",
     // Lo alquilado que se pasa de plazo: cada día es plata que ya salió.
     s.esAdmin ? bloqueDePlazos(s.plazos || []) : "",
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
-      && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length
+      && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length && !(s.pipeline || []).length
       ? `<p style="font-size:13px;color:#4B5563;margin:0">Hoy no tenés nada con fecha. Lo que esté sin fecha te espera en FOREMAN.</p>` : "",
 
     `<div style="margin-top:20px"><a href="${APP}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Abrir FOREMAN →</a></div>`,
@@ -206,19 +230,25 @@ const tituloDelCorreo = s => plantilla({
 export async function mandarResumen(soloPara = null) {
   const [{ filas: tareas, columnas }, { filas: usuarios }, { filas: leads }, { filas: accesos }] = await Promise.all([
     traer("tasks", [
+      "id,title,due_date,hora,status,type,notes,priority,assignee_id,responsable_externo,lead_id,project_id,updated_at,compra_id",
       "id,title,due_date,hora,status,type,notes,priority,assignee_id,responsable_externo,lead_id,project_id,updated_at",
       "id,title,due_date,hora,status,type,notes,priority,assignee_id,lead_id,project_id,updated_at",
       "id,title,due_date,status,type,notes,priority,assignee_id,lead_id,project_id",
       "id,title,due_date,status,assignee_id,lead_id,project_id",
     ]),
     traer("usuarios", ["id,nombre,email,rol,activo"]),
-    traer("leads", ["id,nombre,created_by,responsable_id,resultado", "id,nombre,resultado"]),
+    // Con su espera del cliente, si la migración 171 ya está; si no, sin ella.
+    traer("leads", [
+      "id,nombre,created_by,responsable_id,resultado,espera_desde,espera_que,recordar_el",
+      "id,nombre,created_by,responsable_id,resultado", "id,nombre,resultado",
+    ]),
     traer("lead_accesos", ["lead_id,usuario_id"]),
   ]);
 
   if (!columnas) return { ok: false, error: "No se pudieron leer las tareas: revisá las columnas de la tabla tasks" };
 
-  let sobres = armarResumen({ tareas, usuarios, leads, accesos, hoy: hoyISO() });
+  const pipeline = avisosDelPipeline({ leads, tareas, hoy: hoyISO() });
+  let sobres = armarResumen({ tareas, usuarios, leads, accesos, hoy: hoyISO(), pipeline });
   if (soloPara) {
     sobres = sobres.filter(s => s.usuario.id === Number(soloPara));
     // Probando, un sobre vacío también sirve: dice que el correo llega.
@@ -227,7 +257,7 @@ export async function mandarResumen(soloPara = null) {
       if (!u) return { ok: false, error: `No encontré al usuario ${soloPara} en la tabla de usuarios` };
       if (!u.email) return { ok: false, error: `${u.nombre} no tiene correo cargado: ponéselo en Ajustes → Usuarios` };
       sobres = [{ usuario: u, esAdmin: u.rol === "owner" || u.rol === "assistant",
-        atrasadas: [], hoy: [], manana: [], estaSemana: [], masAdelante: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [] }];
+        atrasadas: [], hoy: [], manana: [], estaSemana: [], masAdelante: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [], pipeline: [] }];
     }
   }
 

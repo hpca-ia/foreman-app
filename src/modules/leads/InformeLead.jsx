@@ -10,7 +10,7 @@ import Button from "../../components/ui/Button";
 // corrige: es lo que va a leer un cliente, y ahí no se improvisa.
 
 const DESTINOS = [
-  { id: "responsable", label: "Al responsable", nota: "Quien tiene la etapa en curso", Icono: User },
+  { id: "responsable", label: "Al responsable", nota: "Quien lleva el proyecto", Icono: User },
   { id: "equipo", label: "Al equipo", nota: "Los que ven este proyecto", Icono: Users },
   { id: "todos", label: "Equipo y externos", nota: "También cliente y proveedores", Icono: Globe },
 ];

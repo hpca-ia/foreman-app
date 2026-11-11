@@ -7,6 +7,7 @@ import DiaDeObra from "./DiaDeObra";
 import LibroImpreso from "./LibroImpreso";
 import { diasDe, hoyEnObra, estadoDelDia } from "./libro";
 import { listaDeDias, sinEscribir } from "./diasDelLibro";
+import { esProyecto } from "../leads/pipeline";
 
 // Libro de Obra: el registro diario de cada obra.
 //
@@ -35,10 +36,10 @@ export default function ModuloLibro({ currentUser, puede, nivelProyecto = () => 
   const proyectos = todos.filter(l => !!nivelProyecto(l.id));
 
   useEffect(() => {
-    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,crono_inicio,crono_laborables").order("nombre").then(({ data }) => {
+    supabase.from("leads").select("id,nombre,tunel,resultado,obra_id,es_lead,crono_inicio,crono_laborables").order("nombre").then(({ data }) => {
       // El libro es de las obras: los leads que todavía se persiguen no tienen
       // días que registrar.
-      setTodos((data || []).filter(l => l.resultado !== "perdido" && (l.tunel || "lead") !== "lead"));
+      setTodos((data || []).filter(l => l.resultado !== "perdido" && esProyecto(l)));
       setCargando(false);
     });
   }, []);

@@ -170,6 +170,30 @@ input, select, textarea { outline: none; font-family: var(--font); }
   .leads-tunel { grid-template-columns: 1fr; }
 }
 
+/* La tarjeta de un lead en el pipeline: a la izquierda quién es, a la derecha
+   en qué etapa está y qué sigue. En el teléfono, una cosa debajo de la otra:
+   un desplegable se toca bien con el dedo si tiene el ancho entero. */
+.lead-tarjeta {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.6fr);
+  gap: 8px 16px; align-items: start; padding: 12px 14px;
+  border-bottom: 1px solid var(--neutral-soft); cursor: pointer;
+}
+.lead-tarjeta:last-child { border-bottom: none; }
+.lead-tarjeta:hover { background: var(--bg); }
+@media (max-width: 768px) {
+  .lead-tarjeta { grid-template-columns: 1fr; padding: 12px; }
+}
+
+/* El tablero con su panel de avisos al costado. En el teléfono el panel va
+   arriba, plegado. */
+.tablero-con-avisos { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 22px; align-items: start; }
+.tablero-con-avisos > .tablero-avisos { position: sticky; top: 12px; }
+@media (max-width: 1100px) {
+  .tablero-con-avisos { grid-template-columns: 1fr; gap: 0; }
+  .tablero-con-avisos > .tablero-avisos { position: static; order: -1; margin-bottom: 12px; }
+}
+
 /* ── Teléfono: el pipeline y las etapas ──────────────────────────────
    Cuatro columnas en 375px no son columnas. En el teléfono cada fila se
    apila: primero de qué proyecto se trata, después en qué va y qué toca.

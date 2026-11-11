@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { esProyecto } from "../leads/tubo";
+import { esProyecto } from "../leads/pipeline";
 import {
   ESTADOS_OBS, PRIORIDADES_OBS, ORIGENES_OBS, ABIERTAS_OBS,
   cargarObservaciones, crearObservacion, guardarObservacion, borrarObservacion,
@@ -113,7 +113,7 @@ export default function ModuloObservaciones({ currentUser, users = [], puede, ni
     // no sabría si ya existe uno y ofrecería crear otro encima del que el
     // cliente ya tiene guardado.
     (async () => {
-      const campos = "id,nombre,tunel,resultado,obra_id";
+      const campos = "id,nombre,tunel,resultado,obra_id,es_lead";
       let { data, error } = await supabase.from("leads").select(`${campos},portal_token,portal_activo`).order("nombre");
       // Sin la 073 no existen esas dos columnas. Un módulo entero en blanco
       // por una migración que falta es peor que no tener el enlace todavía.

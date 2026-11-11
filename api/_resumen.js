@@ -8,6 +8,10 @@
 //     lo de hoy—, no la lista entera de los demás.
 //   · Lo de ayer también se cuenta: un resumen que solo dice lo que falta se
 //     lee como un reproche. Lo que se hizo es la mitad de la noticia.
+//   · Del pipeline, los leads que hoy piden algo: el que hay que insistirle
+//     al cliente —llegó el día del recordatorio— y el que se quedó sin próximo
+//     paso. A quien lo lleva; al Director, los de toda la oficina. El paso
+//     vencido no se repite acá: es una tarea, y ya sale en ATRASADO.
 
 export const hoyISO = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 export const sumarDias = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return hoyISO(d); };
@@ -20,10 +24,11 @@ export const claseDe = t => (t?.type === "Reunión" ? "reunion"
   : "tarea");
 
 /**
- * @param {object} d  { tareas, usuarios, leads, accesos, miembros, hoy }
+ * @param {object} d  { tareas, usuarios, leads, accesos, miembros, hoy, pipeline }
+ *                    `pipeline` es lo que arma avisosDelPipeline
  * @returns {Array} un sobre por persona: { usuario, atrasadas, hoy, manana,
  *                  estaSemana, masAdelante, sinFecha, ayer, deSusProyectos,
- *                  esAdmin, equipo, sinDueno }
+ *                  esAdmin, equipo, sinDueno, pipeline }
  */
 export function armarResumen(d) {
   const hoy = d.hoy || hoyISO();
@@ -53,6 +58,7 @@ export function armarResumen(d) {
   const conProyecto = t => ({ ...t, proyecto: nombreProyecto(t.lead_id), clase: claseDe(t) });
 
   const abiertas = d.tareas.filter(ABIERTA);
+  const delPipeline = (d.pipeline || []).filter(a => a.clase === "insistir" || a.clase === "sin_paso");
   const cerradasAyer = d.tareas.filter(t => {
     const cuando = String(t.updated_at || "").slice(0, 10);
     return t.status === "listo" && cuando >= desde && cuando < hoy;
@@ -85,6 +91,8 @@ export function armarResumen(d) {
           .map(conProyecto),
         equipo: [],
         sinDueno: [],
+        pipeline: delPipeline.filter(a => esAdmin
+          || String(a.responsable_id) === String(u.id) || String(a.created_by) === String(u.id)),
       };
 
       if (esAdmin) {
@@ -108,5 +116,5 @@ export function armarResumen(d) {
     })
     .filter(s => s.atrasadas.length || s.hoy.length || s.manana.length || s.ayer.length
       || s.estaSemana.length || s.masAdelante.length || s.sinFecha.length
-      || s.deSusProyectos.length || (s.esAdmin && (s.equipo.length || s.sinDueno.length)));
+      || s.deSusProyectos.length || s.pipeline.length || (s.esAdmin && (s.equipo.length || s.sinDueno.length)));
 }

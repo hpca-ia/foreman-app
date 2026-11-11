@@ -1,7 +1,6 @@
 // api/pipeline-informe.js — El informe de un proyecto del pipeline, por correo.
 //
-// Sirve para las dos cosas que pidió la oficina: mandarlo cuando uno quiera, y
-// que salga solo al cambiar de etapa. NOVA lo redacta con lo que hay en la
+// Sirve para mandarlo cuando uno quiera. NOVA lo redacta con lo que hay en la
 // base —avance, lo que sigue, las fechas—, y si no contesta se manda igual con
 // el resumen armado acá: un aviso que no sale no sirve de nada.
 //
@@ -34,17 +33,17 @@ export default async function handler(req, res) {
     const para = destinatarios(d, a);
     if (!para.length) return res.status(200).json({ ok: false, error: "Nadie tiene correo configurado para este envío." });
 
-    const etapa = d.actual ? d.nombreEtapa(d.actual.etapa_id) : "sin etapa en curso";
-    const siguen = d.etapas.filter(e => e.estado === "pendiente").slice(0, 5);
+    const etapa = d.etapa;
+    const siguen = d.pendientes.slice(0, 5);
     const html = plantilla({
       titulo: d.lead.nombre,
-      subtitulo: `${etapa}${d.actual?.fecha_objetivo ? ` · para el ${d.actual.fecha_objetivo}` : ""}`,
+      subtitulo: `${etapa}${d.espera ? " · esperando respuesta del cliente" : ""}`,
       cuerpo: `
         ${texto2html(informe)}
         ${siguen.length ? `
           <div style="margin-top:18px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:12px">
             <div style="font-size:11px;font-weight:700;color:#6B7280;letter-spacing:.4px;margin-bottom:6px">LO QUE SIGUE</div>
-            ${siguen.map(e => `<div style="font-size:13px;color:#374151;padding:2px 0">• ${esc(d.nombreEtapa(e.etapa_id))}${e.fecha_objetivo ? ` <span style="color:#9CA3AF">· ${esc(e.fecha_objetivo)}</span>` : ""}${e.responsable_nombre ? ` <span style="color:#9CA3AF">· ${esc(e.responsable_nombre)}</span>` : ""}</div>`).join("")}
+            ${siguen.map(p => `<div style="font-size:13px;color:#374151;padding:2px 0">• ${esc(p.title)}${p.due_date ? ` <span style="color:#9CA3AF">· ${esc(p.due_date)}</span>` : ""}</div>`).join("")}
           </div>` : ""}
       `,
     });
