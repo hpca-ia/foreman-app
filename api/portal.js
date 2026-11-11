@@ -789,15 +789,6 @@ async function decidirAprobacion(req, res, tarea) {
     }),
   }).catch(() => {});
 
-  if (compra.lead_id) await rest("lead_movimientos", {
-    method: "POST", headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({
-      lead_id: compra.lead_id, tipo: "compra", automatico: true,
-      detalle: `${aprueba ? "Aprobada" : "Devuelta"} desde el correo: ${compra.descripcion}${limpio ? ` — ${limpio}` : ""}`,
-      autor_id: quien?.id ?? null, autor_nombre: quien?.nombre || null,
-    }),
-  }).catch(() => {});
-
   // Y AL QUE SIGUE SE LE AVISA. Sin esto la compra queda aprobada y nadie la
   // compra: la tarea aparece en un tablero que esa persona abre mañana.
   await avisarAlQueSigue(nueva, compra, { aprueba, nota: limpio, quien });

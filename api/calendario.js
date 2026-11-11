@@ -28,15 +28,15 @@ export default async function handler(req, res) {
     const [usuario] = await json(await rest(`usuarios?calendario_token=eq.${encodeURIComponent(llave)}&select=id,nombre,activo`));
     if (!usuario || usuario.activo === false) return res.status(404).send("Ese calendario ya no existe");
 
-    const acompana = await json(await rest(`tarea_responsables?usuario_id=eq.${usuario.id}&select=task_id`)).catch(() => []);
-    const ids = (acompana || []).map(r => r.task_id);
-    const filtro = ids.length ? `or=(assignee_id.eq.${usuario.id},id.in.(${ids.join(",")}))` : `assignee_id=eq.${usuario.id}`;
-    const campos = "id,title,notes,due_date,status,priority,project_id,updated_at,created_at";
+    const filtro = `assignee_id=eq.${usuario.id}`;
+    const campos = "id,title,notes,due_date,status,project_id,lead_id,updated_at,created_at";
     // Con la 045 puesta viene la hora; sin ella, todo sigue como evento del día.
-    let r = await rest(`tasks?${filtro}&select=${campos},hora&order=due_date.asc`);
+    let r = await rest(`tasks?${filtro}&select=${campos},hora,type,compra_id&order=due_date.asc`);
     if (!r.ok) r = await rest(`tasks?${filtro}&select=${campos}&order=due_date.asc`);
-    const tareas = await json(r);
-    const proyectos = await json(await rest("proyectos?select=id,nombre"));
+    // Un aviso de compras no es una tarea: se sigue en Compras, no en el calendario.
+    const tareas = (await json(r)).filter(t => !t.compra_id && t.type !== "Compra");
+    // El proyecto de una tarea es el del pipeline. La lista vieja de Ajustes ya no existe.
+    const proyectos = await json(await rest("leads?select=id,nombre"));
     const nombreProyecto = id => proyectos.find(p => p.id === id)?.nombre || "";
 
     // Lo que tiene hora entra a esa hora y dura una hora: una reunión puesta
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
       const fin = new Date(t.due_date + "T00:00:00Z");
       fin.setUTCDate(fin.getUTCDate() + 1);              // un día entero: fin exclusivo
       const estado = t.status === "listo" ? "✓ " : t.status === "bloqueado" ? "⏸ " : "";
-      const donde = nombreProyecto(t.project_id);
+      const donde = nombreProyecto(t.lead_id);
       const hora = aLaHora(t);
       return [
         "BEGIN:VEVENT",
@@ -69,7 +69,6 @@ export default async function handler(req, res) {
         t.notes ? plegar(`DESCRIPTION:${escapar(t.notes)}`) : null,
         donde ? plegar(`LOCATION:${escapar(donde)}`) : null,
         t.status === "listo" ? "STATUS:COMPLETED" : "STATUS:CONFIRMED",
-        t.priority === "urgente" ? "PRIORITY:1" : t.priority === "alta" ? "PRIORITY:3" : "PRIORITY:5",
         "END:VEVENT",
       ].filter(Boolean).join("\r\n");
     });

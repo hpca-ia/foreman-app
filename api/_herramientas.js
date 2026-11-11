@@ -205,7 +205,7 @@ const ACCIONES = {
   },
 
   async estado_proyecto({ nombre }, { usuario, puede }) {
-    const leads = await filas(await rest("leads?select=id,nombre,contacto,created_by,monto,etapa&order=actualizado_at.desc&limit=200"));
+    const leads = await filas(await rest("leads?select=id,nombre,contacto,created_by,valor_estimado,etapa&order=actualizado_at.desc&limit=200"));
     const lead = parecido(nombre, leads);
     if (!lead) return { error: `No encuentro un proyecto que se llame "${nombre}".` };
     const accesos = await filas(await rest(`lead_accesos?lead_id=eq.${lead.id}&select=usuario_id`));
@@ -216,7 +216,7 @@ const ACCIONES = {
     return {
       proyecto: lead.nombre,
       cliente: lead.contacto || null,
-      monto: puede("montos.ver") ? lead.monto ?? null : undefined,
+      monto: puede("montos.ver") ? lead.valor_estimado ?? null : undefined,
       resumen: resumenPlano(d),
       ultimo: d.movs.slice(0, 3).map(m => `${(m.created_at || "").slice(0, 10)}: ${m.detalle}`),
     };

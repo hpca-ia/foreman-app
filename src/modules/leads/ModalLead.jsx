@@ -1,28 +1,22 @@
 import { useState, useEffect } from "react";
-import { Plus, Check, X, Trash2, GripVertical, MessageSquare, Sparkles, Mail, Mic } from "lucide-react";
+import { Trash2, MessageSquare, Mail, Mic } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
-import { daysUntil } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import ConfirmarBorrado from "../../components/ui/ConfirmarBorrado";
 import InformeLead from "./InformeLead";
-import ObraDelProyecto from "./ObraDelProyecto";
 import { esAdmin } from "../../lib/roles";
-import { mensajeError } from "../../lib/sesion";
-import { ORIGENES, SIGUIENTE_ESTADO, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
-import EtapasLead from "./EtapasLead";
+import { ORIGENES, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
+import GenteDelProyecto from "./GenteDelProyecto";
 import ListaDeTareas from "./ListaDeTareas";
 import EstadoDelLead from "./EstadoDelLead";
 import { TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, sePersigue, estaAprobado } from "./pipeline";
 import { useDictado } from "../../lib/dictado";
 import ArchivosDelProyecto from "./ArchivosDelProyecto";
-import { LECTURA, textoDeNova } from "../../lib/modelos";
 
-const hoy = () => new Date().toISOString().split("T")[0];
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
-const enDias = n => new Date(Date.now() + n * 86400000).toISOString().split("T")[0];
 
 const sinTildes = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(p => p.length > 3);
 
@@ -46,11 +40,8 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
   const [movs, setMovs] = useState([]);
   const [presupuestos, setPresupuestos] = useState([]);
   const [nota, setNota] = useState("");
-  const [nuevoPaso, setNuevoPaso] = useState("");
-  const [pensando, setPensando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [borrar, setBorrar] = useState(false);
-  const [verEtapas, setVerEtapas] = useState(false);
   const [editNota, setEditNota] = useState({ id: null, texto: "" });
   // Todo junto en una columna era ilegible en el teléfono: ahora el proyecto
   // se abre en el plan, que es lo que uno viene a mirar, y lo demás está a un toque.
@@ -158,83 +149,6 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
     setGuardando(false); onGuardado();
   }
 
-  // Tres estados, no dos: pendiente → hecho → no se hizo. Un paso que se
-  // descartó y queda "pendiente" para siempre ensucia la señal de lo que
-  // falta, y termina enseñando a ignorarla.
-  async function alternarPaso(t) {
-    const nuevo = SIGUIENTE_ESTADO[t.status] || "listo";
-    await supabase.from("tasks").update({ status: nuevo }).eq("id", t.id);
-    setRuta(r => r.map(x => x.id === t.id ? { ...x, status: nuevo } : x));
-    await supabase.from("leads").update({ actualizado_at: new Date().toISOString() }).eq("id", lead.id);
-    if (nuevo === "listo") await anotar(lead.id, "nota", `Hecho: ${t.title}`);
-    if (nuevo === "bloqueado") await anotar(lead.id, "nota", `No se hizo: ${t.title}`);
-  }
-
-  async function cambiarFecha(t, fecha) {
-    await supabase.from("tasks").update({ due_date: fecha || null }).eq("id", t.id);
-    setRuta(r => r.map(x => x.id === t.id ? { ...x, due_date: fecha } : x));
-    await anotar(lead.id, "nota", fecha ? `"${t.title}" quedó para el ${fecha}` : `"${t.title}" se quedó sin fecha`);
-    await recargarBitacora();
-  }
-
-  // Se le dicta a NOVA en el idioma de uno —"enviar portafolio el viernes y
-  // llamar al arquitecto el lunes"— y ella lo parte en pasos con fecha. Si no
-  // entiende, el texto entra tal cual como un paso: nunca se pierde lo escrito.
-  async function agregarPaso(dictado) {
-    const texto = (typeof dictado === "string" ? dictado : nuevoPaso).trim();
-    if (!texto || !lead) return;
-    setPensando(true); setError("");
-    const orden = Math.max(0, ...ruta.map(t => t.ruta_orden || 0));
-    let pasos = null;
-    try {
-      const res = await fetch("/api/nova", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: LECTURA, max_tokens: 800,
-          system: `Conviertes lo que dicta un director comercial en pasos de seguimiento de un lead.
-Hoy es ${hoy()}. El lead se llama "${lead.nombre}"${form.contacto ? `, contacto ${form.contacto}` : ""}.
-Puede venir más de un paso en una frase. Devuelve SOLO JSON, sin markdown:
-{"pasos":[{"titulo":"Enviar portafolio","fecha":"2026-09-18"}]}
-El título es corto y empieza con el verbo de la acción. La fecha en AAAA-MM-DD:
-interpreta "el viernes", "mañana", "en dos semanas" contra la fecha de hoy.
-Si no se dice cuándo, pon la fecha de hoy.`,
-          messages: [{ role: "user", content: texto }],
-        }),
-      });
-      const data = await res.json();
-      const txt = (textoDeNova(data) || "").replace(/```json|```/g, "").trim();
-      pasos = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]).pasos;
-    } catch { pasos = null; }
-
-    const filas = (pasos?.length ? pasos : [{ titulo: texto, fecha: hoy() }])
-      .filter(p => p.titulo?.trim())
-      .map((p, i) => ({
-        title: p.titulo.trim(), lead_id: lead.id, ruta_orden: orden + i + 1,
-        due_date: /^\d{4}-\d{2}-\d{2}$/.test(p.fecha) ? p.fecha : hoy(),
-        priority: "media", status: "pendiente", type: "lead",
-        assignee_id: Number(form.responsable_id) || currentUser?.id, created_by: currentUser?.id,
-      }));
-
-    const { data, error: e } = await supabase.from("tasks").insert(filas).select();
-    if (e) setError("No se pudo agregar el paso: " + mensajeError(e));
-    else {
-      setRuta(r => [...r, ...(data || [])]);
-      setNuevoPaso("");
-      // Los pasos también son movimientos del proyecto: quien lea la bitácora
-      // tiene que ver qué se decidió hacer, no solo lo que ya se hizo.
-      await anotar(lead.id, "nota", `Pasos nuevos: ${filas.map(f => `${f.title}${f.due_date ? ` (${f.due_date})` : ""}`).join(" · ")}`);
-      const { data: ms } = await supabase.from("lead_movimientos").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(30);
-      setMovs(ms || []);
-    }
-    setPensando(false);
-  }
-
-  async function borrarPaso(t) {
-    await supabase.from("tasks").delete().eq("id", t.id);
-    setRuta(r => r.filter(x => x.id !== t.id));
-    await anotar(lead.id, "nota", `Paso quitado: ${t.title}`);
-  }
-
   async function agregarNota() {
     const d = nota.trim();
     if (!d || !lead) return;
@@ -272,17 +186,12 @@ Si no se dice cuándo, pon la fecha de hoy.`,
 
   async function ejecutarBorrado() {
     await supabase.from("tasks").delete().eq("lead_id", lead.id);
-    await supabase.from("lead_etapas").delete().eq("lead_id", lead.id);
     await supabase.from("pipeline_invitados").delete().eq("lead_id", lead.id);
     await supabase.from("lead_movimientos").delete().eq("lead_id", lead.id);
     const { error: e } = await supabase.from("leads").delete().eq("id", lead.id);
     return e;
   }
 
-  const { grabando, error: errorVoz, dictar } = useDictado({
-    onParcial: setNuevoPaso,
-    onListo: t => { setNuevoPaso(t); agregarPaso(t); },
-  });
   // La nota de bitácora no se manda sola al terminar de dictar: es texto libre
   // y conviene leerlo antes, que es donde el dictado se equivoca.
   const { grabando: grabandoNota, error: errorVozNota, dictar: dictarNota } = useDictado({
@@ -291,7 +200,6 @@ Si no se dice cuándo, pon la fecha de hoy.`,
   });
 
   const puedeBorrar = editando && esAdmin(currentUser?.role);
-  const hechos = ruta.filter(t => t.status === "listo" || t.status === "bloqueado").length;
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
   const mini = { ...inputStyle, padding: "7px 9px", fontSize: 12 };
 
@@ -335,7 +243,7 @@ Si no se dice cuándo, pon la fecha de hoy.`,
               style={{ padding: "7px 13px", border: "none", background: "transparent", cursor: "pointer", fontFamily: colors.font,
                 fontSize: 12, fontWeight: seccionVisible === id ? 600 : 400, color: seccionVisible === id ? colors.brand : colors.inkSoft,
                 borderBottom: `2px solid ${seccionVisible === id ? colors.brand : "transparent"}` }}>
-              {txt}{id === "dia" && ruta.length > 0 ? ` ${hechos}/${ruta.length}` : ""}
+              {txt}
             </button>
           ))}
         </div>
@@ -461,65 +369,8 @@ Si no se dice cuándo, pon la fecha de hoy.`,
       )}
 
       {editando && seccionVisible === "gente" && (
-        <EtapasLead lead={lead} catalogo={catalogo} users={users} currentUser={currentUser}
-          parte="gente"
-          puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id}
-          onBitacora={recargarBitacora}
-          onEtapaCambiada={etapa => setForm(p => ({ ...p, etapa }))} />
-      )}
-
-      {editando && seccionVisible === "dia" && (
-        <>
-          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>
-            Lo suelto de esta semana. Son tareas de verdad: vencen y aparecen en la lista de quien las tiene.
-          </div>
-          <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, marginBottom: 12 }}>
-            {ruta.length === 0 && <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 8 }}>Todavía sin pasos. Dictale abajo a NOVA qué sigue y con qué fecha.</div>}
-            {ruta.map(t => {
-              const listo = t.status === "listo";
-              const noHecho = t.status === "bloqueado";
-              const cerrado = listo || noHecho;
-              const d = t.due_date ? daysUntil(t.due_date) : null;
-              const vencido = !cerrado && d != null && d < 0;
-              return (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", flexWrap: "wrap" }}>
-                  <button onClick={() => alternarPaso(t)} title="Pendiente → hecho → no se hizo"
-                    style={{ width: 19, height: 19, borderRadius: 5, flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
-                      border: `1.5px solid ${listo ? colors.success : noHecho ? colors.muted : vencido ? colors.danger : colors.border}`,
-                      background: listo ? colors.success : noHecho ? colors.muted : "transparent" }}>
-                    {listo && <Check size={11} color="#fff" />}
-                    {noHecho && <X size={11} color="#fff" />}
-                  </button>
-                  <span style={{ flex: 1, minWidth: 120, fontSize: 12, color: cerrado ? colors.muted : colors.ink, textDecoration: cerrado ? "line-through" : "none" }}>
-                    {t.title}
-                  </span>
-                  <input type="date" value={t.due_date || ""} onChange={e => cambiarFecha(t, e.target.value)}
-                    disabled={!puede("tareas.fechas")} title={puede("tareas.fechas") ? "" : "La fecha la mueve el Director o quien tenga ese permiso"}
-                    style={{ ...mini, width: 130, padding: "4px 6px", fontSize: 11, color: vencido ? colors.danger : colors.inkSoft, borderColor: vencido ? colors.dangerBorder : colors.border,
-                      ...(puede("tareas.fechas") ? {} : { background: colors.bg, cursor: "not-allowed" }) }} />
-                  <button onClick={() => borrarPaso(t)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><Trash2 size={12} /></button>
-                </div>
-              );
-            })}
-            {grabando && <div style={{ fontSize: 11, color: colors.danger, marginTop: 6 }}>Escuchando… toca el micrófono cuando termines.</div>}
-            {errorVoz && <div style={{ fontSize: 11, color: colors.warning, marginTop: 6 }}>{errorVoz}</div>}
-            <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
-              <Sparkles size={14} color={colors.brand} style={{ flexShrink: 0 }} />
-              <input value={nuevoPaso} onChange={e => setNuevoPaso(e.target.value)}
-                disabled={pensando}
-                placeholder={pensando ? "NOVA está anotando..." : "Enviar portafolio el viernes..."}
-                style={{ ...mini, flex: 1, minWidth: 0 }} />
-              <button onClick={dictar} disabled={pensando} title={grabando ? "Tocar para terminar" : "Dictar el paso"}
-                style={{ background: grabando ? colors.danger : colors.neutralSoft, border: "none", borderRadius: colors.radiusSm, width: 32, height: 30, flexShrink: 0,
-                  color: grabando ? "#fff" : colors.inkSoft, cursor: pensando ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Mic size={13} />
-              </button>
-              <Button variant="primary" size="sm" onClick={() => agregarPaso()} disabled={!nuevoPaso.trim() || pensando}>
-                <Plus size={12} /> {pensando ? "..." : "Anotar"}
-              </Button>
-            </div>
-          </div>
-        </>
+        <GenteDelProyecto lead={lead} users={users} currentUser={currentUser}
+          puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id} />
       )}
 
       {/* La bitácora es el pie del proyecto —qué pasó, en orden—, no otra

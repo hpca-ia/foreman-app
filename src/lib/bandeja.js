@@ -41,8 +41,6 @@ const abierta = t => t.status !== "listo";
  * La bandeja de una persona.
  *
  * @param tareas        todas las que puede ver
- * @param acompanantes  Map tarea → [usuarios que la acompañan]: si la puedo
- *                      mover, es mía
  * @param leads         los leads del pipeline (para la espera del cliente)
  * @param veTodo        el Director ve lo sin responsable y los leads de toda
  *                      la oficina; el resto, lo suyo
@@ -50,9 +48,9 @@ const abierta = t => t.status !== "listo";
  *   cada parte es una lista de grupos { clave, titulo, tareas, leads?, pide? };
  *   `pide: "decision"` marca el grupo de lo vencido
  */
-export function bandeja({ tareas = [], usuarioId, acompanantes = new Map(), leads = [], veTodo = false, hoy = hoyISO() }) {
+export function bandeja({ tareas = [], usuarioId, leads = [], veTodo = false, hoy = hoyISO() }) {
   const abiertas = sinCompras(tareas).filter(abierta);
-  const esMia = t => mismo(t.assignee_id, usuarioId) || (acompanantes.get?.(t.id) || []).some(id => mismo(id, usuarioId));
+  const esMia = t => mismo(t.assignee_id, usuarioId);
   const sinNadie = t => !t.assignee_id && !t.responsable_externo;
 
   // Lo mío que todavía depende de mí. Lo que marqué «espera a un tercero» ya

@@ -75,17 +75,15 @@ test("espero de otros: lo que encargué, y lo mío que ya depende de un tercero"
   assert.deepEqual(ids(bandeja({ tareas, usuarioId: CAMILA, hoy: HOY }).meToca), { vencidas: ["Para Camila"], sinFecha: ["De otros para otros"] });
 });
 
-test("lo que acompaño es mío; lo que nadie tomó es de quien lo escribió, y del Director todo", () => {
-  const acompanada = t({ title: "Visita a obra", assignee_id: CAMILA, created_by: CAMILA, due_date: HOY });
+test("lo que nadie tomó es de quien lo escribió, y del Director todo", () => {
   const suelta = t({ title: "Pedir pólizas", assignee_id: null });
   const ajena = t({ title: "Suelta de Johanna", assignee_id: null, created_by: JOHANNA });
-  const tareas = [acompanada, suelta, ajena];
-  const acompanantes = new Map([[acompanada.id, [YO]]]);
-  const b = bandeja({ tareas, usuarioId: YO, acompanantes, hoy: HOY });
-  assert.deepEqual(ids(b.meToca), { hoy: ["Visita a obra"], sinDueno: ["Pedir pólizas"] });
+  const tareas = [suelta, ajena];
+  const b = bandeja({ tareas, usuarioId: YO, hoy: HOY });
+  assert.deepEqual(ids(b.meToca), { sinDueno: ["Pedir pólizas"] });
   assert.equal(b.meToca.find(g => g.clave === "sinDueno").pide, "dueno");
   // El Director ve todo lo que no tiene dueño.
-  assert.deepEqual(ids(bandeja({ tareas, usuarioId: YO, acompanantes, veTodo: true, hoy: HOY }).meToca).sinDueno, ["Pedir pólizas", "Suelta de Johanna"]);
+  assert.deepEqual(ids(bandeja({ tareas, usuarioId: YO, veTodo: true, hoy: HOY }).meToca).sinDueno, ["Pedir pólizas", "Suelta de Johanna"]);
   // Los números de la base pueden venir como texto.
   assert.deepEqual(ids(bandeja({ tareas: [t({ title: "x", assignee_id: "1" })], usuarioId: 1, hoy: HOY }).meToca), { sinFecha: ["x"] });
 });

@@ -9,7 +9,6 @@ import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 import ComentariosTarea from "./ComentariosTarea";
 import InlineFiles from "./InlineFiles";
-import DependenciasTarea from "./DependenciasTarea";
 import Avatar from "./ui/Avatar";
 
 export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectos = [], mios = [], proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar, acompanantes = [], tareas = [], onCambio }) {
@@ -22,8 +21,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   } : { title: "", ...comoSeGuarda((mios[0] || proyectos[0]) ?? null), assignee_id: currentUser.id, type: "Llamada", due_date: "", hora: "", priority: "media", status: ESTADO_NUEVO, notes: "", privada: false, enlace: "", es_aprobacion: false });
   const inp = (f, v) => setForm(p => ({ ...p, [f]: v }));
   // Los que acompañan al responsable principal: el plano lo hacen dos.
-  const [conmigo, setConmigo] = useState(acompanantes);
-  const alternarAcompanante = id => setConmigo(x => (x.includes(id) ? x.filter(i => i !== id) : [...x, id]));
   const soyAdmin = esAdmin(currentUser.role);
   // A quién se puede asignar. Con el permiso de asignar, a cualquiera. Sin él,
   // manda el proyecto: si hay uno elegido, solo sus miembros —para no mandarle
@@ -134,31 +131,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           <div><label style={lS}>Responsable</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
         </div>
 
-        {/* Quién más la lleva, pegado a quién la lleva: son dos mitades de la
-            misma decisión y estaban separadas por el bloque del proyecto. Con
-            un desplegable arriba que dice un solo nombre y los demás catorce
-            líneas más abajo, cualquiera concluye que se asigna a uno solo —y
-            eso fue exactamente lo que pasó. */}
-        <div>
-          <label style={lS}>Y también la llevan</label>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {asignables.filter(u => u.id !== form.assignee_id).map(u => {
-              const on = conmigo.includes(u.id);
-              return (
-                <button key={u.id} type="button" onClick={() => alternarAcompanante(u.id)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${on ? colors.ink : colors.border}`, background: on ? colors.ink : "#fff",
-                    color: on ? "#fff" : colors.inkSoft, borderRadius: 20, padding: "3px 10px 3px 4px", fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
-                  <Avatar name={u.name} size={16} color={u.color || colors.brand} /> {u.name}
-                </button>
-              );
-            })}
-            {!asignables.filter(u => u.id !== form.assignee_id).length && <span style={{ fontSize: 11, color: colors.muted }}>No hay más gente a quien sumar.</span>}
-          </div>
-          <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>
-            Tocá a quien se suma. La ven en su tablero como propia y la pueden mover; los recordatorios y la
-            cuenta de carga van al responsable, para que no llegue el mismo aviso tres veces.
-          </div>
-        </div>
         {creandoP && (
           <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 10 }}>
             <label style={lS}>Nombre del proyecto nuevo</label>
@@ -229,13 +201,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           es el que más necesita decir por qué está parada. */}
       {editTask && (
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${colors.neutralSoft}` }}>
-          <DependenciasTarea tarea={editTask} currentUser={currentUser} users={asignables} tareas={tareas}
-            soloLectura={soloLectura} onCambio={onCambio} />
-        </div>
-      )}
-
-      {editTask && (
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${colors.neutralSoft}` }}>
           <ComentariosTarea taskId={editTask.id} currentUser={currentUser} />
         </div>
       )}
@@ -245,7 +210,7 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           Solo lectura: es una tarea de {users.find(u => u.id === editTask.assignee_id)?.name || "otra persona"}. La puede cambiar esa persona o un admin.
         </div>
       ) : (!form.title || !form.due_date) ? <div style={{ color: colors.muted, fontSize: 11, marginTop: 12, textAlign: "center" }}>Completa título y fecha</div>
-        : <Button variant="primary" size="lg" style={{ width: "100%", marginTop: 16 }} onClick={() => { onGuardar({ ...form, _acompanantes: conmigo }, editTask?.id); onCerrar(); }}>
+        : <Button variant="primary" size="lg" style={{ width: "100%", marginTop: 16 }} onClick={() => { onGuardar(form, editTask?.id); onCerrar(); }}>
             {editTask ? "Guardar cambios" : "Agregar tarea"}
           </Button>}
       {editTask && soyAdmin && onEliminar && (

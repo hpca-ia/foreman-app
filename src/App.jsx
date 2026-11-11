@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
@@ -24,7 +24,6 @@ import CargadorDeAvisos from "./components/CargadorDeAvisos";
 import { avisosDelPipeline, esMiAviso, diaCorto } from "./modules/leads/pipeline";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
-import { leerResponsables, guardarResponsables, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
@@ -69,10 +68,8 @@ export default function App() {
   const [cronoPedido, setCronoPedido] = useState(null);
   const [vistaTareas, setVistaTareas] = useState("lista");
   // Quién acompaña a cada tarea, y qué tarea espera a cuál.
-  const [acompanantes, setAcompanantes] = useState(new Map());
   // Lo último de las tareas, para poder leer sus acompañantes sin volver a
   // armar la función cada vez que cambia la lista.
-  const tareasRef = useRef([]);
   // Lo completado se guarda, no se tira: se ve cuando alguien lo pide.
   const [verListas, setVerListas] = useState(false);
   const [filtroP, setFiltroP] = useState("all");
@@ -208,18 +205,6 @@ export default function App() {
     return () => { supabase.removeChannel(tCh); clearInterval(poll); };
   }, [usuario]);
 
-  // Quién acompaña cada tarea y qué espera a qué. Va aparte de las tareas
-  // porque son sus propias tablas, y sin la migración 035 devuelven vacío.
-  const cargarEquipoDeTareas = useCallback(async () => {
-    const ids = tareasRef.current.map(t => t.id);
-    if (!ids.length) return;
-    setAcompanantes(await leerResponsables(ids));
-    // eslint-disable-next-line
-  }, []);
-
-  useEffect(() => { tareasRef.current = tareas; }, [tareas]);
-  useEffect(() => { if (tareas.length) cargarEquipoDeTareas(); }, [tareas.length, cargarEquipoDeTareas]);
-
   async function fetchTareas() {
     setCargando(true);
     const { data } = await supabase.from("tasks").select("*").order("created_at", { ascending: false });
@@ -348,12 +333,6 @@ export default function App() {
     // Si la tarea es de un proyecto, allá se ve cerrada sin hacer nada más:
     // es la misma fila. Y si era su próximo paso, deja de serlo.
 
-    // Al completarla, las que la estaban esperando se destraban solas.
-    if (estado === "listo") {
-      const destrabadas = await destrabarLasQueEsperaban(id);
-      if (destrabadas.length) fetchTareas();
-    }
-
     // Si la tarea es de un proyecto del pipeline, su bitácora se entera: quien
     // la trabaja la marca desde sus tareas, no entrando al proyecto.
     if (tarea?.lead_id && estado !== "pendiente") {
@@ -366,8 +345,7 @@ export default function App() {
   }
 
   async function guardarTarea(formEntero, id) {
-    // Los acompañantes no son columnas de la tarea: van en su propia tabla.
-    const { _acompanantes: conmigo = [], ...form } = formEntero;
+    const form = formEntero;
     // Si falta la migración 038, la tarea se guarda igual: sin la marca de
     // aprobación, y se avisa.
     const sinNuevas = ({ es_aprobacion, enlace, hora, ...resto }) => resto;
@@ -385,15 +363,12 @@ export default function App() {
       const antes = tareas.find(t => t.id === id);
       const { error } = await guardar(form);
       if (error) { alert(mensajeErrorTarea(error)); return; }
-      await guardarResponsables(id, conmigo, form.assignee_id);
-      cargarEquipoDeTareas();
       // Si cambió de manos, el nuevo se entera: enterarse por casualidad de que
       // algo era tuyo es la forma más cara de perder una semana.
       if (form.assignee_id && form.assignee_id !== antes?.assignee_id) await avisarPorCorreo(id);
     } else {
       const { data: creada, error } = await guardar({ ...form, ...(form.es_aprobacion ? { aprobacion_estado: "pendiente" } : {}) });
       if (error) { alert(mensajeErrorTarea(error)); return; }
-      if (creada && conmigo.length) { await guardarResponsables(creada.id, conmigo, form.assignee_id); cargarEquipoDeTareas(); }
       // El aviso lo manda el servidor, que es el único que ve los correos y
       // sabe de qué proyecto es. Si no se pudo mandar, se dice: antes el error
       // se tragaba y la persona nunca se enteraba de que tenía algo.
@@ -599,7 +574,6 @@ export default function App() {
   // prendió un filtro para mirar lo suyo.
   const visiblesTodas = propias.filter(t => veLaTarea({
     tarea: t, usuarioId: usuario.id, admin, todas: veTodo, nivel: nivelDeTarea(t),
-    acompanante: (acompanantes.get(t.id) || []).includes(usuario.id),
   }));
   let visibles = visiblesTodas;
   if (busqueda.trim()) {
@@ -619,7 +593,7 @@ export default function App() {
   // esté mirando un solo proyecto o buscando una tarea.
   const filtrando = !!proyectoElegido || !!busqueda.trim();
   const datosBandeja = bandeja({
-    tareas: visibles, usuarioId: usuario.id, acompanantes, veTodo,
+    tareas: visibles, usuarioId: usuario.id, veTodo,
     leads: verPipeline && !filtrando ? proyectosPipeline.filter(l => nivelProyecto(l.id)) : [],
   });
   // Lo que cerré o se cerró de lo que encargué, lo más nuevo arriba. Solo si se pide.
@@ -784,7 +758,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} proyectos={proyectosTodos} mios={mios} acompanantes={editTask ? (acompanantes.get(editTask.id) || []) : []} tareas={tareas} onCambio={() => { fetchTareas(); cargarEquipoDeTareas(); }} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showModal && <ModalTarea editTask={editTask} proyectos={proyectosTodos} mios={mios} tareas={tareas} onCambio={fetchTareas} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
       {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} permisosUsuario={permisosUsuario} setPermisosUsuario={setPermisosUsuario} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
     </div>
   );

@@ -256,16 +256,6 @@ export async function comentarSolicitud(solicitud, { quien, texto }) {
   const e = await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, limpio);
   if (e) return { error: e };
 
-  // En la bitácora del proyecto también: ahí se lee la historia de la obra, y
-  // una pregunta sobre una compra es parte de esa historia.
-  if (solicitud.lead_id) {
-    await supabase.from("lead_movimientos").insert({
-      lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
-      detalle: `Comentario sobre «${solicitud.descripcion}»: ${limpio}`,
-      autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
-    });
-  }
-
   // El correo no puede frenar el comentario: si falla, lo escrito ya está.
   fetch("/api/aviso?de=compra", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -331,13 +321,9 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
   if (error) return { error: error.message };
   await anotar(solicitud.id, solicitud.estado, estado, quien, comentario);
 
-  // Y la bitácora del proyecto se entera, que es donde se lee la historia. Un
-  // gasto de oficina no cuelga de ninguna, y su historia es la de abajo.
-  if (solicitud.lead_id) await supabase.from("lead_movimientos").insert({
-    lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
-    detalle: `${ESTADOS[estado]?.label || estado}: ${solicitud.descripcion}${comentario ? ` — ${comentario}` : ""}`,
-    autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
-  }).select();
+  // La historia de la compra está en la compra (`anotar`, arriba). La bitácora
+  // del proyecto ya no repite cada paso: eran 90 de 278 renglones, y tapaban
+  // lo que el proyecto tiene para contar.
 
   // El correo lo manda el servidor, igual que cualquier tarea encargada.
   //
