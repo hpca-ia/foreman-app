@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { guardarProyecto } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
 import { ESTADO_NUEVO, CLASES, claseDe, HORAS } from "../theme/constants";
 import { claveDeTarea, comoSeGuarda } from "../lib/proyectos";
@@ -11,7 +10,7 @@ import ComentariosTarea from "./ComentariosTarea";
 import InlineFiles from "./InlineFiles";
 import Avatar from "./ui/Avatar";
 
-export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, projects, proyectos = [], mios = [], proyectosElegibles, asignables: asignablesApp, onProyectoCreado, onEliminar, acompanantes = [], tareas = [], onCambio }) {
+export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, currentUser, users, proyectos = [], mios = [], asignables: asignablesApp, onEliminar, onCambio }) {
   const admin = puede("tareas.asignar");
   const [form, setForm] = useState(editTask ? {
     title: editTask.title, project_id: editTask.project_id, lead_id: editTask.lead_id, assignee_id: editTask.assignee_id,
@@ -42,20 +41,20 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
       ? `${CLASES[id].label} de ${p.notes.replace(/^(Gestión|Actividad|Tarea|Reunión) de /, "")}`
       : p.notes,
   }));
-  const asignablesPara = projectId => {
+  // A quién se le puede dar: con el permiso, a cualquiera. Sin él, a la gente
+  // que entra a ese proyecto; y sin proyecto, a sus compañeros.
+  const asignablesPara = proyecto => {
     if (puedeAsignarATodos) return users;
-    const p = projects.find(x => x.id === projectId);
-    if (p) return users.filter(u => (p.miembros || []).includes(u.id));
+    if (proyecto) return users.filter(u => (proyecto.gente || []).includes(u.id) || u.id === proyecto.creador || u.id === currentUser.id);
     return asignablesApp || users.filter(u => u.id === currentUser.id);
   };
-  const baseAsignables = asignablesPara(form.project_id);
+  const baseAsignables = asignablesPara(proyectos.find(p => p.clave === claveDeTarea(form)) || null);
   const actualAsignado = users.find(u => u.id === editTask?.assignee_id);
   const asignables = actualAsignado && !baseAsignables.some(u => u.id === actualAsignado.id) ? [...baseAsignables, actualAsignado] : baseAsignables;
 
   function elegirProyecto(valor) {
-    if (valor === "__nuevo__") { setCreandoP(true); return; }
     const elegido = proyectos.find(p => p.clave === valor) || null;
-    const lista = asignablesPara(elegido && !elegido.esLead ? elegido.id : null);
+    const lista = asignablesPara(elegido);
     setForm(f => ({
       ...f, ...comoSeGuarda(elegido),
       // Si el asignado no es de ese proyecto, la tarea vuelve a quien la crea.
@@ -66,9 +65,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   // Ver no es tocar: la tarea de otra persona se abre, pero solo la cambia
   // quien la tiene asignada, quien la creó o un admin.
   const soloLectura = !!editTask && !soyAdmin && editTask.assignee_id !== currentUser.id && editTask.created_by !== currentUser.id;
-  const [creandoP, setCreandoP] = useState(false);
-  const [nombreP, setNombreP] = useState("");
-  const [errP, setErrP] = useState("");
   const puedeCrearProyecto = esAdmin(currentUser.role);
 
   // Todos los proyectos, del pipeline y de Ajustes: antes el menú mostraba solo
@@ -79,20 +75,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
   const actual = proyectos.find(p => p.clave === clave);
   const opciones = actual && !base.some(p => p.clave === actual.clave) ? [...base, actual] : base;
 
-  // Crear el proyecto sin salir de la tarea. Quedan como miembros quien lo
-  // crea y a quien se le asigna, que es lo mínimo para que ambos lo vean.
-  async function crearProyecto() {
-    const nombre = nombreP.trim();
-    if (!nombre) return;
-    const id = Date.now();
-    const { error } = await guardarProyecto(
-      { id, name: nombre, color: "#0F3D3E", tipo: "otro", miembros: [currentUser.id, form.assignee_id].filter(Boolean) },
-      currentUser.id
-    );
-    if (error) { setErrP("No se pudo crear: " + error.message); return; }
-    await onProyectoCreado?.();
-    inp("project_id", id); setCreandoP(false); setNombreP(""); setErrP("");
-  }
   const lS = { color: colors.muted, fontSize: 11, fontWeight: 500, marginBottom: 4, display: "block" };
 
   return (
@@ -107,7 +89,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           <div><label style={lS}>Proyecto</label><select value={clave} onChange={e => elegirProyecto(e.target.value)} style={inputStyle}>
             <option value="">Sin proyecto</option>
             {opciones.map(p => <option key={p.clave} value={p.clave}>{p.name}</option>)}
-            {puedeCrearProyecto && <option value="__nuevo__">+ Nuevo proyecto…</option>}
           </select></div>
           {/* Qué es se elige acá igual que en el proyecto, y con los mismos
               colores: la misma cosa no puede llamarse gestión en una pantalla y
@@ -131,18 +112,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           <div><label style={lS}>Responsable</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
         </div>
 
-        {creandoP && (
-          <div style={{ background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 10 }}>
-            <label style={lS}>Nombre del proyecto nuevo</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input value={nombreP} onChange={e => setNombreP(e.target.value)} onKeyDown={e => e.key === "Enter" && crearProyecto()} placeholder="Ej: Mensajería oficina" style={{ ...inputStyle, flex: 1 }} autoFocus />
-              <Button variant="primary" size="sm" onClick={crearProyecto} disabled={!nombreP.trim()}>Crear</Button>
-              <Button variant="outline" size="sm" onClick={() => { setCreandoP(false); setErrP(""); }}>×</Button>
-            </div>
-            {errP && <div style={{ color: colors.danger, fontSize: 11, marginTop: 5 }}>{errP}</div>}
-            <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>Nace en el pipeline como lead (L). Ahí se le pone el tubo —Arquitectura o Construcción— cuando corresponda.</div>
-          </div>
-        )}
         <div>
           <label style={lS}>Fecha límite *</label>
           {/* La hora, solo cuando hay día y para lo que se agenda: una reunión

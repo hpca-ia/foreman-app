@@ -4,8 +4,7 @@ import { supabase } from "../lib/supabase";
 import EtapasCatalogo from "./EtapasCatalogo";
 import { BUCKET_PUBLICO } from "../lib/archivos";
 import { saveToStorage } from "../lib/storage";
-import { guardarUsuario, desactivarUsuario, guardarProyecto, desactivarProyecto, asignarProyectosAUsuario, TIPOS_PROYECTO } from "../lib/equipo";
-import EmparejarProyectos from "./EmparejarProyectos";
+import { guardarUsuario, desactivarUsuario } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
 import { avisarPinNuevo, avisarPermisos, probarCorreo } from "../lib/avisoCuenta";
 import { rolInfo } from "../lib/roles";
@@ -15,7 +14,6 @@ import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
 import UserForm from "./UserForm";
 import PanelPermisos from "./PanelPermisos";
-import ProjectForm from "./ProjectForm";
 import ProyectosDelPipeline from "./ProyectosDelPipeline";
 import PermisosDeUsuario from "./PermisosDeUsuario";
 
@@ -51,14 +49,13 @@ const colorConexion = ts => {
   return dias > 21 ? "var(--warning)" : "var(--muted)";
 };
 
-export default function PanelAjustes({ usuario, permisos, setPermisos, permisosUsuario = {}, setPermisosUsuario = () => {}, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, projects, setProjects, empresa, setEmpresa, onClose }) {
+export default function PanelAjustes({ usuario, permisos, setPermisos, permisosUsuario = {}, setPermisosUsuario = () => {}, equipoRemoto = true, onEquipoCambio = () => {}, users, setUsers, empresa, setEmpresa, onClose }) {
   // Qué persona tiene abiertos sus permisos: uno a la vez, que son muchos.
   const [permisosDe, setPermisosDe] = useState(null);
   const [probandoResumen, setProbandoResumen] = useState(false);
   const [resumenDijo, setResumenDijo] = useState("");
   const [tab, setTab] = useState("empresa");
   const [editU, setEditU] = useState(null);
-  const [editP, setEditP] = useState(null);
   const [newU, setNewU] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoRef = useRef(null);
@@ -105,11 +102,6 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
     const falla = avisos.find(a => a && a.ok === false);
     if (falla) setErrEquipo("El usuario se guardó, pero no se pudo avisar por correo: " + falla.error);
     else if (avisos.length) setOkEquipo(`Se le mandó el correo a ${u.name}.`);
-    // Los admins ven todo: sus membresías no se tocan desde acá.
-    if (!esAdmin(u.role) && Array.isArray(u.proyectos)) {
-      const r = await asignarProyectosAUsuario(id, u.proyectos, projects.map(p => p.id));
-      if (r.error) { setErrEquipo("El usuario se guardó, pero sus proyectos no: " + r.error.message); onEquipoCambio(); return; }
-    }
     setEditU(null); setNewU(false); onEquipoCambio();
   }
   async function deleteUser(id) {
@@ -122,30 +114,6 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
     }
     if (!window.confirm("¿Quitar este usuario?\n\nSu historial y sus tareas terminadas no se borran: deja de poder entrar y de aparecer en las listas.")) return;
     const { error } = await desactivarUsuario(id);
-    if (error) { setErrEquipo("No se pudo quitar: " + error.message); return; }
-    onEquipoCambio();
-  }
-  async function saveProject(p) {
-    setErrEquipo("");
-    const existe = projects.some(x => x.id === p.id);
-    const { error } = await guardarProyecto({ ...p, id: existe ? p.id : Date.now() }, usuario?.id);
-    if (error) { setErrEquipo("No se pudo guardar el proyecto: " + error.message); return; }
-    setEditP(null); onEquipoCambio();
-  }
-  // Un proyecto con trabajo pendiente no se quita: sus tareas quedarían
-  // huérfanas, sin nombre de proyecto y fuera de los filtros.
-  async function deleteProject(id) {
-    setErrEquipo("");
-    const { count: pendientes } = await supabase.from("tasks")
-      .select("id", { count: "exact", head: true }).eq("project_id", id).neq("status", "listo");
-    if (pendientes) {
-      setErrEquipo(`No se puede quitar: el proyecto tiene ${pendientes} ${pendientes === 1 ? "tarea pendiente" : "tareas pendientes"}. Termínalas o pásalas a otro proyecto primero.`);
-      return;
-    }
-    const { count: hechas } = await supabase.from("tasks")
-      .select("id", { count: "exact", head: true }).eq("project_id", id);
-    if (!window.confirm(`¿Quitar este proyecto?\n\n${hechas ? `Sus ${hechas} tareas terminadas no se borran: quedan en el historial.` : "No tiene tareas."}`)) return;
-    const { error } = await desactivarProyecto(id);
     if (error) { setErrEquipo("No se pudo quitar: " + error.message); return; }
     onEquipoCambio();
   }
@@ -295,7 +263,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
                   <Send size={13} />
                 </button>
               )}
-              <button onClick={() => setEditU({ ...u, pin: "", proyectos: projects.filter(p => (p.miembros || []).includes(u.id)).map(p => p.id) })} style={iconBtn}><Pencil size={13} /></button>
+              <button onClick={() => setEditU({ ...u, pin: "" })} style={iconBtn}><Pencil size={13} /></button>
               {u.role !== "owner" && <button onClick={() => deleteUser(u.id)} style={deleteBtn}><X size={13} /></button>}
             </div>
           ))}
@@ -321,42 +289,16 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
       {tab === "proyectos" && (
         <div>
           {avisoEquipo}
-          {/* Un proyecto, una sola vez: acá se dice cuál de esta lista es cuál
-              del pipeline, y dejan de ser dos cosas con el mismo nombre. */}
-          <EmparejarProyectos onCambio={onEquipoCambio} />
-
           {/* La lista de verdad: la del pipeline. Acá el proyecto solo recibe
               lo que hace falta para trabajar en equipo —color y gente—; nace y
               se trabaja en el pipeline, con su tubo y sus etapas. */}
           <ProyectosDelPipeline users={users} permisos={permisos} permisosUsuario={permisosUsuario} onCambio={onEquipoCambio} />
 
-          {/* Lo que todavía no se empató se sigue viendo y editando como antes:
-              nada desaparece por el camino. */}
-          {projects.filter(p => !p.lead_id).length > 0 && (
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.4, margin: "14px 0 7px" }}>
-              LISTA VIEJA DE AJUSTES · {projects.filter(p => !p.lead_id).length}
-            </div>
-          )}
-          {projects.filter(p => !p.lead_id).map(p => editP?.id === p.id ? (
-            <ProjectForm key={p.id} p={editP} users={users} onSave={saveProject} onCancel={() => setEditP(null)} />
-          ) : (
-            <div key={p.id} style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10, borderLeft: `3px solid ${p.color}` }}>
-              <div style={{ width: 12, height: 12, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{p.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                  {TIPOS_PROYECTO.find(t => t.id === p.tipo)?.label || "Otro"} · {(p.miembros || []).length ? `${p.miembros.length} miembro${p.miembros.length === 1 ? "" : "s"}` : "sin miembros — solo lo ven los admins"}
-                </div>
-              </div>
-              <button onClick={() => setEditP({ ...p })} style={iconBtn}><Pencil size={13} /></button>
-              <button onClick={() => deleteProject(p.id)} style={deleteBtn}><X size={13} /></button>
-            </div>
-          ))}
           {/* Los proyectos nuevos nacen en el pipeline: ahí eligen su tubo y
               arrancan con sus etapas. Crear uno acá volvía a partir la lista en
               dos, que es el problema que estamos cerrando. */}
           <div style={{ fontSize: 11.5, color: "var(--muted)", background: "var(--bg)", border: "1px dashed var(--border)", borderRadius: "var(--radius-md)", padding: 11, textAlign: "center" }}>
-            Los proyectos nuevos se crean en <strong style={{ color: "var(--ink-soft)" }}>Pipeline → Nuevo proyecto</strong>, con su tubo y sus etapas.
+            Los proyectos nuevos nacen en <strong style={{ color: "var(--ink-soft)" }}>Pipeline → Nuevo lead</strong>, con su tipo, y pasan a «En marcha» cuando se aprueban.
           </div>
         </div>
       )}

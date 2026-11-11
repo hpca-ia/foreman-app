@@ -38,11 +38,14 @@ export function parecido(texto, lista, campo = "nombre") {
 
 const diasHasta = f => f ? Math.round((new Date(f + "T12:00:00") - new Date(HOY() + "T12:00:00")) / 86400000) : null;
 
+/** El aviso que deja el circuito de compras no es una tarea de nadie. */
+const sinCompras = t => !t.compra_id && t.type !== "Compra";
+
 function comoSeLee(t, proyectos) {
   const d = diasHasta(t.due_date);
   const cuando = d == null ? "sin fecha" : d < 0 ? `vencida hace ${-d} ${-d === 1 ? "día" : "días"}` : d === 0 ? "para hoy" : d === 1 ? "para mañana" : `en ${d} días`;
-  const p = proyectos.find(x => x.id === t.project_id);
-  return { id: t.id, tarea: t.title, cuando, fecha: t.due_date || null, prioridad: t.priority, proyecto: p?.nombre || null, estado: t.status };
+  const p = proyectos.find(x => x.id === t.lead_id);
+  return { id: t.id, tarea: t.title, cuando, fecha: t.due_date || null, proyecto: p?.nombre || null, estado: t.status };
 }
 
 export const herramientas = [
@@ -76,7 +79,6 @@ export const herramientas = [
         para: { type: "string", description: "Nombre de la persona. Vacío: para quien escribe." },
         proyecto: { type: "string", description: "Nombre del proyecto, si lo dijo." },
         fecha: { type: "string", description: "Fecha límite en formato AAAA-MM-DD." },
-        prioridad: { type: "string", enum: ["urgente", "alta", "media", "baja"] },
         nota: { type: "string", description: "Detalle extra, si lo hay." },
       },
       required: ["titulo"],
@@ -137,18 +139,21 @@ const ACCIONES = {
       quien = otro;
     }
     const estado = incluir_terminadas ? "" : "&status=neq.listo";
-    const t = await filas(await rest(`tasks?assignee_id=eq.${quien.id}${estado}&select=id,title,due_date,priority,status,project_id&order=due_date.asc.nullslast&limit=25`));
+    const todas = await filas(await rest(`tasks?assignee_id=eq.${quien.id}${estado}&select=id,title,due_date,status,lead_id,type,compra_id&order=due_date.asc.nullslast&limit=40`));
+    // Un aviso de compras no es una tarea: se sigue en Compras.
+    const t = todas.filter(sinCompras).slice(0, 25);
     return { de: quien.nombre, cuantas: t.length, tareas: t.map(x => comoSeLee(x, proyectos)) };
   },
 
   async buscar_tarea({ texto }, { usuario, puede, proyectos }) {
     const q = encodeURIComponent(`*${String(texto || "").trim()}*`);
     const mias = puede("tareas.todas") ? "" : `&assignee_id=eq.${usuario.id}`;
-    const t = await filas(await rest(`tasks?title=ilike.${q}${mias}&select=id,title,due_date,priority,status,project_id&order=created_at.desc&limit=10`));
+    const todas = await filas(await rest(`tasks?title=ilike.${q}${mias}&select=id,title,due_date,status,lead_id,type,compra_id&order=created_at.desc&limit=20`));
+    const t = todas.filter(sinCompras).slice(0, 10);
     return { cuantas: t.length, tareas: t.map(x => comoSeLee(x, proyectos)) };
   },
 
-  async crear_tarea({ titulo, para, proyecto, fecha, prioridad, nota }, { usuario, puede, equipo, proyectos }) {
+  async crear_tarea({ titulo, para, proyecto, fecha, nota }, { usuario, puede, equipo, proyectos }) {
     if (!String(titulo || "").trim()) return { error: "Falta decir qué hay que hacer." };
     let quien = usuario, aviso = null;
     if (para && pelado(para) !== "yo" && pelado(para) !== pelado(usuario.nombre)) {
@@ -163,9 +168,11 @@ const ACCIONES = {
     const fila = {
       title: String(titulo).trim(),
       assignee_id: quien.id,
-      project_id: p?.id ?? null,
+      // El proyecto de una tarea es el del pipeline.
+      lead_id: p?.id ?? null,
       due_date: /^\d{4}-\d{2}-\d{2}$/.test(fecha || "") ? fecha : null,
-      priority: ["urgente", "alta", "media", "baja"].includes(prioridad) ? prioridad : "media",
+      // Sin prioridades: manda la fecha.
+      priority: "media", type: "Otro",
       notes: nota || null,
       status: "en-progreso",   // una tarea recién creada ya está en proceso
       created_by: usuario.id,
@@ -179,12 +186,12 @@ const ACCIONES = {
     if (quien.id !== usuario.id && quien.email) {
       const cuerpo = `<p>${esc(usuario.nombre)} te asignó una tarea desde WhatsApp.</p>
         <p style="font-size:16px;font-weight:600;margin:14px 0 6px">${esc(fila.title)}</p>
-        ${[p?.nombre && `Proyecto: ${p.nombre}`, fila.due_date && `Para el ${fila.due_date}`, `Prioridad: ${fila.priority}`].filter(Boolean).map(x => `<p style="margin:2px 0;font-size:13px;color:#5B6470">${esc(x)}</p>`).join("")}
+        ${[p?.nombre && `Proyecto: ${p.nombre}`, fila.due_date && `Para el ${fila.due_date}`].filter(Boolean).map(x => `<p style="margin:2px 0;font-size:13px;color:#5B6470">${esc(x)}</p>`).join("")}
         ${fila.notes ? texto2html(fila.notes) : ""}
         <p style="margin-top:18px"><a href="${APP}" style="color:#0F3D3E;font-weight:600">Abrir FOREMAN →</a></p>`;
       await enviarCorreo({ to: quien.email, subject: `Nueva tarea: ${fila.title}`, html: plantilla({ titulo: "Nueva tarea", subtitulo: p?.nombre || "", cuerpo }) }).catch(() => {});
     }
-    return { hecho: true, id: creada.id, tarea: fila.title, para: quien.nombre, proyecto: p?.nombre || null, fecha: fila.due_date, prioridad: fila.priority, aviso };
+    return { hecho: true, id: creada.id, tarea: fila.title, para: quien.nombre, proyecto: p?.nombre || null, fecha: fila.due_date, aviso };
   },
 
   async terminar_tarea({ id }, { usuario, puede }) {

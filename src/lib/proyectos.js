@@ -1,19 +1,15 @@
-import { supabase } from "./supabase";
-
-// La lista de proyectos, una sola, para todas las pantallas.
+// La lista de proyectos, una sola, para todas las pantallas: la del pipeline
+// —los que se persiguen y los aprobados—.
 //
-// "Proyecto" vivía en dos tablas —los del pipeline y los de Ajustes— y cada
-// pantalla elegía una: el tablero mostraba los de Ajustes, Compras los del
-// pipeline, la tarea nueva solo los de Ajustes. El resultado era que un
-// proyecto existía o no según dónde lo buscaras.
+// "Proyecto" vivía en dos tablas —los del pipeline y una lista vieja en
+// Ajustes— y cada pantalla elegía una: un proyecto existía o no según dónde lo
+// buscaras. La lista vieja se fue en la fase 6 de la reingeniería.
 //
-// Acá se unen. Cada entrada trae una `clave` (`l7` o `p3`) para usar en un
-// selector sin que se pisen los números, y dice de qué tabla viene para que
-// quien guarda sepa si va en `lead_id` o en `project_id`.
+// Cada entrada trae una `clave` (`l7`) para usar en un selector.
 
-/** Une las dos listas. Los de Ajustes ya empatados no se repiten: son el mismo. */
-export function unirProyectos(leads = [], ajustes = [], accesos = {}) {
-  const delPipeline = leads
+/** Los proyectos del pipeline, como los usan las pantallas. */
+export function unirProyectos(leads = [], accesos = {}) {
+  return leads
     .filter(l => l.resultado !== "perdido")
     .map(l => ({
       clave: `l${l.id}`, id: l.id, esLead: true, name: l.nombre, nombre: l.nombre,
@@ -21,26 +17,8 @@ export function unirProyectos(leads = [], ajustes = [], accesos = {}) {
       gente: Object.keys(accesos[l.id] || {}).map(Number),
       niveles: accesos[l.id] || {},
       creador: l.created_by, obra_id: l.obra_id || null,
-    }));
-  const deAjustes = ajustes
-    .filter(p => !p.lead_id)
-    .map(p => ({
-      clave: `p${p.id}`, id: p.id, esLead: false, name: p.name || p.nombre, nombre: p.name || p.nombre,
-      color: p.color || null, gente: p.miembros || [], creador: null, obra_id: p.obra_id || null,
-    }));
-  return [...delPipeline, ...deAjustes].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-}
-
-/** Los trae de la base, ya unidos. Para las pantallas que no los tienen a mano. */
-export async function cargarProyectos() {
-  const [{ data: leads }, { data: ajustes }, { data: accesos }] = await Promise.all([
-    supabase.from("leads").select("id,nombre,color,resultado,created_by,obra_id").order("nombre"),
-    supabase.from("proyectos").select("*").eq("activo", true),
-    supabase.from("lead_accesos").select("lead_id,usuario_id"),
-  ]);
-  const mapa = {};
-  (accesos || []).forEach(a => { (mapa[a.lead_id] = mapa[a.lead_id] || []).push(a.usuario_id); });
-  return unirProyectos(leads || [], ajustes || [], mapa);
+    }))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
 
 /** De qué proyecto es una tarea, venga de donde venga. */

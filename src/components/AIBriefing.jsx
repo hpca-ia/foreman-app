@@ -4,11 +4,10 @@ import { colors } from "../theme/colors";
 import NovaMark from "./NovaMark";
 import { LECTURA, textoDeNova } from "../lib/modelos";
 
-export default function AIBriefing({ tasks, currentUser, users, projects }) {
+export default function AIBriefing({ tasks, currentUser, users, leads = {} }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [visible, setVisible] = useState(false);
-  const gP = id => projects.find(p => p.id === id);
   const gU = id => users.find(u => u.id === id);
 
   async function obtener() {
@@ -17,7 +16,7 @@ export default function AIBriefing({ tasks, currentUser, users, projects }) {
       const d = daysUntil(t.due_date);
       return {
         titulo: t.title,
-        proyecto: gP(t.project_id)?.name || "?",
+        proyecto: leads[t.lead_id] || "sin proyecto",
         responsable: t.assignee_id ? gU(t.assignee_id)?.name : "Sin asignar",
         estado: t.status,
         fecha: t.status === "listo" ? "completada" : !t.due_date ? "sin fecha" : d < 0 ? `vencida ${Math.abs(d)}d` : d === 0 ? "HOY" : `en ${d}d`,

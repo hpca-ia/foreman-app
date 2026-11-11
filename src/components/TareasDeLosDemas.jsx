@@ -26,7 +26,7 @@ const cuando = t => {
   return `en ${d}d`;
 };
 
-export default function TareasDeLosDemas({ tasks = [], users = [], projects = [], leads = {}, onEditar }) {
+export default function TareasDeLosDemas({ tasks = [], users = [], leads = {}, onEditar }) {
   const [abierto, setAbierto] = useState(() => {
     try { return localStorage.getItem(LLAVE) !== "no"; } catch { return true; }
   });
@@ -88,7 +88,7 @@ export default function TareasDeLosDemas({ tasks = [], users = [], projects = []
             {desplegada && (
               <div style={{ background: colors.bg, padding: "4px 14px 10px 41px" }}>
                 {suyas.map(t => {
-                  const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline", color: null } : projects.find(p => p.id === t.project_id);
+                  const proy = t.lead_id ? { name: leads[t.lead_id] || "Proyecto", color: null } : null;
                   const tarde = t.due_date && daysUntil(t.due_date) < 0;
                   return (
                     <div key={t.id} onClick={() => onEditar?.(t)}

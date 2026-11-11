@@ -93,7 +93,7 @@ export default function NovaInput({ currentUser, projects, users, puedeAsignarAT
     // Las tareas que esta persona puede cerrar, las más próximas primero: una
     // lista acotada para que NOVA elija entre pocas y no se confunda.
     const abiertas = tareas.slice().sort((a, b) => (a.due_date || "9999").localeCompare(b.due_date || "9999")).slice(0, 80);
-    const listaTareas = abiertas.map(t => `${t.id}|${t.title}|${projects.find(p => p.id === t.project_id)?.name || ""}|${users.find(u => u.id === t.assignee_id)?.name || ""}|${t.due_date || ""}`).join("\n") || "(ninguna)";
+    const listaTareas = abiertas.map(t => `${t.id}|${t.title}|${projects.find(p => p.id === t.lead_id)?.name || ""}|${users.find(u => u.id === t.assignee_id)?.name || ""}|${t.due_date || ""}`).join("\n") || "(ninguna)";
     try {
       const res = await fetch("/api/nova", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -148,7 +148,10 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
     if (fila.assignee_id != null && !users.some(u => u.id === fila.assignee_id)) fila.assignee_id = currentUser.id;
     if (fila.project_id != null && !projects.some(p => p.id === fila.project_id)) fila.project_id = null;
     if (fila.assignee_id != null && !asignablesDe(fila.project_id).some(u => u.id === fila.assignee_id)) fila.assignee_id = currentUser.id;
-    const { error } = await supabase.from("tasks").insert({ ...fila, created_by: currentUser.id });
+    // El proyecto de una tarea es el del pipeline: lo que NOVA devuelve como
+    // `project_id` es el número de ese proyecto, y se guarda donde va.
+    const { project_id: delPipeline, priority, ...resto } = fila;
+    const { error } = await supabase.from("tasks").insert({ ...resto, lead_id: delPipeline ?? null, priority: "media", created_by: currentUser.id });
     if (error) {
       const msg = /out of range/i.test(error.message)
         ? "Falta correr la migración 012 en Supabase: los proyectos y usuarios nuevos todavía no se pueden usar en tareas."
@@ -174,7 +177,7 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
   const asignablesDe = projectId => {
     if (puedeAsignarATodos) return users;
     const p = projects.find(x => x.id === projectId);
-    return p ? users.filter(u => (p.miembros || []).includes(u.id)) : users;
+    return p ? users.filter(u => (p.gente || []).includes(u.id) || u.id === p.creador || u.id === currentUser.id) : users;
   };
   const cambiarProyecto = valor => {
     const id = valor ? Number(valor) : null;
@@ -221,7 +224,7 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
               <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: `1px solid ${colors.border}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                  <div style={{ fontSize: 11, color: colors.inkSoft }}>{[projects.find(p => p.id === t.project_id)?.name, users.find(u => u.id === t.assignee_id)?.name, t.due_date].filter(Boolean).join(" · ")}</div>
+                  <div style={{ fontSize: 11, color: colors.inkSoft }}>{[projects.find(p => p.id === t.lead_id)?.name, users.find(u => u.id === t.assignee_id)?.name, t.due_date].filter(Boolean).join(" · ")}</div>
                 </div>
                 <Button variant="primary" size="sm" style={{ background: colors.success, flexShrink: 0 }} onClick={() => completar(id)}>✓ Terminada</Button>
               </div>

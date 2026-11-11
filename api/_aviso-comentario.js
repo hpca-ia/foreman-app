@@ -31,14 +31,11 @@ export default async function handler(req, res) {
     const para = usuarios.filter(u => involucrados.has(u.id) && u.email && u.activo !== false).map(u => u.email);
     if (!para.length) return res.status(200).json({ ok: false, error: "Nadie más tiene correo cargado." });
 
-    // De qué proyecto es: el de Ajustes o el del pipeline.
+    // De qué proyecto es.
     let donde = "";
     if (tarea.lead_id) {
       const [lead] = await json(await rest(`leads?id=eq.${tarea.lead_id}&select=nombre`));
       donde = lead?.nombre || "";
-    } else if (tarea.project_id) {
-      const [p] = await json(await rest(`proyectos?id=eq.${tarea.project_id}&select=nombre`));
-      donde = p?.nombre || "";
     }
 
     const html = plantilla({

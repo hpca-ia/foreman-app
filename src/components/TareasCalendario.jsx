@@ -32,7 +32,7 @@ function semanasDe(ano, mes) {
   }));
 }
 
-export default function TareasCalendario({ tasks = [], users = [], projects = [], leads = {}, currentUser, onEditar }) {
+export default function TareasCalendario({ tasks = [], users = [], leads = {}, currentUser, onEditar }) {
   const hoy = new Date();
   const [ano, setAno] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth());
@@ -48,7 +48,6 @@ export default function TareasCalendario({ tasks = [], users = [], projects = []
     setCopiado(false);
   }
 
-  const gP = id => projects.find(p => p.id === id);
   const porDia = {};
   tasks.forEach(t => {
     const k = clave(t.due_date);
@@ -65,7 +64,7 @@ export default function TareasCalendario({ tasks = [], users = [], projects = []
   const flecha = { background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: colors.inkSoft, display: "flex" };
 
   const pastilla = t => {
-    const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline", color: null } : gP(t.project_id);
+    const proy = t.lead_id ? { name: leads[t.lead_id] || "Proyecto", color: null } : null;
     const color = proy?.color || colors.brand;
     const listo = t.status === "listo";
     return (

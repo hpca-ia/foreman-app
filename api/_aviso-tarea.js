@@ -30,14 +30,11 @@ export default async function handler(req, res) {
     const [quien] = await json(await rest(`usuarios?id=eq.${tarea.assignee_id}&select=nombre,email,activo`));
     if (!quien?.email || quien.activo === false) return res.status(200).json({ ok: false, error: "Esa persona no tiene correo cargado." });
 
-    // De qué proyecto es: del pipeline o de la lista vieja, lo que haya.
+    // De qué proyecto es.
     let proyecto = "";
     if (tarea.lead_id) {
       const [l] = await json(await rest(`leads?id=eq.${tarea.lead_id}&select=nombre`));
       proyecto = l?.nombre || "";
-    } else if (tarea.project_id) {
-      const [p] = await json(await rest(`proyectos?id=eq.${tarea.project_id}&select=nombre`));
-      proyecto = p?.nombre || "";
     }
 
     const clase = tarea.type === "Reunión" ? "Reunión" : tarea.type === "Gestión" ? "Gestión" : "Tarea";

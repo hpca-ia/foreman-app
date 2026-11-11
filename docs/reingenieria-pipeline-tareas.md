@@ -352,6 +352,33 @@ nada a mano.
 - La historia del proyecto deja de anotar cada paso de cada compra (hoy son 87
   de 264 renglones).
 
+**Cómo quedó hecho (11/11/2026, migraciones 174 y 175):**
+
+- Es la única fase que borra. Hernán aprobó la lista, y antes se guardó una
+  copia de todo lo que se va en `respaldos/fase6-antes-de-borrar-2026-11-11.json`
+  (fuera del repositorio).
+- **El orden es al revés que en las otras fases:** primero se publica el
+  código que deja de tocar las tablas, y después se corre la migración.
+- La 174 borra `lead_etapa_items`, `lead_etapas`, `tasks.lead_etapa_id`,
+  `pipeline_etapa_items`, `tarea_dependencias`, `tarea_responsables` y las 23
+  etapas apagadas del catálogo que nadie nombra (quedan 5 que alguna tarea
+  lleva de etiqueta).
+- La 175 borra la lista vieja de Ajustes: `proyectos` y `proyecto_miembros`.
+  Ninguna tarea colgaba de ella. Los proyectos son los del pipeline; a quién
+  se le puede dar una tarea sin el permiso de asignar sale de quién entra a
+  cada proyecto. OJO: en esa lista había un proyecto activo que no está en el
+  pipeline, «CASA HC»; si hace falta, se crea como lead.
+- Se fueron de la pantalla: acompañantes y dependencias de la tarea, crear un
+  proyecto desde la tarea, «Emparejar proyectos» y la lista vieja en Ajustes.
+- NOVA por WhatsApp y el calendario de cada uno leen los proyectos del
+  pipeline y no listan los avisos de compras. «En qué va tal proyecto» pedía
+  una columna que no existe y no encontraba ninguno: arreglado.
+- La bitácora del proyecto ya no anota cada paso de cada compra. Lo escrito
+  no se borró.
+- **Quedó afuera a propósito:** las filas que el circuito de compras deja en
+  `tasks` (de ellas sale el correo con los botones de aprobar) y la columna
+  `tasks.priority`. La primera pide rehacer la aprobación por correo.
+
 ## Cómo se prueba cada fase
 
 - Las reglas, con pruebas en `pruebas/`, como todo lo demás.
@@ -373,5 +400,5 @@ fase 5), los permisos por proyecto y el portal del cliente.
 - [x] Fase 2 — El Pipeline es lo que se persigue (11/11/2026; migración 171, corrida y publicada)
 - [x] Fase 3 — Proyectos aprobados (11/11/2026; sin migración, publicada)
 - [x] Fase 4 — Tareas: una bandeja que se pueda creer (11/11/2026; migración 172, corrida y publicada)
-- [x] Fase 5 — Los compromisos de las actas (11/11/2026; requiere la migración 173)
-- [ ] Fase 6 — Limpieza
+- [x] Fase 5 — Los compromisos de las actas (11/11/2026; migración 173, corrida y publicada)
+- [x] Fase 6 — Limpieza (11/11/2026; código publicado; requiere las migraciones 174 y 175)

@@ -76,8 +76,10 @@ export default async function handler(req, res) {
     const [puede, equipo, proyectos] = await Promise.all([
       permisosDe(usuario),
       filas(await rest("usuarios?select=id,nombre,rol,email&activo=eq.true&order=nombre")),
-      filas(await rest("proyectos?select=id,nombre&activo=eq.true&order=nombre")),
-    ]);
+      // Los proyectos son los del pipeline —los que se persiguen y los
+      // aprobados—. La lista vieja de Ajustes ya no existe.
+      filas(await rest("leads?select=id,nombre,resultado&order=nombre")),
+    ]).then(([p, e, ls]) => [p, e, (ls || []).filter(l => l.resultado !== "perdido")]);
 
     const { texto: respuesta } = await responder({ texto, historial: previos, ctx: { usuario, puede, equipo, proyectos } });
     await enviar(de, respuesta);

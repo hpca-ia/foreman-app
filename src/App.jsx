@@ -55,7 +55,6 @@ export default function App() {
   // así la pantalla de ingreso no espera, pero todos los equipos terminan
   // viendo la misma lista.
   const [users, setUsers] = useState(() => equipoEnCache().usuarios);
-  const [projects, setProjects] = useState(() => equipoEnCache().proyectos);
   const [equipoRemoto, setEquipoRemoto] = useState(true);
   const [empresa, setEmpresa] = useState(() => loadFromStorage("foreman_empresa", {
     nombre: "HCA Studio", tipo: "Construcción", email: "", telefono: "", web: "", ciudad: "Quito", moneda: "USD", color: colors.brand, logoUrl: "",
@@ -98,7 +97,7 @@ export default function App() {
 
   async function recargarEquipo() {
     const eq = await cargarEquipo();
-    setUsers(eq.usuarios); setProjects(eq.proyectos); setEquipoRemoto(eq.remoto);
+    setUsers(eq.usuarios); setEquipoRemoto(eq.remoto);
     // Si a alguien lo desactivaron desde otro equipo, deja de poder usar la app.
     // Si no cambió nada suyo se conserva el mismo objeto: antes cambiaba de
     // identidad en cada recarga, y eso cerraba el panel de Ajustes a media
@@ -412,7 +411,7 @@ export default function App() {
   // El nombre del proyecto de una tarea: el del pipeline si viene de ahí, el de
   // Ajustes si no. (Se llamaba a sí misma: al buscar por texto una tarea con
   // proyecto normal, el navegador se quedaba sin pila y la pantalla se caía.)
-  const nombreProyecto = t => (t.lead_id ? (leadsPorId[t.lead_id] || "Pipeline") : projects.find(p => p.id === t.project_id)?.name || "");
+  const nombreProyecto = t => (t.lead_id ? (leadsPorId[t.lead_id] || "Proyecto") : "");
   // Quien no entra al Tablero —un conductor, que solo rinde su caja— no puede
   // quedarse mirando una pantalla que no le toca: se lo lleva al primer módulo
   // que sí tenga.
@@ -437,12 +436,11 @@ export default function App() {
 
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
-  const proyectosElegibles = veTodo ? projects : projects.filter(p => (p.miembros || []).includes(usuario.id));
   // Una sola lista de proyectos: los del pipeline —que son los de verdad— y,
   // mientras convivan, los de Ajustes que todavía no se empataron. El filtro
   // miraba solo los de Ajustes, así que una tarea del pipeline no aparecía por
   // más que se eligiera su proyecto.
-  const proyectosTodos = unirProyectos(proyectosPipeline, projects, accesosLead);
+  const proyectosTodos = unirProyectos(proyectosPipeline, accesosLead);
   // Los que creó esta persona: entra sin que nadie se lo asigne.
   const leadsMios = new Set(proyectosPipeline.filter(l => l.created_by === usuario.id).map(l => l.id));
   // ────────────────────────────────────────────────────────────────────────
@@ -489,15 +487,15 @@ export default function App() {
       })
       .map(([leadId]) => Number(leadId))
   );
-  const mios = proyectosTodos.filter(p => (p.esLead
-    ? !!nivelProyecto(p.id)
-    : entraATodo || p.gente.includes(usuario.id) || p.creador === usuario.id));
+  const mios = proyectosTodos.filter(p => !!nivelProyecto(p.id));
   const proyectoElegido = proyectosTodos.find(p => p.clave === filtroP) || null;
   // A quién puede asignarle tareas. Con el permiso de asignar, a cualquiera.
   // Sin él, a sí mismo y a sus compañeros: quienes comparten con él al menos un
   // proyecto. Así se coordinan en obra sin poder cargarle tareas a un admin o a
   // gente de otras obras.
-  const compañeros = new Set(projects.filter(p => (p.miembros || []).includes(usuario.id)).flatMap(p => p.miembros || []));
+  // Los proyectos son los del pipeline: comparte uno con alguien si los dos
+  // entran a él, o si uno lo abrió y el otro entra.
+  const compañeros = new Set(mios.flatMap(p => [...p.gente, p.creador].filter(Boolean)));
   const asignables = puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id || compañeros.has(u.id));
   // Un aviso de compra no se abre como tarea.
   //
@@ -559,14 +557,9 @@ export default function App() {
     observaciones: puede("observaciones.ver") ? misObs : [],
     modulos: avisosDeModulos,
   });
-  // El nivel de esta persona en el proyecto de una tarea. Las de los proyectos
-  // viejos de Ajustes se resuelven por sus miembros, mientras convivan.
-  const nivelDeTarea = t => {
-    if (t.lead_id) return nivelEn(t.lead_id, "proyecto");
-    if (!t.project_id) return null;
-    if (entraATodo) return "editar";
-    return (projects.find(p => p.id === t.project_id)?.miembros || []).includes(usuario.id) ? "editar" : null;
-  };
+  // El nivel de esta persona en el proyecto de una tarea. Una tarea sin
+  // proyecto no es de ninguno: la ve quien la tiene o quien la escribió.
+  const nivelDeTarea = t => (t.lead_id ? nivelEn(t.lead_id, "proyecto") : null);
   // Una sola regla, la misma de todo FOREMAN: es tuya, o entrás a su proyecto.
   // Antes había que acordarse de filtrar por proyecto para ver lo del equipo.
   // Todo lo que esta persona puede ver, sin filtros de pantalla encima. De acá
@@ -585,7 +578,7 @@ export default function App() {
       users.find(u => u.id === t.assignee_id)?.name?.toLowerCase().includes(q)
     );
   }
-  if (proyectoElegido) visibles = visibles.filter(t => (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id));
+  if (proyectoElegido) visibles = visibles.filter(t => t.lead_id === proyectoElegido.id);
 
   // LA BANDEJA: «Me toca» y «Espero de otros». Qué va en cada parte lo decide
   // src/lib/bandeja.js. Los leads que esperan al cliente entran también —del
@@ -629,11 +622,11 @@ export default function App() {
             <div style={{ minWidth: 0 }}>
               {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
                   Solo cierra tareas que esa persona puede cambiar. */}
-              <NovaInput currentUser={usuario} projects={proyectosElegibles}
+              <NovaInput currentUser={usuario} projects={mios}
                 users={asignables} puedeAsignarATodos={puede("tareas.asignar")}
                 tareas={propias.filter(t => t.status !== "listo" && (admin || t.assignee_id === usuario.id))}
                 onCambiarEstado={cambiarEstado} onTaskCreated={fetchTareas} />
-              {admin && <AIBriefing tasks={propias} currentUser={usuario} users={users} projects={projects} />}
+              {admin && <AIBriefing tasks={propias} currentUser={usuario} users={users} leads={leadsPorId} />}
 
               {/* Una sola barra: cómo se ve y de qué proyecto. El orden no se
                   elige —manda la fecha— y no hay filtros de estado ni de
@@ -657,7 +650,7 @@ export default function App() {
               {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
                 <>
                   {vistaTareas === "calendario"
-                    ? <TareasCalendario tasks={paraCalendario} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
+                    ? <TareasCalendario tasks={paraCalendario} users={users} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
                     : <Bandeja datos={datosBandeja} hechas={hechas} users={users} comentarios={comentarios} usuario={usuario} puede={puede}
                         nombreDe={nombreProyecto} proyectos={mios} asignables={asignables}
                         onAbrir={abrirTarea} onCompletar={t => cambiarEstado(t.id, "listo")} onReabrir={reabrirTarea}
@@ -667,7 +660,7 @@ export default function App() {
                       abajo, en su propio cuadro, sin lo marcado como privado. */}
                   <TareasDeLosDemas
                     tasks={visiblesTodas.filter(t => t.assignee_id !== usuario.id)}
-                    users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
+                    users={users.filter(u => u.id !== usuario.id)} leads={leadsPorId}
                     onEditar={abrirTarea} />
                 </>
               )}
@@ -680,11 +673,11 @@ export default function App() {
 
           <Suspense fallback={<Cargando />}>
             {puede("presupuestos.ver") && vista === "presupuestos" && (
-              <ModuloPresupuestos currentUser={usuario} puede={puede} projects={projects} nivelProyecto={nivelPresupuesto} entraATodo={entraATodo}
+              <ModuloPresupuestos currentUser={usuario} puede={puede} nivelProyecto={nivelPresupuesto} entraATodo={entraATodo}
                 onArmarCronograma={puede("cronograma.ver") ? pedido => { setCronoPedido(pedido); setVista("cronograma"); } : undefined} />
             )}
             {puede("controlObra.ver") && vista === "controlObra" && (
-              <ModuloControlObra currentUser={usuario} puede={puede} projects={projects} nivelObra={nivelObra} entraATodo={entraATodo} />
+              <ModuloControlObra currentUser={usuario} puede={puede} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {verPipeline && vista === "leads" && (
               <ModuloLeads currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIrAObra={() => setVista("controlObra")}
@@ -694,7 +687,7 @@ export default function App() {
               <ModuloEnMarcha currentUser={usuario} users={users} puede={puede} nivelProyecto={nivelProyecto} onIr={setVista} />
             )}
             {puede("cajaChica.ver") && vista === "cajaChica" && (
-              <ModuloCajaChica currentUser={usuario} puede={puede} projects={projects} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
+              <ModuloCajaChica currentUser={usuario} puede={puede} users={users} nivelObra={nivelObra} entraATodo={entraATodo} />
             )}
             {puede("compras.ver") && vista === "compras" && (
               <ModuloCompras currentUser={usuario} puede={puede} leToca={leToca}
@@ -758,8 +751,8 @@ export default function App() {
           </div>
         </div>
       )}
-      {showModal && <ModalTarea editTask={editTask} proyectos={proyectosTodos} mios={mios} tareas={tareas} onCambio={fetchTareas} puede={puede} currentUser={usuario} users={users} projects={projects} proyectosElegibles={proyectosElegibles} asignables={asignables} onProyectoCreado={recargarEquipo} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
-      {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} permisosUsuario={permisosUsuario} setPermisosUsuario={setPermisosUsuario} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} projects={projects} setProjects={setProjects} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
+      {showModal && <ModalTarea editTask={editTask} proyectos={proyectosTodos} mios={mios} tareas={tareas} onCambio={fetchTareas} puede={puede} currentUser={usuario} users={users} asignables={asignables} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
+      {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} permisosUsuario={permisosUsuario} setPermisosUsuario={setPermisosUsuario} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
     </div>
   );
 }

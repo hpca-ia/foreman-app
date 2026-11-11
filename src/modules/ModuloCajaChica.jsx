@@ -25,7 +25,7 @@ import { leerRenglones } from "./controlObra/renglones";
 import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
 import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
 
-export default function ModuloCajaChica({ currentUser, puede, projects, users, nivelObra = () => null, entraATodo = false }) {
+export default function ModuloCajaChica({ currentUser, puede, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
   const [borrarCaja, setBorrarCaja] = useState(null);
   const [cajas, setCajas] = useState([]);
