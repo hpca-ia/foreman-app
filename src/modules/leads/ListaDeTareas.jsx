@@ -26,7 +26,7 @@ import {
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
 const cuando = f => (f ? new Date(String(f).length === 10 ? `${f}T12:00:00` : f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
-const EN_BLANCO = { abierto: true, tipo: "gestion", texto: "", assignee_id: "", due_date: "", hora: "", urgente: false, destinatario: "" };
+const EN_BLANCO = { abierto: true, tipo: "gestion", texto: "", assignee_id: "", due_date: "", hora: "", destinatario: "" };
 
 /**
  * @param etapaId   en qué etapa está el lead ahora: es la etiqueta con la que
@@ -122,7 +122,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       const r = await agregarTarea({
         lead, etapaId, titulo: texto, orden: abiertas.length + hechas.length + 1,
         tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : tipo === "envio" ? "Envío" : "Otro",
-        due_date: n.due_date || null, hora: (n.due_date && n.hora) || null, urgente: !!n.urgente,
+        due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
         assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
         nombreResponsable: users.find(u => String(u.id) === String(n.assignee_id))?.name,
         // A quién se le mandó va en el responsable externo: es alguien de
@@ -243,10 +243,6 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
                   <button key={txt} onClick={() => setNuevo(x => ({ ...x, due_date: f }))} style={mini(nuevo.due_date === f)}>{txt}</button>
                 );
               })}
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: colors.inkSoft, marginLeft: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={!!nuevo.urgente} onChange={e => setNuevo(n => ({ ...n, urgente: e.target.checked }))} />
-                Urgente
-              </label>
             </div>
           )}
 
@@ -508,10 +504,6 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
         <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: clase.color, opacity: item.hecho ? 0.4 : 1, flexShrink: 0 }} />
         <div onClick={onAbrir} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
           <div style={{ fontSize: 13, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>
-            {/* Lo urgente se ve sin abrir nada. */}
-            {!item.hecho && tarea?.priority === "urgente" && (
-              <span style={{ color: colors.danger, fontWeight: 700, fontSize: 9.5, marginRight: 4, letterSpacing: 0.3 }}>URGENTE</span>
-            )}
             {item.texto}
           </div>
           <div style={{ fontSize: 10.5, color: item.espera && !item.hecho ? colors.warning : colors.muted, marginTop: 1 }}>

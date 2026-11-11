@@ -93,6 +93,54 @@ const bloqueDelPipeline = lista => (lista.length ? `
     En el Pipeline, cada lead tiene sus tres salidas de un toque: ya respondió, insistí hoy, o recordarme otro día.
   </div>` : "");
 
+/**
+ * LO QUE ESPERÁS DE OTROS: lo que encargaste y ya pasó su fecha.
+ *
+ * No es trabajo tuyo de hoy, pero es lo que hay que reclamar. Lo que está en
+ * fecha se cuenta y no se lista: eso va bien.
+ */
+const bloqueDeEspero = lista => {
+  const vencidas = lista.filter(t => t.vencida);
+  if (!vencidas.length) return "";
+  const enFecha = lista.length - vencidas.length;
+  return `
+  <div style="font-size:11px;font-weight:700;color:#B45309;letter-spacing:.4px;margin:20px 0 6px">
+    ESPERÁS DE OTROS · ${vencidas.length} ${vencidas.length === 1 ? "vencida" : "vencidas"}
+  </div>
+  ${vencidas.slice(0, 8).map(t => `<div style="font-size:13px;color:#374151;padding:3px 0">
+    ${esc(t.title)}
+    <span style="color:#9CA3AF">· ${esc(t.proyecto || "sin proyecto")}</span>
+    <span style="color:#B91C1C">· ${esc(t.persona || "sin responsable")} · ${dia(t.due_date)}</span>
+  </div>`).join("")}
+  ${vencidas.length > 8 ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${vencidas.length - 8} más.</div>` : ""}
+  ${enFecha ? `<div style="font-size:11.5px;color:#6B7280;margin-top:5px">Además le encargaste ${enFecha} ${enFecha === 1 ? "cosa que va en fecha" : "cosas que van en fecha"}.</div>` : ""}`;
+};
+
+/**
+ * LAS COMPRAS, EN SU RENGLÓN.
+ *
+ * Una compra no es una tarea: se sigue en Compras. Acá va cuántas tiene esta
+ * persona esperando en cada paso, que es lo que antes llegaba como diez tareas
+ * «Aprobar compra…», «Comprar…», «Recibir…» mezcladas con lo atrasado.
+ */
+const bloqueDeCompras = c => {
+  if (!c?.total) return "";
+  const partes = [
+    c.visto && `${c.visto} ${c.visto === 1 ? "espera tu visto" : "esperan tu visto"}`,
+    c.devueltas && `${c.devueltas} ${c.devueltas === 1 ? "devuelta" : "devueltas"}`,
+    c.comprar && `${c.comprar} por comprar`,
+    c.recibir && `${c.recibir} por recibir`,
+  ].filter(Boolean);
+  return `
+  <div style="font-size:11px;font-weight:700;color:#A16207;letter-spacing:.4px;margin:20px 0 6px">COMPRAS · ${c.total}</div>
+  <div style="font-size:13px;color:#374151;padding:3px 0">${esc(partes.join(" · "))}</div>
+  <div style="font-size:11.5px;color:#6B7280;margin-top:3px">Se resuelven en Compras, no en Tareas.</div>`;
+};
+
+const bloqueDeActas = n => (n ? `
+  <div style="font-size:11px;font-weight:700;color:#B45309;letter-spacing:.4px;margin:20px 0 6px">ACTAS</div>
+  <div style="font-size:13px;color:#374151;padding:3px 0">${n} ${n === 1 ? "compromiso de un acta está vencido" : "compromisos de actas están vencidos"}.</div>` : "");
+
 const plata = v => `$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
@@ -177,6 +225,10 @@ function cuerpoDelCorreo(s) {
     (s.masAdelante || []).length > 8
       ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${s.masAdelante.length - 8} más adelante.</div>` : "",
     s.deSusProyectos.length ? bloque("EN TUS PROYECTOS", "#6B7280", s.deSusProyectos) : "",
+    // Lo que encargó y ya venció: es lo que hay que reclamar.
+    bloqueDeEspero(s.espero || []),
+    // Las compras no son tareas: van en su renglón.
+    bloqueDeCompras(s.compras),
     s.ayer.length ? bloque("CERRASTE AYER", "#15803D", s.ayer) : "",
     // Lo sin fecha ya no es una nota al pie: si no tiene día, no va a pasar
     // solo, y el correo de la mañana es el momento de ponerle uno.
@@ -200,9 +252,11 @@ function cuerpoDelCorreo(s) {
     s.esAdmin ? bloqueDeOrdenes(s.ordenes || [], String(s.usuario?.email || "").trim().toLowerCase()) : "",
     // Lo alquilado que se pasa de plazo: cada día es plata que ya salió.
     s.esAdmin ? bloqueDePlazos(s.plazos || []) : "",
+    s.esAdmin ? bloqueDeActas(s.actasVencidas || 0) : "",
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
       && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length && !(s.pipeline || []).length
+      && !s.compras?.total && !(s.espero || []).some(t => t.vencida)
       ? `<p style="font-size:13px;color:#4B5563;margin:0">Hoy no tenés nada con fecha. Lo que esté sin fecha te espera en FOREMAN.</p>` : "",
 
     `<div style="margin-top:20px"><a href="${APP}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Abrir FOREMAN →</a></div>`,
@@ -230,6 +284,7 @@ const tituloDelCorreo = s => plantilla({
 export async function mandarResumen(soloPara = null) {
   const [{ filas: tareas, columnas }, { filas: usuarios }, { filas: leads }, { filas: accesos }] = await Promise.all([
     traer("tasks", [
+      "id,title,due_date,hora,status,type,notes,priority,assignee_id,responsable_externo,lead_id,project_id,updated_at,compra_id,compra_estado,created_by,espera,privada",
       "id,title,due_date,hora,status,type,notes,priority,assignee_id,responsable_externo,lead_id,project_id,updated_at,compra_id",
       "id,title,due_date,hora,status,type,notes,priority,assignee_id,responsable_externo,lead_id,project_id,updated_at",
       "id,title,due_date,hora,status,type,notes,priority,assignee_id,lead_id,project_id,updated_at",
@@ -257,7 +312,8 @@ export async function mandarResumen(soloPara = null) {
       if (!u) return { ok: false, error: `No encontré al usuario ${soloPara} en la tabla de usuarios` };
       if (!u.email) return { ok: false, error: `${u.nombre} no tiene correo cargado: ponéselo en Ajustes → Usuarios` };
       sobres = [{ usuario: u, esAdmin: u.rol === "owner" || u.rol === "assistant",
-        atrasadas: [], hoy: [], manana: [], estaSemana: [], masAdelante: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [], pipeline: [] }];
+        atrasadas: [], hoy: [], manana: [], estaSemana: [], masAdelante: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [], pipeline: [],
+        espero: [], compras: { total: 0 } }];
     }
   }
 
@@ -267,11 +323,17 @@ export async function mandarResumen(soloPara = null) {
   try { ordenes = await ordenesSinFirmar(); } catch { /* el resumen sale igual */ }
   let plazos = [];
   try { plazos = await plazosDeLasOrdenes(); } catch { /* el resumen sale igual */ }
+  // Los compromisos de actas que pasaron su fecha y nadie cerró.
+  let actasVencidas = 0;
+  try {
+    actasVencidas = (await json(await rest(`acta_compromisos?estado=in.(pendiente,reprogramado)&fecha_limite=lt.${hoyISO()}&select=id`))).length;
+  } catch { /* el resumen sale igual */ }
 
   const enviados = [];
   for (const s of sobres) {
     s.ordenes = s.esAdmin ? ordenes : [];
     s.plazos = s.esAdmin ? plazos : [];
+    s.actasVencidas = s.esAdmin ? actasVencidas : 0;
     const r = await enviarCorreo({ to: s.usuario.email, subject: asunto(s), html: tituloDelCorreo(s) });
     if (r.ok) enviados.push(s.usuario.email);
   }

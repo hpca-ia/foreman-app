@@ -44,7 +44,6 @@ export default function TareasDeLosDemas({ tasks = [], users = [], projects = []
       return {
         persona: u, suyas,
         atrasadas: suyas.filter(t => t.due_date && daysUntil(t.due_date) < 0).length,
-        urgentes: suyas.filter(t => t.priority === "urgente").length,
         pausadas: suyas.filter(t => t.status === "bloqueado").length,
       };
     })
@@ -66,7 +65,7 @@ export default function TareasDeLosDemas({ tasks = [], users = [], projects = []
         <span style={{ fontSize: 11.5, color: colors.muted }}>{gente.length} {gente.length === 1 ? "persona" : "personas"} · {total} {total === 1 ? "tarea abierta" : "tareas abiertas"}</span>
       </button>
 
-      {abierto && gente.map(({ persona, suyas, atrasadas, urgentes, pausadas }) => {
+      {abierto && gente.map(({ persona, suyas, atrasadas, pausadas }) => {
         const desplegada = quien === persona.id;
         const proxima = suyas[0];
         return (
@@ -82,7 +81,6 @@ export default function TareasDeLosDemas({ tasks = [], users = [], projects = []
               </span>
               <span style={{ ...celda, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {proxima ? <>Próxima: {proxima.title} <span style={{ color: colors.muted }}>· {cuando(proxima)}</span></> : ""}
-                {urgentes > 0 && <span style={{ color: colors.danger }}> · {urgentes} urgente{urgentes === 1 ? "" : "s"}</span>}
                 {pausadas > 0 && <span style={{ color: colors.muted }}> · {pausadas} pausada{pausadas === 1 ? "" : "s"}</span>}
               </span>
             </div>

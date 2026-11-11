@@ -104,11 +104,10 @@ Decide si la persona quiere CREAR una tarea nueva o dar por TERMINADA una que ya
 Responde SOLO JSON, sin markdown.
 
 Para crear:
-{"accion":"crear","title":"...","project_id":N_O_NULL,"assignee_id":N_O_NULL,"type":"...","due_date":"YYYY-MM-DD","priority":"urgente|alta|media|baja","notes":"..."}
+{"accion":"crear","title":"...","project_id":N_O_NULL,"assignee_id":N_O_NULL,"type":"...","due_date":"YYYY-MM-DD","notes":"..."}
 Proyectos: ${proyList}. Usuarios: ${userList}.
 Tipos: Llamada,Reunión,Contrato,Compra,Inspección,Aprobación,Visita a obra,Otro.
-Prioridad: "urgente", "ya mismo", "hoy sin falta" → urgente; "importante", "prioridad alta",
-"alta" → alta; "cuando puedas", "sin apuro", "baja" → baja; si no dice nada → media.
+No hay prioridades: manda la fecha. Si dice "urgente", "ya mismo" u "hoy sin falta", la fecha es hoy.
 Fecha: interpreta "mañana", "el viernes", "en dos semanas" contra hoy; sin fecha dicha, usa hoy.
 Si no menciona proyecto, project_id es null. Si no menciona a nadie, la tarea es para quien
 habla: assignee_id ${currentUser.id}.
@@ -249,9 +248,6 @@ Si ninguna coincide: {"accion":"nada","motivo":"No encontré una tarea abierta q
               {asignablesDe(result.project_id).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
             <input type="date" value={result.due_date || ""} onChange={e => cambiar("due_date", e.target.value)} style={campo} />
-            <select value={result.priority || "media"} onChange={e => cambiar("priority", e.target.value)} style={campo}>
-              {[["urgente", "Urgente"], ["alta", "Alta"], ["media", "Media"], ["baja", "Baja"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <Button variant="outline" size="sm" style={{ flex: 1 }} onClick={() => setResult(null)}>Cancelar</Button>

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight, CalendarPlus, Copy, Check } from "lucide-react";
 import { enlaceCalendario } from "../lib/calendarioSuscripcion";
 import { colors } from "../theme/colors";
-import { PRIORIDAD } from "../theme/constants";
 import MarcaPrivada from "./ui/MarcaPrivada";
 import { claveFecha } from "../lib/dates";
 
@@ -69,14 +68,12 @@ export default function TareasCalendario({ tasks = [], users = [], projects = []
     const proy = t.lead_id ? { name: leads[t.lead_id] || "Pipeline", color: null } : gP(t.project_id);
     const color = proy?.color || colors.brand;
     const listo = t.status === "listo";
-    const urgente = t.priority === "urgente";
     return (
       <div key={t.id} onClick={e => { e.stopPropagation(); onEditar?.(t); }}
         title={`${t.title}${proy?.name ? ` · ${proy.name}` : ""}${users.find(u => u.id === t.assignee_id) ? ` · ${users.find(u => u.id === t.assignee_id).name}` : ""}`}
         style={{ display: "flex", alignItems: "center", gap: 4, background: listo ? colors.neutralSoft : `${color}1A`, borderLeft: `3px solid ${listo ? colors.border : color}`,
           borderRadius: 4, padding: "2px 5px", marginBottom: 2, cursor: "pointer", fontSize: 10.5, lineHeight: 1.25,
           color: listo ? colors.muted : colors.ink, textDecoration: listo ? "line-through" : "none", overflow: "hidden" }}>
-        {urgente && !listo && <span style={{ width: 5, height: 5, borderRadius: "50%", background: PRIORIDAD.urgente.color, flexShrink: 0 }} />}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.privada && <MarcaPrivada />}{t.title}</span>
       </div>
     );

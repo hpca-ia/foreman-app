@@ -292,3 +292,31 @@ test("el panel de avisos junta lo activo de cada módulo, con su cuenta y a dón
   assert.deepEqual(avisosDelTablero({ compras: [{ descripcion: "Andamios" }] }).map(a => [a.tono, a.texto, a.detalle]),
     [["normal", "compra espera por vos", "Andamios"]]);
 });
+
+test("el panel suma lo de los demás módulos, y primero la plata que no cuadra", () => {
+  const modulos = {
+    ordenes: { cuantas: 3, dias: 13, vencidas: 3, objetadas: 0 }, rebotadas: 1, alquileres: 2, actas: 37,
+    noCuadran: ["IMPLEMENTACIÓN DINERS AEREOPUERTO-GUAYAQUIL"], ordenesMal: { cuantas: 1, obras: ["IMPLEMENTACIÓN DINERS PLAZA LAGOS - GUAYAQUIL"] },
+  };
+  const lista = avisosDelTablero({ modulos, compras: [{ descripcion: "Andamios" }] });
+  assert.deepEqual(lista.map(a => [a.clave, a.vista, a.cuenta, a.tono]), [
+    ["control-presupuesto", "controlObra", 1, "peligro"],
+    ["control-ordenes", "controlObra", 1, "peligro"],
+    ["compras", "compras", 1, "normal"],
+    ["ordenes-firma", "controlObra", 3, "peligro"],
+    ["ordenes-rebote", "controlObra", 1, "peligro"],
+    ["alquileres", "controlObra", 2, "peligro"],
+    ["actas", "actas", 37, "atencion"],
+  ]);
+  assert.equal(lista[0].texto, "obra cuyo control no dice lo mismo que su presupuesto firmado");
+  assert.equal(lista[3].detalle, "la más vieja, hace 13 días · 3 con el plazo vencido");
+  assert.equal(lista[6].texto, "compromisos de actas están vencidos");
+  // Lo que hoy pasa de verdad: las dos revisiones cuadran y no hay rebotes ni alquileres.
+  const hoy = avisosDelTablero({ modulos: { ordenes: { cuantas: 3, dias: 13, vencidas: 3, objetadas: 0 }, rebotadas: 0, alquileres: 0, actas: 37, noCuadran: [], ordenesMal: { cuantas: 0, obras: [] } } });
+  assert.deepEqual(hoy.map(a => a.clave), ["ordenes-firma", "actas"]);
+  // Una sola orden, mandada hoy y sin plazo: avisa, pero sin alarma.
+  assert.deepEqual(avisosDelTablero({ modulos: { ordenes: { cuantas: 1, dias: 0, vencidas: 0, objetadas: 0 } } }).map(a => [a.tono, a.texto, a.detalle]),
+    [["atencion", "orden espera la firma del cliente", "enviada hoy"]]);
+  // Mientras todavía no cargó, no rompe ni inventa.
+  assert.deepEqual(avisosDelTablero({ modulos: null }), []);
+});

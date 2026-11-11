@@ -277,6 +277,38 @@ nada a mano.
 - El panel de avisos se completa con los de todos los módulos, y el correo
   de la mañana se arma con la misma bandeja y los mismos avisos.
 
+**Cómo quedó hecho (11/11/2026, migración 172):**
+
+- La bandeja (`components/Bandeja.jsx`, reglas en `src/lib/bandeja.js`) tiene
+  dos partes. «Me toca»: lo mío por fecha —vencidas, hoy, esta semana, más
+  adelante, sin fecha— y lo que nadie tomó. «Espero de otros»: lo que
+  encargué, lo mío que espera a un tercero, y los leads que esperan al
+  cliente. El día del recordatorio, el lead pasa a «Me toca».
+- Cada vencida muestra sus tres salidas sin abrir nada: nueva fecha (hoy,
+  mañana, en una semana, o un día), delegar, o «ya no va». «Ya no va» la
+  cierra sin darla por hecha: `tasks.descartada`.
+- Completar es un toque; la fecha de cualquier tarea se cambia tocándola; se
+  agrega escribiendo y Enter, con el proyecto al lado.
+- «Urgente» no se muestra ni se ofrece en ningún lado. La columna `priority`
+  queda en la base sin uso; no se tocó ninguna fila.
+- Se quitaron la vista de tablero por columnas y los filtros de estado.
+  Quedan la bandeja y el calendario.
+- **Las compras no se listan como tareas**, ni en la bandeja ni en el correo:
+  aparecen como aviso que lleva a Compras. OJO: el circuito de compras SIGUE
+  dejando su fila en `tasks` —de ella salen el correo con los botones de
+  aprobar y el aviso al que compra—; lo que cambió es que nadie la ve como
+  pendiente. Sacar esa fila del todo es rehacer la aprobación por correo, y
+  queda para la limpieza.
+- El panel de avisos suma, con la regla de cada módulo: las dos revisiones de
+  Control (presupuesto firmado y órdenes contra su documento), órdenes que
+  esperan firma, correos de órdenes que rebotaron, alquileres por vencer y
+  compromisos de actas vencidos (`src/lib/cargarAvisos.js`).
+- El correo de la mañana separa igual que la bandeja (una prueba lo cuida) y
+  suma «Esperás de otros», el renglón de Compras y el de Actas. Las dos
+  revisiones de Control no van en el correo: su regla vive en la aplicación.
+  De paso, las tareas privadas dejaron de salir en la foto del equipo: la
+  consulta no traía esa columna.
+
 ### Fase 5 — Los compromisos de las actas
 
 - En el acta, el responsable se elige: alguien del equipo o un tercero. Si es
@@ -314,7 +346,7 @@ fase 5), los permisos por proyecto y el portal del cliente.
 
 - [x] Fase 1 — Una sola tarea (11/11/2026; migración 170, corrida y publicada)
 - [x] Fase 2 — El Pipeline es lo que se persigue (11/11/2026; migración 171, corrida y publicada)
-- [x] Fase 3 — Proyectos aprobados (11/11/2026; sin migración)
-- [ ] Fase 4 — Tareas: una bandeja que se pueda creer
+- [x] Fase 3 — Proyectos aprobados (11/11/2026; sin migración, publicada)
+- [x] Fase 4 — Tareas: una bandeja que se pueda creer (11/11/2026; requiere la migración 172)
 - [ ] Fase 5 — Los compromisos de las actas
 - [ ] Fase 6 — Limpieza

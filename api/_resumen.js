@@ -8,6 +8,12 @@
 //     lo de hoy—, no la lista entera de los demás.
 //   · Lo de ayer también se cuenta: un resumen que solo dice lo que falta se
 //     lee como un reproche. Lo que se hizo es la mitad de la noticia.
+//   · Es la misma bandeja de la pantalla (src/lib/bandeja.js): lo que te toca,
+//     por fecha, y aparte lo que esperás de otros —lo que encargaste—. Lo que
+//     ya hiciste de tu lado y espera a un tercero no sale como atrasado.
+//   · Las compras no son tareas: el aviso que deja su circuito no se lista
+//     entre lo atrasado. Sale en su renglón, con cuántas esperan tu visto,
+//     cuántas hay por comprar y cuántas te devolvieron.
 //   · Del pipeline, los leads que hoy piden algo: el que hay que insistirle
 //     al cliente —llegó el día del recordatorio— y el que se quedó sin próximo
 //     paso. A quien lo lleva; al Director, los de toda la oficina. El paso
@@ -17,6 +23,8 @@ export const hoyISO = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOf
 export const sumarDias = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return hoyISO(d); };
 
 const ABIERTA = t => t.status !== "listo";
+/** El aviso que deja el circuito de compras: no es una tarea de nadie. Igual que en src/lib/bandeja.js. */
+export const esDeCompras = t => !!t?.compra_id || t?.type === "Compra" || /^Gestión de compras/.test(t?.notes || "");
 export const claseDe = t => (t?.type === "Reunión" ? "reunion"
   : t?.type === "Gestión" ? "gestion"
   : /^Tarea de /.test(t?.notes || "") ? "tarea"
@@ -28,7 +36,9 @@ export const claseDe = t => (t?.type === "Reunión" ? "reunion"
  *                    `pipeline` es lo que arma avisosDelPipeline
  * @returns {Array} un sobre por persona: { usuario, atrasadas, hoy, manana,
  *                  estaSemana, masAdelante, sinFecha, ayer, deSusProyectos,
- *                  esAdmin, equipo, sinDueno, pipeline }
+ *                  esAdmin, equipo, sinDueno, pipeline, espero, compras }
+ *                  `espero` es lo que le encargó a otros; `compras`, cuántas
+ *                  tiene esperando en cada paso
  */
 export function armarResumen(d) {
   const hoy = d.hoy || hoyISO();
@@ -57,9 +67,14 @@ export function armarResumen(d) {
   const sinLoPersonal = lista => lista.filter(t => !t.privada);
   const conProyecto = t => ({ ...t, proyecto: nombreProyecto(t.lead_id), clase: claseDe(t) });
 
-  const abiertas = d.tareas.filter(ABIERTA);
+  // Las tareas de verdad, y aparte los avisos de compras que siguen abiertos.
+  const todas = d.tareas;
+  const tareas = todas.filter(t => !esDeCompras(t));
+  const deCompras = todas.filter(t => esDeCompras(t) && ABIERTA(t));
+  const abiertas = tareas.filter(ABIERTA);
+  const nombreDe = id => d.usuarios.find(x => x.id === id)?.nombre || "";
   const delPipeline = (d.pipeline || []).filter(a => a.clase === "insistir" || a.clase === "sin_paso");
-  const cerradasAyer = d.tareas.filter(t => {
+  const cerradasAyer = tareas.filter(t => {
     const cuando = String(t.updated_at || "").slice(0, 10);
     return t.status === "listo" && cuando >= desde && cuando < hoy;
   });
@@ -68,7 +83,11 @@ export function armarResumen(d) {
     .filter(u => u.email && u.activo !== false)
     .map(u => {
       const esAdmin = u.rol === "owner" || u.rol === "assistant";
-      const mias = suyas(u, abiertas).map(conProyecto);
+      // Lo que ya hice de mi lado y espera a un tercero no me toca hoy.
+      const mias = suyas(u, abiertas).filter(t => !t.espera).map(conProyecto);
+      // En qué paso está cada compra que tiene encima.
+      const susCompras = suyas(u, deCompras);
+      const enPaso = paso => susCompras.filter(t => t.compra_estado === paso).length;
       const mios = proyectosDe(u);
 
       const sobre = {
@@ -93,6 +112,15 @@ export function armarResumen(d) {
         sinDueno: [],
         pipeline: delPipeline.filter(a => esAdmin
           || String(a.responsable_id) === String(u.id) || String(a.created_by) === String(u.id)),
+        // Lo que encargó: lo escribió él y lo tiene otro, del equipo o de afuera.
+        espero: abiertas
+          .filter(t => t.created_by === u.id && t.assignee_id !== u.id && (t.assignee_id || t.responsable_externo))
+          .map(t => ({ ...conProyecto(t), persona: t.responsable_externo || nombreDe(t.assignee_id), vencida: !!t.due_date && t.due_date < hoy }))
+          .sort((a, b) => String(a.due_date || "9999").localeCompare(String(b.due_date || "9999"))),
+        compras: {
+          visto: enPaso("pendiente_aprobacion"), devueltas: enPaso("requiere_info"),
+          comprar: enPaso("aprobada"), recibir: enPaso("comprada"), total: susCompras.length,
+        },
       };
 
       if (esAdmin) {
@@ -116,5 +144,6 @@ export function armarResumen(d) {
     })
     .filter(s => s.atrasadas.length || s.hoy.length || s.manana.length || s.ayer.length
       || s.estaSemana.length || s.masAdelante.length || s.sinFecha.length
-      || s.deSusProyectos.length || s.pipeline.length || (s.esAdmin && (s.equipo.length || s.sinDueno.length)));
+      || s.deSusProyectos.length || s.pipeline.length || s.compras.total || s.espero.some(t => t.vencida)
+      || (s.esAdmin && (s.equipo.length || s.sinDueno.length)));
 }

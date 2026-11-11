@@ -64,7 +64,7 @@ export async function leerDependencias(taskIds = []) {
 export async function pedirLoQueFalta({ tareaQueEspera, nueva, creadaPor }) {
   const { data: creada, error } = await supabase.from("tasks").insert({
     title: nueva.title, project_id: nueva.project_id ?? null, assignee_id: nueva.assignee_id ?? null,
-    type: nueva.type || "Otro", due_date: nueva.due_date || null, priority: nueva.priority || "alta",
+    type: nueva.type || "Otro", due_date: nueva.due_date || null, priority: nueva.priority || "media",
     status: "en-progreso", notes: nueva.notes || null, created_by: creadaPor ?? null,
   }).select().single();
   if (error) return { error: error.message };

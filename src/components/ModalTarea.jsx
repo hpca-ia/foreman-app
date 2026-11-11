@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { guardarProyecto } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
-import { PRIORIDAD, ESTADO_NUEVO, CLASES, claseDe, HORAS } from "../theme/constants";
+import { ESTADO_NUEVO, CLASES, claseDe, HORAS } from "../theme/constants";
 import { claveDeTarea, comoSeGuarda } from "../lib/proyectos";
 import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
@@ -132,7 +132,6 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
             </div>
           </div>
           <div><label style={lS}>Responsable</label><select value={form.assignee_id || ""} onChange={e => inp("assignee_id", e.target.value ? Number(e.target.value) : null)} style={inputStyle}><option value="">Sin asignar</option>{asignables.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
-          <div><label style={lS}>Prioridad</label><select value={form.priority} onChange={e => inp("priority", e.target.value)} style={inputStyle} disabled={!admin}>{Object.entries(PRIORIDAD).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
         </div>
 
         {/* Quién más la lleva, pegado a quién la lleva: son dos mitades de la

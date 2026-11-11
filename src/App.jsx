@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { ListTodo } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { loadFromStorage, saveToStorage } from "./lib/storage";
 import { daysUntil } from "./lib/dates";
@@ -9,25 +8,23 @@ import { equipoEnCache, cargarEquipo } from "./lib/equipo";
 import { colors } from "./theme/colors";
 import { unirProyectos } from "./lib/proyectos";
 import { nivelDeAcceso, nivelDeArea, veLaTarea } from "./lib/acceso";
-import { esperaMiVisto, volvioAlVisto } from "./lib/estadoDeCompra";
+import { volvioAlVisto } from "./lib/estadoDeCompra";
 import { misObservaciones } from "./modules/observaciones/observaciones";
-import { PRIORIDAD, CLASES, claseDe } from "./theme/constants";
+import { claseDe } from "./theme/constants";
 
 import LoginScreen from "./components/LoginScreen";
 import { salir, mensajeError } from "./lib/sesion";
 import NovaInput from "./components/NovaInput";
 import AIBriefing from "./components/AIBriefing";
-import TarjetaTarea from "./components/TarjetaTarea";
-import TareasListaMovil from "./components/TareasListaMovil";
-import AvisoTareas from "./components/AvisoTareas";
 import PanelAvisos from "./components/PanelAvisos";
+import Bandeja from "./components/Bandeja";
+import { bandeja, sinCompras, alReprogramar, alDelegar, alDescartar, alReabrir, tareaRapida } from "./lib/bandeja";
 import { avisosDelTablero } from "./lib/avisos";
-import { avisosDelPipeline, esMiAviso } from "./modules/leads/pipeline";
-import TareasTabla from "./components/TareasTabla";
-import TareasKanban from "./components/TareasKanban";
+import CargadorDeAvisos from "./components/CargadorDeAvisos";
+import { avisosDelPipeline, esMiAviso, diaCorto } from "./modules/leads/pipeline";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
-import { leerResponsables, guardarResponsables, leerDependencias, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
+import { leerResponsables, guardarResponsables, destrabarLasQueEsperaban } from "./lib/tareasEquipo";
 import ModalTarea from "./components/ModalTarea";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
@@ -71,14 +68,11 @@ export default function App() {
   // El presupuesto cuyo cronograma se pidió abrir desde Presupuestos.
   const [cronoPedido, setCronoPedido] = useState(null);
   const [vistaTareas, setVistaTareas] = useState("lista");
-  const [soloMias, setSoloMias] = useState(false);
   // Quién acompaña a cada tarea, y qué tarea espera a cuál.
   const [acompanantes, setAcompanantes] = useState(new Map());
   // Lo último de las tareas, para poder leer sus acompañantes sin volver a
   // armar la función cada vez que cambia la lista.
   const tareasRef = useRef([]);
-  const [dependencias, setDependencias] = useState({ espera: new Map(), destraba: new Map() });
-  const [filtro, setFiltro] = useState("todas");
   // Lo completado se guarda, no se tira: se ve cuando alguien lo pide.
   const [verListas, setVerListas] = useState(false);
   const [filtroP, setFiltroP] = useState("all");
@@ -139,6 +133,9 @@ export default function App() {
   // en algún lado, o se enteran cuando alguien pregunta por WhatsApp.
   const [misObs, setMisObs] = useState([]);
   const [misCompras, setMisCompras] = useState([]);
+  // Lo que los demás módulos tienen para avisar: órdenes de cambio, las dos
+  // revisiones de Control, alquileres y actas. Se trae después de dibujar.
+  const [avisosDeModulos, setAvisosDeModulos] = useState(null);
   const tienePipeline = Object.keys(leadsPorId).length > 0;
   // Los proyectos de la oficina: los que se persiguen y los aprobados. Las
   // tareas se cuelgan de ahí igual que de los proyectos de Ajustes, para que
@@ -194,7 +191,7 @@ export default function App() {
     if (!usuario) return;
     fetchTareas();
     const tCh = supabase.channel(`tasks-main-${usuario.id}-${Date.now()}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, p => setTareas(prev => [p.new, ...prev]))
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks" }, p => setTareas(prev => (prev.some(t => t.id === p.new.id) ? prev : [p.new, ...prev])))
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks" }, p => setTareas(prev => prev.map(t => t.id === p.new.id ? p.new : t)))
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks" }, p => setTareas(prev => prev.filter(t => t.id !== p.old.id)))
       .subscribe();
@@ -216,9 +213,7 @@ export default function App() {
   const cargarEquipoDeTareas = useCallback(async () => {
     const ids = tareasRef.current.map(t => t.id);
     if (!ids.length) return;
-    const [resp, dep] = await Promise.all([leerResponsables(ids), leerDependencias(ids)]);
-    setAcompanantes(resp);
-    setDependencias(dep);
+    setAcompanantes(await leerResponsables(ids));
     // eslint-disable-next-line
   }, []);
 
@@ -270,6 +265,46 @@ export default function App() {
     // hay ningún vínculo que cortar ni etapa que poner al día.
     setTareas(prev => prev.filter(t => t.id !== id));
     return true;
+  }
+
+  // ── Lo que se hace desde la fila de la bandeja, sin abrir nada ──────────
+  // Un cambio en la tarea, y si es de un proyecto queda escrito en su
+  // historia. Se ve al instante y se guarda atrás: si no se pudo, se dice y se
+  // vuelve a traer la lista.
+  async function tocarTarea(t, campos, nota) {
+    setTareas(prev => prev.map(x => (x.id === t.id ? { ...x, ...campos } : x)));
+    let { error } = await supabase.from("tasks").update(campos).eq("id", t.id);
+    // Sin la migración 172 no existe `descartada`: se cierra igual, sin la marca.
+    if (error && /descartada/.test(error.message)) {
+      const { descartada, ...resto } = campos;
+      ({ error } = await supabase.from("tasks").update(resto).eq("id", t.id));
+    }
+    if (error) { alert("No se pudo guardar: " + error.message); fetchTareas(); return; }
+    if (t.lead_id && nota) {
+      await supabase.from("lead_movimientos").insert({
+        lead_id: t.lead_id, tipo: "nota", automatico: true, detalle: nota, autor_id: usuario.id, autor_nombre: usuario.name,
+      });
+    }
+  }
+  const reabrirTarea = t => tocarTarea(t, alReabrir(), `Volvió a abrir: ${t.title}`);
+  const reprogramarTarea = (t, fecha) => tocarTarea(t, alReprogramar(fecha), fecha ? `"${t.title}" queda para el ${diaCorto(fecha)}` : `"${t.title}" se queda sin fecha`);
+  // «Ya no va»: se cierra sin haberse hecho, y lo dice.
+  const descartarTarea = t => tocarTarea(t, alDescartar(usuario.name), `Ya no va: ${t.title}`);
+  async function delegarTarea(t, usuarioId) {
+    const nombre = users.find(u => u.id === usuarioId)?.name || "otra persona";
+    await tocarTarea(t, alDelegar(usuarioId), `"${t.title}" pasa a ${nombre}`);
+    // El nuevo se entera: enterarse por casualidad de que algo era tuyo es la
+    // forma más cara de perder una semana.
+    if (usuarioId !== usuario.id) avisarPorCorreo(t.id);
+  }
+  // Se agrega escribiendo y Enter. Devuelve el motivo si no se pudo.
+  async function agregarRapida({ titulo, proyecto, fecha }) {
+    const r = tareaRapida({ titulo, usuarioId: usuario.id, proyecto, fecha });
+    if (r.error) return r.error;
+    const { data, error } = await supabase.from("tasks").insert(r.fila).select().single();
+    if (error) return mensajeErrorTarea(error);
+    if (data) setTareas(prev => (prev.some(t => t.id === data.id) ? prev : [data, ...prev]));
+    return null;
   }
 
   async function cambiarEstado(id, estado, cierre = null) {
@@ -403,11 +438,6 @@ export default function App() {
   // Ajustes si no. (Se llamaba a sí misma: al buscar por texto una tarea con
   // proyecto normal, el navegador se quedaba sin pila y la pantalla se caía.)
   const nombreProyecto = t => (t.lead_id ? (leadsPorId[t.lead_id] || "Pipeline") : projects.find(p => p.id === t.project_id)?.name || "");
-  // Lo que dice el botón que quita un filtro encendido desde los avisos.
-const ETIQUETA_FILTRO = { vencidas: "Vencidas", hoy: "Para hoy", urgentes: "Urgentes", urgente: "Urgentes", atrasadas: "Atrasadas", pausadas: "Pausadas", listo: "Completadas" };
-const VACIO = 'Nada pendiente. Toca "+ Nueva tarea" o dile a NOVA.';
-
-const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Quien no entra al Tablero —un conductor, que solo rinde su caja— no puede
   // quedarse mirando una pantalla que no le toca: se lo lleva al primer módulo
   // que sí tenga.
@@ -494,22 +524,6 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // gente de otras obras.
   const compañeros = new Set(projects.filter(p => (p.miembros || []).includes(usuario.id)).flatMap(p => p.miembros || []));
   const asignables = puede("tareas.asignar") ? users : users.filter(u => u.id === usuario.id || compañeros.has(u.id));
-  // Una gestión de proyecto que nadie tomó no es tarea de nadie: no entra a
-  // "Mis tareas" por haberla escrito yo —eso llenaría la lista de cosas que no
-  // me tocan—, pero tampoco se pierde: vive en su propio cuadro, abajo.
-  // Qué es cada cosa lo dice su tipo, no de dónde vino: una tarea del pipeline
-  // asignada a Camila es una tarea, no una gestión, y aparecía abajo entre las
-  // gestiones solo por tener proyecto. Las de antes de esta distinción se
-  // reparten por lo único que las separaba entonces: si tenían dueño o no.
-  // Una reunión es una reunión porque se creó como tal, no porque tenga hora:
-  // ponerle hora a una gestión —"llamar al municipio a las 9"— la mandaba a
-  // Reuniones y desaparecía de donde el que la escribió la fue a buscar.
-  const esReunion = t => claseDe(t) === "reunion";
-  // Del tubo salen las tres, y cada una lo dice: en su tipo y en su nota. Las
-  // de antes de la distinción decían "Actividad de …" y se toman como
-  // gestiones, que es donde viven —dentro de una etapa—; si alguna era una
-  // tarea, se corrige en un clic desde el proyecto.
-  const esGestion = t => claseDe(t) === "gestion";
   // Un aviso de compra no se abre como tarea.
   //
   // Lo que uno quiere hacer al tocarlo es ver el pedido: las cotizaciones, el
@@ -527,23 +541,16 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     }
     setEditTask(t); setShowModal(true);
   };
-  // Lo que no tiene dueño no se guarda en un cajón aparte: va en su lista, con
-  // todo lo demás y marcado en rojo. En un cuadro al fondo titulado "Sin
-  // responsable" nadie entendía de dónde salía ni qué había que hacer con eso.
-  // Una compra esperando MI visto es una alerta aunque falten diez días para
-  // la fecha: lo que la vuelve urgente no es el calendario sino que hay alguien
-  // parado esperando. Son las únicas que entran por algo que no es la fecha.
-  const apremia = t => daysUntil(t.due_date) < 0 || daysUntil(t.due_date) <= 2 || esperaMiVisto(t, usuario.id);
+  // LAS TAREAS DE VERDAD. Los avisos que deja el circuito de compras no son
+  // tarea de nadie: se siguen en Compras y acá aparecen en el panel de Avisos.
+  const propias = sinCompras(tareas);
+  // La campana: lo mío que venció o vence en dos días. Manda la fecha, y nada
+  // más: «urgente» ya no existe.
+  const apremia = t => !!t.due_date && daysUntil(t.due_date) <= 2;
   const misAlertasTareas = veTodo
-    ? tareas.filter(t => t.status !== "listo" && apremia(t))
-    : tareas.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && apremia(t));
+    ? propias.filter(t => t.status !== "listo" && apremia(t))
+    : propias.filter(t => (t.assignee_id === usuario.id || t.created_by === usuario.id) && t.status !== "listo" && apremia(t));
   const alertCount = misAlertasTareas.length;
-  // Quien no es admin ve lo suyo en "Mis tareas". Al elegir uno de sus
-  // proyectos ve también lo de sus compañeros ahí —para coordinarse—, salvo lo
-  // marcado como privado. Lo privado solo lo ven los admins y el asignado.
-  // Mía es también la que me sumaron como acompañante: si la puedo mover, la
-  // tengo que ver.
-  const esMia = t => t.assignee_id === usuario.id || t.created_by === usuario.id || (acompanantes.get(t.id) || []).includes(usuario.id);
   // A quién le toca cada paso de una compra. Es la misma regla del módulo,
   // dicha acá para poder contar sin cargar la pantalla entera.
   // A QUIÉN LE TOCA, no quién puede.
@@ -575,6 +582,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
     compras: puede("compras.ver") ? comprasQueMeTocan : [],
     devueltas: puede("compras.ver") ? comprasQueMeTocan.filter(volvioAlVisto).length : 0,
     observaciones: puede("observaciones.ver") ? misObs : [],
+    modulos: avisosDeModulos,
   });
   // El nivel de esta persona en el proyecto de una tarea. Las de los proyectos
   // viejos de Ajustes se resuelven por sus miembros, mientras convivan.
@@ -589,7 +597,7 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
   // Todo lo que esta persona puede ver, sin filtros de pantalla encima. De acá
   // sale el cuadro "en qué anda el resto", que no debe achicarse porque uno
   // prendió un filtro para mirar lo suyo.
-  const visiblesTodas = tareas.filter(t => veLaTarea({
+  const visiblesTodas = propias.filter(t => veLaTarea({
     tarea: t, usuarioId: usuario.id, admin, todas: veTodo, nivel: nivelDeTarea(t),
     acompanante: (acompanantes.get(t.id) || []).includes(usuario.id),
   }));
@@ -603,63 +611,30 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
       users.find(u => u.id === t.assignee_id)?.name?.toLowerCase().includes(q)
     );
   }
-  // El aviso mira todo lo del usuario, no lo que dejó el filtro: si al tocar
-  // "Completadas" desapareciera el conteo de vencidas, la señal se apagaría
-  // justo cuando sigue siendo cierta.
-  // El aviso de arriba es sobre lo que te toca a ti: a María no se le prende
-  // la alarma por una tarea vencida de Héctor.
-  const baseAviso = veTodo ? visibles : visibles.filter(esMia);
-  const paraAvisar = !proyectoElegido ? baseAviso
-    : baseAviso.filter(t => (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id));
-
-  if (soloMias) visibles = visibles.filter(esMia);
-  if (filtro === "atrasadas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
-  if (filtro === "pausadas") visibles = visibles.filter(t => t.status === "bloqueado");
-  if (filtro === "urgente") visibles = visibles.filter(t => t.status !== "listo" && (t.priority === "urgente" || daysUntil(t.due_date) <= 1));
-  if (filtro === "listo") visibles = visibles.filter(t => t.status === "listo");
-  // Los que se activan tocando los avisos de arriba: mismas reglas que sus conteos.
-  if (filtro === "vencidas") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) < 0);
-  if (filtro === "hoy") visibles = visibles.filter(t => t.status !== "listo" && t.due_date && daysUntil(t.due_date) === 0);
-  if (filtro === "urgentes") visibles = visibles.filter(t => t.status !== "listo" && t.priority === "urgente" && !(t.due_date && daysUntil(t.due_date) <= 0));
   if (proyectoElegido) visibles = visibles.filter(t => (proyectoElegido.esLead ? t.lead_id === proyectoElegido.id : t.project_id === proyectoElegido.id));
-  // Lo terminado no se mezcla con lo que falta: se ve cuando se lo pide.
-  if (!verListas) visibles = visibles.filter(t => t.status !== "listo");
 
-  // Manda la fecha, y lo terminado al fondo: una lista de pendientes que no
-  // mira la fecha no sirve, y elegir entre cuatro órdenes era una decisión más
-  // para algo que casi siempre se quiere igual.
-  // Sin fecha va al fondo: Infinity menos Infinity da NaN y el orden se rompía.
-  const cuantoFalta = t => (t.due_date ? daysUntil(t.due_date) : Number.MAX_SAFE_INTEGER);
-  const porFecha = (a, b) => (cuantoFalta(a) - cuantoFalta(b)) || (ordenPrioridad[a.priority] - ordenPrioridad[b.priority]);
-  const ordenadas = visibles.slice().sort((a, b) => {
-    if (a.status === "listo" && b.status !== "listo") return 1;
-    if (b.status === "listo" && a.status !== "listo") return -1;
-    return porFecha(a, b);
+  // LA BANDEJA: «Me toca» y «Espero de otros». Qué va en cada parte lo decide
+  // src/lib/bandeja.js. Los leads que esperan al cliente entran también —del
+  // otro lado mientras esperan, de este el día del recordatorio—, salvo que se
+  // esté mirando un solo proyecto o buscando una tarea.
+  const filtrando = !!proyectoElegido || !!busqueda.trim();
+  const datosBandeja = bandeja({
+    tareas: visibles, usuarioId: usuario.id, acompanantes, veTodo,
+    leads: verPipeline && !filtrando ? proyectosPipeline.filter(l => nivelProyecto(l.id)) : [],
   });
-
-  // Las tres cosas de uno, en el orden en que aprietan: una reunión tiene hora
-  // y no espera, una tarea tiene dueño, una actividad es del proyecto.
-  const sinNadie = t => !t.assignee_id && !t.responsable_externo && t.status !== "listo";
-  const bloques = [
-    { clase: "reunion", titulo: "Reuniones", etiqueta: "REUNIÓN", tareas: ordenadas.filter(esReunion) },
-    // UN SOLO BLOQUE. Antes había «Tareas» y «Gestiones de proyectos», y la
-    // diferencia era dónde se había escrito cada una: en el tablero o dentro
-    // de una etapa del pipeline. Son lo mismo —algo que alguien tiene que
-    // hacer— y verlas en dos listas era la mitad de la confusión.
-    { clase: "tarea", titulo: "Tareas", etiqueta: "TAREA", tareas: ordenadas.filter(t => claseDe(t) === "tarea" || esGestion(t)) },
-    // Las compras van últimas y juntas: no son trabajo de uno, son un paso que
-    // uno destraba. Antes caían entre las gestiones, donde se perdían.
-    { clase: "compra", titulo: "Compras", etiqueta: "COMPRA", tareas: ordenadas.filter(t => claseDe(t) === "compra") },
-  ].filter(b => b.tareas.length).map(b => ({ ...b, sueltas: b.tareas.filter(sinNadie).length }));
-  const bloquesMovil = bloques.map(b => ({ clave: b.titulo, titulo: b.titulo, tareas: b.tareas }));
-
-  const filtS = a => ({ padding: "6px 14px", borderRadius: 20, border: a ? "none" : `1px solid ${colors.border}`, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: a ? colors.ink : "#fff", color: a ? "#fff" : colors.inkSoft, flexShrink: 0 });
+  // Lo que cerré o se cerró de lo que encargué, lo más nuevo arriba. Solo si se pide.
+  const hechas = !verListas ? [] : visibles
+    .filter(t => t.status === "listo" && (t.assignee_id === usuario.id || t.created_by === usuario.id))
+    .sort((a, b) => String(b.hecha_at || b.updated_at || "").localeCompare(String(a.hecha_at || a.updated_at || "")))
+    .slice(0, 40);
+  // El calendario muestra todo lo que esta persona ve, con su fecha.
+  const paraCalendario = visibles.filter(t => verListas || t.status !== "listo");
 
   return (
     <div style={{ minHeight: "100vh", background: colors.bg, fontFamily: colors.font, display: "flex", flexDirection: "column" }}>
       <Header
         busqueda={busqueda} setBusqueda={setBusqueda}
-        alertCount={alertCount} onOpenAlerts={() => { setVista("tareas"); setFiltro("urgente"); setShowAlerts(true); }}
+        alertCount={alertCount} onOpenAlerts={() => { setVista("tareas"); setShowAlerts(true); }}
         admin={puede("ajustes.ver")} onOpenAjustes={() => setShowAjustes(true)}
         usuario={usuario} onLogout={logout}
         onNuevaTarea={() => { setEditTask(null); setShowModal(true); }}
@@ -678,106 +653,53 @@ const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 };
           {puede("tareas.ver") && vista === "tareas" && (
             <div className={avisos.length ? "tablero-con-avisos" : undefined}>
             <div style={{ minWidth: 0 }}>
-              {/* Lo primero de la pantalla y para todos los roles: antes las
-                  herramientas de NOVA se comían el tope y una tarea vencida
-                  aparecía cuarta, debajo del pliegue en el teléfono. */}
-              <AvisoTareas tasks={paraAvisar} filtro={filtro} onFiltrar={setFiltro} />
-
-              {/* Lo que no es tarea pero hay que recordarlo —una compra que
-                  espera tu visto, una observación de obra, un lead al que hay
-                  que insistirle— ya no son líneas sueltas acá arriba: están en
-                  el panel de Avisos, al costado. */}
-
               {/* NOVA para todos: cualquiera puede dictar "terminé la inspección".
                   Solo cierra tareas que esa persona puede cambiar. */}
               <NovaInput currentUser={usuario} projects={proyectosElegibles}
                 users={asignables} puedeAsignarATodos={puede("tareas.asignar")}
-                tareas={tareas.filter(t => t.status !== "listo" && (admin || t.assignee_id === usuario.id))}
+                tareas={propias.filter(t => t.status !== "listo" && (admin || t.assignee_id === usuario.id))}
                 onCambiarEstado={cambiarEstado} onTaskCreated={fetchTareas} />
-              {admin && <AIBriefing tasks={tareas} currentUser={usuario} users={users} projects={projects} />}
+              {admin && <AIBriefing tasks={propias} currentUser={usuario} users={users} projects={projects} />}
 
-              {/* La barra, en dos renglones y en el orden en que se piensa:
-                  primero cómo quiero verlas, después cuáles quiero ver. Antes
-                  los filtros, el orden, el proyecto y las vistas estaban todos
-                  mezclados en la misma fila y no se sabía qué hacía qué. */}
-              {/* Una sola barra: cómo se ve y de qué proyecto. El orden ya no se
-                  elige —manda la fecha, que es lo que importa de una lista de
-                  pendientes— y los estados tampoco se filtran: lo terminado se
-                  muestra con un interruptor y lo urgente ya está en los avisos
-                  de arriba. Antes eran tres filas de controles sobre la lista. */}
+              {/* Una sola barra: cómo se ve y de qué proyecto. El orden no se
+                  elige —manda la fecha— y no hay filtros de estado ni de
+                  urgencia: lo vencido ya está arriba de todo en la bandeja,
+                  pidiendo una decisión. */}
               <div className="tareas-barra">
                 <div className="tareas-vistas">
-                  {[["lista", "Lista"], ["tablero", "Tablero"], ["calendario", "Calendario"]].map(([v, l]) => (
+                  {[["lista", "Bandeja"], ["calendario", "Calendario"]].map(([v, l]) => (
                     <button key={v} onClick={() => setVistaTareas(v)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600, background: vistaTareas === v ? colors.surface : "transparent", color: vistaTareas === v ? colors.brand : colors.inkSoft }}>{l}</button>
                   ))}
                 </div>
                 {mios.length > 0 && <select value={filtroP} onChange={e => setFiltroP(e.target.value)} style={{ background: "#fff", border: `1px solid ${filtroP !== "all" ? colors.brand : colors.border}`, borderRadius: 20, color: filtroP !== "all" ? colors.brand : colors.inkSoft, padding: "6px 12px", fontSize: 12, fontFamily: colors.font, cursor: "pointer", flexShrink: 0 }}>
-                  <option value="all">{veTodo ? "Todos los proyectos" : "Mis tareas"}</option>
+                  <option value="all">Todos los proyectos</option>
                   {mios.map(p => <option key={p.clave} value={p.clave}>{p.name}</option>)}
                 </select>}
-                {/* La lista ahora trae lo del equipo de sus proyectos, que es
-                    para lo que sirve: coordinarse. Pero a veces uno solo quiere
-                    saber qué le toca a él, y para eso está este interruptor. */}
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: soloMias ? colors.brand : colors.inkSoft, cursor: "pointer", flexShrink: 0, fontWeight: soloMias ? 600 : 400 }}>
-                  <input type="checkbox" checked={soloMias} onChange={e => setSoloMias(e.target.checked)} /> Solo lo mío
-                </label>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: colors.inkSoft, cursor: "pointer", flexShrink: 0 }}>
-                  <input type="checkbox" checked={verListas} onChange={e => setVerListas(e.target.checked)} /> Ver completadas
+                  <input type="checkbox" checked={verListas} onChange={e => setVerListas(e.target.checked)} /> Ver hechas
                 </label>
-                {filtro !== "todas" && (
-                  <button onClick={() => setFiltro("todas")} style={{ ...filtS(true), padding: "5px 12px" }}>
-                    {ETIQUETA_FILTRO[filtro] || filtro} ✕
-                  </button>
-                )}
               </div>
 
               {cargando ? <div style={{ textAlign: "center", color: colors.muted, padding: "40px 0", fontSize: 13 }}>Cargando...</div> : (
                 <>
-                  {/* Lo tuyo, todo a la vista y separado por lo que es: las
-                      reuniones primero —tienen hora y no se posponen solas—,
-                      después las tareas y al final las gestiones de los
-                      proyectos —pedir una cotización, esperar un documento—. Antes eran tres pestañas: para saber qué tenías
-                      hoy había que abrir las tres. */}
-                  <div className="tasks-view-desktop">
-                    {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13 }}>{VACIO}</div>
-                      : vistaTareas === "calendario"
-                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
-                      : vistaTareas === "tablero"
-                        ? <TareasKanban tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onCambiarEstado={cambiarEstado} onEditar={abrirTarea} />
-                        : bloques.map(b => (
-                            <div key={b.titulo} style={{ marginBottom: 16 }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: CLASES[b.clase].color, letterSpacing: 0.5, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                                <span style={{ width: 8, height: 8, borderRadius: 2, background: CLASES[b.clase].color }} />
-                                {b.titulo.toUpperCase()} · {b.tareas.length}
-                                {b.sueltas > 0 && <span style={{ color: colors.danger }}> · {b.sueltas} SIN RESPONSABLE</span>}
-                              </div>
-                              <TareasTabla tasks={b.tareas} users={users} projects={projects} leads={leadsPorId} etiqueta={b.etiqueta} clase={b.clase}
-                                onCambiarEstado={cambiarEstado}
-                                onEditar={abrirTarea} />
-                            </div>
-                          ))}
-                  </div>
+                  {vistaTareas === "calendario"
+                    ? <TareasCalendario tasks={paraCalendario} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
+                    : <Bandeja datos={datosBandeja} hechas={hechas} users={users} comentarios={comentarios} usuario={usuario} puede={puede}
+                        nombreDe={nombreProyecto} proyectos={mios} asignables={asignables}
+                        onAbrir={abrirTarea} onCompletar={t => cambiarEstado(t.id, "listo")} onReabrir={reabrirTarea}
+                        onReprogramar={reprogramarTarea} onDelegar={delegarTarea} onDescartar={descartarTarea} onAgregar={agregarRapida}
+                        onIrAlPipeline={verPipeline ? () => setVista("leads") : null} />}
                   {/* Lo primero son las tareas de uno; en qué anda el resto va
                       abajo, en su propio cuadro, sin lo marcado como privado. */}
                   <TareasDeLosDemas
                     tasks={visiblesTodas.filter(t => t.assignee_id !== usuario.id)}
                     users={users.filter(u => u.id !== usuario.id)} projects={projects} leads={leadsPorId}
                     onEditar={abrirTarea} />
-
-                  <div className="tasks-view-mobile">
-                    {ordenadas.length === 0 ? <div style={{ textAlign: "center", color: colors.muted, padding: "60px 0", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}><ListTodo size={32} />{VACIO}</div>
-                      : vistaTareas === "calendario"
-                        ? <TareasCalendario tasks={ordenadas} users={users} projects={projects} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
-                      : vistaTareas === "lista"
-                        ? <TareasListaMovil tasks={ordenadas} grupos={bloquesMovil} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios} onEditar={abrirTarea} />
-                        : ordenadas.map(t => <TarjetaTarea key={t.id} task={t} puede={puede} currentUser={usuario} users={users} projects={projects} leads={leadsPorId} comentarios={comentarios[t.id] || 0}
-                            acompanantes={acompanantes.get(t.id) || []}
-                            espera={(dependencias.espera.get(t.id) || []).map(id => tareas.find(x => x.id === id)).filter(x => x && x.status !== "listo")}
-                            onCambiarEstado={cambiarEstado} onEditar={abrirTarea} onEliminar={eliminarTarea} />)}
-                  </div>
                 </>
               )}
             </div>
+            <CargadorDeAvisos entra={leadId => !!nivelObra(leadId)} conControl={puede("controlObra.ver")} conActas={puede("actas.ver")}
+              onCargado={setAvisosDeModulos} />
             <PanelAvisos avisos={avisos} onIr={setVista} />
             </div>
           )}

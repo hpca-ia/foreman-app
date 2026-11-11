@@ -21,9 +21,9 @@ export default function AIBriefing({ tasks, currentUser, users, projects }) {
         responsable: t.assignee_id ? gU(t.assignee_id)?.name : "Sin asignar",
         estado: t.status,
         fecha: t.status === "listo" ? "completada" : !t.due_date ? "sin fecha" : d < 0 ? `vencida ${Math.abs(d)}d` : d === 0 ? "HOY" : `en ${d}d`,
-        prioridad: t.priority,
         vencida: t.status !== "listo" && d < 0,
-        urgente: t.status !== "listo" && (t.priority === "urgente" || d <= 1),
+        // Lo que aprieta lo dice la fecha: vence hoy o mañana.
+        urgente: t.status !== "listo" && !!t.due_date && d >= 0 && d <= 1,
       };
     });
 
@@ -84,7 +84,7 @@ Máximo 3 recomendaciones específicas y accionables para ${currentUser.name} ho
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
             {[
               { l: "VENCIDAS", v: vencidas, c: colors.danger, bg: colors.dangerSoft },
-              { l: "URGENTES", v: urgentes, c: colors.warning, bg: colors.warningSoft },
+              { l: "HOY Y MAÑANA", v: urgentes, c: colors.warning, bg: colors.warningSoft },
               { l: "LISTAS", v: listas, c: colors.success, bg: colors.successSoft },
               { l: "TOTAL", v: total, c: colors.inkSoft, bg: colors.neutralSoft },
             ].map(s => (
