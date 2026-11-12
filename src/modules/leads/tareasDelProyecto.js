@@ -16,7 +16,7 @@
 
 /** Los campos de la tarea que usa la pantalla del proyecto. */
 export const COLUMNAS = "id,title,status,due_date,hora,priority,type,notes,assignee_id,responsable_externo,"
-  + "lead_id,etapa_id,espera,nota,hecha_at,hecha_por,ruta_orden,compra_id,created_at";
+  + "lead_id,etapa_id,espera,nota,hecha_at,hecha_por,ruta_orden,compra_id,created_at,descartada";
 
 /** Qué dice la nota de origen según el tipo: así el tablero sabe qué es. */
 const ORIGEN = { "Reunión": "Reunión", "Gestión": "Gestión", "Envío": "Envío" };
@@ -98,4 +98,44 @@ export function alMarcar(hecha, quienNombre = null, ahora = new Date()) {
   return hecha
     ? { status: "listo", hecha_at: ahora.toISOString(), hecha_por: quienNombre || null }
     : { status: "en-progreso", hecha_at: null, hecha_por: null };
+}
+
+// ─── El checklist: pegar una lista y ver cuánto falta ──────────────────────
+
+// Lo que trae adelante un renglón copiado de otro lado: una viñeta, un número,
+// una casilla. No es parte de lo que hay que hacer.
+const ADORNO = /^\s*(?:[-–—•·*▪■□☐☑✓✔]+|\[[ xX✓]?\]|\(?\d{1,3}[.)-])\s*/;
+const sinAdorno = r => { let t = String(r || ""); for (let i = 0; i < 3; i++) t = t.replace(ADORNO, ""); return t.trim(); };
+const parecido = t => String(t || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
+
+/**
+ * Una lista pegada, renglón por renglón: una tarea por cada uno.
+ *
+ * @param yaEstan  los títulos de las tareas ABIERTAS del proyecto: pegar dos
+ *                 veces la misma lista no las duplica
+ * @returns { nuevos, repetidos }  los que entran y los que ya estaban
+ */
+export function renglonesDeLista(texto, yaEstan = []) {
+  const vistos = new Set(yaEstan.map(parecido));
+  const nuevos = [], repetidos = [];
+  String(texto || "").split(/\r?\n/).map(sinAdorno).filter(Boolean).forEach(t => {
+    // Un título de más de 200 letras no es un renglón de un checklist: se
+    // corta ahí, que es lo que entra en una fila sin romper la lista.
+    const titulo = t.slice(0, 200);
+    const clave = parecido(titulo);
+    if (vistos.has(clave)) { repetidos.push(titulo); return; }
+    vistos.add(clave); nuevos.push(titulo);
+  });
+  return { nuevos, repetidos };
+}
+
+/**
+ * Cuánto va: hechas de cuántas.
+ *
+ * No cuentan las compras —tienen su módulo— ni lo que se cerró con «ya no
+ * va»: eso no se hizo y tampoco falta.
+ */
+export function avanceDe(tareas = []) {
+  const suyas = (tareas || []).filter(t => !t.compra_id && t.type !== "Compra" && !t.descartada);
+  return { hechas: suyas.filter(t => t.status === "listo").length, total: suyas.length };
 }

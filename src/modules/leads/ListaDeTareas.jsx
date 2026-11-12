@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight, Eye, EyeOff, ClipboardList } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -7,9 +7,11 @@ import ComentariosTarea from "../../components/ComentariosTarea";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import { nombreDeEtapa, hoyISO, sumarDias } from "./pipeline";
 import {
-  cargarTareas, agregarTarea, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
+  cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
   anotarCorreccion, anotar,
 } from "./proyecto";
+import { renglonesDeLista, avanceDe } from "./tareasDelProyecto";
+import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 
 // LAS TAREAS DEL PROYECTO: UNA LISTA.
 //
@@ -21,12 +23,18 @@ import {
 // acá». El proyecto podía figurar en tres etapas a la vez y nadie sabía en
 // cuál estaba. Ahora el lead está en una etapa, que se elige arriba, y la
 // tarea solo lleva de etiqueta en cuál se escribió.
+//
+// TAMBIÉN ES EL CHECKLIST. Cuando se arma un presupuesto hay una lista de
+// cosas por cotizar: se pega entera —una tarea por renglón— y arriba dice
+// cuánto va. Y se le puede mostrar al cliente en su enlace, tarea por tarea:
+// él ve qué dice cada una y si está lista, nada más.
 
 // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
 const cuando = f => (f ? new Date(String(f).length === 10 ? `${f}T12:00:00` : f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
 const EN_BLANCO = { abierto: true, tipo: "gestion", texto: "", assignee_id: "", due_date: "", hora: "", destinatario: "" };
+const LISTA_EN_BLANCO = { abierto: true, texto: "", assignee_id: "", due_date: "", alCliente: false };
 
 /**
  * @param etapaId   en qué etapa está el lead ahora: es la etiqueta con la que
@@ -41,6 +49,11 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const [sinMigracion, setSinMigracion] = useState(false);
   const [verHechas, setVerHechas] = useState(false);
   const [nuevo, setNuevo] = useState({ abierto: false });
+  // Pegar una lista entera: una tarea por renglón.
+  const [pegar, setPegar] = useState({ abierto: false });
+  // Cuáles ve el cliente en su enlace.
+  const [compartidas, setCompartidas] = useState(() => new Set());
+  const [sinCompartir, setSinCompartir] = useState(false);
   const [error, setError] = useState("");
   const [aTarea, setATarea] = useState(null);
   // A quién avisarle de una reunión: al del equipo que la tiene y a los de
@@ -74,6 +87,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     setAbiertas(r.abiertas);
     setHechas(r.hechas);
     setTareas(r.tareas || {});
+    setCompartidas(r.compartidas || new Set());
+    setSinCompartir(!!r.sinCompartir);
     setInvitados(inv || []);
     onTareas?.(Object.values(r.tareas || {}));
     // eslint-disable-next-line
@@ -144,6 +159,39 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     });
   }
 
+  // La lista pegada: qué entra y qué ya estaba, dicho antes de agregar.
+  const deLaLista = pegar.abierto ? renglonesDeLista(pegar.texto, abiertas.map(a => a.texto)) : { nuevos: [], repetidos: [] };
+
+  async function sumarLista() {
+    if (!deLaLista.nuevos.length) {
+      setError(deLaLista.repetidos.length ? "Esos renglones ya están en la lista." : "Pegá o escribí la lista: una cosa por renglón.");
+      return;
+    }
+    setError("");
+    await hacer(async () => {
+      const externo = String(pegar.assignee_id || "").startsWith("x:") ? String(pegar.assignee_id).slice(2) : null;
+      const r = await agregarVarias({
+        lead, etapaId, titulos: deLaLista.nuevos, desde: abiertas.length + hechas.length,
+        assignee_id: pegar.assignee_id && !externo ? Number(pegar.assignee_id) : null, responsable_externo: externo,
+        nombreResponsable: users.find(u => String(u.id) === String(pegar.assignee_id))?.name,
+        due_date: pegar.due_date || null, alCliente: !!pegar.alCliente && !sinCompartir, quien: currentUser,
+      });
+      if (r?.error) { setError(r.error); return; }
+      setPegar({ abierto: false });
+    });
+  }
+
+  // Mostrarle al cliente una tarea, o varias, o dejar de mostrárselas.
+  const alCliente = (items, ver) => hacer(async () => {
+    const e = await mostrarAlCliente(items, ver, currentUser);
+    if (e) setError(e);
+  });
+
+  const avance = avanceDe(Object.values(tareas));
+  const todas = [...abiertas, ...hechas];
+  const vistas = todas.filter(i => compartidas.has(i.id));
+  const abiertasSinMostrar = abiertas.filter(i => !compartidas.has(i.id));
+
   // Una fecha ya puesta solo la corre quien tenga el permiso; ponerle fecha a
   // algo que no la tenía es organizar, y eso lo puede hacer cualquiera.
   const fechaBloqueada = !!tareas[aTarea?.item?.tarea_id]?.due_date && !puede("tareas.fechas");
@@ -153,6 +201,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     <Actividad key={item.id} item={item} etiqueta={nombreDeEtapa(item.etapa_id, catalogo)} tarea={tareas[item.tarea_id]} users={users}
       abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
+      laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
       onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
         assignee_id: t?.responsable_externo ? `x:${t.responsable_externo}` : t?.assignee_id || "", due_date: t?.due_date || "", hora: t?.hora || "" }); }} />
@@ -166,12 +215,75 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, flex: 1 }}>
           TAREAS{abiertas.length ? ` · ${abiertas.length} ${abiertas.length === 1 ? "abierta" : "abiertas"}` : ""}
         </div>
-        {editable && !nuevo.abierto && (
-          <button onClick={() => { setNuevo(EN_BLANCO); setError(""); }} style={{ ...mini(false), padding: "4px 10px" }}>
-            <Plus size={11} /> Agregar
-          </button>
+        {editable && !nuevo.abierto && !pegar.abierto && (
+          <>
+            <button onClick={() => { setPegar(LISTA_EN_BLANCO); setError(""); }} title="Pegar una lista entera: una tarea por renglón"
+              style={{ ...mini(false), padding: "4px 10px" }}>
+              <ClipboardList size={11} /> Pegar lista
+            </button>
+            <button onClick={() => { setNuevo(EN_BLANCO); setError(""); }} style={{ ...mini(false), padding: "4px 10px" }}>
+              <Plus size={11} /> Agregar
+            </button>
+          </>
         )}
       </div>
+
+      {/* Cuánto va: es lo que se pregunta de un checklist. */}
+      {avance.total > 1 && (
+        <div className="avance-de-tareas" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div role="progressbar" aria-valuenow={avance.hechas} aria-valuemin={0} aria-valuemax={avance.total}
+            style={{ flex: 1, height: 5, background: colors.neutralSoft, borderRadius: 3, overflow: "hidden" }}>
+            <div style={{ width: `${Math.round((avance.hechas / avance.total) * 100)}%`, height: "100%", background: colors.success }} />
+          </div>
+          <span style={{ fontSize: 11, color: colors.inkSoft, whiteSpace: "nowrap" }}>{avance.hechas} de {avance.total} hechas</span>
+        </div>
+      )}
+
+      {/* PEGAR UNA LISTA. El checklist de un presupuesto ya está escrito en
+          algún lado —un correo, un Excel, una nota—: se pega entero y sale una
+          tarea por renglón, en vez de cargarlas de a una. */}
+      {editable && pegar.abierto && (
+        <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 5 }}>Pegar una lista</div>
+          <textarea value={pegar.texto} autoFocus rows={6} aria-label="La lista, una cosa por renglón"
+            onChange={e => setPegar(p => ({ ...p, texto: e.target.value }))}
+            placeholder={"Una cosa por renglón. Por ejemplo:\nCotizar ventanería\nCotizar cocina\nControl de iluminación"}
+            style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.45 }} />
+          <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+            <select value={pegar.assignee_id} onChange={e => setPegar(p => ({ ...p, assignee_id: e.target.value }))} aria-label="Quién las hace"
+              style={{ ...chico, flex: "1 1 160px", minWidth: 0 }}>
+              <option value="">¿Quién las hace? (opcional)</option>
+              <optgroup label="Del equipo">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
+              {invitados.length > 0 && <optgroup label="De afuera">{invitados.map(i => <option key={`x${i.id}`} value={`x:${i.nombre}`}>{i.nombre}</option>)}</optgroup>}
+            </select>
+            <input type="date" value={pegar.due_date} title="Para cuándo (opcional): la misma fecha para todas" aria-label="Para cuándo"
+              onChange={e => setPegar(p => ({ ...p, due_date: e.target.value }))}
+              style={{ ...chico, flex: "0 1 140px", minWidth: 0 }} />
+          </div>
+          {!sinCompartir && (
+            <label style={{ ...linea, fontSize: 11.5, marginTop: 7 }}>
+              <input type="checkbox" checked={!!pegar.alCliente} onChange={e => setPegar(p => ({ ...p, alCliente: e.target.checked }))} />
+              El cliente las ve en su enlace <span style={{ color: colors.muted }}>· qué dice cada una y si está lista</span>
+            </label>
+          )}
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 6, lineHeight: 1.5 }}>
+            {deLaLista.nuevos.length
+              ? `${deLaLista.nuevos.length === 1 ? "Entra 1 tarea" : `Entran ${deLaLista.nuevos.length} tareas`}`
+                + (deLaLista.repetidos.length ? ` · ${deLaLista.repetidos.length} ya ${deLaLista.repetidos.length === 1 ? "estaba" : "estaban"} en la lista y no se ${deLaLista.repetidos.length === 1 ? "repite" : "repiten"}` : "")
+                + "."
+              : deLaLista.repetidos.length ? "Todo eso ya está en la lista." : "Las viñetas y los números de adelante se quitan solos."}
+            {pegar.assignee_id ? " No sale un correo por cada una: le aparecen en su bandeja y en el correo de la mañana." : ""}
+          </div>
+          <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+            <button onClick={sumarLista} disabled={ocupado}
+              style={{ ...mini(false), padding: "4px 10px", background: colors.ink, color: "#fff", borderColor: colors.ink }}>
+              <Plus size={11} /> {deLaLista.nuevos.length > 1 ? `Agregar las ${deLaLista.nuevos.length}` : "Agregar"}
+            </button>
+            <button onClick={() => { setPegar({ abierto: false }); setError(""); }} style={{ ...mini(false), padding: "4px 10px" }}>Cerrar</button>
+          </div>
+          {error && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 5 }}>{error}</div>}
+        </div>
+      )}
 
       {/* Agregar está guardado detrás de un botón: con el formulario siempre
           abierto, la pantalla parecía un tablero de controles en vez de la
@@ -195,6 +307,15 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
           <input value={nuevo.texto || ""} autoFocus
             onChange={e => setNuevo(n => ({ ...n, texto: e.target.value }))}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumar(); } }}
+            // Si lo que se pega trae varios renglones es una lista: se abre
+            // el cuadro de pegar con eso adentro, en vez de aplastarlo en una.
+            onPaste={e => {
+              const pegado = e.clipboardData?.getData("text") || "";
+              if (!/\r?\n/.test(pegado.trim())) return;
+              e.preventDefault();
+              setNuevo({ abierto: false }); setError("");
+              setPegar({ ...LISTA_EN_BLANCO, texto: pegado.trim() });
+            }}
             placeholder={PISTA[tipoNuevo]}
             style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 6 }} />
 
@@ -285,6 +406,41 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
               {hechas.map(fila)}
             </div>
           )}
+        </div>
+      )}
+
+      {/* CON EL CLIENTE. Qué ve de esta lista y su enlace, en el mismo lugar
+          donde se decide. No se ofrece mientras no haya nada que mostrarle. */}
+      {editable && todas.length > 0 && (
+        <div className="lista-con-el-cliente" style={{ marginTop: 12, borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 5 }}>CON EL CLIENTE</div>
+          {sinCompartir ? (
+            <div style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.5 }}>
+              Para mostrarle tareas al cliente falta correr la migración 176 en Supabase.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
+                {vistas.length
+                  ? <>El cliente ve <strong style={{ color: colors.ink }}>{vistas.length} de {todas.length}</strong> en su enlace: qué dice cada una y si está lista. No ve notas, comentarios ni quién la tiene.</>
+                  : <>El cliente no ve ninguna tarea. Para mostrarle una, abrila y tocá «Mostrar al cliente».</>}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                {abiertasSinMostrar.length > 0 && (
+                  <button disabled={ocupado} onClick={() => alCliente(abiertasSinMostrar, true)} style={mini(false)}>
+                    <Eye size={11} /> {vistas.length ? `Mostrarle las otras ${abiertasSinMostrar.length} abiertas` : `Mostrarle las ${abiertasSinMostrar.length} abiertas`}
+                  </button>
+                )}
+                {vistas.length > 0 && (
+                  <button disabled={ocupado} onClick={() => { if (window.confirm("¿Dejar de mostrarle al cliente todas las tareas de este proyecto?")) alCliente(vistas, false); }} style={mini(false)}>
+                    <EyeOff size={11} /> Dejar de mostrarle todas
+                  </button>
+                )}
+              </div>
+              {vistas.length > 0 && <div style={{ marginTop: 10 }}><EnlaceDelCliente lead={lead} /></div>}
+            </>
+          )}
+          {error && !nuevo.abierto && !pegar.abierto && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 5 }}>{error}</div>}
         </div>
       )}
 
@@ -476,7 +632,7 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, y deja escribir lo que solo sabe
 // quien la trabajó. Los botones dicen su nombre: un ⧗ y un ✓ sueltos no le
 // enseñan a nadie cómo se usa esto.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   const deQuien = t => t?.responsable_externo || users.find(u => u.id === t?.assignee_id)?.name || "sin responsable";
@@ -517,6 +673,11 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             })()}
             {/* En qué etapa estaba el lead cuando se escribió. */}
             {etiqueta ? ` · ${etiqueta}` : ""}
+            {laVeElCliente && (
+              <span className="la-ve-el-cliente" title="El cliente la ve en su enlace" style={{ color: colors.brand, fontWeight: 600 }}>
+                {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente
+              </span>
+            )}
           </div>
         </div>
         {/* La fecha, a la derecha y siempre en el mismo lugar: es lo que
@@ -542,6 +703,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               <> Todavía sin responsable.</>
             ) : null}
             {" "}Es la misma tarea que se ve en Tareas.
+            {laVeElCliente ? " El cliente la ve en su enlace: qué dice y si está lista." : ""}
           </div>
 
           {/* La fecha se cambia desde la misma fila, de un toque. */}
@@ -582,6 +744,13 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             <button onClick={onTarea} style={mini(false)}>
               <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar detalles" : "Asignar y corregir"}
             </button>
+            {/* Mostrársela al cliente: ve qué dice y si está lista. Lo que
+                está escrito acá abajo —la nota, los comentarios— no. */}
+            {onCliente && (
+              <button onClick={() => onCliente(!laVeElCliente)} disabled={ocupado} aria-pressed={laVeElCliente} style={mini(laVeElCliente)}>
+                {laVeElCliente ? <><EyeOff size={11} /> Dejar de mostrarle al cliente</> : <><Eye size={11} /> Mostrar al cliente</>}
+              </button>
+            )}
             {/* Una reunión hay que avisarla: el del equipo la ve en FOREMAN,
                 pero el cliente y el ingeniero no entran acá. */}
             {!item.hecho && esReunion(tarea) && (

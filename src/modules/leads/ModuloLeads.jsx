@@ -7,6 +7,7 @@ import { CATALOGO_BASE } from "./constantes";
 import {
   TIPOS, tipoDe, sePersigue, estaAprobado, estaPerdido, porTipo, avisosDelPipeline, hoyISO,
 } from "./pipeline";
+import { avanceDe } from "./tareasDelProyecto";
 import EstadoDelLead from "./EstadoDelLead";
 import ModalLead from "./ModalLead";
 import NovaLeads from "./NovaLeads";
@@ -25,7 +26,7 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 // acá» que se podía marcar en tres a la vez; la lista mostraba una y adentro
 // decía otra. Las reglas de ahora están en pipeline.js.
 
-const COLUMNAS_TAREA = "id,lead_id,title,due_date,hora,status,type,compra_id,ruta_orden,assignee_id,espera";
+const COLUMNAS_TAREA = "id,lead_id,title,due_date,hora,status,type,compra_id,ruta_orden,assignee_id,espera,descartada";
 
 export default function ModuloLeads({ currentUser, users = [], puede = () => true, nivelProyecto = () => null, onIrAObra, onIrEnMarcha }) {
   const [leads, setLeads] = useState([]);
@@ -206,6 +207,8 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                 <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
                   {g.leads.map(l => {
                     const clase = claseDeAviso[String(l.id)];
+                    // Cuánto va su lista: con una sola tarea no hay checklist que medir.
+                    const avance = avanceDe(tareasDe(l.id));
                     return (
                       <div key={l.id} className="lead-tarjeta" onClick={() => setAbierto(l)}
                         style={{ borderLeft: `3px solid ${clase === "sin_paso" ? colors.warning : clase ? colors.danger : g.color}` }}>
@@ -214,6 +217,15 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                           <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 1 }}>
                             {[l.contacto, l.responsable_nombre].filter(Boolean).join(" · ") || "sin responsable"}
                           </div>
+                          {avance.total > 1 && (
+                            <div className="avance-del-lead" title="Tareas hechas de este lead"
+                              style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, maxWidth: 190 }}>
+                              <div style={{ flex: 1, height: 4, background: colors.neutralSoft, borderRadius: 2, overflow: "hidden" }}>
+                                <div style={{ width: `${Math.round((avance.hechas / avance.total) * 100)}%`, height: "100%", background: colors.success }} />
+                              </div>
+                              <span style={{ fontSize: 10.5, color: colors.inkSoft, whiteSpace: "nowrap" }}>{avance.hechas} de {avance.total}</span>
+                            </div>
+                          )}
                         </div>
                         <EstadoDelLead lead={l} tareas={tareasDe(l.id)} catalogo={catalogo} currentUser={currentUser}
                           editable={puedeEditar && nivelProyecto(l.id) !== "ver"} onCambio={alCambiar} onTareas={cargarTareas} />

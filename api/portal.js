@@ -5,6 +5,7 @@ import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
+import { listaDelCliente } from "./_listaDelCliente.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -1195,6 +1196,15 @@ async function armarInforme(lead) {
     + `&select=id,tipo,titulo,descripcion,archivo_nombre,storage_path,estado,enviado_at,`
     + `cliente_respuesta_at,cliente_nota&order=enviado_at.desc`)) || [];
 
+  // EL CHECKLIST QUE SE DECIDIÓ MOSTRARLE: las tareas del proyecto marcadas
+  // una por una. Se piden solo las marcadas y solo las columnas que hacen
+  // falta para decir qué es y en qué está; la nota y los comentarios ni se
+  // leen. Si la columna todavía no existe (migración 176), no hay lista.
+  const marcadas = await json(await rest(
+    `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true`
+    + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente&order=id`));
+  const lista = listaDelCliente(marcadas);
+
   const enlaces = await firmar([
     ...fotosObs.map(f => f.storage_path),
     ...avance.map(f => f.storage_path),
@@ -1205,7 +1215,10 @@ async function armarInforme(lead) {
   const conUrl = x => ({ ...x, url: enlaces[x.storage_path] || null, storage_path: undefined });
 
   return {
-    proyecto: { nombre: lead.nombre, cliente: lead.cliente_nombre || null },
+    // `enObra` dice si ya se está construyendo: un proyecto que todavía se
+    // presupuesta no tiene fotos ni visitas, y su enlace arranca en la lista.
+    proyecto: { nombre: lead.nombre, cliente: lead.cliente_nombre || null, enObra: !!lead.obra_id },
+    lista,
     recorridas,
     observaciones: observaciones.map(o => ({
       ...o,

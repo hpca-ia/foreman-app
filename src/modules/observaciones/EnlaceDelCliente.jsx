@@ -28,6 +28,8 @@ function nuevaLlave() {
 }
 
 export default function EnlaceDelCliente({ lead, onCambio }) {
+  // Se usa en Observaciones y en la lista de tareas del proyecto: la llave es
+  // del proyecto, así que en los dos lados es el mismo enlace.
   const [token, setToken] = useState(lead?.portal_token || null);
   const [activo, setActivo] = useState(!!lead?.portal_activo);
   const [leido, setLeido] = useState(false);
@@ -110,7 +112,7 @@ export default function EnlaceDelCliente({ lead, onCambio }) {
         <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 8 }}>
           <strong style={{ color: colors.ink }}>El cliente todavía no tiene acceso.</strong> Con el enlace prendido
           entra sin usuario ni contraseña y ve las fotos de avance, lo que salió de las visitas con él,
-          y lo que le mandaste a aprobar. Lo interno no lo ve.
+          lo que le mandaste a aprobar y las tareas que decidas mostrarle. Lo interno no lo ve.
         </div>
         {error && <div style={{ fontSize: 11.5, color: colors.danger, marginBottom: 6 }}>{error}</div>}
         <Button variant="primary" size="sm" onClick={prender} disabled={ocupado}>

@@ -19,6 +19,7 @@ const falta = e => /relation|column|does not exist|schema cache/i.test(e?.messag
 const enCriollo = f => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
 const SIN_170 = "Falta correr la migración 170 en Supabase.";
+export const SIN_176 = "Falta correr la migración 176 en Supabase.";
 export const SIN_171 = "Falta correr la migración 171 en Supabase.";
 
 /**
@@ -45,17 +46,25 @@ export async function aplicar(lead, cambio, quien) {
 /**
  * Las tareas del proyecto.
  *
- * @returns { abiertas, hechas, tareas, sinMigracion }
+ * @returns { abiertas, hechas, tareas, sinMigracion, compartidas, sinCompartir }
  *   `abiertas` y `hechas` con los nombres que usa la pantalla, ya en el orden
- *   en que se leen; `tareas`, las mismas filas enteras, por id.
+ *   en que se leen; `tareas`, las mismas filas enteras, por id; `compartidas`,
+ *   los id de las que ve el cliente en su enlace.
  */
 export async function cargarTareas(leadId) {
-  const { data, error } = await supabase.from("tasks").select(COLUMNAS).eq("lead_id", leadId).order("id");
-  if (error) return { abiertas: [], hechas: [], tareas: {}, sinMigracion: falta(error), error: error.message };
+  // Cuáles ve el cliente se pide aparte: si falta esa columna (migración 176)
+  // la lista se sigue viendo entera, y solo no se ofrece compartir.
+  const [{ data, error }, { data: vistas, error: eVistas }] = await Promise.all([
+    supabase.from("tasks").select(COLUMNAS).eq("lead_id", leadId).order("id"),
+    supabase.from("tasks").select("id").eq("lead_id", leadId).eq("visible_cliente", true),
+  ]);
+  if (error) return { abiertas: [], hechas: [], tareas: {}, compartidas: new Set(), sinMigracion: falta(error), error: error.message };
   const { abiertas, hechas } = delProyecto(data || []);
   return {
     abiertas: abiertas.map(comoActividad), hechas: hechas.map(comoActividad),
     tareas: Object.fromEntries([...abiertas, ...hechas].map(t => [t.id, t])),
+    compartidas: new Set((eVistas ? [] : vistas || []).map(t => t.id)),
+    sinCompartir: !!eVistas,
     sinMigracion: false,
   };
 }
@@ -95,6 +104,63 @@ export async function agregarTarea({
     }
   }
   return { tarea, item: comoActividad(tarea) };
+}
+
+/**
+ * Sumar varias de una vez: la lista que se pega, una tarea por renglón.
+ *
+ * Son gestiones —se marcan cuando pasan—, todas con el mismo responsable y la
+ * misma fecha si se eligieron. No sale un correo por cada una: a quien las
+ * tenga le aparecen en su bandeja y en el correo de la mañana.
+ *
+ * @param alCliente  nacen ya a la vista del cliente en su enlace
+ * @returns { cuantas } o { error }
+ */
+export async function agregarVarias({
+  lead, etapaId = null, titulos = [], desde = 0, assignee_id = null, responsable_externo = null, due_date = null,
+  alCliente = false, quien = null, nombreResponsable = null,
+}) {
+  const filas = titulos.map((titulo, i) => ({
+    ...filaNueva({
+      lead, etapaId, titulo, orden: desde + i + 1, tipo: "Gestión", assignee_id, due_date, responsable_externo,
+      creadoPor: quien?.id ?? lead.created_by ?? null, quienNombre: quien?.name || null,
+    }),
+    ...(alCliente ? { visible_cliente: true } : {}),
+  })).filter(f => f.title);
+  if (!filas.length) return { error: "No hay ningún renglón para agregar." };
+  const { error } = await supabase.from("tasks").insert(filas);
+  if (error) return { error: falta(error) ? (alCliente ? SIN_176 : SIN_170) : error.message };
+
+  const aQuien = responsable_externo || nombreResponsable;
+  await anotar(lead.id, {
+    detalle: `Sumó ${filas.length} ${filas.length === 1 ? "tarea" : "tareas"} de una lista`
+      + (aQuien ? `, a cargo de ${aQuien}` : "") + (due_date ? `, para el ${enCriollo(due_date)}` : "")
+      + (alCliente ? ", a la vista del cliente" : "") + `: ${filas.map(f => f.title).join("; ")}.`,
+    quien,
+  });
+  return { cuantas: filas.length };
+}
+
+/**
+ * Mostrarle una tarea al cliente en su enlace, o dejar de mostrársela.
+ *
+ * El cliente ve qué dice y si está lista. Queda escrito en la historia del
+ * proyecto: qué se le mostró y quién lo decidió.
+ *
+ * @param items  una o varias tareas, como las ve la lista
+ */
+export async function mostrarAlCliente(items, ver, quien) {
+  const lista = [].concat(items || []).filter(Boolean);
+  if (!lista.length) return null;
+  const { error } = await supabase.from("tasks").update({ visible_cliente: !!ver }).in("id", lista.map(i => i.id));
+  if (error) return falta(error) ? SIN_176 : error.message;
+  await anotar(lista[0].lead_id, {
+    detalle: lista.length === 1
+      ? `${ver ? "Le mostró al cliente" : "Dejó de mostrarle al cliente"} "${lista[0].texto}"`
+      : `${ver ? "Le mostró al cliente" : "Dejó de mostrarle al cliente"} ${lista.length} tareas: ${lista.map(i => i.texto).join("; ")}.`,
+    quien,
+  });
+  return null;
 }
 
 /**

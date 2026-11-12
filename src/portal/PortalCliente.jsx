@@ -20,7 +20,9 @@ export default function PortalCliente({ token }) {
   const [info, setInfo] = useState(null);
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(true);
-  const [solapa, setSolapa] = useState("avance");
+  // Sin elegir, arranca en el avance; un proyecto que todavía no está en obra
+  // arranca en su lista, que es lo único que tiene para mostrar.
+  const [elegida, setSolapa] = useState(null);
   const [mirando, setMirando] = useState(null);
   const [enviando, setEnviando] = useState(null);
 
@@ -66,23 +68,31 @@ export default function PortalCliente({ token }) {
     );
   }
 
-  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [] } = info;
+  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [] } = info;
   const ocPendientes = ordenes.filter(o => o.cliente_respondio_at == null);
   const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length;
   const fotos = avance.filter(f => f.url).map(f => ({ ...f, titulo: f.titulo || dia(f.fecha) }));
 
+  const listas = lista.filter(t => t.estado === "listo").length;
+  // Un proyecto que todavía se presupuesta no tiene obra: las solapas de
+  // fotos y visitas vacías serían dos puertas a ningún lado.
+  const enObra = proyecto.enObra !== false || avance.length > 0 || observaciones.length > 0;
   const solapas = [
-    ["avance", "Avance", avance.length],
-    ["recorridas", "Recorridas", observaciones.length],
+    ...(lista.length ? [["lista", "Checklist", lista.length - listas]] : []),
+    ...(enObra ? [["avance", "Avance", avance.length], ["recorridas", "Recorridas", observaciones.length]] : []),
     ["aprobar", "Para aprobar", porContestar],
   ];
+  // La obra arranca en el avance, que es lo que se viene a mirar; sin obra,
+  // en la lista.
+  const porDefecto = enObra ? "avance" : lista.length ? "lista" : "aprobar";
+  const solapa = solapas.some(([id]) => id === elegida) ? elegida : porDefecto;
 
   return (
     <Marco>
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 19, fontWeight: 700, color: colors.ink, lineHeight: 1.25 }}>{proyecto.nombre}</div>
         <div style={{ fontSize: 12.5, color: colors.muted, marginTop: 2 }}>
-          Cómo va la obra · HCA Studio
+          {enObra ? "Cómo va la obra" : "Cómo va el proyecto"} · HCA Studio
         </div>
       </div>
 
@@ -103,6 +113,9 @@ export default function PortalCliente({ token }) {
           </button>
         ))}
       </div>
+
+      {/* ── El checklist ───────────────────────────────────────────── */}
+      {solapa === "lista" && <Checklist lista={lista} listas={listas} />}
 
       {/* ── El avance ──────────────────────────────────────────────── */}
       {solapa === "avance" && (
@@ -178,7 +191,52 @@ export default function PortalCliente({ token }) {
   );
 }
 
-// ── Piezas ────────────────────────────────────────────────────────────────
+// ── Piezas ──────────────────────────────────────────────────────
+
+// Lo que estamos haciendo, punto por punto, y cuánto va. Solo se mira: no se
+// marca desde acá.
+const ESTADO_DE_LISTA = {
+  listo: { dice: "Listo", color: colors.success },
+  espera: { dice: "Hecho de nuestro lado · esperando respuesta", color: colors.warning },
+  pendiente: { dice: "Pendiente", color: colors.muted },
+};
+
+function Checklist({ lista, listas }) {
+  const pct = lista.length ? Math.round((listas / lista.length) * 100) : 0;
+  return (
+    <div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>
+          {listas === lista.length ? "Todo listo" : `${listas} de ${lista.length} ${lista.length === 1 ? "punto listo" : "puntos listos"}`}
+        </div>
+        <div role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}
+          style={{ height: 6, background: colors.neutralSoft, borderRadius: 3, marginTop: 6, overflow: "hidden" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: colors.success, borderRadius: 3 }} />
+        </div>
+      </div>
+      <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: "2px 12px" }}>
+        {lista.map((t, i) => {
+          const e = ESTADO_DE_LISTA[t.estado] || ESTADO_DE_LISTA.pendiente;
+          const listo = t.estado === "listo";
+          return (
+            <div key={t.id} className="punto-de-lista" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0",
+              borderTop: i ? `1px solid ${colors.neutralSoft}` : "none" }}>
+              <span aria-hidden="true" style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, boxSizing: "border-box",
+                border: `1.5px solid ${listo ? colors.success : colors.border}`, background: listo ? colors.success : "#fff",
+                color: "#fff", fontSize: 12, lineHeight: "15px", textAlign: "center", fontWeight: 700 }}>{listo ? "✓" : ""}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
+                <div style={{ fontSize: 11.5, color: e.color, marginTop: 1 }}>
+                  {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function Observacion({ o, onContestar, enviando }) {
   const [nota, setNota] = useState("");
