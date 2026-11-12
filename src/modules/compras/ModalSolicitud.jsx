@@ -179,6 +179,13 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [enlaces, setEnlaces] = useState({});
   const [subiendo, setSubiendo] = useState(false);
   const [avisoPapel, setAvisoPapel] = useState("");
+  // LAS COTIZACIONES QUE ESPERAN. Un archivo necesita un pedido del que
+  // colgar, y el pedido necesita proyecto y descripción. Si se elige el
+  // archivo antes de escribirlos, antes se mostraba un aviso y EL ARCHIVO SE
+  // PERDÍA: Johanna pidió el visto de dos compras creyendo que llevaban su
+  // cotización, y salieron sin nada. Ahora el archivo queda acá, a la vista, y
+  // se sube solo en cuanto el pedido se guarda o se manda.
+  const [enEspera, setEnEspera] = useState([]);
   const [verAnexos, setVerAnexos] = useState(!!solicitud);
   const proformaRef = useRef(null);
   // El documento con el que se concreta la compra: factura, nota de venta o
@@ -200,9 +207,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [guardandoImp, setGuardandoImp] = useState(false);
   const [avisoImp, setAvisoImp] = useState("");
 
-  const cargarPapeles = useCallback(async () => {
-    if (!viva?.id) return;
-    const todos = await adjuntosDe(viva.id);
+  // `id` se pasa cuando el pedido se acaba de crear en ese mismo paso: ahí
+  // `viva` todavía es el de antes y, sin esto, la cotización recién subida a un
+  // pedido nuevo no aparecía en la lista hasta volver a abrirlo.
+  const cargarPapeles = useCallback(async (id = viva?.id) => {
+    if (!id) return;
+    const todos = await adjuntosDe(id);
     const cotizaciones = todos.filter(a => a.tipo === "cotizacion");
     // Lo que NO es cotización: el documento con el que se cerró la compra y el
     // comprobante de pago. Antes se subían y no se mostraban en ningún lado
@@ -272,6 +282,50 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     return r.solicitud;
   }
 
+  /**
+   * Sube una cotización al pedido. NOVA lee el membrete: el proveedor, el RUC
+   * y el total salen del papel y no de lo que alguien teclee en la obra, que
+   * es de donde salen "Kiwy", "FERRETERIA KIWY" y "kywi" como tres proveedores
+   * distintos. Si no puede leerla, se sube igual con el nombre del archivo y
+   * se corrige en la fila.
+   *
+   * @returns { error } si no se pudo subir, o { aviso } si subió sin leerse
+   */
+  async function subirCotizacion(sol, archivo) {
+    const leido = await leerProforma(archivo).catch(() => ({}));
+    const canon = leido.proveedor ? await proveedorCanonico(leido).catch(() => ({})) : {};
+    const r = await subirAdjunto(sol, archivo, {
+      tipo: "cotizacion", quien: currentUser,
+      proveedor: canon.proveedor || archivo.name.replace(/\.[^.]+$/, "").slice(0, 60),
+      monto: leido.monto || null,
+      nota: leido.detalle || null,
+    });
+    if (r.error) return { error: `No se pudo subir "${archivo.name}": ${r.error}` };
+    return leido.error ? { aviso: "Se subió, pero NOVA no pudo leerla: completá proveedor y monto." } : {};
+  }
+
+  /**
+   * Las cotizaciones que se eligieron antes de que el pedido existiera: se
+   * suben ahora que existe. Si alguna falla, queda en espera y se dice cuál:
+   * un pedido no sale callado sin el papel que se le quiso poner.
+   *
+   * @returns null o el error
+   */
+  async function subirLasQueEsperan(sol) {
+    if (!enEspera.length) return null;
+    setSubiendo(true);
+    const quedan = [];
+    let error = null;
+    for (const archivo of enEspera) {
+      const r = await subirCotizacion(sol, archivo);
+      if (r.error) { quedan.push(archivo); error = error || r.error; }
+    }
+    setEnEspera(quedan);
+    setSubiendo(false);
+    await cargarPapeles(sol.id);
+    return error;
+  }
+
   // Mover de proyecto se guarda en el acto —no espera un Guardar— porque lo
   // que se corrige acá es un error que ya está molestando en el control de la
   // obra equivocada.
@@ -322,6 +376,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     }
     const quien = gerenteDelProyecto();
     if (!quien) return { error: "No hay a quién pedirle el visto: falta un gerente o el Director en el equipo." };
+    // ANTES DE MANDAR, LOS PAPELES. El que da el visto lo recibe por correo
+    // con las cotizaciones: si salen después, aprueba sin verlas. Y si una no
+    // sube, el pedido no se manda: se dice cuál y queda todo como estaba.
+    setViva(s);
+    const sinSubir = await subirLasQueEsperan(s);
+    if (sinSubir) return { error: `${sinSubir} El pedido quedó guardado y todavía no se mandó.` };
     return moverA(s, "pendiente_aprobacion", {
       quien: currentUser, comentario: comentario || null, paraQuien: quien,
       titulo: `Aprobar compra: ${s.descripcion}`,
@@ -336,12 +396,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const soloGuardar = () => hacer(async () => {
     if (!form.lead_id) return { error: "Elegí el proyecto, o marcá que es un gasto de oficina." };
     if (!form.descripcion?.trim()) return { error: "Escribe qué hace falta." };
-    if (!viva) {
+    let sol = viva;
+    if (!sol) {
       const r = await crearSolicitud(form, currentUser);
-      return r.error ? r : {};
+      if (r.error) return r;
+      sol = r.solicitud;
+      setViva(sol);
+    } else {
+      const err = await guardarSolicitud(sol.id, form);
+      if (err) return { error: err };
     }
-    const err = await guardarSolicitud(viva.id, form);
-    return err ? { error: err } : {};
+    const sinSubir = await subirLasQueEsperan(sol);
+    return sinSubir ? { error: `${sinSubir} El pedido quedó guardado.` } : {};
   });
 
   // Aprobar guarda primero lo que haya corregido de la asignación: no hay un
@@ -872,27 +938,47 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             onChange={async ev => {
               const archivo = ev.target.files?.[0]; ev.target.value = "";
               if (!archivo) return;
+              // SIN PROYECTO O SIN DESCRIPCIÓN TODAVÍA NO HAY PEDIDO DEL QUE
+              // COLGARLO. El archivo no se pierde: queda en espera, a la
+              // vista, y se sube solo al guardar o al pedir el visto.
+              if (!viva && (!form.lead_id || !form.descripcion?.trim())) {
+                setEnEspera(l => [...l, archivo]);
+                setAvisoPapel("");
+                return;
+              }
               setSubiendo(true);
-              const s = await asegurarSolicitud();
-              if (!s) { setSubiendo(false); return; }
-              // NOVA lee el membrete: el proveedor, el RUC y el total salen
-              // del papel y no de lo que alguien teclee en la obra, que es de
-              // donde salen "Kiwy", "FERRETERIA KIWY" y "kywi" como tres
-              // proveedores distintos. Si no puede leerla, se sube igual con
-              // el nombre del archivo y se corrige en la fila.
-              const leido = await leerProforma(archivo).catch(() => ({}));
-              const canon = leido.proveedor ? await proveedorCanonico(leido) : {};
-              const r = await subirAdjunto(s, archivo, {
-                tipo: "cotizacion", quien: currentUser,
-                proveedor: canon.proveedor || archivo.name.replace(/\.[^.]+$/, "").slice(0, 60),
-                monto: leido.monto || null,
-                nota: leido.detalle || null,
-              });
+              const sol = await asegurarSolicitud();
+              if (!sol) { setSubiendo(false); return; }
+              const r = await subirCotizacion(sol, archivo);
+              // Y con ella, las que hubieran quedado esperando.
+              const sinSubir = r.error ? null : await subirLasQueEsperan(sol);
               setSubiendo(false);
-              if (r.error) { setAvisoPapel(r.error); return; }
-              if (leido.error) setAvisoPapel("Se subió, pero NOVA no pudo leerla: completá proveedor y monto.");
-              await cargarPapeles();
+              if (r.error || sinSubir) { setAvisoPapel(r.error || sinSubir); return; }
+              if (r.aviso) setAvisoPapel(r.aviso);
+              await cargarPapeles(sol.id);
             }} />
+          {/* LAS QUE ESPERAN: elegidas antes de que el pedido tuviera proyecto
+              y descripción. Se ven, se pueden sacar, y dicen cuándo suben. */}
+          {enEspera.length > 0 && (
+            <div className="cotizaciones-en-espera" style={{ marginTop: 6, background: colors.warningSoft, borderRadius: 8, padding: "8px 10px" }}>
+              {enEspera.map((a, i) => (
+                <div key={`${a.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.ink, padding: "2px 0" }}>
+                  <FileText size={13} color={colors.warning} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                  <button onClick={() => setEnEspera(l => l.filter((_, k) => k !== i))} title="Sacarla"
+                    style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 0 }}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: colors.warning, marginTop: 4, lineHeight: 1.45 }}>
+                {enEspera.length === 1 ? "Elegida, todavía sin subir." : `${enEspera.length} elegidas, todavía sin subir.`}
+                {" "}{!form.lead_id ? "Falta elegir el proyecto" : "Falta escribir qué hace falta"}
+                {!form.lead_id && !form.descripcion?.trim() ? " y escribir qué hace falta" : ""}:
+                {" "}{enEspera.length === 1 ? "se sube sola" : "se suben solas"} al guardar o al pedir el visto.
+              </div>
+            </div>
+          )}
           {avisoPapel && <div style={{ fontSize: 11, color: colors.danger, marginTop: 4 }}>{avisoPapel}</div>}
 
           {puedeSubirPapeles && <label style={{ ...lbl, marginTop: 12, display: "block" }}>ANEXOS · el plano, la foto, la especificación</label>}
@@ -1197,15 +1283,16 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       {/* Solo el botón que le toca a quien está mirando. */}
       <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
         {(!editando || estado === "borrador" || estado === "requiere_info") && esMia && (
-          <Button variant="primary" onClick={guardarYMandar} disabled={ocupado}>
-            <Send size={13} /> {estado === "requiere_info" ? "Reenviar" : "Pedir el visto"}
+          <Button variant="primary" onClick={guardarYMandar} disabled={ocupado || subiendo}
+            title={subiendo ? "Esperá a que termine de subir la cotización" : ""}>
+            <Send size={13} /> {subiendo ? "Subiendo la cotización…" : estado === "requiere_info" ? "Reenviar" : "Pedir el visto"}
           </Button>
         )}
 
         {/* Guardar sin mandar, en cualquier paso donde se pueda corregir: así
             volver a abrir un pedido para arreglar la cantidad o el rubro no
             obliga a hacerlo pasar otra vez por la aprobación. */}
-        {puedeEditar && !modoVisto && <Button variant="outline" onClick={soloGuardar} disabled={ocupado}>Guardar</Button>}
+        {puedeEditar && !modoVisto && <Button variant="outline" onClick={soloGuardar} disabled={ocupado || subiendo}>Guardar</Button>}
 
         {/* Nadie da el visto a su propio pedido, ni con el permiso puesto: eso
             lo sube un escalón, al Director. Pedir y aprobar en el mismo clic
