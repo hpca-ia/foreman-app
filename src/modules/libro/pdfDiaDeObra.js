@@ -5,6 +5,7 @@ import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 import { CATEGORIAS } from "./libro";
+import { seguro, partirTexto, tandasDeRenglones } from "./textoDelPdf.js";
 
 // El libro de obra, en papel.
 //
@@ -35,9 +36,10 @@ export const comoSeLee = f => {
 };
 const hora = t => (t ? new Date(t).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) : "");
 
-// jsPDF escribe en WinAnsi: las comillas curvas y las rayas salen como basura.
-const seguro = t => String(t ?? "")
-  .replace(/[«»]/g, '"').replace(/[—–]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+// TODO TEXTO LARGO SE PARTE CON `partirTexto`, que pone la letra y parte con
+// ella. Partirlo con `doc.splitTextToSize` a secas mide con la letra que haya
+// quedado puesta de lo anterior, y si es más chica que la que se va a usar los
+// renglones salen más largos que la hoja (textoDelPdf.js cuenta el caso).
 
 /**
  * Un día del libro, dibujado en el documento que se le pase.
@@ -83,11 +85,11 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     dia.cerrado_at ? `cerrado el ${String(dia.fecha).slice(0, 10)} a las ${hora(dia.cerrado_at)}` : "",
     dia.aprobado_nombre ? `aprobado por ${dia.aprobado_nombre}` : "",
   ].filter(Boolean).join("   ·   ");
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GRIS);
+  doc.setTextColor(...GRIS);
   // PARTIDA AL ANCHO DE LA HOJA. Escrita de un tirón, una ficha con clima y
   // con quién lo aprobó se iba por el margen derecho y la mitad no se leía:
   // jsPDF no corta solo, escribe hasta donde llegue y sigue fuera del papel.
-  const fichaLineas = doc.splitTextToSize(seguro(ficha), ancho - M * 2);
+  const fichaLineas = partirTexto(doc, ficha, ancho - M * 2, "normal", 8.5);
   doc.text(fichaLineas, M, y);
   y += fichaLineas.length * 11 + 5;
 
@@ -98,13 +100,13 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
   // que dice — no después, ni en una columna de la base que nadie mira.
   if (dia.reabierto_at) {
     doc.setFillColor(253, 246, 231); doc.setDrawColor(240, 217, 168);
-    const texto = doc.splitTextToSize(seguro(
+    const texto = partirTexto(doc,
       `Este día se reabrió ${Number(dia.reaperturas) > 1 ? `${dia.reaperturas} veces` : "después de cerrado"}`
       + `${dia.reabierto_nombre ? `, por ${dia.reabierto_nombre}` : ""}`
-      + `${dia.reabierto_motivo ? `: ${dia.reabierto_motivo}` : "."}`), ancho - M * 2 - 16);
+      + `${dia.reabierto_motivo ? `: ${dia.reabierto_motivo}` : "."}`, ancho - M * 2 - 16, "normal", 8.5);
     const h = texto.length * 10 + 12;
     doc.roundedRect(M, y - 8, ancho - M * 2, h, 4, 4, "FD");
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...AMBAR);
+    doc.setTextColor(...AMBAR);
     doc.text(texto, M + 8, y + 2);
     y += h + 8;
   }
@@ -128,14 +130,25 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     doc.line(M, y, ancho - M, y);
     y += 11;
     for (const e of suyas) {
-      const lineas = doc.splitTextToSize(seguro(e.contenido), ancho - M * 2 - 10);
-      salto(lineas.length * 11 + 14);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(40, 40, 40);
-      doc.text(lineas, M + 8, y);
-      y += lineas.length * 11 + 2;
-      doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-      doc.text(doc.splitTextToSize(seguro(`${e.autor_nombre || "sin firma"} · ${hora(e.created_at)}`), ancho - M * 2 - 10), M + 8, y);
-      y += 12;
+      // CON SU LETRA, la de 9,5 con la que se escribe. Antes se partía con la
+      // que había dejado la firma de la entrada anterior, más chica, y cada
+      // renglón se iba más de cien puntos fuera de la hoja.
+      const lineas = partirTexto(doc, e.contenido, ancho - M * 2 - 10, "normal", 9.5);
+      // Y A LO ALTO: entera en esta hoja o en la siguiente; si es más larga
+      // que una hoja, sigue en la otra en vez de escribirse debajo del papel.
+      const tandas = tandasDeRenglones({ cuantos: lineas.length, y, paso: 11, techo: 44, piso: alto - 50, cola: 14 });
+      for (const t of tandas) {
+        if (t.hojaNueva) { doc.addPage(); y = 44; }
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(40, 40, 40);
+        doc.text(lineas.slice(t.desde, t.hasta), M + 8, y);
+        y += (t.hasta - t.desde) * 11;
+      }
+      y += 2;
+      const firma = partirTexto(doc, `${e.autor_nombre || "sin firma"} · ${hora(e.created_at)}`, ancho - M * 2 - 10, "normal", 7.5);
+      salto(firma.length * 9);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+      doc.text(firma, M + 8, y);
+      y += 12 + (firma.length - 1) * 9;
     }
     y += 4;
   }
@@ -179,8 +192,9 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
       // tope aplastaba toda foto vertical, que es como se saca casi toda foto
       // de obra. Se recortan los dos lados en la misma proporción.
       const cajas = fila.map(({ img }) => encajar(img, { ancho: anchoFoto, alto: 150 }));
+      // El pie de cada foto, partido con la letra chica con la que va.
       const pies = fila.map(({ f }) => (f.descripcion
-        ? doc.splitTextToSize(seguro(f.descripcion), anchoFoto) : []));
+        ? partirTexto(doc, f.descripcion, anchoFoto, "normal", 7.5) : []));
       const altoPie = Math.max(0, ...pies.map(l => l.length * 9));
       const necesita = Math.max(...cajas.map(c2 => c2.h)) + altoPie + 16;
       if (y + necesita > alto - 50) { doc.addPage(); y = 44; }
