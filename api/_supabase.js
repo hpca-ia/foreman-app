@@ -19,6 +19,8 @@ function cabeceras(extra = {}) {
 
 export const rest = (ruta, op = {}) => fetch(`${SUPABASE_URL}/rest/v1/${ruta}`, { ...op, headers: cabeceras(op.headers) });
 export const auth = (ruta, op = {}) => fetch(`${SUPABASE_URL}/auth/v1/${ruta}`, { ...op, headers: cabeceras(op.headers) });
+/** El depósito de archivos, con la llave del servidor. */
+export const deposito = (ruta, op = {}) => fetch(`${SUPABASE_URL}/storage/v1/${ruta}`, { ...op, headers: cabeceras(op.headers) });
 
 /** El usuario de Supabase Auth dueño del token que manda la app, o null. */
 export async function usuarioDeToken(req) {

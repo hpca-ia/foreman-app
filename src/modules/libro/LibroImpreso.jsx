@@ -5,7 +5,8 @@ import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { contenidoDe, enlacesDeFotos, guardarPdfDelDia, entregasDe } from "./libro";
 import { pdfDiaDeObra, pdfLibroDeObra, comoSeLee } from "./pdfDiaDeObra";
-import { abrirArchivo } from "../../lib/archivos";
+import { abrirArchivo, subirArchivo } from "../../lib/archivos";
+import { comoViaja, rutaDelEnvio, enMegas } from "./envioDelLibro.js";
 import { pdfAlDia, pdfViejo } from "./pdfGuardado.js";
 import { convocadosDe } from "../actas/actas";
 
@@ -27,6 +28,14 @@ import { convocadosDe } from "../actas/actas";
 
 const esCorreo = e => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(e || "").trim());
 const fecha = d => String(d || "").slice(0, 10);
+
+/** El PDF en base64, para el libro que entra adentro del pedido. */
+const enBase64 = blob => new Promise((ok, mal) => {
+  const lector = new FileReader();
+  lector.onload = () => ok(String(lector.result).split(",")[1] || "");
+  lector.onerror = () => mal(new Error("no se pudo leer el PDF armado"));
+  lector.readAsDataURL(blob);
+});
 
 export default function LibroImpreso({ lead, dias = [], onCambio, currentUser }) {
   const [ocupado, setOcupado] = useState("");
@@ -169,18 +178,23 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
     if (!enRango.length) { setError("No hay días cerrados en ese tramo."); return; }
     setOcupado("correo"); setError(""); setAviso("");
     try {
-      const adjunto = await pdfLibroDeObra({ obra: lead.nombre, dias: enRango, traerDia: contenido }, "base64");
-      // EL PEDIDO TIENE UN TECHO Y NO ES NUESTRO.
-      //
-      // Vercel no acepta pedidos de más de 4,5 MB, y un libro con las fotos de
-      // tres meses los pasa sin esfuerzo. Pasado eso la función se cae antes de
-      // leer una línea y lo que vuelve es una página de error, no un error. Acá
-      // se dice antes, con el peso a la vista y con la salida puesta: el tramo
-      // de fechas, que para eso está.
-      const pesa = (adjunto?.contenido?.length || 0);
-      if (pesa > 4.2e6) {
-        throw new Error(`El libro de ese tramo pesa ${(pesa / 1024 / 1024).toFixed(1)} MB y el máximo que`
-          + " acepta el servidor es 4,5 MB. Mandalo por partes: achicá el tramo de fechas y mandá dos correos.");
+      const desde = fecha(enRango[0].fecha), hasta = fecha(enRango[enRango.length - 1].fecha);
+      const pdf = await pdfLibroDeObra({ obra: lead.nombre, dias: enRango, traerDia: contenido }, "blob");
+      const nombre = `Libro de obra ${lead.nombre || ""}.pdf`.replace(/\s+/g, " ");
+      // EL PEDIDO TIENE UN TECHO Y NO ES NUESTRO: Vercel no acepta pedidos de
+      // más de 4,5 MB, y un libro de cinco días con sus fotos ya los pasa. Antes
+      // se pedía mandarlo por partes. Ahora el libro que no entra en el pedido
+      // se sube al depósito y el servidor lo toma de ahí (envioDelLibro.js).
+      const via = comoViaja(pdf.size);
+      let adjunto;
+      if (via === "pedido") {
+        adjunto = { nombre, contenido: await enBase64(pdf) };
+      } else {
+        setAviso(`El libro pesa ${enMegas(pdf.size)}: subiéndolo para mandarlo…`);
+        const subido = await subirArchivo(rutaDelEnvio(lead.id, desde, hasta), new File([pdf], nombre, { type: "application/pdf" }));
+        if (subido.error || !subido.ruta) throw new Error(`No se pudo subir el libro para mandarlo: ${subido.error?.message || "el depósito no lo aceptó"}.`);
+        adjunto = { nombre, ruta: subido.ruta, bytes: pdf.size };
+        setAviso("");
       }
       // Quién es cada dirección: una entrega que dice "info@proeficaz.com" y no
       // "PROEFICAZ" obliga a traducir mentalmente cada vez que se la mira.
@@ -192,7 +206,7 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
       const r = await fetch("/api/aviso?de=libro", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lead_id: lead.id, desde: fecha(enRango[0].fecha), hasta: fecha(enRango[enRango.length - 1].fecha),
+          lead_id: lead.id, desde, hasta,
           dias: enRango.length, para: destinatarios, adjunto, nota: nota.trim() || null, quien,
           de: currentUser ? { id: currentUser.id ?? null, nombre: currentUser.name || null, email: currentUser.email || null } : null,
         }),
@@ -206,7 +220,9 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
       if (!r.ok || data.error) throw new Error(data.error || "No se pudo mandar el libro.");
       const fallaron = data.fallaron || [];
       setAviso(`${data.mandados} ${data.mandados === 1 ? "copia enviada" : "copias enviadas"}`
-        + `${fallaron.length ? ` · ${fallaron.length} no salió: ${fallaron.map(f => f.dir).join(", ")}` : ""}.`);
+        + `${fallaron.length ? ` · ${fallaron.length} no salió: ${fallaron.map(f => f.dir).join(", ")}` : ""}.`
+        // Si pesaba demasiado para ir adjunto, se dice: lo que llegó es un enlace.
+        + (data.comoFue === "enlace" ? ` El libro pesa ${data.peso || enMegas(pdf.size)}: fue como enlace de descarga, válido 30 días, y no como adjunto.` : ""));
       if (!fallaron.length) { setMandando(false); setOtros(""); setNota(""); setElegidos(new Set()); }
       await cargarEntregas();
     } catch (e) {
@@ -216,6 +232,7 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
   }
 
   const titulito = { fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 };
+
 
   return (
     <div>

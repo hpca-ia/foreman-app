@@ -14,7 +14,8 @@
 // el que lo pidió cree que ya lo tiene y no lo vuelve a pedir.
 
 import { randomUUID } from "crypto";
-import { rest, configurado } from "./_supabase.js";
+import { rest, configurado, deposito, SUPABASE_URL } from "./_supabase.js";
+import { esRutaDeEnvio, TOPE_DEL_ADJUNTO, enMegas } from "./_envioDelLibro.js";
 import { enviarCorreo, plantilla, estadoDeCorreo } from "./_correo.js";
 
 async function filas(tabla, consulta) {
@@ -85,7 +86,20 @@ async function mandarLibro(req, res) {
   // El libro ES el adjunto: un correo que dice "acá va el libro" sin el libro
   // adentro es peor que no mandarlo, porque el que lo recibe cree que ya se lo
   // mandaron y no vuelve a pedirlo.
-  if (!adjunto?.contenido) return res.status(400).json({ error: "El PDF del libro no llegó al servidor." });
+  //
+  // LLEGA DE DOS MANERAS (_envioDelLibro.js). Chico, adentro del pedido. Más
+  // grande, ya subido al depósito: el pedido trae solo dónde está, y de ahí se
+  // lo toma. Y si pesa tanto que ninguna casilla lo aceptaría adjunto, el
+  // correo lleva el botón para descargarlo.
+  let contenido = adjunto?.contenido || null;
+  let descarga = null;
+  if (!contenido && adjunto?.ruta) {
+    const libro = await libroDelDeposito(adjunto.ruta, leadId);
+    if (libro.error) return res.status(400).json({ error: libro.error });
+    contenido = libro.contenido || null;
+    descarga = libro.descarga || null;
+  }
+  if (!contenido && !descarga) return res.status(400).json({ error: "El PDF del libro no llegó al servidor." });
 
   const lead = (await filas("leads", `id=eq.${leadId}&select=nombre`))[0] || null;
   const obra = lead?.nombre || "Obra";
@@ -93,7 +107,7 @@ async function mandarLibro(req, res) {
     ? (desde === hasta ? `del ${dia(desde)}` : `del ${dia(desde)} al ${dia(hasta)}`)
     : "";
   const asunto = `Libro de obra · ${obra}${tramo ? ` · ${tramo}` : ""}`;
-  const adjuntos = [{ filename: adjunto.nombre || `Libro de obra - ${obra}.pdf`, content: adjunto.contenido }];
+  const adjuntos = contenido ? [{ filename: adjunto.nombre || `Libro de obra - ${obra}.pdf`, content: contenido }] : null;
 
   // DE A UNO Y CON SU ENLACE. Cada persona recibe el suyo: la conformidad es
   // de alguien, y una llave compartida dejaría que cualquiera dé —o niegue— la
@@ -116,7 +130,7 @@ async function mandarLibro(req, res) {
     const html = plantilla({
       titulo: `Libro de obra · ${obra}`,
       subtitulo: tramo || undefined,
-      cuerpo: cuerpoDelCorreo({ obra, tramo, cuantos, nota, enlace }),
+      cuerpo: cuerpoDelCorreo({ obra, tramo, cuantos, nota, enlace, descarga }),
     });
 
     const mandar = () => enviarCorreo({
@@ -144,12 +158,51 @@ async function mandarLibro(req, res) {
   return res.status(200).json({
     mandados: envios.length - fallaron.length,
     fallaron: fallaron.map(e => ({ dir: e.dir, error: e.error })),
+    // Cómo fue el libro: adjunto, o como enlace de descarga porque no entraba.
+    comoFue: descarga ? "enlace" : "adjunto", peso: descarga?.peso || null,
   });
 }
 
-function cuerpoDelCorreo({ obra, tramo, cuantos, nota, enlace }) {
-  return `
-    <p style="margin:0 0 12px">Va adjunto el <strong>libro de obra de ${esc(obra)}</strong>${tramo ? `, ${esc(tramo)}` : ""}.</p>
+/**
+ * El libro que se subió al depósito para mandar.
+ *
+ * @returns { contenido } en base64 si entra como adjunto, { descarga } con su
+ *          enlace si no, o { error }
+ */
+async function libroDelDeposito(ruta, leadId) {
+  // Solo un libro subido para mandar, y de ESTA obra: el servidor manda por
+  // correo lo que le digan, y sin esto cualquier archivo podría salir así.
+  if (!esRutaDeEnvio(ruta, leadId)) return { error: "Ese archivo no es un libro de esta obra." };
+  // Un enlace que dura treinta días: sirve para tomarlo ahora y, si va como
+  // enlace, es el que le llega a quien lo recibe.
+  const r = await deposito("object/sign/task-files", {
+    method: "POST", body: JSON.stringify({ expiresIn: 60 * 60 * 24 * 30, paths: [ruta] }),
+  });
+  const firmados = r.ok ? await r.json().catch(() => null) : null;
+  const firmado = Array.isArray(firmados) ? firmados.find(x => x?.signedURL)?.signedURL : null;
+  if (!firmado) return { error: "No se encontró el PDF del libro en el depósito. Probá mandarlo de nuevo." };
+  const url = `${SUPABASE_URL}/storage/v1${firmado}`;
+
+  const archivo = await fetch(url);
+  if (!archivo.ok) return { error: "No se pudo leer el PDF del libro del depósito. Probá mandarlo de nuevo." };
+  // Si el depósito ya dice que pesa demasiado, ni se lo baja: va el enlace.
+  const anunciado = Number(archivo.headers?.get?.("content-length")) || 0;
+  if (anunciado > TOPE_DEL_ADJUNTO) return { descarga: { url, peso: enMegas(anunciado) } };
+  const bytes = Buffer.from(await archivo.arrayBuffer());
+  if (!bytes.length) return { error: "El PDF del libro llegó vacío al depósito. Probá mandarlo de nuevo." };
+  if (bytes.length > TOPE_DEL_ADJUNTO) return { descarga: { url, peso: enMegas(bytes.length) } };
+  return { contenido: bytes.toString("base64") };
+}
+
+function cuerpoDelCorreo({ obra, tramo, cuantos, nota, enlace, descarga = null }) {
+  // Adjunto, o —si pesa demasiado para cualquier casilla— con su botón de descarga.
+  const dondeEsta = descarga ? `
+    <p style="margin:0 0 12px">El <strong>libro de obra de ${esc(obra)}</strong>${tramo ? `, ${esc(tramo)}` : ""}, pesa ${esc(descarga.peso)} y no entra como adjunto en un correo. Se descarga desde acá:</p>
+    <p style="margin:0 0 14px"><a href="${descarga.url}" style="display:inline-block;background:#0F3D3E;color:#fff;text-decoration:none;
+      padding:10px 18px;border-radius:7px;font-size:14px;font-weight:700">Descargar el libro (PDF)</a>
+      <span style="display:block;font-size:12px;color:#6B7280;margin-top:6px">El enlace vale 30 días.</span></p>` : `
+    <p style="margin:0 0 12px">Va adjunto el <strong>libro de obra de ${esc(obra)}</strong>${tramo ? `, ${esc(tramo)}` : ""}.</p>`;
+  return `${dondeEsta}
     ${cuantos ? `<p style="margin:0 0 12px;color:#6B7280">${esc(String(cuantos))} ${cuantos === 1 ? "día cerrado" : "días cerrados"}, en orden, con lo que se escribió cada día y las fotos de ese día.</p>` : ""}
     ${nota ? `<p style="margin:0 0 12px;white-space:pre-line">${esc(nota)}</p>` : ""}
     ${enlace ? `
