@@ -31,6 +31,7 @@ import { cotizacionesDeCompras, bajarCotizacion } from "./cotizacionesDeCompras.
 // El presupuesto completo al costado, para mirarlo mientras se decide. Era de
 // esta pantalla; ahora lo usa también Beneficios, y es el mismo.
 import Presupuesto from "./PanelPresupuesto";
+import DiferenciasDeCantidad from "./DiferenciasDeCantidad";
 
 // DIFERENCIAS CON EL CLIENTE: el presupuesto contra lo que de verdad hace falta.
 //
@@ -135,7 +136,7 @@ function Cuenta({ que, cantidad, unidad, unitario, total, color, base, fuerte })
 // quince puntos.
 const unitario = r => (Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0);
 
-export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio }) {
+export default function PanelDiferencias({ obra, rubros = [], currentUser, onCambio, modalidad = null }) {
   const [lista, setLista] = useState([]);
   const [enlaces, setEnlaces] = useState({});
   const [avance, setAvance] = useState({});
@@ -1884,6 +1885,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   // ── LA LISTA ──────────────────────────────────────────────────────────────
   return (
     <div style={{ fontFamily: colors.font }}>
+      {/* LAS DE CANTIDAD: lo ejecutado contra lo contratado, que se carga en el
+          presupuesto actualizado. Solo aparece si ya hay alguna. */}
+      <DiferenciasDeCantidad obra={obra} rubros={rubros} modalidad={modalidad} titulo="Diferencias de cantidad · lo ejecutado contra lo contratado" />
       <div style={{ fontSize: 13, fontWeight: 700, color: colors.ink }}>Diferencias con el cliente</div>
       <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5, marginBottom: 10, maxWidth: 760 }}>
         El contrato vigente contra una <strong>propuesta nueva</strong> o una <strong>liquidación</strong>.

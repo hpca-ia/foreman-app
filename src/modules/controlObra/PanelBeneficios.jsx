@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Upload, Sparkles, TrendingUp, TrendingDown, Plus, Trash2, Check, X, Paperclip, Pencil } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -13,6 +13,8 @@ import { ordenesMudas, contraQueSeMide, porProveedor } from "./cuentaBeneficios.
 import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
+import { cargarEjecutado } from "./ejecutado.js";
+import { liquidacionDeLaObra, modalidadDe } from "./liquidacion.js";
 import { FORMATO, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto, leerSinCortes } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -34,11 +36,14 @@ import Presupuesto from "./PanelPresupuesto";
 
 const n = v => Number(v) || 0;
 
-export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, currentUser }) {
+export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, currentUser, modalidad = null }) {
   const [items, setItems] = useState([]);
   const [proveedor, setProveedor] = useState("");
   const [ordenes, setOrdenes] = useState([]);
   const [lineasDeOrdenes, setLineasDeOrdenes] = useState({});
+  // Lo ejecutado, cargado en el presupuesto actualizado: mueve lo que deja lo
+  // ya aprobado, según cómo se cobra la obra.
+  const [ejecutado, setEjecutado] = useState({});
   const [leyendo, setLeyendo] = useState(false);
   const [paso, setPaso] = useState("");
   // Cuando NOVA se quedó sin espacio antes de terminar la proforma.
@@ -104,6 +109,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
     const oc = await cargarOrdenes(obra.id);
     setOrdenes(oc.ordenes || []);
     setLineasDeOrdenes(oc.lineas || {});
+    setEjecutado((await cargarEjecutado(obra.id)).ejecutado || {});
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -111,7 +117,11 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const t = porOrigen.obra;
   // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
   // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
-  const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes });
+  const comoSeCobra = modalidad || modalidadDe(obra);
+  const deltas = useMemo(() => (Object.keys(ejecutado).length
+    ? liquidacionDeLaObra({ obra: { ...obra, modalidad: comoSeCobra }, rubros, ordenes, lineasDeOrdenes, ejecutado }).deltas
+    : {}), [ejecutado, obra, comoSeCobra, rubros, ordenes, lineasDeOrdenes]);
+  const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes, deltas, modalidad: comoSeCobra });
   // UN RUBRO SE SIGUE UNA SOLA VEZ, PERO PUEDE TENER VARIOS INGRESOS. Son dos
   // cosas distintas: el seguimiento mide sus facturas; un ingreso es una
   // compra o una proforma cargada contra él, y puede haber tres. En el
@@ -458,6 +468,7 @@ Rubros de la obra: ${lista}`;
             <div style={{ fontSize: 10.5, color: colors.muted }}>
               rubro {f.numero} · {fmt(f.cantidad)} {f.unidad}
               {f.reducida > 0 ? ` · eran ${fmt(f.contratada)}, una orden quitó ${fmt(f.reducida)}` : ""}
+              {f.medida ? ` · se ejecutaron ${fmt(f.ejecutada)} de ${fmt(f.aprobada)}${f.llave ? ": se cobra lo contratado y cuesta lo ejecutado" : ""}` : ""}
               {" "}· aprobado a ${fmt(f.precio)} y cuesta ${fmt(f.costo)} · ya aprobado en el contrato
             </div>
           </div>

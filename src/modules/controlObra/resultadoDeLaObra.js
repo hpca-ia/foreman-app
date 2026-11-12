@@ -114,22 +114,30 @@ export function reduccionesAprobadas(ordenes = [], lineasDeOrdenes = {}) {
  * con $150 de costo cargado no dejan $5.850: tienen un costo mal puesto. Se
  * listan aparte, marcadas, para que alguien lo corrija, y no entran al total.
  */
-export function beneficioDeLoAprobado({ rubros = [], beneficios = [], reducciones = {} } = {}) {
+export function beneficioDeLoAprobado({ rubros = [], beneficios = [], reducciones = {}, deltas = {}, modalidad = "rubros" } = {}) {
   const aMano = new Set(beneficios.filter(b => b?.obra_rubro_id && b.origen === "manual").map(b => String(b.obra_rubro_id)));
   const filas = rubros.filter(vivo)
     .filter(r => r.origen !== "orden_cambio" && conCosto(r) && !aMano.has(String(r.id)))
     .map(r => {
       const contratada = n(r.cantidad);
       const reducida = Math.min(contratada, n(reducciones[r.id]));
-      const cantidad = Math.round((contratada - reducida) * 10000) / 10000;
+      const aprobada = Math.round((contratada - reducida) * 10000) / 10000;
+      // LO EJECUTADO, SI YA SE MIDIÓ (liquidacion.js). La diferencia contra lo
+      // vigente mueve la cantidad de este rubro: por rubros se cobra y cuesta
+      // lo ejecutado; llave en mano se cobra lo aprobado y cuesta lo ejecutado.
+      const delta = n(deltas[r.id]);
+      const ejecutada = Math.max(0, Math.round((aprobada + delta) * 10000) / 10000);
+      const llave = modalidad === "llave_en_mano";
+      const cantidad = llave ? aprobada : ejecutada;
       const precio = precioDelContrato(r);
       const costo = n(r.costo_unitario);
       if (precio == null || !(cantidad > 0)) return null;
       return {
         id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
         unidad: r.unidad || "", contratada, reducida, cantidad, precio, costo,
-        seCobra: c2(precio * cantidad), cuesta: c2(costo * cantidad),
-        beneficio: c2((precio - costo) * cantidad),
+        aprobada, ejecutada, delta, medida: delta !== 0, llave,
+        seCobra: c2(precio * cantidad), cuesta: c2(costo * ejecutada),
+        beneficio: llave && delta ? c2(precio * cantidad - costo * ejecutada) : c2((precio - costo) * cantidad),
         dudoso: costo < precio / 2 || costo > precio * 2,
       };
     }).filter(Boolean).sort((a, b) => (a.dudoso - b.dudoso) || (b.beneficio - a.beneficio));
@@ -182,7 +190,7 @@ export function ordenesPorAprobar({ ordenes = [], lineasDeOrdenes = {}, rubros =
   return { filas, total: c2(filas.reduce((t, x) => t + x.beneficio, 0)) };
 }
 
-export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {} } = {}) {
+export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {}, deltas = {}, modalidad = "rubros" } = {}) {
   const t = totales(beneficios);
   const perdidas = perdidasEnRubros(rubros, porRubro);
   const porId = new Map(rubros.map(r => [String(r.id), r]));
@@ -195,7 +203,7 @@ export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [],
   const ganadoEnSeguidos = c2(seguimiento
     .filter(f => f.terminado && f.gastado > 0 && f.resultado > 0)
     .reduce((s, f) => s + f.resultado, 0));
-  const aprobados = beneficioDeLoAprobado({ rubros, beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes) });
+  const aprobados = beneficioDeLoAprobado({ rubros, beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes), deltas, modalidad });
   return {
     conPapel: t.neto, cuantosConPapel: t.cuantos,
     previsto: t.previsto, cuantosPrevistos: t.cuantosPrevistos,

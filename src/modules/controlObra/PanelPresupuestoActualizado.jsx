@@ -8,6 +8,9 @@ import { cargarOrdenes } from "./ordenesDeCambio";
 import { presupuestoActualizado, renglonesDeLaMatriz, ajustesLimpios, nuevosLimpios, nuevosDe, faltaGuardar, nombrePorDefecto } from "./presupuestoActualizado.js";
 import { excelDelPresupuesto, pdfDelPresupuesto } from "./exportarPresupuestoActualizado.js";
 import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacionesDePresupuesto.js";
+import { liquidacion, subtotalesDeLiquidacion, modalidadDe, MODALIDADES, claveDe, seMide, costosDe, cantidadEscrita } from "./liquidacion.js";
+import { cargarEjecutado, anotarEjecutado, guardarModalidad } from "./ejecutado.js";
+import DiferenciasDeCantidad from "./DiferenciasDeCantidad";
 
 // EL PRESUPUESTO ACTUALIZADO, EN PANTALLA.
 //
@@ -26,6 +29,13 @@ import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacio
 // En la base no quedó ni una. Ahora cada cambio se guarda un segundo después
 // de escribirlo, al entrar se abre la última, y al lado dice si quedó guardado.
 // El presupuesto original, al lado, no cambia: es el papel que se firmó.
+//
+// Y ACÁ SE CARGA LO EJECUTADO. «Las cantidades ejecutadas se ponen en
+// presupuesto actualizado con órdenes de cambio… ese es a la final la
+// liquidación.» Al lado del vigente de cada rubro va lo que de verdad se
+// ejecutó, y con eso sale lo que se liquida, según cómo se contrató la obra
+// (liquidacion.js). Eso sí es real y se guarda al salir de la casilla: no es
+// parte de ninguna proyección.
 
 const th = { padding: "5px 6px", fontSize: 9.5, color: colors.muted, letterSpacing: 0.3, fontWeight: 700, whiteSpace: "nowrap" };
 const td = { padding: "5px 6px", fontSize: 11.5, verticalAlign: "top" };
@@ -33,13 +43,14 @@ const num = { textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace
 // La raya que separa un grupo de columnas del siguiente.
 const borde = { borderLeft: `1px solid ${colors.border}` };
 const VIOLETA = "#6D28D9";
+const VERDE = "#0F766E";
 
 const Mov = ({ v, color }) => (!v ? null : (
   <span style={{ color: v < 0 ? colors.danger : (color || colors.ink) }}>{v > 0 ? "+" : "−"}{fmt(Math.abs(v))}</span>
 ));
 const plata = v => `${v < 0 ? "−" : ""}$${fmt(Math.abs(v))}`;
 
-export default function PanelPresupuestoActualizado({ obra, rubros, currentUser }) {
+export default function PanelPresupuestoActualizado({ obra, rubros, currentUser, modalidad: modalidadDeAfuera = null, onModalidad, onEjecutado }) {
   const [ordenes, setOrdenes] = useState([]);
   const [lineas, setLineas] = useState({});
   const [cargando, setCargando] = useState(true);
@@ -65,6 +76,13 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
   const [simulacion, setSimulacion] = useState(null);   // la guardada que está abierta
   const [nombre, setNombre] = useState("");
   const [sinTabla, setSinTabla] = useState(false);
+  // Lo ejecutado de cada renglón, lo que se está escribiendo en una casilla, y
+  // cómo se cobra la obra.
+  const [ejecutado, setEjecutado] = useState({});
+  const [escritoEj, setEscritoEj] = useState({});
+  const [sinEjecutado, setSinEjecutado] = useState(false);
+  const [modalidad, setModalidad] = useState(modalidadDeAfuera || modalidadDe(obra));
+  const [guardadoEj, setGuardadoEj] = useState({ estado: "", error: "", hora: null });
 
   const cargarSimulaciones = useCallback(async () => {
     const r = await simulacionesDe(obra.id);
@@ -82,9 +100,10 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
       // guardada. Si la matriz se abriera antes de que llegue la proyección,
       // lo que se escribiera en ese rato lo pisaría la guardada al llegar —o
       // nacería una segunda proyección al lado de la primera—.
-      const [r, lista] = await Promise.all([cargarOrdenes(obra.id), cargarSimulaciones()]);
+      const [r, lista, ej] = await Promise.all([cargarOrdenes(obra.id), cargarSimulaciones(), cargarEjecutado(obra.id)]);
       if (!vivo) return;
       setOrdenes(r.ordenes || []); setLineas(r.lineas || {});
+      setEjecutado(ej.ejecutado || {}); setSinEjecutado(!!ej.sinTabla); setEscritoEj({});
       // AL ENTRAR SE ABRE LA ÚLTIMA PROYECCIÓN. Arrancar en blanco y dejar la
       // guardada escondida en una lista es lo mismo que no haberla guardado.
       const s = lista[0] || null;
@@ -112,6 +131,40 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
     return pie < 0 ? [...sin, { tipo: "proyectados" }] : [...sin.slice(0, pie), { tipo: "proyectados" }, ...sin.slice(pie)];
   }, [renglones]);
   const t = matriz.totales;
+  // LA LIQUIDACIÓN: lo vigente con lo ejecutado. No mira el ajuste a mano, que
+  // es una proyección; mira lo que ya es contrato.
+  const liq = useMemo(() => liquidacion({ matriz, ejecutado, modalidad, costos: costosDe(rubros) }), [matriz, ejecutado, modalidad, rubros]);
+  const subsLiq = useMemo(() => subtotalesDeLiquidacion(filasDeLaTabla, liq), [filasDeLaTabla, liq]);
+  // El pie de la liquidación, en el orden de los renglones del pie: sin IVA, el IVA y el total.
+  const piesLiq = matriz.iva > 0 ? [liq.totales.liquidacion, liq.totales.iva, liq.totales.conIva] : [liq.totales.liquidacion];
+  const indiceDelPie = i => filasDeLaTabla.slice(0, i).filter(x => x.tipo === "pie").length;
+
+  // Lo ejecutado se guarda al salir de la casilla, y dice al lado si quedó.
+  async function anotar(r, valor) {
+    const clave = claveDe(r);
+    const antes = ejecutado[clave] ?? null;
+    const ahora = cantidadEscrita(valor);
+    const vacio = valor === "" || valor == null;
+    if (ahora === antes && (ahora != null || vacio)) { setEscritoEj(x => { const y = { ...x }; delete y[clave]; return y; }); return; }
+    setGuardadoEj({ estado: "guardando", error: "", hora: null });
+    const e = await anotarEjecutado({ obra, clave, rubroId: r.deOrden ? null : r.id, valor, quien: currentUser });
+    if (e) { setGuardadoEj({ estado: "error", error: e, hora: null }); return; }
+    const mapa = { ...ejecutado };
+    if (ahora == null) delete mapa[clave]; else mapa[clave] = ahora;
+    setEjecutado(mapa);
+    setEscritoEj(x => { const y = { ...x }; delete y[clave]; return y; });
+    setGuardadoEj({ estado: "guardado", error: "", hora: new Date() });
+    onEjecutado?.(mapa);
+  }
+
+  async function cambiarModalidad(m) {
+    const antes = modalidad;
+    setModalidad(m); setGuardadoEj({ estado: "guardando", error: "", hora: null });
+    const e = await guardarModalidad(obra, m);
+    if (e) { setModalidad(antes); setGuardadoEj({ estado: "error", error: e, hora: null }); return; }
+    setGuardadoEj({ estado: "guardado", error: "", hora: new Date() });
+    onModalidad?.(m);
+  }
   const borradores = ordenes.filter(o => o.estado === "borrador" && !o.anulada && (lineas[o.id] || []).length).length;
   const hayAjustes = Object.keys(numeros).length > 0 || escritos.length > 0;
   // ── SE GUARDA SOLA ──────────────────────────────────────────────────────
@@ -273,7 +326,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
             {matriz.honorariosPct > 0 ? `, con su ${matriz.honorariosPct} % de honorarios en el rubro de honorarios` : ""}.
           </div>
         </td>
-        <td colSpan={10} style={{ ...td, ...borde }} />
+        <td colSpan={12} style={{ ...td, ...borde }} />
         <td style={{ ...td, ...borde }} />
         <td style={{ ...td, ...num, fontWeight: 700, fontSize: 11 }}><Mov v={subProyectados.manual} color={VIOLETA} /></td>
         <td style={{ ...td, ...borde }} />
@@ -304,7 +357,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
               <input type="number" step="any" value={x.precio} onChange={e => cambiarNuevo(x.id, "precio", e.target.value)}
                 placeholder="precio" title="Precio unitario estimado, sin IVA" style={{ ...campoDeMatriz, width: 78, textAlign: "right" }} />
             </td>
-            <td colSpan={10} style={{ ...td, ...borde }} />
+            <td colSpan={12} style={{ ...td, ...borde }} />
             <td style={{ ...td, ...num, ...borde }}>
               <input type="number" step="any" value={x.cantidad} onChange={e => cambiarNuevo(x.id, "cantidad", e.target.value)}
                 placeholder="cant" title="Cantidad" style={{ ...campoDeMatriz, width: 62, textAlign: "right" }} />
@@ -318,7 +371,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
         );
       })}
       <tr style={{ background: "#F5F3FF" }}>
-        <td colSpan={18} style={{ ...td, padding: "8px 6px" }}>
+        <td colSpan={20} style={{ ...td, padding: "8px 6px" }}>
           <button onClick={agregarNuevo}
             style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", background: VIOLETA, color: "#fff",
               border: "none", borderRadius: 6, padding: "5px 12px", fontFamily: colors.font, fontSize: 12, fontWeight: 600 }}>
@@ -511,14 +564,55 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
         )}
       </div>
 
+      {/* LA LIQUIDACIÓN. Cómo se cobra la obra, cuánto va medido y cuánto se
+          liquida hoy. Lo ejecutado se escribe abajo, en la matriz, al lado del
+          vigente de cada rubro. */}
+      <div className="barra-de-liquidacion" style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd,
+        padding: "10px 12px", marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <strong style={{ fontSize: 12.5, color: VERDE }}>Liquidación</strong>
+          <label style={{ fontSize: 11.5, color: colors.inkSoft, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            El contrato es
+            <select aria-label="Cómo se cobra el contrato" value={modalidad} disabled={sinEjecutado}
+              onChange={e => cambiarModalidad(e.target.value)} style={{ ...inputStyle, padding: "4px 8px", fontSize: 12, width: "auto" }}>
+              {Object.entries(MODALIDADES).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+            </select>
+          </label>
+          <span style={{ fontSize: 11.5, color: colors.muted }}>{MODALIDADES[modalidad].dice}</span>
+          <span role="status" className="guardado-de-ejecutado"
+            style={{ fontSize: 11, marginLeft: "auto", color: guardadoEj.estado === "error" ? colors.danger : colors.muted }}>
+            {guardadoEj.estado === "guardando" ? "Guardando…"
+              : guardadoEj.estado === "guardado" ? `Guardado ${guardadoEj.hora?.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) || ""}`
+              : guardadoEj.estado === "error" ? guardadoEj.error : ""}
+          </span>
+        </div>
+        {sinEjecutado ? (
+          <div style={{ fontSize: 11.5, color: colors.warning, marginTop: 6, lineHeight: 1.5 }}>
+            Para cargar lo ejecutado y armar la liquidación falta correr la migración 179 en Supabase.
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 6, lineHeight: 1.55 }}>
+            Escribí lo ejecutado de cada rubro en la columna <strong style={{ color: VERDE }}>EJECUTADO</strong>, al lado del vigente.
+            El que no tenga cantidad todavía no se midió y se liquida por lo vigente.
+            {" "}Van {liq.totales.medidos} de {liq.totales.medidos + liq.totales.sinMedir} medidos.
+            {" "}<strong style={{ color: colors.ink }}>A liquidar hoy: {plata(liq.totales.liquidacion)}</strong> sin IVA, {plata(liq.totales.conIva)} con IVA
+            {liq.totales.diferencia !== 0 && (
+              <> — <strong style={{ color: liq.totales.diferencia < 0 ? colors.danger : VERDE }}>{plata(liq.totales.diferencia)}</strong> contra el vigente
+                {liq.totales.honorarios !== 0 && <>, {plata(liq.totales.honorarios)} de eso en honorarios</>}</>
+            )}.
+          </div>
+        )}
+      </div>
+
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1340 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1500 }}>
           <thead>
             <tr style={{ background: colors.bg }}>
               <th colSpan={4} style={th} />
               <th colSpan={2} style={{ ...th, ...borde, textAlign: "center", color: colors.ink }}>PRESUPUESTO BASE</th>
               <th colSpan={3} style={{ ...th, ...borde, textAlign: "center", color: colors.ink }}>ÓRDENES APROBADAS</th>
               <th colSpan={2} style={{ ...th, ...borde, textAlign: "center", color: colors.brand }}>VIGENTE</th>
+              <th colSpan={2} style={{ ...th, ...borde, textAlign: "center", color: VERDE }}>EJECUTADO · LIQUIDACIÓN</th>
               <th colSpan={3} style={{ ...th, ...borde, textAlign: "center", color: colors.warning }}>ÓRDENES POR APROBAR</th>
               <th colSpan={2} style={{ ...th, ...borde, textAlign: "center", color: VIOLETA }}>AJUSTE A MANO</th>
               <th colSpan={2} style={{ ...th, ...borde, textAlign: "center", color: colors.ink }}>PROYECTADO</th>
@@ -531,6 +625,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
               <th style={{ ...th, ...num, ...borde }}>CANT</th><th style={{ ...th, ...num }}>TOTAL</th>
               <th style={{ ...th, ...num, ...borde }}>± CANT</th><th style={{ ...th, ...num }}>± TOTAL</th><th style={th}>ORDEN</th>
               <th style={{ ...th, ...num, ...borde }}>CANT</th><th style={{ ...th, ...num }}>TOTAL</th>
+              <th style={{ ...th, ...num, ...borde, color: VERDE }}>CANT</th><th style={{ ...th, ...num, color: VERDE }}>SE LIQUIDA</th>
               <th style={{ ...th, ...num, ...borde }}>± CANT</th><th style={{ ...th, ...num }}>± TOTAL</th><th style={th}>ORDEN</th>
               <th style={{ ...th, ...num, ...borde }}>± CANT</th><th style={{ ...th, ...num }}>± TOTAL</th>
               <th style={{ ...th, ...num, ...borde }}>CANT</th><th style={{ ...th, ...num }}>TOTAL</th>
@@ -560,6 +655,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
                     <td style={{ ...e, ...borde }} /><td style={e}>{r.sub.base ? fmt(r.sub.base) : ""}</td>
                     <td style={{ ...e, ...borde }} /><td style={e}><Mov v={r.sub.aprobado} /></td><td style={e} />
                     <td style={{ ...e, ...borde }} /><td style={e}>{r.sub.vigente ? fmt(r.sub.vigente) : ""}</td>
+                    <td style={{ ...e, ...borde }} /><td style={{ ...e, color: VERDE }}>{subsLiq[i] ? fmt(subsLiq[i]) : ""}</td>
                     <td style={{ ...e, ...borde }} /><td style={e}><Mov v={r.sub.porAprobar} /></td><td style={e} />
                     <td style={{ ...e, ...borde }} /><td style={e}><Mov v={r.sub.manual} color={VIOLETA} /></td>
                     <td style={{ ...e, ...borde }} /><td style={e}>{r.sub.proyectado ? fmt(r.sub.proyectado) : ""}</td>
@@ -576,6 +672,7 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
                     <td style={{ ...e, ...borde }} /><td style={e}>{plata(v.base)}</td>
                     <td style={{ ...e, ...borde }} /><td style={e}>{plata(v.aprobado)}</td><td style={e} />
                     <td style={{ ...e, ...borde }} /><td style={{ ...e, color: r.fuerte ? colors.brand : e.color }}>{plata(v.vigente)}</td>
+                    <td style={{ ...e, ...borde }} /><td className="pie-de-liquidacion" style={{ ...e, color: r.fuerte ? VERDE : e.color }}>{plata(piesLiq[indiceDelPie(i)] ?? 0)}</td>
                     <td style={{ ...e, ...borde }} /><td style={e}>{plata(v.porAprobar)}</td><td style={e} />
                     <td style={{ ...e, ...borde }} /><td style={{ ...e, color: v.manual ? VIOLETA : e.color }}>{v.manual ? plata(v.manual) : ""}</td>
                     <td style={{ ...e, ...borde }} /><td style={e}>{plata(v.proyectado)}</td>
@@ -590,6 +687,10 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
               // Lo que este rubro tendría sin el ajuste: es lo que "quitar" saca.
               const sinAjuste = Math.round((r.vigente.cantidad + r.porAprobar.cantidad) * 10000) / 10000;
               const escrito = ajustes[r.id];
+              // Lo ejecutado y lo que se liquida de este renglón.
+              const clave = claveDe(r);
+              const l = liq.porFila[clave];
+              const medible = seMide(r) && !sinEjecutado;
               return (
                 <tr key={r.id} style={{ borderTop: `1px solid ${colors.neutralSoft}`,
                   background: r.manual.total || r.proyectada ? "#F5F3FF" : movido && !r.deOrden ? "#FFFBEB" : "transparent" }}>
@@ -612,6 +713,21 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
                   <td style={{ ...td, textAlign: "center", fontSize: 10, color: colors.success, whiteSpace: "nowrap" }}>{r.aprobado.ordenes.join(", ")}</td>
                   <td style={{ ...td, ...num, ...borde }}>{r.vigente.cantidad ? fmt(r.vigente.cantidad) : ""}</td>
                   <td style={{ ...td, ...num, fontWeight: 600 }}>{r.vigente.total ? fmt(r.vigente.total) : ""}</td>
+                  <td style={{ ...td, ...num, ...borde }}>
+                    {medible && (
+                      <input type="number" min="0" step="any" aria-label={`Ejecutado de ${r.descripcion}`}
+                        value={escritoEj[clave] ?? (ejecutado[clave] ?? "")} placeholder={fmt(r.vigente.cantidad)}
+                        onChange={e => setEscritoEj(x => ({ ...x, [clave]: e.target.value }))}
+                        onBlur={e => anotar(r, e.target.value)}
+                        title="Cantidad ejecutada. Vacío: todavía no se midió y se liquida por lo vigente."
+                        style={{ width: 66, padding: "2px 5px", fontSize: 11.5, textAlign: "right", fontFamily: colors.font,
+                          border: `1px solid ${ejecutado[clave] != null ? VERDE : colors.border}`, borderRadius: 5, outline: "none", background: "#fff" }} />
+                    )}
+                  </td>
+                  <td className="se-liquida" style={{ ...td, ...num, fontWeight: l?.medida || l?.deltaCobro ? 700 : 400,
+                    color: !l ? colors.muted : l.deltaCobro < 0 ? colors.danger : l.deltaCobro > 0 ? VERDE : l.medida ? colors.ink : colors.muted }}>
+                    {l && (l.cobra || l.medida) ? fmt(l.cobra) : ""}
+                  </td>
                   <td style={{ ...td, ...num, ...borde }}><Mov v={r.porAprobar.cantidad} /></td>
                   <td style={{ ...td, ...num }}><Mov v={r.porAprobar.total} /></td>
                   <td style={{ ...td, textAlign: "center", fontSize: 10, color: colors.warning, whiteSpace: "nowrap" }}>{r.porAprobar.ordenes.join(", ")}</td>
@@ -645,6 +761,11 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser 
           </tbody>
         </table>
       </div>
+
+      {/* LAS DIFERENCIAS DE CANTIDAD que salen de lo ejecutado: qué le hace
+          cada una a lo que se cobra y al beneficio. Las mismas se ven en
+          Diferencias. */}
+      <DiferenciasDeCantidad liq={liq} />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import { creditoDisponible } from "./cuentasProveedor";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
@@ -21,6 +21,9 @@ import TablaControl from "./TablaControl";
 // día que apareció el primero —el margen de la OC-01 de Plaza Lagos— se llevó
 // la pantalla puesta.
 import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
+import { cargarEjecutado } from "./ejecutado.js";
+import { cargarOrdenes } from "./ordenesDeCambio";
+import { liquidacionDeLaObra, modalidadDe } from "./liquidacion.js";
 import { cuadreConElPresupuesto, comoSeDice as comoSeDiceElCuadre } from "./cuadreConElPresupuesto.js";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
@@ -135,6 +138,20 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const [beneficios, setBeneficios] = useState([]);
   const [vistaPresupuesto, setVistaPresupuesto] = useState("original");
   const [ordenesDeCambio, setOrdenesDeCambio] = useState({ ordenes: [], lineas: {} });
+  // LO EJECUTADO Y CÓMO SE COBRA LA OBRA (liquidacion.js). Lo que ya se midió
+  // mueve el beneficio de lo aprobado; para saber cuánto hace falta el
+  // presupuesto actualizado entero, así que las órdenes completas se piden
+  // solo cuando hay algo medido.
+  const [ejecutado, setEjecutado] = useState({});
+  const [ordenesEnteras, setOrdenesEnteras] = useState(null);
+  const [modalidad, setModalidad] = useState(modalidadDe(obra));
+  const deltasDeLoEjecutado = useMemo(() => (Object.keys(ejecutado).length && ordenesEnteras
+    ? liquidacionDeLaObra({ obra: { ...obra, modalidad }, rubros, ordenes: ordenesEnteras.ordenes, lineasDeOrdenes: ordenesEnteras.lineas, ejecutado }).deltas
+    : {}), [ejecutado, ordenesEnteras, obra, modalidad, rubros]);
+  const alCambiarLoEjecutado = useCallback(async mapa => {
+    setEjecutado(mapa);
+    if (Object.keys(mapa).length) { const oc = await cargarOrdenes(obra.id); setOrdenesEnteras({ ordenes: oc.ordenes || [], lineas: oc.lineas || {} }); }
+  }, [obra?.id]);
   const [planillas, setPlanillas] = useState([]);
   const [facturas, setFacturas] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
@@ -193,6 +210,12 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
       (ls || []).forEach(l => { (quitan[l.orden_id] = quitan[l.orden_id] || []).push(l); });
     }
     setOrdenesDeCambio({ ordenes: ocs || [], lineas: quitan });
+    const ej = await cargarEjecutado(obra.id);
+    setEjecutado(ej.ejecutado || {});
+    if (Object.keys(ej.ejecutado || {}).length) {
+      const oc = await cargarOrdenes(obra.id);
+      setOrdenesEnteras({ ordenes: oc.ordenes || [], lineas: oc.lineas || {} });
+    }
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
     const facturasConNumero = (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null }));
@@ -383,7 +406,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           // va perdiendo en tres rubros no es un beneficio. Lo previsto sale
           // de una proforma y todavía puede no pasar: no entra.
           const res = resultadoDeLaObra({ beneficios, rubros, porRubro,
-            ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas });
+            ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas,
+            deltas: deltasDeLoEjecutado, modalidad });
           if (!res.cuantosConPapel && !res.perdidas.length && !res.aprobados.cuantos) return null;
           return <Tarjeta label={res.neto >= 0 ? "Beneficio" : "Pérdida"} valor={Math.abs(res.neto)}
             color={res.neto >= 0 ? colors.success : colors.danger} />;
@@ -561,7 +585,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                 ))}
               </div>
               {vistaPresupuesto === "actualizado"
-                ? <PanelPresupuestoActualizado obra={obra} rubros={rubros} currentUser={currentUser} />
+                ? <PanelPresupuestoActualizado obra={obra} rubros={rubros} currentUser={currentUser}
+                    modalidad={modalidad} onModalidad={setModalidad} onEjecutado={alCambiarLoEjecutado} />
                 : <PresupuestoOriginal obra={obra} rubros={rubros} currentUser={currentUser} />}
             </>
           )}
@@ -573,10 +598,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           )}
 
           {tab === "beneficios" && (
-            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} porRubro={porRubro} currentUser={currentUser} /></SiSeRompe>
+            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} porRubro={porRubro} currentUser={currentUser} modalidad={modalidad} /></SiSeRompe>
           )}
           {tab === "diferencias" && (
-            <SiSeRompe que="Diferencias"><PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} /></SiSeRompe>
+            <SiSeRompe que="Diferencias"><PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} modalidad={modalidad} /></SiSeRompe>
           )}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
