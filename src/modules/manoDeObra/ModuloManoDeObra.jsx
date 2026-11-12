@@ -1,13 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
 import { sePuedeAnotar, permisoVigente, pedidosAbiertos, cuantosDias, hoyEnObra } from "./permisoDeDias";
-import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet, Pencil, CalendarDays } from "lucide-react";
+import { Plus, ChevronLeft, HardHat, Trash2, Check, X, Printer, FileSpreadsheet, Pencil, CalendarDays, Wallet } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { PARAMETROS, RECARGOS, calcularNomina } from "./nomina";
 import { rolAExcel, rolAPDF } from "./exportarRol";
-import { rolesDeLaObra, cerrarRol, imprimirRecibos } from "./rolGuardado";
+import { rolesDeLaObra, cerrarRol, imprimirRecibos, cargarPrestamos } from "./rolGuardado";
+import { extrasConPrestamos } from "./prestamos";
+import PanelPrestamos from "./PanelPrestamos";
 import { seSolapan, periodoTexto, lineasParaGuardar } from "./rolPagado";
 import EditorDias from "./EditorDias";
 import PanelRolesCerrados from "./PanelRolesCerrados";
@@ -26,7 +28,10 @@ import PanelRolesCerrados from "./PanelRolesCerrados";
 // control de obra para que ese gasto, que es entre el 25 y el 40 por ciento de
 // una obra, entre donde tiene que entrar.
 
-const hoy = () => new Date().toISOString().split("T")[0];
+// Hoy EN LA OBRA. Con la fecha del reloj universal, después de las siete de
+// la tarde «hoy» ya era mañana y el rol proponía arrancar el día 2: el día 1
+// del mes quedaba afuera sin que nadie lo hubiera pedido.
+const hoy = () => hoyEnObra();
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { weekday: "short", day: "numeric", month: "short" }) : "");
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -54,6 +59,10 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   // sabe quien lleva la caja, y se escribe antes de cerrar.
   const [descuentos, setDescuentos] = useState({});
   const [abiertoDesc, setAbiertoDesc] = useState(null);
+  // Los préstamos son la excepción: se anotan una vez y cada rol trae su
+  // cuota sola (prestamos.js).
+  const [prestamos, setPrestamos] = useState({ prestamos: [], cuotas: [], sinTabla: false });
+  const [prestamoPara, setPrestamoPara] = useState(null);
   const [diasDe, setDiasDe] = useState(null);
   const [cerrando, setCerrando] = useState(false);
 
@@ -84,6 +93,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
     const r = await rolesDeLaObra(lead.id);
     setRoles(r.roles);
     setErrorRoles(r.error || "");
+    setPrestamos(await cargarPrestamos());
   }, [lead?.id, periodo.desde, periodo.hasta]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -91,8 +101,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   // rol salga con los días de toda la historia de la obra.
   useEffect(() => {
     if (lead && !periodo.desde) {
-      const d = new Date(); d.setDate(1);
-      setPeriodo(p => ({ ...p, desde: d.toISOString().split("T")[0] }));
+      setPeriodo(p => ({ ...p, desde: `${hoy().slice(0, 8)}01` }));
     }
   }, [lead, periodo.desde]);
 
@@ -135,7 +144,17 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   }
 
   const delDia = id => (asistencia[id] || []).find(d => d.fecha === fecha);
-  const nomina = calcularNomina({ personal, asistencia, extras: descuentos, par: PARAMETROS });
+  // La cuota de cada préstamo entra sola en los descuentos; lo que se escriba
+  // a mano para este rol la reemplaza.
+  const { extras, detalle: deuda } = extrasConPrestamos({
+    personal, descuentos, prestamos: prestamos.prestamos, cuotas: prestamos.cuotas, hasta: periodo.hasta,
+  });
+  const calculada = calcularNomina({ personal, asistencia, extras, par: PARAMETROS });
+  // Cuánto le queda debiendo después de este rol: va al recibo que firma.
+  const nomina = {
+    ...calculada,
+    lineas: calculada.lineas.map(l => (deuda[l.persona.id] ? { ...l, prestamoSaldo: deuda[l.persona.id].saldoDespues } : l)),
+  };
   const pisado = roles.find(r => seSolapan(r, periodo));
 
   // Los recibos del rol en curso, antes de cerrarlo: para revisarlos con la
@@ -166,7 +185,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
   async function cerrar() {
     if (!window.confirm(`¿Cerrar el rol ${periodoTexto(periodo)} por $${fmt(nomina.aPagar)}? Desde ahí sus números no cambian aunque se corrija la asistencia.`)) return;
     setCerrando(true); setError("");
-    const r = await cerrarRol({ lead, periodo, nomina, parametros: PARAMETROS, roles, quien: currentUser });
+    const r = await cerrarRol({ lead, periodo, nomina, parametros: PARAMETROS, roles, quien: currentUser, prestamos: deuda });
     setCerrando(false);
     if (r.error) { setError(r.error); return; }
     setDescuentos({}); setAbiertoDesc(null); setDiasDe(null);
@@ -485,6 +504,7 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
               {nomina.lineas.map(l => {
                 const id = l.persona.id;
                 const desc = descuentos[id] || {};
+                const debe = deuda[id];
                 return (
                 <div key={id} style={{ borderTop: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ display: "grid", gridTemplateColumns: "minmax(150px,1.4fr) 50px 90px 90px 90px 90px",
@@ -499,7 +519,15 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                       <Accion icono={Printer} onClick={() => recibos([l])} disabled={exportando}>Recibo</Accion>
                       {editable && <Accion icono={CalendarDays} onClick={() => setDiasDe(diasDe === id ? null : id)} activa={diasDe === id}>Días</Accion>}
                       {editable && <Accion icono={Pencil} onClick={() => editarPersona(l.persona)}>Editar datos</Accion>}
+                      {/* Los descuentos, con su nombre: detrás del monto
+                          subrayado no los encontraba nadie. */}
+                      {editable && !pisado && <Accion icono={Wallet} onClick={() => setAbiertoDesc(abiertoDesc === id ? null : id)} activa={abiertoDesc === id}>Descuentos</Accion>}
                     </div>
+                    {debe && (
+                      <div className="deuda-en-el-rol" style={{ fontSize: 10.5, color: colors.muted, marginTop: 2 }}>
+                        Préstamo: {debe.aplicado > 0 ? `se le descuentan $${fmt(debe.aplicado)}` : "este rol no se le descuenta"} · debe ${fmt(debe.saldo)}
+                      </div>
+                    )}
                   </div>
                   <span style={{ textAlign: "center", color: colors.inkSoft }}>{l.asistencia.dias}</span>
                   <span style={{ textAlign: "right", color: colors.inkSoft }}>${fmt(l.sueldoPeriodo)}</span>
@@ -517,13 +545,36 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
                     {[["anticipos", "Anticipo 1ª quincena"], ["prestamos", "Préstamos"], ["quirografarios", "Quirografarios"], ["multas", "Multas"]].map(([k, label]) => (
                       <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, fontWeight: 600, color: colors.muted }}>
                         {label}
-                        <input type="number" min="0" step="0.01" value={desc[k] ?? ""} placeholder="0"
+                        <input type="number" min="0" step="0.01" value={desc[k] ?? ""}
+                          // Con un préstamo anotado, vacío quiere decir «la cuota de siempre».
+                          placeholder={k === "prestamos" && debe ? String(debe.auto) : "0"}
                           onChange={e => setDescuentos(x => ({ ...x, [id]: { ...x[id], [k]: e.target.value } }))}
                           style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
                       </label>
                     ))}
                     <div style={{ gridColumn: "1 / -1", fontSize: 10.5, color: colors.muted }}>
                       Aporte IESS calculado: ${fmt(l.aporte)}. Lo que escribas acá queda guardado al cerrar el rol.
+                    </div>
+                    {/* EL PRÉSTAMO: cuánto debe y qué pasa con él en este rol. */}
+                    <div className="prestamo-en-descuentos" style={{ gridColumn: "1 / -1", fontSize: 11, color: colors.inkSoft, lineHeight: 1.5 }}>
+                      {debe ? (
+                        <>
+                          <strong style={{ color: colors.ink }}>Préstamo:</strong> debe ${fmt(debe.saldo)}.{" "}
+                          {debe.manual
+                            ? <>Escribiste ${fmt(desc.prestamos)} para este rol (la cuota de siempre es ${fmt(debe.auto)}); después le quedan ${fmt(debe.saldoDespues)}. Borralo para volver a la cuota.</>
+                            : <>En este rol se le descuentan ${fmt(debe.auto)} y le quedan ${fmt(debe.saldoDespues)}. Para no descontarle este rol, escribí 0 en Préstamos.</>}
+                          {debe.sobra > 0 && <span style={{ color: colors.danger }}> Son ${fmt(debe.sobra)} más de lo que debe.</span>}
+                        </>
+                      ) : prestamos.sinTabla ? null : (
+                        <>Sin préstamos anotados. Si se le prestó plata, anotalo una vez y se descuenta solo cada rol.</>
+                      )}
+                      {!prestamos.sinTabla && (
+                        <button onClick={() => setPrestamoPara(id)}
+                          style={{ background: "none", border: "none", padding: 0, marginLeft: 6, fontFamily: colors.font, fontSize: 11, fontWeight: 600, color: colors.brand, cursor: "pointer" }}>
+                          + Préstamo a {l.persona.nombre.split(" ")[0]}
+                        </button>
+                      )}
+                      {l.aPagar < 0 && <div style={{ color: colors.danger, marginTop: 2 }}>Con estos descuentos le queda en negativo: bajá lo que se le descuenta en este rol.</div>}
                     </div>
                   </div>
                 )}
@@ -535,8 +586,12 @@ export default function ModuloManoDeObra({ currentUser, puede, nivelProyecto }) 
           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.55 }}>
             Las cuentas son las de tu planilla: sueldo = salario ÷ 30 × días, hora extra sobre salario ÷ 240,
             décimo tercero ÷ 12, décimo cuarto básico ÷ 360 × días, vacaciones ÷ 24, fondos 8,33% y aporte 9,45%.
-            Tocá el monto de descuentos de una persona para cargar anticipo, préstamos o multas antes de cerrar.
+            Tocá «Descuentos» en una persona para cargar anticipo, quirografarios o multas antes de cerrar. Los préstamos
+            se anotan abajo una vez y se descuentan solos.
           </div>
+
+          <PanelPrestamos lead={lead} personal={personal} prestamos={prestamos.prestamos} cuotas={prestamos.cuotas} sinTabla={prestamos.sinTabla}
+            editable={editable} quien={currentUser} onCambio={cargar} nuevoPara={prestamoPara} onAtendido={() => setPrestamoPara(null)} />
 
           <PanelRolesCerrados roles={roles} lead={lead} editable={editable} quien={currentUser} onCambio={cargar} />
         </>

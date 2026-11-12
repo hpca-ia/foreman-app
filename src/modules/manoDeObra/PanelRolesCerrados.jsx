@@ -6,6 +6,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { FORMAS_PAGO } from "../controlObra/pagos";
 import { reabrirRol, pagarLineas, imprimirRecibos } from "./rolGuardado";
 import { SOPORTES, periodoTexto, porPagar, resumenDePago } from "./rolPagado";
+import { hoyEnObra } from "./permisoDeDias";
 
 // Los roles cerrados: el recibo de cada uno, y quién ya cobró.
 //
@@ -13,7 +14,7 @@ import { SOPORTES, periodoTexto, porPagar, resumenDePago } from "./rolPagado";
 // al control de obra como gasto de mano de obra, sin asignar: el rubro se lo
 // pone después quien lleva el control, como a un gasto de caja chica.
 
-const hoy = () => new Date().toISOString().split("T")[0];
+const hoy = () => hoyEnObra();
 const fmt = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fechaCorta = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 

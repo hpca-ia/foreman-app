@@ -235,7 +235,9 @@ export async function recibosAPDF({ rol, lineas, obra = {}, empresa = {} }) {
     // ── Descuentos ──
     titulo("DESCUENTOS");
     fila(`APORTES ${String(pctAporte).replace(".", ",")}% (APORTE PERSONAL)`, ...partir(c.aporte, pctAporte / 100));
-    fila("PRÉSTAMOS", null, null, c.prestamos);
+    // Con un préstamo anotado, el recibo dice cuánto le queda debiendo: es lo
+    // que la persona pregunta al firmar.
+    fila(c.prestamoSaldo != null ? `PRÉSTAMOS (QUEDA DEBIENDO ${$(c.prestamoSaldo)})` : "PRÉSTAMOS", null, null, c.prestamos);
     fila("PLANILLAS QUIROGRAFARIOS", null, null, c.quirografarios);
     fila("MULTAS", null, null, c.multas);
     raya(); fila("TOTAL DE DESCUENTOS Y EGRESOS", null, null, b.descuentos, { negrita: true });

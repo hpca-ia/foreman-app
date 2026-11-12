@@ -6,11 +6,13 @@ import { registrarPago } from "../controlObra/pagos";
 import {
   lineasParaGuardar, seSolapan, estadoDelRol, agruparPagos, gastoDelPago, periodoTexto,
 } from "./rolPagado";
+import { cuotasParaGuardar, nuevoPrestamo, nuevoAbono, estadoDelPrestamo } from "./prestamos";
 
 // Los roles guardados: cerrarlos, reabrirlos y pagarlos.
 
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 const sinMigracion = e => (falta(e) ? "Falta correr la migración 131." : e?.message || "error desconocido");
+const SIN_177 = "Falta correr la migración 177 en Supabase.";
 
 /** Los roles de la obra, del más nuevo al más viejo, con sus líneas. */
 export async function rolesDeLaObra(leadId) {
@@ -27,8 +29,11 @@ export async function rolesDeLaObra(leadId) {
 /**
  * Cierra el rol del período: lo guarda con sus números congelados.
  * No deja cerrar dos roles que se pisen: el mismo día se pagaría dos veces.
+ *
+ * @param prestamos  el `detalle` de extrasConPrestamos: qué cuota de qué
+ *                   préstamo se le descontó a cada persona en este rol
  */
-export async function cerrarRol({ lead, periodo, nomina, parametros, roles = [], quien }) {
+export async function cerrarRol({ lead, periodo, nomina, parametros, roles = [], quien, prestamos = {} }) {
   if (!periodo?.desde || !periodo?.hasta) return { error: "Elegí las dos fechas del período." };
   if (!nomina?.lineas?.length) return { error: "No hay nadie en el rol." };
   const pisa = roles.find(r => seSolapan(r, periodo));
@@ -44,11 +49,24 @@ export async function cerrarRol({ lead, periodo, nomina, parametros, roles = [],
   }).select().single();
   if (error || !rol) return { error: "No se pudo cerrar el rol: " + sinMigracion(error) };
 
-  const { error: e2 } = await supabase.from("obra_rol_lineas").insert(lineasParaGuardar(nomina, rol.id));
+  const { data: guardadas, error: e2 } = await supabase.from("obra_rol_lineas")
+    .insert(lineasParaGuardar(nomina, rol.id)).select("id,personal_id");
   if (e2) {
     // Un rol sin líneas no sirve y taparía el período: se deshace.
     await supabase.from("obra_roles").delete().eq("id", rol.id);
     return { error: "No se pudo guardar el detalle del rol: " + sinMigracion(e2) };
+  }
+
+  // Las cuotas de los préstamos descontadas en este rol. Si no se pueden
+  // anotar, el rol se deshace: quedaría un descuento hecho que no baja la
+  // deuda de nadie, y el mes que viene se le cobraría de nuevo.
+  const cuotas = cuotasParaGuardar({ lineas: guardadas || [], detalle: prestamos, rolId: rol.id, fecha: periodo.hasta, quien });
+  if (cuotas.length) {
+    const { error: e3 } = await supabase.from("obra_prestamo_cuotas").insert(cuotas);
+    if (e3) {
+      await supabase.from("obra_roles").delete().eq("id", rol.id);
+      return { error: "No se pudieron anotar las cuotas de los préstamos, así que no cerré el rol: " + (falta(e3) ? SIN_177 : e3.message) };
+    }
   }
   return { rol };
 }
@@ -140,4 +158,55 @@ export async function imprimirRecibos({ rol, lineas, lead }) {
   }
   const empresa = loadFromStorage("foreman_empresa", {}) || {};
   await recibosAPDF({ rol, lineas, obra: { nombre: lead?.nombre || "", inicio }, empresa: { nombre: empresa.nombre || "", direccion: empresa.direccion || "" } });
+}
+
+// ─── Los préstamos ─────────────────────────────────────────────────────────
+// Las reglas —cuánto se descuenta en cada rol, cuánto falta— están en
+// prestamos.js. Esto es lo que lee y escribe.
+
+/**
+ * Todos los préstamos vivos y lo que se fue descontando de cada uno.
+ *
+ * Se piden todos y no solo los de esta obra: el préstamo sigue a la persona
+ * por su cédula, y si pasa a otra obra se le sigue descontando allá.
+ *
+ * @returns { prestamos, cuotas, sinTabla }
+ */
+export async function cargarPrestamos() {
+  const { data: prestamos, error } = await supabase.from("obra_prestamos").select("*").eq("anulado", false).order("fecha");
+  if (error) return { prestamos: [], cuotas: [], sinTabla: falta(error), error: falta(error) ? SIN_177 : error.message };
+  if (!prestamos?.length) return { prestamos: [], cuotas: [], sinTabla: false };
+  const { data: cuotas, error: e2 } = await supabase.from("obra_prestamo_cuotas")
+    .select("*").in("prestamo_id", prestamos.map(p => p.id)).order("fecha");
+  if (e2) return { prestamos: [], cuotas: [], sinTabla: falta(e2), error: falta(e2) ? SIN_177 : e2.message };
+  return { prestamos, cuotas: cuotas || [], sinTabla: false };
+}
+
+/** Anotar un préstamo. @returns { prestamo } o { error } */
+export async function darPrestamo(datos) {
+  const r = nuevoPrestamo(datos);
+  if (r.error) return r;
+  const { data, error } = await supabase.from("obra_prestamos").insert(r.fila).select().single();
+  if (error) return { error: falta(error) ? SIN_177 : error.message };
+  return { prestamo: data };
+}
+
+/** Lo que pagó por fuera del rol. @returns {} o { error } */
+export async function abonarPrestamo(datos) {
+  const r = nuevoAbono(datos);
+  if (r.error) return r;
+  const { error } = await supabase.from("obra_prestamo_cuotas").insert(r.fila);
+  return error ? { error: falta(error) ? SIN_177 : error.message } : {};
+}
+
+/**
+ * Anular un préstamo que se cargó mal. Solo si todavía no se le descontó
+ * nada: con cuotas ya cobradas, borrarlo dejaría esos descuentos sin motivo.
+ */
+export async function anularPrestamo(prestamo, cuotas = []) {
+  if (estadoDelPrestamo(prestamo, cuotas).cuotas > 0) {
+    return { error: "Ya se le descontó de este préstamo: no se puede anular. Si se le perdona el resto, registrá un abono a mano por el saldo." };
+  }
+  const { error } = await supabase.from("obra_prestamos").update({ anulado: true }).eq("id", prestamo.id);
+  return error ? { error: error.message } : {};
 }
