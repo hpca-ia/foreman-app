@@ -85,7 +85,7 @@ export default function FirmaDelLibro({ token }) {
             <div style={{ color: C.ambar, fontSize: 15, fontWeight: 600 }}>
               Tu observación quedó registrada.
               <div style={{ fontSize: 12.5, color: C.gris, fontWeight: 400, marginTop: 4 }}>
-                Le llegó al equipo de la obra, que es quien puede reabrir un día y corregirlo.
+                Le llegó al equipo de la obra, que es quien puede revisarlo y corregirlo.
               </div>
             </div>
           ) : (
@@ -141,8 +141,7 @@ export default function FirmaDelLibro({ token }) {
         ))}
 
         <div style={{ fontSize: 11.5, color: C.gris, textAlign: "center", marginTop: 18, lineHeight: 1.5 }}>
-          Cada día lo cerró quien lo escribió y, una vez cerrado, no se cambia: si hizo falta corregir algo,
-          el día dice que fue reabierto y cuándo.
+          Cada día lo cerró quien lo escribió y quedó guardado con su fecha.
           <div style={{ marginTop: 4 }}>FOREMAN · HCA Studio</div>
         </div>
       </div>

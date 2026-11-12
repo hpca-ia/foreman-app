@@ -6,6 +6,7 @@ import { logoEmpresa } from "../../lib/marca";
 import { CATEGORIAS } from "./libro";
 import { seguro, partirTexto, tandasDeRenglones } from "./textoDelPdf.js";
 import { filasDeFotos, ALTO_DE_FOTO } from "./fotosDelPdf.js";
+import { paraElPapel } from "./reapertura.js";
 
 // El libro de obra, en papel.
 //
@@ -18,12 +19,12 @@ import { filasDeFotos, ALTO_DE_FOTO } from "./fotosDelPdf.js";
 //
 // Por eso el día se cierra y en ese momento se imprime. Lo que quede escrito
 // en ese PDF es lo que había el día que se cerró: si después se reabre y se
-// corrige, se vuelve a imprimir y la reapertura queda dicha adentro, con su
-// motivo. Un libro que se puede editar en silencio no vale como registro.
+// corrige, se vuelve a imprimir. Que se reabrió, quién y por qué queda
+// guardado y se ve en FOREMAN; en el papel, que es lo que lee el cliente, no
+// va (lo definió Hernán el 12/11/2026: ver reapertura.js).
 
 const TINTA = [15, 61, 62];
 const GRIS = [107, 114, 128];
-const AMBAR = [146, 64, 14];
 const LINEA = [225, 225, 222];
 
 const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -93,23 +94,10 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
   doc.text(fichaLineas, M, y);
   y += fichaLineas.length * 11 + 5;
 
-  // UNA REAPERTURA SE DICE, Y SE DICE ARRIBA.
-  //
-  // Un día que se volvió a abrir y se corrigió no es lo mismo que uno escrito
-  // el día que pasó, y quien lea el libro tiene que saberlo antes de leer lo
-  // que dice — no después, ni en una columna de la base que nadie mira.
-  if (dia.reabierto_at) {
-    doc.setFillColor(253, 246, 231); doc.setDrawColor(240, 217, 168);
-    const texto = partirTexto(doc,
-      `Este día se reabrió ${Number(dia.reaperturas) > 1 ? `${dia.reaperturas} veces` : "después de cerrado"}`
-      + `${dia.reabierto_nombre ? `, por ${dia.reabierto_nombre}` : ""}`
-      + `${dia.reabierto_motivo ? `: ${dia.reabierto_motivo}` : "."}`, ancho - M * 2 - 16, "normal", 8.5);
-    const h = texto.length * 10 + 12;
-    doc.roundedRect(M, y - 8, ancho - M * 2, h, 4, 4, "FD");
-    doc.setTextColor(...AMBAR);
-    doc.text(texto, M + 8, y + 2);
-    y += h + 8;
-  }
+  // LA REAPERTURA NO SE DICE EN EL PAPEL (reapertura.js). Antes iba acá un
+  // recuadro —«Este día se reabrió después de cerrado, por…»— y entre las
+  // observaciones la que deja escrita cada reapertura. El papel lo lee el
+  // cliente; que un día se reabrió, quién y por qué se ve en FOREMAN.
 
   if (dia.sin_novedades) {
     doc.setFont("helvetica", "italic"); doc.setFontSize(10); doc.setTextColor(...GRIS);
@@ -119,8 +107,10 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
 
   // Las entradas, en el orden de las categorías y no en el que se escribieron:
   // el libro se escribe salteado a lo largo del día y se lee ordenado.
+  // Sin las observaciones que deja escrita una reapertura: esas son del sistema.
+  const delPapel = paraElPapel(entradas);
   for (const cat of CATEGORIAS) {
-    const suyas = entradas.filter(e => e.categoria === cat.id);
+    const suyas = delPapel.filter(e => e.categoria === cat.id);
     if (!suyas.length) continue;
     salto(50);
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...TINTA);

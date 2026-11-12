@@ -152,7 +152,7 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
     setOcupado("");
     if (listos) onCambio?.();
     if (fallaron.length) setError(`No se pudieron rehacer ${fallaron.length}: ${fallaron.slice(0, 3).join(" · ")}`);
-    if (listos) setAviso(`${listos === 1 ? "Se rehizo 1 PDF" : `Se rehicieron ${listos} PDF`} con el formato corregido.`);
+    if (listos) setAviso(`${listos === 1 ? "Se rehizo 1 PDF" : `Se rehicieron ${listos} PDF`} con el formato de ahora.`);
   }
 
   async function bajarTramo() {
@@ -228,15 +228,15 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
             Cada día cerrado deja su PDF. Apilados son el libro de obra: lo que se entrega cuando alguien lo pide.
             {conPdf < enRango.length && ` ${enRango.length - conPdf} todavía no tienen el PDF guardado; se arma solo al abrirlo.`}
           </div>
-          {/* LOS GUARDADOS CON EL FORMATO VIEJO —renglones cortados, fotos
-              chicas—. Cada uno se rehace solo al abrirlo; este botón los
-              rehace todos de una vez. */}
+          {/* LOS GUARDADOS CON UN FORMATO ANTERIOR —renglones cortados, fotos
+              chicas, la nota de que el día se reabrió—. Cada uno se rehace
+              solo al abrirlo; este botón los rehace todos de una vez. */}
           {viejos > 0 && (
             <div className="pdf-viejos" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 7,
               background: colors.warningSoft, borderRadius: colors.radiusSm, padding: "7px 10px" }}>
               <span style={{ fontSize: 11.5, color: colors.warning, flex: 1, minWidth: 200, lineHeight: 1.45 }}>
-                {viejos === 1 ? "1 día tiene" : `${viejos} días tienen`} el PDF guardado con el formato viejo, el de los renglones cortados.
-                Dicen lo mismo; se rehacen con el formato corregido.
+                {viejos === 1 ? "1 día tiene" : `${viejos} días tienen`} el PDF guardado con un formato anterior.
+                Se rehacen con el de ahora: mismos renglones y fotos, sin la nota de que el día se reabrió.
               </span>
               <Button variant="primary" size="sm" disabled={!!ocupado} onClick={rehacerViejos}>
                 <RefreshCw size={12} /> {String(ocupado).startsWith("rehaciendo") ? `Rehaciendo ${String(ocupado).slice(11)}…` : viejos === 1 ? "Rehacerlo" : `Rehacer los ${viejos}`}
@@ -430,7 +430,7 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
                   {d.aprobado_nombre ? ` por ${d.aprobado_nombre}` : ""}
                   {d.reabierto_at ? ` · reabierto ${Number(d.reaperturas) > 1 ? `${d.reaperturas} veces` : "una vez"}` : ""}
                   {d.pdf_url ? "" : " · sin PDF guardado"}
-                  {pdfViejo(d) ? " · PDF con el formato viejo: se rehace al abrirlo" : ""}
+                  {pdfViejo(d) ? " · PDF con un formato anterior: se rehace al abrirlo" : ""}
                 </div>
               </div>
               <Button variant="outline" size="sm" disabled={!!ocupado} onClick={() => verDia(d)}>

@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { rutaDelPdfDelDia } from "./pdfGuardado.js";
+import { notaDeReapertura } from "./reapertura.js";
 import { hoyEnObra, HORA_DE_CIERRE, HORA_LIMITE_ESCRITURA, sePuedeEscribirEl } from "./jornada.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { subirArchivo } from "../../lib/archivos";
@@ -104,9 +105,9 @@ export async function reabrirDia(dia, quien, motivo) {
   }
   if (!data?.length) return "No se pudo reabrir: la base no dejó tocar ese día.";
   // Y queda escrito EN EL LIBRO, no solo en una columna. Quien lo lea seis
-  // meses después tiene que encontrarlo leyendo, no auditando la base.
-  await anotar(dia, "observaciones",
-    `Se reabrió el día para completarlo o corregirlo: ${porque}`, quien);
+  // meses después tiene que encontrarlo leyendo, no auditando la base. Se ve
+  // en FOREMAN; al papel que lee el cliente no va (reapertura.js).
+  await anotar(dia, "observaciones", notaDeReapertura(porque), quien);
   return null;
 }
 

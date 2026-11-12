@@ -164,7 +164,6 @@ function cuerpoDelCorreo({ obra, tramo, cuantos, nota, enlace }) {
       </div>
     </div>` : ""}
     <p style="margin:14px 0 0;color:#6B7280;font-size:12.5px">
-      Cada día lo cerró quien lo escribió, y una vez cerrado no se cambia: si hizo falta corregir algo,
-      el día dice que fue reabierto y cuándo. Por eso el libro sirve como documento.
+      Cada día lo cerró quien lo escribió y quedó guardado con su fecha. Por eso el libro sirve como documento.
     </p>`;
 }

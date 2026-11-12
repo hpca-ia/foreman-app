@@ -21,8 +21,12 @@
 //
 // Sin base ni pantalla: se puede probar (pruebas/pdfGuardadoDelLibro.test.mjs).
 
-/** 1: como salió hasta el 12/11/2026. 2: renglones que entran en la hoja y fotos al doble. */
-export const VERSION_DEL_DIBUJO = 2;
+/**
+ * 1: como salió hasta el 12/11/2026.
+ * 2: renglones que entran en la hoja y fotos al doble.
+ * 3: sin la nota de que el día se reabrió, que el cliente no tiene que ver.
+ */
+export const VERSION_DEL_DIBUJO = 3;
 
 /** Dónde se guarda el PDF de un día: con su fecha, el momento y la versión del dibujo. */
 export function rutaDelPdfDelDia(dia, ahora = Date.now()) {

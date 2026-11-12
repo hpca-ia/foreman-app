@@ -6,6 +6,7 @@ import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
 import { listaDelCliente } from "./_listaDelCliente.js";
+import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -237,7 +238,9 @@ async function libroParaFirmar(req, res, entrega) {
     ? await json(await rest(`libro_obra_entradas?dia_id=in.(${ids.join(",")})&select=dia_id,categoria,contenido&order=id`))
     : [];
   const porDia = new Map();
-  for (const e of entradas || []) {
+  // La observación que deja escrita una reapertura es del sistema: el cliente
+  // no la lee, ni acá ni en el PDF.
+  for (const e of sinReaperturas(entradas)) {
     if (!porDia.has(e.dia_id)) porDia.set(e.dia_id, []);
     porDia.get(e.dia_id).push({ categoria: e.categoria, contenido: e.contenido });
   }
