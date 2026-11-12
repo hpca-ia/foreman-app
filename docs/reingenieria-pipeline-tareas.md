@@ -401,4 +401,4 @@ fase 5), los permisos por proyecto y el portal del cliente.
 - [x] Fase 3 — Proyectos aprobados (11/11/2026; sin migración, publicada)
 - [x] Fase 4 — Tareas: una bandeja que se pueda creer (11/11/2026; migración 172, corrida y publicada)
 - [x] Fase 5 — Los compromisos de las actas (11/11/2026; migración 173, corrida y publicada)
-- [x] Fase 6 — Limpieza (11/11/2026; código publicado; requiere las migraciones 174 y 175)
+- [x] Fase 6 — Limpieza (11/11/2026; código publicado; migraciones 174 y 175 corridas y verificadas ese día)
