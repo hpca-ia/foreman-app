@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight, Eye, EyeOff, ClipboardList } from "lucide-react";
+import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight, Eye, EyeOff, ClipboardList, Send } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -7,7 +7,7 @@ import ComentariosTarea from "../../components/ComentariosTarea";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import { nombreDeEtapa, hoyISO, sumarDias } from "./pipeline";
 import {
-  cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
+  cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
   anotarCorreccion, anotar,
 } from "./proyecto";
 import { renglonesDeLista, avanceDe } from "./tareasDelProyecto";
@@ -54,6 +54,11 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // Cuáles ve el cliente en su enlace.
   const [compartidas, setCompartidas] = useState(() => new Set());
   const [sinCompartir, setSinCompartir] = useState(false);
+  // Lo escrito para él en cada punto: qué es y qué hay de nuevo.
+  const [paraElCliente, setParaElCliente] = useState({});
+  const [sinReporte, setSinReporte] = useState(false);
+  // Mandarle el checklist por correo: a quién y con qué líneas.
+  const [envio, setEnvio] = useState(null);   // { a: Set, otro, mensaje, dijo, mal }
   const [error, setError] = useState("");
   const [aTarea, setATarea] = useState(null);
   // A quién avisarle de una reunión: al del equipo que la tiene y a los de
@@ -89,6 +94,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     setTareas(r.tareas || {});
     setCompartidas(r.compartidas || new Set());
     setSinCompartir(!!r.sinCompartir);
+    setParaElCliente(r.paraElCliente || {});
+    setSinReporte(!!r.sinReporte);
     setInvitados(inv || []);
     onTareas?.(Object.values(r.tareas || {}));
     // eslint-disable-next-line
@@ -187,6 +194,17 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     if (e) setError(e);
   });
 
+  // Mandárselo por correo: lo que ve en su enlace, a quien se elija.
+  async function mandar() {
+    const otros = String(envio.otro || "").split(/[,;\s]+/).filter(Boolean);
+    setOcupado(true);
+    const r = await enviarChecklist({ lead, invitados: [...envio.a], otros, mensaje: envio.mensaje, quien: currentUser });
+    setOcupado(false);
+    if (r.error) { setEnvio(v => ({ ...v, dijo: r.error, mal: true })); return; }
+    setEnvio(v => ({ ...v, dijo: `Enviado a ${r.enviadoA.join(", ")}.`, mal: false }));
+    onBitacora?.();
+  }
+
   const avance = avanceDe(Object.values(tareas));
   const todas = [...abiertas, ...hechas];
   const vistas = todas.filter(i => compartidas.has(i.id));
@@ -202,6 +220,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
+      delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
       onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
       onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
         assignee_id: t?.responsable_externo ? `x:${t.responsable_externo}` : t?.assignee_id || "", due_date: t?.due_date || "", hora: t?.hora || "" }); }} />
@@ -438,6 +457,50 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
                 )}
               </div>
               {vistas.length > 0 && <div style={{ marginTop: 10 }}><EnlaceDelCliente lead={lead} /></div>}
+
+              {/* MANDÁRSELO. El enlace hay que acordarse de abrirlo; el correo
+                  le llega. Lleva lo mismo que ve ahí: cada punto con su
+                  descripción, en qué está y la última actualización. */}
+              {vistas.length > 0 && !envio && (
+                <button onClick={() => setEnvio({ a: new Set(invitados.filter(i => i.email && /cliente/i.test(i.rol || "")).map(i => i.id)), otro: "", mensaje: "" })}
+                  style={{ ...mini(false), padding: "5px 11px" }}>
+                  <Send size={11} /> Enviarle el checklist por correo
+                </button>
+              )}
+              {envio && (
+                <div className="envio-del-checklist" style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 10, marginTop: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 2 }}>Enviarle el checklist por correo</div>
+                  <div style={{ fontSize: 10.5, color: colors.muted, marginBottom: 7 }}>
+                    Le llegan los {vistas.length === 1 ? "1 punto" : `${vistas.length} puntos`} que ve en su enlace, con su estado y lo que le escribiste en cada uno.
+                  </div>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {invitados.map(i => (
+                      <label key={i.id} style={{ ...linea, opacity: i.email ? 1 : 0.5 }} title={i.email || "No tiene correo cargado"}>
+                        <input type="checkbox" disabled={!i.email} checked={envio.a.has(i.id)}
+                          onChange={() => setEnvio(v => { const a = new Set(v.a); a.has(i.id) ? a.delete(i.id) : a.add(i.id); return { ...v, a }; })} />
+                        {i.nombre} <span style={{ color: colors.muted }}>· {i.email ? `${i.rol || "de afuera"} · ${i.email}` : "sin correo"}</span>
+                      </label>
+                    ))}
+                    {!invitados.length && (
+                      <div style={{ fontSize: 11, color: colors.muted }}>Este proyecto no tiene gente de afuera cargada: escribí el correo abajo.</div>
+                    )}
+                  </div>
+                  <input value={envio.otro} aria-label="Otro correo" placeholder="Otro correo (o varios, separados por coma)"
+                    onChange={e => setEnvio(v => ({ ...v, otro: e.target.value }))}
+                    style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 7 }} />
+                  <textarea value={envio.mensaje} rows={2} aria-label="Unas líneas para él" placeholder="Unas líneas para él, arriba de la lista (opcional)"
+                    onChange={e => setEnvio(v => ({ ...v, mensaje: e.target.value }))}
+                    style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 5, resize: "vertical", lineHeight: 1.4 }} />
+                  {envio.dijo && <div role="status" style={{ fontSize: 11, color: envio.mal ? colors.danger : colors.success, marginTop: 6 }}>{envio.dijo}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button disabled={ocupado} onClick={() => (envio.a.size || String(envio.otro).trim()
+                      ? mandar() : setEnvio(v => ({ ...v, dijo: "Elegí a quién mandárselo o escribí un correo.", mal: true })))} style={boton(true)}>
+                      <Send size={12} /> {ocupado ? "Enviando…" : "Enviar"}
+                    </button>
+                    <button onClick={() => setEnvio(null)} style={boton(false)}>Cerrar</button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           {error && !nuevo.abierto && !pegar.abierto && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 5 }}>{error}</div>}
@@ -632,9 +695,23 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, y deja escribir lo que solo sabe
 // quien la trabajó. Los botones dicen su nombre: un ⧗ y un ✓ sueltos no le
 // enseñan a nadie cómo se usa esto.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
+  // Lo que se le escribe al cliente sobre este punto. Se guarda solo al salir
+  // del cuadro, y dice al lado que quedó guardado.
+  const [paraEl, setParaEl] = useState({ descripcion: delCliente?.descripcion || "", actualizacion: delCliente?.actualizacion || "" });
+  const [guardado, setGuardado] = useState("");
+  useEffect(() => { setParaEl({ descripcion: delCliente?.descripcion || "", actualizacion: delCliente?.actualizacion || "" }); },
+    [delCliente?.descripcion, delCliente?.actualizacion]);
+  const escribir = campo => {
+    if ((delCliente?.[campo] || "") === paraEl[campo].trim()) return;
+    setGuardado("guardando");
+    hacer(async () => {
+      const e = await escribirleAlCliente(item, { [campo]: paraEl[campo] });
+      setGuardado(e || "guardado");
+    });
+  };
   const deQuien = t => t?.responsable_externo || users.find(u => u.id === t?.assignee_id)?.name || "sin responsable";
   // Solo las que alguien tomó se anuncian como «de fulano»: decir «de sin
   // responsable» sería ruido.
@@ -721,6 +798,32 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               {tarea?.due_date && puedeCorrer && (
                 <button disabled={ocupado} onClick={() => hacer(() => ponerFecha(item, null, currentUser))} style={mini(false)}>Sin fecha</button>
               )}
+            </div>
+          )}
+
+          {/* PARA EL CLIENTE. Lo que lee él de este punto en su enlace y en el
+              correo: qué es y qué hay de nuevo. Aparte de la nota de abajo, que
+              es interna y no viaja. */}
+          {laVeElCliente && !sinReporte && (
+            <div className="para-el-cliente" style={{ background: colors.brandSoft, borderRadius: colors.radiusSm, padding: "8px 10px", display: "grid", gap: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: colors.brand, letterSpacing: 0.4 }}>LO QUE LEE EL CLIENTE</span>
+                <span role="status" style={{ fontSize: 10.5, color: guardado === "guardado" || guardado === "guardando" || !guardado ? colors.muted : colors.danger }}>
+                  {guardado === "guardando" ? "Guardando…" : guardado === "guardado" ? "Guardado" : guardado}
+                </span>
+              </div>
+              <input value={paraEl.descripcion} readOnly={!editable} aria-label="Descripción para el cliente"
+                onChange={e => { setParaEl(p => ({ ...p, descripcion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("descripcion")}
+                placeholder="Descripción: qué es este punto (opcional)"
+                style={{ ...chico, width: "100%", boxSizing: "border-box" }} />
+              <textarea value={paraEl.actualizacion} readOnly={!editable} rows={2} aria-label="Actualización para el cliente"
+                onChange={e => { setParaEl(p => ({ ...p, actualizacion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("actualizacion")}
+                placeholder="Actualización: qué hay de nuevo. Ej: llegaron dos cotizaciones, falta la de Alumina"
+                style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
+              <div style={{ fontSize: 10.5, color: colors.muted }}>
+                El estado lo ve solo: pendiente, esperando respuesta o listo.
+                {delCliente?.actualizado_at ? ` Última actualización: ${cuando(delCliente.actualizado_at)}.` : ""}
+              </div>
             </div>
           )}
 

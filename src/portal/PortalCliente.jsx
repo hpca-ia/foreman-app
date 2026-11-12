@@ -225,10 +225,22 @@ function Checklist({ lista, listas }) {
                 border: `1.5px solid ${listo ? colors.success : colors.border}`, background: listo ? colors.success : "#fff",
                 color: "#fff", fontSize: 12, lineHeight: "15px", textAlign: "center", fontWeight: 700 }}>{listo ? "✓" : ""}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
-                <div style={{ fontSize: 11.5, color: e.color, marginTop: 1 }}>
+                <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
+                {/* Qué es este punto, dicho para él. */}
+                {t.descripcion && (
+                  <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2, overflowWrap: "anywhere" }}>{t.descripcion}</div>
+                )}
+                <div style={{ fontSize: 11.5, color: e.color, marginTop: 2 }}>
                   {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
                 </div>
+                {/* Qué hay de nuevo, con su fecha: cuán fresca es la noticia. */}
+                {t.actualizacion && (
+                  <div className="actualizacion-del-punto" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, marginTop: 6, padding: "7px 10px",
+                    background: colors.bg, borderRadius: 7, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
+                    {t.actualizacion}
+                    {t.actualizado_el && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>Actualizado el {dia(t.actualizado_el)}</div>}
+                  </div>
+                )}
               </div>
             </div>
           );

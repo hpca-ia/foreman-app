@@ -20,6 +20,7 @@ const enCriollo = f => (f ? new Date(`${f}T12:00:00`).toLocaleDateString("es-EC"
 
 const SIN_170 = "Falta correr la migración 170 en Supabase.";
 export const SIN_176 = "Falta correr la migración 176 en Supabase.";
+export const SIN_178 = "Falta correr la migración 178 en Supabase.";
 export const SIN_171 = "Falta correr la migración 171 en Supabase.";
 
 /**
@@ -54,19 +55,70 @@ export async function aplicar(lead, cambio, quien) {
 export async function cargarTareas(leadId) {
   // Cuáles ve el cliente se pide aparte: si falta esa columna (migración 176)
   // la lista se sigue viendo entera, y solo no se ofrece compartir.
-  const [{ data, error }, { data: vistas, error: eVistas }] = await Promise.all([
+  // Y lo escrito para él —la descripción y la actualización de cada punto—,
+  // también aparte: sin la migración 178 se comparte igual, solo con el
+  // título y el estado.
+  const [{ data, error }, { data: vistas, error: eVistas }, { data: textos, error: eTextos }] = await Promise.all([
     supabase.from("tasks").select(COLUMNAS).eq("lead_id", leadId).order("id"),
     supabase.from("tasks").select("id").eq("lead_id", leadId).eq("visible_cliente", true),
+    supabase.from("tasks").select("id,cliente_descripcion,cliente_actualizacion,cliente_actualizado_at").eq("lead_id", leadId).eq("visible_cliente", true),
   ]);
-  if (error) return { abiertas: [], hechas: [], tareas: {}, compartidas: new Set(), sinMigracion: falta(error), error: error.message };
+  if (error) return { abiertas: [], hechas: [], tareas: {}, compartidas: new Set(), paraElCliente: {}, sinMigracion: falta(error), error: error.message };
   const { abiertas, hechas } = delProyecto(data || []);
   return {
     abiertas: abiertas.map(comoActividad), hechas: hechas.map(comoActividad),
     tareas: Object.fromEntries([...abiertas, ...hechas].map(t => [t.id, t])),
     compartidas: new Set((eVistas ? [] : vistas || []).map(t => t.id)),
     sinCompartir: !!eVistas,
+    paraElCliente: Object.fromEntries((eTextos ? [] : textos || []).map(t => [t.id, {
+      descripcion: t.cliente_descripcion || "", actualizacion: t.cliente_actualizacion || "", actualizado_at: t.cliente_actualizado_at || null,
+    }])),
+    sinReporte: !!eTextos && !eVistas,
     sinMigracion: false,
   };
+}
+
+/**
+ * Lo que se le escribe al cliente sobre un punto del checklist: qué es y qué
+ * hay de nuevo. La fecha de la actualización se pone sola cuando el texto
+ * cambia, para que él lea cuán fresca es.
+ *
+ * @param campos  { descripcion } y/o { actualizacion }: solo lo que cambió
+ * @returns null o el error
+ */
+export async function escribirleAlCliente(item, campos = {}, ahora = new Date()) {
+  const cambio = {};
+  if (campos.descripcion !== undefined) cambio.cliente_descripcion = String(campos.descripcion || "").trim() || null;
+  if (campos.actualizacion !== undefined) {
+    cambio.cliente_actualizacion = String(campos.actualizacion || "").trim() || null;
+    cambio.cliente_actualizado_at = cambio.cliente_actualizacion ? ahora.toISOString() : null;
+  }
+  if (!Object.keys(cambio).length) return null;
+  const { error } = await supabase.from("tasks").update(cambio).eq("id", item.id);
+  return error ? (falta(error) ? SIN_178 : error.message) : null;
+}
+
+/**
+ * Mandarle el checklist por correo: lo mismo que ve en su enlace.
+ *
+ * @param invitados  ids de la gente de afuera del proyecto
+ * @param otros      correos escritos a mano
+ * @returns { ok, enviadoA } o { error }
+ */
+export async function enviarChecklist({ lead, invitados = [], otros = [], mensaje = "", quien = null }) {
+  try {
+    const r = await fetch("/api/aviso?de=checklist", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leadId: lead.id, invitados, otros, mensaje,
+        quien: quien ? { id: quien.id, name: quien.name, email: quien.email || null } : null,
+      }),
+    });
+    const d = await r.json();
+    return d.ok ? { ok: true, enviadoA: d.enviadoA || [] } : { error: d.error || "No se pudo enviar." };
+  } catch (e) {
+    return { error: "No se pudo enviar: " + e.message };
+  }
 }
 
 /**

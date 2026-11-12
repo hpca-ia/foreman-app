@@ -1200,9 +1200,12 @@ async function armarInforme(lead) {
   // una por una. Se piden solo las marcadas y solo las columnas que hacen
   // falta para decir qué es y en qué está; la nota y los comentarios ni se
   // leen. Si la columna todavía no existe (migración 176), no hay lista.
-  const marcadas = await json(await rest(
-    `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true`
-    + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente&order=id`));
+  const deLaLista = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id`
+    + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente`;
+  // Con la descripción y la actualización escritas para él (migración 178);
+  // si esas columnas todavía no están, sale el título y el estado.
+  let marcadas = await json(await rest(`${deLaLista},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`));
+  if (!Array.isArray(marcadas)) marcadas = await json(await rest(deLaLista));
   const lista = listaDelCliente(marcadas);
 
   const enlaces = await firmar([
