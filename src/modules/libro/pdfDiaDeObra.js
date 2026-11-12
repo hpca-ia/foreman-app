@@ -1,11 +1,11 @@
 import { cargarPDF } from "../../lib/exportar";
-import { encajar } from "../../lib/encajar";
 import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 import { CATEGORIAS } from "./libro";
 import { seguro, partirTexto, tandasDeRenglones } from "./textoDelPdf.js";
+import { filasDeFotos, ALTO_DE_FOTO } from "./fotosDelPdf.js";
 
 // El libro de obra, en papel.
 //
@@ -153,8 +153,8 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     y += 4;
   }
 
-  // Las fotos, dos por fila. Son la mitad del valor del libro: una foto con
-  // fecha discute mejor que tres párrafos.
+  // Las fotos. Son la mitad del valor del libro: una foto con fecha discute
+  // mejor que tres párrafos.
   // LA LLAVE ERA LA EQUIVOCADA Y NO SE VEÍA NINGUNA.
   //
   // `enlacesFirmados` devuelve las direcciones indexadas por el ID de la foto
@@ -173,7 +173,8 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
   }
 
   if (conFoto.length) {
-    salto(90);
+    // El título no queda solo al pie de una hoja con las fotos en la siguiente.
+    salto(ALTO_DE_FOTO + 40);
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...TINTA);
     doc.text("FOTOS DEL DIA", M, y);
     y += 4;
@@ -181,29 +182,26 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     doc.line(M, y, ancho - M, y);
     y += 12;
 
-    // DE A DOS, Y LA FILA SE MIDE ANTES DE DIBUJARLA. Antes el alto de la fila
-    // era el de la última foto y el salto de página podía partir una fila al
-    // medio: una foto quedaba arriba, la otra en la hoja siguiente, y debajo
-    // un hueco de 170 puntos puesto a ojo.
-    const anchoFoto = (ancho - M * 2 - 14) / 2;
-    for (let i = 0; i < conFoto.length; i += 2) {
-      const fila = conFoto.slice(i, i + 2);
-      // ENTERA Y SIN DEFORMAR: el ancho de la columna con el alto recortado al
-      // tope aplastaba toda foto vertical, que es como se saca casi toda foto
-      // de obra. Se recortan los dos lados en la misma proporción.
-      const cajas = fila.map(({ img }) => encajar(img, { ancho: anchoFoto, alto: 150 }));
-      // El pie de cada foto, partido con la letra chica con la que va.
-      const pies = fila.map(({ f }) => (f.descripcion
-        ? partirTexto(doc, f.descripcion, anchoFoto, "normal", 7.5) : []));
+    // GRANDES, ENTERAS Y SIN DEFORMAR (fotosDelPdf.js). Todas las de una fila
+    // al mismo alto y cada una con el ancho de su proporción: tres verticales,
+    // dos medianas o una apaisada sola. Antes iban de a dos con un tope de 150
+    // puntos, y una foto sacada con el teléfono parado salía de tres
+    // centímetros de ancho.
+    //
+    // LA FILA SE MIDE ANTES DE DIBUJARLA, con el pie de cada foto: así el
+    // salto de hoja no parte una fila al medio.
+    for (const fila of filasDeFotos(conFoto.map(x => x.img), { ancho: ancho - M * 2 })) {
+      // El pie de cada foto, partido al ancho de SU foto y con su letra chica.
+      const pies = fila.fotos.map(p => (conFoto[p.indice].f.descripcion
+        ? partirTexto(doc, conFoto[p.indice].f.descripcion, p.w, "normal", 7.5) : []));
       const altoPie = Math.max(0, ...pies.map(l => l.length * 9));
-      const necesita = Math.max(...cajas.map(c2 => c2.h)) + altoPie + 16;
+      const necesita = fila.alto + altoPie + 16;
       if (y + necesita > alto - 50) { doc.addPage(); y = 44; }
-      fila.forEach(({ img }, k) => {
-        const x = M + k * (anchoFoto + 14);
-        doc.addImage(img.dataUrl, "JPEG", x + cajas[k].dx, y, cajas[k].w, cajas[k].h);
+      fila.fotos.forEach((p, k) => {
+        doc.addImage(conFoto[p.indice].img.dataUrl, "JPEG", M + p.x, y, p.w, p.h);
         if (pies[k].length) {
           doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-          doc.text(pies[k], x, y + cajas[k].h + 9);
+          doc.text(pies[k], M + p.x, y + p.h + 9);
         }
       });
       y += necesita;
