@@ -61,6 +61,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   // rendida ya se revisó y se firmó; dejarla en la lista obliga a bajar
   // sesenta renglones para llegar a lo de esta semana.
   const [viendoCierre, setViendoCierre] = useState(null);
+  // El cierre desde el que se abrió el reporte, si se abrió desde uno.
+  const [reporteDeCierre, setReporteDeCierre] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [novaLeyendo, setNovaLeyendo] = useState(false);
   const [gastoForm, setGastoForm] = useState({ descripcion:"", proveedor:"", ruc:"", numero_factura:"", monto:"", fecha:new Date().toISOString().split("T")[0], tipo:"factura", notas:"", presupuesto_id:"" });
@@ -973,13 +975,14 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
           {subVista==="detalle"&&<>
             {admin&&<button onClick={()=>setSubVista("anticipo")} style={{background:"#7C3AED",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Anticipo</button>}
             <button onClick={()=>setSubVista("gasto")} style={{background:"var(--brand)",border:"none",borderRadius:8,padding:"7px 12px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ Gasto</button>
-            <button onClick={()=>setSubVista("reporte")} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Reporte</button>
+            <button onClick={()=>{setReporteDeCierre(null);setSubVista("reporte");}} style={{background:"var(--neutral-soft)",border:"none",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Reporte</button>
           </>}
         </div>
       </div>
 
       {subVista==="reporte"&&cajaActiva&&(
-        <ReporteCaja caja={cajaActiva} gastos={gastos} anticipos={anticipos} cierres={cierres} usuarios={users}/>
+        <ReporteCaja key={reporteDeCierre||"periodo"} caja={cajaActiva} gastos={gastos} anticipos={anticipos} cierres={cierres} usuarios={users}
+          cierreInicial={reporteDeCierre}/>
       )}
 
       {borrarCaja&&(
@@ -1398,6 +1401,12 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                   <button onClick={()=>setViendoCierre(String(f.cierre.id)===String(viendoCierre)?null:String(f.cierre.id))}
                     style={{background:"none",border:"none",color:"var(--brand)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
                     {String(f.cierre.id)===String(viendoCierre)?"ocultar":"ver sus gastos"}
+                  </button>
+                  {/* EL REPORTE DE ESTE CIERRE, desde el cierre: su Excel, su
+                      PDF con las facturas y el correo. */}
+                  <button onClick={()=>{setReporteDeCierre(String(f.cierre.id));setSubVista("reporte");}}
+                    style={{background:"none",border:"none",color:"var(--brand)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                    reporte
                   </button>
                   {/* REABRIR CUALQUIERA, no solo el último: deshacerlos en
                       orden obliga a tocar el bueno para llegar al malo. */}

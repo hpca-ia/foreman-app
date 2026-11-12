@@ -6,13 +6,17 @@ import { inputStyle } from "../../components/ui/Input";
 import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
 import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
 import { enlaceArchivo, enlacesArchivos, subirArchivo } from "../../lib/archivos";
-import { paraElReporte } from "./lista.js";
-import { resumenDeLaCaja } from "./resumen.js";
+import { contenidoDelReporte, cierresParaElegir } from "./reporte.js";
 
 const primerDiaMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0]; };
 const hoy = () => new Date().toISOString().split("T")[0];
 
-export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usuarios = [] }) {
+// POR PERÍODO O POR CIERRE (qué entra en cada uno: reporte.js). `cierreInicial`
+// es el cierre desde el que se abrió el reporte, si se abrió desde uno.
+export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usuarios = [], cierreInicial = null }) {
+  const elegibles = useMemo(() => cierresParaElegir(cierres), [cierres]);
+  const [modo, setModo] = useState(cierreInicial ? "cierre" : "periodo");
+  const [cierreId, setCierreId] = useState(cierreInicial ? String(cierreInicial) : "");
   const [desde, setDesde] = useState(primerDiaMes());
   const [hasta, setHasta] = useState(hoy());
   const [generando, setGenerando] = useState("");
@@ -21,29 +25,22 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
   const [extra, setExtra] = useState("");
   const [contenido, setContenido] = useState("completo");
 
-  const enRango = (f) => (!desde || f >= desde) && (!hasta || f <= hasta);
+  const porCierre = modo === "cierre";
+  // Sin elegir, el último: es el que se acaba de rendir.
+  const elegido = cierreId || (elegibles[0] ? String(elegibles[0].id) : "");
+  const r = useMemo(() => contenidoDelReporte({ gastos, anticipos, cierres, modo, desde, hasta, cierreId: elegido }),
+    [gastos, anticipos, cierres, modo, desde, hasta, elegido]);
+  const { gastosF, devueltosF, anticiposF, reposiciones, cierresF, totalGastos, totalAnticipos, totalDevueltos, totalReposicion, queEs, difiere } = r;
 
-  const { gastosF, devueltosF, anticiposF, cierresF, totalGastos, totalAnticipos, totalDevueltos, queEs } = useMemo(() => {
-    const delPeriodo = gastos.filter(g => enRango(g.fecha)).sort((a, b) => a.fecha.localeCompare(b.fecha));
-    // LOS DEVUELTOS AL RESIDENTE QUEDAN FUERA. Están mal cargados y hasta que
-    // se corrijan no son un gasto de la caja: sumarlos era cobrarle a la obra
-    // un papel que administración rechazó. Van aparte, para que no se pierdan.
-    const { gastos: gastosF, devueltos: devueltosF } = paraElReporte(delPeriodo);
-    const anticiposF = anticipos.filter(a => enRango(a.fecha)).sort((a, b) => a.fecha.localeCompare(b.fecha));
-    const cierresF = cierres.filter(c => enRango(String(c.hasta || "").slice(0, 10)))
-      .sort((a, b) => (Number(a.numero) || 0) - (Number(b.numero) || 0));
-    // Qué es cada anticipo —el fondo, la reposición de qué cierre— dicho en el papel.
-    const dice = new Map(resumenDeLaCaja({ anticipos, cierres }).filter(f => f.anticipo).map(f => [f.anticipo.id, f.dice]));
-    return {
-      gastosF, devueltosF, anticiposF, cierresF,
-      totalGastos: gastosF.reduce((s, g) => s + (Number(g.monto) || 0), 0),
-      totalAnticipos: anticiposF.reduce((s, a) => s + (Number(a.monto) || 0), 0),
-      totalDevueltos: devueltosF.reduce((s, g) => s + (Number(g.monto) || 0), 0),
-      queEs: a => dice.get(a.id) || "Anticipo",
-    };
-  }, [gastos, anticipos, cierres, desde, hasta]);
-
-  const periodo = `${desde || "inicio"} a ${hasta || "hoy"}`;
+  const periodo = r.etiqueta;
+  // Cómo se nombra en el papel y en el archivo.
+  const rotulo = porCierre ? periodo : `Período: ${periodo}`;
+  const archivo = `Caja Chica - ${caja.proyecto_nombre} - ${r.nombre}`;
+  // Lo firmado contra lo de hoy, cuando no coinciden.
+  const aviso = difiere
+    ? `Este cierre se firmó con ${difiere.firmado.gastos} ${difiere.firmado.gastos === 1 ? "gasto" : "gastos"} por $${money(difiere.firmado.total)} y $${money(difiere.firmado.entregado)} entregados. `
+      + `Hoy tiene ${difiere.hoy.gastos} por $${money(difiere.hoy.total)} y $${money(difiere.hoy.entregado)} entregados: algo se corrigió después de cerrar.`
+    : "";
   const conAdjunto = gastosF.filter(g => g.archivo_url).length;
 
   async function generarExcel() {
@@ -51,7 +48,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
     try {
       const filasGastos = [
         [`CAJA CHICA — ${caja.proyecto_nombre}`],
-        [`Responsable: ${caja.responsable_nombre}`, "", `Período: ${periodo}`],
+        [`Responsable: ${caja.responsable_nombre}`, "", rotulo],
         [],
         ["FECHA", "PROVEEDOR", "RUC", "N° FACTURA", "DESCRIPCIÓN", "CAPÍTULO", "TIPO", "MONTO", "ESTADO", "SUBIÓ", "ADJUNTO"],
         ...gastosF.map(g => [g.fecha, g.proveedor || "", g.ruc || "", g.numero_factura || "",
@@ -70,18 +67,28 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       ];
 
       const filasAnticipos = [
-        [`ANTICIPOS — ${caja.proyecto_nombre}`],
-        [`Período: ${periodo}`],
+        [`${porCierre ? "ENTREGADO PARA ESTA VUELTA" : "ANTICIPOS"} — ${caja.proyecto_nombre}`],
+        [rotulo],
         [],
         ["FECHA", "QUÉ ES", "DESCRIPCIÓN", "ENTREGADO POR", "MONTO"],
         ...anticiposF.map(a => [a.fecha, queEs(a), a.descripcion || "", a.entregado_por_nombre || "", Number(a.monto) || 0]),
         [],
-        ["", "", "", "TOTAL ANTICIPOS", totalAnticipos],
+        ["", "", "", porCierre ? "TOTAL ENTREGADO" : "TOTAL ANTICIPOS", totalAnticipos],
+        // La reposición no es plata de esta vuelta: es la que llegó después,
+        // por lo que se rindió en ella.
+        ...(porCierre ? [
+          [],
+          ["REPOSICIÓN DE ESTE CIERRE"],
+          ...(reposiciones.length
+            ? [...reposiciones.map(a => [a.fecha, queEs(a), a.descripcion || "", a.entregado_por_nombre || "", Number(a.monto) || 0]),
+               ["", "", "", "TOTAL REPUESTO", totalReposicion]]
+            : [["Todavía no hay una reposición cargada después de este cierre."]]),
+        ] : []),
       ];
 
       const filasCierres = [
-        [`CIERRES DE CAJA — ${caja.proyecto_nombre}`],
-        [`Período: ${periodo}`],
+        [`${porCierre ? "EL CIERRE" : "CIERRES DE CAJA"} — ${caja.proyecto_nombre}`],
+        [rotulo],
         [],
         ["N°", "HASTA", "GASTOS", "ENTREGADO", "GASTADO", "SALDO", "CERRÓ", "NOTA"],
         ...cierresF.map(c => [c.numero, c.hasta, c.gastos, Number(c.total_abonado) || 0, Number(c.total_gastado) || 0,
@@ -92,24 +99,35 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
         ["RESUMEN DE CAJA CHICA", ""],
         [caja.proyecto_nombre, ""],
         [`Responsable: ${caja.responsable_nombre}`, ""],
-        [`Período: ${periodo}`, ""],
+        [rotulo, ""],
         [],
         ["Concepto", "Valor"],
-        ["Anticipos recibidos en el período", totalAnticipos],
-        ["Gastos del período", totalGastos],
-        ["Diferencia del período", totalAnticipos - totalGastos],
-        ...(devueltosF.length ? [["Devueltos al residente, fuera de la cuenta", totalDevueltos]] : []),
-        ...cierresF.map(c => [`Cierre ${c.numero} hasta el ${c.hasta}: gastado`, Number(c.total_gastado) || 0]),
+        ...(porCierre ? [
+          ["Entregado para esta vuelta", totalAnticipos],
+          ["Gastado en esta vuelta", totalGastos],
+          ["Saldo del cierre", totalAnticipos - totalGastos],
+          [reposiciones.length ? `Reposición recibida (${reposiciones.map(a => a.fecha).join(", ")})` : "Reposición: todavía no cargada", totalReposicion],
+          ...(devueltosF.length ? [["Devueltos al residente después de cerrar, fuera de la cuenta", totalDevueltos]] : []),
+          ...(r.cierre?.cerrado_nombre ? [[`Cerró: ${r.cierre.cerrado_nombre}`, ""]] : []),
+          ...(r.cierre?.nota ? [[`Nota del cierre: ${r.cierre.nota}`, ""]] : []),
+          ...(aviso ? [[aviso, ""]] : []),
+        ] : [
+          ["Anticipos recibidos en el período", totalAnticipos],
+          ["Gastos del período", totalGastos],
+          ["Diferencia del período", totalAnticipos - totalGastos],
+          ...(devueltosF.length ? [["Devueltos al residente, fuera de la cuenta", totalDevueltos]] : []),
+          ...cierresF.map(c => [`Cierre ${c.numero} hasta el ${c.hasta}: gastado`, Number(c.total_gastado) || 0]),
+        ]),
         [],
         ["Saldo total entregado (histórico)", Number(caja.saldo_total) || 0],
         ["Total gastado (histórico)", Number(caja.saldo_gastado) || 0],
         ["Saldo disponible", Number(caja.saldo_disponible) || 0],
       ];
 
-      await exportarExcel(`Caja Chica - ${caja.proyecto_nombre} - ${desde}`, [
+      await exportarExcel(archivo, [
         { nombre: "Gastos", filas: filasGastos, anchos: [11, 28, 14, 18, 42, 24, 12, 12, 12, 16, 9] },
-        { nombre: "Anticipos", filas: filasAnticipos, anchos: [11, 30, 40, 20, 12] },
-        ...(cierresF.length ? [{ nombre: "Cierres", filas: filasCierres, anchos: [5, 11, 8, 12, 12, 12, 18, 30] }] : []),
+        { nombre: porCierre ? "Entregado" : "Anticipos", filas: filasAnticipos, anchos: [11, 30, 40, 20, 12] },
+        ...(cierresF.length ? [{ nombre: porCierre ? "Cierre" : "Cierres", filas: filasCierres, anchos: [5, 11, 8, 12, 12, 12, 18, 30] }] : []),
         { nombre: "Resumen", filas: filasResumen, anchos: [36, 16] },
       ]);
     } finally { setGenerando(""); }
@@ -117,7 +135,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
 
   async function datosPDF(modo = contenido) {
     const bloques = [{
-        titulo: "Gastos del período",
+        titulo: porCierre ? `Gastos del cierre N° ${r.cierre?.numero}` : "Gastos del período",
         columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
         filas: gastosF.map(g => [g.fecha, g.proveedor || "—", g.numero_factura || "—",
           (g.descripcion || "").slice(0, 55), (g.capitulo || "—").slice(0, 28), g.estado || "pendiente", money(g.monto)]),
@@ -135,15 +153,23 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       }
       if (anticiposF.length) {
         bloques.push({
-          titulo: "Anticipos recibidos",
+          titulo: porCierre ? "Entregado para esta vuelta" : "Anticipos recibidos",
           columnas: ["Fecha", "Qué es", "Descripción", "Entregado por", "Monto"],
           filas: anticiposF.map(a => [a.fecha, queEs(a), a.descripcion || "—", a.entregado_por_nombre || "—", money(a.monto)]),
           anchos: { 4: { halign: "right" } },
         });
       }
+      if (reposiciones.length) {
+        bloques.push({
+          titulo: "Reposición de este cierre",
+          columnas: ["Fecha", "Qué es", "Descripción", "Entregado por", "Monto"],
+          filas: reposiciones.map(a => [a.fecha, queEs(a), a.descripcion || "—", a.entregado_por_nombre || "—", money(a.monto)]),
+          anchos: { 4: { halign: "right" } },
+        });
+      }
       if (cierresF.length) {
         bloques.push({
-          titulo: "Cierres de caja del período",
+          titulo: porCierre ? "El cierre, como se firmó" : "Cierres de caja del período",
           columnas: ["N°", "Hasta", "Gastos", "Entregado", "Gastado", "Saldo", "Cerró"],
           filas: cierresF.map(c => [String(c.numero), c.hasta, String(c.gastos ?? ""), money(c.total_abonado),
             money(c.total_gastado), money(c.saldo), c.cerrado_nombre || "—"]),
@@ -162,14 +188,21 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       const sufijo = soloAnexos ? " (anexos)" : modo === "reporte" ? "" : "";
 
       return {
-        nombreArchivo: `Caja Chica - ${caja.proyecto_nombre} - ${desde}${sufijo}`,
+        nombreArchivo: `${archivo}${sufijo}`,
         titulo: soloAnexos ? `Anexos — Caja Chica ${caja.proyecto_nombre}` : `Caja Chica — ${caja.proyecto_nombre}`,
-        pie: { elemento: `${soloAnexos ? "Anexos de caja chica" : "Caja chica"} · período ${periodo}`, proyecto: caja.proyecto_nombre },
-        subtitulo: `Responsable: ${caja.responsable_nombre} · Período ${periodo}`,
+        pie: { elemento: `${soloAnexos ? "Anexos de caja chica" : "Caja chica"} · ${porCierre ? periodo : `período ${periodo}`}`, proyecto: caja.proyecto_nombre },
+        subtitulo: `Responsable: ${caja.responsable_nombre} · ${porCierre ? periodo : `Período ${periodo}`}${aviso ? ` · ${aviso}` : ""}`,
         indiceAdjuntos: soloAnexos,
         bloques: soloAnexos ? [] : bloques,
         adjuntos: modo === "reporte" ? [] : adjuntos,
-        resumen: soloAnexos ? [] : [
+        // Un cierre es una foto: el saldo que hoy tiene la caja no va en ella.
+        resumen: soloAnexos ? [] : porCierre ? [
+          { label: "Entregado", valor: `$${money(totalAnticipos)}` },
+          { label: "Gastado", valor: `$${money(totalGastos)}`, color: [185, 28, 28] },
+          ...(devueltosF.length ? [{ label: "Devueltos, fuera", valor: `$${money(totalDevueltos)}` }] : []),
+          { label: "Saldo del cierre", valor: `$${money(totalAnticipos - totalGastos)}` },
+          { label: "Reposición", valor: reposiciones.length ? `$${money(totalReposicion)}` : "sin cargar", color: [21, 128, 61] },
+        ] : [
           { label: "Anticipos período", valor: `$${money(totalAnticipos)}` },
           { label: "Gastos período", valor: `$${money(totalGastos)}`, color: [185, 28, 28] },
           ...(devueltosF.length ? [{ label: "Devueltos, fuera", valor: `$${money(totalDevueltos)}` }] : []),
@@ -208,7 +241,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       let pdfBase64 = base64, pdfUrl = null;
       if (pesoMB > 8) {
         setProgreso("El PDF es grande, subiéndolo...");
-        const ruta = `caja-${caja.id}/reporte-${desde}-${Date.now()}.pdf`;
+        const ruta = `caja-${caja.id}/reporte-${porCierre ? `cierre-${r.cierre?.numero}` : desde}-${Date.now()}.pdf`;
         const { error } = await subirArchivo(ruta, doc.output("blob"), { contentType: "application/pdf" });
         pdfBase64 = null;
         // Un mes: el enlace va por correo y tiene que seguir abriendo después.
@@ -225,12 +258,16 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
           tipo: "reporte_caja_chica",
           datos: {
             nombre: caja.responsable_nombre, proyecto: caja.proyecto_nombre, periodo,
-            recibido: caja.saldo_total, gastado: caja.saldo_gastado, saldo: caja.saldo_disponible,
+            // Por cierre, los tres números son los de esa vuelta; por período,
+            // los de la caja entera, como siempre.
+            recibido: porCierre ? totalAnticipos : caja.saldo_total,
+            gastado: porCierre ? totalGastos : caja.saldo_gastado,
+            saldo: porCierre ? totalAnticipos - totalGastos : caja.saldo_disponible,
             gastos: gastosF.map((g, i) => ({ fecha: g.fecha, descripcion: g.descripcion,
               montoTotal: g.monto, tieneFactura: !!g.archivo_url, fotoUrl: fotos[i] })),
             emailAsistente: admins, emailResponsable: responsable?.email || null,
             destinatariosExtra: extras,
-            pdfBase64, pdfUrl, pdfNombre: `Caja Chica - ${caja.proyecto_nombre} - ${desde}.pdf`,
+            pdfBase64, pdfUrl, pdfNombre: `${archivo}.pdf`,
           },
         }),
       });
@@ -244,37 +281,74 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
   }
 
   const lbl = { fontSize: 11, color: colors.muted, display: "block", marginBottom: 4 };
+  const pastilla = { border: "none", borderRadius: 20, padding: "5px 12px", fontSize: 11, cursor: "pointer", fontWeight: 600, fontFamily: colors.font };
 
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 12 }}>Reporte de caja chica</div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-        <div><label style={lbl}>DESDE</label><input type="date" value={desde} onChange={e => setDesde(e.target.value)} style={inputStyle} /></div>
-        <div><label style={lbl}>HASTA</label><input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={inputStyle} /></div>
-      </div>
+      {/* POR PERÍODO O POR CIERRE. Solo se ofrece si la caja ya tiene alguno. */}
+      {elegibles.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          {[["periodo", "Por período"], ["cierre", "Por cierre"]].map(([m, txt]) => (
+            <button key={m} onClick={() => setModo(m)} aria-pressed={modo === m}
+              style={{ ...pastilla, background: modo === m ? colors.brand : colors.neutralSoft, color: modo === m ? "#fff" : colors.inkSoft }}>
+              {txt}
+            </button>
+          ))}
+        </div>
+      )}
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {[
-          ["Este mes", primerDiaMes(), hoy()],
-          ["Mes pasado", new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toISOString().split("T")[0],
-            new Date(new Date().getFullYear(), new Date().getMonth(), 0).toISOString().split("T")[0]],
-          ["Todo", "", hoy()],
-        ].map(([txt, d, h]) => (
-          <button key={txt} onClick={() => { setDesde(d); setHasta(h); }}
-            style={{ background: desde === d ? colors.brandSoft : colors.neutralSoft, border: "none", borderRadius: 20, padding: "5px 12px", fontSize: 11, color: desde === d ? colors.brand : colors.inkSoft, cursor: "pointer", fontWeight: 600, fontFamily: colors.font }}>
-            {txt}
-          </button>
-        ))}
-      </div>
+      {porCierre ? (
+        <div style={{ marginBottom: 14 }}>
+          <label style={lbl} htmlFor="reporte-cierre">CIERRE</label>
+          <select id="reporte-cierre" value={elegido} onChange={e => setCierreId(e.target.value)} style={inputStyle}>
+            {elegibles.map(c => (
+              <option key={c.id} value={String(c.id)}>
+                {`Cierre N° ${c.numero} — hasta el ${String(c.hasta || "").slice(0, 10)} · ${c.gastos} ${Number(c.gastos) === 1 ? "gasto" : "gastos"} · $${money(c.total_gastado)}`}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
+            Sale lo que se rindió en esa vuelta, no un rango de fechas: lo devuelto al residente o cargado después quedó para otro cierre.
+          </div>
+        </div>
+      ) : (<>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+          <div><label style={lbl}>DESDE</label><input type="date" value={desde} onChange={e => setDesde(e.target.value)} style={inputStyle} /></div>
+          <div><label style={lbl}>HASTA</label><input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={inputStyle} /></div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {[
+            ["Este mes", primerDiaMes(), hoy()],
+            ["Mes pasado", new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toISOString().split("T")[0],
+              new Date(new Date().getFullYear(), new Date().getMonth(), 0).toISOString().split("T")[0]],
+            ["Todo", "", hoy()],
+          ].map(([txt, d, h]) => (
+            <button key={txt} onClick={() => { setDesde(d); setHasta(h); }}
+              style={{ ...pastilla, background: desde === d ? colors.brandSoft : colors.neutralSoft, color: desde === d ? colors.brand : colors.inkSoft }}>
+              {txt}
+            </button>
+          ))}
+        </div>
+      </>)}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginBottom: 14 }}>
         <Mini label="Gastos" valor={gastosF.length} moneda={false} />
         <Mini label="Total gastado" valor={totalGastos} destacado />
-        <Mini label="Anticipos" valor={totalAnticipos} />
+        <Mini label={porCierre ? "Entregado" : "Anticipos"} valor={totalAnticipos} />
+        {porCierre && <Mini label="Saldo del cierre" valor={totalAnticipos - totalGastos} />}
+        {porCierre && <Mini label="Reposición" valor={reposiciones.length ? totalReposicion : "sin cargar"} moneda={reposiciones.length > 0} />}
         {devueltosF.length > 0 && <Mini label="Devueltos, fuera" valor={totalDevueltos} />}
         <Mini label="Con factura" valor={`${conAdjunto}/${gastosF.length}`} moneda={false} />
       </div>
+
+      {aviso && (
+        <div role="status" style={{ fontSize: 11.5, color: colors.warning, background: colors.warningSoft, borderRadius: colors.radiusSm, padding: "8px 10px", marginBottom: 14 }}>
+          {aviso}
+        </div>
+      )}
 
       <SelectorContenido valor={contenido} onChange={setContenido} conAdjunto={conAdjunto} />
 
@@ -288,7 +362,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
         </Button>
       </div>
 
-      {!gastosF.length && <div style={{ fontSize: 11, color: colors.muted, marginTop: 10 }}>No hay gastos en este período.</div>}
+      {!gastosF.length && <div style={{ fontSize: 11, color: colors.muted, marginTop: 10 }}>{porCierre ? "Ese cierre no tiene gastos." : "No hay gastos en este período."}</div>}
 
       <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: 16, paddingTop: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 6 }}>Enviar por correo</div>
