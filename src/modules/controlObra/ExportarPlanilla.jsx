@@ -5,7 +5,7 @@ import Button from "../../components/ui/Button";
 import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import { exportarExcel, exportarPDF, money } from "../../lib/exportar";
 import { enlacesArchivos } from "../../lib/archivos";
-import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
+import SelectorContenido, { CONTENIDO, contenidoQueSale } from "../../components/ui/SelectorContenido";
 
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
@@ -291,7 +291,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
         .map((f, i) => ({ url: urls[i], titulo: `${f.razon_social || "Factura"} — ${f.numero_factura || f.fecha} — $${money(f.total)}` }))
         .filter(a => a.url);
 
-      const soloAnexos = conFacturas && contenido === "anexos";
+      const soloAnexos = conFacturas && sale === "anexos";
 
       await exportarPDF({
         nombreArchivo: `${obra.nombre} - ${nombrePlanilla}${soloAnexos ? " (anexos)" : ""}`,
@@ -309,13 +309,16 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
           { label: "Avance", valor: `${(totales.pct * 100).toFixed(1)}%` },
         ],
         bloques: soloAnexos ? [] : bloquesControl,
-        adjuntos: !conFacturas || contenido === "reporte" ? [] : adjuntos,
+        adjuntos: !conFacturas || sale === "reporte" ? [] : adjuntos,
         onProgreso: (i, t) => setProgreso(`Adjuntando facturas ${i}/${t}...`),
       });
     } finally { setGenerando(""); setProgreso(""); }
   }
 
   const conAdjunto = delPeriodo.filter(f => f.archivo_url).length;
+  // Lo que va a salir: lo elegido, o solo el reporte si no hay ninguna factura
+  // escaneada. La elección no se pierde (SelectorContenido).
+  const sale = contenidoQueSale(contenido, conAdjunto);
 
   return (
     <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 16 }}>
@@ -360,7 +363,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
         </Button>
         <Button variant="primary" onClick={generarPDF} disabled={!!generando}>
           {generando === "pdf" ? <Loader2 size={14} /> : <FileText size={14} />}
-          {generando === "pdf" ? (progreso || "Generando...") : conFacturas ? `PDF · ${CONTENIDO[contenido].label}` : "PDF"}
+          {generando === "pdf" ? (progreso || "Generando...") : conFacturas ? `PDF · ${CONTENIDO[sale].label}` : "PDF"}
         </Button>
       </div>
 

@@ -3,7 +3,7 @@ import { FileSpreadsheet, FileText, Loader2, Mail, Check } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import SelectorContenido, { CONTENIDO } from "../../components/ui/SelectorContenido";
+import SelectorContenido, { CONTENIDO, contenidoQueSale } from "../../components/ui/SelectorContenido";
 import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
 import { enlaceArchivo, enlacesArchivos, subirArchivo } from "../../lib/archivos";
 import { contenidoDelReporte, cierresParaElegir } from "./reporte.js";
@@ -42,6 +42,9 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       + `Hoy tiene ${difiere.hoy.gastos} por $${money(difiere.hoy.total)} y $${money(difiere.hoy.entregado)} entregados: algo se corrigió después de cerrar.`
     : "";
   const conAdjunto = gastosF.filter(g => g.archivo_url).length;
+  // Lo que va a salir en el PDF: lo elegido, o solo el reporte si en lo que se
+  // pide no hay ningún sustento.
+  const sale = contenidoQueSale(contenido, conAdjunto);
 
   async function generarExcel() {
     setGenerando("excel");
@@ -133,7 +136,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
     } finally { setGenerando(""); }
   }
 
-  async function datosPDF(modo = contenido) {
+  async function datosPDF(modo = sale) {
     const bloques = [{
         titulo: porCierre ? `Gastos del cierre N° ${r.cierre?.numero}` : "Gastos del período",
         columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
@@ -209,7 +212,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
           { label: "Diferencia", valor: `$${money(totalAnticipos - totalGastos)}` },
           { label: "Saldo disponible", valor: `$${money(caja.saldo_disponible)}`, color: [21, 128, 61] },
         ],
-        onProgreso: (i, t) => setProgreso(`Adjuntando facturas ${i}/${t}...`),
+        onProgreso: (i, t) => setProgreso(`Adjuntando sustentos ${i}/${t}...`),
       };
   }
 
@@ -233,7 +236,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       }
 
       setProgreso("Armando el PDF...");
-      const doc = await construirPDF(await datosPDF(contenido === "anexos" ? "completo" : contenido));
+      const doc = await construirPDF(await datosPDF(sale === "anexos" ? "completo" : sale));
       const base64 = doc.output("datauristring").split(",")[1];
       const pesoMB = (base64.length * 0.75) / (1024 * 1024);
 
@@ -358,7 +361,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
         </Button>
         <Button variant="primary" onClick={generarPDF} disabled={!!generando || !gastosF.length}>
           {generando === "pdf" ? <Loader2 size={14} /> : <FileText size={14} />}
-          {generando === "pdf" ? (progreso || "Generando...") : `PDF · ${CONTENIDO[contenido].label}`}
+          {generando === "pdf" ? (progreso || "Generando...") : `PDF · ${CONTENIDO[sale].label}`}
         </Button>
       </div>
 

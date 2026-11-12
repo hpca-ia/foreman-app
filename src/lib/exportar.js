@@ -6,6 +6,7 @@
 // bajaba igual el motor de Excel y el de PDF: la mayor parte del peso, para
 // algo que usa una persona una vez por semana.
 import { pieDePdf } from "./piePdf";
+import { esPdf, paginasDelPdf, incrustarPdfs, comoDocumento } from "./adjuntosDelPdf";
 
 let XLSX, jsPDF, autoTable;
 const cargarExcel = async () => { XLSX = XLSX || await import("xlsx"); return XLSX; };
@@ -49,7 +50,7 @@ export async function exportarExcel(nombreArchivo, hojas) {
  * @param subtitulo   línea bajo el título (obra, período…)
  * @param resumen     [{label, valor}] tarjetas de totales
  * @param bloques     [{titulo, columnas, filas, anchos?, filasDestacadas?, destacarSinNegrita?, nota?}]
- * @param adjuntos    [{titulo, url}] imágenes de facturas
+ * @param adjuntos    [{titulo, url}] los sustentos: fotos o PDF (adjuntosDelPdf.js)
  * @param indiceAdjuntos  agrega un índice de los anexos antes de las imágenes
  */
 export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = [], adjuntos = [], indiceAdjuntos = false, onProgreso, tono, pie }) {
@@ -137,24 +138,55 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
     });
   }
 
-  // Facturas escaneadas, una por página
+  // LOS SUSTENTOS, en el orden de la lista: cada foto en su hoja, y cada hoja
+  // de un sustento en PDF en la suya. Antes solo entraban las fotos y un PDF
+  // se salteaba sin decir nada (adjuntosDelPdf.js).
+  const titular = texto => {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...TINTA);
+    doc.text(texto, 40, 42);
+  };
+  const porIncrustar = [];
   let n = 0;
   for (const adj of adjuntos) {
     n++;
     onProgreso?.(n, adjuntos.length);
-    const img = await cargarImagen(adj.url);
-    if (!img) continue;
-    doc.addPage();
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...TINTA);
-    doc.text(adj.titulo || `Factura ${n}`, 40, 42);
-    const maxW = ancho - 80, maxH = doc.internal.pageSize.getHeight() - 100;
-    const escala = Math.min(maxW / img.width, maxH / img.height, 1);
-    doc.addImage(img.dataUrl, "JPEG", 40, 56, img.width * escala, img.height * escala);
+    const nombre = adj.titulo || `Factura ${n}`;
+    const a = await cargarAdjunto(adj.url);
+    if (!a) {
+      // No se pudo bajar o no es ni foto ni PDF: se dice, en su lugar.
+      doc.addPage(); titular(nombre);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...GRIS);
+      doc.text("Este sustento no se pudo incluir: no se pudo abrir el archivo. Está cargado en FOREMAN, en el gasto.", 40, 62);
+      continue;
+    }
+    if (a.tipo === "imagen") {
+      doc.addPage();
+      titular(nombre);
+      const maxW = ancho - 80, maxH = doc.internal.pageSize.getHeight() - 100;
+      const escala = Math.min(maxW / a.width, maxH / a.height, 1);
+      doc.addImage(a.dataUrl, "JPEG", 40, 56, a.width * escala, a.height * escala);
+      continue;
+    }
+    // UN PDF: una hoja del reporte por cada hoja suya, parada o acostada como
+    // ella, con el mismo título. La hoja del sustento se dibuja al final.
+    a.paginas.forEach((hoja, i) => {
+      doc.addPage("a4", hoja.ancho > hoja.alto ? "landscape" : "portrait");
+      titular(a.paginas.length > 1 ? `${nombre} · hoja ${i + 1} de ${a.paginas.length}` : nombre);
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+      porIncrustar.push({
+        pagina: doc.getNumberOfPages(), origen: a.origen, indice: i, hoja,
+        hueco: { x: 40, arriba: 56, ancho: W - 80, alto: H - 100 },
+      });
+    });
   }
 
   // Qué es, de qué proyecto y cuándo se emitió, en cada hoja.
   pieDePdf(doc, { elemento: pie?.elemento ?? titulo, proyecto: pie?.proyecto, margen: 14, abajo: 7 });
-  return doc;
+  if (!porIncrustar.length) return doc;
+  // Con sustentos en PDF, el documento final lo cierra pdf-lib. Se devuelve
+  // con las mismas salidas que el de jsPDF: guardar, blob y base64.
+  const paginas = doc.getNumberOfPages();
+  return comoDocumento(await incrustarPdfs(doc.output("arraybuffer"), porIncrustar), paginas);
 }
 
 /** Construye el PDF y lo descarga. */
@@ -163,13 +195,26 @@ export async function exportarPDF(opciones) {
   doc.save(`${limpiarNombre(opciones.nombreArchivo)}.pdf`);
 }
 
-/** Descarga la imagen y la pasa a JPEG para que jsPDF pueda incrustarla. */
-async function cargarImagen(url) {
+/**
+ * Baja un sustento y dice qué es.
+ *
+ * @returns { tipo: "imagen", dataUrl, width, height } — pasada a JPEG para
+ *          que jsPDF pueda incrustarla—, { tipo: "pdf", origen, paginas } o
+ *          null si no se pudo bajar o no es ninguna de las dos cosas
+ */
+async function cargarAdjunto(url) {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
     const blob = await res.blob();
-    if (!blob.type.startsWith("image/")) return null; // los PDF adjuntos no se incrustan
+    if (!String(blob.type || "").startsWith("image/")) {
+      // UN PDF TAMBIÉN ES UN SUSTENTO. Se reconoce por cómo empieza el
+      // archivo y no solo por el tipo que diga el depósito.
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (blob.type !== "application/pdf" && !esPdf(bytes)) return null;
+      const { origen, paginas } = await paginasDelPdf(bytes);
+      return paginas.length ? { tipo: "pdf", origen, paginas } : null;
+    }
     const bitmap = await createImageBitmap(blob);
     const escala = Math.min(1, 1400 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
@@ -177,7 +222,7 @@ async function cargarImagen(url) {
     canvas.height = Math.round(bitmap.height * escala);
     canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close?.();
-    return { dataUrl: canvas.toDataURL("image/jpeg", 0.8), width: canvas.width, height: canvas.height };
+    return { tipo: "imagen", dataUrl: canvas.toDataURL("image/jpeg", 0.8), width: canvas.width, height: canvas.height };
   } catch {
     return null;
   }

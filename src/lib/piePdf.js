@@ -50,12 +50,15 @@ export function queEs(elemento, proyecto) {
  */
 export function pieDePdf(doc, { elemento, proyecto, emitido = new Date(), abajo = 7, margen = 12, color = [140, 138, 132] } = {}) {
   const k = 72 / 25.4 / doc.internal.scaleFactor;        // milímetros → unidad del documento
-  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-  const x1 = margen * k, x2 = W - margen * k, y = H - abajo * k;
   const izquierda = limpio(queEs(elemento, proyecto));
   const total = doc.internal.getNumberOfPages();
   for (let i = 1; i <= total; i++) {
     doc.setPage(i);
+    // EL TAMAÑO ES EL DE CADA HOJA. Un reporte puede traer hojas paradas entre
+    // las acostadas —los sustentos en PDF van como son—, y con el tamaño de
+    // una sola el pie de las otras quedaba fuera del papel.
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const x1 = margen * k, x2 = W - margen * k, y = H - abajo * k;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(...color);
