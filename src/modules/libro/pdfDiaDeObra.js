@@ -4,7 +4,7 @@ import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 import { CATEGORIAS } from "./libro";
-import { seguro, partirTexto, tandasDeRenglones } from "./textoDelPdf.js";
+import { seguro, partirTexto, tandasDeRenglones } from "../../lib/textoDelPdf.js";
 import { filasDeFotos, ALTO_DE_FOTO } from "./fotosDelPdf.js";
 import { paraElPapel } from "./reapertura.js";
 

@@ -1,4 +1,4 @@
-// EL TEXTO DEL LIBRO EN EL PAPEL: que entre en la hoja, a lo ancho y a lo alto.
+// EL TEXTO EN EL PAPEL: que entre en la hoja, a lo ancho y a lo alto.
 //
 // jsPDF no corta solo: escribe cada renglón hasta donde llegue y sigue fuera
 // del papel. Para que no pase hay que partir el texto antes, y la cuenta de
@@ -13,25 +13,39 @@
 // porque la letra anterior era la del título.
 //
 // Acá partir y poner la letra son una sola cosa: no se puede hacer lo uno sin
-// lo otro. Sin pantalla ni base: se puede probar (pruebas/textoDelLibro.test.mjs).
+// lo otro. Sin pantalla ni base: se puede probar (pruebas/textoDelLibro.test.mjs
+// y pruebas/textoDeLosPdf.test.mjs).
+//
+// NACIÓ EN EL LIBRO Y ES DE TODOS LOS PDF. La revisión del presupuesto tenía
+// el mismo error —el título de cada punto se medía con la letra de las filas
+// del punto de arriba— y el acta lo tenía al revés, en los pies de foto.
 
-// jsPDF escribe en WinAnsi: las comillas curvas y las rayas salen como basura,
-// y un tabulador —llega al pegar desde Word— no tiene ancho que se pueda medir.
-export const seguro = t => String(t ?? "")
-  .replace(/[«»]/g, '"').replace(/[—–]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
-  .replace(/\t/g, " ").replace(/ /g, " ");
+// LO QUE jsPDF MIDE DE UNA MANERA Y DIBUJA DE OTRA. Al tabulador —llega al
+// pegar desde Word o desde Excel— lo cuenta como un signo y lo escribe como
+// ocho espacios: en letra de 10, cada uno corre el renglón 17 puntos más allá
+// de donde se midió, y con tres el renglón ya pasó el margen. Y el espacio
+// duro no deja partir entre las dos palabras que une.
+export const medible = t => String(t ?? "").replace(/\t/g, " ").replace(/\u00a0/g, " ");
+
+// Y además, a máquina de escribir: comillas rectas y guiones en lugar de las
+// comillas curvas y las rayas. El papel que escribe sus rayas a propósito —el
+// acta, la solicitud de compra, el presupuesto— parte con `medible` y nada más.
+export const seguro = t => medible(t)
+  .replace(/[«»]/g, '"').replace(/[—–]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 
 /**
  * El texto partido en renglones que entran en `ancho`, con la letra con la que
  * se va a escribir. Deja esa letra puesta: lo que se escriba enseguida sale
  * con la misma con la que se midió.
  *
- * @param estilo  "normal" | "bold" | "italic"
- * @param letra   el tamaño, en puntos
+ * @param estilo   "normal" | "bold" | "italic"
+ * @param letra    el tamaño, en puntos
+ * @param limpiar  `seguro`, o `medible` para el papel que conserva sus rayas.
+ *                 Se limpia ANTES de medir: lo que se mide es lo que se escribe.
  */
-export function partirTexto(doc, texto, ancho, estilo = "normal", letra = 9.5) {
+export function partirTexto(doc, texto, ancho, estilo = "normal", letra = 9.5, limpiar = seguro) {
   doc.setFont("helvetica", estilo); doc.setFontSize(letra);
-  return doc.splitTextToSize(seguro(texto), ancho);
+  return doc.splitTextToSize(limpiar(texto), ancho);
 }
 
 /**

@@ -4,6 +4,7 @@ import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { encajar } from "../../lib/encajar";
 import { logoEmpresa } from "../../lib/marca";
+import { medible, partirTexto } from "../../lib/textoDelPdf.js";
 
 // El acta en PDF: el que se imprime, se firma y se archiva.
 //
@@ -79,8 +80,11 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
   };
   const parrafo = (t, { sangria = 0, negrita = false, color = NEGRO } = {}) => {
     if (!t) return;
-    doc.setFont("helvetica", negrita ? "bold" : "normal"); doc.setFontSize(9.5); doc.setTextColor(...color);
-    const lineas = doc.splitTextToSize(String(t), ANCHO - M * 2 - sangria);
+    // `partirTexto` pone la letra y parte con ella, y antes saca los
+    // tabuladores: un tema pegado desde Word los trae, y cada uno corría el
+    // renglón seis milímetros más allá de donde se había medido.
+    const lineas = partirTexto(doc, t, ANCHO - M * 2 - sangria, negrita ? "bold" : "normal", 9.5, medible);
+    doc.setTextColor(...color);
     lineas.forEach(l => {
       if (y > ALTO - 22) { doc.addPage(); y = 18; }
       doc.text(l, M + sangria, y); y += 4.6;
@@ -217,8 +221,11 @@ export async function pdfActa({ acta, obra, asistentes = [], temas = [], comprom
       // saca casi toda foto de obra— salía gorda y baja. `encajar` recorta los
       // dos lados en la misma proporción y la centra en su columna.
       const cajas = fila.map(({ img }) => encajar(img, { ancho: anchoFoto, alto: 70 }));
+      // EL PIE, CON SU LETRA: la de 7,5 con la que se escribe. Se partía con
+      // la que hubiera quedado puesta —la negrita de 8,5 del título— y el
+      // renglón doblaba a cuatro quintos del ancho de la foto.
       const pies = fila.map(({ f }) => (f.descripcion
-        ? doc.splitTextToSize(String(f.descripcion), anchoFoto) : []));
+        ? partirTexto(doc, f.descripcion, anchoFoto, "normal", 7.5, medible) : []));
       const altoPie = Math.max(0, ...pies.map(l => l.length * 3.6));
       const necesita = Math.max(...cajas.map(c => c.h)) + altoPie + 7;
       if (y + necesita > ALTO - 24) { doc.addPage(); y = 18; }

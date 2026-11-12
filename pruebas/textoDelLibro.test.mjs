@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { seguro, partirTexto, tandasDeRenglones } from "../src/modules/libro/textoDelPdf.js";
+import { seguro, partirTexto, tandasDeRenglones } from "../src/lib/textoDelPdf.js";
 
 const { jsPDF } = createRequire(import.meta.url)("jspdf");
 const hoja = () => new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });

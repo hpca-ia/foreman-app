@@ -3,6 +3,7 @@ import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
+import { medible, partirTexto, tandasDeRenglones } from "../../lib/textoDelPdf.js";
 
 // La solicitud de compra en una hoja: lo que se lee para decidir.
 //
@@ -60,10 +61,11 @@ export async function pdfSolicitud({ solicitud, obra, pidio, historial = [], adj
 
   // LO QUE SE PIDE, GRANDE. Es lo único que se lee en la vista previa del
   // adjunto en un teléfono.
-  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...NEGRO);
-  doc.splitTextToSize(String(solicitud.descripcion || ""), ANCHO - M * 2).forEach(l => {
-    doc.text(l, M, y); y += 6;
-  });
+  // `partirTexto` pone la letra y parte con ella, y antes saca los tabuladores
+  // de lo que se pegó desde Word o Excel (lib/textoDelPdf.js cuenta por qué).
+  const pedido = partirTexto(doc, solicitud.descripcion, ANCHO - M * 2, "bold", 13, medible);
+  doc.setTextColor(...NEGRO);
+  pedido.forEach(l => { doc.text(l, M, y); y += 6; });
   y += 1;
 
   if (solicitud.urgente) {
@@ -75,12 +77,20 @@ export async function pdfSolicitud({ solicitud, obra, pidio, historial = [], adj
   const dato = (k, v) => {
     if (!v) return;
     if (y > ALTO - 30) { doc.addPage(); y = 18; }
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GRIS);
-    doc.text(k, M, y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...NEGRO);
-    const lineas = doc.splitTextToSize(String(v), ANCHO - M * 2 - 42);
-    lineas.forEach((l, i) => { doc.text(l, M + 42, y + i * 5); });
-    y += Math.max(6.5, lineas.length * 5 + 1.5);
+    const lineas = partirTexto(doc, v, ANCHO - M * 2 - 42, "normal", 10, medible);
+    // A LO ALTO TAMBIÉN. Un "para qué" largo se escribía renglón tras renglón
+    // sin mirar dónde terminaba la hoja: entero acá o en la siguiente, y si no
+    // entra ni en una hoja vacía, sigue en la otra.
+    tandasDeRenglones({ cuantos: lineas.length, y, paso: 5, techo: 18, piso: ALTO - 15 }).forEach((t, n) => {
+      if (t.hojaNueva) { doc.addPage(); y = 18; }
+      if (n === 0) {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...GRIS);
+        doc.text(k, M, y);
+      }
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...NEGRO);
+      lineas.slice(t.desde, t.hasta).forEach(l => { doc.text(l, M + 42, y); y += 5; });
+    });
+    y += 1.5;
   };
 
   dato("Monto estimado", solicitud.monto_estimado ? plata(solicitud.monto_estimado) : "sin estimar");
@@ -123,8 +133,13 @@ export async function pdfSolicitud({ solicitud, obra, pidio, historial = [], adj
     doc.text("LO QUE SE DIJO", M, y); y += 5;
     dicho.forEach(h => {
       if (y > ALTO - 26) { doc.addPage(); y = 18; }
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...NEGRO);
-      doc.splitTextToSize(String(h.comentario), ANCHO - M * 2).forEach(l => { doc.text(l, M, y); y += 4.6; });
+      const lineas = partirTexto(doc, h.comentario, ANCHO - M * 2, "normal", 9.5, medible);
+      doc.setTextColor(...NEGRO);
+      // Con su firma (`cola`): que el nombre no quede solo en la otra hoja.
+      tandasDeRenglones({ cuantos: lineas.length, y, paso: 4.6, techo: 18, piso: ALTO - 15, cola: 6 }).forEach(t => {
+        if (t.hojaNueva) { doc.addPage(); y = 18; }
+        lineas.slice(t.desde, t.hasta).forEach(l => { doc.text(l, M, y); y += 4.6; });
+      });
       doc.setFontSize(8); doc.setTextColor(...GRIS);
       doc.text(`${h.usuario_nombre || "—"}  ·  ${dia(h.created_at)}`, M, y); y += 6;
     });

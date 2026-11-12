@@ -4,6 +4,9 @@ import { pieDePdf } from "../../lib/piePdf";
 // sirve igual para meter un plano o la foto de una consulta en una hoja.
 import { logoParaPDF, fotoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
+// `seguro` es el de todos los PDF: además de comillas y rayas saca los
+// tabuladores, que jsPDF mide como un signo y escribe como ocho espacios.
+import { seguro } from "../../lib/textoDelPdf.js";
 
 // El plan de la semana en PDF: el que se imprime y se pega en la obra.
 //
@@ -28,10 +31,6 @@ const comoSeLee = f => {
   const d = new Date(`${String(f).slice(0, 10)}T12:00:00`);
   return `${DIAS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
 };
-
-// jsPDF escribe en WinAnsi: las comillas curvas y las rayas salen como basura.
-const seguro = t => String(t ?? "")
-  .replace(/[«»]/g, '"').replace(/[—–]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 
 /**
  * @param dias   [{ fecha, horario, personal, permisos, consideraciones }]

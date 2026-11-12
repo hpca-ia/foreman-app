@@ -3,6 +3,7 @@ import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
+import { seguro, partirTexto } from "../../lib/textoDelPdf.js";
 
 // LO QUE EL EXCEL TRAE MAL, EN UNA HOJA PARA MANDAR.
 //
@@ -22,8 +23,6 @@ const ROJO = [185, 28, 28];
 const AMBAR = [146, 64, 14];
 const LINEA = [225, 225, 222];
 
-const seguro = t => String(t ?? "")
-  .replace(/[«»]/g, '"').replace(/[—–]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 const hoy = () => new Date().toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" });
 
 /**
@@ -55,14 +54,16 @@ export async function pdfRevision({ nombre, archivo, advertencias = [], quien },
   const errores = advertencias.filter(a => a.nivel === "error");
   const avisos = advertencias.filter(a => a.nivel !== "error");
 
-  doc.setFontSize(9); doc.setTextColor(60, 60, 60);
-  const intro = doc.splitTextToSize(seguro(
+  // TODO TEXTO LARGO SE PARTE CON `partirTexto`, que pone la letra y parte con
+  // ella (lib/textoDelPdf.js cuenta por qué).
+  const intro = partirTexto(doc,
     `Archivo revisado: ${archivo || "el Excel del presupuesto"}. ${hoy()}.`
     + `${quien ? ` Revisado por ${quien}.` : ""}`
     + `\n\nEstos son los puntos que no cuadran en la planilla, con el número de fila de Excel al lado de cada uno.`
     + ` No son correcciones hechas: son cosas para revisar y corregir en el archivo original.`
-    + ` Los marcados como ERROR cambian el total; los marcados como AVISO no cambian la plata pero complican el control de la obra.`),
-    ANCHO - M * 2);
+    + ` Los marcados como ERROR cambian el total; los marcados como AVISO no cambian la plata pero complican el control de la obra.`,
+    ANCHO - M * 2, "normal", 9);
+  doc.setTextColor(60, 60, 60);
   doc.text(intro, M, y);
   y += intro.length * 4.4 + 5;
 
@@ -85,17 +86,24 @@ export async function pdfRevision({ nombre, archivo, advertencias = [], quien },
     y += 5;
 
     lista.forEach((a, i) => {
-      const texto = doc.splitTextToSize(seguro(`${i + 1}. ${a.titulo}`), ANCHO - M * 2 - 4);
+      // CON SU LETRA, la de 9 con la que se escribe. Se partía con la que
+      // hubiera quedado de lo anterior: desde el segundo punto, la de 7,8 de
+      // las filas del punto de arriba. Cada renglón salía un sexto más largo
+      // que su ancho —hasta 27 mm—: adentro del margen derecho y, si el corte
+      // caía justo, 11 mm fuera del papel.
+      const texto = partirTexto(doc, `${i + 1}. ${a.titulo}`, ANCHO - M * 2 - 4, "normal", 9);
       salto(texto.length * 4.2 + 8);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(30, 30, 30);
+      doc.setTextColor(30, 30, 30);
       doc.text(texto, M + 4, y);
       y += texto.length * 4.2 + 1;
 
       // LAS FILAS, QUE ES LO QUE SE VA A BUSCAR EN EL EXCEL.
       (a.filas || []).slice(0, 40).forEach(f => {
-        const linea = doc.splitTextToSize(seguro(`fila ${f.fila}: ${f.texto}`), ANCHO - M * 2 - 12);
+        // Y la primera fila de cada punto se medía con la de 9 del título:
+        // partía antes de llegar al margen, distinto de las que le seguían.
+        const linea = partirTexto(doc, `fila ${f.fila}: ${f.texto}`, ANCHO - M * 2 - 12, "normal", 7.8);
         salto(linea.length * 3.8 + 3);
-        doc.setFontSize(7.8); doc.setTextColor(...GRIS);
+        doc.setTextColor(...GRIS);
         doc.text(linea, M + 9, y);
         y += linea.length * 3.8 + 0.6;
       });

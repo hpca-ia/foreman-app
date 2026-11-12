@@ -29,6 +29,7 @@ async function cargarPDF() {
 }
 import { money } from "../../lib/exportar";
 import { pieDePdf, momentoDeEmision } from "../../lib/piePdf";
+import { medible } from "../../lib/textoDelPdf.js";
 import { totalesPresupuesto, etiquetaHonorario } from "./honorarios";
 import { subtotalesPorEtapa, tieneEtapas, SIN_ETAPA } from "./etapas";
 import { etiquetaUnidad } from "../../lib/unidades";
@@ -318,7 +319,10 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   // separan, los renglones que empiezan con guión son los cambios —con
   // sangría francesa, para que la segunda línea no parezca otro cambio— y el
   // TOTAL del final va resaltado, que es lo primero que se busca.
-  const renglonesCarta = String(carta || "").split("\n").map(x => x.trimEnd());
+  // Sin tabuladores, que llegan al pegar desde Word o Excel: jsPDF los mide
+  // como un signo y los escribe como ocho espacios, y el renglón se pasa del
+  // margen (lib/textoDelPdf.js). La letra ya está puesta antes de cada partir.
+  const renglonesCarta = medible(carta || "").split("\n").map(x => x.trimEnd());
   if (renglonesCarta.some(x => x.trim())) {
     doc.setFont("times", "bold"); doc.setFontSize(10.5); doc.setTextColor(...t.primario);
     espaciado("MEMORIA DE CAMBIOS", M, y, { espacio: 1.4 });
@@ -598,7 +602,7 @@ export async function pdfPresupuesto({ presupuesto, capitulos, items, formato = 
   }
 
   // ── Notas y condiciones, numeradas ──
-  const lista = notas.map(x => String(x || "").trim()).filter(Boolean);
+  const lista = notas.map(x => medible(x || "").trim()).filter(Boolean);   // sin tabuladores, como la carta
   if (lista.length) {
     if (y > H - 110) { doc.addPage(); y = 56; }
     doc.setFont(t.fuenteTitulo, "bold"); doc.setFontSize(9.5); doc.setTextColor(...t.acento);

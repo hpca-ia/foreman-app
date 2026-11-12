@@ -7,6 +7,7 @@
 // algo que usa una persona una vez por semana.
 import { pieDePdf } from "./piePdf";
 import { esPdf, paginasDelPdf, incrustarPdfs, comoDocumento } from "./adjuntosDelPdf";
+import { medible, partirTexto, tandasDeRenglones } from "./textoDelPdf.js";
 
 let XLSX, jsPDF, autoTable;
 const cargarExcel = async () => { XLSX = XLSX || await import("xlsx"); return XLSX; };
@@ -114,10 +115,17 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
     // no son gastos como los otros, y quien recibe el documento —el cliente—
     // no tiene por qué deducirlo de la palabra del encabezado. Se escribe.
     if (b.nota) {
-      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...TINTA);
-      const lineas = doc.splitTextToSize(b.nota, 515);
-      doc.text(lineas, 40, y);
-      y += lineas.length * 9 + 4;
+      const lineas = partirTexto(doc, b.nota, 515, "normal", 7.5, medible);
+      doc.setTextColor(...TINTA);
+      // NO ENCIMA DEL PIE. Cuando el cuadro termina justo al borde de la
+      // hoja, el segundo renglón de la nota se montaba sobre el pie de la
+      // página: si no entra debajo de su cuadro, va arriba en la siguiente.
+      for (const t of tandasDeRenglones({ cuantos: lineas.length, y, paso: 9, techo: 42, piso: doc.internal.pageSize.getHeight() - 18 })) {
+        if (t.hojaNueva) { doc.addPage(); y = 42; }
+        doc.text(lineas.slice(t.desde, t.hasta), 40, y);
+        y += (t.hasta - t.desde) * 9;
+      }
+      y += 4;
     }
     y += 14;
     if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 42; }

@@ -3,6 +3,7 @@ import { pieDePdf } from "../../lib/piePdf";
 import { honorariosDe, comoSeDice, pctQueCorresponde } from "./honorariosDeOrden.js";
 import { impactoDelPlazo } from "./impactoDelPlazo.js";
 import { adicionesPorClase, contratadoDe } from "./clasesDePartida.js";
+import { medible, partirTexto, tandasDeRenglones } from "../../lib/textoDelPdf.js";
 
 // Las órdenes de cambio en PDF, con el formato que la oficina ya firma.
 //
@@ -46,12 +47,13 @@ const tabla = (autoTable, doc, opciones) => autoTable(doc, {
   didParseCell: d => { limpiarCeldas(d); opciones.didParseCell?.(d); },
 });
 
-const seguro = t => String(t ?? "")
+// `medible` saca además el tabulador y el espacio duro, que jsPDF mide de una
+// manera y dibuja de otra: en el párrafo y en las celdas de las tablas.
+const seguro = t => medible(t)
   .replace(/[\u2212\u2013\u2014]/g, "-")     // menos, raya corta, raya larga
   .replace(/[\u2018\u2019\u2032]/g, "'")
   .replace(/[\u201C\u201D]/g, '"')
-  .replace(/\u2026/g, "...")
-  .replace(/\u00a0/g, " ");
+  .replace(/\u2026/g, "...");
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, " / ") : "");
 
 /** Una imagen remota a JPEG, que es lo único que jsPDF incrusta sin pelear. */
@@ -146,11 +148,13 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
   };
 
   const parrafo = texto => {
-    doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(55, 65, 81);
-    const lineas = doc.splitTextToSize(texto || "—", util);
+    // Se limpia ANTES de partir: lo que se mide es lo que se escribe. Se
+    // partía el texto crudo y se escribía el limpio.
+    const lineas = partirTexto(doc, texto || "—", util, "normal", 9, seguro);
+    doc.setTextColor(55, 65, 81);
     lineas.forEach(l => {
       if (y > 780) { doc.addPage(); y = 44; }
-      doc.text(seguro(l), margen, y);
+      doc.text(l, margen, y);
       y += 12;
     });
     y += 4;
@@ -368,12 +372,22 @@ async function pintarOrden({ doc, autoTable, orden, lineas = [], fotos = [], enl
         const escala = Math.min(util / img.ancho, 300 / img.alto);
         const w = img.ancho * escala, h = img.alto * escala;
         if (py + h > 780) { doc.addPage(); py = 44; }
+        // LA FOTO Y SU PIE, JUNTOS Y ARRIBA DEL MARGEN. Solo se medía la foto:
+        // con una que terminaba al borde, el pie de cuatro renglones se
+        // escribía encima del pie de la hoja, y el de siete, fuera del papel.
+        // El bloque es la foto con su pie: si acá no entra y en una hoja vacía
+        // sí, pasan los dos (por eso el techo cuenta la foto).
+        const pie = f.descripcion ? partirTexto(doc, f.descripcion, util, "normal", 8, seguro) : [];
+        const tandas = tandasDeRenglones({ cuantos: pie.length, y: py + h + 6, paso: 10, techo: 44 + h + 6, piso: 820 });
+        if (tandas[0]?.hojaNueva) { doc.addPage(); py = 44; }
         doc.addImage(img.dataUrl, "JPEG", margen, py, w, h);
         py += h + 6;
-        if (f.descripcion) {
-          doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...GRIS);
-          doc.splitTextToSize(f.descripcion, util).forEach(l => { doc.text(seguro(l), margen, py); py += 10; });
-        }
+        doc.setTextColor(...GRIS);
+        tandas.forEach((t, n) => {
+          // Un pie más largo que la hoja sigue en la otra, ya sin la foto.
+          if (n && t.hojaNueva) { doc.addPage(); py = 44; }
+          pie.slice(t.desde, t.hasta).forEach(l => { doc.text(l, margen, py); py += 10; });
+        });
         py += 12;
       } catch {
         // Una imagen que no se pudo traer no puede tumbar el documento entero.
