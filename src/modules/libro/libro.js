@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { rutaDelPdfDelDia } from "./pdfGuardado.js";
 import { hoyEnObra, HORA_DE_CIERRE, HORA_LIMITE_ESCRITURA, sePuedeEscribirEl } from "./jornada.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 import { subirArchivo } from "../../lib/archivos";
@@ -284,7 +285,9 @@ export async function avanceDeLaObra(leadId) {
 
 /** Guarda el PDF del día en el depósito y lo cuelga del día. */
 export async function guardarPdfDelDia(dia, blob) {
-  const ruta = `libro/${dia.lead_id}/dia-${String(dia.fecha).slice(0, 10)}-${Date.now()}.pdf`;
+  // Con la versión del dibujo en el nombre: así se sabe después si este PDF
+  // sirve o hay que rehacerlo (pdfGuardado.js).
+  const ruta = rutaDelPdfDelDia(dia);
   const archivo = new File([blob], `libro-${String(dia.fecha).slice(0, 10)}.pdf`, { type: "application/pdf" });
   const { ruta: guardada, error } = await subirArchivo(ruta, archivo);
   if (error) return { error: error.message || "No se pudo guardar el PDF del día." };

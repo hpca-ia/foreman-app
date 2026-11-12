@@ -9,6 +9,7 @@ import {
   guardarClima, subirFoto, borrarFoto, enlacesDeFotos, avanceDeLaObra, hoyEnObra, estadoDelDia, reabrirDia,
   abrirDiaPasado, cerrarEImprimir, guardarPdfDelDia } from "./libro";
 import { pdfDiaDeObra } from "./pdfDiaDeObra";
+import { pdfAlDia } from "./pdfGuardado.js";
 import { abrirArchivo } from "../../lib/archivos";
 
 // El día de obra, pensado para el teléfono y para una mano sucia de cemento.
@@ -217,12 +218,14 @@ export default function DiaDeObra({ lead, fecha, currentUser, puedeEscribir = tr
           {/* EL PDF DEL DÍA, A MANO. El guardado al cerrar es el que vale; este
               botón es para mirarlo, imprimirlo o mandarlo por WhatsApp. Si el
               día se cerró sin PDF —se cayó la red, lo cerró el reloj— lo arma
-              ahora y lo deja guardado. */}
+              ahora y lo deja guardado. Y SI EL GUARDADO ES DE UN DIBUJO VIEJO
+              —el de los renglones cortados— también: se rehace con los mismos
+              datos y se guarda el nuevo (pdfGuardado.js). */}
           {dia && (
             <Button variant="outline" size="sm" disabled={ocupado} onClick={async () => {
               setOcupado(true); setError("");
               try {
-                if (dia.pdf_url) { await abrirArchivo(dia.pdf_url); }
+                if (pdfAlDia(dia)) { await abrirArchivo(dia.pdf_url); }
                 else {
                   await pdfDiaDeObra({ dia, obra: lead.nombre, entradas, fotos, enlaces }, "abrir");
                   if (!abierto) {
