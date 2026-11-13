@@ -102,6 +102,41 @@ test("una que se hizo y se volvió a abrir no dice «hecha» de más", () => {
   assert.deepEqual(h.map(f => f.texto), ["Se agregó al checklist", "Se marcó como hecha", "Se volvió a abrir"]);
 });
 
+test("agendar es un paso: elegir el día y enseguida la hora deja un renglón, no dos", () => {
+  const h = historialDe({
+    tarea: madeval, nombreDe,
+    movimientos: [
+      { id: 1, detalle: '"MADEVAL" queda para el 18 nov', autor_nombre: "Hernan Cueva", created_at: "2026-11-13T15:00:00Z" },
+      { id: 2, detalle: '"MADEVAL" queda para el 18 nov a las 10:00', autor_nombre: "Hernan Cueva", created_at: "2026-11-13T15:00:20Z" },
+    ],
+  });
+  assert.deepEqual(h.map(f => f.texto), ["Se agregó al checklist", "Queda para el 18 nov a las 10:00"]);
+});
+
+test("correr la fecha otro día, u otra persona, sí son dos renglones: eso es historia", () => {
+  const h = historialDe({
+    tarea: madeval, nombreDe,
+    movimientos: [
+      { id: 1, detalle: '"MADEVAL" queda para el 18 nov a las 10:00', autor_nombre: "Hernan Cueva", created_at: "2026-11-13T15:00:00Z" },
+      { id: 2, detalle: '"MADEVAL" queda para el 20 nov a las 16:00', autor_nombre: "Hernan Cueva", created_at: "2026-11-17T21:00:00Z" },
+      { id: 3, detalle: '"MADEVAL" queda para el 21 nov', autor_nombre: "Johanna", created_at: "2026-11-17T21:01:00Z" },
+    ],
+  });
+  assert.deepEqual(h.map(f => f.texto), ["Se agregó al checklist", "Queda para el 18 nov a las 10:00", "Queda para el 20 nov a las 16:00", "Queda para el 21 nov"]);
+});
+
+test("una anotación entre el día y la hora no se pierde ni junta nada", () => {
+  const h = historialDe({
+    tarea: madeval, nombreDe,
+    movimientos: [
+      { id: 1, detalle: '"MADEVAL" queda para el 18 nov', autor_nombre: "Hernan Cueva", created_at: "2026-11-13T15:00:00Z" },
+      { id: 2, detalle: '"MADEVAL" queda para el 18 nov a las 10:00', autor_nombre: "Hernan Cueva", created_at: "2026-11-13T15:02:00Z" },
+    ],
+    comentarios: [{ id: 9, texto: "Confirmó Andrea.", autor_nombre: "Hernan Cueva", created_at: "2026-11-13T15:01:00Z" }],
+  });
+  assert.deepEqual(h.map(f => f.texto), ["Se agregó al checklist", "Queda para el 18 nov", "Confirmó Andrea.", "Queda para el 18 nov a las 10:00"]);
+});
+
 test("lo que se lee en la fila cerrada es lo último que alguien ANOTÓ", () => {
   assert.equal(ultimaAnotacion([]), null);
   assert.equal(ultimaAnotacion(undefined), null);

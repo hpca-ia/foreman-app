@@ -255,13 +255,25 @@ export async function asegurarTarea(item, datos) {
   return { tarea: data };
 }
 
-/** Ponerle o correrle la fecha a una tarea, de un toque. */
-export async function ponerFecha(item, fecha, quien) {
-  const { error } = await supabase.from("tasks").update({ due_date: fecha || null }).eq("id", item.id);
+/**
+ * Ponerle o correrle la fecha a una tarea, de un toque.
+ *
+ * Con `hora` es agendar: «la reunión con Madeval, el 18 a las 10». El punto
+ * sigue siendo el mismo —no nace una tarea aparte para la reunión— y el paso
+ * queda en su historial.
+ *
+ * @param hora  "10:00", o null para todo el día. Si no se pasa, la hora que
+ *              tuviera no se toca. Sin día no hay hora: se va con él.
+ */
+export async function ponerFecha(item, fecha, quien, hora = undefined) {
+  const campos = { due_date: fecha || null };
+  if (!fecha) campos.hora = null;
+  else if (hora !== undefined) campos.hora = hora || null;
+  const { error } = await supabase.from("tasks").update(campos).eq("id", item.id);
   if (error) return error.message;
   await anotar(item.lead_id, {
-    detalle: fecha ? `"${item.texto}" queda para el ${enCriollo(fecha)}` : `"${item.texto}" se queda sin fecha`, quien,
-    extra: { task_id: item.id },
+    detalle: fecha ? `"${item.texto}" queda para el ${enCriollo(fecha)}${campos.hora ? ` a las ${campos.hora}` : ""}` : `"${item.texto}" se queda sin fecha`,
+    quien, extra: { task_id: item.id },
   });
   return null;
 }

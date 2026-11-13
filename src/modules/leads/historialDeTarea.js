@@ -78,11 +78,26 @@ export function historialDe({ tarea, comentarios = [], movimientos = [], nombreD
     filas.push({ id: "hecha", cuando: tarea.hecha_at, quien: tarea.hecha_por || null, texto: "Se marcó como hecha", automatico: true });
   }
   // En orden; lo que empata en el minuto queda como llegó.
-  return filas
+  const enOrden = filas
     .map((f, i) => ({ f, i, t: new Date(f.cuando).getTime() || 0 }))
-    .sort((a, b) => a.t - b.t || a.i - b.i)
+    .sort((a, b) => a.t - b.t || a.i - b.i);
+  // AGENDAR ES UN PASO, NO DOS. Se elige el día y enseguida la hora, y la
+  // bitácora anota las dos cosas: «queda para el 18 nov» y «queda para el 18
+  // nov a las 10:00». En el historial vale la última: la primera no dice nada
+  // que la segunda no diga.
+  return enOrden
+    .filter((x, k) => {
+      const sigue = enOrden[k + 1];
+      return !(sigue && ES_FECHA.test(x.f.texto) && ES_FECHA.test(sigue.f.texto) && x.f.automatico && sigue.f.automatico
+        && x.f.quien === sigue.f.quien && sigue.t - x.t <= DE_UNA_SENTADA);
+    })
     .map(x => x.f);
 }
+
+// Los renglones que solo dicen para cuándo queda, ya dichos adentro.
+const ES_FECHA = /^(Queda para el |Se queda sin fecha$)/;
+// Cuánto puede pasar entre elegir el día y elegir la hora para que sea el mismo gesto.
+const DE_UNA_SENTADA = 5 * 60 * 1000;
 
 /**
  * Lo último que alguien anotó: es lo que se lee en la fila sin abrirla, para

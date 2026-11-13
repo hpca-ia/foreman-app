@@ -746,12 +746,24 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   // Lo que se está por anotar: «llamé, quedan en confirmar la reunión».
   const [paso, setPaso] = useState("");
   const [dijo, setDijo] = useState("");
+  // EL PASO TAMBIÉN PUEDE SER LA ACTUALIZACIÓN QUE LEE EL CLIENTE. El punto
+  // tiene, para él, descripción, actualización y estado; y casi siempre lo que
+  // hay de nuevo es justo el paso que se acaba de dar —«reunión agendada para
+  // el 18»—. Con un tilde se escribe una vez y vale para los dos. Sin tilde no
+  // viaja: lo anotado es interno salvo que se diga lo contrario.
+  const [queLoLea, setQueLoLea] = useState(false);
+  const puedeLeerlo = laVeElCliente && !sinReporte;
   const anotarPaso = () => {
     if (!paso.trim()) { setDijo("Escribí qué pasó."); return; }
     setDijo("");
     hacer(async () => {
       const e = await anotarEnLaTarea(item, paso, currentUser);
-      if (e) setDijo(e); else setPaso("");
+      if (e) { setDijo(e); return; }
+      if (queLoLea && puedeLeerlo) {
+        const e2 = await escribirleAlCliente(item, { actualizacion: paso });
+        if (e2) { setDijo(`Quedó anotado, pero no se actualizó lo que lee el cliente: ${e2}`); return; }
+      }
+      setPaso(""); setQueLoLea(false);
     });
   };
   // Lo que se le escribe al cliente sobre este punto. Se guarda solo al salir
@@ -879,6 +891,12 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                     <Plus size={11} /> Anotar
                   </button>
                 </div>
+                {puedeLeerlo && (
+                  <label style={{ ...linea, fontSize: 11, marginTop: 5 }}>
+                    <input type="checkbox" checked={queLoLea} onChange={e => setQueLoLea(e.target.checked)} />
+                    Que también lo lea el cliente <span style={{ color: colors.muted }}>· queda como la actualización de este punto</span>
+                  </label>
+                )}
                 <div style={{ fontSize: 10, color: dijo ? colors.danger : colors.muted, marginTop: 3 }}>
                   {dijo || "Queda con la fecha y tu nombre. Le llega por correo a quien lo tiene a cargo."}
                 </div>
@@ -898,6 +916,21 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                     style={{ ...mini(String(tarea?.due_date || "").slice(0, 10) === f), opacity: puedeCorrer ? 1 : 0.5 }}>{txt}</button>
                 );
               })}
+              {/* AGENDAR, ACÁ MISMO. Los tres botones alcanzan para «mañana»;
+                  una reunión es un día cualquiera a una hora. Antes eso pedía
+                  abrir «Cambiar detalles», al pie de toda la lista. El punto
+                  sigue siendo el mismo: no nace otra tarea para la reunión. */}
+              <input type="date" value={String(tarea?.due_date || "").slice(0, 10)} disabled={ocupado || !puedeCorrer} aria-label="Para qué día"
+                title={puedeCorrer ? "Otro día" : "La fecha la mueve el Director o quien tenga ese permiso"}
+                onChange={e => { const f = e.target.value || null; hacer(() => ponerFecha(item, f, currentUser, f ? tarea?.hora || null : null)); }}
+                style={{ ...chico, width: 128, padding: "2px 6px", fontSize: 11.5, opacity: puedeCorrer ? 1 : 0.5 }} />
+              <select value={tarea?.hora || ""} disabled={ocupado || !puedeCorrer || !tarea?.due_date} aria-label="A qué hora"
+                title={tarea?.due_date ? "A qué hora" : "Primero el día"}
+                onChange={e => { const h = e.target.value || null; hacer(() => ponerFecha(item, String(tarea.due_date).slice(0, 10), currentUser, h)); }}
+                style={{ ...chico, width: 104, padding: "2px 6px", fontSize: 11.5, opacity: tarea?.due_date && puedeCorrer ? 1 : 0.5 }}>
+                <option value="">Todo el día</option>
+                {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
               {tarea?.due_date && puedeCorrer && (
                 <button disabled={ocupado} onClick={() => hacer(() => ponerFecha(item, null, currentUser))} style={mini(false)}>Sin fecha</button>
               )}
