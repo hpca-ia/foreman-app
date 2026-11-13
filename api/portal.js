@@ -34,14 +34,29 @@ import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 
 const json = async r => { try { return await r.json(); } catch { return null; } };
 
-/** La llave convertida en proyecto. Null si no existe o si está apagado. */
+/**
+ * La llave convertida en proyecto. Null si no existe o si está apagado.
+ *
+ * EL ENLACE DEL CLIENTE NO ABRIÓ NUNCA. Acá se pedía `cliente_nombre`, una
+ * columna que `leads` no tiene: la base contestaba con un error, el error se
+ * leía como «no hay ningún proyecto con esa llave», y el cliente veía «Este
+ * enlace no está disponible» con el enlace recién generado y siete puntos del
+ * checklist a su vista. Nadie lo había notado porque RES BG fue el primer
+ * proyecto al que se le prendió el enlace.
+ *
+ * Dos arreglos: se pide solo lo que existe, y UN ERROR DE LA BASE YA NO SE
+ * DISFRAZA DE LLAVE MALA. Si la base no contesta una lista, eso se dice —y
+ * queda en el registro del servidor con su motivo— en vez de mandar al
+ * cliente a pedir un enlace nuevo que va a fallar igual.
+ */
 async function proyectoDe(token) {
   if (!token || String(token).length < 20) return null;
   const limpio = String(token).replace(/[^A-Za-z0-9_-]/g, "");
   if (limpio.length < 20) return null;
   const filas = await json(await rest(
-    `leads?portal_token=eq.${encodeURIComponent(limpio)}&select=id,nombre,obra_id,portal_activo,cliente_nombre`));
-  const lead = filas?.[0];
+    `leads?portal_token=eq.${encodeURIComponent(limpio)}&select=id,nombre,obra_id,portal_activo`));
+  if (!Array.isArray(filas)) throw new Error(`leads no contestó: ${filas?.message || filas?.code || "sin respuesta"}`);
+  const lead = filas[0];
   if (!lead || !lead.portal_activo) return null;
   return lead;
 }
@@ -1133,7 +1148,15 @@ export default async function handler(req, res) {
   }
 
   const token = req.method === "GET" ? req.query?.t : (req.body || {}).token;
-  const lead = await proyectoDe(token);
+  let lead;
+  try {
+    lead = await proyectoDe(token);
+  } catch (e) {
+    // Falló el servidor, no el enlace: al cliente se le dice que pruebe de
+    // nuevo, y el motivo queda acá para quien lo tenga que arreglar.
+    console.error("[portal] no se pudo leer el proyecto del enlace:", e.message);
+    return res.status(500).json({ error: "No se pudo abrir en este momento. Probá de nuevo en un rato." });
+  }
   // El mismo mensaje para una llave inventada y para un portal apagado: decir
   // cuál de las dos es le confirma a quien prueba llaves que acertó una.
   if (!lead) return res.status(404).json({ error: "Este enlace no está disponible." });
@@ -1223,7 +1246,7 @@ async function armarInforme(lead) {
   return {
     // `enObra` dice si ya se está construyendo: un proyecto que todavía se
     // presupuesta no tiene fotos ni visitas, y su enlace arranca en la lista.
-    proyecto: { nombre: lead.nombre, cliente: lead.cliente_nombre || null, enObra: !!lead.obra_id },
+    proyecto: { nombre: lead.nombre, enObra: !!lead.obra_id },
     lista,
     recorridas,
     observaciones: observaciones.map(o => ({
