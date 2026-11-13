@@ -284,6 +284,8 @@ export default function App() {
   }
   const reabrirTarea = t => tocarTarea(t, alReabrir(), `Volvió a abrir: ${t.title}`);
   const reprogramarTarea = (t, fecha) => tocarTarea(t, alReprogramar(fecha), fecha ? `"${t.title}" queda para el ${diaCorto(fecha)}` : `"${t.title}" se queda sin fecha`);
+  // Lo nuestro ya se hizo y ahora depende de otro: cambia de estado sin cerrarse.
+  const esperarTarea = (t, espera) => tocarTarea(t, { espera: !!espera }, `"${t.title}" ${espera ? "queda esperando a un tercero" : "ya no espera"}`);
   // «Ya no va»: se cierra sin haberse hecho, y lo dice.
   const descartarTarea = t => tocarTarea(t, alDescartar(usuario.name), `Ya no va: ${t.title}`);
   async function delegarTarea(t, usuarioId) {
@@ -661,7 +663,7 @@ export default function App() {
                 <>
                   {vistaTareas === "calendario"
                     ? <TareasCalendario tasks={paraCalendario} users={users} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
-                    : <Bandeja datos={datosBandeja} hechas={hechas} users={users} comentarios={comentarios} ultimas={ultimas} onAnotar={anotarEnTarea} usuario={usuario} puede={puede}
+                    : <Bandeja datos={datosBandeja} hechas={hechas} users={users} comentarios={comentarios} ultimas={ultimas} onAnotar={anotarEnTarea} onEsperar={esperarTarea} usuario={usuario} puede={puede}
                         nombreDe={nombreProyecto} proyectos={mios} asignables={asignables}
                         onAbrir={abrirTarea} onCompletar={t => cambiarEstado(t.id, "listo")} onReabrir={reabrirTarea}
                         onReprogramar={reprogramarTarea} onDelegar={delegarTarea} onDescartar={descartarTarea} onAgregar={agregarRapida}

@@ -33,7 +33,7 @@ import { sumarDias, hoyISO, diasEntre, diaCorto } from "../modules/leads/pipelin
  */
 export default function Bandeja({
   datos, hechas = [], users = [], comentarios = {}, ultimas = {}, usuario, puede = () => false, nombreDe = () => "",
-  proyectos = [], asignables = [], onAbrir, onCompletar, onReabrir, onReprogramar, onDelegar, onDescartar, onAgregar, onAnotar, onIrAlPipeline,
+  proyectos = [], asignables = [], onAbrir, onCompletar, onReabrir, onReprogramar, onDelegar, onDescartar, onAgregar, onAnotar, onEsperar, onIrAlPipeline,
 }) {
   const hoy = hoyISO();
   // Qué fila tiene abierto su cuadro de fecha o de delegar.
@@ -120,6 +120,16 @@ export default function Bandeja({
           <option value="">Delegar a…</option>
           {otros.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
+      )}
+      {/* CAMBIARLE EL ESTADO SIN CERRARLA. Entre «pendiente» y «hecha» hay un
+          tercero que es el más común en una gestión: lo nuestro ya se hizo y
+          ahora depende de otro —el cliente confirma la fecha, el proveedor
+          manda la cotización—. Pasa a «Espero de otros» y deja de estar en
+          rojo, sin darla por terminada. */}
+      {onEsperar && (
+        <button disabled={ocupado} onClick={() => hacer(() => onEsperar(t, !t.espera))} aria-pressed={!!t.espera}
+          title={t.espera ? "Vuelve a depender de mí" : "Lo nuestro ya se hizo: ahora depende de otro"}
+          style={chip(false)}><Hourglass size={11} /> {t.espera ? "Ya no espera" : "Espera a un tercero"}</button>
       )}
       {conDescartar && puedeDescartar(t) && (
         <button disabled={ocupado} onClick={() => hacer(() => onDescartar(t))} title="Se cierra sin haberse hecho"
