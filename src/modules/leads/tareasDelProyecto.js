@@ -16,7 +16,7 @@
 
 /** Los campos de la tarea que usa la pantalla del proyecto. */
 export const COLUMNAS = "id,title,status,due_date,hora,priority,type,notes,assignee_id,responsable_externo,"
-  + "lead_id,etapa_id,espera,nota,hecha_at,hecha_por,ruta_orden,compra_id,created_at,descartada";
+  + "lead_id,etapa_id,espera,nota,hecha_at,hecha_por,ruta_orden,compra_id,created_at,created_by,descartada";
 
 /** Qué dice la nota de origen según el tipo: así el tablero sabe qué es. */
 const ORIGEN = { "Reunión": "Reunión", "Gestión": "Gestión", "Envío": "Envío" };

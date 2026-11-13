@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { COLUMNAS, comoActividad, delProyecto, filaNueva, alMarcar, notaDeOrigen } from "./tareasDelProyecto.js";
+import { porTarea } from "./historialDeTarea.js";
 
 // Lo que se guarda de un proyecto: lo que cambia en él —su etapa, su tipo, si
 // espera al cliente—, sus tareas y su historia.
@@ -145,13 +146,13 @@ export async function agregarTarea({
   // Un envío no se «suma» ni se «encarga»: se registra, y eso lo anota quien
   // lo llama, con a quién fue.
   if (!hecha) {
-    await anotar(lead.id, { detalle: `Sumó "${tarea.title}"`, quien });
+    await anotar(lead.id, { detalle: `Sumó "${tarea.title}"`, quien, extra: { task_id: tarea.id } });
     // Encargarle algo a alguien es de las cosas que hay que poder rastrear.
     if (assignee_id || responsable_externo) {
       await anotar(lead.id, {
         detalle: `Le encargó "${tarea.title}" a ${responsable_externo || nombreResponsable || "alguien del equipo"}`
           + (due_date ? `, para el ${enCriollo(due_date)}${hora ? ` a las ${hora}` : ""}` : ""),
-        quien,
+        quien, extra: { task_id: tarea.id },
       });
     }
   }
@@ -211,6 +212,9 @@ export async function mostrarAlCliente(items, ver, quien) {
       ? `${ver ? "Le mostró al cliente" : "Dejó de mostrarle al cliente"} "${lista[0].texto}"`
       : `${ver ? "Le mostró al cliente" : "Dejó de mostrarle al cliente"} ${lista.length} tareas: ${lista.map(i => i.texto).join("; ")}.`,
     quien,
+    // Un renglón que habla de varias no es de ninguna: queda en la bitácora
+    // del proyecto y no en el historial de cada una.
+    ...(lista.length === 1 ? { extra: { task_id: lista[0].id } } : {}),
   });
   return null;
 }
@@ -225,7 +229,7 @@ export async function mostrarAlCliente(items, ver, quien) {
 export async function marcarItem(item, hecho, quien, autor) {
   const { error } = await supabase.from("tasks").update(alMarcar(hecho, quien || autor?.name || null)).eq("id", item.id);
   if (error) return falta(error) ? SIN_170 : error.message;
-  await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor });
+  await anotar(item.lead_id, { detalle: `${hecho ? "Hizo" : "Volvió a abrir"} "${item.texto}"`, quien: autor, extra: { task_id: item.id } });
   return null;
 }
 
@@ -257,6 +261,7 @@ export async function ponerFecha(item, fecha, quien) {
   if (error) return error.message;
   await anotar(item.lead_id, {
     detalle: fecha ? `"${item.texto}" queda para el ${enCriollo(fecha)}` : `"${item.texto}" se queda sin fecha`, quien,
+    extra: { task_id: item.id },
   });
   return null;
 }
@@ -275,7 +280,9 @@ export async function guardarNota(item, nota) {
 export async function marcarEspera(item, espera, quien) {
   const { error } = await supabase.from("tasks").update({ espera: !!espera }).eq("id", item.id);
   if (!error) {
-    await anotar(item.lead_id, { detalle: `"${item.texto}" ${espera ? "queda esperando a un tercero" : "ya no espera"}`, quien });
+    await anotar(item.lead_id, {
+      detalle: `"${item.texto}" ${espera ? "queda esperando a un tercero" : "ya no espera"}`, quien, extra: { task_id: item.id },
+    });
   }
   return error ? (falta(error) ? "falta_migracion" : error.message) : null;
 }
@@ -301,7 +308,16 @@ export async function anotar(leadId, { tipo = "actividad", detalle, quien, autom
   if (!leadId || !detalle) return null;
   const fila = { lead_id: leadId, tipo, automatico, detalle, autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null, ...extra };
   let { error } = await supabase.from("lead_movimientos").insert(fila);
-  if (error && /column|schema cache/i.test(error.message)) {
+  // Sin la 181 no existe `task_id`: el renglón entra igual en la bitácora del
+  // proyecto, solo que sin decir de qué tarea es.
+  if (error && /column|schema cache/i.test(error.message) && fila.task_id !== undefined) {
+    const { task_id: deCual, ...sinTarea } = fila;
+    ({ error } = await supabase.from("lead_movimientos").insert(sinTarea));
+    if (error && /column|schema cache/i.test(error.message)) {
+      const { automatico: auto, ...resto } = sinTarea;
+      ({ error } = await supabase.from("lead_movimientos").insert(resto));
+    }
+  } else if (error && /column|schema cache/i.test(error.message)) {
     const { automatico: auto, ...resto } = fila;
     ({ error } = await supabase.from("lead_movimientos").insert(resto));
   }
@@ -309,7 +325,56 @@ export async function anotar(leadId, { tipo = "actividad", detalle, quien, autom
 }
 
 /** Lo que se corrigió, a la bitácora: quién la movió y de qué a qué. */
-export const anotarCorreccion = (lead, detalle, quien) => anotar(lead.id, { detalle, quien });
+export const anotarCorreccion = (lead, detalle, quien, tareaId = null) =>
+  anotar(lead.id, { detalle, quien, ...(tareaId ? { extra: { task_id: tareaId } } : {}) });
+
+/**
+ * El historial de las tareas del proyecto, de una sola pasada.
+ *
+ * Son dos cosas que se leen juntas en cada punto del checklist: lo que alguien
+ * anotó en la tarea (sus comentarios, los mismos de Tareas) y lo que la
+ * bitácora del proyecto dice de ella (migración 181).
+ *
+ * @param ids  las tareas del proyecto
+ * @returns { comentarios, movimientos } por id de tarea, y `sinEnlace` si
+ *          falta la 181: ahí se ve lo anotado, y lo automático todavía no
+ */
+export async function cargarHistorial(leadId, ids = []) {
+  if (!leadId || !ids.length) return { comentarios: {}, movimientos: {}, sinEnlace: false };
+  const [{ data: notas, error: eNotas }, { data: movs, error: eMovs }] = await Promise.all([
+    supabase.from("tarea_comentarios").select("id,task_id,texto,autor_id,autor_nombre,created_at").in("task_id", ids).order("created_at"),
+    supabase.from("lead_movimientos").select("id,task_id,detalle,autor_nombre,automatico,created_at")
+      .eq("lead_id", leadId).not("task_id", "is", null).order("created_at"),
+  ]);
+  return {
+    comentarios: porTarea(eNotas ? [] : notas || []),
+    movimientos: porTarea(eMovs ? [] : movs || []),
+    sinEnlace: !!eMovs && falta(eMovs),
+  };
+}
+
+/**
+ * Anotar qué pasó con un punto: «llamé, quedan en confirmar la reunión».
+ *
+ * Es un comentario de la tarea —el mismo hilo que se ve en Tareas—, con fecha
+ * y con nombre. Les llega por correo a los involucrados, menos a quien lo
+ * escribe; si el correo falla, lo anotado ya quedó.
+ *
+ * @returns null o el error
+ */
+export async function anotarEnLaTarea(item, texto, quien) {
+  const limpio = String(texto || "").trim();
+  if (!limpio) return "Escribí qué pasó.";
+  const { error } = await supabase.from("tarea_comentarios").insert({
+    task_id: item.id, texto: limpio, autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null,
+  });
+  if (error) return "No se pudo anotar: " + error.message;
+  fetch("/api/aviso?de=comentario", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskId: item.id, texto: limpio, autorId: quien?.id ?? null }),
+  }).catch(() => {});
+  return null;
+}
 
 /**
  * Dejar constancia en el proyecto de que se le mandó algo al cliente.

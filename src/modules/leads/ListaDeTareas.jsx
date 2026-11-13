@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight, Eye, EyeOff, ClipboardList, Send } from "lucide-react";
+import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight, Eye, EyeOff, ClipboardList, Send, History } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
-import ComentariosTarea from "../../components/ComentariosTarea";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import { nombreDeEtapa, hoyISO, sumarDias } from "./pipeline";
 import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
-  anotarCorreccion, anotar,
+  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea,
 } from "./proyecto";
 import { renglonesDeLista, avanceDe } from "./tareasDelProyecto";
+import { historialDe, ultimaAnotacion } from "./historialDeTarea";
 import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 
 // LAS TAREAS DEL PROYECTO: UNA LISTA.
@@ -24,10 +24,18 @@ import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 // cuál estaba. Ahora el lead está en una etapa, que se elige arriba, y la
 // tarea solo lleva de etiqueta en cuál se escribió.
 //
-// TAMBIÉN ES EL CHECKLIST. Cuando se arma un presupuesto hay una lista de
-// cosas por cotizar: se pega entera —una tarea por renglón— y arriba dice
-// cuánto va. Y se le puede mostrar al cliente en su enlace, tarea por tarea:
-// él ve qué dice cada una y si está lista, nada más.
+// ES EL CHECKLIST DEL PROYECTO, Y ASÍ SE LLAMA EN LA PANTALLA. Cuando se arma
+// un presupuesto hay una lista de cosas por cotizar: se pega entera —una tarea
+// por renglón— y arriba dice cuánto va. Y se le puede mostrar al cliente en su
+// enlace, tarea por tarea: él ve qué dice cada una y si está lista, nada más.
+//
+// Se llamaba «Tareas» y la palabra «checklist» no aparecía en ningún lado de
+// la ventana: quien venía a cargar el checklist de un lead no lo encontraba.
+//
+// CADA PUNTO TIENE SU HISTORIAL. «MADEVAL» no es una casilla: es contactarlos,
+// fijar la reunión, recibir la cotización. Lo que se anota y lo que pasó solo
+// se leen juntos, en orden, al abrir el punto; lo último anotado se lee en la
+// fila sin abrirla (historialDeTarea.js).
 
 // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
@@ -57,6 +65,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // Lo escrito para él en cada punto: qué es y qué hay de nuevo.
   const [paraElCliente, setParaElCliente] = useState({});
   const [sinReporte, setSinReporte] = useState(false);
+  // El historial de cada punto: lo anotado y lo que la bitácora dice de él.
+  const [historial, setHistorial] = useState({ comentarios: {}, movimientos: {} });
   // Mandarle el checklist por correo: a quién y con qué líneas.
   const [envio, setEnvio] = useState(null);   // { a: Set, otro, mensaje, dijo, mal }
   const [error, setError] = useState("");
@@ -98,6 +108,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     setSinReporte(!!r.sinReporte);
     setInvitados(inv || []);
     onTareas?.(Object.values(r.tareas || {}));
+    // Va después y aparte: la lista se ve sin esperar al historial.
+    setHistorial(await cargarHistorial(lead.id, Object.values(r.tareas || {}).map(t => t.id)));
     // eslint-disable-next-line
   }, [lead.id]);
 
@@ -215,12 +227,19 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const fechaBloqueada = !!tareas[aTarea?.item?.tarea_id]?.due_date && !puede("tareas.fechas");
   const puedeCorrer = item => !tareas[item.tarea_id]?.due_date || puede("tareas.fechas");
 
+  // LA ETAPA NO SE REPITE EN CADA RENGLÓN. Arriba ya dice en cuál está el
+  // proyecto, y con todos los puntos escritos en esa misma etapa la palabra
+  // salía una vez por fila sin decir nada nuevo. Se dice solo en el punto que
+  // viene de OTRA etapa, que es el único caso en que informa.
+  const etapaDe = item => (item.etapa_id && item.etapa_id !== etapaId ? nombreDeEtapa(item.etapa_id, catalogo) : "");
+
   const fila = item => (
-    <Actividad key={item.id} item={item} etiqueta={nombreDeEtapa(item.etapa_id, catalogo)} tarea={tareas[item.tarea_id]} users={users}
+    <Actividad key={item.id} item={item} etiqueta={etapaDe(item)} tarea={tareas[item.tarea_id]} users={users}
       abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
+      anotado={historial.comentarios[item.id]} pasado={historial.movimientos[item.id]}
       onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
       onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
         assignee_id: t?.responsable_externo ? `x:${t.responsable_externo}` : t?.assignee_id || "", due_date: t?.due_date || "", hora: t?.hora || "" }); }} />
@@ -232,7 +251,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, flex: 1 }}>
-          TAREAS{abiertas.length ? ` · ${abiertas.length} ${abiertas.length === 1 ? "abierta" : "abiertas"}` : ""}
+          CHECKLIST{abiertas.length ? ` · ${abiertas.length} ${abiertas.length === 1 ? "abierto" : "abiertos"}` : ""}
         </div>
         {editable && !nuevo.abierto && !pegar.abierto && (
           <>
@@ -254,7 +273,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             style={{ flex: 1, height: 5, background: colors.neutralSoft, borderRadius: 3, overflow: "hidden" }}>
             <div style={{ width: `${Math.round((avance.hechas / avance.total) * 100)}%`, height: "100%", background: colors.success }} />
           </div>
-          <span style={{ fontSize: 11, color: colors.inkSoft, whiteSpace: "nowrap" }}>{avance.hechas} de {avance.total} hechas</span>
+          <span style={{ fontSize: 11, color: colors.inkSoft, whiteSpace: "nowrap" }}>{avance.hechas} de {avance.total} hechos</span>
         </div>
       )}
 
@@ -403,9 +422,27 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
 
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "4px 12px" }}>
         {abiertas.map(fila)}
-        {!abiertas.length && (
-          <div style={{ fontSize: 12, color: colors.muted, padding: "8px 0" }}>
-            {hechas.length ? "No queda nada abierto." : "Todavía sin tareas."}
+        {!abiertas.length && hechas.length > 0 && (
+          <div style={{ fontSize: 12, color: colors.muted, padding: "8px 0" }}>No queda nada abierto.</div>
+        )}
+        {/* VACÍO NO ES MUDO: dice que el checklist va acá y con qué se empieza. */}
+        {!abiertas.length && !hechas.length && (
+          <div className="checklist-vacio" style={{ padding: "10px 0" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink }}>Este proyecto todavía no tiene checklist.</div>
+            <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2 }}>
+              Acá va lo que hay que gestionar: cada proveedor por cotizar, cada reunión, cada entrega.
+              Cada punto guarda su historial —qué pasó y cuándo— y es la misma tarea que se ve en Tareas.
+            </div>
+            {editable && !nuevo.abierto && !pegar.abierto && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <button onClick={() => { setPegar(LISTA_EN_BLANCO); setError(""); }} style={boton(true)}>
+                  <ClipboardList size={12} /> Pegar el checklist
+                </button>
+                <button onClick={() => { setNuevo(EN_BLANCO); setError(""); }} style={boton(false)}>
+                  <Plus size={12} /> Agregar un punto
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -418,7 +455,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, color: colors.inkSoft,
               display: "inline-flex", alignItems: "center", gap: 4 }}>
             {verHechas ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {hechas.length === 1 ? "1 hecha" : `${hechas.length} hechas`}
+            {hechas.length === 1 ? "1 hecho" : `${hechas.length} hechos`}
           </button>
           {verHechas && (
             <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "4px 12px", marginTop: 6 }}>
@@ -428,12 +465,17 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         </div>
       )}
 
-      {/* CON EL CLIENTE. Qué ve de esta lista y su enlace, en el mismo lugar
-          donde se decide. No se ofrece mientras no haya nada que mostrarle. */}
-      {editable && todas.length > 0 && (
+      {/* EL CHECKLIST QUE VE EL CLIENTE. Qué ve de esta lista y su enlace, en
+          el mismo lugar donde se decide. Está a la vista aunque todavía no
+          haya nada que mostrarle: lo que no se ve no se encuentra. */}
+      {editable && (
         <div className="lista-con-el-cliente" style={{ marginTop: 12, borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 5 }}>CON EL CLIENTE</div>
-          {sinCompartir ? (
+          <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 5 }}>CHECKLIST PARA EL CLIENTE</div>
+          {!todas.length ? (
+            <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
+              Cuando el checklist tenga puntos, acá elegís cuáles ve el cliente en su enlace y se lo mandás por correo.
+            </div>
+          ) : sinCompartir ? (
             <div style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.5 }}>
               Para mostrarle tareas al cliente falta correr la migración 176 en Supabase.
             </div>
@@ -441,18 +483,18 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             <>
               <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
                 {vistas.length
-                  ? <>El cliente ve <strong style={{ color: colors.ink }}>{vistas.length} de {todas.length}</strong> en su enlace: qué dice cada una y si está lista. No ve notas, comentarios ni quién la tiene.</>
-                  : <>El cliente no ve ninguna tarea. Para mostrarle una, abrila y tocá «Mostrar al cliente».</>}
+                  ? <>El cliente ve <strong style={{ color: colors.ink }}>{vistas.length} de {todas.length}</strong> en su enlace: qué dice cada punto y si está listo. No ve el historial ni quién lo tiene.</>
+                  : <>El cliente todavía no ve ningún punto. Para mostrarle uno, abrilo y tocá «Mostrar al cliente».</>}
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                 {abiertasSinMostrar.length > 0 && (
                   <button disabled={ocupado} onClick={() => alCliente(abiertasSinMostrar, true)} style={mini(false)}>
-                    <Eye size={11} /> {vistas.length ? `Mostrarle las otras ${abiertasSinMostrar.length} abiertas` : `Mostrarle las ${abiertasSinMostrar.length} abiertas`}
+                    <Eye size={11} /> {vistas.length ? `Mostrarle los otros ${abiertasSinMostrar.length} abiertos` : abiertasSinMostrar.length === 1 ? "Mostrarle el punto abierto" : `Mostrarle los ${abiertasSinMostrar.length} abiertos`}
                   </button>
                 )}
                 {vistas.length > 0 && (
                   <button disabled={ocupado} onClick={() => { if (window.confirm("¿Dejar de mostrarle al cliente todas las tareas de este proyecto?")) alCliente(vistas, false); }} style={mini(false)}>
-                    <EyeOff size={11} /> Dejar de mostrarle todas
+                    <EyeOff size={11} /> Dejar de mostrarle todos
                   </button>
                 )}
               </div>
@@ -588,7 +630,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
                     : deCuando ? `se mueve del ${deCuando} al ${aCuando}`
                     : `queda para el ${aCuando}`);
                 }
-                if (cambios.length) await anotarCorreccion(lead, `Arregló "${aTarea.item.texto}": ${cambios.join(", ")}.`, currentUser);
+                if (cambios.length) await anotarCorreccion(lead, `Arregló "${aTarea.item.texto}": ${cambios.join(", ")}.`, currentUser, aTarea.item.id);
                 setATarea(null);
               })} disabled={ocupado || !aTarea.titulo.trim()} style={boton(true)}>Guardar</button>
               <button onClick={() => setATarea(null)} style={boton(false)}>Cancelar</button>
@@ -695,9 +737,23 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, y deja escribir lo que solo sabe
 // quien la trabajó. Los botones dicen su nombre: un ⧗ y un ✓ sueltos no le
 // enseñan a nadie cómo se usa esto.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [] }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
+  // EL HISTORIAL del punto: lo que se anotó y lo que pasó solo, en orden.
+  const historia = historialDe({ tarea, comentarios: anotado, movimientos: pasado, nombreDe: id => users.find(u => u.id === id)?.name || null });
+  const ultima = ultimaAnotacion(anotado);
+  // Lo que se está por anotar: «llamé, quedan en confirmar la reunión».
+  const [paso, setPaso] = useState("");
+  const [dijo, setDijo] = useState("");
+  const anotarPaso = () => {
+    if (!paso.trim()) { setDijo("Escribí qué pasó."); return; }
+    setDijo("");
+    hacer(async () => {
+      const e = await anotarEnLaTarea(item, paso, currentUser);
+      if (e) setDijo(e); else setPaso("");
+    });
+  };
   // Lo que se le escribe al cliente sobre este punto. Se guarda solo al salir
   // del cuadro, y dice al lado que quedó guardado.
   const [paraEl, setParaEl] = useState({ descripcion: delCliente?.descripcion || "", actualizacion: delCliente?.actualizacion || "" });
@@ -749,13 +805,21 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               return resto ? ` · ${resto}` : "";
             })()}
             {/* En qué etapa estaba el lead cuando se escribió. */}
-            {etiqueta ? ` · ${etiqueta}` : ""}
+            {etiqueta ? ` · de ${etiqueta}` : ""}
             {laVeElCliente && (
               <span className="la-ve-el-cliente" title="El cliente la ve en su enlace" style={{ color: colors.brand, fontWeight: 600 }}>
                 {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente
               </span>
             )}
           </div>
+          {/* Lo último que se anotó: en qué va la gestión, sin abrirla. */}
+          {ultima && !abierta && (
+            <div className="ultima-anotacion" title={ultima.texto}
+              style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <History size={10} style={{ verticalAlign: "-1px", marginRight: 3 }} color={colors.muted} />
+              <span style={{ color: colors.muted }}>{cuando(ultima.created_at)} · </span>{ultima.texto}
+            </div>
+          )}
         </div>
         {/* La fecha, a la derecha y siempre en el mismo lugar: es lo que
             ordena la lista. */}
@@ -781,6 +845,45 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             ) : null}
             {" "}Es la misma tarea que se ve en Tareas.
             {laVeElCliente ? " El cliente la ve en su enlace: qué dice y si está lista." : ""}
+          </div>
+
+          {/* EL HISTORIAL. Qué pasó con este punto, en orden: lo que alguien
+              anotó —en negro— y lo que pasó solo —en gris—. Antes eran un
+              «Comentarios», una nota suelta que se pisaba y la bitácora del
+              proyecto, cada cosa por su lado. */}
+          <div className="historial-del-punto" style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
+              <History size={11} /> HISTORIAL
+            </div>
+            {historia.map(h => (
+              <div key={h.id} className={h.automatico ? "paso-solo" : "paso-anotado"}
+                style={{ display: "flex", gap: 8, fontSize: 11.5, lineHeight: 1.45, padding: "2px 0" }}>
+                <span style={{ width: 44, flexShrink: 0, color: colors.muted, whiteSpace: "nowrap" }}>{cuando(h.cuando)}</span>
+                <span style={{ flex: 1, minWidth: 0, color: h.automatico ? colors.muted : colors.ink, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                  {h.texto}
+                  {h.quien ? <span style={{ color: colors.muted }}> · {h.quien}</span> : null}
+                </span>
+              </div>
+            ))}
+            {!historia.length && <div style={{ fontSize: 11.5, color: colors.muted }}>Todavía sin historia.</div>}
+            {editable && (
+              <>
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <input value={paso} aria-label="Qué pasó con este punto"
+                    onChange={e => { setPaso(e.target.value); setDijo(""); }}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); anotarPaso(); } }}
+                    placeholder="¿Qué pasó? Ej: llamé, quedan en confirmar la reunión"
+                    style={{ ...chico, flex: 1, minWidth: 0 }} />
+                  <button onClick={anotarPaso} disabled={ocupado}
+                    style={{ ...mini(false), padding: "4px 11px", background: colors.ink, color: "#fff", borderColor: colors.ink }}>
+                    <Plus size={11} /> Anotar
+                  </button>
+                </div>
+                <div style={{ fontSize: 10, color: dijo ? colors.danger : colors.muted, marginTop: 3 }}>
+                  {dijo || "Queda con la fecha y tu nombre. Le llega por correo a quien lo tiene a cargo."}
+                </div>
+              </>
+            )}
           </div>
 
           {/* La fecha se cambia desde la misma fila, de un toque. */}
@@ -827,15 +930,14 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             </div>
           )}
 
-          {/* Lo que se habla de esto: la conversación vive con la cosa, no en
-              un WhatsApp aparte. Es la misma de la tarea en el tablero. */}
-          {tarea?.id && <ComentariosTarea taskId={tarea.id} currentUser={currentUser} />}
-
-          {/* Lo que solo sabe quien la trabajó. */}
-          <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2} readOnly={!editable}
-            onBlur={() => { if (editable && (item.nota || "") !== nota) hacer(() => guardarNota(item, nota.trim())); }}
-            placeholder={editable ? "Qué pasó, con quién, qué falta…" : "Sin notas."}
-            style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
+          {/* La nota suelta de antes: ya no se ofrece —lo que pasó va al
+              historial, con fecha y con nombre—, pero la que alguien hubiera
+              escrito no se esconde ni se pierde. */}
+          {(item.nota || "").trim() !== "" && (
+            <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2} readOnly={!editable} aria-label="Nota de antes"
+              onBlur={() => { if (editable && (item.nota || "") !== nota) hacer(() => guardarNota(item, nota.trim())); }}
+              style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
+          )}
 
           {editable && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

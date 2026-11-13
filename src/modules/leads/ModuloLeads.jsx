@@ -218,12 +218,12 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                             {[l.contacto, l.responsable_nombre].filter(Boolean).join(" · ") || "sin responsable"}
                           </div>
                           {avance.total > 1 && (
-                            <div className="avance-del-lead" title="Tareas hechas de este lead"
+                            <div className="avance-del-lead" title="Puntos hechos del checklist de este lead"
                               style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, maxWidth: 190 }}>
                               <div style={{ flex: 1, height: 4, background: colors.neutralSoft, borderRadius: 2, overflow: "hidden" }}>
                                 <div style={{ width: `${Math.round((avance.hechas / avance.total) * 100)}%`, height: "100%", background: colors.success }} />
                               </div>
-                              <span style={{ fontSize: 10.5, color: colors.inkSoft, whiteSpace: "nowrap" }}>{avance.hechas} de {avance.total}</span>
+                              <span style={{ fontSize: 10.5, color: colors.inkSoft, whiteSpace: "nowrap" }}>Checklist · {avance.hechas} de {avance.total}</span>
                             </div>
                           )}
                         </div>
