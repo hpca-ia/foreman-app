@@ -6,7 +6,7 @@ import { colors } from "../theme/colors";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { inputStyle } from "./ui/Input";
-import ComentariosTarea from "./ComentariosTarea";
+import HistorialDeTarea from "./HistorialDeTarea";
 import InlineFiles from "./InlineFiles";
 import Avatar from "./ui/Avatar";
 
@@ -166,11 +166,13 @@ export default function ModalTarea({ puede, onCerrar, onGuardar, editTask, curre
           : <div style={{ fontSize: 11.5, color: colors.muted }}>Guarda la tarea y acá mismo podrás subir fotos y PDF. Mientras tanto, puedes dejar un enlace arriba.</div>}
       </div>
 
-      {/* Comentar se puede siempre: justamente el que no puede editar la tarea
-          es el que más necesita decir por qué está parada. */}
+      {/* EL HISTORIAL: qué pasó con esta tarea, paso por paso. Anotar se
+          puede siempre: justamente el que no puede editar la tarea es el que
+          más necesita decir por qué está parada. Y anotar un paso no la
+          cierra: la casilla es para cuando está completa. */}
       {editTask && (
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${colors.neutralSoft}` }}>
-          <ComentariosTarea taskId={editTask.id} currentUser={currentUser} />
+          <HistorialDeTarea tarea={editTask} users={users} currentUser={currentUser} onCambio={onCambio} />
         </div>
       )}
 

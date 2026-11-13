@@ -23,6 +23,15 @@ test("adentro de la tarea, la bitácora no repite su nombre", () => {
   assert.equal(dichoAdentro('Arregló "Espera de Borrador de Contrato": se mueve del 1 oct al 2 oct.'), "Se corrigió: se mueve del 1 oct al 2 oct.");
 });
 
+test("lo que anota la bandeja de Tareas también se lee adentro de la tarea", () => {
+  assert.equal(dichoAdentro("Hecho: gestionar reunion"), "Se marcó como hecha");
+  assert.equal(dichoAdentro("No se hizo: gestionar reunion"), "Se marcó como no hecha");
+  assert.equal(dichoAdentro("Volvió a abrir: gestionar reunion"), "Se volvió a abrir");
+  assert.equal(dichoAdentro("Ya no va: ENVIO A GYE DE ESCRITORIOS"), "Se cerró sin hacerse: ya no va");
+  assert.equal(dichoAdentro('"gestionar reunion" queda para el 20 nov'), "Queda para el 20 nov");
+  assert.equal(dichoAdentro('"gestionar reunion" pasa a Camila Mena'), "Pasa a Camila Mena");
+});
+
 test("un título con comillas adentro, o corregido después, se reconoce igual: es por la forma de la frase", () => {
   assert.equal(dichoAdentro('Hizo "Cocina "tipo isla" MADEVAL"'), "Se marcó como hecha");
   assert.equal(dichoAdentro('"Cocina "tipo isla"" queda para el 2 dic'), "Queda para el 2 dic");
@@ -168,6 +177,16 @@ test("cada renglón de la bitácora que es de una tarea lleva de cuál: si no, n
     assert.match(tramo, /extra: \{ task_id: (tarea|item)\.id \}/, `el renglón de ${f} no dice de qué tarea es`);
   }
   assert.match(lista, /anotarCorreccion\(lead, `Arregló "\$\{aTarea\.item\.texto\}"[^\n]+, currentUser, aTarea\.item\.id\)/);
+});
+
+test("lo que se hace desde la bandeja de Tareas también dice de qué tarea es", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  // Reprogramar, delegar, reabrir, «ya no va»: todo pasa por tocarTarea.
+  assert.match(app, /anotarEnProyecto\(t\.lead_id, \{ tipo: "nota", detalle: nota, quien: usuario, extra: \{ task_id: t\.id \} \}\)/);
+  // Completarla.
+  assert.match(app, /"Hecho" : "No se hizo"\}: \$\{tarea\.title\}`, quien: usuario, extra: \{ task_id: tarea\.id \}/);
+  // Y ya no se escribe en la bitácora por fuera de esa puerta.
+  assert.doesNotMatch(app, /from\("lead_movimientos"\)\.insert/);
 });
 
 test("si falta la migración 181, el renglón entra igual en la bitácora del proyecto", () => {

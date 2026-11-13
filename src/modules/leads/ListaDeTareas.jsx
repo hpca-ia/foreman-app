@@ -10,7 +10,8 @@ import {
   anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea,
 } from "./proyecto";
 import { renglonesDeLista, avanceDe } from "./tareasDelProyecto";
-import { historialDe, ultimaAnotacion } from "./historialDeTarea";
+import { ultimaAnotacion } from "./historialDeTarea";
+import HistorialDeTarea from "../../components/HistorialDeTarea";
 import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 
 // LAS TAREAS DEL PROYECTO: UNA LISTA.
@@ -740,12 +741,8 @@ const boton = fuerte => ({
 function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [] }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
-  // EL HISTORIAL del punto: lo que se anotó y lo que pasó solo, en orden.
-  const historia = historialDe({ tarea, comentarios: anotado, movimientos: pasado, nombreDe: id => users.find(u => u.id === id)?.name || null });
+  // Lo último que alguien anotó: se lee en la fila sin abrirla.
   const ultima = ultimaAnotacion(anotado);
-  // Lo que se está por anotar: «llamé, quedan en confirmar la reunión».
-  const [paso, setPaso] = useState("");
-  const [dijo, setDijo] = useState("");
   // EL PASO TAMBIÉN PUEDE SER LA ACTUALIZACIÓN QUE LEE EL CLIENTE. El punto
   // tiene, para él, descripción, actualización y estado; y casi siempre lo que
   // hay de nuevo es justo el paso que se acaba de dar —«reunión agendada para
@@ -753,18 +750,19 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   // viaja: lo anotado es interno salvo que se diga lo contrario.
   const [queLoLea, setQueLoLea] = useState(false);
   const puedeLeerlo = laVeElCliente && !sinReporte;
-  const anotarPaso = () => {
-    if (!paso.trim()) { setDijo("Escribí qué pasó."); return; }
-    setDijo("");
-    hacer(async () => {
-      const e = await anotarEnLaTarea(item, paso, currentUser);
-      if (e) { setDijo(e); return; }
+  // Devuelve null o el motivo: el cuadro del historial lo dice ahí mismo.
+  const anotarPaso = async paso => {
+    let dijo = null;
+    await hacer(async () => {
+      dijo = await anotarEnLaTarea(item, paso, currentUser);
+      if (dijo) return;
       if (queLoLea && puedeLeerlo) {
         const e2 = await escribirleAlCliente(item, { actualizacion: paso });
-        if (e2) { setDijo(`Quedó anotado, pero no se actualizó lo que lee el cliente: ${e2}`); return; }
+        if (e2) { dijo = `Quedó anotado, pero no se actualizó lo que lee el cliente: ${e2}`; return; }
       }
-      setPaso(""); setQueLoLea(false);
+      setQueLoLea(false);
     });
+    return dijo;
   };
   // Lo que se le escribe al cliente sobre este punto. Se guarda solo al salir
   // del cuadro, y dice al lado que quedó guardado.
@@ -863,46 +861,15 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               anotó —en negro— y lo que pasó solo —en gris—. Antes eran un
               «Comentarios», una nota suelta que se pisaba y la bitácora del
               proyecto, cada cosa por su lado. */}
-          <div className="historial-del-punto" style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
-              <History size={11} /> HISTORIAL
-            </div>
-            {historia.map(h => (
-              <div key={h.id} className={h.automatico ? "paso-solo" : "paso-anotado"}
-                style={{ display: "flex", gap: 8, fontSize: 11.5, lineHeight: 1.45, padding: "2px 0" }}>
-                <span style={{ width: 44, flexShrink: 0, color: colors.muted, whiteSpace: "nowrap" }}>{cuando(h.cuando)}</span>
-                <span style={{ flex: 1, minWidth: 0, color: h.automatico ? colors.muted : colors.ink, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-                  {h.texto}
-                  {h.quien ? <span style={{ color: colors.muted }}> · {h.quien}</span> : null}
-                </span>
-              </div>
-            ))}
-            {!historia.length && <div style={{ fontSize: 11.5, color: colors.muted }}>Todavía sin historia.</div>}
-            {editable && (
-              <>
-                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                  <input value={paso} aria-label="Qué pasó con este punto"
-                    onChange={e => { setPaso(e.target.value); setDijo(""); }}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); anotarPaso(); } }}
-                    placeholder="¿Qué pasó? Ej: llamé, quedan en confirmar la reunión"
-                    style={{ ...chico, flex: 1, minWidth: 0 }} />
-                  <button onClick={anotarPaso} disabled={ocupado}
-                    style={{ ...mini(false), padding: "4px 11px", background: colors.ink, color: "#fff", borderColor: colors.ink }}>
-                    <Plus size={11} /> Anotar
-                  </button>
-                </div>
-                {puedeLeerlo && (
-                  <label style={{ ...linea, fontSize: 11, marginTop: 5 }}>
-                    <input type="checkbox" checked={queLoLea} onChange={e => setQueLoLea(e.target.checked)} />
-                    Que también lo lea el cliente <span style={{ color: colors.muted }}>· queda como la actualización de este punto</span>
-                  </label>
-                )}
-                <div style={{ fontSize: 10, color: dijo ? colors.danger : colors.muted, marginTop: 3 }}>
-                  {dijo || "Queda con la fecha y tu nombre. Le llega por correo a quien lo tiene a cargo."}
-                </div>
-              </>
+          <HistorialDeTarea tarea={tarea} users={users} currentUser={currentUser} editable={editable} ocupado={ocupado}
+            anotado={anotado} pasado={pasado} onAnotar={anotarPaso}>
+            {puedeLeerlo && (
+              <label style={{ ...linea, fontSize: 11, marginTop: 5 }}>
+                <input type="checkbox" checked={queLoLea} onChange={e => setQueLoLea(e.target.checked)} />
+                Que también lo lea el cliente <span style={{ color: colors.muted }}>· queda como la actualización de este punto</span>
+              </label>
             )}
-          </div>
+          </HistorialDeTarea>
 
           {/* La fecha se cambia desde la misma fila, de un toque. */}
           {editable && !item.hecho && (

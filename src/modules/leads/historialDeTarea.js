@@ -34,7 +34,13 @@ export function dichoAdentro(detalle) {
   const d = String(detalle || "").trim();
   let m;
   if (ES_CIERRE.test(d)) return "Se marcó como hecha";
-  if (/^Volvió a abrir "/.test(d)) return "Se volvió a abrir";
+  if (/^Volvió a abrir[ :]/.test(d)) return "Se volvió a abrir";
+  // Lo que anota la bandeja de Tareas, que nombra la tarea después de dos puntos.
+  if (/^Ya no va: /.test(d)) return "Se cerró sin hacerse: ya no va";
+  if (/^No se hizo: /.test(d)) return "Se marcó como no hecha";
+  // Delegarla, o cambiarla de etapa: las dos «pasan a» algo.
+  if ((m = d.match(/^".*" pasa a (.+)$/))) return `Pasa a ${m[1]}`;
+  if ((m = d.match(/^".*" queda sin etapa(.*)$/))) return `Queda sin etapa${m[1]}`;
   if ((m = d.match(/^Le encargó ".*" a (.+)$/))) return `Se le encargó a ${m[1]}`;
   if ((m = d.match(/^".*" queda para el (.+)$/))) return `Queda para el ${m[1]}`;
   if (/^".*" se queda sin fecha$/.test(d)) return "Se queda sin fecha";

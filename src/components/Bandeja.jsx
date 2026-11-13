@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Hourglass, MessageSquare, Plus, ArrowRight, X } from "lucide-react";
+import { Check, Hourglass, MessageSquare, Plus, ArrowRight, X, History } from "lucide-react";
 import { colors } from "../theme/colors";
 import { inputStyle } from "./ui/Input";
 import MarcaPrivada from "./ui/MarcaPrivada";
@@ -15,7 +15,12 @@ import { sumarDias, hoyISO, diasEntre, diaCorto } from "../modules/leads/pipelin
 //
 // Todo se hace desde la fila: completar es un toque, la fecha se cambia
 // tocándola, y se agrega escribiendo y Enter. Abrir la tarea queda para lo
-// demás —detalle, archivos, comentarios—.
+// demás —detalle, archivos, el historial entero—.
+//
+// UN PASO SE ANOTA, NO SE MARCA. Una tarea vencida no siempre está sin hacer:
+// a veces ya se dio un paso —«la reunión quedó fijada»— y falta el resto. Eso
+// se anota ahí mismo y se le pone la fecha de lo que sigue; la tarea queda
+// abierta con su seguimiento. La casilla es para cuando está completa.
 //
 // Qué va en cada parte lo decide src/lib/bandeja.js; esto lo dibuja.
 
@@ -27,8 +32,8 @@ import { sumarDias, hoyISO, diasEntre, diaCorto } from "../modules/leads/pipelin
  * @param asignables  a quién se le puede delegar
  */
 export default function Bandeja({
-  datos, hechas = [], users = [], comentarios = {}, usuario, puede = () => false, nombreDe = () => "",
-  proyectos = [], asignables = [], onAbrir, onCompletar, onReabrir, onReprogramar, onDelegar, onDescartar, onAgregar, onIrAlPipeline,
+  datos, hechas = [], users = [], comentarios = {}, ultimas = {}, usuario, puede = () => false, nombreDe = () => "",
+  proyectos = [], asignables = [], onAbrir, onCompletar, onReabrir, onReprogramar, onDelegar, onDescartar, onAgregar, onAnotar, onIrAlPipeline,
 }) {
   const hoy = hoyISO();
   // Qué fila tiene abierto su cuadro de fecha o de delegar.
@@ -36,6 +41,21 @@ export default function Bandeja({
   const [nueva, setNueva] = useState({ titulo: "", proyecto: "", fecha: "" });
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // El paso que se está por anotar en cada fila, y lo que dijo al anotarlo.
+  const [pasos, setPasos] = useState({});       // id → texto
+  const [dijoPaso, setDijoPaso] = useState({}); // id → motivo por el que no se anotó
+
+  async function anotarPaso(t) {
+    const texto = (pasos[t.id] || "").trim();
+    if (!texto) { setDijoPaso(d => ({ ...d, [t.id]: "Escribí qué pasó." })); return; }
+    setOcupado(true);
+    const e = await onAnotar(t, texto);
+    setOcupado(false);
+    if (e) { setDijoPaso(d => ({ ...d, [t.id]: e })); return; }
+    // La fila se queda abierta: casi siempre después del paso va la fecha de lo que sigue.
+    setPasos(x => ({ ...x, [t.id]: "" }));
+    setDijoPaso(d => ({ ...d, [t.id]: "" }));
+  }
 
   const nombre = id => users.find(u => String(u.id) === String(id))?.name || null;
   const otros = asignables.filter(u => String(u.id) !== String(usuario?.id));
@@ -63,6 +83,21 @@ export default function Bandeja({
   // componente definido adentro de otro es un tipo nuevo en cada dibujo: React
   // lo desmonta y lo vuelve a montar, y el campo de «nueva tarea» perdería el
   // foco a cada letra.
+
+  // Anotar un paso: qué pasó, sin cerrar la tarea.
+  const paso = t => onAnotar && (
+    <div className="bandeja-paso" style={{ marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+        <input value={pasos[t.id] || ""} aria-label="Qué pasó con esta tarea" disabled={ocupado}
+          onChange={e => { const v = e.target.value; setPasos(x => ({ ...x, [t.id]: v })); setDijoPaso(d => ({ ...d, [t.id]: "" })); }}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); anotarPaso(t); } }}
+          placeholder="¿Ya diste un paso? Anotalo: queda en su historial y la tarea sigue abierta"
+          style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "4px 8px", fontSize: 12 }} />
+        <button disabled={ocupado} onClick={() => anotarPaso(t)} style={chip(true)}><Plus size={11} /> Anotar</button>
+      </div>
+      {dijoPaso[t.id] && <div style={{ fontSize: 11, color: colors.danger, marginTop: 3 }}>{dijoPaso[t.id]}</div>}
+    </div>
+  );
 
   // Las salidas de una fila: fechas de un toque, delegar y «ya no va».
   const salidas = (t, conDescartar = true) => (
@@ -135,6 +170,14 @@ export default function Bandeja({
               {hecha && <span>· {t.descartada ? "ya no va" : "hecha"}{t.hecha_por ? ` · ${t.hecha_por}` : ""}</span>}
               {comentarios[t.id] > 0 && <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>· <MessageSquare size={10} /> {comentarios[t.id]}</span>}
             </div>
+            {/* Lo último que se anotó: en qué va, sin abrirla. */}
+            {ultimas[t.id]?.texto && !hecha && (
+              <div className="ultima-anotacion" title={ultimas[t.id].texto}
+                style={{ fontSize: 11.5, color: colors.inkSoft, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <History size={10} style={{ verticalAlign: "-1px", marginRight: 3 }} color={colors.muted} />
+                <span style={{ color: colors.muted }}>{diaCorto(ultimas[t.id].created_at)} · </span>{ultimas[t.id].texto}
+              </div>
+            )}
           </div>
 
           {/* La fecha, siempre a la derecha: se toca y se cambia ahí mismo. */}
@@ -150,6 +193,7 @@ export default function Bandeja({
 
         {(pideAlgo || abiertaAca) && !hecha && (
           <div style={{ marginTop: 7, paddingLeft: 28 }}>
+            {paso(t)}
             {grupo.pide === "dueno" ? (
               <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
                 <button disabled={ocupado} onClick={() => hacer(() => onDelegar(t, usuario.id))} style={chip(true)}>La tomo yo</button>
@@ -191,7 +235,7 @@ export default function Bandeja({
           <div key={g.clave} style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, marginBottom: 5, color: rojo ? colors.danger : colors.muted }}>
               {g.titulo.toUpperCase()} · {cuantos}
-              {g.clave === "vencidas" && <span style={{ fontWeight: 400, letterSpacing: 0, color: colors.inkSoft }}> — cada una pide una decisión: nueva fecha, delegarla, o ya no va</span>}
+              {g.clave === "vencidas" && <span style={{ fontWeight: 400, letterSpacing: 0, color: colors.inkSoft }}> — cada una pide una decisión: anotar el paso que ya se dio y ponerle nueva fecha, delegarla, o ya no va</span>}
             </div>
             <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
               {(g.leads || []).map(filaLead)}

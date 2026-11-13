@@ -366,6 +366,22 @@ export async function cargarHistorial(leadId, ids = []) {
 }
 
 /**
+ * El historial de una sola tarea: para la ventana de la tarea y la bandeja,
+ * que no tienen el proyecto entero a mano. Una tarea sin proyecto no tiene
+ * bitácora: su historial es lo anotado, más cuándo entró y cuándo se hizo.
+ *
+ * @returns { comentarios, movimientos }
+ */
+export async function cargarHistorialDeTarea(taskId) {
+  if (!taskId) return { comentarios: [], movimientos: [] };
+  const [{ data: notas, error: eNotas }, { data: movs, error: eMovs }] = await Promise.all([
+    supabase.from("tarea_comentarios").select("id,task_id,texto,autor_id,autor_nombre,created_at").eq("task_id", taskId).order("created_at"),
+    supabase.from("lead_movimientos").select("id,task_id,detalle,autor_nombre,automatico,created_at").eq("task_id", taskId).order("created_at"),
+  ]);
+  return { comentarios: eNotas ? [] : notas || [], movimientos: eMovs ? [] : movs || [] };
+}
+
+/**
  * Anotar qué pasó con un punto: «llamé, quedan en confirmar la reunión».
  *
  * Es un comentario de la tarea —el mismo hilo que se ve en Tareas—, con fecha

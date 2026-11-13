@@ -22,6 +22,7 @@ import { bandeja, sinCompras, alReprogramar, alDelegar, alDescartar, alReabrir, 
 import { avisosDelTablero } from "./lib/avisos";
 import CargadorDeAvisos from "./components/CargadorDeAvisos";
 import { avisosDelPipeline, esMiAviso, diaCorto } from "./modules/leads/pipeline";
+import { anotar as anotarEnProyecto, anotarEnLaTarea } from "./modules/leads/proyecto";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
 import ModalTarea from "./components/ModalTarea";
@@ -118,6 +119,8 @@ export default function App() {
   const [accesosLead, setAccesosLead] = useState({});
   const [proyectosPipeline, setProyectosPipeline] = useState([]);
   const [comentarios, setComentarios] = useState({});   // task_id -> cuántos
+  // Lo último que se anotó en cada tarea: se lee en su fila sin abrirla.
+  const [ultimas, setUltimas] = useState({});   // task_id -> { texto, created_at }
   // Qué compra abrir al tocar su aviso en el tablero. Va acá arriba y no junto
   // a `abrirTarea`, que es donde se usa: abajo quedaría DESPUÉS del `return` de
   // la pantalla de login, y un hook después de un return temprano se saltea
@@ -176,10 +179,11 @@ export default function App() {
       .select("id,estado,solicitante_id,descripcion,aprobado_at")
       .in("estado", ["pendiente_aprobacion", "requiere_info", "aprobada"])
       .then(({ data }) => setMisCompras(data || []));
-    supabase.from("tarea_comentarios").select("task_id").then(({ data }) => {
-      const c = {};
-      (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; });
+    supabase.from("tarea_comentarios").select("task_id,texto,created_at").order("created_at").then(({ data }) => {
+      const c = {}, u = {};
+      (data || []).forEach(x => { c[x.task_id] = (c[x.task_id] || 0) + 1; u[x.task_id] = { texto: x.texto, created_at: x.created_at }; });
       setComentarios(c);
+      setUltimas(u);
     });
   }, [usuario]);
 
@@ -264,11 +268,19 @@ export default function App() {
       ({ error } = await supabase.from("tasks").update(resto).eq("id", t.id));
     }
     if (error) { alert("No se pudo guardar: " + error.message); fetchTareas(); return; }
-    if (t.lead_id && nota) {
-      await supabase.from("lead_movimientos").insert({
-        lead_id: t.lead_id, tipo: "nota", automatico: true, detalle: nota, autor_id: usuario.id, autor_nombre: usuario.name,
-      });
-    }
+    // A la bitácora del proyecto, diciendo de qué tarea es: de ahí sale el
+    // historial de la tarea (migración 181).
+    if (t.lead_id && nota) await anotarEnProyecto(t.lead_id, { tipo: "nota", detalle: nota, quien: usuario, extra: { task_id: t.id } });
+  }
+  // UN PASO NO CIERRA LA TAREA. «Gestionar reunión»: se logró fijarla, y eso
+  // se anota en ella; la tarea sigue abierta hasta que esté completa. No hace
+  // falta marcarla hecha y abrir otra para seguir: así se pierde el hilo.
+  async function anotarEnTarea(t, texto) {
+    const e = await anotarEnLaTarea(t, texto, usuario);
+    if (e) return e;
+    setComentarios(c => ({ ...c, [t.id]: (c[t.id] || 0) + 1 }));
+    setUltimas(u => ({ ...u, [t.id]: { texto: String(texto).trim(), created_at: new Date().toISOString() } }));
+    return null;
   }
   const reabrirTarea = t => tocarTarea(t, alReabrir(), `Volvió a abrir: ${t.title}`);
   const reprogramarTarea = (t, fecha) => tocarTarea(t, alReprogramar(fecha), fecha ? `"${t.title}" queda para el ${diaCorto(fecha)}` : `"${t.title}" se queda sin fecha`);
@@ -335,10 +347,8 @@ export default function App() {
     // Si la tarea es de un proyecto del pipeline, su bitácora se entera: quien
     // la trabaja la marca desde sus tareas, no entrando al proyecto.
     if (tarea?.lead_id && estado !== "pendiente") {
-      await supabase.from("lead_movimientos").insert({
-        lead_id: tarea.lead_id, tipo: "nota", automatico: true,
-        detalle: `${estado === "listo" ? "Hecho" : "No se hizo"}: ${tarea.title}`,
-        autor_id: usuario.id, autor_nombre: usuario.name,
+      await anotarEnProyecto(tarea.lead_id, {
+        tipo: "nota", detalle: `${estado === "listo" ? "Hecho" : "No se hizo"}: ${tarea.title}`, quien: usuario, extra: { task_id: tarea.id },
       });
     }
   }
@@ -651,7 +661,7 @@ export default function App() {
                 <>
                   {vistaTareas === "calendario"
                     ? <TareasCalendario tasks={paraCalendario} users={users} leads={leadsPorId} currentUser={usuario} onEditar={abrirTarea} />
-                    : <Bandeja datos={datosBandeja} hechas={hechas} users={users} comentarios={comentarios} usuario={usuario} puede={puede}
+                    : <Bandeja datos={datosBandeja} hechas={hechas} users={users} comentarios={comentarios} ultimas={ultimas} onAnotar={anotarEnTarea} usuario={usuario} puede={puede}
                         nombreDe={nombreProyecto} proyectos={mios} asignables={asignables}
                         onAbrir={abrirTarea} onCompletar={t => cambiarEstado(t.id, "listo")} onReabrir={reabrirTarea}
                         onReprogramar={reprogramarTarea} onDelegar={delegarTarea} onDescartar={descartarTarea} onAgregar={agregarRapida}
