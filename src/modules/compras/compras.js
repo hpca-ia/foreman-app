@@ -1,7 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
 import { agruparOrdenesAprobadas } from "../controlObra/agruparOrdenes.js";
-import { solicitudesDeLaObra } from "../controlObra/calculos";
+import { solicitudesDeLaObra, repartirSolicitudes } from "../controlObra/calculos";
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
@@ -221,6 +221,47 @@ export async function rubrosDelProyecto(leadId) {
     supabase.from("obra_actividades").select("id,nombre,codigo,orden,origen").eq("obra_id", obra.id).order("orden"),
   ]);
   return { obra, rubros: data || [], actividades: acts || [] };
+}
+
+/**
+ * Lo que el control de obra usa para su cuenta, traído igual que lo trae su
+ * pantalla: rubros, agrupaciones, facturas con el número de su planilla,
+ * asignaciones, pagos, y los pedidos de la obra con sus cotizaciones.
+ *
+ * Es para mostrar el presupuesto al aprobar (presupuestoDelDestino.js). Se
+ * trae una vez por pedido; cambiar el rubro en la pantalla no vuelve a pedirlo.
+ *
+ * @returns null si el proyecto no tiene obra; si no, las filas
+ */
+export async function datosDelControlPara(leadId) {
+  if (!leadId) return null;
+  const { data: obras } = await supabase.from("obras").select("id,lead_id").eq("lead_id", leadId).limit(1);
+  const obra = obras?.[0];
+  if (!obra) return null;
+  const [{ data: rubros }, { data: planillas }, { data: facturas }, { data: actividades }, { data: pagos }, a, b] = await Promise.all([
+    supabase.from("obra_rubros").select("*").eq("obra_id", obra.id).order("capitulo_orden").order("orden"),
+    supabase.from("planillas").select("id,numero").eq("obra_id", obra.id).order("numero"),
+    supabase.from("obra_facturas").select("*").eq("obra_id", obra.id).order("fecha", { ascending: false }),
+    supabase.from("obra_actividades").select("*").eq("obra_id", obra.id).order("orden"),
+    supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").eq("obra_id", obra.id),
+    supabase.from("compras_solicitudes").select("*").eq("obra_id", obra.id),
+    supabase.from("compras_solicitudes").select("*").eq("lead_id", leadId),
+  ]);
+  const numero = {};
+  (planillas || []).forEach(pl => { numero[pl.id] = pl.numero; });
+  const conNumero = (facturas || []).map(f => ({ ...f, _planillaNumero: f.planilla_id ? numero[f.planilla_id] ?? null : null }));
+  let asignaciones = [];
+  if (conNumero.length) {
+    const { data } = await supabase.from("obra_asignaciones").select("*").in("factura_id", conNumero.map(f => f.id));
+    asignaciones = data || [];
+  }
+  const solicitudes = repartirSolicitudes([...(a.data || []), ...(b.data || [])], { id: obra.id, lead_id: leadId }).dentro;
+  let adjuntos = [];
+  if (solicitudes.length) {
+    const { data } = await supabase.from("compras_adjuntos").select("id,solicitud_id,monto,proveedor,tipo").in("solicitud_id", solicitudes.map(x => x.id));
+    adjuntos = data || [];
+  }
+  return { obra, rubros: rubros || [], actividades: actividades || [], facturas: conNumero, asignaciones, pagos: pagos || [], solicitudes, adjuntos };
 }
 
 /** Cada paso queda escrito: sin esto el flujo es una conversación de WhatsApp. */

@@ -8,8 +8,9 @@ import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, actualizarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
   moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe,
-  marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia } from "./compras";
+  marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia, datosDelControlPara } from "./compras";
 import { faltaEnElControl, documentoSugerido } from "./alControl";
+import { presupuestoDelDestino } from "./presupuestoDelDestino";
 import { supabase } from "../../lib/supabase";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
@@ -235,6 +236,27 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     setEnlaces(await enlacesDeAdjuntos([...cotizaciones, ...cierre]));
   }, [viva?.id]);
   useEffect(() => { cargarPapeles(); }, [cargarPapeles]);
+
+  // EL PRESUPUESTO, PARA APROBAR MIRÁNDOLO. Lo ve quien da el visto: cuánto
+  // tenía ese rubro o esa agrupación, cuánto se lleva gastado, cuánto ya está
+  // hablado en otros pedidos y cuánto queda si aprueba este. Las filas del
+  // control se traen una vez; si corrige contra qué va, la cuenta se rehace
+  // sola con lo que ya está en pantalla.
+  const [delControlDeObra, setDelControlDeObra] = useState(null);
+  const veElPresupuesto = editando && puede("compras.aprobar");
+  const leadDelPedido = leadDe(form.lead_id);
+  useEffect(() => {
+    let vivo = true;
+    if (!veElPresupuesto || !leadDelPedido) { setDelControlDeObra(null); return; }
+    datosDelControlPara(leadDelPedido).then(d => { if (vivo) setDelControlDeObra(d); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [veElPresupuesto, leadDelPedido]);
+  const presupuestoDe = delControlDeObra && viva ? presupuestoDelDestino({
+    ...delControlDeObra,
+    destino: { obra_rubro_id: form.obra_rubro_id ? Number(form.obra_rubro_id) : null, obra_actividad_id: form.obra_actividad_id ? Number(form.obra_actividad_id) : null },
+    // Con el estimado que está escrito ahora, aunque todavía no se haya guardado.
+    solicitud: { ...viva, monto_estimado: form.monto_estimado === "" || form.monto_estimado == null ? null : Number(form.monto_estimado) },
+  }) : null;
 
   // ¿Es de una obra, ya se aprobó, y su documento todavía no está en el control?
   const sinControl = faltaEnElControl(viva);
@@ -687,6 +709,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   })();
 
   const lbl = { fontSize: 10.5, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
+  const plata = v => `${Number(v) < 0 ? "−" : ""}$${Math.abs(Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const mini = { ...inputStyle, padding: "8px 10px", fontSize: 12.5 };
 
   return (
@@ -911,6 +934,55 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             </div>
           )}
         </div>
+
+        {/* EL PRESUPUESTO DE AQUELLO CONTRA LO QUE SE PIDE. Para aprobar
+            mirándolo, sin ir a Control de Obra con el pedido de memoria. Es
+            la misma cuenta del control: no puede decir otro número. */}
+        {veElPresupuesto && presupuestoDe && [presupuestoDe.principal, presupuestoDe.agrupacion].filter(Boolean).map((c, k) => (
+          <div key={c.tipo} className={`presupuesto-del-destino presupuesto-de-${c.tipo}`}
+            style={{ background: k ? "transparent" : colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "9px 11px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
+              {k ? "Y SU AGRUPACIÓN ENTERA" : c.tipo === "rubro" ? "EL PRESUPUESTO DE ESE RUBRO" : "EL PRESUPUESTO DE ESA AGRUPACIÓN"}
+            </div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, margin: "2px 0 6px", overflowWrap: "anywhere" }}>{c.nombre}</div>
+            {c.sinPresupuesto ? (
+              <div style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.5 }}>
+                No tiene presupuesto: todo lo que se gaste acá es por fuera de lo presupuestado.
+                {c.invertido > 0 ? ` Lleva gastados ${plata(c.invertido)}.` : ""}
+                {c.comprometido > 0 ? ` Hay ${plata(c.comprometido)} en otros pedidos ya aprobados.` : ""}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", rowGap: 3, columnGap: 12, fontSize: 12, color: colors.inkSoft }}>
+                <span>Presupuestado</span><strong style={{ color: colors.ink, textAlign: "right" }}>{plata(c.presupuesto)}</strong>
+                <span>Gastado hasta hoy</span><span style={{ textAlign: "right" }}>− {plata(c.invertido)}</span>
+                <span>Otros pedidos ya aprobados{c.cuantos ? ` (${c.cuantos})` : ""}</span><span style={{ textAlign: "right" }}>− {plata(c.comprometido)}</span>
+                <span style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 3, fontWeight: 600, color: colors.ink }}>Queda disponible</span>
+                <strong style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 3, textAlign: "right", color: c.disponible < 0 ? colors.danger : colors.ink }}>{plata(c.disponible)}</strong>
+                {!k && (<>
+                  <span>Este pedido{presupuestoDe.deDonde && presupuestoDe.estePedido ? ` (${presupuestoDe.deDonde})` : ""}</span>
+                  <span style={{ textAlign: "right" }}>{presupuestoDe.estePedido ? `− ${plata(presupuestoDe.estePedido)}` : "sin monto"}</span>
+                  <span style={{ fontWeight: 700, color: colors.ink }}>Si se aprueba, quedaría</span>
+                  <strong className="quedaria" style={{ textAlign: "right", color: c.quedaria < 0 ? colors.danger : colors.success }}>{plata(c.quedaria)}</strong>
+                </>)}
+              </div>
+            )}
+            {!k && !c.sinPresupuesto && c.quedaria < 0 && (
+              <div style={{ fontSize: 11, color: colors.danger, marginTop: 5, lineHeight: 1.45 }}>
+                Con este pedido {c.tipo === "rubro" ? "el rubro" : "la agrupación"} se pasa de lo presupuestado por {plata(-c.quedaria)}.
+              </div>
+            )}
+            {c.porAprobar > 0 && (
+              <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
+                Además hay {plata(c.porAprobar)} en {c.cuantosPorAprobar === 1 ? "otro pedido que espera" : `otros ${c.cuantosPorAprobar} pedidos que esperan`} el visto: no están descontados.
+              </div>
+            )}
+          </div>
+        ))}
+        {veElPresupuesto && delControlDeObra && !presupuestoDe && estado === "pendiente_aprobacion" && (
+          <div className="presupuesto-del-destino" style={{ fontSize: 11.5, color: colors.warning, background: colors.warningSoft, borderRadius: 8, padding: "8px 10px", lineHeight: 1.5 }}>
+            Este pedido no dice contra qué del presupuesto va: elegile la agrupación arriba y acá aparece cuánto queda.
+          </div>
+        )}
 
         {!soloMiro && (<div>
           <label style={lbl}>QUÉ CLASE DE PEDIDO ES</label>
