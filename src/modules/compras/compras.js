@@ -3,6 +3,7 @@ import { sincronizarCapitulos } from "../controlObra/sincronizarCapitulos";
 import { agruparOrdenesAprobadas } from "../controlObra/agruparOrdenes.js";
 import { solicitudesDeLaObra } from "../controlObra/calculos";
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
+import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // El flujo de una compra, de punta a punta.
@@ -588,7 +589,7 @@ export async function facturarCompra(solicitud, datos, quien) {
   // archivo" aunque el PDF estuviera a un clic, en el pedido.
   const papel = datos.archivo_url
     ? { archivo_url: datos.archivo_url, archivo_nombre: datos.archivo_nombre || null }
-    : await ultimoRespaldo(solicitud.id);
+    : await papelDelPedido(solicitud);
 
   const fila = {
     obra_id: obra.id, planilla_id: abierta?.id || null,
@@ -646,7 +647,13 @@ export async function facturarCompra(solicitud, datos, quien) {
 
   // Enganchada al pedido: con esto deja de contarse como comprometido —si no,
   // la misma plata pesaría dos veces sobre el mismo rubro.
-  await supabase.from("compras_solicitudes").update({ factura_id: factura.id, obra_id: obra.id }).eq("id", solicitud.id);
+  // Y con a quién se le compró y por cuánto, si el pedido no lo sabía. Un
+  // anticipo no es el precio de la compra: ese no pisa el monto.
+  await supabase.from("compras_solicitudes").update({
+    factura_id: factura.id, obra_id: obra.id,
+    ...(fila.razon_social && !solicitud.proveedor ? { proveedor: fila.razon_social } : {}),
+    ...(solicitud.monto == null && fila.clase !== "anticipo" ? { monto: total } : {}),
+  }).eq("id", solicitud.id);
 
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
     `${(datos.clase || "factura") === "proforma" ? "Proforma" : "Factura"}${fila.numero_factura ? ` ${fila.numero_factura}` : ""} por $${total.toFixed(2)} cargada al control de obra${asignado ? "" : " — falta asignarle el rubro"}`);
@@ -654,12 +661,18 @@ export async function facturarCompra(solicitud, datos, quien) {
   return { factura, sinDestino: !asignado, sinPlanilla: !abierta };
 }
 
-/** El último documento adjuntado al pedido como respaldo: la factura, el recibo. */
-async function ultimoRespaldo(solicitudId) {
+/**
+ * El papel con el que el pedido entra al control: el último respaldo —la
+ * factura, el recibo— o, si nadie subió uno, la cotización que se eligió.
+ *
+ * Muchas veces son el mismo papel: quien pide el pago sube la factura como
+ * cotización, se aprueba y se paga. Sin esto esa factura entraba al control
+ * «sin archivo» con el PDF a un clic, en el pedido.
+ */
+async function papelDelPedido(solicitud) {
   const { data } = await supabase.from("compras_adjuntos")
-    .select("storage_path,nombre").eq("solicitud_id", solicitudId).eq("tipo", "respaldo")
-    .order("created_at", { ascending: false }).limit(1);
-  const a = data?.[0];
+    .select("id,tipo,storage_path,nombre,proveedor,monto,created_at").eq("solicitud_id", solicitud.id);
+  const a = documentoSugerido(solicitud, data || []).papel;
   return a ? { archivo_url: a.storage_path, archivo_nombre: a.nombre } : {};
 }
 
@@ -688,43 +701,49 @@ export async function papelesDeLaFactura(facturaId) {
  * El monto es opcional: muchas veces se paga exactamente lo de la proforma y
  * repetirlo es trabajo de más. En blanco, vale el de la compra.
  */
-export async function registrarPago(solicitud, { monto, quien, comentario }) {
+export async function registrarPago(solicitud, { monto, quien, comentario, forma = "otro", fecha = null }) {
+  // CON EL DOCUMENTO EN EL CONTROL, EL PAGO ES UN ABONO A ESE DOCUMENTO.
+  //
+  // Proveedores calcula lo que se debe restando los pagos de `obra_pagos` al
+  // total del documento: un pago que solo se marca en el pedido deja una
+  // deuda que ya no existe. Y lo que se escribe acá es ESTE pago, no el total
+  // pagado: en blanco es «lo que falta». Antes, pagar el saldo de una factura
+  // ya abonada no registraba nada, y subir el comprobante de un anticipo del
+  // 50% dejaba el pedido como pagado entero.
+  let pagaAhora = null, pagado = null;
+  if (solicitud.factura_id) {
+    const { data: f } = await supabase.from("obra_facturas")
+      .select("id,obra_id,total,clase").eq("id", solicitud.factura_id).maybeSingle();
+    if (f) {
+      const { data: ya } = await supabase.from("obra_pagos").select("monto").eq("factura_id", f.id);
+      const antes = (ya || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+      const a = abonoAlControl({ total: f.total, pagado: antes, escrito: monto, esAnticipo: f.clase === "anticipo" });
+      if (a.error) return a.error;
+      if (a.monto > 0.005) {
+        const r = await pagarFactura(f, { monto: a.monto, forma, fecha, nota: "Registrado desde Compras" }, quien);
+        if (r?.error) return "No se pudo registrar el pago en el control: " + r.error;
+      }
+      pagaAhora = a.monto;
+      pagado = Math.round((antes + a.monto) * 100) / 100;
+    }
+  }
+  // Sin documento en el control —un gasto de oficina— la marca del pedido es
+  // todo lo que hay.
+  if (pagado == null) {
+    pagaAhora = monto ? Number(monto) : (solicitud.monto ?? solicitud.monto_estimado ?? null);
+    pagado = pagaAhora;
+  }
+
   const campos = {
     pagado_at: new Date().toISOString(),
     pagado_por: quien?.id ?? null,
     pagado_nombre: quien?.name || null,
-    pagado_monto: monto ? Number(monto) : (solicitud.monto ?? null),
+    pagado_monto: pagado,
   };
   const { error } = await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
   if (error) return /column|schema cache/i.test(error.message) ? "Falta correr la migración 065." : error.message;
 
-  // Y EL PAGO ENTRA AL CONTROL, que es donde se mira lo que se debe.
-  //
-  // Hasta acá esto solo marcaba el pedido como pagado. Proveedores calcula el
-  // saldo restando los pagos de `obra_pagos` al total del documento, así que
-  // una factura pagada desde Compras seguía apareciendo como que se debe: el
-  // pago existía en una pantalla y no en la otra. Alguien iba a pagar dos
-  // veces, o a discutir con un proveedor que ya había cobrado.
-  //
-  // Si el pedido todavía no tiene factura en el control no hay contra qué
-  // registrarlo, y ahí la marca del pedido es todo lo que se puede guardar.
-  if (solicitud.factura_id && campos.pagado_monto) {
-    const { data: f } = await supabase.from("obra_facturas")
-      .select("id,obra_id").eq("id", solicitud.factura_id).maybeSingle();
-    if (f) {
-      // Sin duplicar: si alguien ya registró este pago en el control —al
-      // facturar, por ejemplo— no se suma de nuevo.
-      const { data: ya } = await supabase.from("obra_pagos")
-        .select("monto").eq("factura_id", f.id);
-      const pagado = (ya || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
-      const falta = Math.round((Number(campos.pagado_monto) - pagado) * 100) / 100;
-      if (falta > 0.005) {
-        await pagarFactura(f, { monto: falta, forma: "otro", nota: "Registrado desde Compras" }, quien);
-      }
-    }
-  }
-
-  const cuanto = campos.pagado_monto ? ` · $${Number(campos.pagado_monto).toFixed(2)}` : "";
+  const cuanto = pagaAhora ? ` · $${Number(pagaAhora).toFixed(2)}` : "";
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, `Pagado${cuanto}${comentario ? ` · ${comentario}` : ""}`);
   if (solicitud.lead_id) await supabase.from("lead_movimientos").insert({
     lead_id: solicitud.lead_id, tipo: "compra", automatico: true,
@@ -732,6 +751,97 @@ export async function registrarPago(solicitud, { monto, quien, comentario }) {
     autor_id: quien?.id ?? null, autor_nombre: quien?.name || null,
   }).select();
   return null;
+}
+
+/**
+ * El pedido se entera de un pago que ya se registró en el control al cargar
+ * el documento. Sin esto la compra quedaba «en el control, falta registrar el
+ * pago» con el pago hecho, y alguien lo registraba otra vez.
+ */
+export async function marcarPagoDelPedido(solicitud, monto, quien) {
+  const { error } = await supabase.from("compras_solicitudes").update({
+    pagado_at: new Date().toISOString(), pagado_por: quien?.id ?? null, pagado_nombre: quien?.name || null,
+    pagado_monto: Number(monto) || null,
+  }).eq("id", solicitud.id);
+  if (error) return error.message;
+  await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien, `Pagado · $${Number(monto).toFixed(2)} · al cargar el documento al control`);
+  return null;
+}
+
+/**
+ * Los documentos del control que pueden ser el de este pedido: para cuando la
+ * factura ya se cargó desde la planilla y nadie la enganchó.
+ *
+ * @returns { obra, candidatas }
+ */
+export async function documentosDelControlPara(solicitud) {
+  if (!solicitud?.lead_id) return { obra: null, candidatas: [] };
+  const { data: obras } = await supabase.from("obras").select("id").eq("lead_id", solicitud.lead_id).limit(1);
+  const obra = obras?.[0];
+  if (!obra) return { obra: null, candidatas: [] };
+  const [{ data: facturas }, { data: tomadas }, { data: adjuntos }, { data: pagos }] = await Promise.all([
+    supabase.from("obra_facturas").select("id,obra_id,fecha,clase,numero_factura,razon_social,total").eq("obra_id", obra.id).order("fecha", { ascending: false }),
+    supabase.from("compras_solicitudes").select("id,factura_id").not("factura_id", "is", null),
+    supabase.from("compras_adjuntos").select("id,tipo,proveedor,monto").eq("solicitud_id", solicitud.id),
+    supabase.from("obra_pagos").select("factura_id,monto").eq("obra_id", obra.id),
+  ]);
+  return {
+    obra,
+    candidatas: candidatasDelControl(solicitud, {
+      facturas: facturas || [], enganchadas: (tomadas || []).map(x => x.factura_id), adjuntos: adjuntos || [], pagos: pagos || [],
+    }),
+  };
+}
+
+/**
+ * «Es este»: enganchar el pedido a un documento que ya estaba en el control, y
+ * dejar los dos diciendo lo mismo.
+ *
+ *   · el pedido deja de contar como comprometido (engancharFactura);
+ *   · si Compras decía «pagado» y el control no tenía ese pago, se registra
+ *     —nunca por más de lo que el documento vale—;
+ *   · el pedido queda con lo que de verdad está pagado, y avanza a «comprada».
+ *
+ * @returns { ok, pagado } o { error }
+ */
+export async function engancharYPonerAlDia(solicitud, factura, quien) {
+  const err = await engancharFactura(solicitud, factura, quien);
+  if (err) return { error: err };
+
+  const { data: ya } = await supabase.from("obra_pagos").select("monto").eq("factura_id", factura.id);
+  const enControl = (ya || []).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+  const p = pagoAlEnganchar({
+    total: factura.total, pagadoEnControl: enControl,
+    pagadoEnCompras: solicitud.pagado_monto, estabaPagado: !!solicitud.pagado_at,
+  });
+  let pagado = enControl;
+  if (p.registrar > 0.005) {
+    const r = await pagarFactura({ id: factura.id, obra_id: factura.obra_id }, {
+      monto: p.registrar, forma: "otro", nota: "Registrado desde Compras",
+      fecha: solicitud.pagado_at ? String(solicitud.pagado_at).slice(0, 10) : null,
+    }, quien);
+    if (r?.error) return { error: "Quedó enganchada, pero el pago no se registró en el control: " + r.error };
+    pagado = p.pagado;
+  }
+
+  const campos = {};
+  if (pagado > 0.005) {
+    campos.pagado_monto = Math.round(pagado * 100) / 100;
+    if (!solicitud.pagado_at) Object.assign(campos, { pagado_at: new Date().toISOString(), pagado_por: quien?.id ?? null, pagado_nombre: quien?.name || null });
+  }
+  if (!solicitud.proveedor && factura.razon_social) campos.proveedor = factura.razon_social;
+  if (solicitud.monto == null && factura.clase !== "anticipo") campos.monto = Number(factura.total) || null;
+  if (Object.keys(campos).length) await supabase.from("compras_solicitudes").update(campos).eq("id", solicitud.id);
+
+  // Con el documento en el control la compra está hecha: le toca a quien la
+  // pidió decir que llegó.
+  if (solicitud.estado === "aprobada") {
+    const r = await moverA({ ...solicitud, ...campos, factura_id: factura.id }, "comprada", {
+      quien, comentario: null, paraQuien: solicitud.solicitante_id, titulo: `Recibir: ${solicitud.descripcion}`,
+    });
+    if (r?.error) return r;
+  }
+  return { ok: true, pagado };
 }
 
 /** Se pagó por error, o se deshizo el pago. */

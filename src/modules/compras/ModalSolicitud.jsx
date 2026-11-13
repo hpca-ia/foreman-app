@@ -7,7 +7,10 @@ import { inputStyle } from "../../components/ui/Input";
 import InlineFiles from "../../components/InlineFiles";
 import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, historialDe, rubrosDelProyecto,
   adjuntosDe, subirAdjunto, borrarAdjunto, actualizarAdjunto, enlacesDeAdjuntos, elegirProforma, registrarPago,
-  moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe } from "./compras";
+  moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe,
+  marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia } from "./compras";
+import { faltaEnElControl, documentoSugerido } from "./alControl";
+import { supabase } from "../../lib/supabase";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
 import { esDeOrden } from "../controlObra/agrupacionesDeOrdenes.js";
@@ -204,6 +207,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [papelesCierre, setPapelesCierre] = useState([]);
   const pagoRef = useRef(null);
   const [subiendoPago, setSubiendoPago] = useState(false);
+  // EL COMPROBANTE VIAJA CON LA CARGA. Pagar una compra de obra y cargarla al
+  // control son el mismo acto: el comprobante se elige acá y se sube cuando el
+  // documento entra al control, con su pago.
+  const [comprobante, setComprobante] = useState(null);
+  const comprobanteRef = useRef(null);
+  // Los documentos del control que pueden ser el de este pedido: para cuando
+  // la factura ya se cargó desde la planilla y nadie la enganchó.
+  const [delControl, setDelControl] = useState([]);
   const [guardandoImp, setGuardandoImp] = useState(false);
   const [avisoImp, setAvisoImp] = useState("");
 
@@ -224,6 +235,34 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     setEnlaces(await enlacesDeAdjuntos([...cotizaciones, ...cierre]));
   }, [viva?.id]);
   useEffect(() => { cargarPapeles(); }, [cargarPapeles]);
+
+  // ¿Es de una obra, ya se aprobó, y su documento todavía no está en el control?
+  const sinControl = faltaEnElControl(viva);
+  // UNA COMPRA DE OBRA NO SE PAGA SUELTA: el pago se registra contra su
+  // documento del control. Suelto solo se paga lo que ya lo tiene, o un gasto
+  // de oficina, que no entra a ningún control.
+  const pagoSuelto = !!viva && (!!viva.factura_id || viva.lead_id == null);
+  // LO QUE YA SE SABE, YA ESTÁ ESCRITO. Quien pidió subió la cotización —muchas
+  // veces la factura misma— y NOVA leyó de quién es y por cuánto: quien paga no
+  // tiene que copiarlo. Solo llena lo que está vacío.
+  const sugerido = viva ? documentoSugerido(viva, [...proformas, ...papelesCierre]) : null;
+  useEffect(() => {
+    if (!sugerido) return;
+    setCompra(c => ({
+      ...c,
+      proveedor: c.proveedor || sugerido.proveedor,
+      monto: c.monto || (sugerido.total ? String(sugerido.total) : ""),
+    }));
+    // eslint-disable-next-line
+  }, [sugerido?.proveedor, sugerido?.total]);
+  const deObraYDeCompras = sinControl && (puede("compras.gestionar") || puede("compras.aprobar"));
+  useEffect(() => {
+    let vivo = true;
+    if (!deObraYDeCompras || !viva?.id) { setDelControl([]); return; }
+    documentosDelControlPara(viva).then(r => { if (vivo) setDelControl(r.candidatas || []); }).catch(() => {});
+    return () => { vivo = false; };
+    // eslint-disable-next-line
+  }, [deObraYDeCompras, viva?.id, viva?.pagado_at]);
 
   // Los rubros de la obra de este proyecto: contra qué se está pidiendo.
   const [obra, setObra] = useState(null);
@@ -466,21 +505,40 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     });
   });
 
+  // PAGAR UNA COMPRA DE OBRA ES CARGARLA AL CONTROL.
+  //
+  // El documento entra al control contra su rubro, el pago queda registrado
+  // contra ese documento, el comprobante queda en el pedido y el pedido
+  // avanza. Todo en un paso, desde acá: si después de pagar alguien tiene que
+  // acordarse de cargar la misma factura en la planilla, la carga dos veces o
+  // no la carga. Era lo que pasaba: seis pedidos pagados que el control seguía
+  // contando como comprometidos.
   const marcarComprada = () => hacer(async () => {
     if (!compra.proveedor.trim()) return { error: "¿A quién se le compró?" };
     const total = Number(compra.monto) || 0;
     if (!(total > 0)) return { error: "¿Por cuánto es el documento?" };
+    const paga = Number(compra.pagaAhora) || 0;
+    if (paga > total + 0.005) return { error: `No se puede pagar más que el documento, que es por $${total.toFixed(2)}.` };
+    if (comprobante && !(paga > 0)) return { error: "Adjuntaste un comprobante: escribí cuánto se pagó." };
 
-    const r = await moverA(viva, "comprada", {
-      quien: currentUser, comentario: comentario || null, paraQuien: viva.solicitante_id,
-      titulo: `Recibir: ${viva.descripcion}`,
-      extra: { proveedor: compra.proveedor.trim(), monto: total },
-    });
-    if (r?.error) return r;
+    // Lo que ya estaba «comprada» y nunca entró al control no vuelve a
+    // moverse de estado: solo le falta el documento.
+    let s = viva;
+    if (estado === "aprobada") {
+      const r = await moverA(viva, "comprada", {
+        quien: currentUser, comentario: comentario || null, paraQuien: viva.solicitante_id,
+        titulo: `Recibir: ${viva.descripcion}`,
+        extra: { proveedor: compra.proveedor.trim(), monto: compra.clase === "anticipo" ? (viva.monto ?? null) : total },
+      });
+      if (r?.error) return r;
+      s = { ...viva, estado: "comprada" };
+    }
+    // Un gasto de oficina no entra al control de ninguna obra.
+    if (!viva.lead_id) return {};
 
     // Acá la plata deja de estar hablada: el documento entra al control y
-    // descuenta el rubro. Antes había que acordarse de ir a cargarlo a mano.
-    const con = { ...viva, proveedor: compra.proveedor.trim() };
+    // descuenta el rubro.
+    const con = { ...s, proveedor: compra.proveedor.trim() };
     // Los renglones emparejados viajan como repartos: cada uno a su rubro.
     // Lo que quedó sin rubro no va —se cae al destino del pedido, que es lo
     // que se hacía siempre.
@@ -490,12 +548,82 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     const f = await facturarCompra(con, { ...compra, total, repartos }, currentUser);
     if (f.error) return { error: "La compra quedó marcada, pero el documento no entró al control: " + f.error };
 
-    const paga = Number(compra.pagaAhora) || 0;
     if (paga > 0) {
-      await registrarPagoDeFactura(f.factura, { monto: paga, fecha: compra.fecha, forma: compra.forma }, currentUser);
+      const pg = await registrarPagoDeFactura(f.factura, { monto: paga, fecha: compra.fecha, forma: compra.forma }, currentUser);
+      if (pg?.error) return { error: "El documento entró al control, pero el pago no se registró: " + pg.error };
+      // Y el pedido se entera: si no, queda «falta registrar el pago» con el
+      // pago hecho, y alguien lo registra otra vez.
+      await marcarPagoDelPedido(con, paga, currentUser);
+    }
+    if (comprobante) {
+      const r = await subirAdjunto(con, comprobante, {
+        tipo: "pago", quien: currentUser, proveedor: compra.proveedor.trim(), monto: paga || null, nota: "Comprobante de pago",
+      });
+      if (r.error) return { error: "El documento y el pago quedaron en el control, pero el comprobante no se subió: " + r.error };
     }
     return {};
   });
+
+  // «Es este»: la factura ya estaba en el control, cargada desde la planilla.
+  const esEsteDelControl = factura => hacer(async () => {
+    const r = await engancharYPonerAlDia(viva, factura, currentUser);
+    return r.error ? { error: r.error } : {};
+  });
+
+  // QUE NOVA LEA UN DOCUMENTO de la compra y llene los datos. Sirve para el
+  // que se sube ahora y para el que ya está en el pedido: muchas veces la
+  // cotización que se aprobó ES la factura, y volver a subirla es trabajo de
+  // más. `yaEsta` dice que el papel ya vive en el pedido y no hay que subirlo.
+  async function leerElDocumento(archivo, yaEsta = null) {
+    setLeyendoDoc(true); setAvisoDoc("");
+    const leido = await leerDocumentoDeCompra(archivo).catch(e => ({ error: e.message }));
+    if (leido.error) { setLeyendoDoc(false); setAvisoDoc(leido.error); return; }
+    // El proveedor pasa por el canónico: "Kiwy", "FERRETERIA KIWY" y "kywi"
+    // son el mismo, y si entran como tres la cuenta por proveedor deja de
+    // servir.
+    const canon = leido.proveedor ? await proveedorCanonico(leido).catch(() => ({})) : {};
+    // Los renglones, para poder repartir la factura entre varios rubros. Una
+    // de ferretería trae cemento, varilla y alambre, y eso es albañilería,
+    // estructura e instalaciones.
+    setItemsFactura((leido.items || []).map((x, k) => ({ ...x, k, obra_rubro_id: null })));
+    setCompra(c => ({
+      ...c,
+      clase: leido.clase || c.clase,
+      proveedor: canon.proveedor || leido.proveedor || c.proveedor,
+      ruc: leido.ruc || canon.ruc || c.ruc,
+      numero: leido.numero || c.numero,
+      fecha: leido.fecha || c.fecha,
+      monto: leido.monto != null ? String(leido.monto) : c.monto,
+      // Con qué papel entra al control: este.
+      ...(yaEsta ? { archivo_url: yaEsta.storage_path, archivo_nombre: yaEsta.nombre } : { archivo_url: undefined, archivo_nombre: undefined }),
+    }));
+    // Y el papel queda guardado: leerlo y no conservarlo deja el número
+    // cargado sin respaldo de dónde salió.
+    if (!yaEsta) {
+      const sol = await asegurarSolicitud();
+      if (sol) {
+        await subirAdjunto(sol, archivo, {
+          tipo: "respaldo", quien: currentUser,
+          proveedor: canon.proveedor || leido.proveedor || null,
+          monto: leido.monto || null, nota: leido.detalle || null,
+        });
+        await cargarPapeles();
+      }
+    }
+    setLeyendoDoc(false);
+    const faltan = [!leido.numero && "el número", !leido.fecha && "la fecha", !leido.monto && "el total"].filter(Boolean);
+    setAvisoDoc(faltan.length ? `Revisá ${faltan.join(" y ")}: no se leyó del papel.` : "");
+  }
+
+  // El documento que ya está en el pedido, traído del depósito para leerlo.
+  async function leerElDelPedido() {
+    const papel = sugerido?.papel;
+    if (!papel?.storage_path) return;
+    setLeyendoDoc(true); setAvisoDoc("");
+    const { data, error: e } = await supabase.storage.from("task-files").download(papel.storage_path);
+    if (e || !data) { setLeyendoDoc(false); setAvisoDoc("No se pudo abrir el documento del pedido: " + (e?.message || "sin archivo")); return; }
+    await leerElDocumento(new File([data], papel.nombre || "documento", { type: data.type || "application/pdf" }), papel);
+  }
 
   const marcarRecibida = () => hacer(() => moverA(viva, "recibida", {
     quien: currentUser, comentario: comentario || null, paraQuien: null, titulo: null,
@@ -544,8 +672,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         detalle: "Mirá las proformas y contra qué va. Si el rubro está mal, corregilo acá: al aprobar se guarda." };
     }
     if (estado === "aprobada") {
-      return { mio: gestionaCompras, titulo: gestionaCompras ? "Te toca comprar y cargar el documento" : "Aprobada — compras la está gestionando",
-        detalle: gestionaCompras ? "Subí la factura y NOVA saca los renglones para repartirla entre rubros." : null };
+      return { mio: gestionaCompras, titulo: gestionaCompras ? "Te toca pagar y cargarla al control de obra" : "Aprobada — compras la está gestionando",
+        detalle: gestionaCompras ? "Es un solo paso: el documento entra al control contra su rubro y el pago queda registrado. No hace falta cargarla después en la planilla." : null };
     }
     if (!viva?.factura_id) {
       return { mio: gestionaCompras, titulo: "Comprada, falta cargarla al control de obra",
@@ -994,10 +1122,68 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           )}
         </div>
 
+        {/* YA ESTÁ PAGADA, O YA ESTÁ EN EL CONTROL, Y NO SE ENCONTRARON.
+            El pedido figura pagado y el control no tiene su documento —o lo
+            tiene, cargado desde la planilla, sin enganchar—. Mientras tanto la
+            misma plata pesa dos veces: invertida por la factura y comprometida
+            por el pedido. Se ofrece engancharla en vez de cargarla de nuevo. */}
+        {editando && deObraYDeCompras && (viva.pagado_at || delControl.length > 0) && (
+          <div className="falta-en-el-control" style={{ background: colors.warningSoft, borderRadius: colors.radiusMd, padding: 10, display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: colors.warning }}>
+              {viva.pagado_at
+                ? `Pagada${viva.pagado_monto ? ` · $${Number(viva.pagado_monto).toFixed(2)}` : ""}, y su documento no está enganchado en el control de obra`
+                : "En el control hay un documento que puede ser el de este pedido"}
+            </div>
+            <div style={{ fontSize: 11, color: colors.inkSoft, lineHeight: 1.5 }}>
+              Mientras no esté enganchado, el control sigue contando este pedido como comprometido
+              {viva.pagado_at ? ", y el pago no figura contra ningún documento" : ""}.
+            </div>
+            {delControl.length > 0 ? (
+              <>
+                <div style={{ fontSize: 11, color: colors.ink, fontWeight: 600 }}>
+                  ¿Ya se cargó desde la planilla? {delControl.length === 1 ? "Puede ser este:" : "Puede ser uno de estos:"}
+                </div>
+                {delControl.map(c => (
+                  <div key={c.factura.id} className="candidata-del-control" style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", borderRadius: 8, padding: "6px 8px", flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 170, fontSize: 11.5, color: colors.ink, lineHeight: 1.4 }}>
+                      <strong>{CLASES_DOC[c.factura.clase]?.label || "Documento"}{c.factura.numero_factura ? ` ${c.factura.numero_factura}` : ""}</strong>
+                      {" · "}{c.factura.razon_social || "sin proveedor"}{" · "}<strong>${Number(c.factura.total).toFixed(2)}</strong>
+                      <div style={{ fontSize: 10.5, color: colors.muted }}>
+                        {c.factura.fecha ? new Date(`${String(c.factura.fecha).slice(0, 10)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "sin fecha"}
+                        {" · "}{c.pagado > 0 ? `pagado $${c.pagado.toFixed(2)} en el control` : "sin pagos en el control"}
+                        {!c.mismoMonto ? " · el monto no es el del pedido" : ""}
+                      </div>
+                    </div>
+                    {gestionaCompras && (
+                      <Button variant="outline" size="sm" disabled={ocupado} onClick={() => esEsteDelControl(c.factura)}>
+                        <Check size={12} /> Es este: engancharlo
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45 }}>
+                  Al engancharlo el pedido deja de contar como comprometido, el pago queda igual en los dos lados y pasa a «comprada». Si no es ninguno, cargala acá abajo.
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 11, color: colors.ink }}>
+                En el control no hay ningún documento por ese monto ni de ese proveedor: cargala acá abajo.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Lo que compras necesita completar cuando concreta. */}
-        {editando && estado === "aprobada" && gestionaCompras && (
-          <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, display: "grid", gap: 8 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.ink }}>La compra</div>
+        {editando && gestionaCompras && (estado === "aprobada" || sinControl) && (
+          <div className="cargar-al-control" style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 10, display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.ink }}>
+              {viva.lead_id ? "Pagar y cargar al control de obra" : "La compra"}
+            </div>
+            {viva.lead_id && (
+              <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5, marginTop: -4 }}>
+                El documento entra al control contra su rubro y el pago queda registrado ahí mismo. No hay que cargarla después en la planilla.
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8 }}>
               <CampoProveedor valor={compra.proveedor} onChange={v => setCompra(c => ({ ...c, proveedor: v }))}
                 ruc={compra.ruc} onRuc={v => setCompra(c => ({ ...c, ruc: v }))}
@@ -1022,49 +1208,22 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 {leyendoDoc ? "NOVA está leyendo el documento…"
                   : "Subí la factura, nota de venta o recibo y NOVA llena los datos."}
               </span>
+              {/* EL DEL PEDIDO. La cotización que se aprobó muchas veces ES
+                  la factura: se lee esa, sin volver a subirla. */}
+              {sugerido?.papel?.storage_path && (
+                <Button variant="outline" size="sm" disabled={leyendoDoc} onClick={leerElDelPedido}
+                  title={`Leer ${sugerido.papel.nombre || "el documento del pedido"}`}>
+                  <FileText size={12} /> Leer el del pedido
+                </Button>
+              )}
               <Button variant="primary" size="sm" disabled={leyendoDoc}
                 onClick={() => docRef.current?.click()}>
-                <Upload size={12} /> {leyendoDoc ? "Leyendo…" : "Leer con NOVA"}
+                <Upload size={12} /> {leyendoDoc ? "Leyendo…" : sugerido?.papel?.storage_path ? "Subir otro" : "Leer con NOVA"}
               </Button>
               <input ref={docRef} type="file" accept="image/*,.pdf" style={{ display: "none" }}
                 onChange={async ev => {
                   const archivo = ev.target.files?.[0]; ev.target.value = "";
-                  if (!archivo) return;
-                  setLeyendoDoc(true); setAvisoDoc("");
-                  const leido = await leerDocumentoDeCompra(archivo).catch(e => ({ error: e.message }));
-                  if (leido.error) { setLeyendoDoc(false); setAvisoDoc(leido.error); return; }
-                  // El proveedor pasa por el canónico: "Kiwy", "FERRETERIA
-                  // KIWY" y "kywi" son el mismo, y si entran como tres la
-                  // cuenta por proveedor deja de servir.
-                  const canon = leido.proveedor ? await proveedorCanonico(leido).catch(() => ({})) : {};
-                  // Los renglones, para poder repartir la factura entre
-                  // varios rubros. Una de ferretería trae cemento, varilla y
-                  // alambre, y eso es albañilería, estructura e instalaciones.
-                  setItemsFactura((leido.items || []).map((x, k) => ({ ...x, k, obra_rubro_id: null })));
-                  setCompra(c => ({
-                    ...c,
-                    clase: leido.clase || c.clase,
-                    proveedor: canon.proveedor || leido.proveedor || c.proveedor,
-                    ruc: leido.ruc || canon.ruc || c.ruc,
-                    numero: leido.numero || c.numero,
-                    fecha: leido.fecha || c.fecha,
-                    monto: leido.monto != null ? String(leido.monto) : c.monto,
-                  }));
-                  // Y el papel queda guardado: leerlo y no conservarlo deja el
-                  // número cargado sin respaldo de dónde salió.
-                  const sol = await asegurarSolicitud();
-                  if (sol) {
-                    await subirAdjunto(sol, archivo, {
-                      tipo: "respaldo", quien: currentUser,
-                      proveedor: canon.proveedor || leido.proveedor || null,
-                      monto: leido.monto || null, nota: leido.detalle || null,
-                    });
-                    await cargarPapeles();
-                  }
-                  setLeyendoDoc(false);
-                  const faltan = [!leido.numero && "el número", !leido.fecha && "la fecha",
-                    !leido.monto && "el total"].filter(Boolean);
-                  setAvisoDoc(faltan.length ? `Revisá ${faltan.join(" y ")}: no se leyó del papel.` : "");
+                  if (archivo) await leerElDocumento(archivo);
                 }} />
             </div>
             {avisoDoc && <div style={{ fontSize: 11, color: colors.warning }}>{avisoDoc}</div>}
@@ -1137,17 +1296,47 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 {FORMAS_PAGO.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </div>
-            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
-              Al guardar, el <strong>total</strong> entra al control de obra contra
-              {viva.obra_rubro_id ? " su rubro" : viva.obra_actividad_id ? " su agrupación" : " la obra (falta elegirle la agrupación)"} y
-              deja de contar como comprometido. Lo que quede sin pagar aparece en Proveedores.
-            </div>
+            {/* EL COMPROBANTE, ACÁ. Se sube con la carga: así no existe el
+                camino de «pagué y subí la transferencia» sin que el documento
+                entre al control. */}
+            {viva.lead_id && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <Button variant="outline" size="sm" onClick={() => comprobanteRef.current?.click()}>
+                  <Upload size={12} /> {comprobante ? "Cambiar el comprobante" : "Adjuntar el comprobante de pago"}
+                </Button>
+                <span className="comprobante-elegido" style={{ fontSize: 11, color: comprobante ? colors.ink : colors.muted, flex: 1, minWidth: 150, lineHeight: 1.45, overflowWrap: "anywhere" }}>
+                  {comprobante ? comprobante.name : "La transferencia o el cheque. Opcional: se puede subir después."}
+                </span>
+                {comprobante && (
+                  <button onClick={() => setComprobante(null)} title="Quitarlo"
+                    style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 0 }}><X size={13} /></button>
+                )}
+                <input ref={comprobanteRef} className="comprobante-de-la-carga" type="file" accept="image/*,.pdf" style={{ display: "none" }}
+                  onChange={ev => { const a = ev.target.files?.[0]; ev.target.value = ""; if (a) setComprobante(a); }} />
+              </div>
+            )}
+            {viva.lead_id ? (
+              <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
+                Al guardar, el <strong>total</strong> entra al control de obra contra
+                {viva.obra_rubro_id ? " su rubro" : viva.obra_actividad_id ? " su agrupación" : " la obra (falta elegirle la agrupación)"} y
+                deja de contar como comprometido. Lo que quede sin pagar aparece en Proveedores.
+              </div>
+            ) : (
+              <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
+                Es un gasto de oficina: no entra al control de ninguna obra.
+              </div>
+            )}
           </div>
         )}
 
         {/* El pago. No mueve el estado: se paga por adelantado, contra entrega
             o a treinta días, y en los tres casos la compra sigue su camino. */}
-        {editando && (gestionaCompras || apruebo) && estado !== "borrador" && estado !== "pendiente_aprobacion" && (
+        {/* UNA COMPRA DE OBRA NO SE PAGA SUELTA. Mientras su documento no esté
+            en el control no hay contra qué registrar el pago: «se pagó» solo
+            marcaba el pedido, y el control se quedaba sin la factura y sin el
+            pago. El pago va con la carga, arriba. Con el documento ya en el
+            control —o en un gasto de oficina—, esto registra un abono. */}
+        {editando && (gestionaCompras || apruebo) && estado !== "borrador" && estado !== "pendiente_aprobacion" && pagoSuelto && (
           viva.pagado_at ? (
             <div style={{ fontSize: 11.5, color: colors.success, background: colors.bg, borderRadius: 8, padding: "8px 10px" }}>
               Pagado el {new Date(viva.pagado_at).toLocaleDateString("es-EC", { day: "numeric", month: "long" })}
@@ -1157,7 +1346,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
               <input type="number" step="0.01" value={pago.monto} onChange={ev => setPago({ monto: ev.target.value })}
-                placeholder={viva.monto ? `Cuánto se pagó (por defecto $${Number(viva.monto).toFixed(2)})` : "Cuánto se pagó"} style={mini} />
+                placeholder={viva.factura_id ? "Cuánto se paga ahora (en blanco: lo que falta del documento)"
+                  : viva.monto ? `Cuánto se pagó (por defecto $${Number(viva.monto).toFixed(2)})` : "Cuánto se pagó"} style={mini} />
               <Button variant="outline" onClick={marcarPagada} disabled={ocupado}><Banknote size={13} /> Se pagó</Button>
             </div>
           )
@@ -1172,7 +1362,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
 
             Va aparte del "Se pagó" a propósito: muchas veces se marca el pago
             el día que se hace y el comprobante llega después. */}
-        {editando && (gestionaCompras || apruebo || esMia) && estado !== "borrador" && (
+        {editando && (gestionaCompras || apruebo || esMia) && estado !== "borrador" && pagoSuelto && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <Button variant="outline" size="sm" disabled={subiendoPago}
               onClick={() => pagoRef.current?.click()}>
@@ -1209,8 +1399,10 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 // comprobante (el saldo de una factura pagada en dos veces) no
                 // vuelve a registrar el total.
                 if (!viva?.pagado_at) {
+                  // Con el documento en el control se paga LO QUE FALTA de
+                  // ese documento —en blanco—; sin él, lo del pedido.
                   const err = await registrarPago(viva, {
-                    monto: viva?.monto ?? viva?.monto_estimado ?? null,
+                    monto: viva?.factura_id ? null : (viva?.monto ?? viva?.monto_estimado ?? null),
                     quien: currentUser,
                     comentario: "Registrado al subir el comprobante",
                   });
@@ -1327,7 +1519,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
 
         {editando && estado === "aprobada" && gestionaCompras && (
           <>
-            <Button variant="primary" onClick={marcarComprada} disabled={ocupado}><ShoppingCart size={13} /> Ya la compré</Button>
+            <Button variant="primary" onClick={marcarComprada} disabled={ocupado}>
+              <ShoppingCart size={13} /> {!viva.lead_id ? "Ya la compré" : Number(compra.pagaAhora) > 0 ? "Pagar y cargar al control" : "Cargar al control"}
+            </Button>
             {/* Compras también puede frenar: una proforma vencida o un precio
                 que cambió no se arreglan comprando igual. */}
             <Button variant="outline" onClick={() => devolverCompras("pide")} disabled={ocupado}>
@@ -1337,6 +1531,13 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               <X size={13} /> Cambió el precio: nuevo visto
             </Button>
           </>
+        )}
+
+        {/* Comprada o recibida, y nunca entró al control: se carga ahora. */}
+        {editando && estado !== "aprobada" && sinControl && gestionaCompras && (
+          <Button variant="primary" onClick={marcarComprada} disabled={ocupado}>
+            <ShoppingCart size={13} /> {Number(compra.pagaAhora) > 0 ? "Pagar y cargar al control" : "Cargar al control"}
+          </Button>
         )}
 
         {editando && estado === "comprada" && esMia && (
