@@ -4,12 +4,12 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
-import { nombreDeEtapa, hoyISO, sumarDias } from "./pipeline";
+import { nombreDeEtapa, hoyISO, sumarDias, etapasDelTipo, tipoDe } from "./pipeline";
 import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
-  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea,
+  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, moverDeEtapa,
 } from "./proyecto";
-import { renglonesDeLista, avanceDe } from "./tareasDelProyecto";
+import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa } from "./tareasDelProyecto";
 import { ultimaAnotacion } from "./historialDeTarea";
 import HistorialDeTarea from "../../components/HistorialDeTarea";
 import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
@@ -37,6 +37,13 @@ import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 // fijar la reunión, recibir la cotización. Lo que se anota y lo que pasó solo
 // se leen juntos, en orden, al abrir el punto; lo último anotado se lee en la
 // fila sin abrirla (historialDeTarea.js).
+//
+// LA ETAPA LA DICE CADA PUNTO. Un proyecto tiene a la vez cosas de varias
+// etapas —la revisión eléctrica es de Ingenierías, la cotización de MADEVAL es
+// de Presupuesto—. Antes el punto nacía con la etapa en la que estuviera
+// parado el proyecto y no se podía cambiar: para cargar algo de Presupuesto
+// había que mover el proyecto, cargarlo y volverlo. Ahora la etapa se elige al
+// agregar y se cambia en el punto, y la lista se lee por etapa.
 
 // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
@@ -155,7 +162,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     await hacer(async () => {
       const externo = String(n.assignee_id || "").startsWith("x:") ? String(n.assignee_id).slice(2) : null;
       const r = await agregarTarea({
-        lead, etapaId, titulo: texto, orden: abiertas.length + hechas.length + 1,
+        lead, etapaId: n.etapa !== undefined ? n.etapa || null : etapaId, titulo: texto, orden: abiertas.length + hechas.length + 1,
         tipo: tipo === "reunion" ? "Reunión" : tipo === "gestion" ? "Gestión" : tipo === "envio" ? "Envío" : "Otro",
         due_date: n.due_date || null, hora: (n.due_date && n.hora) || null,
         assignee_id: n.assignee_id && !externo ? Number(n.assignee_id) : null,
@@ -175,7 +182,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       }
       // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
       // seguidas, y volver a abrir el cuadro cada vez era un clic de más.
-      setNuevo({ ...EN_BLANCO, tipo });
+      // Y en la misma etapa, que es donde se estaba cargando.
+      setNuevo({ ...EN_BLANCO, tipo, ...(n.etapa !== undefined ? { etapa: n.etapa } : {}) });
     });
   }
 
@@ -191,7 +199,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     await hacer(async () => {
       const externo = String(pegar.assignee_id || "").startsWith("x:") ? String(pegar.assignee_id).slice(2) : null;
       const r = await agregarVarias({
-        lead, etapaId, titulos: deLaLista.nuevos, desde: abiertas.length + hechas.length,
+        lead, etapaId: pegar.etapa !== undefined ? pegar.etapa || null : etapaId, titulos: deLaLista.nuevos, desde: abiertas.length + hechas.length,
         assignee_id: pegar.assignee_id && !externo ? Number(pegar.assignee_id) : null, responsable_externo: externo,
         nombreResponsable: users.find(u => String(u.id) === String(pegar.assignee_id))?.name,
         due_date: pegar.due_date || null, alCliente: !!pegar.alCliente && !sinCompartir, quien: currentUser,
@@ -228,11 +236,29 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const fechaBloqueada = !!tareas[aTarea?.item?.tarea_id]?.due_date && !puede("tareas.fechas");
   const puedeCorrer = item => !tareas[item.tarea_id]?.due_date || puede("tareas.fechas");
 
-  // LA ETAPA NO SE REPITE EN CADA RENGLÓN. Arriba ya dice en cuál está el
-  // proyecto, y con todos los puntos escritos en esa misma etapa la palabra
-  // salía una vez por fila sin decir nada nuevo. Se dice solo en el punto que
-  // viene de OTRA etapa, que es el único caso en que informa.
-  const etapaDe = item => (item.etapa_id && item.etapa_id !== etapaId ? nombreDeEtapa(item.etapa_id, catalogo) : "");
+  // POR ETAPA. Lo abierto se lee agrupado: cada etapa con su título, en el
+  // orden del tipo del proyecto. Si todo es de la etapa en la que está el
+  // proyecto no hay títulos —arriba ya lo dice—.
+  const etapas = etapasDelTipo(catalogo, tipoDe(lead));
+  const grupos = porEtapa(abiertas, etapas, { nombreDe: id => nombreDeEtapa(id, catalogo), etapaDelProyecto: etapaId });
+  const conTitulos = conTitulosDeEtapa(grupos, etapaId);
+  // En lo hecho, que va plegado y sin títulos, la etapa se dice en la fila; y
+  // solo si el checklist tiene puntos de más de una.
+  const variasEtapas = new Set([...abiertas, ...hechas].map(i => i.etapa_id || "")).size > 1;
+  const etapaDe = item => (item.hecho && variasEtapas && item.etapa_id ? nombreDeEtapa(item.etapa_id, catalogo) || "" : "");
+  const cambiarEtapa = (item, id) => hacer(async () => {
+    const e = await moverDeEtapa(item, id, { de: nombreDeEtapa(item.etapa_id, catalogo), a: nombreDeEtapa(id, catalogo) }, currentUser);
+    if (e) setError(e);
+  });
+  // El desplegable de etapa de los dos cuadros de agregar: arranca en la del
+  // proyecto y se queda en la que se eligió.
+  const elegirEtapa = (valor, alCambiar) => etapas.length > 0 && (
+    <select value={valor !== undefined ? valor : etapaId || ""} onChange={e => alCambiar(e.target.value)} aria-label="De qué etapa es"
+      title="De qué etapa es" style={{ ...chico, flex: "0 1 150px", minWidth: 0 }}>
+      {etapas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+      <option value="">Sin etapa</option>
+    </select>
+  );
 
   const fila = item => (
     <Actividad key={item.id} item={item} etiqueta={etapaDe(item)} tarea={tareas[item.tarea_id]} users={users}
@@ -240,6 +266,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
+      etapas={etapas} onEtapa={id => cambiarEtapa(item, id)} etapaVieja={nombreDeEtapa(item.etapa_id, catalogo)}
       anotado={historial.comentarios[item.id]} pasado={historial.movimientos[item.id]}
       onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
       onTarea={() => { const t = tareas[item.tarea_id]; setATarea({ item, titulo: item.texto, tipo: claseDe(t),
@@ -289,6 +316,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             placeholder={"Una cosa por renglón. Por ejemplo:\nCotizar ventanería\nCotizar cocina\nControl de iluminación"}
             style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.45 }} />
           <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+            {elegirEtapa(pegar.etapa, v => setPegar(p => ({ ...p, etapa: v })))}
             <select value={pegar.assignee_id} onChange={e => setPegar(p => ({ ...p, assignee_id: e.target.value }))} aria-label="Quién las hace"
               style={{ ...chico, flex: "1 1 160px", minWidth: 0 }}>
               <option value="">¿Quién las hace? (opcional)</option>
@@ -359,6 +387,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 6 }} />
 
           <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+            {elegirEtapa(nuevo.etapa, v => setNuevo(n => ({ ...n, etapa: v })))}
             {/* En un envío no se pregunta quién lo hace sino a quién se le
                 mandó: es lo único que se consulta después. Se puede elegir de
                 la gente del proyecto o escribir el nombre. */}
@@ -422,7 +451,19 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       )}
 
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "4px 12px" }}>
-        {abiertas.map(fila)}
+        {grupos.map((g, k) => (
+          <div key={g.id || "sin-etapa"} className="grupo-de-etapa">
+            {conTitulos && (
+              <div className="etapa-del-checklist"
+                style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: g.actual ? colors.brand : colors.muted,
+                  padding: k ? "12px 0 3px" : "8px 0 3px" }}>
+                {g.nombre.toUpperCase()} · {g.items.length}
+                {g.actual && <span style={{ fontWeight: 400, letterSpacing: 0 }}> · la etapa en la que está el proyecto</span>}
+              </div>
+            )}
+            {g.items.map(fila)}
+          </div>
+        ))}
         {!abiertas.length && hechas.length > 0 && (
           <div style={{ fontSize: 12, color: colors.muted, padding: "8px 0" }}>No queda nada abierto.</div>
         )}
@@ -738,7 +779,7 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, y deja escribir lo que solo sabe
 // quien la trabajó. Los botones dicen su nombre: un ⧗ y un ✓ sueltos no le
 // enseñan a nadie cómo se usa esto.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [] }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // Lo último que alguien anotó: se lee en la fila sin abrirla.
@@ -815,7 +856,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               return resto ? ` · ${resto}` : "";
             })()}
             {/* En qué etapa estaba el lead cuando se escribió. */}
-            {etiqueta ? ` · de ${etiqueta}` : ""}
+            {etiqueta ? ` · ${etiqueta}` : ""}
             {laVeElCliente && (
               <span className="la-ve-el-cliente" title="El cliente la ve en su enlace" style={{ color: colors.brand, fontWeight: 600 }}>
                 {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente
@@ -870,6 +911,22 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               </label>
             )}
           </HistorialDeTarea>
+
+          {/* DE QUÉ ETAPA ES. La dice el punto: se puede tener hoy algo de
+              Presupuesto con el proyecto todavía en Ingenierías. */}
+          {editable && onEtapa && etapas.length > 0 && (
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 10.5, color: colors.muted }}>Etapa:</span>
+              <select value={item.etapa_id || ""} aria-label="De qué etapa es este punto" disabled={ocupado}
+                onChange={e => onEtapa(e.target.value || null)}
+                style={{ ...chico, width: "auto", padding: "2px 6px", fontSize: 11.5, cursor: "pointer" }}>
+                {/* Una etapa de antes, que ya no es de este tipo: se muestra, no se pierde. */}
+                {item.etapa_id && !etapas.some(e => e.id === item.etapa_id) && <option value={item.etapa_id}>{etapaVieja || "Otra etapa"}</option>}
+                {etapas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                <option value="">Sin etapa</option>
+              </select>
+            </div>
+          )}
 
           {/* La fecha se cambia desde la misma fila, de un toque. */}
           {editable && !item.hecho && (

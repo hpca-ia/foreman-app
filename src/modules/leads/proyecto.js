@@ -278,6 +278,24 @@ export async function ponerFecha(item, fecha, quien, hora = undefined) {
   return null;
 }
 
+/**
+ * De qué etapa es un punto. La etapa la dice la tarea: se puede cargar hoy
+ * algo de Presupuesto con el proyecto todavía en Ingenierías, sin tener que
+ * mover el proyecto de etapa para cargarlo y volverlo después.
+ *
+ * @param nombres  { de, a }: cómo se llaman, para dejarlo escrito
+ * @returns null o el error
+ */
+export async function moverDeEtapa(item, etapaId, { de = null, a = null } = {}, quien) {
+  const { error } = await supabase.from("tasks").update({ etapa_id: etapaId || null }).eq("id", item.id);
+  if (error) return falta(error) ? SIN_170 : error.message;
+  await anotar(item.lead_id, {
+    detalle: `"${item.texto}" ${etapaId ? `pasa a la etapa ${a || "elegida"}` : "queda sin etapa"}${de ? ` (estaba en ${de})` : ""}`,
+    quien, extra: { task_id: item.id },
+  });
+  return null;
+}
+
 /** Lo que hay que saber de esa tarea y solo sabe quien la trabajó. */
 export async function guardarNota(item, nota) {
   const { error } = await supabase.from("tasks").update({ nota: nota || null }).eq("id", item.id);

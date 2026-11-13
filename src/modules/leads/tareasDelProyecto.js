@@ -41,6 +41,51 @@ export function comoActividad(t) {
 const dia = f => String(f || "").slice(0, 10);
 
 /**
+ * EL CHECKLIST, REPARTIDO POR ETAPA.
+ *
+ * Un proyecto tiene a la vez cosas de varias etapas: la revisión eléctrica es
+ * de Ingenierías y la cotización de MADEVAL es de Presupuesto. La etapa la
+ * dice CADA PUNTO —no la etapa en la que está parado el proyecto—, y la lista
+ * se lee por etapa para que no se mezclen.
+ *
+ * No es la vuelta de «una columna por etapa con su estado»: el proyecto sigue
+ * estando en UNA etapa, la que dice arriba. Esto solo ordena sus puntos.
+ *
+ * @param items             los puntos, como los dibuja la lista (llevan `etapa_id`)
+ * @param etapas            las del tipo del proyecto, en su orden
+ * @param nombreDe          id → nombre, para una etapa que ya no es de este tipo
+ * @param etapaDelProyecto  en cuál está el proyecto ahora
+ * @returns [{ id, nombre, actual, items }] en el orden de las etapas; al final
+ *          las de otra etapa y, último, lo que no tiene ninguna
+ */
+export function porEtapa(items = [], etapas = [], { nombreDe = () => null, etapaDelProyecto = null } = {}) {
+  const lugar = new Map(etapas.map((e, i) => [e.id, i]));
+  const grupos = new Map();
+  for (const it of items || []) {
+    const id = it.etapa_id || null;
+    if (!grupos.has(id)) {
+      grupos.set(id, {
+        id,
+        nombre: id ? etapas.find(e => e.id === id)?.nombre || nombreDe(id) || "Otra etapa" : "Sin etapa",
+        actual: !!id && id === etapaDelProyecto,
+        items: [],
+      });
+    }
+    grupos.get(id).items.push(it);
+  }
+  const rango = g => (g.id == null ? 2e6 : lugar.has(g.id) ? lugar.get(g.id) : 1e6);
+  return [...grupos.values()].sort((a, b) => rango(a) - rango(b));
+}
+
+/**
+ * ¿Hace falta el título de cada etapa? Con todo en la etapa en la que está el
+ * proyecto, no: arriba ya lo dice, y repetirlo es ruido. En cuanto hay puntos
+ * de otra, sí: es lo que los separa.
+ */
+export const conTitulosDeEtapa = (grupos = [], etapaDelProyecto = null) =>
+  grupos.length > 1 || (grupos.length === 1 && !!etapaDelProyecto && grupos[0].id !== etapaDelProyecto);
+
+/**
  * Las tareas de un proyecto, como se leen en su pantalla.
  *
  * Las compras no: tienen su módulo, con su estado y su historia, y la tarea
