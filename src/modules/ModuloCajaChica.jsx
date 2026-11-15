@@ -25,7 +25,7 @@ import { leerRenglones } from "./controlObra/renglones";
 import { basesDelPapel, basesAlGuardar, basesAlCorregir, lineaDeBases } from "./cajaChica/basesDelPapel";
 import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
 import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
-import { avisoDeSobra } from "./controlObra/repartoDeFactura.js";
+import { avisoDeSobra, agrupacionesDeCaja } from "./controlObra/repartoDeFactura.js";
 import { recibeGasto } from "./controlObra/calculos";
 import { rubrosParaGastarDe } from "./controlObra/quitasDeOrdenes.js";
 
@@ -565,7 +565,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     if (!id) { setRubrosObra([]); return; }
     let vivo = true;
     // Los que NOVA puede proponer: tampoco lo que una orden de cambio quitó.
-    supabase.from("obra_rubros").select("id,numero,descripcion,oculto,anulado_por_oc,total_base,origen,orden_cambio_id,iva_pct").eq("obra_id", id)
+    // Con su agrupación: una agrupación con un solo rubro va a ese rubro.
+    supabase.from("obra_rubros").select("id,numero,descripcion,capitulo,actividad_id,oculto,anulado_por_oc,total_base,origen,orden_cambio_id,iva_pct").eq("obra_id", id)
       .then(async ({ data }) => {
         const vivos = await rubrosParaGastarDe(id, data || []);
         if (vivo) setRubrosObra(vivos.filter(r => !r.oculto && recibeGasto(r)));
@@ -671,7 +672,17 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     // LO REPARTIDO ENTRE RUBROS NO PUEDE SUMAR MÁS QUE EL GASTO. Un gasto de
     // $89,85 con $60 a un rubro y $60 a otro entraba al control con $120
     // asignados. Se mira acá, antes de subir la foto y de escribir nada.
-    const pasado = avisoDeSobra(repartoDelGasto(rubrosGasto, gastoForm.monto), gastoForm.monto, "el gasto");
+    //
+    // Y EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS (Hernán, 15/11/2026): una
+    // agrupación con un solo rubro va a ese rubro; una con varios no se guarda
+    // hasta que se elija a cuál va. Acá no se ven presupuestos, así que no se
+    // reparte por lo que pesa cada uno.
+    const { seleccion: elegidos, faltaElegir } = agrupacionesDeCaja(rubrosGasto, rubrosObra);
+    if (faltaElegir.length) {
+      setNovaError(`La agrupación elegida tiene ${faltaElegir[0].cuantos} rubros: elegí a cuál va el gasto, en «¿Contra qué va este gasto?».`);
+      return false;
+    }
+    const pasado = avisoDeSobra(repartoDelGasto(elegidos, gastoForm.monto), gastoForm.monto, "el gasto");
     if (pasado) { setNovaError(pasado); return false; }
     setUploading(true);
     let archivoUrl=null, archivoNombre=null;
@@ -710,7 +721,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     // todavía no estaba leído. Lo que vale cero no se guardaba, y el gasto
     // entraba al control sin rubro y sin un solo aviso. La regla vive en
     // repartoDelGasto.js: un solo rubro se lleva el documento entero.
-    const conRubros = repartoDelGasto(rubrosGasto, gastoForm.monto);
+    const conRubros = repartoDelGasto(elegidos, gastoForm.monto);
     let errorDeRubro = null;
     // LO QUE SE CARGA AL RUBRO TIENE EL SIGNO DEL DOCUMENTO, SIEMPRE.
     //

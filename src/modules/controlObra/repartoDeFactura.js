@@ -25,7 +25,7 @@
 //     guardados —Control de Obra, Compras y Caja chica— se frenan si no da
 //     cero.
 
-import { repartirProporcional, fmt } from "./calculos.js";
+import { repartirProporcional, fmt, recibeGasto } from "./calculos.js";
 
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
@@ -107,6 +107,101 @@ export function avisoDeSobra(repartos, total, que = "la factura") {
     + `porque el control contaría más plata de la que dice el papel.`;
 }
 
+// ── EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS ───────────────────────────
+//
+// Lo dijo Hernán el 15/11/2026, después de la 171: una agrupación o un
+// capítulo es un título, y el gasto va a los rubros que tiene debajo. La plata
+// que quedaba guardada en el título la repartía el control después, a ciegas,
+// y así la 171 terminó con $98,45 en la OC-03 que se repartían también contra
+// el renglón en negativo de la orden.
+//
+// Ahora el título se reparte en sus rubros al cargarlo, a la vista de quien
+// carga, por lo que presupuesta cada uno. Pesan solo los rubros que reciben
+// gasto (`recibeGasto`, la misma regla del control): ni el «(–)» de una orden
+// ni lo que una orden tachó. Un título sin rubros —Oficina, Vivienda,
+// Imprevistos— se queda como está: no hay a dónde más llevarlo.
+
+/** Los rubros que hay debajo de un título y pueden recibir gasto. */
+export function rubrosDelTitulo(linea, rubros = []) {
+  if (!linea) return [];
+  const vale = r => r && !r.oculto && recibeGasto(r);
+  if (linea.tipo === "actividad") {
+    return (rubros || []).filter(r => vale(r) && r.actividad_id != null && Number(r.actividad_id) === Number(linea.id));
+  }
+  if (linea.tipo === "capitulo") return (rubros || []).filter(r => vale(r) && r.capitulo === linea.id);
+  return [];
+}
+
+/**
+ * Cambia cada línea a un título por sus rubros, repartida por lo que
+ * presupuesta cada uno, exacta al centavo. Si un rubro ya estaba en el reparto,
+ * se le suma. Un título sin rubros queda como está.
+ *
+ * @param repartos  [{ tipo: "rubro" | "actividad" | "capitulo", id, monto }]
+ * @param rubros    los rubros de la obra, como los ve el control del gasto
+ */
+export function sinTitulos(repartos = [], rubros = []) {
+  const salida = [];
+  const dondeEsta = new Map();
+  const aRubro = (id, monto) => {
+    const k = Number(id);
+    if (dondeEsta.has(k)) {
+      const linea = salida[dondeEsta.get(k)];
+      linea.monto = c2(n(linea.monto) + n(monto));
+      return;
+    }
+    dondeEsta.set(k, salida.length);
+    salida.push({ tipo: "rubro", id: k, monto: c2(monto) });
+  };
+  (repartos || []).forEach(r => {
+    if (!r) return;
+    if (r.tipo === "rubro") { aRubro(r.id, r.monto); return; }
+    const suyos = rubrosDelTitulo(r, rubros);
+    if (!suyos.length) { salida.push({ ...r }); return; }
+    repartirProporcional(n(r.monto), suyos).forEach((parte, i) => aRubro(suyos[i].id, parte));
+  });
+  return salida;
+}
+
+/** Lo mismo, con las filas como van a `obra_asignaciones`. */
+export function asignacionesSinTitulo(filas = [], rubros = []) {
+  const comoReparto = f => (f.obra_rubro_id != null ? { tipo: "rubro", id: f.obra_rubro_id, monto: f.monto }
+    : f.obra_actividad_id != null ? { tipo: "actividad", id: f.obra_actividad_id, monto: f.monto }
+    : { tipo: "capitulo", id: f.capitulo, monto: f.monto });
+  return sinTitulos((filas || []).map(comoReparto), rubros).map(r => ({
+    obra_rubro_id: r.tipo === "rubro" ? r.id : null,
+    obra_actividad_id: r.tipo === "actividad" ? r.id : null,
+    ...(r.tipo === "capitulo" ? { capitulo: r.id } : {}),
+    monto: r.monto,
+  }));
+}
+
+/**
+ * EN CAJA CHICA NO SE VEN PRESUPUESTOS, así que ahí no se prorratea por peso:
+ * una agrupación con un solo rubro va a ese rubro, y una con varios no se
+ * guarda hasta que se elija a cuál va.
+ *
+ * @param seleccion  lo elegido en caja chica: [{ obra_rubro_id | obra_actividad_id, monto }]
+ * @returns { seleccion, faltaElegir: [{ obra_actividad_id, cuantos }] }
+ */
+export function agrupacionesDeCaja(seleccion = [], rubros = []) {
+  const salida = [];
+  const faltaElegir = [];
+  (seleccion || []).forEach(s => {
+    if (!s || s.obra_rubro_id || s.obra_actividad_id == null) { if (s) salida.push({ ...s }); return; }
+    const suyos = rubrosDelTitulo({ tipo: "actividad", id: s.obra_actividad_id }, rubros);
+    if (suyos.length === 1) {
+      const ya = salida.find(x => Number(x.obra_rubro_id) === Number(suyos[0].id));
+      if (ya) ya.monto = c2(n(ya.monto) + n(s.monto));
+      else salida.push({ obra_rubro_id: Number(suyos[0].id), monto: s.monto });
+      return;
+    }
+    if (suyos.length > 1) faltaElegir.push({ obra_actividad_id: s.obra_actividad_id, cuantos: suyos.length });
+    salida.push({ ...s });
+  });
+  return { seleccion: salida, faltaElegir };
+}
+
 /**
  * Cuánto del documento queda para repartir entre los rubros marcados: el total
  * menos lo que ya se cargó entero a una agrupación o a un capítulo. Nunca
@@ -125,17 +220,17 @@ export function quedaParaLosRubros(repartos = [], total) {
  * Las líneas a una agrupación o a un capítulo entero no se tocan, y lo que ya
  * tienen NO se vuelve a repartir: ahí estaba el doble.
  *
- * Un rubro con presupuesto en cero o negativo —el «(–)» de una orden de
- * cambio— no pesa: es un descuento del contrato, no un lugar donde se gasta.
- * Si ninguno de los marcados pesa, no hay con qué prorratear y el reparto
- * vuelve como estaba.
+ * Un rubro que no recibe gasto —el «(–)» de una orden de cambio, lo que una
+ * orden tachó— no pesa: es la misma regla del control (`recibeGasto`). Si
+ * ninguno de los marcados pesa, no hay con qué prorratear y el reparto vuelve
+ * como estaba.
  *
  * @param repartos  [{ tipo: "rubro" | "actividad" | "capitulo", id, monto }]
  * @param rubros    los rubros de la obra, con `id` y `total_base`
  * @param total     el total del documento
  */
 export function prorratearEntreRubros(repartos = [], rubros = [], total) {
-  const peso = new Map((rubros || []).map(r => [Number(r.id), Math.max(0, n(r.total_base))]));
+  const peso = new Map((rubros || []).map(r => [Number(r.id), recibeGasto(r) ? Math.max(0, n(r.total_base)) : 0]));
   const pesos = (repartos || []).filter(r => r?.tipo === "rubro")
     .map(r => ({ total_base: peso.get(Number(r.id)) || 0 }));
   if (!pesos.some(p => p.total_base > 0)) return repartos;

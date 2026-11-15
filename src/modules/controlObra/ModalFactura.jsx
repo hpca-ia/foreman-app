@@ -23,7 +23,7 @@ import { leerHastaQueCuadre } from "../lectura/insistir.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
 import { totalesDeLectura, renglonesDeLectura, revisionDeFactura, cuadraConIva } from "./cuadrarFactura.js";
 // Lo repartido no puede sumar más que la factura: la regla vive ahí.
-import { sobraDelReparto, avisoDeSobra, quedaParaLosRubros, prorratearEntreRubros, repartoDeRenglones } from "./repartoDeFactura.js";
+import { sobraDelReparto, avisoDeSobra, quedaParaLosRubros, prorratearEntreRubros, repartoDeRenglones, sinTitulos } from "./repartoDeFactura.js";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -74,11 +74,16 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   // mano o cuando el SRI contesta con el XML.
   const [lectura, setLectura] = useState(null);
   const [paso, setPaso] = useState("");
-  const [repartos, setRepartos] = useState(
+  // EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS (Hernán, 15/11/2026). Una
+  // factura vieja cargada a una agrupación entera se abre ya repartida entre
+  // sus rubros: lo que se ve es lo que se va a guardar.
+  const [repartos, setRepartos] = useState(() => sinTitulos(
     asignacionesFactura.map(a => a.obra_actividad_id != null
       ? { tipo: "actividad", id: a.obra_actividad_id, monto: a.monto }
-      : { tipo: "rubro", id: a.obra_rubro_id, monto: a.monto })
-  );
+      : a.obra_rubro_id == null && a.capitulo
+        ? { tipo: "capitulo", id: a.capitulo, monto: a.monto }
+        : { tipo: "rubro", id: a.obra_rubro_id, monto: a.monto }),
+    rubros));
   const [nuevaActividad, setNuevaActividad] = useState("");
   const [porRubro, setPorRubro] = useState(false);
   const [archivo, setArchivo] = useState(null);
@@ -445,7 +450,8 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   function agregar(tipo, id) {
     if (id == null || repartos.some(r => r.tipo === tipo && r.id === id)) return;
     const restante = Math.max(n(form.total) - repartos.reduce((s, r) => s + n(r.monto), 0), 0);
-    setRepartos([...repartos, { tipo, id, monto: restante }]);
+    // Una agrupación o un capítulo con rubros entra ya repartido entre ellos.
+    setRepartos(sinTitulos([...repartos, { tipo, id, monto: restante }], rubros));
     setBusqueda("");
   }
 
@@ -491,7 +497,10 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
     // repartida entre cinco rubros de esa misma agrupación. $1.181,46 de
     // asignado. No se nota hasta que se le registra el pago, y ese día el
     // control cuenta el doble. Se frena acá, antes de escribir nada.
-    const pasado = avisoDeSobra(repartos, form.total);
+    // Y NINGÚN TÍTULO SE GUARDA CON PLATA si tiene rubros: va a ellos. La
+    // pantalla ya los muestra repartidos; esto es la última palabra.
+    const finales = sinTitulos(repartos, rubros);
+    const pasado = avisoDeSobra(finales, form.total);
     if (pasado) { setError(pasado); return; }
     setGuardando(true); setError("");
 
@@ -578,13 +587,12 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       facturaId = data.id;
     }
 
-    const filas = repartos.filter(r => n(r.monto) !== 0).map(r => ({
+    const filas = finales.filter(r => n(r.monto) !== 0).map(r => ({
       factura_id: facturaId,
+      // Una agrupación solo llega acá si no tiene rubros: Oficina, Vivienda.
       obra_actividad_id: r.tipo === "actividad" ? r.id : null,
       obra_rubro_id: r.tipo === "rubro" ? r.id : null,
-      // Al capítulo entero: ni rubro ni agrupación. La plata suma al capítulo y
-      // los rubros quedan en cero, que es la verdad cuando no se sabe cuánto
-      // fue de cada uno.
+      // Y un capítulo, solo si no tiene rubros que reciban gasto.
       capitulo: r.tipo === "capitulo" ? r.id : null,
       monto: n(r.monto),
     }));
@@ -1129,7 +1137,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 <option value="">¿a dónde va?</option>
                 {capitulosDeRubros.map(c => (
                   <optgroup key={c} label={c}>
-                    <option value={`cap:${c}`}>Todo el capítulo {c}</option>
+                    <option value={`cap:${c}`}>Todo el capítulo {c}, repartido entre sus rubros</option>
                     {rubros.filter(r => r.capitulo === c && !r.oculto && recibeGasto(r)).map(r => {
                       const acc = control[r.id];
                       const queda = acc ? acc.saldo : n(r.total_base);
@@ -1177,7 +1185,9 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 //
                 // Exacto al centavo: redondeando cada destino por su cuenta,
                 // tres destinos podían sumar un centavo más que la factura.
-                setRepartos(repartoDeRenglones(items, form.total));
+                // Un renglón a un capítulo o a una agrupación entera va a sus
+                // rubros, repartido por lo que presupuesta cada uno.
+                setRepartos(sinTitulos(repartoDeRenglones(items, form.total), rubros));
               }}>
               Asignar {items.filter(x => x.destino).length} de {items.length}
             </Button>
@@ -1383,34 +1393,33 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 <span style={{ fontSize: 10.5, flexBasis: "100%", lineHeight: 1.45,
                   color: queda ? colors.muted : colors.warning }}>
                   {queda
-                    ? `A prorrata entre los rubros van los $${fmt(queda)} que quedan: los $${fmt(entero)} cargados a una agrupación o a un capítulo entero no se vuelven a repartir.`
-                    : `No queda nada para prorratear entre los rubros: los $${fmt(entero)} ya están cargados enteros a una agrupación o a un capítulo. Para repartirlos por rubro, quitá esa línea.`}
+                    ? `A prorrata entre los rubros van los $${fmt(queda)} que quedan: los $${fmt(entero)} cargados a una agrupación sin rubros no se vuelven a repartir.`
+                    : `No queda nada para prorratear entre los rubros: los $${fmt(entero)} ya están cargados a una agrupación sin rubros. Para repartirlos por rubro, quitá esa línea.`}
                 </span>
               );
             })()}
           </div>
         )}
 
-        {/* AL CAPÍTULO ENTERO, sin repartir.
-            La factura de $4.000 del maestro albañil no es "$180 de mampostería,
-            $310 de enlucido y $94 de mochetas": es $4.000 de albañilería.
-            Prorratearla inventa una precisión que no existe, y después alguien
-            compara el avance de un rubro con su presupuesto y ese número no
-            significa nada. Acá la plata suma al capítulo y los rubros quedan en
-            cero, que es la verdad: no se sabe cuánto fue de cada uno. */}
+        {/* AL CAPÍTULO O A LA AGRUPACIÓN ENTERA: REPARTIDO ENTRE SUS RUBROS.
+            Antes el capítulo entero se guardaba «sin repartir» y la agrupación
+            entera quedaba en el título para que el control la repartiera
+            después, a ciegas. Hernán, el 15/11/2026: «el título no lleva el
+            peso, solo sus rubros». Ahora se reparte acá, por lo que presupuesta
+            cada rubro, y quien carga ve cuánto le toca a cada uno antes de
+            guardar. Solo una agrupación sin rubros se guarda entera. */}
         {capElegido && !repartos.some(r =>
             (esAgrupacion ? r.tipo === "actividad" && r.id === Number(capElegido.slice(4))
-                          : r.tipo === "capitulo" && r.id === capElegido)) && (
+                          : r.tipo === "capitulo" && r.id === capElegido)) && (diferencia > 0 || !rubrosDelDestino.length) && (
           <button onClick={() => esAgrupacion
               ? agregar("actividad", Number(capElegido.slice(4)))
               : agregar("capitulo", capElegido)}
             style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
               padding: "5px 10px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
               fontFamily: colors.font, marginTop: 6, marginBottom: 2, display: "block" }}>
-            …o cargarlo a <strong>{nombreDestino}</strong> entero
             {rubrosDelDestino.length
-              ? (esAgrupacion ? ", repartido a prorrata entre sus rubros" : ", sin repartir entre sus rubros")
-              : ""}
+              ? <>…o repartir {diferencia < n(form.total) ? "lo que falta" : "la factura"} entre los {rubrosDelDestino.length} rubros de <strong>{nombreDestino}</strong>, por lo que presupuesta cada uno</>
+              : <>…o cargarlo a <strong>{nombreDestino}</strong> entero</>}
           </button>
         )}
 
@@ -1477,7 +1486,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
 
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <select value="" onChange={e => agregar("actividad", Number(e.target.value))} style={{ ...mini, flex: 1 }}>
-            <option value="">…o a una agrupación entera, de un saque</option>
+            <option value="">…o a una agrupación entera: se reparte entre sus rubros</option>
             {actividades.filter(a => !repartos.some(r => r.tipo === "actividad" && r.id === a.id))
               .map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
           </select>
@@ -1506,7 +1515,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
         {porRubro && (
           <>
             <div style={{ fontSize: 10, color: colors.muted, margin: "4px 0 5px" }}>
-              Lo asignado a una agrupación se reparte entre sus rubros a prorrata. Si sabes el rubro exacto, asígnalo acá y el monto no se prorratea.
+              Lo cargado a una agrupación se reparte entre sus rubros por lo que presupuesta cada uno. Si sabes el rubro exacto, asígnalo acá y el monto no se prorratea.
             </div>
             <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar rubro..." style={mini} />
             {coincidencias.length > 0 && (

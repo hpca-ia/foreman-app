@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   asignadoDe, sobraDelReparto, avisoDeSobra, quedaParaLosRubros,
   prorratearEntreRubros, repartoDeRenglones, asignadoDeMas, destinosPorFactura,
+  rubrosDelTitulo, sinTitulos, asignacionesSinTitulo, agrupacionesDeCaja,
 } from "../src/modules/controlObra/repartoDeFactura.js";
 
 // ── UNA FACTURA NO PUEDE QUEDAR CON MÁS ASIGNADO QUE SU TOTAL ──────────────
@@ -196,14 +197,15 @@ const leer = ruta => readFileSync(new URL(ruta, import.meta.url), "utf8");
 test("Control de Obra: el guardado de la factura se frena antes de escribir nada", () => {
   const modal = leer("../src/modules/controlObra/ModalFactura.jsx");
   const guardar = modal.slice(modal.indexOf("async function guardar()"));
-  const freno = guardar.indexOf("avisoDeSobra(repartos, form.total)");
+  const freno = guardar.indexOf("avisoDeSobra(finales, form.total)");
   assert.ok(freno > 0, "el guardado consulta la regla");
+  assert.ok(guardar.indexOf("const finales = sinTitulos(repartos, rubros)") < freno, "sobre el reparto ya sin títulos");
   assert.ok(freno < guardar.indexOf("subirArchivo("), "antes de subir el archivo");
   assert.ok(freno < guardar.indexOf('from("obra_facturas")'), "antes de tocar la factura");
   assert.ok(freno < guardar.indexOf('from("obra_asignaciones")'), "antes de tocar las asignaciones");
   // Y el botón de prorrata usa el reparto que descuenta lo cargado entero.
   assert.match(modal, /setRepartos\(rs => prorratearEntreRubros\(rs, rubros, form\.total\)\)/);
-  assert.match(modal, /setRepartos\(repartoDeRenglones\(items, form\.total\)\)/);
+  assert.match(modal, /setRepartos\(sinTitulos\(repartoDeRenglones\(items, form\.total\), rubros\)\)/);
 });
 
 test("Compras: el documento no entra al control con renglones que suman más que él", () => {
@@ -222,7 +224,7 @@ test("Compras: el documento no entra al control con renglones que suman más que
 test("Caja chica: el gasto no se guarda repartido por más de lo que vale", () => {
   const caja = leer("../src/modules/ModuloCajaChica.jsx");
   const cuerpo = caja.slice(caja.indexOf("async function agregarGasto()"));
-  const freno = cuerpo.indexOf('avisoDeSobra(repartoDelGasto(rubrosGasto, gastoForm.monto), gastoForm.monto, "el gasto")');
+  const freno = cuerpo.indexOf('avisoDeSobra(repartoDelGasto(elegidos, gastoForm.monto), gastoForm.monto, "el gasto")');
   assert.ok(freno > 0);
   assert.ok(freno < cuerpo.indexOf("subirArchivo("), "antes de subir la foto");
   assert.ok(freno < cuerpo.indexOf('from("cajas_gastos")'), "antes de escribir el gasto");
@@ -284,4 +286,113 @@ test("la fila de la lista avisa lo asignado de más, y la lista y su Excel usan 
   assert.match(libro, /destinosPorFactura\(asignaciones, rubros, actividades\)/);
   assert.match(libro, /\.\.\.\(destinosDe\[f\.id\] \|\| \[\]\)/, "la línea de la fila");
   assert.match(libro, /\(destinosDe\[f\.id\] \|\| \[\]\)\.join\(" · "\) \|\| "SIN ASIGNAR"/, "la columna del Excel");
+});
+
+// ── EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS ───────────────────────────
+//
+// Hernán, el 15/11/2026, después de la 171: una agrupación o un capítulo es un
+// título y el gasto va a los rubros que tiene debajo. La 171 quedó con $98,45
+// en la OC-03 que el control repartía también contra el (–) de la orden.
+//
+// La OC-03 de la obra 13, con su agrupación y su capítulo. El 1448 es el (–).
+const OC03_CON_TITULO = OC03.map(r => ({ ...r, actividad_id: 196, capitulo: "ADICIONALES · OC-03" }));
+const CINCO = [1444, 1445, 1446, 1447, 1449];
+
+test("los rubros de un título son los que reciben gasto: el (–) de la orden no está", () => {
+  assert.deepEqual(rubrosDelTitulo({ tipo: "actividad", id: 196 }, OC03_CON_TITULO).map(r => r.id), CINCO);
+  assert.deepEqual(rubrosDelTitulo({ tipo: "capitulo", id: "ADICIONALES · OC-03" }, OC03_CON_TITULO).map(r => r.id), CINCO);
+  assert.deepEqual(rubrosDelTitulo({ tipo: "actividad", id: 999 }, OC03_CON_TITULO), []);
+  const conOculto = OC03_CON_TITULO.map(r => (r.id === 1449 ? { ...r, oculto: true } : r));
+  assert.ok(!rubrosDelTitulo({ tipo: "actividad", id: 196 }, conOculto).some(r => r.id === 1449), "lo escondido no recibe");
+  const conTachado = OC03_CON_TITULO.map(r => (r.id === 1446 ? { ...r, anulado_por_oc: 7 } : r));
+  assert.ok(!rubrosDelTitulo({ tipo: "actividad", id: 196 }, conTachado).some(r => r.id === 1446), "lo tachado por una orden no recibe");
+});
+
+test("la 171 cargada a la OC-03 entera queda en sus cinco rubros, como la dejó Hernán", () => {
+  const r = sinTitulos([{ tipo: "actividad", id: 196, monto: 590.73 }], OC03_CON_TITULO);
+  assert.deepEqual(r.map(x => [x.tipo, x.id, x.monto]), [
+    ["rubro", 1444, 237.88], ["rubro", 1445, 83.87], ["rubro", 1446, 34.97], ["rubro", 1447, 170.48], ["rubro", 1449, 63.53],
+  ]);
+  assert.equal(asignadoDe(r), 590.73);
+});
+
+test("lo que el título tenía se suma a los rubros que ya estaban, sin duplicar líneas", () => {
+  // El 13/11 de hoy: $98,45 en el título y el resto ya repartido en los rubros.
+  const hoy = [
+    { tipo: "actividad", id: 196, monto: 98.45 },
+    { tipo: "rubro", id: 1444, monto: 198.24 }, { tipo: "rubro", id: 1445, monto: 69.89 },
+    { tipo: "rubro", id: 1446, monto: 29.14 }, { tipo: "rubro", id: 1447, monto: 142.07 }, { tipo: "rubro", id: 1449, monto: 52.94 },
+  ];
+  const r = sinTitulos(hoy, OC03_CON_TITULO);
+  assert.equal(r.length, 5, "una línea por rubro");
+  assert.ok(r.every(x => x.tipo === "rubro"));
+  assert.equal(asignadoDe(r), 590.73, "el total no se mueve un centavo");
+  assert.ok(!r.some(x => x.id === 1448), "el (–) no recibe nada");
+});
+
+test("una agrupación sin rubros se queda como está: no hay a dónde más llevarla", () => {
+  const oficina = [{ tipo: "actividad", id: 191, monto: 120 }];
+  assert.deepEqual(sinTitulos(oficina, OC03_CON_TITULO), oficina);
+  // Y un capítulo cuyos rubros no reciben gasto, tampoco se inventa.
+  const soloElMenos = [{ id: 9, total_base: -50, capitulo: "X", actividad_id: 1 }];
+  assert.deepEqual(sinTitulos([{ tipo: "capitulo", id: "X", monto: 10 }], soloElMenos), [{ tipo: "capitulo", id: "X", monto: 10 }]);
+});
+
+test("con un solo rubro, el título va entero a ese rubro aunque presupueste cero", () => {
+  const logistica = [{ id: 77, total_base: 0, actividad_id: 192 }];
+  assert.deepEqual(sinTitulos([{ tipo: "actividad", id: 192, monto: 45.5 }], logistica), [{ tipo: "rubro", id: 77, monto: 45.5 }]);
+});
+
+test("una nota de crédito a un título descarga sus rubros en negativo, exacta", () => {
+  const r = sinTitulos([{ tipo: "actividad", id: 196, monto: -100 }], OC03_CON_TITULO);
+  assert.equal(asignadoDe(r), -100);
+  assert.ok(r.every(x => x.monto <= 0));
+});
+
+test("Compras: las filas a la base salen sin título, con la misma regla", () => {
+  assert.deepEqual(asignacionesSinTitulo([{ obra_actividad_id: 196, obra_rubro_id: null, monto: 590.73 }], OC03_CON_TITULO)
+    .map(f => [f.obra_rubro_id, f.obra_actividad_id, f.monto]),
+  [[1444, null, 237.88], [1445, null, 83.87], [1446, null, 34.97], [1447, null, 170.48], [1449, null, 63.53]]);
+  assert.deepEqual(asignacionesSinTitulo([{ obra_rubro_id: 1444, obra_actividad_id: null, monto: 10 }], OC03_CON_TITULO),
+    [{ obra_rubro_id: 1444, obra_actividad_id: null, monto: 10 }]);
+  assert.deepEqual(asignacionesSinTitulo([{ obra_actividad_id: 191, monto: 5 }], OC03_CON_TITULO),
+    [{ obra_rubro_id: null, obra_actividad_id: 191, monto: 5 }]);
+});
+
+test("Caja chica: un solo rubro va solo; con varios, no se guarda hasta elegir", () => {
+  const rubros = [...OC03_CON_TITULO, { id: 77, total_base: 0, actividad_id: 192 }];
+  const uno = agrupacionesDeCaja([{ obra_actividad_id: 192, monto: "12.50" }], rubros);
+  assert.deepEqual(uno, { seleccion: [{ obra_rubro_id: 77, monto: "12.50" }], faltaElegir: [] });
+  const varios = agrupacionesDeCaja([{ obra_actividad_id: 196, monto: 30 }], rubros);
+  assert.deepEqual(varios.faltaElegir, [{ obra_actividad_id: 196, cuantos: 5 }]);
+  const sinRubros = agrupacionesDeCaja([{ obra_actividad_id: 191, monto: 8 }], rubros);
+  assert.deepEqual(sinRubros, { seleccion: [{ obra_actividad_id: 191, monto: 8 }], faltaElegir: [] });
+  // Si el rubro ya estaba elegido, se suma ahí.
+  const junto = agrupacionesDeCaja([{ obra_rubro_id: 77, monto: 5 }, { obra_actividad_id: 192, monto: 7 }], rubros);
+  assert.deepEqual(junto.seleccion, [{ obra_rubro_id: 77, monto: 12 }]);
+  // Y no toca lo que le pasaron: es el estado de la pantalla.
+  const original = [{ obra_rubro_id: 77, monto: 5 }, { obra_actividad_id: 192, monto: 7 }];
+  agrupacionesDeCaja(original, rubros);
+  assert.deepEqual(original, [{ obra_rubro_id: 77, monto: 5 }, { obra_actividad_id: 192, monto: 7 }]);
+});
+
+test("las tres puertas aplican la regla antes de escribir", () => {
+  const modal = leer("../src/modules/controlObra/ModalFactura.jsx");
+  assert.match(modal, /useState\(\(\) => sinTitulos\(/, "la factura se abre ya repartida");
+  assert.match(modal, /setRepartos\(sinTitulos\(\[\.\.\.repartos, \{ tipo, id, monto: restante \}\], rubros\)\)/, "al agregar un título");
+  const guardar = modal.slice(modal.indexOf("async function guardar()"));
+  assert.ok(guardar.indexOf("const filas = finales.filter(") > 0, "lo que se guarda es el reparto sin títulos");
+
+  const compras = leer("../src/modules/compras/compras.js");
+  const facturar = compras.slice(compras.indexOf("export async function facturarCompra("), compras.indexOf("async function aSusRubros("));
+  assert.equal((facturar.match(/await aSusRubros\(obra\.id,/g) || []).length, 2, "con renglones y con el destino del pedido");
+  const enganchar = compras.slice(compras.indexOf("export async function engancharFactura("));
+  const reparte = enganchar.indexOf("await aSusRubros(");
+  assert.ok(reparte > 0 && reparte < enganchar.indexOf(".insert(filas.map("), "al enganchar, antes de escribir");
+
+  const caja = leer("../src/modules/ModuloCajaChica.jsx");
+  const cuerpo = caja.slice(caja.indexOf("async function agregarGasto()"));
+  const regla = cuerpo.indexOf("agrupacionesDeCaja(rubrosGasto, rubrosObra)");
+  assert.ok(regla > 0 && regla < cuerpo.indexOf("subirArchivo("), "antes de subir la foto");
+  assert.match(cuerpo, /const conRubros = repartoDelGasto\(elegidos, gastoForm\.monto\);/);
 });

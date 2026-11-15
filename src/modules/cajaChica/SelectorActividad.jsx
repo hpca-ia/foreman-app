@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { recibeGasto } from "../controlObra/calculos";
 import { rubrosParaGastarDe } from "../controlObra/quitasDeOrdenes.js";
+import { rubrosDelTitulo, agrupacionesDeCaja } from "../controlObra/repartoDeFactura.js";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -18,6 +19,12 @@ import { inputStyle } from "../../components/ui/Input";
 // del capítulo, sumando centavos en catorce renglones que no la tuvieron. Ahora
 // se puede elegir el rubro exacto, que es lo que uno sabe cuando acaba de
 // comprar algo.
+//
+// Y EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS (Hernán, 15/11/2026). Elegir
+// una agrupación que tiene un solo rubro es elegir ese rubro. Una que tiene
+// varios queda pidiendo a cuál de ellos va: acá no se ven los presupuestos, así
+// que no se puede repartir por lo que pesa cada uno, y el gasto no se guarda
+// en el título. Las agrupaciones sin rubros —Oficina, Vivienda— siguen igual.
 //
 // No ve plata: ni el presupuesto de la actividad, ni su saldo, ni su avance.
 // Quien carga un gasto no tiene por qué ver el presupuesto de la obra. Y si se
@@ -50,14 +57,34 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
     })();
   }, [obraId]);
 
+  // Una agrupación con un solo rubro, puesta por la caja o por un gasto viejo,
+  // pasa sola a ese rubro.
+  useEffect(() => {
+    if (cargando || !rubros.length) return;
+    const { seleccion: ya } = agrupacionesDeCaja(seleccion, rubros);
+    if (JSON.stringify(ya) !== JSON.stringify(seleccion)) onChange(ya);
+  }, [cargando, rubros, seleccion]);  // eslint-disable-line
+
   if (!obraId) return null;
 
+  const rubrosDe = id => rubrosDelTitulo({ tipo: "actividad", id }, rubros);
+  // La agrupación elegida que todavía pide su rubro: mientras esté, el
+  // desplegable de rubros muestra solo los suyos.
+  const pendiente = seleccion.find(s => !s.obra_rubro_id && s.obra_actividad_id != null && rubrosDe(s.obra_actividad_id).length > 1);
+  const deLaPendiente = pendiente ? rubrosDe(pendiente.obra_actividad_id) : null;
+  const nombrePendiente = pendiente ? (actividades.find(a => a.id === pendiente.obra_actividad_id)?.nombre || "la agrupación") : "";
+
   const disponibles = actividades.filter(a => !seleccion.some(s => s.obra_actividad_id === a.id));
-  const rubrosLibres = rubros.filter(r => !seleccion.some(s => s.obra_rubro_id === r.id));
+  const rubrosLibres = (deLaPendiente || rubros).filter(r => !seleccion.some(s => s.obra_rubro_id === r.id));
 
   function agregarRubro(id) {
     const n = Number(id);
     if (!n) return;
+    // Elegir el rubro de la agrupación que lo pedía la reemplaza, con su monto.
+    if (pendiente && deLaPendiente.some(r => r.id === n)) {
+      onChange(seleccion.map(s => (s === pendiente ? { obra_rubro_id: n, monto: s.monto } : s)));
+      return;
+    }
     const dado = seleccion.reduce((t, s) => t + (Number(s.monto) || 0), 0);
     const restante = Math.max((Number(montoTotal) || 0) - dado, 0);
     onChange([...seleccion, { obra_rubro_id: n, monto: seleccion.length === 0 ? (Number(montoTotal) || 0) : restante }]);
@@ -66,7 +93,9 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
   function agregar(id) {
     const usado = seleccion.reduce((s, x) => s + (Number(x.monto) || 0), 0);
     const restante = Math.max((Number(montoTotal) || 0) - usado, 0);
-    onChange([...seleccion, { obra_actividad_id: id, monto: seleccion.length === 0 ? (Number(montoTotal) || 0) : restante }]);
+    const monto = seleccion.length === 0 ? (Number(montoTotal) || 0) : restante;
+    // Con un solo rubro, es ese rubro. Con varios, queda pidiendo cuál.
+    onChange(agrupacionesDeCaja([...seleccion, { obra_actividad_id: id, monto }], rubros).seleccion);
   }
 
   const asignado = seleccion.reduce((s, x) => s + (Number(x.monto) || 0), 0);
@@ -92,7 +121,11 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
               ) : (
                 <>
                   <span style={{ color: "var(--muted)", marginRight: 5 }}>{a?.codigo}</span>{a?.nombre || "Agrupación"}
-                  <span style={{ color: "var(--muted)", fontSize: 10.5 }}> · se reparte entre sus rubros</span>
+                  {rubrosDe(s.obra_actividad_id).length > 1 && (
+                    <span style={{ color: "var(--warning)", fontSize: 10.5, fontWeight: 600 }}>
+                      {" "}· tiene {rubrosDe(s.obra_actividad_id).length} rubros: elegí abajo a cuál va
+                    </span>
+                  )}
                 </>
               )}
             </div>
@@ -125,6 +158,7 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
         <option value="">
           {cargando ? "Cargando rubros..."
             : !rubros.length ? "Esta obra todavía no tiene rubros"
+            : pendiente ? `¿A cuál rubro de «${nombrePendiente}» va?`
             : "Elegir el rubro exacto…"}
         </option>
         {rubrosLibres.map(r => (
@@ -137,7 +171,7 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
           {cargando ? "Cargando agrupaciones..."
             : !actividades.length ? "Esta obra todavía no tiene agrupaciones"
             : !disponibles.length ? "Ya asignaste todas las agrupaciones"
-            : "…o una agrupación entera, que se reparte entre sus rubros"}
+            : "…o una agrupación (si tiene varios rubros, después elegís cuál)"}
         </option>
         {disponibles.map(a => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
       </select>

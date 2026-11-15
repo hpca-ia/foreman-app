@@ -5,7 +5,7 @@ import { solicitudesDeLaObra, repartirSolicitudes } from "../controlObra/calculo
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
 import { eleccionesDeAntes } from "./eleccionDeProforma.js";
-import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
+import { avisoDeSobra, asignacionesSinTitulo } from "../controlObra/repartoDeFactura.js";
 import { buscarDuplicados } from "../controlObra/duplicados";
 import { rubrosParaGastarDe } from "../controlObra/quitasDeOrdenes.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
@@ -701,21 +701,25 @@ export async function facturarCompra(solicitud, datos, quien) {
   // era la compra.
   // Si quedó sin asignar hay que decirlo: una factura sin destino entra al
   // control y no descuenta de ningún lado.
+  //
+  // Y EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS: un pedido contra una
+  // agrupación entra repartido entre sus rubros (`aSusRubros`).
   let asignado = false;
   if (repartos.length) {
-    await supabase.from("obra_asignaciones").insert(repartos.map(x => ({
-      factura_id: factura.id,
+    const filas = await aSusRubros(obra.id, repartos.map(x => ({
       obra_rubro_id: x.obra_rubro_id ?? null,
       obra_actividad_id: x.obra_actividad_id ?? null,
       monto: Number(x.monto),
     })));
+    await supabase.from("obra_asignaciones").insert(filas.map(f => ({ factura_id: factura.id, ...f })));
     asignado = true;
   } else {
     const destino = solicitud.obra_rubro_id
       ? { obra_rubro_id: solicitud.obra_rubro_id }
       : solicitud.obra_actividad_id ? { obra_actividad_id: solicitud.obra_actividad_id } : null;
     if (destino) {
-      await supabase.from("obra_asignaciones").insert({ factura_id: factura.id, ...destino, monto: total });
+      const filas = await aSusRubros(obra.id, [{ ...destino, monto: total }]);
+      await supabase.from("obra_asignaciones").insert(filas.map(f => ({ factura_id: factura.id, ...f })));
       asignado = true;
     }
   }
@@ -986,6 +990,27 @@ export async function comprasSinFacturar(obraId, leadId) {
 }
 
 /**
+ * EL TÍTULO NO LLEVA EL PESO, SOLO SUS RUBROS (Hernán, 15/11/2026).
+ *
+ * Un pedido apunta casi siempre a una agrupación —«EHS», «OC-03»— porque es lo
+ * que se sabe cuando se pide. Al llegar la factura, esa plata va a los rubros
+ * de la agrupación, por lo que presupuesta cada uno, con la misma regla del
+ * control: ni el «(–)» de una orden ni lo que una orden tachó reciben gasto.
+ * Una agrupación sin rubros se queda como está.
+ *
+ * Si los rubros no se pueden leer, las filas van como vinieron: el control
+ * igual reparte lo que quedó en el título.
+ */
+async function aSusRubros(obraId, filas) {
+  if (!obraId || !filas.some(f => f.obra_rubro_id == null)) return filas;
+  const { data, error } = await supabase.from("obra_rubros")
+    .select("id,numero,descripcion,capitulo,actividad_id,oculto,anulado_por_oc,total_base,origen,orden_cambio_id,iva_pct")
+    .eq("obra_id", obraId);
+  if (error || !data?.length) return filas;
+  return asignacionesSinTitulo(filas, await rubrosParaGastarDe(obraId, data));
+}
+
+/**
  * Enganchar un pedido a una factura que ya se cargó en el control.
  *
  * Con esto el pedido deja de contarse como comprometido. Y si el pedido sabía
@@ -1006,8 +1031,9 @@ export async function engancharFactura(solicitud, factura, quien) {
     ? { obra_rubro_id: solicitud.obra_rubro_id }
     : solicitud.obra_actividad_id ? { obra_actividad_id: solicitud.obra_actividad_id } : null;
   if (!yaTiene?.length && destino) {
-    await supabase.from("obra_asignaciones")
-      .insert({ factura_id: factura.id, ...destino, monto: Number(factura.total) || 0 });
+    // Contra una agrupación, repartido entre sus rubros: el título no lleva el peso.
+    const filas = await aSusRubros(factura.obra_id ?? solicitud.obra_id, [{ ...destino, monto: Number(factura.total) || 0 }]);
+    await supabase.from("obra_asignaciones").insert(filas.map(f => ({ factura_id: factura.id, ...f })));
   }
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
     `Enganchada a la factura ${factura.numero_factura || `#${factura.id}`} del control de obra`);
