@@ -61,5 +61,54 @@ export function revisionDeFactura({ items = [], p = {}, comprobante = null } = {
   const delPapel = baseImpresa(p);
   const subtotal = delSri ?? delPapel;
   const r = revisarLectura(items, subtotal == null ? null : { subtotal }, 0);
+  if (r.cuadra === false && delSri == null) {
+    const conIva = cuadraConIva(items, p);
+    if (conIva) {
+      return {
+        ...r, cuadra: true, falta: 0, esperado: conIva.base, confiable: !r.malos.length,
+        contra: "papel-con-iva", corregirBase: conIva.corregir,
+        conclusion: `${items.length} renglones · $${fmtUs(conIva.base)} + IVA ${conIva.tasa}% $${fmtUs(conIva.iva)} = $${fmtUs(conIva.total)}: `
+          + "suman exactamente el total del papel",
+      };
+    }
+  }
   return { ...r, contra: delSri != null ? "sri" : delPapel != null ? "papel" : null };
+}
+
+const fmtUs = v => n(v).toFixed(2);
+// Las tarifas de IVA de Ecuador: la general y la de materiales de construcción.
+const TASAS = [15, 5];
+
+/**
+ * ¿LA BASE CARGADA ES EN REALIDAD EL TOTAL?
+ *
+ * Caja chica guarda cada gasto en el control con su monto como «base 15%» y
+ * el IVA en cero: no lee la base ni el IVA del papel. Así quedan sus facturas
+ * —la de Kywi por $143,32 decía base $143,32 e IVA $0—, y cuando NOVA lee los
+ * renglones, que vienen sin IVA, la comprobación decía «FALTAN $18,69: algún
+ * renglón no entró». No faltaba nada: era el IVA.
+ *
+ * Si la base cargada es igual al total y no hay IVA, se prueba si los
+ * renglones más el IVA —15%, o 5% de materiales de construcción— dan el total.
+ * Si dan, cuadra, y se ofrece dejar la base y el IVA como dice el papel.
+ *
+ * @returns null, o { tasa, base, iva, total, corregir }
+ */
+export function cuadraConIva(items = [], p = {}) {
+  const total = c2(p.total);
+  const base = baseImpresa(p);
+  if (!(total > 0) || n(p.iva) > 0.005 || base == null || Math.abs(base - total) > 0.01) return null;
+  const suman = c2((items || []).reduce((t, x) => t + n(x.monto), 0));
+  if (!(suman > 0) || suman >= total) return null;
+  const tolerancia = Math.max(0.05, (items || []).length * 0.01);
+  for (const tasa of TASAS) {
+    if (Math.abs(c2(suman * (1 + tasa / 100)) - total) <= tolerancia) {
+      const iva = c2(total - suman);
+      return {
+        tasa, base: suman, iva, total,
+        corregir: { subtotal_0: 0, subtotal_5: tasa === 5 ? suman : 0, subtotal_15: tasa === 15 ? suman : 0, iva },
+      };
+    }
+  }
+  return null;
 }

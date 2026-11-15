@@ -163,10 +163,17 @@ export function repartoDeRenglones(items = [], total) {
   });
   const claves = [...porDestino.keys()];
   const suma = claves.reduce((t, k) => t + porDestino.get(k), 0);
+  // CON RENGLONES SIN DESTINO, A LOS ASIGNADOS LES TOCA SU PARTE, NO EL TOTAL.
+  // «Asignar 1 de 11» le daba los $143,32 de la factura entera al único
+  // renglón con destino —un alambre de $2,60—. Les toca lo suyo con su IVA:
+  // la parte del total que pesan entre todos los renglones leídos. Lo demás
+  // queda por asignar, y la pantalla dice cuánto falta.
+  const todos = (items || []).reduce((t, x) => t + n(x.monto), 0);
+  const parte = todos > 0 && suma > 0 && suma < todos - 0.005 ? c2(n(total) * suma / todos) : n(total);
   // Sin base que escalar —todo en cero, o descuentos que se comen la suma— va
   // lo leído tal cual: no hay proporción de la que colgar el total.
   const montos = suma > 0
-    ? repartirProporcional(n(total), claves.map(k => ({ total_base: porDestino.get(k) })))
+    ? repartirProporcional(parte, claves.map(k => ({ total_base: porDestino.get(k) })))
     : claves.map(k => c2(porDestino.get(k)));
   return claves.map((clave, i) => {
     const corte = clave.indexOf(":");

@@ -21,7 +21,7 @@ import { desdeLecturaDeFactura } from "./itemsComprados";
 // = base imponible, y si no cierra, se vuelve a leer diciendo cuánto falta.
 import { leerHastaQueCuadre } from "../lectura/insistir.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
-import { totalesDeLectura, renglonesDeLectura, revisionDeFactura } from "./cuadrarFactura.js";
+import { totalesDeLectura, renglonesDeLectura, revisionDeFactura, cuadraConIva } from "./cuadrarFactura.js";
 // Lo repartido no puede sumar más que la factura: la regla vive ahí.
 import { sobraDelReparto, avisoDeSobra, quedaParaLosRubros, prorratearEntreRubros, repartoDeRenglones } from "./repartoDeFactura.js";
 
@@ -1047,10 +1047,25 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 {rev.conclusion}
                 {rev.contra === "sri" && " · contra la base del XML autorizado por el SRI"}
                 {rev.contra === "papel" && " · contra la base impresa"}
+                {rev.contra === "papel-con-iva" && " · contra el total del papel, con su IVA"}
                 {lectura?.vuelta != null && (
                   <span style={{ marginLeft: 6, opacity: 0.75 }}>
                     · {lectura.vuelta === 1 ? "cerró a la primera" : `necesitó ${lectura.vuelta} de ${lectura.vueltas || 3} vueltas`}
                   </span>
+                )}
+                {/* LA BASE Y EL IVA, COMO DICE EL PAPEL. La factura estaba
+                    cargada con la base igual al total y sin IVA —así la
+                    guarda caja chica—. Un toque la deja bien; se guarda con
+                    el resto, al guardar. */}
+                {rev.corregirBase && (n(form.subtotal_15) !== rev.corregirBase.subtotal_15 || n(form.iva) !== rev.corregirBase.iva) && (
+                  <div className="corregir-base-iva" style={{ marginTop: 4, color: colors.inkSoft }}>
+                    Esta factura estaba cargada con la base igual al total y sin IVA.{" "}
+                    <button onClick={() => setForm(f => ({ ...f, ...rev.corregirBase }))}
+                      style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6, padding: "2px 8px",
+                        fontSize: 11, color: colors.brand, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
+                      Dejar base ${fmt(rev.corregirBase.subtotal_15 || rev.corregirBase.subtotal_5)} e IVA ${fmt(rev.corregirBase.iva)}
+                    </button>
+                  </div>
                 )}
                 {rev.malos.map((m, i) => (
                   <div key={i} style={{ fontSize: 10.5 }}>
@@ -1174,6 +1189,15 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
               const suma = items.reduce((t, x) => t + n(x.monto), 0);
               const base = n(form.subtotal_0) + n(form.subtotal_5) + n(form.subtotal_15);
               const dif = Math.round((suma - base) * 100) / 100;
+              // La base cargada era el total: los renglones cuadran con el IVA.
+              const conIva = cuadraConIva(items, form);
+              if (conIva) {
+                return (
+                  <span style={{ fontSize: 11, color: colors.success }}>
+                    {`Los renglones suman $${fmt(suma)}; con el IVA del ${conIva.tasa}% dan los $${fmt(conIva.total)} de la factura. Al asignar se les reparte el IVA.`}
+                  </span>
+                );
+              }
               return (
                 <span style={{ fontSize: 11, color: Math.abs(dif) < 0.02 ? colors.success : colors.warning }}>
                   {Math.abs(dif) < 0.02

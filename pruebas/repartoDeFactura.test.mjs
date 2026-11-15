@@ -135,8 +135,9 @@ test("los renglones se llevan al total de la factura: el IVA se reparte con la b
     { destino: "rubro:1444", monto: 50 },
     { destino: "act:196", monto: 150 },
     { destino: "cap:ALBAÑILERÍA: MUROS", monto: 100 },
-    { destino: null, monto: 999 },
   ];
+  // (Un renglón SIN destino ya no le pasa su parte a los demás: ver
+  // facturaConIvaAdentro.test.mjs, «asignar 1 de 11».)
   assert.deepEqual(repartoDeRenglones(items, 460), [
     { tipo: "rubro", id: 1444, monto: 172.5 },
     { tipo: "actividad", id: 196, monto: 172.5 },
