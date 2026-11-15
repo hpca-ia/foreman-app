@@ -429,7 +429,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       if (factura) {
         aviso += `\n\nTambién se borra del control de obra la factura ${factura.numero_factura || ""} de ${factura.razon_social || "ese proveedor"}, con lo que tenía asignado a los rubros.`;
         if (factura.planilla_id) {
-          const { data: pl } = await supabase.from("obra_planillas")
+          const { data: pl } = await supabase.from("planillas")
             .select("numero,estado").eq("id", factura.planilla_id).maybeSingle();
           aviso += `\n\nOJO: esa factura está dentro de la planilla N° ${pl?.numero ?? factura.planilla_id}`
             + `${pl?.estado ? ` (${pl.estado})` : ""}. Si esa planilla ya se presentó, su monto va a cambiar.`;
@@ -640,7 +640,21 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       setNovaError("Falta la descripción o el monto del gasto.");
       return false;
     }
-    if (dupsGasto.exactos.length && !dupJustificacion.trim()) {
+    // LOS DUPLICADOS SE REVISAN AL GUARDAR, con lo que está escrito ahora.
+    //
+    // Antes se revisaban al leer el papel con NOVA o al salir del campo del
+    // número. Un gasto cargado a mano —sin archivo— y guardado con un clic
+    // entraba antes de que esa revisión terminara: así entró dos veces la
+    // factura 753-003-000015663 de Tuti en la caja de Lizeth, con 50 minutos
+    // de diferencia. Ahora la última palabra la tiene esta revisión.
+    let dups = dupsGasto;
+    if (cajaActiva.obra_id && (gastoForm.numero_factura || gastoForm.proveedor || archivoHash)) {
+      dups = await buscarDuplicados({ obraId:cajaActiva.obra_id, ruc:gastoForm.ruc, numeroFactura:gastoForm.numero_factura,
+        razonSocial:gastoForm.proveedor, monto:gastoForm.monto, fecha:gastoForm.fecha, archivoHash,
+        excluirId:gastoEditando?.obra_factura_id ?? null, excluirGastoId:gastoEditando?.id ?? null });
+      setDupsGasto(dups);
+    }
+    if (dups.exactos.length && !dupJustificacion.trim()) {
       setNovaError("Esta factura ya está cargada en la obra. Explica por qué no es un duplicado para poder guardarla.");
       return false;
     }
@@ -839,8 +853,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
           clase:devuelve ? "nota_credito" : claseDeGasto(gastoForm.tipo),
           razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
           numero_factura:gastoForm.numero_factura||null, archivo_hash:archivoHash||null,
-          duplicado_de:dupsGasto.exactos[0]?.id||null,
-          duplicado_justificacion:dupsGasto.exactos.length?dupJustificacion.trim():null,
+          duplicado_de:dups.exactos[0]?.id||null,
+          duplicado_justificacion:dups.exactos.length?dupJustificacion.trim():null,
           detalle:gastoForm.descripcion,
           justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
           tipo:"material", archivo_url:archivoUrl, archivo_nombre:archivoNombre,

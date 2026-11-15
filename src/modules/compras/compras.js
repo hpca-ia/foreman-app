@@ -5,6 +5,7 @@ import { solicitudesDeLaObra, repartirSolicitudes } from "../controlObra/calculo
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
 import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
+import { buscarDuplicados } from "../controlObra/duplicados";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // El flujo de una compra, de punta a punta.
@@ -628,6 +629,19 @@ export async function facturarCompra(solicitud, datos, quien) {
   const { data: obras } = await supabase.from("obras").select("id").eq("lead_id", solicitud.lead_id).limit(1);
   const obra = obras?.[0];
   if (!obra) return { error: "Este proyecto todavía no tiene una obra activa en Control de Obra." };
+
+  // LA MISMA FACTURA NO ENTRA DOS VECES, tampoco desde Compras. Mismo RUC y
+  // mismo número es el mismo documento, entre por donde entre: si ya está en
+  // el control —cargado desde la planilla o desde caja chica— se engancha, no
+  // se vuelve a cargar.
+  if (datos.numero?.trim() && datos.ruc?.trim()) {
+    const ya = await buscarDuplicados({ obraId: obra.id, ruc: datos.ruc, numeroFactura: datos.numero });
+    const f = ya.exactos[0];
+    if (f) {
+      const como = { manual: "a mano", nova: "con NOVA", caja_chica: "desde caja chica" }[f.origen] || "";
+      return { error: `Esa factura ya está en el control: ${f.razon_social || "ese proveedor"} #${f.numero_factura}, por $${Number(f.total).toFixed(2)}, cargada ${como}${f.subido_por_nombre ? ` por ${f.subido_por_nombre}` : ""}. No se carga otra vez: enganchala desde el aviso de arriba, o desde Alertas en el control.` };
+    }
+  }
 
   // A la planilla abierta; si no hay ninguna, queda sin corte y se asigna
   // después. Una factura sin planilla ya salió de la caja igual.

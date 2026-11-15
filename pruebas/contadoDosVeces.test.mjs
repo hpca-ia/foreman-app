@@ -148,3 +148,84 @@ test("un centavo de redondeo no es una factura mal asignada", () => {
   const casi = [{ factura_id: 210, obra_rubro_id: 1, monto: 346.56 }, { factura_id: 210, obra_rubro_id: 2, monto: 346.56 }];
   assert.deepEqual(facturasSobreasignadas({ facturas, asignaciones: casi }), []);
 });
+
+// ── La misma factura dos veces, entre por donde entre ──
+import { facturasRepetidas, documentosSinAsignar, pagadosSinDocumento, alertasDeLaObra } from "../src/modules/controlObra/contadoDosVeces.js";
+import { readFileSync as leer } from "node:fs";
+
+const tuti = (id, mas) => ({ id, obra_id: 13, fecha: "2026-10-30", clase: "factura", origen: "caja_chica", ruc: "0993152161001", numero_factura: "753-003-000015663", razon_social: "TIENDAS TUTI TTDE S.A.", total: 2.96, ...mas });
+
+test("LO QUE ÉL VIO: la factura de Tuti entró dos veces por caja chica, una con archivo y otra a mano", () => {
+  const r = facturasRepetidas([
+    tuti(190, { caja_gasto_id: 182, created_at: "2026-11-10T07:36:28Z", archivo_hash: null }),
+    tuti(189, { caja_gasto_id: 181, created_at: "2026-11-10T06:45:50Z", archivo_hash: "abc" }),
+  ]);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].tipo, "exacto");
+  // La primera es la que entró primero; la de después es la que sobra.
+  assert.deepEqual(r[0].facturas.map(f => f.id), [189, 190]);
+});
+
+test("el número se compara sin guiones, puntos ni espacios; y entre orígenes distintos", () => {
+  const r = facturasRepetidas([
+    tuti(1, { origen: "manual", numero_factura: "753-003-000015663" }),
+    tuti(2, { origen: "nova", numero_factura: "753003000015663", ruc: "0993152161001 " }),
+  ]);
+  assert.equal(r.length, 1);
+});
+
+test("el mismo archivo es la misma factura aunque no tenga número; parecidas solo si las fechas están cerca", () => {
+  assert.equal(facturasRepetidas([{ id: 1, archivo_hash: "x", total: 5 }, { id: 2, archivo_hash: "x", total: 5 }])[0].tipo, "exacto");
+  const cerca = [{ id: 1, razon_social: "Kywi", total: 19.71, fecha: "2026-11-11" }, { id: 2, razon_social: "KYWI", total: 19.71, fecha: "2026-11-13" }];
+  assert.equal(facturasRepetidas(cerca)[0].tipo, "posible");
+  const lejos = [{ id: 1, razon_social: "Kywi", total: 19.71, fecha: "2026-10-01" }, { id: 2, razon_social: "Kywi", total: 19.71, fecha: "2026-11-13" }];
+  assert.deepEqual(facturasRepetidas(lejos), []);
+});
+
+test("la revisión de la obra entera vive en un solo lugar: no queda otra copia de la regla", () => {
+  const dup = leer(new URL("../src/modules/controlObra/duplicados.js", import.meta.url), "utf8");
+  assert.doesNotMatch(dup, /auditarObra/);
+  // Y la de un documento que entra usa los mismos criterios: RUC + número, o el mismo archivo.
+  assert.match(dup, /norm\(f\.numero_factura\) === norm\(numeroFactura\) && norm\(f\.ruc\) === norm\(ruc\)/);
+  assert.match(dup, /f\.archivo_hash === archivoHash/);
+});
+
+test("documentos sin asignar: los que no descuentan de ningún rubro, o descuentan menos de lo que valen", () => {
+  const r = documentosSinAsignar({ facturas, asignaciones: [...asignaciones, { factura_id: 210, monto: 600 }] });
+  const de = Object.fromEntries(r.map(x => [x.factura.id, x.falta]));
+  assert.equal(de[199], 1494.35);        // nada asignado
+  assert.equal(de[210], undefined);      // 693,11 + 600 es de más, no de menos
+  assert.equal(de[243], undefined);      // asignada justo
+  assert.equal(de[220], undefined);      // la nota de crédito, asignada por su monto
+  assert.equal(de[242], 483);
+});
+
+test("pagado en Compras sin documento en el control: solo lo que no tiene con qué engancharse", () => {
+  const ya = pedidosYaFacturados({ solicitudes, facturas, adjuntos, pagos });
+  const r = pagadosSinDocumento({ solicitudes, adjuntos, yaFacturados: ya });
+  assert.deepEqual(r.map(x => [x.pedido.id, x.monto]), [[27, 2670.3]]);
+});
+
+test("todas juntas, y cuántas son: lo que dice la pestaña", () => {
+  const a = alertasDeLaObra({ solicitudes, facturas: [...facturas, tuti(189, { created_at: "1" }), tuti(190, { created_at: "2" })], asignaciones, adjuntos, pagos });
+  assert.equal(a.repetidas.length, 1);
+  assert.equal(a.sobreasignadas.length, 1);
+  assert.equal(a.pedidos.length, 6);
+  assert.equal(a.pagados.length, 1);
+  assert.equal(a.cuantas, a.repetidas.length + a.sobreasignadas.length + a.pedidos.length + a.pagados.length + a.sinAsignar.length);
+  assert.deepEqual(alertasDeLaObra({}).cuantas, 0);
+});
+
+test("al guardar se revisa otra vez, en caja chica, en el control y en Compras", () => {
+  const caja = leer(new URL("../src/modules/ModuloCajaChica.jsx", import.meta.url), "utf8");
+  const agregar = caja.slice(caja.indexOf("async function agregarGasto()"), caja.indexOf("const devuelve = gastoForm.tipo"));
+  assert.match(agregar, /dups = await buscarDuplicados\(/);
+  assert.ok(agregar.indexOf("dups = await buscarDuplicados(") < agregar.indexOf("if (dups.exactos.length && !dupJustificacion.trim())"));
+  assert.match(caja, /duplicado_de:dups\.exactos\[0\]\?\.id/);
+  const modal = leer(new URL("../src/modules/controlObra/ModalFactura.jsx", import.meta.url), "utf8");
+  const guardar = modal.slice(modal.indexOf("async function guardar()"), modal.indexOf("setGuardando(true); setError(\"\");"));
+  assert.match(guardar, /d = await buscarDuplicados\(/);
+  const compras = leer(new URL("../src/modules/compras/compras.js", import.meta.url), "utf8");
+  const facturar = compras.slice(compras.indexOf("export async function facturarCompra("), compras.indexOf('from("obra_facturas").insert(fila)'));
+  assert.match(facturar, /buscarDuplicados\(\{ obraId: obra\.id, ruc: datos\.ruc, numeroFactura: datos\.numero \}\)/);
+});

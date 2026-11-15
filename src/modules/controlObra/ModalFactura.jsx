@@ -470,7 +470,18 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
 
   async function guardar() {
     if (!form.total) { setError("Falta el total de la factura."); return; }
-    if (dups.exactos.length && !justificacion.trim()) {
+    // Al guardar se revisa otra vez, con lo escrito ahora: la revisión del
+    // campo puede no haber terminado cuando se toca Guardar.
+    let d = dups;
+    if (form.numero_factura || form.razon_social || archivoHash) {
+      d = await buscarDuplicados({
+        obraId: obra.id, ruc: form.ruc, numeroFactura: form.numero_factura,
+        razonSocial: form.razon_social, monto: form.total, fecha: form.fecha,
+        archivoHash, excluirId: factura?.id || null,
+      });
+      setDups(d);
+    }
+    if (d.exactos.length && !justificacion.trim()) {
       setError("Esta factura ya está cargada. Explica por qué no es un duplicado para poder guardarla.");
       return;
     }
@@ -524,8 +535,8 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       archivo_url, archivo_nombre,
       origen: archivo ? "nova" : (form.origen || "manual"),
       archivo_hash: archivoHash || form.archivo_hash || null,
-      duplicado_de: dups.exactos[0]?.id || null,
-      duplicado_justificacion: dups.exactos.length ? justificacion.trim() : null,
+      duplicado_de: d.exactos[0]?.id || null,
+      duplicado_justificacion: d.exactos.length ? justificacion.trim() : null,
       subido_por: currentUser.id, subido_por_nombre: currentUser.name,
       // La revisión viaja con la factura: la pregunta "¿esta se puede pagar?"
       // aparece después, cuando alguien la va a pagar, y para entonces nadie

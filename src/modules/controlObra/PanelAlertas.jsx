@@ -49,8 +49,15 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
   const deMasRepetidas = suma(exactos, g => suma(g.facturas.slice(1), f => f.total));
 
   async function eliminar(f) {
-    if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"} por $${fmt(f.total)}?\n\nSe quita del control de la obra.`)) return;
+    if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"} por $${fmt(f.total)}?\n\nSe quita del control de la obra, con lo que tenía asignado y pagado.`)) return;
     setTrabajando("f" + f.id); setError("");
+    // Primero lo que cuelga de ella: al revés quedarían asignaciones y pagos
+    // apuntando a una factura que ya no existe. Y si un pedido de Compras la
+    // tenía enganchada, se suelta: vuelve a pedir su documento.
+    await supabase.from("obra_asignaciones").delete().eq("factura_id", f.id);
+    await supabase.from("obra_factura_rubros").delete().eq("factura_id", f.id);
+    await supabase.from("obra_pagos").delete().eq("factura_id", f.id);
+    await supabase.from("compras_solicitudes").update({ factura_id: null }).eq("factura_id", f.id);
     const { error: e } = await supabase.from("obra_facturas").delete().eq("id", f.id);
     setTrabajando(null);
     if (e) { setError("No se pudo eliminar: " + e.message); return; }
@@ -119,7 +126,17 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                     )}
                   </div>
                   <div style={plata}>${fmt(f.total)}</div>
-                  {i > 0 && (
+                  {/* LA COPIA QUE ENTRÓ POR CAJA CHICA SE BORRA EN CAJA CHICA.
+                      Ahí es un gasto de la caja: borrarla solo del control
+                      dejaba la caja contando un gasto que ya no está en
+                      ningún lado. Allá se borran los dos y se rehace el
+                      cierre, si lo tenía. */}
+                  {i > 0 && f.origen === "caja_chica" && f.caja_gasto_id && (
+                    <span className="borrar-en-caja-chica" style={{ fontSize: 10.5, color: colors.danger, maxWidth: 120, textAlign: "right", lineHeight: 1.35, flexShrink: 0 }}>
+                      Borrala en Caja chica: es un gasto de la caja
+                    </span>
+                  )}
+                  {i > 0 && !(f.origen === "caja_chica" && f.caja_gasto_id) && (
                     <button onClick={() => eliminar(f)} disabled={trabajando === "f" + f.id} title="Eliminar esta copia"
                       style={{ background: colors.dangerSoft, border: `1px solid ${colors.dangerBorder}`, borderRadius: colors.radiusSm, padding: "5px 7px", color: colors.danger, cursor: "pointer", display: "flex" }}>
                       <Trash2 size={12} />
