@@ -38,11 +38,11 @@ function Explica({ children }) {
 
 const suma = (xs, f) => xs.reduce((t, x) => t + (Number(f(x)) || 0), 0);
 
-export default function PanelAlertas({ obra, planillas = [], facturas = [], asignaciones = [], pagos = [], solicitudes = [], adjuntos = [], currentUser, onCambio, onCambioPedidos }) {
+export default function PanelAlertas({ obra, planillas = [], facturas = [], asignaciones = [], pagos = [], solicitudes = [], adjuntos = [], rubros = [], currentUser, onCambio, onCambioPedidos }) {
   const [trabajando, setTrabajando] = useState(null);
   const [error, setError] = useState("");
 
-  const a = alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos });
+  const a = alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos, rubros });
   const nombrePlanilla = id => planillas.find(p => p.id === id)?.nombre || (id ? "—" : "sin planilla");
   const exactos = a.repetidas.filter(g => g.tipo === "exacto");
   const posibles = a.repetidas.filter(g => g.tipo === "posible");
@@ -186,6 +186,35 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                   </button>
                 </div>
               ))}
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* ── Gasto en un rubro que una orden de cambio quitó ── */}
+      {a.enQuitados.length > 0 && (
+        <>
+          <Titulo icono={Layers} color={colors.danger} monto={suma(a.enQuitados, x => x.asignacion.monto)}>
+            Gastos en un rubro que una orden de cambio quitó · {a.enQuitados.length}
+          </Titulo>
+          <Explica>
+            El renglón en negativo de una orden es obra que ya no se hace: ahí no va gasto. Va al rubro que sigue en el
+            presupuesto original o a los rubros nuevos de la orden. Se corrige eligiéndole el rubro donde se usó
+            {a.enQuitados.some(x => x.factura.origen === "caja_chica") ? " — los de caja chica, en Caja chica" : ""}.
+          </Explica>
+          {a.enQuitados.map(x => (
+            <div key={x.asignacion.id} className="gasto-en-rubro-quitado" style={fila(colors.dangerSoft)}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={nombre}>
+                  {x.factura.razon_social || "Sin proveedor"}
+                  {x.factura.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{x.factura.numero_factura}</span>}
+                </div>
+                <div style={detalle}>
+                  {x.factura.fecha} · entró {ORIGEN[x.factura.origen] || x.factura.origen || "—"}{x.factura.subido_por_nombre ? ` por ${x.factura.subido_por_nombre}` : ""}
+                  {" · "}en {x.rubro.numero} {String(x.rubro.descripcion || "").slice(0, 60)}
+                </div>
+              </div>
+              <div style={plata}>${fmt(x.asignacion.monto)}</div>
             </div>
           ))}
         </>

@@ -25,6 +25,7 @@ import { leerRenglones } from "./controlObra/renglones";
 import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
 import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
 import { avisoDeSobra } from "./controlObra/repartoDeFactura.js";
+import { recibeGasto } from "./controlObra/calculos";
 
 export default function ModuloCajaChica({ currentUser, puede, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -561,8 +562,9 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     const id = cajaActiva?.obra_id;
     if (!id) { setRubrosObra([]); return; }
     let vivo = true;
-    supabase.from("obra_rubros").select("id,descripcion,oculto,anulado_por_oc").eq("obra_id", id)
-      .then(({ data }) => { if (vivo) setRubrosObra((data || []).filter(r => !r.oculto && !r.anulado_por_oc)); });
+    // Los que NOVA puede proponer: tampoco lo que una orden de cambio quitó.
+    supabase.from("obra_rubros").select("id,descripcion,oculto,anulado_por_oc,total_base").eq("obra_id", id)
+      .then(({ data }) => { if (vivo) setRubrosObra((data || []).filter(r => !r.oculto && recibeGasto(r))); });
     return () => { vivo = false; };
   }, [cajaActiva?.obra_id]);
 

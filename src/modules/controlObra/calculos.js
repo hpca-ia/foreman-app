@@ -30,6 +30,26 @@ export function fmt(v) {
   return n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/**
+ * ¿Este rubro puede recibir gasto?
+ *
+ * LO QUE UNA ORDEN DE CAMBIO QUITA, NO. Una orden borra algo del presupuesto y
+ * agrega otra cosa: lo que borra entra a su agrupación como un renglón en
+ * NEGATIVO —«(–) PISO DE MICROCEMENTO»— para que el total de la orden cuadre.
+ * Ese renglón no es obra por hacer: es obra que ya no se hace. El gasto va al
+ * rubro que sigue en el presupuesto original y a los rubros nuevos de la
+ * orden; nunca al negativo.
+ *
+ * Pasaba al repartir el gasto de una agrupación a prorrata de lo que pesa cada
+ * rubro: el negativo pesaba en negativo, se llevaba una parte en negativo, y
+ * los demás recibían de más para compensar. En la agrupación de la OC-01 del
+ * Aeropuerto, cada dólar asignado a la agrupación le cargaba $3,25 a los rubros
+ * nuevos y le restaba $2,25 al quitado: el picado de masillado salía al 148%.
+ *
+ * Tampoco el rubro que una orden tachó entero (`anulado_por_oc`).
+ */
+export const recibeGasto = r => !!r && !r.anulado_por_oc && !(n(r.total_base) < 0);
+
 /** Reparte un monto entre rubros a prorrata de su presupuesto, exacto al
  *  centavo: el sobrante de redondeo va a los rubros más grandes, uno a uno. */
 export function repartirProporcional(monto, rubros) {
@@ -139,9 +159,11 @@ export function calcularControl({ rubros = [], facturas = [], asignaciones = [],
     porRubro[r.id] = { anterior: 0, periodo: 0, acumulado: 0, saldo: n(r.total_base), pct: 0, estimado: false };
   });
 
+  // Entre quiénes se reparte lo asignado a una agrupación: sus rubros que
+  // pueden recibir gasto. Lo que una orden quitó no entra al reparto.
   const rubrosDe = new Map();
   rubros.forEach(r => {
-    if (r.actividad_id == null) return;
+    if (r.actividad_id == null || !recibeGasto(r)) return;
     if (!rubrosDe.has(r.actividad_id)) rubrosDe.set(r.actividad_id, []);
     rubrosDe.get(r.actividad_id).push(r);
   });
@@ -831,7 +853,9 @@ export function gastosDe({ rubroId = null, capitulo = null, actividadId = null }
   // Los rubros de una agrupación, para poder repartir lo que se le asignó a
   // ella: es la misma cuenta que hace el control, dicha acá para poder
   // mostrarla renglón por renglón.
-  const hermanos = id => rubros.filter(r => Number(r.actividad_id) === Number(id) && !r.anulado_por_oc);
+  // Los mismos del reparto del control: si no, el detalle de un rubro diría
+  // otra plata que su fila.
+  const hermanos = id => rubros.filter(r => Number(r.actividad_id) === Number(id) && recibeGasto(r));
 
   const salida = [];
   asignaciones.forEach(a => {

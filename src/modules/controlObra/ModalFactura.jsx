@@ -6,7 +6,7 @@ import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
-import { fmt, TIPOS_GASTO } from "./calculos";
+import { fmt, TIPOS_GASTO, recibeGasto } from "./calculos";
 import { CLASES_DOC, esNotaDeCredito } from "./pagos";
 import { buscarDuplicados, hashArchivo } from "./duplicados";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -716,12 +716,12 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   const actElegida = esAgrupacion ? actividades.find(a => a.id === Number(capElegido.slice(4))) : null;
   const nombreDestino = esAgrupacion ? (actElegida?.nombre || "la agrupación") : capElegido;
   const rubrosDelDestino = !capElegido ? []
-    : rubros.filter(r => !r.oculto && !r.anulado_por_oc
+    : rubros.filter(r => !r.oculto && recibeGasto(r)
         && (esAgrupacion ? Number(r.actividad_id) === Number(capElegido.slice(4))
                          : r.capitulo === capElegido));
 
   const coincidencias = busqueda.trim()
-    ? rubros.filter(r => r.descripcion.toLowerCase().includes(busqueda.toLowerCase()) || String(r.numero) === busqueda.trim()).slice(0, 8)
+    ? rubros.filter(r => recibeGasto(r) && (r.descripcion.toLowerCase().includes(busqueda.toLowerCase()) || String(r.numero) === busqueda.trim())).slice(0, 8)
     : [];
 
   const lbl = { fontSize: 10, color: colors.muted, fontWeight: 600, display: "block", marginBottom: 3 };
@@ -1115,7 +1115,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 {capitulosDeRubros.map(c => (
                   <optgroup key={c} label={c}>
                     <option value={`cap:${c}`}>Todo el capítulo {c}</option>
-                    {rubros.filter(r => r.capitulo === c && !r.oculto && !r.anulado_por_oc).map(r => {
+                    {rubros.filter(r => r.capitulo === c && !r.oculto && recibeGasto(r)).map(r => {
                       const acc = control[r.id];
                       const queda = acc ? acc.saldo : n(r.total_base);
                       return (

@@ -300,8 +300,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const veCaja = puede ? puede("fondos.ver") : true;
 
   const cuantasAlertas = useMemo(
-    () => alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos }).cuantas,
-    [solicitudes, facturas, asignaciones, adjuntos, pagos]);
+    () => alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos, rubros }).cuantas,
+    [solicitudes, facturas, asignaciones, adjuntos, pagos, rubros]);
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
 
   return (
@@ -614,7 +614,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "alertas" && (
             <SiSeRompe que="Alertas">
-              <PanelAlertas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos}
+              <PanelAlertas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubros}
                 solicitudes={solicitudes} adjuntos={adjuntos} currentUser={currentUser}
                 onCambio={cargar} onCambioPedidos={() => setReleerPedidos(v => v + 1)} />
             </SiSeRompe>

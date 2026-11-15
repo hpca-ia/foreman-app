@@ -24,7 +24,7 @@
 //
 // Son cuenta pura: reciben las filas que la pantalla del control ya tiene.
 
-import { montoDeSolicitud } from "./calculos.js";
+import { montoDeSolicitud, recibeGasto } from "./calculos.js";
 import { candidatasDelControl } from "../compras/alControl.js";
 
 const n = v => Number(v) || 0;
@@ -176,19 +176,40 @@ export function pagadosSinDocumento({ solicitudes = [], adjuntos = [], yaFactura
 }
 
 /**
+ * Gasto asignado DIRECTO a un rubro que una orden de cambio quitó —su renglón
+ * en negativo— o tachó entero. Ahí no hay obra que hacer: el gasto es de otro
+ * rubro, y mientras esté ahí el control lo muestra en una fila que no existe.
+ *
+ * Se elegía desde caja chica y desde la factura del control, que ofrecían ese
+ * renglón como cualquier otro. Ya no se ofrece; esto es lo que quedó de antes.
+ *
+ * @returns [{ asignacion, factura, rubro }]
+ */
+export function gastosEnRubroQuitado({ rubros = [], facturas = [], asignaciones = [] } = {}) {
+  const quitados = new Map((rubros || []).filter(r => r && !recibeGasto(r)).map(r => [Number(r.id), r]));
+  if (!quitados.size) return [];
+  const factura = new Map((facturas || []).map(f => [Number(f.id), f]));
+  return (asignaciones || [])
+    .filter(a => a.obra_rubro_id != null && quitados.has(Number(a.obra_rubro_id)) && factura.has(Number(a.factura_id)))
+    .map(a => ({ asignacion: a, factura: factura.get(Number(a.factura_id)), rubro: quitados.get(Number(a.obra_rubro_id)) }))
+    .sort((x, y) => String(y.factura.fecha || "").localeCompare(String(x.factura.fecha || "")));
+}
+
+/**
  * Todas las alertas de una obra, de una vez: para dibujarlas y para contar
  * cuántas hay en la pestaña.
  *
- * @returns { repetidas, sobreasignadas, pedidos, pagados, sinAsignar, cuantas }
+ * @returns { repetidas, sobreasignadas, pedidos, pagados, sinAsignar, enQuitados, cuantas }
  */
-export function alertasDeLaObra({ solicitudes = [], facturas = [], asignaciones = [], adjuntos = [], pagos = [] } = {}) {
+export function alertasDeLaObra({ solicitudes = [], facturas = [], asignaciones = [], adjuntos = [], pagos = [], rubros = [] } = {}) {
   const repetidas = facturasRepetidas(facturas);
   const sobreasignadas = facturasSobreasignadas({ facturas, asignaciones });
   const pedidos = pedidosYaFacturados({ solicitudes, facturas, adjuntos, pagos });
   const pagados = pagadosSinDocumento({ solicitudes, adjuntos, yaFacturados: pedidos });
   const sinAsignar = documentosSinAsignar({ facturas, asignaciones });
+  const enQuitados = gastosEnRubroQuitado({ rubros, facturas, asignaciones });
   return {
-    repetidas, sobreasignadas, pedidos, pagados, sinAsignar,
-    cuantas: repetidas.length + sobreasignadas.length + pedidos.length + pagados.length + sinAsignar.length,
+    repetidas, sobreasignadas, pedidos, pagados, sinAsignar, enQuitados,
+    cuantas: repetidas.length + sobreasignadas.length + pedidos.length + pagados.length + sinAsignar.length + enQuitados.length,
   };
 }
