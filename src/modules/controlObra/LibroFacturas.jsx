@@ -11,6 +11,7 @@ import RevisionLectura from "./RevisionLectura";
 import { esDeCajaChica, SIGLA_CAJA } from "./origenGasto";
 import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 import { Mini } from "./PanelFacturas";
+import { destinosPorFactura } from "./repartoDeFactura.js";
 
 // El libro de facturas de la obra: todas, o las de una planilla, con filtros.
 //
@@ -68,6 +69,11 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     });
     return m;
   }, [asignaciones, rubros]);
+
+  // A DÓNDE FUE CADA UNA, también lo cargado a una agrupación o a un capítulo
+  // entero. `rubrosDe` queda para el filtro por rubro; esto es lo que se lee.
+  const destinosDe = useMemo(() => destinosPorFactura(asignaciones, rubros, actividades),
+    [asignaciones, rubros, actividades]);
 
   // Primero el alcance; los proveedores del filtro son los de ese alcance, para
   // no ofrecer uno que no tiene nada ahí.
@@ -132,7 +138,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
       [alcanceTxt, filtros],
       [],
       ["N°", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
-       "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "ORIGEN", "RUBRO ASIGNADO", "SIN ASIGNAR"],
+       "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "ORIGEN", "ASIGNADO A", "SIN ASIGNAR"],
     ];
     vistas.forEach((f, i) => {
       const suelto = Math.max(0, Math.round(((Number(f.total) || 0) - (asignadoA[f.id] || 0)) * 100) / 100);
@@ -140,7 +146,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
         f.detalle || "", f.justificacion || "",
         Number(f.subtotal_0) || 0, Number(f.subtotal_5) || 0, Number(f.subtotal_15) || 0, Number(f.iva) || 0, Number(f.total) || 0,
         tipoLabel(f.tipo), esDeCajaChica(f) ? SIGLA_CAJA : "COMPRA",
-        (rubrosDe[f.id] || []).map(r => `${r.numero} ${r.descripcion}`).join(" · ") || "SIN ASIGNAR", suelto]);
+        (destinosDe[f.id] || []).join(" · ") || "SIN ASIGNAR", suelto]);
     });
     filas.push([]);
     filas.push(["", "", "", "", "", "", "", "", "TOTALES", resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", resumen.sinAsignar]);
@@ -294,7 +300,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
         ) : vistas.map(f => (
           <FilaFactura key={f.id} f={f} asignado={asignadoA[f.id] || 0}
             onYaEsGasto={yaEsGasto}
-            extra={[alcance === "todo" && nombrePlanilla(f.planilla_id), (rubrosDe[f.id] || []).map(r => `${r.numero} ${r.descripcion}`).join(" · ")].filter(Boolean).join(" · ")}
+            extra={[alcance === "todo" && nombrePlanilla(f.planilla_id), ...(destinosDe[f.id] || [])].filter(Boolean).join(" · ")}
             onEditar={() => setModal({ factura: f })} onEliminar={() => eliminar(f)} />
         ))}
       </div>

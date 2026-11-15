@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   asignadoDe, sobraDelReparto, avisoDeSobra, quedaParaLosRubros,
-  prorratearEntreRubros, repartoDeRenglones,
+  prorratearEntreRubros, repartoDeRenglones, asignadoDeMas, destinosPorFactura,
 } from "../src/modules/controlObra/repartoDeFactura.js";
 
 // ── UNA FACTURA NO PUEDE QUEDAR CON MÁS ASIGNADO QUE SU TOTAL ──────────────
@@ -225,4 +225,62 @@ test("Caja chica: el gasto no se guarda repartido por más de lo que vale", () =
   assert.ok(freno > 0);
   assert.ok(freno < cuerpo.indexOf("subirArchivo("), "antes de subir la foto");
   assert.ok(freno < cuerpo.indexOf('from("cajas_gastos")'), "antes de escribir el gasto");
+});
+
+// ── La lista dice a dónde fue cada factura, y si está asignada de más ─────
+//
+// La lista de facturas nombraba solo los rubros. Lo cargado a una agrupación o
+// a un capítulo entero no aparecía, y la factura se veía sin destino y sin el
+// aviso de «sin asignar». En la obra 13 eran 108. La 171 mostraba sus cinco
+// rubros y escondía la agrupación OC-03, que era el doble.
+
+const RUBROS_LISTA = [
+  { id: 1444, numero: 9300, descripcion: "RESANE DE FIBROCEMENTO EN TUMBADO · OC-03" },
+  { id: 1445, numero: 9301, descripcion: "PULIDO DE ESTRUCTURAS METÁLICAS · OC-03" },
+];
+const AGRUPACIONES = [
+  { id: 196, codigo: "OC-03", nombre: "RESANE Y PINTURA DE CIELO EXPUESTO" },
+  { id: 178, codigo: "15", nombre: "Instalaciones hidráulicas" },
+];
+
+test("la 171 muestra la agrupación entera primero, y después sus rubros", () => {
+  const d = destinosPorFactura([
+    { factura_id: 171, obra_rubro_id: 1444, monto: 237.88 },
+    { factura_id: 171, obra_actividad_id: 196, monto: 590.73 },
+    { factura_id: 171, obra_rubro_id: 1445, monto: 83.87 },
+  ], RUBROS_LISTA, AGRUPACIONES);
+  assert.deepEqual(d[171], [
+    "agrupación OC-03 RESANE Y PINTURA DE CIELO EXPUESTO",
+    "9300 RESANE DE FIBROCEMENTO EN TUMBADO · OC-03",
+    "9301 PULIDO DE ESTRUCTURAS METÁLICAS · OC-03",
+  ]);
+});
+
+test("una factura cargada entera a una agrupación o a un capítulo ya no se ve sin destino", () => {
+  const d = destinosPorFactura([
+    { factura_id: 209, obra_actividad_id: 178, monto: 30.87 },
+    { factura_id: 300, capitulo: "ALBAÑILERÍA", monto: 4000 },
+    { factura_id: 301, obra_actividad_id: 999, monto: 10 },
+  ], RUBROS_LISTA, AGRUPACIONES);
+  assert.deepEqual(d[209], ["agrupación 15 Instalaciones hidráulicas"]);
+  assert.deepEqual(d[300], ["capítulo ALBAÑILERÍA"]);
+  assert.deepEqual(d[301], ["una agrupación que ya no está"], "si la agrupación se borró, se dice");
+  assert.equal(d[999], undefined, "una factura sin asignaciones no tiene destinos");
+});
+
+test("lo asignado de más se calcula sobre lo que ya está en la base", () => {
+  assert.equal(asignadoDeMas(1181.46, 590.73), 590.73);
+  assert.equal(asignadoDeMas(590.73, 590.73), 0);
+  assert.equal(asignadoDeMas(100, 590.73), 0, "lo que falta no es de más: eso lo dice el aviso de sin asignar");
+  assert.equal(asignadoDeMas(-30.85, -30.85), 0, "una nota de crédito bien asignada no avisa");
+});
+
+test("la fila de la lista avisa lo asignado de más, y la lista y su Excel usan los destinos completos", () => {
+  const fila = leer("../src/modules/controlObra/FilaFactura.jsx");
+  assert.match(fila, /const deMas = asignadoDeMas\(asignado, f\.total\);/);
+  assert.match(fila, /asignados de más/);
+  const libro = leer("../src/modules/controlObra/LibroFacturas.jsx");
+  assert.match(libro, /destinosPorFactura\(asignaciones, rubros, actividades\)/);
+  assert.match(libro, /\.\.\.\(destinosDe\[f\.id\] \|\| \[\]\)/, "la línea de la fila");
+  assert.match(libro, /\(destinosDe\[f\.id\] \|\| \[\]\)\.join\(" · "\) \|\| "SIN ASIGNAR"/, "la columna del Excel");
 });

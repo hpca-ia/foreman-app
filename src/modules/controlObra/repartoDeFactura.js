@@ -47,6 +47,55 @@ export function sobraDelReparto(repartos, total) {
 }
 
 /**
+ * Por cuánto se pasa lo ya asignado a un documento, para avisarlo en la lista.
+ * Es la misma cuenta que frena el guardado, sobre lo que ya está en la base.
+ */
+export function asignadoDeMas(asignado, total) {
+  return sobraDelReparto([{ monto: asignado }], total);
+}
+
+/**
+ * A DÓNDE FUE CADA DOCUMENTO, dicho en la lista y en su Excel.
+ *
+ * La lista nombraba solo los rubros. Lo cargado a una agrupación entera o a un
+ * capítulo entero no aparecía en ningún lado: la factura se veía sin destino
+ * y sin el aviso de «sin asignar», como si no fuera a ninguna parte. En la
+ * obra 13 eran 108 facturas así. Y la 171 mostraba sus cinco rubros pero no la
+ * agrupación OC-03 que también tenía, que era justo el doble que había que ver.
+ *
+ * Lo cargado entero va primero: es lo que más pesa en la factura y, si la línea
+ * se corta por largo, es lo que no se puede perder.
+ *
+ * @returns { [factura_id]: string[] }
+ */
+export function destinosPorFactura(asignaciones = [], rubros = [], actividades = []) {
+  const rubro = new Map((rubros || []).map(r => [Number(r.id), r]));
+  const agrupacion = new Map((actividades || []).map(a => [Number(a.id), a]));
+  const enteros = {}, porRubro = {};
+  const poner = (m, id, texto) => { (m[id] = m[id] || []).push(texto); };
+  (asignaciones || []).forEach(a => {
+    if (a.obra_rubro_id != null) {
+      const r = rubro.get(Number(a.obra_rubro_id));
+      if (r) poner(porRubro, a.factura_id, `${r.numero} ${r.descripcion}`);
+      return;
+    }
+    if (a.obra_actividad_id != null) {
+      const x = agrupacion.get(Number(a.obra_actividad_id));
+      poner(enteros, a.factura_id, x
+        ? `agrupación ${[x.codigo, x.nombre].filter(Boolean).join(" ")}`
+        : "una agrupación que ya no está");
+      return;
+    }
+    if (a.capitulo) poner(enteros, a.factura_id, `capítulo ${a.capitulo}`);
+  });
+  const todos = {};
+  new Set([...Object.keys(enteros), ...Object.keys(porRubro)]).forEach(id => {
+    todos[id] = [...(enteros[id] || []), ...(porRubro[id] || [])];
+  });
+  return todos;
+}
+
+/**
  * La frase que frena el guardado, o "" si el reparto entra en el documento.
  * @param que  cómo se llama el papel en esa pantalla: "la factura", "el gasto"
  */

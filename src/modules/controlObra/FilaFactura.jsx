@@ -6,6 +6,7 @@ import { esDeCajaChica } from "./origenGasto";
 import { esNotaDeCredito } from "./pagos";
 import MarcaCaja from "./MarcaCaja";
 import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
+import { asignadoDeMas } from "./repartoDeFactura.js";
 
 // QUÉ ES ESTE PAPEL, DICHO EN LA FILA.
 //
@@ -28,6 +29,10 @@ const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id;
 
 export default function FilaFactura({ f, asignado = 0, extra, onEditar, onEliminar, onYaEsGasto }) {
   const pendiente = Math.round(((Number(f.total) || 0) - asignado) * 100) / 100;
+  // LO ASIGNADO DE MÁS TAMBIÉN SE AVISA. El aviso ámbar solo miraba lo que
+  // falta: una factura de $590,73 con $1.181,46 asignados se veía igual que
+  // una bien asignada, y el día que se pagara el control iba a contar el doble.
+  const deMas = asignadoDeMas(asignado, f.total);
   const vale = esNotaDeCredito(f.clase) || (Number(f.total) || 0) < 0;
   const anticipo = f.clase === "anticipo" && !f.facturada_con_id;
   // POR QUÉ ALGUNAS DICEN SRI Y OTRAS NO.
@@ -106,6 +111,12 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
         {pendiente > 0.009 && (
           <div style={{ fontSize: 10, color: colors.warning, marginTop: 3, fontWeight: 600 }}>
             ${fmt(pendiente)} sin asignar a rubro
+          </div>
+        )}
+        {deMas > 0 && (
+          <div title="Abrí el documento y dejá una sola de las asignaciones que se repiten: así como está no se puede volver a guardar."
+            style={{ fontSize: 10, color: colors.danger, marginTop: 3, fontWeight: 600 }}>
+            ${fmt(deMas)} asignados de más: suman ${fmt(Math.abs(asignado))} y el documento es por ${fmt(Math.abs(Number(f.total) || 0))}
           </div>
         )}
       </div>
