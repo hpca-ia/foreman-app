@@ -40,6 +40,8 @@ import SiSeRompe from "../../components/SiSeRompe";
 import ExportarPlanilla from "./ExportarPlanilla";
 import PanelOrdenesCambio from "./PanelOrdenesCambio";
 import { comprometidoPorGrupo } from "./calculos";
+import { rubrosParaGastar } from "./presupuestoParaGastar.js";
+import { quitasDeLaObra } from "./quitasDeOrdenes.js";
 
 // Las dos pantallas de plata bajan aparte. No es solo peso: quien no tiene el
 // permiso no descarga el código, así que no hay forma de llegar a esa pantalla
@@ -141,6 +143,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const [beneficios, setBeneficios] = useState([]);
   const [vistaPresupuesto, setVistaPresupuesto] = useState("original");
   const [ordenesDeCambio, setOrdenesDeCambio] = useState({ ordenes: [], lineas: {} });
+  // Lo que las órdenes quitan: para que el control mida el gasto contra lo que
+  // de verdad se va a hacer (presupuestoParaGastar.js).
+  const [quitas, setQuitas] = useState({ ordenes: [], lineas: [] });
   // LO EJECUTADO Y CÓMO SE COBRA LA OBRA (liquidacion.js). Lo que ya se midió
   // mueve el beneficio de lo aprobado; para saber cuánto hace falta el
   // presupuesto actualizado entero, así que las órdenes completas se piden
@@ -230,6 +235,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     }
 
     setRubros(r || []);
+    setQuitas(await quitasDeLaObra(obra.id).catch(() => ({ ordenes: [], lineas: [] })));
     setActividades(act || []);
     setPlanillas(p || []);
     setFacturas(facturasConNumero);
@@ -246,12 +252,17 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   useEffect(() => { cargar(); }, [cargar]);
 
   const planillaActual = planillas.find(p => p.id === planillaSel) || null;
-  const porRubro = calcularControl({ rubros, facturas, asignaciones, pagos, planillaNumero: planillaActual?.numero ?? null });
+  // EL CONTROL DEL GASTO MIDE CONTRA LO QUE SE VA A HACER. Lo que una orden
+  // quita y su renglón negativo se cancelan, y la agrupación de la orden queda
+  // con sus adiciones enteras. Solo acá: el contrato, las órdenes, el
+  // presupuesto actualizado y Beneficios siguen leyendo `rubros` tal cual.
+  const rubrosControl = useMemo(() => rubrosParaGastar(rubros, quitas).rubros, [rubros, quitas]);
+  const porRubro = calcularControl({ rubros: rubrosControl, facturas, asignaciones, pagos, planillaNumero: planillaActual?.numero ?? null });
   // El comprometido PRIMERO: los grupos lo necesitan para poder dibujar el
   // bloque de gasto fuera del presupuesto cuando lo único que hay ahí todavía
   // es una compra aprobada sin factura.
-  const comprometido = comprometidoPorGrupo(solicitudes, rubros, adjuntos);
-  const grupos = agrupar(rubros, porRubro, agruparPor, actividades, comprometido);
+  const comprometido = comprometidoPorGrupo(solicitudes, rubrosControl, adjuntos);
+  const grupos = agrupar(rubrosControl, porRubro, agruparPor, actividades, comprometido);
   /**
    * Cuánto de un rubro está ejecutado en obra.
    *
@@ -300,8 +311,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const veCaja = puede ? puede("fondos.ver") : true;
 
   const cuantasAlertas = useMemo(
-    () => alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos, rubros }).cuantas,
-    [solicitudes, facturas, asignaciones, adjuntos, pagos, rubros]);
+    () => alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos, rubros: rubrosControl }).cuantas,
+    [solicitudes, facturas, asignaciones, adjuntos, pagos, rubrosControl]);
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
 
   return (
@@ -516,7 +527,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               </div>
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} beneficios={beneficios}
                 comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
-                facturas={facturas} asignaciones={asignaciones} rubros={rubros} actividades={actividades} pagos={pagos}
+                facturas={facturas} asignaciones={asignaciones} rubros={rubrosControl} actividades={actividades} pagos={pagos}
                 onAvance={puede && !puede("facturas.registrar") ? null : guardarAvance} />
 
               {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.
@@ -532,7 +543,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                   en qué va cada rubro, abajo las facturas que lo movieron. */}
               <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
                 <PanelFacturas puede={puede}
-                  obra={obra} rubros={rubros} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
+                  obra={obra} rubros={rubrosControl} actividades={actividades} planillas={planillas} planillaActual={planillaActual}
                   facturas={facturas} asignaciones={asignaciones} pagos={pagos} porRubro={porRubro}
                   currentUser={currentUser} onCambio={cargar}
                 />
@@ -546,7 +557,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               onAbrir={p => { setPlanillaSel(p.id); setAbierta(p.id); }}
               onVolver={() => setAbierta(null)}>
               <PanelFacturas puede={puede}
-                obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
+                obra={obra} rubros={rubrosControl} actividades={actividades} planillas={planillas}
                 planillaActual={planillas.find(p => p.id === abierta) || null}
                 facturas={facturas} asignaciones={asignaciones} pagos={pagos} porRubro={porRubro}
                 currentUser={currentUser} onCambio={cargar} mostrarTitulo={false}
@@ -554,7 +565,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             </PanelPlanillas>
           )}
           {tab === "facturas" && (
-            <LibroFacturas obra={obra} rubros={rubros} actividades={actividades} planillas={planillas}
+            <LibroFacturas obra={obra} rubros={rubrosControl} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} pagos={pagos} currentUser={currentUser} onCambio={cargar}
               sueltasAlEntrar={!!entrarEn?.sueltas} claseAlEntrar={verClase}
               porRubro={porRubro} />
@@ -614,14 +625,14 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
           {tab === "alertas" && (
             <SiSeRompe que="Alertas">
-              <PanelAlertas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubros}
+              <PanelAlertas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubrosControl}
                 solicitudes={solicitudes} adjuntos={adjuntos} currentUser={currentUser}
                 onCambio={cargar} onCambioPedidos={() => setReleerPedidos(v => v + 1)} />
             </SiSeRompe>
           )}
           {tab === "exportar" && (
             <ExportarPlanilla obra={obra} planilla={planillaActual} planillas={planillas} grupos={grupos} porRubro={porRubro}
-              totales={totales} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubros} />
+              totales={totales} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubrosControl} />
           )}
         </>
       )}

@@ -11,6 +11,7 @@ import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, h
   marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia, datosDelControlPara } from "./compras";
 import { faltaEnElControl, documentoSugerido } from "./alControl";
 import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
+import { recibeGasto } from "../controlObra/calculos";
 import { presupuestoDelDestino, loDeCadaRubro } from "./presupuestoDelDestino";
 // El presupuesto completo al costado, el mismo de Beneficios y Diferencias.
 import Presupuesto from "../controlObra/PanelPresupuesto";
@@ -269,7 +270,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [verPresupuesto, setVerPresupuesto] = useState(false);
   const [buscaRubro, setBuscaRubro] = useState("");
   const rubrosDelContrato = (delControlDeObra?.rubros || [])
-    .filter(r => !r.oculto && !r.anulado_por_oc && !(Number(r.total_base) < 0));
+    .filter(r => !r.oculto && recibeGasto(r));
   const hayPresupuesto = veElPresupuesto && rubrosDelContrato.length > 0;
   const alPresupuesto = hayPresupuesto && verPresupuesto;
   const debajoDeCadaRubro = alPresupuesto && viva ? loDeCadaRubro({ ...delControlDeObra, solicitud: viva }) : {};
@@ -330,7 +331,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   // está en la agrupación de la orden para que su total cuadre, pero no se
   // ofrece como destino de un pedido.
   const deLaAgrupacion = rubros.filter(r => String(r.actividad_id || "") === String(form.obra_actividad_id || "")
-    && !(Number(r.total_base) < 0));
+    && recibeGasto(r));
   // Las agrupaciones de las órdenes de cambio aprobadas, aparte en la lista:
   // son adicionales al contrato y se buscan por su número.
   const agrupacionesDeOrdenes = actividades.filter(esDeOrden);

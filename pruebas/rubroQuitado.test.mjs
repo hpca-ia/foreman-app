@@ -117,9 +117,9 @@ test("sin rubros quitados no hay nada que avisar", () => {
 
 test("el renglón quitado no se ofrece para asignar en caja chica, en la factura del control ni en Compras", () => {
   const leer = p => readFileSync(new URL(p, import.meta.url), "utf8");
-  assert.match(leer("../src/modules/cajaChica/SelectorActividad.jsx"), /filter\(r => !r\.oculto && recibeGasto\(r\)\)/);
-  assert.match(leer("../src/modules/ModuloCajaChica.jsx"), /setRubrosObra\(\(data \|\| \[\]\)\.filter\(r => !r\.oculto && recibeGasto\(r\)\)\)/);
+  assert.match(leer("../src/modules/cajaChica/SelectorActividad.jsx"), /\.filter\(r => !r\.oculto && recibeGasto\(r\)\)/);
+  assert.match(leer("../src/modules/ModuloCajaChica.jsx"), /setRubrosObra\(vivos\.filter\(r => !r\.oculto && recibeGasto\(r\)\)\)/);
   const modal = leer("../src/modules/controlObra/ModalFactura.jsx");
   assert.equal((modal.match(/recibeGasto\(r\)/g) || []).length, 3);
-  assert.match(leer("../src/modules/compras/ModalSolicitud.jsx"), /!\(Number\(r\.total_base\) < 0\)/);
+  assert.equal((leer("../src/modules/compras/ModalSolicitud.jsx").match(/recibeGasto\(r\)/g) || []).length, 2);
 });

@@ -6,6 +6,7 @@ import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
 import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
 import { buscarDuplicados } from "../controlObra/duplicados";
+import { rubrosParaGastarDe } from "../controlObra/quitasDeOrdenes.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // El flujo de una compra, de punta a punta.
@@ -222,7 +223,8 @@ export async function rubrosDelProyecto(leadId) {
       .select("id,numero,capitulo,descripcion,total_base,actividad_id").eq("obra_id", obra.id).order("orden"),
     supabase.from("obra_actividades").select("id,nombre,codigo,orden,origen").eq("obra_id", obra.id).order("orden"),
   ]);
-  return { obra, rubros: data || [], actividades: acts || [] };
+  // Con lo que quitan las órdenes ya cancelado: un rubro anulado no se ofrece.
+  return { obra, rubros: await rubrosParaGastarDe(obra.id, data || []), actividades: acts || [] };
 }
 
 /**
@@ -263,7 +265,8 @@ export async function datosDelControlPara(leadId) {
     const { data } = await supabase.from("compras_adjuntos").select("id,solicitud_id,monto,proveedor,tipo").in("solicitud_id", solicitudes.map(x => x.id));
     adjuntos = data || [];
   }
-  return { obra, rubros: rubros || [], actividades: actividades || [], facturas: conNumero, asignaciones, pagos: pagos || [], solicitudes, adjuntos };
+  // La misma cuenta que el control: lo que quitan las órdenes, cancelado.
+  return { obra, rubros: await rubrosParaGastarDe(obra.id, rubros || []), actividades: actividades || [], facturas: conNumero, asignaciones, pagos: pagos || [], solicitudes, adjuntos };
 }
 
 /** Cada paso queda escrito: sin esto el flujo es una conversación de WhatsApp. */

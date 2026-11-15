@@ -46,9 +46,11 @@ export function fmt(v) {
  * Aeropuerto, cada dólar asignado a la agrupación le cargaba $3,25 a los rubros
  * nuevos y le restaba $2,25 al quitado: el picado de masillado salía al 148%.
  *
- * Tampoco el rubro que una orden tachó entero (`anulado_por_oc`).
+ * Tampoco el rubro que una orden tachó entero (`anulado_por_oc`), ni —en el
+ * control del gasto— el original que una orden quitó entero ni el negativo que
+ * se cancela con él (presupuestoParaGastar.js).
  */
-export const recibeGasto = r => !!r && !r.anulado_por_oc && !(n(r.total_base) < 0);
+export const recibeGasto = r => !!r && !r.anulado_por_oc && !(n(r.total_base) < 0) && !r._cancela && !r._anuladoPor;
 
 /** Reparte un monto entre rubros a prorrata de su presupuesto, exacto al
  *  centavo: el sobrante de redondeo va a los rubros más grandes, uno a uno. */

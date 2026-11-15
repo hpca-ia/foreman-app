@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { recibeGasto } from "../controlObra/calculos";
+import { rubrosParaGastarDe } from "../controlObra/quitasDeOrdenes.js";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -37,13 +38,14 @@ export default function SelectorActividad({ obraId, seleccion, onChange, montoTo
           .select("id,codigo,nombre")           // sin montos, a propósito
           .eq("obra_id", obraId).order("orden"),
         supabase.from("obra_rubros")
-          .select("id,numero,descripcion,capitulo,capitulo_orden,orden,actividad_id,oculto,anulado_por_oc,total_base")
+          .select("id,numero,descripcion,capitulo,capitulo_orden,orden,actividad_id,oculto,anulado_por_oc,total_base,origen,orden_cambio_id,iva_pct")
           .eq("obra_id", obraId).order("capitulo_orden").order("orden"),
       ]);
       setActividades(data || []);
       // Lo que una orden de cambio quitó —su renglón en negativo— no se ofrece:
       // ahí no se gasta. Se elegía, y el gasto quedaba en un rubro que ya no existe.
-      setRubros((rs || []).filter(r => !r.oculto && recibeGasto(r)));
+      // Y el original que una orden quitó entero, tampoco.
+      setRubros((await rubrosParaGastarDe(obraId, rs || [])).filter(r => !r.oculto && recibeGasto(r)));
       setCargando(false);
     })();
   }, [obraId]);
