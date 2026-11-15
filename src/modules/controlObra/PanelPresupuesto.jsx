@@ -22,10 +22,12 @@ import { baseSinIva } from "./contratoDeLaObra";
  *                   ese rubro, dicho al lado —"ya se sigue", "3 ingresos"—.
  *                   Con `bloquea` el rubro no se puede elegir: un rubro se
  *                   sigue una sola vez, aunque pueda tener varios ingresos.
+ * @param debajo     { [rubroId]: { texto, alerta } }: una línea más bajo el
+ *                   rubro —en Compras, cuánto lleva gastado y pedido—.
  */
 const unitario = r => (Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0);
 
-export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar, marcas = {} }) {
+export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegir, onCerrar, marcas = {}, debajo = {} }) {
   const texto = busca.trim().toLowerCase();
   const filtrados = texto
     ? rubros.filter(r => `${r.numero ?? ""} ${r.descripcion || ""} ${r.capitulo || ""}`.toLowerCase().includes(texto))
@@ -54,7 +56,7 @@ export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegi
     // Entonces no se pega a nada: la que scrollea es la columna de las
     // diferencias, acá adentro, y esta se queda quieta al lado porque nunca se
     // fue a ningún lado.
-    <div style={{ width: 320, flexShrink: 0, border: `1px solid ${colors.border}`,
+    <div style={{ width: 320, maxWidth: "100%", flexShrink: 0, border: `1px solid ${colors.border}`,
       borderRadius: colors.radiusMd, background: colors.surface, alignSelf: "stretch",
       display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
       <div style={{ padding: "9px 11px", borderBottom: `1px solid ${colors.border}` }}>
@@ -70,7 +72,7 @@ export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegi
             por descripción y "pintura de fibrocemento" calza con tres. */}
         {eligiendo && (
           <div style={{ fontSize: 11, color: colors.brand, fontWeight: 600, marginTop: 4, lineHeight: 1.4 }}>
-            {eligiendo.paraPrecio
+            {eligiendo.texto ? eligiendo.texto : eligiendo.paraPrecio
               ? `Elegí el rubro cuyo precio querés cobrar por «${String(eligiendo.descripcion || "").slice(0, 40)}»`
               : `Elegí contra qué rubro se compara «${String(eligiendo.descripcion || "").slice(0, 44)}»`}
           </div>
@@ -94,6 +96,7 @@ export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegi
             {c.rubros.map(r => {
               const m = marcas[r.id] || marcas[String(r.id)];
               const elegible = !!eligiendo && !m?.bloquea;
+              const d = debajo[r.id] || debajo[String(r.id)];
               return (
               <div key={r.id}
                 onClick={elegible ? () => onElegir(r) : undefined}
@@ -134,6 +137,13 @@ export default function Presupuesto({ rubros, busca, onBusca, eligiendo, onElegi
                     <span style={{ minWidth: 60, textAlign: "right" }}>
                       ${fmt(Number(r.costo_unitario) * Number(r.cantidad))}
                     </span>
+                  </div>
+                )}
+                {d && (
+                  <div style={{ display: "flex", gap: 6, fontSize: 10, fontVariantNumeric: "tabular-nums",
+                    color: d.alerta ? colors.danger : colors.inkSoft, fontWeight: d.alerta ? 600 : 400 }}>
+                    <span style={{ minWidth: 30 }} />
+                    <span style={{ flex: 1 }}>{d.texto}</span>
                   </div>
                 )}
               </div>

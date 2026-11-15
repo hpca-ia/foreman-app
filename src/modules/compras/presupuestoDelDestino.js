@@ -99,3 +99,43 @@ export function presupuestoDelDestino({
     estePedido, deDonde: este.de,
   };
 }
+
+/**
+ * EL PRESUPUESTO ENTERO AL COSTADO DEL PEDIDO: cuánto lleva cada rubro.
+ *
+ * Al lado de cantidad × unitario = total, una línea por rubro con lo que ya se
+ * gastó y lo que está hablado en otros pedidos, en porcentaje de lo que tiene.
+ * En porcentaje y no en plata porque el panel muestra el total sin IVA y el
+ * control mide con IVA: el porcentaje es el mismo en las dos bases y la plata
+ * no. La misma cuenta que `presupuestoDelDestino`, rubro por rubro.
+ *
+ * @returns { [rubroId]: { texto, alerta } }; un rubro sin gasto ni pedidos no
+ *   lleva línea, salvo el de este pedido.
+ */
+export function loDeCadaRubro({ solicitud = {}, rubros = [], facturas = [], asignaciones = [], pagos = [], solicitudes = [], adjuntos = [] }) {
+  const porRubro = calcularControl({ rubros, facturas, asignaciones, pagos, planillaNumero: null });
+  const otros = (solicitudes || []).filter(s => !mismo(s.id, solicitud.id));
+  const comprometido = comprometidoPorGrupo(otros, rubros, adjuntos);
+  const hablado = {};
+  comprometido.detalle.filter(d => d.firme && d.rubroId != null).forEach(d => { hablado[d.rubroId] = n(hablado[d.rubroId]) + n(d.monto); });
+  otros.filter(s => COMPRADAS.includes(s.estado) && !s.factura_id && s.obra_rubro_id != null)
+    .forEach(s => { hablado[s.obra_rubro_id] = n(hablado[s.obra_rubro_id]) + montoDeSolicitud(s, adjuntos).monto; });
+  const pct = (v, base) => `${Math.round((v / base) * 100)}%`;
+  const out = {};
+  (rubros || []).forEach(r => {
+    const base = r.anulado_por_oc ? 0 : n(r.total_base);
+    const gastado = r2(porRubro[r.id]?.acumulado);
+    const pedido = r2(hablado[r.id]);
+    if (!(gastado > 0) && !(pedido > 0)) return;
+    if (!(base > 0)) {
+      out[r.id] = { texto: "sin presupuesto, y ya tiene gasto o pedidos", alerta: true };
+      return;
+    }
+    const partes = [];
+    if (gastado > 0) partes.push(`gastado ${pct(gastado, base)}`);
+    if (pedido > 0) partes.push(`en pedidos ${pct(pedido, base)}`);
+    const pasa = gastado + pedido > base + 0.01;
+    out[r.id] = { texto: partes.join(" · ") + (pasa ? " — se pasa" : ""), alerta: pasa };
+  });
+  return out;
+}

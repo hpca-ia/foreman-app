@@ -10,7 +10,9 @@ import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, h
   moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe,
   marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia, datosDelControlPara } from "./compras";
 import { faltaEnElControl, documentoSugerido } from "./alControl";
-import { presupuestoDelDestino } from "./presupuestoDelDestino";
+import { presupuestoDelDestino, loDeCadaRubro } from "./presupuestoDelDestino";
+// El presupuesto completo al costado, el mismo de Beneficios y Diferencias.
+import Presupuesto from "../controlObra/PanelPresupuesto";
 import { supabase } from "../../lib/supabase";
 import { registrarPago as registrarPagoDeFactura, CLASES_DOC, FORMAS_PAGO } from "../controlObra/pagos";
 import PanelBodega from "./PanelBodega";
@@ -257,6 +259,27 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     // Con el estimado que está escrito ahora, aunque todavía no se haya guardado.
     solicitud: { ...viva, monto_estimado: form.monto_estimado === "" || form.monto_estimado == null ? null : Number(form.monto_estimado) },
   }) : null;
+
+  // EL PRESUPUESTO ENTERO, AL COSTADO DEL PEDIDO. Como en Beneficios: el
+  // contrato a la vista —cantidad × unitario = total— mientras se mira lo que
+  // se pide, y debajo de cada rubro cuánto lleva gastado y pedido. Lo ve el
+  // mismo que ve la cuenta del destino. Si puede corregir contra qué va, un
+  // clic en un rubro lo elige (y se guarda con «Guardar la asignación»).
+  const [verPresupuesto, setVerPresupuesto] = useState(false);
+  const [buscaRubro, setBuscaRubro] = useState("");
+  const rubrosDelContrato = (delControlDeObra?.rubros || [])
+    .filter(r => !r.oculto && !r.anulado_por_oc && !(Number(r.total_base) < 0));
+  const hayPresupuesto = veElPresupuesto && rubrosDelContrato.length > 0;
+  const alPresupuesto = hayPresupuesto && verPresupuesto;
+  const debajoDeCadaRubro = alPresupuesto && viva ? loDeCadaRubro({ ...delControlDeObra, solicitud: viva }) : {};
+  const marcasDelPedido = (() => {
+    if (!alPresupuesto) return {};
+    const m = {};
+    if (puedeEditarImputacion) rubrosDelContrato.filter(r => r.actividad_id == null).forEach(r => { m[r.id] = { texto: "sin agrupación", bloquea: true }; });
+    if (form.obra_rubro_id) m[form.obra_rubro_id] = { texto: "este pedido" };
+    else if (form.obra_actividad_id) rubrosDelContrato.filter(r => String(r.actividad_id) === String(form.obra_actividad_id)).forEach(r => { m[r.id] = { texto: "su agrupación" }; });
+    return m;
+  })();
 
   // ¿Es de una obra, ya se aprobó, y su documento todavía no está en el control?
   const sinControl = faltaEnElControl(viva);
@@ -713,7 +736,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const mini = { ...inputStyle, padding: "8px 10px", fontSize: 12.5 };
 
   return (
-    <Modal onClose={onCerrar} maxWidth={560}>
+    <Modal onClose={onCerrar} maxWidth={alPresupuesto ? 920 : 560}>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div style={{ flex: "1 1 420px", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>
           {editando ? "Solicitud de compra" : "Pedir algo para la obra"}
@@ -722,6 +747,13 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: e.color }}>
             {e.label}
           </span>
+        )}
+        {hayPresupuesto && (
+          <button onClick={() => setVerPresupuesto(v => !v)}
+            style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 20, padding: "3px 10px",
+              cursor: "pointer", fontFamily: colors.font, fontSize: 11, fontWeight: 600, color: colors.brand }}>
+            {verPresupuesto ? "Ocultar el presupuesto" : "Ver el presupuesto"}
+          </button>
         )}
       </div>
 
@@ -1648,6 +1680,20 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           ))}
         </div>
       )}
+      </div>
+      {alPresupuesto && (
+        // Pegado arriba de la ventana: la que scrollea es la ventana del
+        // pedido, y el presupuesto se queda a la vista mientras se baja.
+        <div className="presupuesto-al-costado" style={{ position: "sticky", top: 0, display: "flex",
+          height: "calc(90vh - 40px)", flex: "0 0 320px", maxWidth: "100%" }}>
+          <Presupuesto rubros={rubrosDelContrato} busca={buscaRubro} onBusca={setBuscaRubro}
+            marcas={marcasDelPedido} debajo={debajoDeCadaRubro}
+            eligiendo={puedeEditarImputacion ? { texto: "Tocá un rubro para que el pedido vaya contra él" } : null}
+            onCerrar={() => setVerPresupuesto(false)}
+            onElegir={rb => setForm(p => ({ ...p, obra_actividad_id: String(rb.actividad_id), obra_rubro_id: String(rb.id), capitulo: rb.capitulo || "" }))} />
+        </div>
+      )}
+      </div>
     </Modal>
   );
 }
