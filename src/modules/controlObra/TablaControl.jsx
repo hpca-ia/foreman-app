@@ -179,7 +179,11 @@ function Pedidos({ pedidos, sangria }) {
   );
 }
 
-function Gastos({ gastos, sangria, pagadoDe = {} }) {
+// CADA GASTO ABRE SU FACTURA. Se pidió para reasignar más rápido: se ve un
+// gasto mal puesto en el desglose de un rubro y se corrige ahí, sin ir al
+// libro de facturas a buscarlo. Quien no puede registrar facturas lo abre para
+// leer: se le muestra el papel.
+function Gastos({ gastos, sangria, pagadoDe = {}, onAbrir = null }) {
   if (!gastos.length) {
     return (
       <div style={{ padding: `6px 14px 8px ${sangria + 14}px`, fontSize: 11, color: colors.muted,
@@ -191,9 +195,12 @@ function Gastos({ gastos, sangria, pagadoDe = {} }) {
   return (
     <div style={{ background: colors.bg, borderBottom: `1px solid ${colors.neutralSoft}` }}>
       {gastos.map((g, i) => (
-        <div key={`${g.factura.id}-${i}`}
+        <div key={`${g.factura.id}-${i}`} className="gasto-del-desglose"
+          onClick={onAbrir ? e => { e.stopPropagation(); onAbrir(g.factura); } : undefined}
+          title={onAbrir ? "Abrir esta factura" : undefined}
           style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap",
-            padding: `5px 14px 5px ${sangria + 14}px`, fontSize: 11.5, color: colors.inkSoft }}>
+            padding: `5px 14px 5px ${sangria + 14}px`, fontSize: 11.5, color: colors.inkSoft,
+            cursor: onAbrir ? "pointer" : undefined }}>
           <span style={{ color: colors.muted, minWidth: 64 }}>{String(g.fecha || "").slice(0, 10)}</span>
           <span style={{ color: colors.ink, fontWeight: 500 }}>{g.proveedor}</span>
           {esDeCajaChica(g.factura) && <MarcaCaja />}
@@ -232,6 +239,7 @@ function Gastos({ gastos, sangria, pagadoDe = {} }) {
             );
           })()}
           <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.ink }}>${fmt(g.monto)}</span>
+          {onAbrir && <span className="abrir-factura" style={{ fontSize: 10.5, color: colors.brand, fontWeight: 600 }}>Abrir ›</span>}
         </div>
       ))}
     </div>
@@ -240,7 +248,7 @@ function Gastos({ gastos, sangria, pagadoDe = {} }) {
 
 export default function TablaControl({ grupos, porRubro, totales, modo = "capitulo", comprometido = null,
   fuera = [], obra = null, facturas = [], asignaciones = [], rubros = [], actividades = [], pagos = [],
-  onAvance = null, beneficios = [] }) {
+  onAvance = null, beneficios = [], onAbrirFactura = null }) {
   // EL BENEFICIO, PEGADO AL RUBRO.
   //
   // Vive en su propia pestaña porque ahí se carga, pero la pregunta "¿este
@@ -437,7 +445,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                 )}
 
                 {abierto && !g.rubros.length && (
-                  <Gastos sangria={14} pagadoDe={pagadoDe}
+                  <Gastos sangria={14} pagadoDe={pagadoDe} onAbrir={onAbrirFactura}
                     gastos={modo === "actividad"
                       ? gastosDe({ actividadId: Number(String(g.clave).slice(1)) }, { facturas, asignaciones, rubros })
                       : gastosSueltos({ facturas, asignaciones, rubros, actividades })} />
@@ -456,7 +464,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                         pedidos={(comprometido?.detalle || []).filter(d => Number(d.rubroId) === Number(r.id))} />
                     )}
                     {verGastos === `r${r.id}` && (
-                      <Gastos sangria={14} pagadoDe={pagadoDe}
+                      <Gastos sangria={14} pagadoDe={pagadoDe} onAbrir={onAbrirFactura}
                         gastos={gastosDe({ rubroId: r.id }, { facturas, asignaciones, rubros })} />
                     )}
                   </div>

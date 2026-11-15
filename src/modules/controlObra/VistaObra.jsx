@@ -43,6 +43,8 @@ import { comprometidoPorGrupo } from "./calculos";
 import { rubrosParaGastar } from "./presupuestoParaGastar.js";
 import { quitasDeLaObra } from "./quitasDeOrdenes.js";
 import { beneficiosSobreLoQueQueda } from "./beneficiosConOrdenes.js";
+import ModalFactura from "./ModalFactura";
+import { abrirArchivo } from "../../lib/archivos";
 
 // Las dos pantallas de plata bajan aparte. No es solo peso: quien no tiene el
 // permiso no descarga el código, así que no hay forma de llegar a esa pantalla
@@ -147,6 +149,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // Lo que las órdenes quitan: para que el control mida el gasto contra lo que
   // de verdad se va a hacer (presupuestoParaGastar.js).
   const [quitas, setQuitas] = useState({ ordenes: [], lineas: [] });
+  // La factura abierta desde el desglose de un rubro, para corregirla ahí.
+  const [facturaAbierta, setFacturaAbierta] = useState(null);
   // LO EJECUTADO Y CÓMO SE COBRA LA OBRA (liquidacion.js). Lo que ya se midió
   // mueve el beneficio de lo aprobado; para saber cuánto hace falta el
   // presupuesto actualizado entero, así que las órdenes completas se piden
@@ -534,6 +538,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
               <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} beneficios={beneficiosVivos}
                 comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
                 facturas={facturas} asignaciones={asignaciones} rubros={rubrosControl} actividades={actividades} pagos={pagos}
+                onAbrirFactura={!puede || puede("facturas.registrar")
+                  ? f => setFacturaAbierta(f)
+                  : f => (f.archivo_url ? abrirArchivo(f.archivo_url) : null)}
                 onAvance={puede && !puede("facturas.registrar") ? null : guardarAvance} />
 
               {/* Acomodar el control: sacar el ruido en $0 y armar capítulos.
@@ -544,6 +551,17 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                   un booleano— así que ponerla acá habría sido una guardia que
                   siempre deja pasar, que es peor que ninguna. */}
               <PanelCurar obra={obra} rubros={rubros} porRubro={porRubro} onCambio={cargar} />
+
+              {/* La factura abierta desde el desglose: se corrige y se vuelve a la tabla. */}
+              {facturaAbierta && (
+                <ModalFactura actividades={actividades} control={porRubro}
+                  obra={obra} rubros={rubrosControl} planilla={planillas.find(p => p.id === facturaAbierta.planilla_id) || null}
+                  factura={facturaAbierta}
+                  asignacionesFactura={asignaciones.filter(a => a.factura_id === facturaAbierta.id)}
+                  currentUser={currentUser}
+                  onCerrar={() => setFacturaAbierta(null)}
+                  onGuardado={() => { setFacturaAbierta(null); cargar(); }} />
+              )}
 
               {/* Lo que el Excel tenía en dos hojas y uno cruzaba a mano: arriba
                   en qué va cada rubro, abajo las facturas que lo movieron. */}
