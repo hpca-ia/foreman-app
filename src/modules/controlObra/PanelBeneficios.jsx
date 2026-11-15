@@ -10,6 +10,7 @@ import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas, seguidosDe, seguirRubro, dejarDeSeguir } from "./beneficios";
 import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
 import { ordenesMudas, contraQueSeMide, porProveedor } from "./cuentaBeneficios.js";
+import { beneficiosSobreLoQueQueda, notaDelAjuste } from "./beneficiosConOrdenes.js";
 import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
 import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
@@ -113,7 +114,12 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   }, [obra?.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const porOrigen = totalesPorOrigen(guardados);
+  // SOBRE LO QUE QUEDA. Si una orden aprobada le quitó cantidad a un rubro, su
+  // beneficio de compra se cuenta sobre la cantidad que sigue. `guardados` es
+  // lo cargado y es lo que se corrige; `contados` es lo que se suma.
+  const contados = useMemo(() => beneficiosSobreLoQueQueda(guardados, { rubros, ordenes, lineasDeOrdenes }),
+    [guardados, rubros, ordenes, lineasDeOrdenes]);
+  const porOrigen = totalesPorOrigen(contados);
   const t = porOrigen.obra;
   // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
   // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
@@ -121,7 +127,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   const deltas = useMemo(() => (Object.keys(ejecutado).length
     ? liquidacionDeLaObra({ obra: { ...obra, modalidad: comoSeCobra }, rubros, ordenes, lineasDeOrdenes, ejecutado }).deltas
     : {}), [ejecutado, obra, comoSeCobra, rubros, ordenes, lineasDeOrdenes]);
-  const res = resultadoDeLaObra({ beneficios: guardados, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes, deltas, modalidad: comoSeCobra });
+  const res = resultadoDeLaObra({ beneficios: contados, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes, deltas, modalidad: comoSeCobra });
   // UN RUBRO SE SIGUE UNA SOLA VEZ, PERO PUEDE TENER VARIOS INGRESOS. Son dos
   // cosas distintas: el seguimiento mide sus facturas; un ingreso es una
   // compra o una proforma cargada contra él, y puede haber tres. En el
@@ -1352,7 +1358,7 @@ Rubros de la obra: ${lista}`;
 
         {guardados.length > 0 && vista === "proveedor" && (
           <div style={{ display: "grid", gap: 8 }}>
-            {porProveedor(guardados).map(g => (
+            {porProveedor(contados).map(g => (
               <div key={g.proveedor} style={{ background: colors.surface, border: `1px solid ${colors.border}`,
                 borderRadius: colors.radiusMd, overflow: "hidden" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 12px", flexWrap: "wrap",
@@ -1408,8 +1414,9 @@ Rubros de la obra: ${lista}`;
         {(guardados.length > 0 || res.aprobados.filas.length > 0) && vista === "lista" && (
           <div style={{ background: colors.surface, border: `1px solid ${colors.border}`,
             borderRadius: colors.radiusMd, overflow: "hidden" }}>
-            {guardados.map(b => {
+            {contados.map(b => {
               const dif = Math.round((n(b.presupuestado) - n(b.real)) * 100) / 100;
+              const ajuste = notaDelAjuste(b);
               const rub = vivos.find(x => String(x.id) === String(b.obra_rubro_id));
               return (
                 <div key={b.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px",
@@ -1428,6 +1435,7 @@ Rubros de la obra: ${lista}`;
                           nada que decirle a quien lee. */}
                       {b.nota ? ` · ${String(b.nota).replace(/\s*·?\s*\[dif:\d+\]/g, "").trim()}` : ""}
                     </div>
+                    {ajuste && <div className="ajuste-por-orden" style={{ fontSize: 10.5, color: colors.warning, marginTop: 1 }}>{ajuste}</div>}
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0, fontSize: 11, color: colors.muted }}>
                     {esDeOrden(b) ? "cobrado " : ""}${fmt(b.presupuestado)} → {esDeOrden(b) ? "costó " : ""}${fmt(b.real)}
@@ -1461,7 +1469,7 @@ Rubros de la obra: ${lista}`;
                     </button>
                   )}
                   {!esDeOrden(b) && (
-                    <button onClick={() => editarBeneficio(b)} title="Corregirlo"
+                    <button onClick={() => editarBeneficio(guardados.find(x => x.id === b.id) || b)} title="Corregirlo"
                       style={{ background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex", flexShrink: 0 }}>
                       <Pencil size={12} />
                     </button>

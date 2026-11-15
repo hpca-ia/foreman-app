@@ -42,6 +42,7 @@ import PanelOrdenesCambio from "./PanelOrdenesCambio";
 import { comprometidoPorGrupo } from "./calculos";
 import { rubrosParaGastar } from "./presupuestoParaGastar.js";
 import { quitasDeLaObra } from "./quitasDeOrdenes.js";
+import { beneficiosSobreLoQueQueda } from "./beneficiosConOrdenes.js";
 
 // Las dos pantallas de plata bajan aparte. No es solo peso: quien no tiene el
 // permiso no descarga el código, así que no hay forma de llegar a esa pantalla
@@ -204,13 +205,13 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").eq("obra_id", obra.id);
     setPagos(pg || []);
     const { data: ben } = await supabase.from("obra_beneficios")
-      .select("obra_rubro_id,descripcion,presupuestado,real,estado,origen").eq("obra_id", obra.id);
+      .select("id,obra_rubro_id,descripcion,cantidad,unidad,presupuestado,real,estado,origen,orden_cambio_id").eq("obra_id", obra.id);
     setBeneficios(ben || []);
     // Las órdenes y lo que quitan: lo ya aprobado deja beneficio sobre la
     // cantidad que SIGUE aprobada, y para eso hay que saber cuánto le sacó
     // cada orden aprobada a cada rubro.
     const { data: ocs } = await supabase.from("ordenes_cambio")
-      .select("id,estado,anulada,reemplazada_at").eq("obra_id", obra.id);
+      .select("id,codigo,numero,estado,anulada,reemplazada_at").eq("obra_id", obra.id);
     const quitan = {};
     if ((ocs || []).length) {
       const { data: ls } = await supabase.from("orden_cambio_lineas")
@@ -257,6 +258,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   // con sus adiciones enteras. Solo acá: el contrato, las órdenes, el
   // presupuesto actualizado y Beneficios siguen leyendo `rubros` tal cual.
   const rubrosControl = useMemo(() => rubrosParaGastar(rubros, quitas).rubros, [rubros, quitas]);
+  // Y el beneficio, sobre lo que queda: si una orden le quitó cantidad al
+  // rubro, el beneficio de comprarlo barato se cuenta sobre lo que sigue.
+  const beneficiosVivos = useMemo(() => beneficiosSobreLoQueQueda(beneficios, {
+    rubros, ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas,
+  }), [beneficios, rubros, ordenesDeCambio]);
   const porRubro = calcularControl({ rubros: rubrosControl, facturas, asignaciones, pagos, planillaNumero: planillaActual?.numero ?? null });
   // El comprometido PRIMERO: los grupos lo necesitan para poder dibujar el
   // bloque de gasto fuera del presupuesto cuando lo único que hay ahí todavía
@@ -422,7 +428,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           // rubros pasados adentro: un beneficio de $5.000 en una obra que ya
           // va perdiendo en tres rubros no es un beneficio. Lo previsto sale
           // de una proforma y todavía puede no pasar: no entra.
-          const res = resultadoDeLaObra({ beneficios, rubros, porRubro,
+          const res = resultadoDeLaObra({ beneficios: beneficiosVivos, rubros, porRubro,
             ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas,
             deltas: deltasDeLoEjecutado, modalidad });
           if (!res.cuantosConPapel && !res.perdidas.length && !res.aprobados.cuantos) return null;
@@ -525,7 +531,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
                   </span>
                 )}
               </div>
-              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} beneficios={beneficios}
+              <TablaControl grupos={grupos} porRubro={porRubro} totales={totales} modo={agruparPor} beneficios={beneficiosVivos}
                 comprometido={comprometido} fuera={solicitudesFuera} obra={obra}
                 facturas={facturas} asignaciones={asignaciones} rubros={rubrosControl} actividades={actividades} pagos={pagos}
                 onAvance={puede && !puede("facturas.registrar") ? null : guardarAvance} />
