@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Hourglass, AlertTriangle, ArrowRight, Check } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
+import { HORAS } from "../../theme/constants";
 import {
   TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, estadoDelLead, loQueDice, sePersigue, estaAprobado, estaPerdido,
   alCambiarEtapa, alCambiarTipo, alAprobar, alPerder, alReabrir, alEsperar, alResponder, alInsistir, alPosponer,
@@ -41,6 +42,10 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
   const [texto, setTexto] = useState("");
   const [fecha, setFecha] = useState("");
   const [paso, setPaso] = useState("");
+  // AGENDAR: un día cualquiera y, si es una reunión, la hora. Los tres botones
+  // de un toque alcanzan para «mañana»; una reunión que se acordó con el
+  // cliente es el jueves 20 a las 10, y eso no se podía poner desde acá.
+  const [cuando, setCuando] = useState({ dia: "", hora: "" });
 
   const hoy = hoyISO();
   const tipo = tipoDe(lead);
@@ -77,23 +82,30 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
 
   // Ponerle el próximo paso ahí mismo: una tarea suya, con fecha, de quien
   // lleva el lead. Es la misma que después aparece en Tareas.
-  async function sumarPaso(dia) {
+  //
+  // CON HORA ES UNA REUNIÓN, y también si lo dice: así aparece como reunión en
+  // Tareas y en el checklist, y desde ahí se le manda la invitación al cliente.
+  async function sumarPaso(dia, hora = null) {
     const titulo = paso.trim();
     if (!titulo) { setError("Escribí cuál es el próximo paso."); return; }
+    if (!dia) { setError("Elegí el día, o tocá Hoy, Mañana o En una semana."); return; }
     setError(""); setEstadoGuardado("guardando");
     const r = await agregarTarea({
-      lead, etapaId: lead.etapa, titulo, tipo: "Otro", due_date: dia,
+      lead, etapaId: lead.etapa, titulo, tipo: hora || /reuni[oó]n/i.test(titulo) ? "Reunión" : "Otro",
+      due_date: dia, hora: hora || null,
       assignee_id: lead.responsable_id || currentUser?.id || null, quien: currentUser,
       orden: tareas.length + 1,
     });
     if (r.error) { setError(r.error); setEstadoGuardado(""); return; }
-    setPaso(""); setEstadoGuardado("guardado");
+    setPaso(""); setCuando({ dia: "", hora: "" }); setEstadoGuardado("guardado");
     setTimeout(() => setEstadoGuardado(e => (e === "guardado" ? "" : e)), 2500);
     onTareas?.();
   }
-  async function fecharPaso(dia) {
+  async function fecharPaso(dia, hora = undefined) {
+    if (!dia) { setError("Elegí el día, o tocá Hoy, Mañana o En una semana."); return; }
     setError(""); setEstadoGuardado("guardando");
-    const e = await ponerFecha(comoActividad(estado.paso), dia, currentUser);
+    const e = await ponerFecha(comoActividad(estado.paso), dia, currentUser, hora);
+    setCuando({ dia: "", hora: "" });
     if (e) { setError(e); setEstadoGuardado(""); return; }
     setEstadoGuardado("guardado");
     setTimeout(() => setEstadoGuardado(x => (x === "guardado" ? "" : x)), 2500);
@@ -180,21 +192,46 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
         )}
       </div>
 
-      {/* Sin próximo paso ni espera: se le pone acá, sin abrir nada. */}
+      {/* SIN PRÓXIMO PASO NI ESPERA: se le pone acá, sin abrir nada.
+          Qué es, y cuándo. Los tres botones de un toque agendan en el acto; el
+          día exacto y la hora, con «Agendar». Antes había que adivinar que
+          tocar «Mañana» era lo que guardaba, y una reunión acordada para el
+          jueves a las 10 no tenía dónde ponerse. */}
       {editable && !pidiendo && estado.clase === "sin_paso" && (
-        estado.paso ? (
+        <div className="proximo-paso" style={{ display: "grid", gap: 5 }}>
+          {!estado.paso && (
+            <input value={paso} onChange={e => { setPaso(e.target.value); setError(""); }} aria-label="Próximo paso"
+              placeholder="¿Cuál es el próximo paso? Ej: reunión con el cliente"
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumarPaso(cuando.dia || sumarDias(hoy, 1), cuando.dia ? cuando.hora || null : null); } }}
+              style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: colors.muted }}>Ponele fecha:</span>
-            {DIAS.map(([txt, n]) => <button key={txt} onClick={() => fecharPaso(sumarDias(hoy, n))} style={chip(false)}>{txt}</button>)}
+            <span style={{ fontSize: 11, color: colors.muted }}>{estado.paso ? "Ponele fecha:" : "¿Cuándo?"}</span>
+            {DIAS.map(([txt, n]) => (
+              <button key={txt} style={chip(false)}
+                onClick={() => (estado.paso ? fecharPaso(sumarDias(hoy, n), cuando.hora || undefined) : sumarPaso(sumarDias(hoy, n), cuando.hora || null))}>{txt}</button>
+            ))}
+            <span style={{ fontSize: 11, color: colors.muted }}>u otro día:</span>
+            <input type="date" value={cuando.dia} min={hoy} aria-label="Día del próximo paso"
+              onChange={e => { setCuando(c => ({ ...c, dia: e.target.value })); setError(""); }}
+              style={{ ...inputStyle, width: 132, padding: "3px 6px", fontSize: 11.5 }} />
+            {/* La hora de una lista, no la ruleta del navegador. */}
+            <select value={cuando.hora} aria-label="Hora del próximo paso" onChange={e => setCuando(c => ({ ...c, hora: e.target.value }))}
+              style={{ ...inputStyle, width: 104, padding: "3px 6px", fontSize: 11.5 }}>
+              <option value="">Sin hora</option>
+              {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <button style={chip(true)}
+              onClick={() => (estado.paso ? fecharPaso(cuando.dia, cuando.hora || undefined) : sumarPaso(cuando.dia, cuando.hora || null))}>
+              Agendar
+            </button>
           </div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-            <input value={paso} onChange={e => setPaso(e.target.value)} placeholder="¿Cuál es el próximo paso?"
-              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumarPaso(sumarDias(hoy, 1)); } }}
-              style={{ ...inputStyle, flex: "1 1 180px", minWidth: 0, padding: "5px 8px", fontSize: 12 }} />
-            {DIAS.map(([txt, n]) => <button key={txt} onClick={() => sumarPaso(sumarDias(hoy, n))} style={chip(false)}>{txt}</button>)}
-          </div>
-        )
+          {!estado.paso && (
+            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45 }}>
+              Queda como tarea del lead, la misma que se ve en Tareas. Con hora es una reunión: desde el checklist se le manda la invitación al cliente.
+            </div>
+          )}
+        </div>
       )}
 
       {/* Esperar, insistir o correr el recordatorio: los tres piden un día. */}
