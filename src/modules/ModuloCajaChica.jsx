@@ -24,6 +24,7 @@ import { LECTURA, textoDeNova } from "../lib/modelos";
 import { leerRenglones } from "./controlObra/renglones";
 import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
 import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
+import { avisoDeSobra } from "./controlObra/repartoDeFactura.js";
 
 export default function ModuloCajaChica({ currentUser, puede, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -643,6 +644,11 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       setNovaError("Esta factura ya está cargada en la obra. Explica por qué no es un duplicado para poder guardarla.");
       return false;
     }
+    // LO REPARTIDO ENTRE RUBROS NO PUEDE SUMAR MÁS QUE EL GASTO. Un gasto de
+    // $89,85 con $60 a un rubro y $60 a otro entraba al control con $120
+    // asignados. Se mira acá, antes de subir la foto y de escribir nada.
+    const pasado = avisoDeSobra(repartoDelGasto(rubrosGasto, gastoForm.monto), gastoForm.monto, "el gasto");
+    if (pasado) { setNovaError(pasado); return false; }
     setUploading(true);
     let archivoUrl=null, archivoNombre=null;
     if (archivoGasto) {

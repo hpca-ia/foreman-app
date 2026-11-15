@@ -22,6 +22,8 @@ import { desdeLecturaDeFactura } from "./itemsComprados";
 import { leerHastaQueCuadre } from "../lectura/insistir.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
 import { totalesDeLectura, renglonesDeLectura, revisionDeFactura } from "./cuadrarFactura.js";
+// Lo repartido no puede sumar más que la factura: la regla vive ahí.
+import { sobraDelReparto, avisoDeSobra, quedaParaLosRubros, prorratearEntreRubros, repartoDeRenglones } from "./repartoDeFactura.js";
 
 const hoy = () => new Date().toISOString().split("T")[0];
 const n = v => Number(v) || 0;
@@ -463,6 +465,8 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
 
   const asignado = repartos.reduce((s, r) => s + n(r.monto), 0);
   const diferencia = Math.round((n(form.total) - asignado) * 100) / 100;
+  // Repartir de menos se puede —el resto queda «por asignar»—; de más, no.
+  const sobra = sobraDelReparto(repartos, form.total);
 
   async function guardar() {
     if (!form.total) { setError("Falta el total de la factura."); return; }
@@ -470,6 +474,14 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       setError("Esta factura ya está cargada. Explica por qué no es un duplicado para poder guardarla.");
       return;
     }
+    // NO SE GUARDA MÁS ASIGNADO QUE EL TOTAL.
+    //
+    // Pasó: una factura de $590,73 cargada a su agrupación entera y, además,
+    // repartida entre cinco rubros de esa misma agrupación. $1.181,46 de
+    // asignado. No se nota hasta que se le registra el pago, y ese día el
+    // control cuenta el doble. Se frena acá, antes de escribir nada.
+    const pasado = avisoDeSobra(repartos, form.total);
+    if (pasado) { setError(pasado); return; }
     setGuardando(true); setError("");
 
     let archivo_url = form.archivo_url || null, archivo_nombre = form.archivo_nombre || null;
@@ -1136,21 +1148,10 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 // Y el IVA es costo de la obra: el rubro costó lo que costó
                 // con impuesto. Se reparte entre los destinos en la misma
                 // proporción en que se repartió la base.
-                const suma = items.filter(x => x.destino).reduce((t, x) => t + n(x.monto), 0);
-                const escala = suma > 0 ? n(form.total) / suma : 1;
-                const porDestino = new Map();
-                items.forEach(x => {
-                  if (!x.destino) return;
-                  porDestino.set(x.destino, (porDestino.get(x.destino) || 0) + n(x.monto) * escala);
-                });
-                setRepartos([...porDestino.entries()].map(([clave, monto]) => {
-                  const [tipo, id] = [clave.slice(0, clave.indexOf(":")), clave.slice(clave.indexOf(":") + 1)];
-                  return {
-                    tipo: tipo === "cap" ? "capitulo" : tipo === "act" ? "actividad" : "rubro",
-                    id: tipo === "cap" ? id : Number(id),
-                    monto: Math.round(monto * 100) / 100,
-                  };
-                }));
+                //
+                // Exacto al centavo: redondeando cada destino por su cuenta,
+                // tres destinos podían sumar un centavo más que la factura.
+                setRepartos(repartoDeRenglones(items, form.total));
               }}>
               Asignar {items.filter(x => x.destino).length} de {items.length}
             </Button>
@@ -1178,8 +1179,12 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
       <div style={{ background: colors.bg, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink }}>¿A qué agrupación va?</div>
-          <div style={{ marginLeft: "auto", fontSize: 11, color: diferencia === 0 ? colors.success : colors.warning, fontWeight: 600 }}>
-            {diferencia === 0 ? "Cuadrado" : `Faltan $${fmt(diferencia)}`}
+          {/* SI SOBRA, SE DICE QUE SOBRA. Decía «Faltan $-590,73», que nadie
+              lee como "asignaste el doble". */}
+          <div style={{ marginLeft: "auto", fontSize: 11, fontWeight: 600,
+            color: sobra > 0 ? colors.danger : diferencia === 0 ? colors.success : colors.warning }}>
+            {sobra > 0 ? `Sobran $${fmt(sobra)}: hay más asignado que el total`
+              : diferencia === 0 ? "Cuadrado" : `Faltan $${fmt(Math.abs(diferencia))}`}
           </div>
         </div>
 
@@ -1318,27 +1323,12 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
                 que el chico aparezca al 300% y el grande al 5%. A prorrata cada
                 uno se lleva lo que le toca por tamaño: es la única repartición
                 que no exige inventar un dato que nadie tiene. */}
-            <button onClick={() => {
-                const base = repartos.reduce((t, x) => {
-                  const r = rubros.find(y => y.id === x.id);
-                  return t + (x.tipo === "rubro" ? n(r?.total_base) : 0);
-                }, 0);
-                if (!base) return;
-                let dado = 0;
-                setRepartos(rs => rs.map((x, j) => {
-                  if (x.tipo !== "rubro") return x;
-                  const r = rubros.find(y => y.id === x.id);
-                  const ultimo = j === rs.length - 1;
-                  // El resto que no divide exacto va al último: si se tira, el
-                  // total de la factura deja de coincidir con lo asignado y ese
-                  // centavo aparece después como un descuadre inexplicable.
-                  const monto = ultimo
-                    ? Math.round((n(form.total) - dado) * 100) / 100
-                    : Math.round((n(form.total) * (n(r?.total_base) / base)) * 100) / 100;
-                  dado = Math.round((dado + monto) * 100) / 100;
-                  return { ...x, monto };
-                }));
-              }}
+            {/* LO QUE YA ESTÁ EN UNA AGRUPACIÓN ENTERA NO SE VUELVE A REPARTIR.
+                Este botón repartía el total de la factura entre los rubros
+                marcados sin mirar la línea de la agrupación, que ya se lo
+                había llevado todo: la factura quedaba asignada dos veces.
+                Entre los rubros va lo que queda, exacto al centavo. */}
+            <button onClick={() => setRepartos(rs => prorratearEntreRubros(rs, rubros, form.total))}
               style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
                 padding: "6px 11px", fontSize: 11.5, color: colors.inkSoft, cursor: "pointer",
                 fontFamily: colors.font }}>
@@ -1347,6 +1337,22 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
             <span style={{ fontSize: 10.5, color: colors.muted, flexBasis: "100%" }}>
               …o escribí el % de cada uno y el monto se calcula solo
             </span>
+            {(() => {
+              // Solo cuando conviven las dos cosas: rubros marcados y plata
+              // cargada entera a una agrupación o a un capítulo.
+              if (!repartos.some(r => r.tipo === "rubro")) return null;
+              const queda = quedaParaLosRubros(repartos, form.total);
+              const entero = Math.round((n(form.total) - queda) * 100) / 100;
+              if (!entero) return null;
+              return (
+                <span style={{ fontSize: 10.5, flexBasis: "100%", lineHeight: 1.45,
+                  color: queda ? colors.muted : colors.warning }}>
+                  {queda
+                    ? `A prorrata entre los rubros van los $${fmt(queda)} que quedan: los $${fmt(entero)} cargados a una agrupación o a un capítulo entero no se vuelven a repartir.`
+                    : `No queda nada para prorratear entre los rubros: los $${fmt(entero)} ya están cargados enteros a una agrupación o a un capítulo. Para repartirlos por rubro, quitá esa línea.`}
+                </span>
+              );
+            })()}
           </div>
         )}
 

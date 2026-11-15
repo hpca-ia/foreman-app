@@ -4,6 +4,7 @@ import { agruparOrdenesAprobadas } from "../controlObra/agruparOrdenes.js";
 import { solicitudesDeLaObra, repartirSolicitudes } from "../controlObra/calculos";
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
+import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
 
 // El flujo de una compra, de punta a punta.
@@ -614,6 +615,16 @@ export async function facturarCompra(solicitud, datos, quien) {
   if (!(total > 0)) return { error: "¿Por cuánto es el documento?" };
   if (!solicitud.lead_id) return { error: "Un gasto de oficina no entra al control de una obra." };
 
+  // LOS RENGLONES REPARTIDOS NO PUEDEN SUMAR MÁS QUE EL DOCUMENTO.
+  //
+  // El anticipo de $400 sobre una proforma de $1.000: NOVA lee los renglones
+  // del papel —los mil— y el documento que entra al control es por
+  // cuatrocientos. Guardar los renglones tal cual deja mil asignados a rubros
+  // por un documento de cuatrocientos. Se mira antes de escribir nada.
+  const repartos = (datos.repartos || []).filter(x => Number(x.monto) > 0 && (x.obra_rubro_id || x.obra_actividad_id));
+  const pasado = avisoDeSobra(repartos, total, "el documento");
+  if (pasado) return { error: pasado };
+
   const { data: obras } = await supabase.from("obras").select("id").eq("lead_id", solicitud.lead_id).limit(1);
   const obra = obras?.[0];
   if (!obra) return { error: "Este proyecto todavía no tiene una obra activa en Control de Obra." };
@@ -667,7 +678,6 @@ export async function facturarCompra(solicitud, datos, quien) {
   // Si quedó sin asignar hay que decirlo: una factura sin destino entra al
   // control y no descuenta de ningún lado.
   let asignado = false;
-  const repartos = (datos.repartos || []).filter(x => Number(x.monto) > 0 && (x.obra_rubro_id || x.obra_actividad_id));
   if (repartos.length) {
     await supabase.from("obra_asignaciones").insert(repartos.map(x => ({
       factura_id: factura.id,

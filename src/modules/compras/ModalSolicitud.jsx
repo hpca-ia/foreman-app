@@ -10,6 +10,7 @@ import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, h
   moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe,
   marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia, datosDelControlPara } from "./compras";
 import { faltaEnElControl, documentoSugerido } from "./alControl";
+import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
 import { presupuestoDelDestino, loDeCadaRubro } from "./presupuestoDelDestino";
 // El presupuesto completo al costado, el mismo de Beneficios y Diferencias.
 import Presupuesto from "../controlObra/PanelPresupuesto";
@@ -565,6 +566,17 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     const paga = Number(compra.pagaAhora) || 0;
     if (paga > total + 0.005) return { error: `No se puede pagar más que el documento, que es por $${total.toFixed(2)}.` };
     if (comprobante && !(paga > 0)) return { error: "Adjuntaste un comprobante: escribí cuánto se pagó." };
+    // Los renglones emparejados viajan como repartos: cada uno a su rubro.
+    // Lo que quedó sin rubro no va —se cae al destino del pedido, que es lo
+    // que se hacía siempre.
+    const repartos = itemsFactura
+      .filter(x => x.obra_rubro_id && Number(x.monto) > 0)
+      .map(x => ({ obra_rubro_id: x.obra_rubro_id, monto: Number(x.monto) }));
+    // Y NO PUEDEN SUMAR MÁS QUE EL DOCUMENTO. Se mira acá, antes de mover el
+    // pedido: si se frenara recién al cargar el documento, el pedido ya
+    // habría quedado «comprada» sin su papel en el control.
+    const pasado = viva.lead_id ? avisoDeSobra(repartos, total, "el documento") : "";
+    if (pasado) return { error: pasado };
 
     // Lo que ya estaba «comprada» y nunca entró al control no vuelve a
     // moverse de estado: solo le falta el documento.
@@ -584,12 +596,6 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     // Acá la plata deja de estar hablada: el documento entra al control y
     // descuenta el rubro.
     const con = { ...s, proveedor: compra.proveedor.trim() };
-    // Los renglones emparejados viajan como repartos: cada uno a su rubro.
-    // Lo que quedó sin rubro no va —se cae al destino del pedido, que es lo
-    // que se hacía siempre.
-    const repartos = itemsFactura
-      .filter(x => x.obra_rubro_id && Number(x.monto) > 0)
-      .map(x => ({ obra_rubro_id: x.obra_rubro_id, monto: Number(x.monto) }));
     const f = await facturarCompra(con, { ...compra, total, repartos }, currentUser);
     if (f.error) return { error: "La compra quedó marcada, pero el documento no entró al control: " + f.error };
 
