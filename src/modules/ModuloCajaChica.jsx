@@ -627,7 +627,9 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     const d = {...gastoForm, ...extra};
     if (!d.numero_factura && !d.proveedor && !hash) { setDupsGasto({exactos:[],posibles:[]}); return; }
     const r = await buscarDuplicados({ obraId:cajaActiva.obra_id, ruc:d.ruc, numeroFactura:d.numero_factura,
-      razonSocial:d.proveedor, monto:d.monto, fecha:d.fecha, archivoHash:hash });
+      razonSocial:d.proveedor, monto:d.monto, fecha:d.fecha, archivoHash:hash,
+      // Al corregir un gasto, su propio documento en el control no es su duplicado.
+      excluirId:gastoEditando?.obra_factura_id ?? null, excluirGastoId:gastoEditando?.id ?? null });
     setDupsGasto(r);
   }
 

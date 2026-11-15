@@ -31,14 +31,17 @@ export async function hashArchivo(file) {
  * Busca duplicados de una factura dentro de la misma obra.
  * @returns {{exactos: Array, posibles: Array}}
  */
-export async function buscarDuplicados({ obraId, ruc, numeroFactura, razonSocial, monto, fecha, archivoHash, excluirId = null }) {
+export async function buscarDuplicados({ obraId, ruc, numeroFactura, razonSocial, monto, fecha, archivoHash, excluirId = null, excluirGastoId = null }) {
   if (!obraId) return { exactos: [], posibles: [] };
 
   const { data } = await supabase.from("obra_facturas")
-    .select("id,fecha,ruc,numero_factura,razon_social,total,origen,planilla_id,subido_por_nombre,created_at,archivo_hash")
+    .select("id,fecha,ruc,numero_factura,razon_social,total,origen,planilla_id,subido_por_nombre,created_at,archivo_hash,caja_gasto_id")
     .eq("obra_id", obraId);
 
-  const otras = (data || []).filter(f => f.id !== excluirId);
+  // Al corregir algo que ya estaba, ese mismo documento no es su duplicado:
+  // la factura que se edita, o la del gasto de caja chica que se corrige.
+  const otras = (data || []).filter(f => f.id !== excluirId
+    && (excluirGastoId == null || Number(f.caja_gasto_id) !== Number(excluirGastoId)));
   const exactos = [], posibles = [];
 
   for (const f of otras) {
@@ -59,31 +62,4 @@ export async function buscarDuplicados({ obraId, ruc, numeroFactura, razonSocial
   }
 
   return { exactos, posibles };
-}
-
-/** Escanea toda una obra y agrupa las facturas duplicadas entre sí. */
-export async function auditarObra(obraId) {
-  const { data } = await supabase.from("obra_facturas")
-    .select("id,fecha,ruc,numero_factura,razon_social,total,origen,planilla_id,subido_por_nombre,created_at,archivo_hash,duplicado_de,duplicado_justificacion")
-    .eq("obra_id", obraId).order("created_at");
-
-  const facturas = data || [];
-  const grupos = new Map();
-
-  for (const f of facturas) {
-    let clave = null, tipo = null;
-    if (f.numero_factura && f.ruc) { clave = "id:" + norm(f.ruc) + "|" + norm(f.numero_factura); tipo = "exacto"; }
-    else if (f.archivo_hash) { clave = "file:" + f.archivo_hash; tipo = "exacto"; }
-    else if (f.razon_social && f.total) { clave = "aprox:" + norm(f.razon_social) + "|" + Number(f.total).toFixed(2); tipo = "posible"; }
-    if (!clave) continue;
-    if (!grupos.has(clave)) grupos.set(clave, { clave, tipo, facturas: [] });
-    grupos.get(clave).facturas.push(f);
-  }
-
-  // Los "posibles" solo cuentan si además las fechas están cerca
-  return [...grupos.values()]
-    .filter(g => g.facturas.length > 1)
-    .filter(g => g.tipo === "exacto" || g.facturas.every((f, _, arr) => dias(f.fecha, arr[0].fecha) <= DIAS_CERCANOS))
-    .map(g => ({ ...g, total: g.facturas.reduce((s, f) => s + Number(f.total || 0), 0), justificado: g.facturas.some(f => f.duplicado_de) }))
-    .sort((a, b) => (a.tipo === b.tipo ? b.total - a.total : a.tipo === "exacto" ? -1 : 1));
 }

@@ -28,7 +28,8 @@ import { cuadreConElPresupuesto, comoSeDice as comoSeDiceElCuadre } from "./cuad
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
 import LibroFacturas from "./LibroFacturas";
-import PanelDuplicados from "./PanelDuplicados";
+import PanelAlertas from "./PanelAlertas";
+import { alertasDeLaObra } from "./contadoDosVeces.js";
 import PanelActividades from "./PanelActividades";
 import PresupuestoOriginal from "./PresupuestoOriginal";
 import PanelPresupuestoActualizado from "./PanelPresupuestoActualizado";
@@ -63,6 +64,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const [solicitudes, setSolicitudes] = useState([]);
   const [solicitudesFuera, setSolicitudesFuera] = useState([]);
   const [adjuntos, setAdjuntos] = useState([]);
+  // Se sube al enganchar un pedido desde Alertas: vuelve a leer los pedidos.
+  const [releerPedidos, setReleerPedidos] = useState(0);
   useEffect(() => {
     if (!obra.lead_id && !obra.id) return;
     let vivo = true;
@@ -106,7 +109,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
       setSolicitudesFuera(r.fuera);
     })();
     return () => { vivo = false; };
-  }, [obra.id, obra.lead_id]);
+  }, [obra.id, obra.lead_id, releerPedidos]);
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -296,6 +299,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const vePlata = puede ? puede("proveedores.ver") : true;
   const veCaja = puede ? puede("fondos.ver") : true;
 
+  const cuantasAlertas = useMemo(
+    () => alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos }).cuantas,
+    [solicitudes, facturas, asignaciones, adjuntos, pagos]);
   const tabS = a => ({ padding: "7px 14px", border: "none", borderBottom: a ? `2px solid ${colors.brand}` : "2px solid transparent", background: "transparent", color: a ? colors.brand : colors.inkSoft, fontSize: 12, fontWeight: a ? 600 : 400, cursor: "pointer", fontFamily: colors.font });
 
   return (
@@ -480,7 +486,9 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
         <button onClick={() => setTab("diferencias")} style={tabS(tab === "diferencias")}>Diferencias</button>
         <button onClick={() => setTab("ordenes")} style={tabS(tab === "ordenes")}>Órdenes de cambio</button>
         <button onClick={() => setTab("actividades")} style={tabS(tab === "actividades")}>Agrupaciones</button>
-        <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
+        <button onClick={() => setTab("alertas")} style={tabS(tab === "alertas")}>
+          Alertas{cuantasAlertas > 0 && <span style={{ marginLeft: 5, background: colors.danger, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>{cuantasAlertas}</span>}
+        </button>
         <button onClick={() => setTab("exportar")} style={tabS(tab === "exportar")}>Exportar</button>
       </div>
 
@@ -604,7 +612,13 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             <SiSeRompe que="Diferencias"><PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} modalidad={modalidad} /></SiSeRompe>
           )}
           {tab === "actividades" && <PanelActividades obra={obra} rubros={rubros} actividades={actividades} onCambio={cargar} />}
-          {tab === "duplicados" && <PanelDuplicados obra={obra} planillas={planillas} onCambio={cargar} />}
+          {tab === "alertas" && (
+            <SiSeRompe que="Alertas">
+              <PanelAlertas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos}
+                solicitudes={solicitudes} adjuntos={adjuntos} currentUser={currentUser}
+                onCambio={cargar} onCambioPedidos={() => setReleerPedidos(v => v + 1)} />
+            </SiSeRompe>
+          )}
           {tab === "exportar" && (
             <ExportarPlanilla obra={obra} planilla={planillaActual} planillas={planillas} grupos={grupos} porRubro={porRubro}
               totales={totales} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubros} />
