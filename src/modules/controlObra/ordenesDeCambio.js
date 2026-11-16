@@ -740,6 +740,18 @@ export async function moverLinea(lineas, id, direccion) {
  */
 export async function gentePara(leadId) {
   if (!leadId) return [];
+  // Cómo se juntan —por correo, lo cargado a mano manda— está en
+  // directorioDelProyecto.js, sin base de datos, para poder probarlo.
+  return armarDirectorio(await fuentesDeLaGente(leadId));
+}
+
+/**
+ * Las cinco listas donde está escrita la gente de un proyecto, tal cual.
+ * De acá salen el directorio para mandar (gentePara) y la lista de
+ * involucrados de la ficha del proyecto.
+ */
+export async function fuentesDeLaGente(leadId) {
+  if (!leadId) return { convocados: [], invitados: [], asistentes: [], firmantes: [], delLibro: [] };
   // LAS CUATRO LISTAS SON UNA SOLA PERSONA.
   //
   // El mismo arquitecto de la fiscalización está cargado como convocado del
@@ -783,9 +795,8 @@ export async function gentePara(leadId) {
       : Promise.resolve({ data: [] }),
   ]);
 
-  // Cómo se juntan —por correo, gana el dato más completo— está en
-  // directorioDelProyecto.js, sin base de datos, para poder probarlo.
-  return armarDirectorio({ convocados, invitados, asistentes, firmantes, delLibro });
+  return { convocados: convocados || [], invitados: invitados || [], asistentes: asistentes || [],
+    firmantes: firmantes || [], delLibro: delLibro || [] };
 }
 
 /**

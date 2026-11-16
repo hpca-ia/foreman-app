@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { UserPlus, Eye, X } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
-import Button from "../../components/ui/Button";
+import InvolucradosDelProyecto from "./InvolucradosDelProyecto";
 
 // LA GENTE DE UN PROYECTO.
 //
@@ -14,21 +14,19 @@ import Button from "../../components/ui/Button";
 //
 // Antes esto vivía pegado a las etapas por proyecto, que ya no existen: en el
 // pipeline un lead está en una etapa, y lo dice él.
+//
+// Los de afuera son TODOS LOS INVOLUCRADOS (InvolucradosDelProyecto.jsx): no
+// solo los que se cargaron acá, también los de siempre del acta, los que
+// firmaron órdenes y a quien se le mandó el libro. Acá mostraba solo lo
+// cargado en esta pestaña, que no usaba nadie, y la gente de verdad del
+// proyecto —diecinueve en el Aeropuerto— no aparecía.
 
-const vacio = { nombre: "", rol: "cliente", email: "", telefono: "" };
-
-export default function GenteDelProyecto({ lead, users = [], currentUser, puedeCompartir }) {
-  const [invitados, setInvitados] = useState([]);
+export default function GenteDelProyecto({ lead, users = [], currentUser, puedeCompartir, editable = true }) {
   const [accesos, setAccesos] = useState([]);
-  const [invitado, setInvitado] = useState(null);
-  const [ocupado, setOcupado] = useState(false);
 
   const cargar = useCallback(async () => {
-    const [{ data: inv }, { data: acc }] = await Promise.all([
-      supabase.from("pipeline_invitados").select("*").eq("lead_id", lead.id).order("nombre"),
-      supabase.from("lead_accesos").select("*").eq("lead_id", lead.id),
-    ]);
-    setInvitados(inv || []); setAccesos(acc || []);
+    const { data: acc } = await supabase.from("lead_accesos").select("*").eq("lead_id", lead.id);
+    setAccesos(acc || []);
   }, [lead.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -42,17 +40,6 @@ export default function GenteDelProyecto({ lead, users = [], currentUser, puedeC
 
   async function quitarAcceso(usuarioId) {
     await supabase.from("lead_accesos").delete().eq("lead_id", lead.id).eq("usuario_id", usuarioId);
-    await cargar();
-  }
-
-  async function guardarInvitado() {
-    if (!invitado?.nombre.trim()) return;
-    setOcupado(true);
-    await supabase.from("pipeline_invitados").insert({
-      lead_id: lead.id, nombre: invitado.nombre.trim(), rol: invitado.rol,
-      email: invitado.email || null, telefono: invitado.telefono || null,
-    });
-    setInvitado(null); setOcupado(false);
     await cargar();
   }
 
@@ -86,35 +73,7 @@ export default function GenteDelProyecto({ lead, users = [], currentUser, puedeC
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, flex: 1 }}>
-          Personas de este proyecto <span style={{ fontWeight: 400, color: colors.muted }}>fuera de FOREMAN</span>
-        </div>
-        <button onClick={() => setInvitado(invitado ? null : { ...vacio })}
-          style={{ background: "none", border: "none", color: colors.brand, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, display: "flex", alignItems: "center", gap: 3 }}>
-          <UserPlus size={12} /> Agregar persona
-        </button>
-      </div>
-
-      {invitado && (
-        <div className="invitado-form">
-          <input value={invitado.nombre} onChange={e => setInvitado(p => ({ ...p, nombre: e.target.value }))} placeholder="Nombre" style={mini} autoFocus />
-          <select value={invitado.rol} onChange={e => setInvitado(p => ({ ...p, rol: e.target.value }))} style={mini}>
-            <option value="cliente">Cliente</option><option value="proveedor">Proveedor</option><option value="otro">Otro</option>
-          </select>
-          <input value={invitado.email} onChange={e => setInvitado(p => ({ ...p, email: e.target.value }))} placeholder="Correo" style={mini} />
-          <input value={invitado.telefono} onChange={e => setInvitado(p => ({ ...p, telefono: e.target.value }))} placeholder="WhatsApp" style={mini} />
-          <Button variant="primary" size="sm" onClick={guardarInvitado} disabled={!invitado.nombre.trim() || ocupado}>Guardar</Button>
-        </div>
-      )}
-
-      {invitados.length > 0 && (
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
-          {invitados.map(x => (
-            <span key={x.id} style={{ ...pastilla, gap: 4 }}>{x.nombre} <span style={{ color: colors.muted }}>{x.rol}</span></span>
-          ))}
-        </div>
-      )}
+      <InvolucradosDelProyecto lead={lead} editable={editable} />
     </>
   );
 }

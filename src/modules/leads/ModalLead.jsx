@@ -369,7 +369,7 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
       )}
 
       {editando && seccionVisible === "gente" && (
-        <GenteDelProyecto lead={lead} users={users} currentUser={currentUser}
+        <GenteDelProyecto lead={lead} users={users} currentUser={currentUser} editable={editable}
           puedeCompartir={esAdmin(currentUser?.role) || lead.created_by === currentUser?.id} />
       )}
 
