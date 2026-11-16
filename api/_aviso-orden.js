@@ -403,10 +403,12 @@ export default async function handler(req, res) {
  * cliente rechazó se veía igual que una entregada, con el plazo de aprobación
  * corriendo contra un correo que nadie recibió.
  *
- * Se pregunta solo por los que todavía no se sabe: los que ya llegaron, los
- * que ya rebotaron y los que ya contestaron no cambian. Y de a uno, con una
- * pausa: el servidor de correo corta a los que preguntan muy seguido, y un
- * corte se lee igual que "no sé".
+ * Se pregunta por los que todavía pueden cambiar: los que ya rebotaron y los
+ * que ya contestaron, no. El que figura entregado SÍ se vuelve a preguntar
+ * durante la semana: hay filtros de correo que aceptan el mensaje y lo
+ * devuelven horas después (Diners, 12/11/2026: entregado 17:57, rebotado
+ * 22:26). Y de a uno, con una pausa: el servidor de correo corta a los que
+ * preguntan muy seguido, y un corte se lee igual que "no sé".
  */
 async function revisarEntregas(req, res) {
   const ids = [...new Set((Array.isArray(req.body?.orden_ids) ? req.body.orden_ids : [])

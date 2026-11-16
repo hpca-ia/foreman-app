@@ -14,9 +14,17 @@
 //
 // Acá está la regla de A QUIÉN se le vuelve a preguntar. Sin base de datos.
 
-/** El correo llegó: no hay más que preguntar. */
+/**
+ * El servidor del cliente lo recibió. NO ES EL FINAL.
+ *
+ * El 12/11/2026 Diners recibió un libro de obra a las 17:57 —"delivered"— y
+ * lo devolvió a las 22:26: su filtro de correo acepta el mensaje y el rebote
+ * llega horas después. Nueve de diez envíos de esa tarde terminaron así. El
+ * libro y las actas vuelven a preguntar aunque diga "entregado"; las órdenes
+ * se quedaban con ese primer "entregado" y un rebote tardío no lo veían nunca.
+ */
 export const LLEGO = ["delivered", "opened", "clicked"];
-/** El correo no llegó: tampoco, y hay que avisarlo. */
+/** El correo no llegó: de este ya no se pregunta más, y hay que avisarlo. */
 export const REBOTO = ["bounced", "complained", "failed"];
 /** Pasados estos días ya no se pregunta: el servidor de correo no guarda el registro. */
 export const DIAS_QUE_SE_PREGUNTA = 7;
@@ -27,7 +35,10 @@ const estadoDe = a => String(a?.envio_estado || "").trim().toLowerCase();
 export const leReboto = a => REBOTO.includes(estadoDe(a)) && !a?.aprobado_at;
 
 /**
- * ¿De este envío todavía no se sabe si llegó?
+ * ¿Lo que se sabe de este envío todavía puede cambiar?
+ *
+ * Mientras no haya contestado ni rebotado, y dentro de la semana, sí: también
+ * el que figura entregado, que puede volver rebotado horas después.
  *
  * @param a      la fila del firmante: envio_id, envio_at, envio_estado, aprobado_at, observacion
  * @param ahora  milisegundos, para poder probarlo
@@ -37,7 +48,7 @@ export function sinConfirmar(a, ahora = Date.now()) {
   // Si ya contestó —aprobó u objetó—, le llegó: no hay nada que averiguar.
   if (a.aprobado_at || String(a.observacion || "").trim()) return false;
   const e = estadoDe(a);
-  if (LLEGO.includes(e) || REBOTO.includes(e) || e === "canceled") return false;
+  if (REBOTO.includes(e) || e === "canceled") return false;
   const hace = ahora - new Date(a.envio_at).getTime();
   return Number.isFinite(hace) && hace <= DIAS_QUE_SE_PREGUNTA * 86400000;
 }

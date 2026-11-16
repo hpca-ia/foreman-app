@@ -20,8 +20,20 @@ test("se vuelve a preguntar por lo que quedó en «sent»: entró el pedido, no 
   assert.equal(sinConfirmar(firma(1, { envio_estado: " SENT " }), AHORA), true);
 });
 
-test("lo que ya llegó, lo que ya rebotó y lo que ya contestaron no se vuelve a preguntar", () => {
-  for (const e of ["delivered", "opened", "clicked", "bounced", "complained", "failed", "canceled", "Delivered"]) {
+// LO QUE PASÓ: el 12/11/2026 el servidor de Diners recibió un libro de obra a
+// las 17:57 —"delivered"— y lo devolvió a las 22:26. Las órdenes dejaban de
+// preguntar apenas decía "entregado": un rebote así no lo veían nunca.
+test("LO QUE VIO: «entregado» no es el final; durante la semana se vuelve a preguntar, porque puede volver rebotado", () => {
+  for (const e of ["delivered", "opened", "clicked", "Delivered"]) {
+    assert.equal(sinConfirmar(firma(1, { envio_estado: e }), AHORA), true, e);
+    assert.equal(sinConfirmar(firma(1, { envio_estado: e, envio_at: hace(DIAS_QUE_SE_PREGUNTA + 0.5) }), AHORA), false, e);
+    // Si ya aprobó, le llegó de verdad: ahí sí no hay nada que averiguar.
+    assert.equal(sinConfirmar(firma(1, { envio_estado: e, aprobado_at: hace(0) }), AHORA), false, e);
+  }
+});
+
+test("lo que ya rebotó y lo que ya contestaron no se vuelve a preguntar", () => {
+  for (const e of ["bounced", "complained", "failed", "canceled", "Bounced"]) {
     assert.equal(sinConfirmar(firma(1, { envio_estado: e }), AHORA), false, e);
   }
   // Si aprobó u objetó, le llegó: no hay nada que averiguar.
@@ -51,7 +63,8 @@ test("se pregunta por orden, una sola vez por envío; si se reenvía, se vuelve 
   const ya = new Set();
   const primera = porConfirmar(porOrden, ya, AHORA);
   assert.deepEqual(primera.ordenes.sort((a, b) => a - b), [7, 13]);
-  assert.deepEqual(primera.claves.sort(), ["1:correo-1", "4:correo-4", "5:correo-5"]);
+  // El 2 figura entregado y se pregunta igual; el 3 ya aprobó y no.
+  assert.deepEqual(primera.claves.sort(), ["1:correo-1", "2:correo-2", "4:correo-4", "5:correo-5"]);
   primera.claves.forEach(k => ya.add(k));
   // La pantalla se recarga después de cada cosa que se hace: no vuelve a preguntar.
   assert.deepEqual(porConfirmar(porOrden, ya, AHORA), { ordenes: [], claves: [] });
@@ -135,15 +148,33 @@ test("al revisar, el que rebotó queda como rebotado y se avisa con nombre; el q
     { id: 1, orden_id: 13, nombre: "Nathalie", email: "n@cliente.test", envio_id: "c1", envio_estado: "sent", envio_at: reciente() },
     { id: 2, orden_id: 13, nombre: "Gerente", email: "mal@cliente.test", envio_id: "c2", envio_estado: "sent", envio_at: reciente() },
     { id: 3, orden_id: 13, nombre: "Ya firmó", email: "f@cliente.test", envio_id: "c3", envio_estado: "sent", envio_at: reciente(), aprobado_at: reciente() },
-    { id: 4, orden_id: 13, nombre: "Ya se sabía", email: "s@cliente.test", envio_id: "c4", envio_estado: "delivered", envio_at: reciente() },
+    // El caso de Diners: figuraba entregado y volvió rebotado horas después.
+    { id: 4, orden_id: 13, nombre: "Coordinación", email: "c@cliente.test", envio_id: "c4", envio_estado: "delivered", envio_at: reciente() },
     { id: 5, orden_id: 99, nombre: "De otra obra", email: "o@otro.test", envio_id: "c5", envio_estado: "sent", envio_at: reciente() },
+    { id: 6, orden_id: 13, nombre: "Entregado y sigue igual", email: "e@cliente.test", envio_id: "c6", envio_estado: "delivered", envio_at: reciente() },
+    { id: 7, orden_id: 13, nombre: "Ya había rebotado", email: "r@cliente.test", envio_id: "c7", envio_estado: "bounced", envio_at: reciente() },
   ];
-  const r = await revisar(firmas, { c1: "delivered", c2: "bounced", c3: "delivered", c4: "opened", c5: "bounced" }, { revisar: true, orden_ids: [13] });
+  const r = await revisar(firmas, { c1: "delivered", c2: "bounced", c3: "delivered", c4: "bounced", c5: "bounced", c6: "delivered", c7: "delivered" },
+    { revisar: true, orden_ids: [13] });
   assert.equal(r.res.codigo, 200);
-  // Solo se preguntó por los dos de los que no se sabía, y solo de esa orden.
-  assert.deepEqual(r.preguntas, ["c1", "c2"]);
-  assert.deepEqual(r.escrituras, [{ id: 1, envio_estado: "delivered" }, { id: 2, envio_estado: "bounced" }]);
-  assert.deepEqual(r.res.cuerpo, { revisados: 2, cambiaron: 2, rebotaron: [{ orden_id: 13, nombre: "Gerente", email: "mal@cliente.test" }] });
+  // Se preguntó por los que pueden cambiar —también los entregados—, y solo de
+  // esa orden. Por el que firmó y por el que ya había rebotado, no.
+  assert.deepEqual(r.preguntas, ["c1", "c2", "c4", "c6"]);
+  assert.deepEqual(r.escrituras, [{ id: 1, envio_estado: "delivered" }, { id: 2, envio_estado: "bounced" }, { id: 4, envio_estado: "bounced" }]);
+  assert.deepEqual(r.res.cuerpo, { revisados: 4, cambiaron: 3, rebotaron: [
+    { orden_id: 13, nombre: "Gerente", email: "mal@cliente.test" },
+    { orden_id: 13, nombre: "Coordinación", email: "c@cliente.test" },
+    { orden_id: 13, nombre: "Ya había rebotado", email: "r@cliente.test" },
+  ] });
+});
+
+test("un envío entregado hace más de una semana ya no se pregunta", async () => {
+  const viejo = new Date(Date.now() - 8 * 86400000).toISOString();
+  const r = await revisar(
+    [{ id: 1, orden_id: 13, nombre: "A", email: "a@c.test", envio_id: "c1", envio_estado: "delivered", envio_at: viejo }],
+    { c1: "bounced" }, { revisar: true, orden_ids: [13] });
+  assert.deepEqual(r.preguntas, []);
+  assert.deepEqual(r.escrituras, []);
 });
 
 test("si el servidor de correo no sabe o sigue igual, no se toca nada y no se inventa una entrega", async () => {

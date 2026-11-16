@@ -16,7 +16,8 @@ export function sinConfirmar(a, ahora = Date.now()) {
   if (!a?.envio_id || !a.envio_at) return false;
   if (a.aprobado_at || String(a.observacion || "").trim()) return false;
   const e = estadoDe(a);
-  if (LLEGO.includes(e) || REBOTO.includes(e) || e === "canceled") return false;
+  // "Entregado" no es el final: el rebote puede llegar horas después.
+  if (REBOTO.includes(e) || e === "canceled") return false;
   const hace = ahora - new Date(a.envio_at).getTime();
   return Number.isFinite(hace) && hace <= DIAS_QUE_SE_PREGUNTA * 86400000;
 }
