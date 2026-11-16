@@ -81,6 +81,11 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
     if (!suyas.length) continue;
 
     const suma = suyas.reduce((t, l) => t + n(l.monto), 0);
+    // EL TÍTULO NO QUEDA SOLO AL PIE. Con el cuadro de arriba terminando al
+    // borde, el título del grupo siguiente y su explicación se escribían
+    // encima del pie de la hoja, y el cuadro arrancaba en la otra. Si no entra
+    // el título con el encabezado y una fila, va todo a la hoja siguiente.
+    if (y > doc.internal.pageSize.getHeight() - 110) { doc.addPage(); y = 44; }
     doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...TINTA);
     doc.text(`${titulo}  ·  ${suyas.length}  ·  $${plata(suma)} de costo`, M, y);
     doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(...GRIS);

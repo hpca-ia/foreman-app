@@ -539,7 +539,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
             titulo: "Gastos de la caja",
             columnas: ["Fecha","Proveedor","Descripción","Monto"],
             filas: [{fecha:gastoForm.fecha,proveedor:gastoForm.proveedor,descripcion:gastoForm.descripcion,monto:gastoForm.monto}, ...gastos]
-              .map(g=>[g.fecha,g.proveedor||"—",(g.descripcion||"").slice(0,60),fmt(g.monto)]),
+              .map(g=>[g.fecha,g.proveedor||"—",g.descripcion||"",fmt(g.monto)]),
             anchos: { 3: { halign: "right" } },
           }],
         });

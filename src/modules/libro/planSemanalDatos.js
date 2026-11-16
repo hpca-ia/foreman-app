@@ -219,10 +219,16 @@ export async function guardarDia(diaId, campos) {
   return error ? error.message : null;
 }
 
+export const TOPE_DE_UN_RENGLON = 2000;
+
 export async function agregarItem(dia, { tipo = "tarea", texto, cronograma_actividad_id = null, obra_actividad_id = null, orden = 0 }) {
   if (!String(texto || "").trim()) return { error: "Escribí qué hay que hacer." };
+  // EL TEXTO ENTRA ENTERO. Se cortaba a 300 letras sin avisar: una lista de
+  // materiales pegada en el casillero quedaba a media palabra —«- Kit d»— y
+  // así salía en la hoja del plan. El tope que queda es solo contra un pegado
+  // por error de un documento entero.
   const { data, error } = await supabase.from("obra_plan_items").insert({
-    plan_dia_id: dia.id, tipo, texto: String(texto).trim().slice(0, 300),
+    plan_dia_id: dia.id, tipo, texto: String(texto).trim().slice(0, TOPE_DE_UN_RENGLON),
     cronograma_actividad_id, obra_actividad_id, orden,
   }).select().single();
   return error ? { error: error.message } : { item: data };

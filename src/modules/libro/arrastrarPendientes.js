@@ -26,6 +26,18 @@ export function loQueQuedo(items = []) {
 }
 
 /**
+ * Lo que quedó, con el día en que estaba puesto y en orden de fecha: así lo
+ * lista la hoja del plan, que dice de qué día era cada cosa.
+ */
+export function loQueQuedoConSuDia({ items = [], dias = [] } = {}) {
+  const fechaDe = new Map(dias.map(d => [d.id, String(d.fecha).slice(0, 10)]));
+  return loQueQuedo(items)
+    .map((i, k) => ({ ...i, fecha: fechaDe.get(i.plan_dia_id) || null, _k: k }))
+    .sort((x, y) => String(x.fecha || "").localeCompare(String(y.fecha || "")) || x._k - y._k)
+    .map(({ _k, ...i }) => i);
+}
+
+/**
  * ¿Esta tarea ya está en la semana nueva? Por la actividad del cronograma si
  * las dos la tienen; si no, por el texto, sin tildes ni mayúsculas.
  */

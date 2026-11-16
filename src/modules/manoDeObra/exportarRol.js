@@ -112,16 +112,28 @@ export async function rolAPDF({ nomina, obra = "", periodo = {} }) {
     subtitulo: `${obra} · ${periodoEnPalabras(periodo)}`,
     resumen: [
       { label: "Personas", valor: nomina.personas },
-      { label: "Ingresos", valor: nomina.ingresos },
-      { label: "Beneficios de ley", valor: nomina.beneficios },
-      { label: "Descuentos", valor: nomina.descuentos },
-      { label: "A pagar", valor: nomina.aPagar },
+      // Con el formato de la plata, como en el cuadro de abajo: iban los
+      // números crudos —«2686.12»— al lado de un detalle que dice «275,52».
+      { label: "Ingresos", valor: `$${money(nomina.ingresos)}` },
+      { label: "Beneficios de ley", valor: `$${money(nomina.beneficios)}` },
+      { label: "Descuentos", valor: `$${money(nomina.descuentos)}` },
+      { label: "A pagar", valor: `$${money(nomina.aPagar)}` },
     ],
     bloques: [{
       titulo: "Detalle por persona",
       columnas,
       filas,
-      anchos: [60, 120, 28, 52, 58, 56, 58, 90],
+      // LA FIRMA NECESITA LUGAR. Los anchos iban como una lista de números,
+      // que es como los pide el Excel y no el PDF: no se aplicaban, y la
+      // columna de la firma salía la más angosta de la hoja, en filas de medio
+      // centímetro. Ahora la firma es la columna más ancha, cada fila tiene el
+      // alto de una firma y la plata va alineada a la derecha.
+      anchos: {
+        0: { cellWidth: 78 }, 2: { cellWidth: 38, halign: "center" },
+        3: { cellWidth: 70, halign: "right" }, 4: { cellWidth: 70, halign: "right" }, 5: { cellWidth: 70, halign: "right" },
+        6: { cellWidth: 76, halign: "right", fontStyle: "bold" }, 7: { cellWidth: 190 },
+      },
+      altoFila: 30,
     }],
   });
 }

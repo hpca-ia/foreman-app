@@ -429,7 +429,7 @@ export async function pdfConsolidado({ ordenes = [], lineasPorOrden = {}, fotosP
   doc.setFont("helvetica", "bold").setFontSize(19).setTextColor(...TINTA);
   doc.text(seguro("ÓRDENES DE CAMBIO"), margen, 60);
   doc.setFont("helvetica", "normal").setFontSize(10).setTextColor(...GRIS);
-  doc.text(seguro(`${proyecto || obra?.nombre || ""}  |  HCA Studio  |  ${new Date().getFullYear()}`), margen, 78);
+  doc.text(seguro(`${proyecto || obra?.nombre || ""}  ·  HCA Studio  ·  ${new Date().getFullYear()}`), margen, 78);
 
   // El orden del papel es el de emisión, no el de la pantalla.
   const enOrden = [...ordenes].sort((a, b) => (a.numero || 0) - (b.numero || 0));
@@ -530,7 +530,7 @@ export async function pdfLiquidacionInterna({ liquidacion, obra, proyecto }) {
   doc.setFont("helvetica", "bold").setFontSize(17).setTextColor(...TINTA);
   doc.text(seguro("LIQUIDACIÓN INTERNA · ÓRDENES DE CAMBIO"), margen, 54);
   doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(...GRIS);
-  doc.text(seguro(`${proyecto || obra?.nombre || ""}  |  ${new Date().toLocaleDateString("es-EC")}`), margen, 70);
+  doc.text(seguro(`${proyecto || obra?.nombre || ""}  ·  ${new Date().toLocaleDateString("es-EC")}`), margen, 70);
   doc.setFont("helvetica", "bold").setFontSize(8.5).setTextColor(...ROJO);
   doc.text(seguro("USO INTERNO — NO ENTREGAR AL CLIENTE"), margen, 84);
 
@@ -548,10 +548,10 @@ export async function pdfLiquidacionInterna({ liquidacion, obra, proyecto }) {
       $(f.costoReal),
       f.conCosto ? $(f.costo) : "-",
       f.conCosto ? $(f.margen) : "sin costo",
-      f.pct != null ? `${f.pct}%` : "-",
+      f.pct != null ? `${String(f.pct).replace(".", ",")}%` : "-",
     ]),
     foot: [["", "TOTAL", "", $(total.total), $(total.cobradoConCosto), $(total.costoCotizado), "", $(total.costo), $(total.margen),
-      total.pct != null ? `${total.pct}%` : "-"]],
+      total.pct != null ? `${String(total.pct).replace(".", ",")}%` : "-"]],
     theme: "grid",
     headStyles: { fillColor: TINTA, textColor: [255, 255, 255], fontSize: 7, fontStyle: "bold" },
     footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39], fontSize: 8.5, fontStyle: "bold", halign: "right" },

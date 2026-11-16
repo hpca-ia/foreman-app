@@ -49,6 +49,20 @@ export function partirTexto(doc, texto, ancho, estilo = "normal", letra = 9.5, l
 }
 
 /**
+ * CUÁNTO OCUPA UN TEXTO ESCRITO, con la letra que esté puesta.
+ *
+ * `doc.getTextWidth` descuenta el ajuste entre pares de letras —la «a» que se
+ * mete debajo de la «T»— y jsPDF después no lo aplica al escribir: mide de
+ * menos. En «Tabiquerías y Tumbados:» son tres puntos, justo el espacio que
+ * separa el título en negrita de lo que sigue en el mismo renglón, y las dos
+ * partes salían pegadas. Para poner un texto a continuación de otro se mide
+ * con esto.
+ */
+export function anchoEscrito(doc, texto) {
+  return doc.getStringUnitWidth(String(texto ?? ""), { doKerning: false }) * doc.getFontSize() / doc.internal.scaleFactor;
+}
+
+/**
  * En cuántas tandas se escribe un bloque de renglones, y en cuál hoja va cada
  * una, para que ninguno quede debajo del margen de abajo.
  *

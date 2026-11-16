@@ -12,7 +12,7 @@ import { cargarPlan as cargarGantt, leerPlazo } from "../cronograma/plazo";
 import { equipoEnCache } from "../../lib/equipo";
 // Lo que quedó sin hacer la semana anterior pasa a esta, con su motivo como
 // nota. Puro: qué quedó es un dato, no una opinión.
-import { loQueQuedo, propuestaDeArrastre, comoSeDice as comoSeDiceArrastre } from "./arrastrarPendientes.js";
+import { loQueQuedo, loQueQuedoConSuDia, propuestaDeArrastre, comoSeDice as comoSeDiceArrastre } from "./arrastrarPendientes.js";
 // Sumar a alguien del proyecto desde el plan: en una obra nueva el directorio
 // está vacío y la única forma de cargar a la gente era pasar por un acta.
 import { guardarConvocado } from "../actas/actas";
@@ -796,8 +796,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                   // miércoles de antes—, no siete días para atrás a ciegas.
                   const ant = correrPeriodo(desde, hasta, -1);
                   const previa = await cargarPlan(lead.id, ant.desde, ant.hasta);
-                  const quedaron = previa.items
-                    .filter(i => !["material", "externo"].includes(i.tipo || "tarea") && !i.hecha);
+                  const quedaron = loQueQuedoConSuDia(previa);
                   // Los enlaces del depósito duran una hora y los de la
                   // pantalla pueden llevar rato abiertos: se piden de nuevo,
                   // porque un plano que no carga deja el PDF sin la hoja.
@@ -962,8 +961,7 @@ export default function PlanSemanal({ lead, currentUser, puedeEscribir = true })
                       try {
                         const ant = correrPeriodo(desde, hasta, -1);
                         const previa = await cargarPlan(lead.id, ant.desde, ant.hasta);
-                        const quedaron = previa.items
-                          .filter(i => !["material", "externo"].includes(i.tipo || "tarea") && !i.hecha);
+                        const quedaron = loQueQuedoConSuDia(previa);
                         const frescos = archivos.length ? await enlacesDeArchivos(archivos) : {};
                         const doc = await pdfPlanSemanal({
                           proyecto: lead.nombre, desde, hasta, dias, items, quedaron,

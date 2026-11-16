@@ -26,6 +26,18 @@ const GRIS = [107, 114, 128];
 
 export const money = v => (Number(v) || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const hoyTexto = () => new Date().toLocaleDateString("es-EC", { day: "2-digit", month: "long", year: "numeric" });
+// EL LOGO DE LA CASA, en los reportes también. La planilla del control, el
+// reporte de caja chica y el rol salen de la oficina igual que un acta, y eran
+// los únicos papeles de FOREMAN sin membrete. Se pide recién al armar el PDF
+// —este archivo se carga sin la base ni el depósito— y si no carga, el reporte
+// sale igual.
+async function logoDeLaCasa() {
+  try {
+    const [{ logoParaPDF }, { logoEmpresa }] = await Promise.all([import("./logos"), import("./marca")]);
+    return await logoParaPDF(logoEmpresa());
+  } catch { return null; }
+}
+
 const limpiarNombre = s => (s || "reporte").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, "").trim().slice(0, 60);
 
 /**
@@ -61,12 +73,24 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
   const ancho = doc.internal.pageSize.getWidth();
   let y = 42;
 
-  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(...TINTA);
-  doc.text(titulo, 40, y);
-  y += 16;
+  const logo = await logoDeLaCasa();
+  let anchoLogo = 0;
+  if (logo) {
+    const alto = 22;
+    anchoLogo = (logo.width / logo.height) * alto;
+    doc.addImage(logo.dataUrl, "PNG", ancho - 40 - anchoLogo, 27, anchoLogo, alto);
+  }
+  // El título y el subtítulo, al ancho que deja el logo: un nombre de obra
+  // largo baja de renglón en vez de escribirse encima del logo o fuera de la hoja.
+  const lugar = ancho - 80 - (anchoLogo ? anchoLogo + 24 : 0);
+  const lineasTitulo = partirTexto(doc, titulo, lugar, "bold", 15, medible);
+  doc.setTextColor(...TINTA);
+  doc.text(lineasTitulo, 40, y);
+  y += 16 + (lineasTitulo.length - 1) * 17;
   if (subtitulo) {
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...GRIS);
-    doc.text(subtitulo, 40, y); y += 14;
+    const lineasSub = partirTexto(doc, subtitulo, lugar, "normal", 9.5, medible);
+    doc.setTextColor(...GRIS);
+    doc.text(lineasSub, 40, y); y += 14 + (lineasSub.length - 1) * 11;
   }
   doc.setFontSize(8); doc.setTextColor(...GRIS);
   doc.text(`Generado el ${hoyTexto()} · FOREMAN`, 40, y);
@@ -96,8 +120,11 @@ export async function construirPDF({ titulo, subtitulo, resumen = [], bloques = 
       head: [b.columnas],
       body: b.filas,
       margin: { left: 40, right: 40 },
-      styles: { fontSize: 7.5, cellPadding: 4, textColor: TINTA, lineColor: [235, 235, 232], lineWidth: 0.5 },
-      headStyles: { fillColor: SUAVE, textColor: FUERTE, fontStyle: "bold", fontSize: 7 },
+      // `altoFila`: para el cuadro que se firma a mano —el rol—, cada fila
+      // con el alto de una firma.
+      styles: { fontSize: 7.5, cellPadding: 4, textColor: TINTA, lineColor: [235, 235, 232], lineWidth: 0.5,
+        ...(b.altoFila ? { minCellHeight: b.altoFila, valign: "middle" } : {}) },
+      headStyles: { fillColor: SUAVE, textColor: FUERTE, fontStyle: "bold", fontSize: 7, minCellHeight: 0 },
       alternateRowStyles: { fillColor: [252, 252, 251] },
       columnStyles: b.anchos || {},
       rowPageBreak: "avoid",   // una fila no se parte entre dos páginas

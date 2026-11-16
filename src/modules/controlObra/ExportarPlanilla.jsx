@@ -235,7 +235,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
           ? ["Fecha", "Planilla", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"]
           : ["Fecha", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"];
         const fila = f => [f.fecha, ...(todoElProyecto ? [planillaDe(f.planilla_id)] : []), f.razon_social || "—", f.numero_factura || "—",
-          (f.detalle || "").slice(0, 60), rubrosDeFactura(f.id) || "SIN ASIGNAR", money(Math.abs(Number(f.total) || 0))];
+          f.detalle || "", rubrosDeFactura(f.id) || "SIN ASIGNAR", money(Math.abs(Number(f.total) || 0))];
         const alaDerecha = { [todoElProyecto ? 6 : 5]: { halign: "right" } };
         const filasFact = facturado.map(fila);
         filasFact.push([...Array(columnas.length - 2).fill(""), "GASTO FACTURADO", money(resumen.gasto)]);

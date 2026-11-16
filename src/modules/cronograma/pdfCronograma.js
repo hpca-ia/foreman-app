@@ -4,6 +4,7 @@ import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
+import { anchoEscrito } from "../../lib/textoDelPdf.js";
 import { cuandoDejanEmpezar } from "./cpm";
 
 // El cronograma en PDF: el que se imprime y se clava en la pared.
@@ -260,8 +261,11 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
           doc.rect(M, y, ANCHO - M * 2, FILA, "F");
           doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...TINTA);
           let et = String(f.nombre);
-          while (doc.getTextWidth(et) > 46 && et.length > 4) et = et.slice(0, -2);
-          doc.text(et === String(f.nombre) ? et : `${et.trim()}…`, M + 1.5, y + FILA - 1.7);
+          if (anchoEscrito(doc, et) > 46) {
+            while (anchoEscrito(doc, `${et.trim()}…`) > 46 && et.length > 4) et = et.slice(0, -1);
+            et = `${et.trim()}…`;
+          }
+          doc.text(et, M + 1.5, y + FILA - 1.7);
           if (f.inicio && f.fin) {
             doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
             doc.text(`${corta(f.inicio)} a ${corta(f.fin)}`, M + 51, y + FILA - 1.7);
@@ -280,10 +284,15 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
         // Porcelanato en bodegas y paredes de baño" tiene menos caracteres que
         // el límite y aun así se metía arriba de la columna de los días.
         const etiqueta = `${f.numero ? `${f.numero}  ` : ""}${f.nombre}`;
-        const cabe = 44 - sangria;
+        // Y MEDIDO COMO SE ESCRIBE, con los puntos suspensivos adentro de la
+        // cuenta: se medía sin ellos y de menos (anchoEscrito), y «Desmontaje
+        // de instalaciones y lumin…» terminaba pegado al número de días.
+        const cabe = 42 - sangria;
         let texto = etiqueta;
-        while (doc.getTextWidth(texto) > cabe && texto.length > 4) texto = texto.slice(0, -2);
-        if (texto !== etiqueta) texto = `${texto.trim()}…`;
+        if (anchoEscrito(doc, texto) > cabe) {
+          while (anchoEscrito(doc, `${texto.trim()}…`) > cabe && texto.length > 4) texto = texto.slice(0, -1);
+          texto = `${texto.trim()}…`;
+        }
         doc.text(texto, M + 1.5 + sangria, y + FILA - 1.7);
         doc.setTextColor(...GRIS); doc.setFontSize(6.3);
         doc.text(f.hito ? "—" : String(f.duracion), M + 48, y + FILA - 1.7, { align: "right" });

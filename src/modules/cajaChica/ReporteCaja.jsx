@@ -140,18 +140,20 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
     const bloques = [{
         titulo: porCierre ? `Gastos del cierre N° ${r.cierre?.numero}` : "Gastos del período",
         columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
-        filas: gastosF.map(g => [g.fecha, g.proveedor || "—", g.numero_factura || "—",
-          (g.descripcion || "").slice(0, 55), (g.capitulo || "—").slice(0, 28), g.estado || "pendiente", money(g.monto)]),
-        anchos: { 6: { halign: "right" } },
+        filas: gastosF.map(g => [String(g.fecha || "").slice(0, 10), g.proveedor || "—", g.numero_factura || "—",
+          // ENTERA. Se cortaba a 55 letras —«cortadora de p», «prevención de
+          // riesg»— con media hoja libre al lado: la tabla baja de renglón sola.
+          g.descripcion || "", g.capitulo || "—", g.estado || "pendiente", money(g.monto)]),
+        anchos: { 0: { cellWidth: 52 }, 1: { cellWidth: 170 }, 2: { cellWidth: 84 }, 5: { cellWidth: 50 }, 6: { cellWidth: 52, halign: "right" } },
       }];
 
       if (devueltosF.length) {
         bloques.push({
           titulo: "Devueltos al residente — fuera de la cuenta hasta que se corrijan",
           columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Motivo", "Monto"],
-          filas: devueltosF.map(g => [g.fecha, g.proveedor || "—", g.numero_factura || "—",
-            (g.descripcion || "").slice(0, 45), (g.devuelto_motivo || "—").slice(0, 40), money(g.monto)]),
-          anchos: { 5: { halign: "right" } },
+          filas: devueltosF.map(g => [String(g.fecha || "").slice(0, 10), g.proveedor || "—", g.numero_factura || "—",
+            g.descripcion || "", g.devuelto_motivo || "—", money(g.monto)]),
+          anchos: { 0: { cellWidth: 52 }, 1: { cellWidth: 170 }, 2: { cellWidth: 84 }, 5: { cellWidth: 52, halign: "right" } },
         });
       }
       if (anticiposF.length) {

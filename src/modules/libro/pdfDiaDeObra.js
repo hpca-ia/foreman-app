@@ -75,7 +75,8 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
   y += 16;
 
   doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...TINTA);
-  doc.text(seguro(comoSeLee(dia.fecha)), M, y);
+  // El título del día, con mayúscula: es un título.
+  doc.text(seguro(comoSeLee(dia.fecha).replace(/^./, c => c.toUpperCase())), M, y);
   y += 14;
 
   // La ficha del día: estado, clima, quién lo cerró. Es lo que convierte la
@@ -101,7 +102,7 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
 
   if (dia.sin_novedades) {
     doc.setFont("helvetica", "italic"); doc.setFontSize(10); doc.setTextColor(...GRIS);
-    doc.text("Sin novedades: la obra trabajó segun lo previsto y no hubo nada que registrar.", M, y + 4);
+    doc.text("Sin novedades: la obra trabajó según lo previsto y no hubo nada que registrar.", M, y + 4);
     y += 20;
   }
 
@@ -166,7 +167,7 @@ export async function paginaDelDia(doc, { dia, obra, entradas = [], fotos = [], 
     // El título no queda solo al pie de una hoja con las fotos en la siguiente.
     salto(ALTO_DE_FOTO + 40);
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...TINTA);
-    doc.text("FOTOS DEL DIA", M, y);
+    doc.text("FOTOS DEL DÍA", M, y);
     y += 4;
     doc.setDrawColor(...LINEA); doc.setLineWidth(0.5);
     doc.line(M, y, ancho - M, y);
@@ -262,7 +263,7 @@ export async function pdfLibroDeObra({ obra, dias = [], traerDia }, modo = "abri
 
   let y = 240;
   doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...TINTA);
-  doc.text("INDICE", M, y); y += 12;
+  doc.text("ÍNDICE", M, y); y += 12;
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(60, 60, 60);
   for (const d of dias) {
     if (y > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); y = 50; }
