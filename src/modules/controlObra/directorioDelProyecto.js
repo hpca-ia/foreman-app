@@ -23,9 +23,10 @@ export const esCorreo = email => ES_CORREO.test(correoLimpio(email));
  * @param asistentes  filas de acta_asistentes de las actas del proyecto
  * @param firmantes   filas de orden_cambio_aprobaciones de sus órdenes
  * @param delLibro    filas de libro_envios: a quién se le mandó el libro
+ * @param ocultos     filas de proyecto_gente_oculta: a quién se quitó de las listas
  * @returns [{ nombre, empresa, rol, email, id?, deSiempre?, recibe_ordenes?, deActas?, deOrdenes?, deLibro? }]
  */
-export function armarDirectorio({ convocados = [], invitados = [], asistentes = [], firmantes = [], delLibro = [] } = {}) {
+export function armarDirectorio({ convocados = [], invitados = [], asistentes = [], firmantes = [], delLibro = [], ocultos = [] } = {}) {
   const por = new Map();
   // LO CARGADO A MANO MANDA SOBRE LO QUE QUEDÓ EN UN DOCUMENTO. El nombre de
   // los de siempre y de la ficha es el que alguien escribió —y puede corregir
@@ -69,7 +70,70 @@ export function armarDirectorio({ convocados = [], invitados = [], asistentes = 
   for (const a of asistentes || []) poner(a.nombre, a.empresa, a.cargo, a.email, { deActas: true });
   for (const f of firmantes || []) poner(f.nombre, f.empresa, f.rol, f.email, { deOrdenes: true });
   for (const l of delLibro || []) poner(l.nombre, "", "", l.email, { deLibro: true });
-  return [...por.values()];
+  // Los que se quitaron de las listas no se ofrecen más, aunque sigan
+  // figurando en un documento.
+  const quitados = correosQuitados({ convocados, invitados, ocultos });
+  return [...por.values()].filter(g => !quitados.has(g.email));
+}
+
+// ── QUITAR A ALGUIEN DE LAS LISTAS ─────────────────────────────────────────
+//
+// De un acta, una orden o un libro ya enviados no se borra a nadie: son
+// documentos. Pero la dirección mal escrita a la que se le mandó un libro, o
+// quien ya no está en la obra, no tiene por qué seguir ofreciéndose en cada
+// envío. Los quitados se anotan aparte (migración 183) y acá se los saca de
+// las listas. Hernán, 16/11/2026: «haz la migración».
+
+/**
+ * Los correos quitados de las listas. MANDA LO CARGADO A MANO: si a alguien
+ * que se había quitado se lo vuelve a cargar en los de siempre o en la ficha,
+ * aparece de nuevo aunque siga anotado como quitado.
+ */
+export function correosQuitados({ convocados = [], invitados = [], ocultos = [] } = {}) {
+  const cargados = new Set([...(convocados || []), ...(invitados || [])].map(x => correoLimpio(x.email)).filter(Boolean));
+  return new Set((ocultos || []).map(o => correoLimpio(o.email)).filter(e => e && !cargados.has(e)));
+}
+
+/**
+ * Los que están quitados, con el nombre que se les conozca, para poder
+ * volver a ponerlos.
+ * @returns [{ email, nombre, figura: ["actas", ...] }] por nombre
+ */
+export function quitadosDe(fuentes = {}) {
+  const quitados = correosQuitados(fuentes);
+  const conocidos = new Map(armarDirectorio({ ...fuentes, ocultos: [] }).map(g => [g.email, g]));
+  const vistos = new Set();
+  const lista = [];
+  for (const o of fuentes.ocultos || []) {
+    const email = correoLimpio(o.email);
+    if (!quitados.has(email) || vistos.has(email)) continue;
+    vistos.add(email);
+    const g = conocidos.get(email);
+    lista.push({ email, nombre: String(g?.nombre || o.nombre || "").trim(), figura: dondeFigura(g) });
+  }
+  return lista.sort((a, b) => (a.nombre || a.email).localeCompare(b.nombre || b.email, "es", { sensitivity: "base" }));
+}
+
+/**
+ * Qué hace falta para quitar a esta persona de las listas: sacarla de lo
+ * cargado a mano, anotarla como quitada, o las dos cosas.
+ *
+ * Solo se anota a quien figura en un documento: al que está cargado a mano y
+ * en ningún otro lado le alcanza con sacarlo, porque no queda de dónde volver.
+ */
+export function alQuitar(p) {
+  return {
+    deLoCargado: filasDe(p, "convocado").length + filasDe(p, "invitado").length > 0,
+    esconder: !!p?.email && figuraEnDocumentos(p),
+  };
+}
+
+/** Lo que se le pregunta antes de quitarla, dicho con lo que va a pasar. */
+export function preguntaAlQuitar(p) {
+  const quien = p?.nombre || p?.email || "esta persona";
+  const figura = dondeFigura(p);
+  return `¿Quitar a ${quien} de este proyecto?\n\nDeja de aparecer en las listas para mandar actas, órdenes, el plan y el libro.`
+    + (figura.length ? `\n\nEn ${figura.join(", ")} ya enviados sigue figurando: esos documentos no se tocan. Se la puede volver a poner desde acá.` : "");
 }
 
 // ── TODOS LOS INVOLUCRADOS, PARA LA FICHA DEL PROYECTO ─────────────────────

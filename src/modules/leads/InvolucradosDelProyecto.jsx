@@ -3,9 +3,9 @@ import { UserPlus, Pencil, X } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
-import { cambiosAlEditar, filaDeSiempre, personaDeLaFicha, dondeFigura, figuraEnDocumentos, correoLimpio }
+import { cambiosAlEditar, filaDeSiempre, personaDeLaFicha, dondeFigura, figuraEnDocumentos, correoLimpio, alQuitar, preguntaAlQuitar }
   from "../controlObra/directorioDelProyecto.js";
-import { involucradosDe, aplicarCambios, agregarALaFicha, ponerDeSiempre, sacarDeSiempre, quitarDeLoCargado } from "./involucrados";
+import { involucradosDe, aplicarCambios, agregarALaFicha, ponerDeSiempre, sacarDeSiempre, quitarDeLaLista, volverAPoner } from "./involucrados";
 
 // TODOS LOS INVOLUCRADOS DEL PROYECTO, en un solo lugar.
 //
@@ -19,9 +19,11 @@ import { involucradosDe, aplicarCambios, agregarALaFicha, ponerDeSiempre, sacarD
 // actas, los firmantes de las órdenes y a quién se le mandó el libro—. Por eso
 // quien entra por cualquiera de esos lados aparece acá sin que nadie lo pase.
 //
-// Desde acá se agrega, se corrige y se marca quién es «de siempre». Lo que no
-// se puede es borrar a alguien de un acta, una orden o un libro ya enviados:
-// esos son documentos.
+// Desde acá se agrega, se corrige, se marca quién es «de siempre» y se quita.
+// De un acta, una orden o un libro ya enviados no se borra a nadie —son
+// documentos—: al que figura ahí se lo anota como quitado (migración 183) y
+// deja de ofrecerse para los envíos que vengan. Abajo queda la lista de los
+// quitados, para volver a ponerlos.
 
 const vacio = { nombre: "", rol: "cliente", email: "", telefono: "" };
 const limpio = v => String(v || "").trim();
@@ -30,8 +32,10 @@ const iguales = (p, b) => limpio(p.nombre) === limpio(b.nombre) && limpio(p.empr
   && limpio(p.cargo) === limpio(b.cargo) && correoLimpio(p.email) === correoLimpio(b.email)
   && limpio(p.telefono) === limpio(b.telefono);
 
-export default function InvolucradosDelProyecto({ lead, editable = true }) {
+export default function InvolucradosDelProyecto({ lead, currentUser, editable = true }) {
   const [personas, setPersonas] = useState(null);
+  const [quitados, setQuitados] = useState([]);
+  const [verQuitados, setVerQuitados] = useState(false);
   const [nueva, setNueva] = useState(null);
   const [borrador, setBorrador] = useState(null);
   const [estado, setEstado] = useState(null);   // { texto } | { error }, al lado de lo que se corrige
@@ -43,10 +47,14 @@ export default function InvolucradosDelProyecto({ lead, editable = true }) {
   const guardando = useRef(false);
 
   const cargar = useCallback(async () => {
-    let todas = [];
-    try { todas = await involucradosDe(lead.id); } catch (e) { setError(`No se pudo leer la gente del proyecto: ${e?.message || e}`); }
+    let todas = [], fuera = [];
+    try {
+      const r = await involucradosDe(lead.id);
+      todas = r.personas; fuera = r.quitados;
+    } catch (e) { setError(`No se pudo leer la gente del proyecto: ${e?.message || e}`); }
     lista.current = todas;
     setPersonas(todas);
+    setQuitados(fuera);
     return todas;
   }, [lead.id]);
   useEffect(() => { cargar(); }, [cargar]);
@@ -78,17 +86,22 @@ export default function InvolucradosDelProyecto({ lead, editable = true }) {
   }
 
   async function quitar(p) {
-    const sigue = figuraEnDocumentos(p);
-    const donde = dondeFigura(p).join(", ");
-    if (!window.confirm(sigue
-      ? `¿Quitar a ${p.nombre || p.email} de lo cargado a mano?\n\nSigue en la lista porque figura en ${donde}: esos documentos no se tocan.`
-      : `¿Quitar a ${p.nombre || p.email} de este proyecto?\n\nNo se toca ningún documento ya enviado.`)) return;
+    if (!window.confirm(preguntaAlQuitar(p))) return;
     setError(""); setAviso("");
-    const e = await quitarDeLoCargado(p);
+    const e = await quitarDeLaLista(p, lead.id, currentUser);
     if (e) { setError(e); return; }
     if (borrador?.clave === p.clave) { setBorrador(null); ultimo.current = null; }
     await cargar();
-    if (sigue) setAviso(`${p.nombre || p.email} sigue en la lista porque figura en ${donde}.`);
+    if (alQuitar(p).esconder) {
+      setAviso(`${p.nombre || p.email} ya no aparece en las listas. En ${dondeFigura(p).join(", ")} sigue figurando; se la vuelve a poner desde «quitados», acá abajo.`);
+    }
+  }
+
+  async function reponer(q) {
+    setError(""); setAviso("");
+    const e = await volverAPoner(lead.id, q.email);
+    if (e) { setError(e); return; }
+    await cargar();
   }
 
   function abrir(p) {
@@ -210,9 +223,8 @@ export default function InvolucradosDelProyecto({ lead, editable = true }) {
                         <input type="checkbox" checked={p.deSiempre} onChange={() => alternarDeSiempre(p)} /> de siempre
                       </label>
                       <button className="corregir" onClick={() => abrir(p)} title="Corregir el nombre o el correo" style={icono}><Pencil size={12} /></button>
-                      {cargada
-                        ? <button className="quitar" onClick={() => quitar(p)} title="Quitarla de lo cargado a mano" style={icono}><X size={13} /></button>
-                        : <span style={{ width: 19 }} title="Figura en documentos ya enviados: de ahí no se borra" />}
+                      <button className="quitar" onClick={() => quitar(p)} style={icono}
+                        title="Quitarla de las listas de este proyecto. Los documentos ya enviados no se tocan."><X size={13} /></button>
                     </>
                   ) : p.deSiempre && <span style={{ fontSize: 10.5, color: colors.muted, whiteSpace: "nowrap" }}>de siempre</span>}
                 </div>
@@ -237,6 +249,37 @@ export default function InvolucradosDelProyecto({ lead, editable = true }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* LOS QUITADOS. No se borraron de ningún lado: dejaron de ofrecerse
+          para mandar. Acá se los vuelve a poner. */}
+      {quitados.length > 0 && (
+        <div className="quitados-del-proyecto" style={{ marginBottom: 12 }}>
+          <button onClick={() => setVerQuitados(v => !v)}
+            style={{ background: "none", border: "none", padding: 0, color: colors.muted, fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
+            {quitados.length} {quitados.length === 1 ? "quitado" : "quitados"} de las listas · {verQuitados ? "ocultar" : "ver"}
+          </button>
+          {verQuitados && (
+            <div style={{ marginTop: 5, display: "grid", gap: 3 }}>
+              {quitados.map(q => (
+                <div key={q.email} className="quitado" data-clave={q.email}
+                  style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: colors.inkSoft }}>
+                  <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                    {q.nombre ? `${q.nombre} · ` : ""}{q.email}
+                    {q.figura.length ? <span style={{ color: colors.muted }}> · figura en {q.figura.join(", ")}</span> : null}
+                  </span>
+                  {editable && (
+                    <button className="reponer" onClick={() => reponer(q)}
+                      style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 6, padding: "2px 8px",
+                        color: colors.brand, fontSize: 10.5, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                      volver a poner
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

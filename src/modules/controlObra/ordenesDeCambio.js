@@ -751,7 +751,7 @@ export async function gentePara(leadId) {
  * involucrados de la ficha del proyecto.
  */
 export async function fuentesDeLaGente(leadId) {
-  if (!leadId) return { convocados: [], invitados: [], asistentes: [], firmantes: [], delLibro: [] };
+  if (!leadId) return { convocados: [], invitados: [], asistentes: [], firmantes: [], delLibro: [], ocultos: [] };
   // LAS CUATRO LISTAS SON UNA SOLA PERSONA.
   //
   // El mismo arquitecto de la fiscalización está cargado como convocado del
@@ -774,13 +774,16 @@ export async function fuentesDeLaGente(leadId) {
   //
   // Y LA QUINTA: a quién se le mandó el libro de obra. La dirección que se
   // escribía a mano al mandarlo quedaba solo en la entrega (16/11/2026).
-  const [{ data: convocados }, { data: invitados }, { data: actas }, { data: obras }, { data: delLibro }] = await Promise.all([
+  const [{ data: convocados }, { data: invitados }, { data: actas }, { data: obras }, { data: delLibro }, { data: ocultos }] = await Promise.all([
     supabase.from("obra_convocados").select("*").eq("lead_id", leadId).eq("activo", true).order("orden"),
     supabase.from("pipeline_invitados").select("*").eq("lead_id", leadId),
     supabase.from("obra_actas").select("id").eq("lead_id", leadId),
     supabase.from("obras").select("id").eq("lead_id", leadId),
     // Si la tabla del libro no está, el directorio sale igual con las otras cuatro.
     supabase.from("libro_envios").select("nombre,email").eq("lead_id", leadId),
+    // A QUIÉN SE QUITÓ de las listas (migración 183). Si todavía no se corrió,
+    // esto vuelve sin filas y nadie está quitado: todo sigue como antes.
+    supabase.from("proyecto_gente_oculta").select("email,nombre").eq("lead_id", leadId),
   ]);
 
   const [{ data: asistentes }, { data: firmantes }] = await Promise.all([
@@ -796,7 +799,7 @@ export async function fuentesDeLaGente(leadId) {
   ]);
 
   return { convocados: convocados || [], invitados: invitados || [], asistentes: asistentes || [],
-    firmantes: firmantes || [], delLibro: delLibro || [] };
+    firmantes: firmantes || [], delLibro: delLibro || [], ocultos: ocultos || [] };
 }
 
 /**

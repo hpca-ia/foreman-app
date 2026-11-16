@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { armarDirectorio, deDondeSale, personaParaSumar, esCorreo, correoLimpio, armarInvolucrados, cambiosAlEditar,
-  filaDeSiempre, personaDeLaFicha, dondeFigura, figuraEnDocumentos, filasDe } from "../src/modules/controlObra/directorioDelProyecto.js";
+  filaDeSiempre, personaDeLaFicha, dondeFigura, figuraEnDocumentos, filasDe, quitadosDe, correosQuitados, alQuitar, preguntaAlQuitar } from "../src/modules/controlObra/directorioDelProyecto.js";
 
 const leer = ruta => readFileSync(new URL(ruta, import.meta.url), "utf8");
 const codigoDe = ruta => leer(ruta).split("\n").filter(l => !l.trim().startsWith("//")).join("\n");
@@ -234,10 +234,10 @@ test("pasar a alguien a los de siempre lleva lo que se sabe de él; agregar desd
 
 test("la pestaña «Gente» de la ficha muestra a todos los involucrados, no solo lo cargado ahí", () => {
   const gente = codigoDe("../src/modules/leads/GenteDelProyecto.jsx");
-  assert.match(gente, /<InvolucradosDelProyecto lead=\{lead\} editable=\{editable\} \/>/);
+  assert.match(gente, /<InvolucradosDelProyecto lead=\{lead\} currentUser=\{currentUser\} editable=\{editable\} \/>/);
   assert.doesNotMatch(gente, /pipeline_invitados/);
   const datos = codigoDe("../src/modules/leads/involucrados.js");
-  assert.match(datos, /return armarInvolucrados\(await fuentesDeLaGente\(leadId\)\);/);
+  assert.match(datos, /return \{ personas: armarInvolucrados\(fuentes\), quitados: quitadosDe\(fuentes\) \};/);
   const pantalla = codigoDe("../src/modules/leads/InvolucradosDelProyecto.jsx");
   // Se guarda solo al salir del casillero, con el estado al lado.
   assert.match(pantalla, /onBlur=\{guardar\}/);
@@ -256,4 +256,77 @@ test("el libro de obra elige de la gente del proyecto y suma a alguien ahí mism
   assert.match(c, /\+ sumar a alguien/);
   // Las órdenes dicen de dónde salió cada uno con la misma regla.
   assert.match(codigoDe("../src/modules/controlObra/PanelOrdenesCambio.jsx"), /const deDonde = deDondeSale;/);
+});
+
+// ── QUITAR A ALGUIEN DE LAS LISTAS (migración 183) ─────────────────────────
+//
+// Hernán, 16/11/2026: «haz la migración». Quien solo figuraba en un acta, una
+// orden o un libro ya enviados no se podía sacar de la lista.
+
+test("LO QUE PIDIÓ: el que se quitó deja de ofrecerse en las listas aunque siga figurando en un documento", () => {
+  const fuentes = { ...FUENTES, ocultos: [{ email: " Nueva@Cliente.test ", nombre: null }, { email: "ana@fisca.test", nombre: "Ana Fiscal" }] };
+  // En la lista para mandar —órdenes, plan, libro— ya no están.
+  assert.deepEqual(armarDirectorio(fuentes).map(g => g.email), ["seba@cliente.test", "zoila@cliente.test"]);
+  // En la ficha tampoco; quedan aparte, para volver a ponerlos.
+  assert.deepEqual(armarInvolucrados(fuentes).map(p => p.clave), ["seba@cliente.test", "c2", "i6", "zoila@cliente.test"]);
+  assert.deepEqual(quitadosDe(fuentes), [
+    { email: "ana@fisca.test", nombre: "Ana Fiscal", figura: ["actas", "órdenes"] },
+    { email: "nueva@cliente.test", nombre: "", figura: ["libro"] },
+  ]);
+  // Sin nadie quitado, todo como antes.
+  assert.equal(armarDirectorio(FUENTES).length, 4);
+  assert.deepEqual(quitadosDe(FUENTES), []);
+  assert.deepEqual(quitadosDe(), []);
+});
+
+test("manda lo cargado a mano: al que se había quitado y se lo vuelve a cargar, se lo ve de nuevo", () => {
+  const fuentes = { ...FUENTES, ocultos: [{ email: "seba@cliente.test" }, { email: "zoila@cliente.test" }, { email: "nueva@cliente.test" }] };
+  // Seba está en los de siempre y Zoila en la ficha: siguen. La que solo figura en el libro, no.
+  assert.deepEqual(armarDirectorio(fuentes).map(g => g.email), ["seba@cliente.test", "zoila@cliente.test", "ana@fisca.test"]);
+  assert.deepEqual(quitadosDe(fuentes).map(q => q.email), ["nueva@cliente.test"]);
+  assert.deepEqual([...correosQuitados(fuentes)], ["nueva@cliente.test"]);
+  // Y cargar a alguien en los de siempre borra la anotación, para que no lo
+  // vuelva a esconder el día que se lo saque de ahí.
+  const actas = codigoDe("../src/modules/actas/actas.js");
+  assert.match(actas, /supabase\.from\("proyecto_gente_oculta"\)\.delete\(\)\.eq\("lead_id", data\.lead_id\)\.eq\("email", correo\)/);
+});
+
+test("el quitado que ya no figura en ningún lado se reconoce por el nombre con que se lo anotó", () => {
+  assert.deepEqual(quitadosDe({ ocultos: [{ email: "viejo@cliente.test", nombre: "Uno que ya no está" }, { email: "viejo@cliente.test", nombre: "repetido" }] }),
+    [{ email: "viejo@cliente.test", nombre: "Uno que ya no está", figura: [] }]);
+});
+
+test("qué hace falta para quitar a cada uno: sacarlo de lo cargado, anotarlo, o las dos", () => {
+  const [seba, maestro, ana, nueva, proveedor, zoila] = armarInvolucrados(FUENTES);
+  // Solo figura en documentos: no hay nada que sacar, se lo anota.
+  assert.deepEqual(alQuitar(nueva), { deLoCargado: false, esconder: true });
+  assert.deepEqual(alQuitar(ana), { deLoCargado: false, esconder: true });
+  // De siempre y además en actas y libro: las dos cosas, o seguiría apareciendo por el acta.
+  assert.deepEqual(alQuitar(seba), { deLoCargado: true, esconder: true });
+  // Cargado a mano y en ningún documento: sacarlo alcanza.
+  assert.deepEqual(alQuitar(zoila), { deLoCargado: true, esconder: false });
+  assert.deepEqual(alQuitar(maestro), { deLoCargado: true, esconder: false });
+  assert.deepEqual(alQuitar(proveedor), { deLoCargado: true, esconder: false });
+  // Lo que se pregunta dice lo que va a pasar.
+  assert.equal(preguntaAlQuitar(zoila), "¿Quitar a Zoila Cliente de este proyecto?\n\nDeja de aparecer en las listas para mandar actas, órdenes, el plan y el libro.");
+  assert.equal(preguntaAlQuitar(nueva), "¿Quitar a nueva@cliente.test de este proyecto?\n\nDeja de aparecer en las listas para mandar actas, órdenes, el plan y el libro."
+    + "\n\nEn libro ya enviados sigue figurando: esos documentos no se tocan. Se la puede volver a poner desde acá.");
+});
+
+test("la migración 183 crea la lista de quitados, y el código la lee sin romperse si todavía no se corrió", () => {
+  const sql = leer("../supabase/migrations/183_quitar_gente_de_las_listas.sql");
+  assert.match(sql, /create table if not exists public\.proyecto_gente_oculta/);
+  assert.match(sql, /primary key \(lead_id, email\)/);
+  assert.match(sql, /create policy "equipo foreman" on public\.proyecto_gente_oculta for all to authenticated using \(true\) with check \(true\);/);
+  // No borra ni cambia ningún dato.
+  assert.doesNotMatch(sql.split("\n").filter(l => !l.trim().startsWith("--")).join("\n"), /^\s*(delete|update|drop|truncate|insert)\b/im);
+  const consulta = codigoDe("../src/modules/controlObra/ordenesDeCambio.js");
+  assert.match(consulta, /supabase\.from\("proyecto_gente_oculta"\)\.select\("email,nombre"\)\.eq\("lead_id", leadId\)/);
+  assert.match(consulta, /ocultos: ocultos \|\| \[\]/);
+  // Primero se anota y después se saca de lo cargado: si falta la migración no se toca nada.
+  const datos = codigoDe("../src/modules/leads/involucrados.js");
+  const anota = datos.indexOf('supabase.from("proyecto_gente_oculta").upsert(');
+  const saca = datos.indexOf("const e = await sacarDeSiempre(p);");
+  assert.ok(anota > 0 && saca > anota);
+  assert.match(datos, /if \(error\) return falta\(error\) \? SIN_183 : error\.message;/);
 });

@@ -73,7 +73,7 @@ export default function GenteDelProyecto({ lead, users = [], currentUser, puedeC
         )}
       </div>
 
-      <InvolucradosDelProyecto lead={lead} editable={editable} />
+      <InvolucradosDelProyecto lead={lead} currentUser={currentUser} editable={editable} />
     </>
   );
 }

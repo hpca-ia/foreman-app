@@ -72,6 +72,14 @@ export async function guardarConvocado(fila) {
     : supabase.from("obra_convocados").insert(campos);
   const { data, error } = await q.select().single();
   if (error) return { error: falta(error) ? SIN_106 : error.message };
+  // SI SE LA HABÍA QUITADO DE LAS LISTAS, VUELVE. Cargar a alguien en los de
+  // siempre es decir que está en el proyecto: la anotación de «quitada»
+  // (migración 183) se borra, para que no la vuelva a esconder el día que se
+  // la saque de los de siempre. Si esa tabla no está, no hay nada que borrar.
+  const correo = String(data?.email || "").trim().toLowerCase();
+  if (correo && data?.lead_id && data.activo !== false) {
+    try { await supabase.from("proyecto_gente_oculta").delete().eq("lead_id", data.lead_id).eq("email", correo); } catch { /* sigue cargada igual */ }
+  }
   return { convocado: data };
 }
 
