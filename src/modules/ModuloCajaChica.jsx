@@ -22,6 +22,7 @@ import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 import CampoProveedor from "../components/CampoProveedor";
 import { LECTURA, textoDeNova } from "../lib/modelos";
 import { leerRenglones } from "./controlObra/renglones";
+import { basesDelPapel, basesAlGuardar, basesAlCorregir, lineaDeBases } from "./cajaChica/basesDelPapel";
 import { CLASES_DOC, CLASES_CAJA, claseDeGasto } from "./controlObra/pagos";
 import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
 import { avisoDeSobra } from "./controlObra/repartoDeFactura.js";
@@ -591,8 +592,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       // en una lista de ciento sesenta es trabajo que el modelo puede hacer.
       // Propone; quien carga confirma.
       const paraNova = rubrosObra.slice(0, 220).map(r => `${r.id}:${r.descripcion.slice(0, 60)}`).join(" | ");
-      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"fecha":"YYYY-MM-DD","tipo":"factura|nota_venta|recibo|pasaje|nota_credito","rubro_id":null}. "tipo" es qué documento es: factura (electrónica o impresa, con RUC y clave de acceso), nota_venta (régimen simplificado o RIMPE, dice NOTA DE VENTA), recibo (un recibo simple o escrito a mano), pasaje (boleto aéreo) o nota_credito (devolución). "numero_factura" es el número impreso del documento (formato 001-001-000000123), si lo tiene. "monto" es el TOTAL a pagar. "rubro_id" es el id del rubro de esta lista al que corresponde el gasto, o null si no estás seguro: null es una respuesta válida y es mejor que adivinar, porque un gasto cargado al rubro equivocado se descubre meses después. Rubros: ' + paraNova}];
-      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:LECTURA,max_tokens:700,messages:[{role:"user",content}]})});
+      const content=[adjunto,{type:"text",text:'Lee esta factura de Ecuador. SOLO JSON, sin markdown: {"descripcion":"","proveedor":"","ruc":"","numero_factura":"","monto":0,"subtotal_0":0,"subtotal_5":0,"subtotal_15":0,"iva":0,"fecha":"YYYY-MM-DD","tipo":"factura|nota_venta|recibo|pasaje|nota_credito","rubro_id":null}. "tipo" es qué documento es: factura (electrónica o impresa, con RUC y clave de acceso), nota_venta (régimen simplificado o RIMPE, dice NOTA DE VENTA), recibo (un recibo simple o escrito a mano), pasaje (boleto aéreo) o nota_credito (devolución). "numero_factura" es el número impreso del documento (formato 001-001-000000123), si lo tiene. "monto" es el TOTAL a pagar. "subtotal_0", "subtotal_5" y "subtotal_15" son las bases sin IVA que el papel imprime para la tarifa 0%, 5% y 15%, ya con el descuento restado; "iva" es el IVA que imprime. Si el documento no cobra IVA (nota de venta, recibo), todo va en "subtotal_0" e "iva" es 0. "rubro_id" es el id del rubro de esta lista al que corresponde el gasto, o null si no estás seguro: null es una respuesta válida y es mejor que adivinar, porque un gasto cargado al rubro equivocado se descubre meses después. Rubros: ' + paraNova}];
+      const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:LECTURA,max_tokens:900,messages:[{role:"user",content}]})});
       if (!res.ok) { setNovaError(`NOVA no respondió (error ${res.status}). Llena los datos a mano.`); setNovaLeyendo(false); return; }
       const d=await res.json();
       if (d.error) { setNovaError("NOVA: "+(d.error.message||JSON.stringify(d.error))); setNovaLeyendo(false); return; }
@@ -603,7 +604,10 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       setGastoForm(prev=>({...prev,
         descripcion:parsed.descripcion||prev.descripcion, proveedor:parsed.proveedor||prev.proveedor,
         ruc:parsed.ruc||prev.ruc, numero_factura:parsed.numero_factura||prev.numero_factura,
-        monto:parsed.monto||prev.monto, fecha:parsed.fecha||prev.fecha, tipo:parsed.tipo||prev.tipo}));
+        monto:parsed.monto||prev.monto, fecha:parsed.fecha||prev.fecha, tipo:parsed.tipo||prev.tipo,
+        // La base y el IVA del papel: si cuadran con el monto, van así al
+        // control (basesDelPapel.js decide).
+        desglose:{subtotal_0:parsed.subtotal_0, subtotal_5:parsed.subtotal_5, subtotal_15:parsed.subtotal_15, iva:parsed.iva}}));
       // EL RUBRO QUE PROPUSO, si existe de verdad y todavía no se eligió nada.
       // No pisa una elección hecha a mano: quien cargó el gasto sabe más que
       // el papel sobre para qué era.
@@ -751,7 +755,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
         await supabase.from("obra_facturas").update({
           fecha:gastoForm.fecha, razon_social:gastoForm.proveedor||null, ruc:gastoForm.ruc||null,
           numero_factura:gastoForm.numero_factura||null, detalle:gastoForm.descripcion,
-          justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
+          justificacion:gastoForm.notas||null, total:monto,
+          ...basesAlCorregir(gastoForm.desglose, monto, gastoEditando.monto),
           clase:claseDeGasto(tipoGasto),
           ...(archivoUrl?{archivo_url:archivoUrl, archivo_nombre:archivoNombre}:{}),
         }).eq("id",gastoEditando.obra_factura_id);
@@ -862,7 +867,10 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
           duplicado_de:dups.exactos[0]?.id||null,
           duplicado_justificacion:dups.exactos.length?dupJustificacion.trim():null,
           detalle:gastoForm.descripcion,
-          justificacion:gastoForm.notas||null, total:monto, subtotal_15:monto,
+          justificacion:gastoForm.notas||null, total:monto,
+          // LA BASE Y EL IVA, LOS DEL PAPEL. Antes todo el monto entraba como
+          // base 15% con el IVA en cero.
+          ...basesAlGuardar(gastoForm.desglose, monto),
           tipo:"material", archivo_url:archivoUrl, archivo_nombre:archivoNombre,
           origen:"caja_chica", caja_gasto_id:data.id,
           subido_por:currentUser.id, subido_por_nombre:currentUser.name
@@ -1176,7 +1184,10 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                 <CampoProveedor valor={gastoForm.proveedor} onChange={v=>setGastoForm(p=>({...p,proveedor:v}))}
                   ruc={gastoForm.ruc} onRuc={v=>setGastoForm(p=>({...p,ruc:v}))} placeholder="Proveedor" estilo={iS}/></div>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Monto *</label>
-                <input type="number" value={gastoForm.monto} onChange={e=>setGastoForm(p=>({...p,monto:e.target.value}))} placeholder="$0.00" style={iS}/></div>
+                <input type="number" value={gastoForm.monto} onChange={e=>setGastoForm(p=>({...p,monto:e.target.value}))} placeholder="$0.00" style={iS}/>
+                {(()=>{ const b = basesDelPapel(gastoForm.desglose, gastoForm.monto);
+                  return b ? <div className="bases-del-papel" style={{fontSize:11,color:"var(--muted)",marginTop:4}}>{lineaDeBases(b, fmt)}</div> : null; })()}
+              </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>RUC</label>
