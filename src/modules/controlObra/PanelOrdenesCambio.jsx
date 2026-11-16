@@ -15,6 +15,7 @@ import { comoSeDice as parentescoDe, codigoDeLaRevision, mandaEnElControl } from
 import { cuadreDeOrdenes, comoSeDice as cuadreComoSeDice, capitulosPartidos } from "./cuadreDeOrdenes.js";
 import { huecosQueSeCierran, numerosQueFaltan, codigoPrincipal } from "./numeracionDeOrdenes.js";
 import { porConfirmar } from "./entregaDeOrdenes.js";
+import { deDondeSale } from "./directorioDelProyecto.js";
 import {
   ESTADOS_ORDEN, EJECUCION, codigoDe, subtotales, cargarOrdenes, crearOrden, guardarOrden,
   borrarOrden, agregarLinea, borrarLinea, guardarLinea, aprobarOrden, desaprobarOrden, enviarOrden,
@@ -253,10 +254,7 @@ export default function PanelOrdenesCambio({ obra, proyecto, rubros = [], curren
   // parece a un cliente que no contestó—. Trae la gente del proyecto que
   // recibe órdenes y no está ya en la lista.
   /** De dónde salió esta persona, dicho para quien elige. */
-  const deDonde = g => (g.deSiempre ? "los de siempre"
-    : g.deOrdenes ? "órdenes anteriores"
-    : g.deActas ? "actas de este proyecto"
-    : "el proyecto");
+  const deDonde = deDondeSale;
 
   async function traerLosDeSiempre(o) {
     setAvisoGente(null);

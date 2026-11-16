@@ -8,7 +8,9 @@ import { pdfDiaDeObra, pdfLibroDeObra, comoSeLee } from "./pdfDiaDeObra";
 import { abrirArchivo, subirArchivo } from "../../lib/archivos";
 import { comoViaja, rutaDelEnvio, enMegas } from "./envioDelLibro.js";
 import { pdfAlDia, pdfViejo } from "./pdfGuardado.js";
-import { convocadosDe } from "../actas/actas";
+import { guardarConvocado } from "../actas/actas";
+import { gentePara } from "../controlObra/ordenesDeCambio";
+import { personaParaSumar, deDondeSale } from "../controlObra/directorioDelProyecto.js";
 
 // EL LIBRO, EL DE VERDAD.
 //
@@ -64,16 +66,49 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
   const todoElLibro = enRango.length === ordenados.length;
 
   // ── A quién se le manda ────────────────────────────────────────────────
+  //
+  // LA GENTE DEL PROYECTO, la misma lista que usan las órdenes y el plan
+  // semanal: los de siempre del acta, los que firmaron órdenes, los que
+  // vinieron a una reunión y a quien ya se le mandó el libro. Antes acá
+  // salían solo los convocados del acta, y la dirección que se escribía a
+  // mano había que escribirla de nuevo cada vez. Hernán, 16/11/2026: «agrego
+  // un nuevo recipient al enviar el libro... esa nueva persona debería poder
+  // ser nueva en el listado de correos».
   const [mandando, setMandando] = useState(false);
-  const [convocados, setConvocados] = useState([]);
+  const [gente, setGente] = useState([]);
   const [elegidos, setElegidos] = useState(() => new Set());
   const [otros, setOtros] = useState("");
   const [nota, setNota] = useState("");
+  const [nuevaPersona, setNuevaPersona] = useState(null);
 
-  useEffect(() => {
-    if (!mandando || !lead?.id) return;
-    convocadosDe(lead.id).then(cs => setConvocados((cs || []).filter(c => esCorreo(c.email))));
-  }, [mandando, lead?.id]);
+  const cargarGente = useCallback(async () => {
+    if (!lead?.id) return;
+    try { setGente(await gentePara(lead.id)); } catch { /* queda la que había */ }
+  }, [lead?.id]);
+  useEffect(() => { if (mandando) cargarGente(); }, [mandando, cargarGente]);
+
+  /** Sumar a alguien acá mismo: queda en los de siempre del proyecto. */
+  async function sumarPersona() {
+    const r = personaParaSumar(nuevaPersona, lead.id, gente.length);
+    if (r.error) { setError(r.error); return; }
+    const correo = r.fila.email;
+    const marcar = () => setElegidos(s => new Set(s).add(correo));
+    setError(""); setAviso("");
+    // Si ya está en los de siempre no se la carga dos veces: se la marca.
+    const ya = gente.find(g => g.email === correo);
+    if (ya?.deSiempre) {
+      marcar(); setNuevaPersona(null);
+      setAviso(`${ya.nombre || correo} ya estaba en la lista: quedó marcado.`);
+      return;
+    }
+    setOcupado("sumando");
+    const g = await guardarConvocado(r.fila);
+    if (g.error) { setOcupado(""); setError(g.error); return; }
+    await cargarGente();
+    // Recién sumada, va marcada: para eso se la sumó.
+    marcar(); setNuevaPersona(null);
+    setOcupado("");
+  }
 
   // ── LO QUE YA SE ENTREGÓ ───────────────────────────────────────────────
   //
@@ -199,9 +234,8 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
       // Quién es cada dirección: una entrega que dice "info@proeficaz.com" y no
       // "PROEFICAZ" obliga a traducir mentalmente cada vez que se la mira.
       const quien = {};
-      for (const c of convocados) {
-        const mail = String(c.email).trim().toLowerCase();
-        if (destinatarios.includes(mail)) quien[mail] = c.nombre || null;
+      for (const g of gente) {
+        if (destinatarios.includes(g.email)) quien[g.email] = g.nombre || null;
       }
       const r = await fetch("/api/aviso?de=libro", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -304,42 +338,80 @@ export default function LibroImpreso({ lead, dias = [], onCambio, currentUser })
         </div>
       )}
 
-      {/* A QUIÉN. Los de siempre de esta obra ya están cargados: son los
-          mismos que reciben las actas. Y se puede escribir cualquier otra
-          dirección, porque el libro se lo pide gente que no va a las
-          reuniones —un abogado, un perito, el seguro—. */}
+      {/* A QUIÉN. La gente del proyecto ya está cargada: es la misma lista de
+          las actas, las órdenes y el plan. Se suma a alguien acá mismo, y se
+          puede escribir cualquier otra dirección, porque el libro se lo pide
+          gente que no va a las reuniones —un abogado, un perito, el seguro—. */}
       {mandando && (
         <div style={{ background: colors.surface, border: `1px solid ${colors.brand}`,
           borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 12, display: "grid", gap: 9 }}>
           <div>
             <label style={titulito}>A QUIÉN</label>
-            {convocados.length === 0 ? (
-              <div style={{ fontSize: 11.5, color: colors.muted }}>
-                Esta obra no tiene convocados con correo cargado. Escribí las direcciones abajo.
+            {gente.length === 0 ? (
+              <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 6 }}>
+                Esta obra todavía no tiene a nadie cargado. Sumalo acá: queda para el libro, las actas y las órdenes.
               </div>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
-                {convocados.map(c => {
-                  const mail = String(c.email).trim().toLowerCase();
-                  return (
-                    <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 5,
+              <div className="gente-del-libro" style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginBottom: 6 }}>
+                {gente.map(g => (
+                  <label key={g.email} title={`${g.email} · de ${deDondeSale(g)}`}
+                    style={{ display: "flex", alignItems: "center", gap: 5,
                       fontSize: 12, color: colors.ink, cursor: "pointer" }}>
-                      <input type="checkbox" checked={elegidos.has(mail)}
-                        onChange={e => setElegidos(s => {
-                          const n = new Set(s);
-                          if (e.target.checked) n.add(mail); else n.delete(mail);
-                          return n;
-                        })} />
-                      {c.nombre || mail}
-                    </label>
-                  );
-                })}
+                    <input type="checkbox" checked={elegidos.has(g.email)}
+                      onChange={e => setElegidos(s => {
+                        const n = new Set(s);
+                        if (e.target.checked) n.add(g.email); else n.delete(g.email);
+                        return n;
+                      })} />
+                    {g.nombre || g.email}
+                  </label>
+                ))}
+              </div>
+            )}
+            {/* SUMAR A ALGUIEN, acá mismo, con su nombre. Queda en los de
+                siempre del proyecto: no hay que ir al acta a cargarlo. */}
+            {!nuevaPersona ? (
+              <button className="sumar-al-libro" onClick={() => { setNuevaPersona({ nombre: "", empresa: "", email: "" }); setError(""); }}
+                title="Alguien del proyecto que no está en la lista"
+                style={{ border: `1px dashed ${colors.border}`, background: "#fff", color: colors.inkSoft,
+                  borderRadius: 14, padding: "3px 10px", fontSize: 11.5, cursor: "pointer", fontFamily: colors.font }}>
+                + sumar a alguien
+              </button>
+            ) : (
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                  <input placeholder="Nombre" value={nuevaPersona.nombre} autoFocus
+                    onChange={e => setNuevaPersona(n => ({ ...n, nombre: e.target.value }))}
+                    style={{ ...inputStyle, width: 150, padding: "4px 8px", fontSize: 11.5 }} />
+                  <input placeholder="Empresa o rol" value={nuevaPersona.empresa}
+                    onChange={e => setNuevaPersona(n => ({ ...n, empresa: e.target.value }))}
+                    style={{ ...inputStyle, width: 140, padding: "4px 8px", fontSize: 11.5 }} />
+                  <input placeholder="correo@" type="email" value={nuevaPersona.email}
+                    onChange={e => setNuevaPersona(n => ({ ...n, email: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter") sumarPersona(); }}
+                    style={{ ...inputStyle, width: 190, padding: "4px 8px", fontSize: 11.5 }} />
+                  <Button size="sm" variant="primary" onClick={sumarPersona}
+                    disabled={!!ocupado || !nuevaPersona.nombre.trim() || !esCorreo(nuevaPersona.email)}>
+                    {ocupado === "sumando" ? "Sumando…" : "Sumar"}
+                  </Button>
+                  <button onClick={() => setNuevaPersona(null)}
+                    style={{ border: "none", background: "transparent", color: colors.muted, cursor: "pointer",
+                      fontSize: 11.5, fontFamily: colors.font }}>cancelar</button>
+                </div>
+                <div style={{ fontSize: 10.5, color: colors.muted }}>
+                  Queda en «los de siempre» del proyecto: para el libro, las órdenes, el plan y cada acta nueva.
+                </div>
               </div>
             )}
           </div>
-          <input value={otros} placeholder="Otras direcciones, separadas por coma"
-            onChange={e => setOtros(e.target.value)}
-            style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
+          <div>
+            <input value={otros} placeholder="Otras direcciones, separadas por coma"
+              onChange={e => setOtros(e.target.value)}
+              style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />
+            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>
+              A quien le mandes el libro queda en esta lista para la próxima vez.
+            </div>
+          </div>
           <input value={nota} placeholder="Una línea de contexto, si hace falta (opcional)"
             onChange={e => setNota(e.target.value)}
             style={{ ...inputStyle, fontSize: 12, padding: "7px 10px" }} />

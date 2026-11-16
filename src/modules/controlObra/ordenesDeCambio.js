@@ -3,6 +3,7 @@ import { rubrosDeLaOrden } from "./rubrosDeLaOrden.js";
 import { agruparOrdenesAprobadas } from "./agruparOrdenes.js";
 import { codigoDeLaRevision } from "./revisionesDeOrden.js";
 import { siguienteNumero, numeroDeModificacion, numeroPrincipal, huecosQueSeCierran, codigoPrincipal } from "./numeracionDeOrdenes.js";
+import { armarDirectorio } from "./directorioDelProyecto.js";
 
 // Las órdenes de cambio: lo que se pactó después.
 //
@@ -758,11 +759,16 @@ export async function gentePara(leadId) {
   // cada acta nueva. Un proveedor que vino una vez a una reunión queda en el
   // directorio —para no volver a tipearlo— pero no se cuela en todas las actas
   // del año.
-  const [{ data: convocados }, { data: invitados }, { data: actas }, { data: obras }] = await Promise.all([
+  //
+  // Y LA QUINTA: a quién se le mandó el libro de obra. La dirección que se
+  // escribía a mano al mandarlo quedaba solo en la entrega (16/11/2026).
+  const [{ data: convocados }, { data: invitados }, { data: actas }, { data: obras }, { data: delLibro }] = await Promise.all([
     supabase.from("obra_convocados").select("*").eq("lead_id", leadId).eq("activo", true).order("orden"),
     supabase.from("pipeline_invitados").select("*").eq("lead_id", leadId),
     supabase.from("obra_actas").select("id").eq("lead_id", leadId),
     supabase.from("obras").select("id").eq("lead_id", leadId),
+    // Si la tabla del libro no está, el directorio sale igual con las otras cuatro.
+    supabase.from("libro_envios").select("nombre,email").eq("lead_id", leadId),
   ]);
 
   const [{ data: asistentes }, { data: firmantes }] = await Promise.all([
@@ -777,26 +783,9 @@ export async function gentePara(leadId) {
       : Promise.resolve({ data: [] }),
   ]);
 
-  const por = new Map();
-  const poner = (nombre, empresa, rol, email, extra = {}) => {
-    const limpio = String(email || "").trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(limpio)) return;
-    const ya = por.get(limpio);
-    if (!ya) { por.set(limpio, { nombre: nombre || "", empresa: empresa || "", rol: rol || "", email: limpio, ...extra }); return; }
-    // Gana el dato que existe sobre el vacío, y el nombre más completo: el
-    // firmante de una orden suele estar cargado como "Diners" y el convocado
-    // del acta con nombre, empresa y cargo.
-    if (String(nombre || "").length > String(ya.nombre || "").length) ya.nombre = nombre;
-    if (!ya.empresa && empresa) ya.empresa = empresa;
-    if (!ya.rol && rol) ya.rol = rol;
-    Object.assign(ya, { ...extra, ...(ya.deSiempre ? { deSiempre: true } : {}) });
-  };
-
-  for (const c of convocados || []) poner(c.nombre, c.empresa, c.cargo, c.email, { id: `c${c.id}`, deSiempre: true });
-  for (const i of invitados || []) poner(i.nombre, "", i.rol, i.email, { id: `i${i.id}`, recibe_ordenes: i.recibe_ordenes });
-  for (const a of asistentes || []) poner(a.nombre, a.empresa, a.cargo, a.email, { deActas: true });
-  for (const f of firmantes || []) poner(f.nombre, f.empresa, f.rol, f.email, { deOrdenes: true });
-  return [...por.values()];
+  // Cómo se juntan —por correo, gana el dato más completo— está en
+  // directorioDelProyecto.js, sin base de datos, para poder probarlo.
+  return armarDirectorio({ convocados, invitados, asistentes, firmantes, delLibro });
 }
 
 /**
