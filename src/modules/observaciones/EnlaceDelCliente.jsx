@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link2, Copy, Check, Power } from "lucide-react";
+import { Link2, Copy, Check, Power, Eye } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -112,7 +112,7 @@ export default function EnlaceDelCliente({ lead, onCambio }) {
         <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 8 }}>
           <strong style={{ color: colors.ink }}>El cliente todavía no tiene acceso.</strong> Con el enlace prendido
           entra sin usuario ni contraseña y ve las fotos de avance, lo que salió de las visitas con él,
-          lo que le mandaste a aprobar y las tareas que decidas mostrarle. Lo interno no lo ve.
+          lo que le mandaste a aprobar y los puntos del checklist que decidas mostrarle, con sus fotos y archivos. Lo interno no lo ve.
         </div>
         {error && <div style={{ fontSize: 11.5, color: colors.danger, marginBottom: 6 }}>{error}</div>}
         <Button variant="primary" size="sm" onClick={prender} disabled={ocupado}>
@@ -134,6 +134,13 @@ export default function EnlaceDelCliente({ lead, onCambio }) {
         <Button variant={copiado ? "secondary" : "primary"} size="sm" onClick={copiar}>
           {copiado ? <><Check size={13} /> Copiado</> : <><Copy size={13} /> Copiar</>}
         </Button>
+        {/* VERLO COMO LO VE ÉL. Antes de mandarlo se mira: es la única forma
+            de saber qué le va a aparecer, y de entender qué es «su enlace». */}
+        <a className="ver-como-el-cliente" href={url} target="_blank" rel="noreferrer"
+          style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: colors.brand,
+            textDecoration: "none", border: `1px solid ${colors.brand}`, borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
+          <Eye size={13} /> Ver como el cliente
+        </a>
       </div>
       <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.5 }}>
         Quien tenga este enlace entra sin contraseña y ve solo este proyecto. Mandáselo por correo o WhatsApp.

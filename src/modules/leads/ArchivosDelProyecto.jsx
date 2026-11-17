@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Upload, Trash2, Download, FileText, Image, Box, Sheet, Folder } from "lucide-react";
+import { Upload, Trash2, Download, FileText, Image, Box, Sheet, Folder, Eye, EyeOff } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { enlacesArchivos, abrirArchivo } from "../../lib/archivos";
+import { mostrarArchivoAlCliente } from "./proyecto";
 
 // El cajón del proyecto: planos, CAD, PDF del cliente, fotos del terreno.
 //
@@ -15,6 +16,11 @@ import { enlacesArchivos, abrirArchivo } from "../../lib/archivos";
 // Las carpetas son texto libre y se escriben al subir. Obligar a crearlas
 // antes termina con todo en la raíz, que es exactamente el problema que esto
 // viene a resolver.
+//
+// CUÁLES VE EL CLIENTE. Un archivo del proyecto es interno hasta que alguien
+// decide mostrarlo (migración 184): con el ojo de cada renglón se le muestra
+// en su enlace, o se le deja de mostrar, sin borrarlo. Los que se adjuntan
+// desde el checklist «para el cliente» también están acá, ya marcados.
 
 const MB = 1024 * 1024;
 // Supabase corta los archivos grandes del lado del servidor. Avisar antes de
@@ -85,6 +91,13 @@ export default function ArchivosDelProyecto({ lead, currentUser, editable = true
       if (e2) setAviso(/relation|schema cache/i.test(e2.message) ? "Falta correr la migración 061." : e2.message);
       setSubiendo(false);
     }
+    await cargar();
+  }
+
+  async function alCliente(a, ver) {
+    setAviso("");
+    const e = await mostrarArchivoAlCliente(a, ver);
+    if (e) { setAviso(e); return; }
     await cargar();
   }
 
@@ -172,8 +185,23 @@ export default function ArchivosDelProyecto({ lead, currentUser, editable = true
                     </div>
                     <div style={{ fontSize: 10.5, color: colors.muted }}>
                       {peso(a.tamano)}{a.tamano ? " · " : ""}{a.subido_nombre || "—"} · {dia(a.created_at)}
+                      {a.visible_cliente && (
+                        <span className="lo-ve-el-cliente" style={{ color: colors.brand, fontWeight: 600 }}>
+                          {" · "}lo ve el cliente{a.task_id ? ", en un punto del checklist" : ""}
+                        </span>
+                      )}
                     </div>
                   </div>
+                  {/* El ojo: mostrárselo al cliente en su enlace, o dejar de
+                      mostrárselo. Solo si la base ya tiene ese dato (184). */}
+                  {editable && a.visible_cliente !== undefined && (
+                    <button className="ojo-del-cliente" onClick={() => alCliente(a, !a.visible_cliente)} aria-pressed={!!a.visible_cliente}
+                      title={a.visible_cliente ? "El cliente lo ve en su enlace. Tocá para dejar de mostrárselo." : "Mostrárselo al cliente en su enlace"}
+                      style={{ background: a.visible_cliente ? colors.brandSoft : "none", border: `1px solid ${a.visible_cliente ? colors.brand : colors.border}`,
+                        borderRadius: 7, padding: "5px 7px", color: a.visible_cliente ? colors.brand : colors.inkSoft, cursor: "pointer", display: "flex" }}>
+                      {a.visible_cliente ? <Eye size={13} /> : <EyeOff size={13} />}
+                    </button>
+                  )}
                   <button onClick={() => abrirArchivo(a.storage_path)} title="Abrir o descargar"
                     style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 7, padding: "5px 7px",
                       color: colors.inkSoft, cursor: "pointer", display: "flex" }}>

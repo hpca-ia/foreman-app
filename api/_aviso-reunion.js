@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Método no permitido" });
   if (!(await sesionValida(req))) return res.status(401).json({ error: "Tu sesión venció. Vuelve a entrar a FOREMAN." });
 
-  const { tareaId, alResponsable = true, invitados = [] } = req.body || {};
+  const { tareaId, alResponsable = true, invitados = [], correos = [] } = req.body || {};
   if (!tareaId) return res.status(400).json({ error: "Falta la reunión" });
 
   try {
@@ -71,6 +71,13 @@ export default async function handler(req, res) {
       const suyos = await json(await rest(`pipeline_invitados?lead_id=eq.${tarea.lead_id}&select=id,nombre,email`));
       suyos.filter(i => invitados.includes(i.id) && i.email).forEach(i => gente.push({ nombre: i.nombre, email: i.email }));
     }
+    // Y LOS INVOLUCRADOS DEL PROYECTO, que llegan por su correo: la gente de
+    // afuera ya no se carga en una lista aparte, sale del directorio del
+    // proyecto —los de siempre del acta, los que firmaron órdenes, a quien se
+    // le mandó el libro—. Quien pide esto ya entró a FOREMAN (sesión arriba).
+    const esCorreo = c => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(c);
+    [].concat(correos || []).map(c => String(c || "").trim().toLowerCase()).filter(esCorreo).slice(0, 30)
+      .forEach(c => { if (!gente.some(g => String(g.email).toLowerCase() === c)) gente.push({ nombre: c, email: c }); });
     if (!gente.length) return res.status(200).json({ ok: false, error: "Nadie de los elegidos tiene correo cargado." });
 
     const cuando = `${enCriollo(tarea.due_date)}${tarea.hora ? ` a las ${tarea.hora}` : ""}`;

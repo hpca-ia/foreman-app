@@ -78,6 +78,48 @@ export function porEtapa(items = [], etapas = [], { nombreDe = () => null, etapa
 }
 
 /**
+ * EL AVANCE DEL PROYECTO, ETAPA POR ETAPA.
+ *
+ * Hernán, 17/11/2026: «el pipeline es el progreso del proyecto que genera
+ * actividades con fecha y estado... no todas las actividades tienen la misma
+ * etapa». El checklist ya repartía sus puntos por etapa, pero el progreso no
+ * se leía en ningún lado: para saber cuánto iba Ingenierías había que contar
+ * a mano, y lo hecho quedaba plegado en una lista sin etapas.
+ *
+ * Cuenta todo —lo abierto y lo hecho—, menos las compras, que tienen su
+ * módulo, y lo que se cerró con «ya no va».
+ *
+ * @param tareas   las filas enteras de las tareas del proyecto
+ * @param etapas   las del tipo del proyecto, en su orden
+ * @param elCamino si se muestran también las etapas del tipo que todavía no
+ *                 tienen nada: mientras se persigue, es el camino que falta;
+ *                 en un aprobado serían seis casilleros vacíos
+ * @returns [{ id, nombre, hechas, total, actual, estado }] con estado
+ *          «lista» · «en_curso» · «vacia»; al final las etapas que ya no son
+ *          de este tipo y lo que no tiene ninguna
+ */
+export function avancePorEtapa(tareas = [], etapas = [], { nombreDe = () => null, etapaDelProyecto = null, elCamino = true } = {}) {
+  const cuenta = new Map();
+  for (const t of tareas || []) {
+    if (!t || t.compra_id || t.type === "Compra" || t.descartada) continue;
+    const id = t.etapa_id || null;
+    const c = cuenta.get(id) || { hechas: 0, total: 0 };
+    c.total += 1;
+    if (t.status === "listo") c.hechas += 1;
+    cuenta.set(id, c);
+  }
+  const fila = (id, nombre) => {
+    const c = cuenta.get(id) || { hechas: 0, total: 0 };
+    return { id, nombre, hechas: c.hechas, total: c.total, actual: !!id && id === etapaDelProyecto,
+      estado: !c.total ? "vacia" : c.hechas === c.total ? "lista" : "en_curso" };
+  };
+  const delTipo = (etapas || []).map(e => fila(e.id, e.nombre)).filter(f => elCamino || f.total || f.actual);
+  const otras = [...cuenta.keys()].filter(id => id && !(etapas || []).some(e => e.id === id))
+    .map(id => fila(id, nombreDe(id) || "Otra etapa"));
+  return [...delTipo, ...otras, ...(cuenta.has(null) ? [fila(null, "Sin etapa")] : [])];
+}
+
+/**
  * ¿Hace falta el título de cada etapa? Con todo en la etapa en la que está el
  * proyecto, no: arriba ya lo dice, y repetirlo es ruido. En cuanto hay puntos
  * de otra, sí: es lo que los separa.

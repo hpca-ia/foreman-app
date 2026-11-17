@@ -90,6 +90,20 @@ export function etapaDelLead(lead, catalogo = []) {
   return etapasDelTipo(catalogo, tipoDe(lead)).find(e => e.id === lead?.etapa) || null;
 }
 
+/**
+ * En qué etapa nace una tarea que se le carga a un proyecto desde Tareas.
+ *
+ * Hernán, 17/11/2026: «el pipeline es el progreso del proyecto que genera
+ * actividades... que se transforman en tareas; no todas las actividades tienen
+ * la misma etapa». La tarea cargada desde el checklist ya elegía su etapa; la
+ * que se cargaba desde Tareas —la misma fila— nacía sin ninguna y caía en
+ * «Sin etapa», fuera del avance del proyecto. Nace en la etapa en la que está
+ * el proyecto, y desde el checklist se la pasa a otra.
+ *
+ * Solo mientras se persigue: un aprobado ya no está en el pipeline.
+ */
+export const etapaAlCrear = lead => (sePersigue(lead) && lead?.etapa ? lead.etapa : null);
+
 /** Cómo se llama una etapa, siga activa o no: las tareas viejas la llevan de etiqueta. */
 export const nombreDeEtapa = (id, catalogo = []) => catalogo.find(e => e.id === id)?.nombre || null;
 

@@ -250,6 +250,29 @@ export function personaDeLaFicha({ nombre, rol, email, telefono } = {}, leadId) 
   return { fila: { lead_id: leadId, nombre: quien, rol: rol || "otro", email: correo || null, telefono: texto(telefono) || null } };
 }
 
+/**
+ * La gente DE AFUERA del proyecto, para elegir en su checklist: a quién se le
+ * manda, a quién se le avisa una reunión, de quién es un punto.
+ *
+ * Sale del mismo directorio. Se quita a los del equipo —Lizeth, Johanna—, que
+ * también están en los de siempre del acta pero entran a FOREMAN: en el
+ * checklist ya salen como «Del equipo», y dos veces la misma persona hace
+ * dudar de cuál elegir.
+ *
+ * @param gente     el directorio (armarDirectorio)
+ * @param usuarios  el equipo de FOREMAN, con su correo
+ * @returns [{ id, nombre, rol, email }] por nombre; el `id` es su correo
+ */
+export function deAfuera(gente = [], usuarios = []) {
+  const delEquipo = new Set((usuarios || []).map(u => correoLimpio(u?.email)).filter(Boolean));
+  return (gente || []).filter(g => g?.email && !delEquipo.has(g.email))
+    .map(g => ({
+      id: g.email, email: g.email, nombre: String(g.nombre || "").trim() || g.email,
+      rol: [g.empresa, g.rol].map(v => String(v || "").trim()).filter(Boolean).join(" · "),
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+}
+
 /** De dónde salió esta persona, dicho para quien elige. */
 export const deDondeSale = g => (g?.deSiempre ? "los de siempre"
   : g?.deOrdenes ? "órdenes anteriores"

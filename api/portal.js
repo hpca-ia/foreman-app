@@ -5,7 +5,7 @@ import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
-import { listaDelCliente } from "./_listaDelCliente.js";
+import { listaDelCliente, loDelCliente } from "./_listaDelCliente.js";
 import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
@@ -54,7 +54,7 @@ async function proyectoDe(token) {
   const limpio = String(token).replace(/[^A-Za-z0-9_-]/g, "");
   if (limpio.length < 20) return null;
   const filas = await json(await rest(
-    `leads?portal_token=eq.${encodeURIComponent(limpio)}&select=id,nombre,obra_id,portal_activo`));
+    `leads?portal_token=eq.${encodeURIComponent(limpio)}&select=id,nombre,obra_id,portal_activo,tunel,etapa,resultado`));
   if (!Array.isArray(filas)) throw new Error(`leads no contestó: ${filas?.message || filas?.code || "sin respuesta"}`);
   const lead = filas[0];
   if (!lead || !lead.portal_activo) return null;
@@ -1227,19 +1227,38 @@ async function armarInforme(lead) {
   // falta para decir qué es y en qué está; la nota y los comentarios ni se
   // leen. Si la columna todavía no existe (migración 176), no hay lista.
   const deLaLista = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id`
-    + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente`;
+    + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente,etapa_id`;
   // Con la descripción y la actualización escritas para él (migración 178);
   // si esas columnas todavía no están, sale el título y el estado.
   let marcadas = await json(await rest(`${deLaLista},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`));
   if (!Array.isArray(marcadas)) marcadas = await json(await rest(deLaLista));
-  const lista = listaDelCliente(marcadas);
+  if (!Array.isArray(marcadas)) marcadas = [];
+
+  // LAS FOTOS Y LOS ARCHIVOS QUE SE DECIDIÓ MOSTRARLE (migración 184): los del
+  // proyecto y los de cada punto. Solo lo marcado, y de un punto solo si el
+  // punto también se le muestra. Si esas columnas todavía no están, no hay.
+  let paraEl = await json(await rest(
+    `proyecto_archivos?lead_id=eq.${lead.id}&visible_cliente=eq.true`
+    + `&select=id,task_id,nombre,descripcion,tipo,storage_path,visible_cliente,created_at&order=created_at.desc`));
+  if (!Array.isArray(paraEl)) paraEl = [];
+  const seVen = new Set(listaDelCliente(marcadas).map(t => t.id));
+  paraEl = paraEl.filter(a => a.task_id == null || seVen.has(a.task_id));
+
+  // Las etapas del pipeline, para decirle en cuál está cada punto.
+  let catalogo = marcadas.some(t => t.etapa_id)
+    ? await json(await rest("pipeline_etapas?select=id,nombre,orden,tunel")) : [];
+  if (!Array.isArray(catalogo)) catalogo = [];
 
   const enlaces = await firmar([
     ...fotosObs.map(f => f.storage_path),
     ...avance.map(f => f.storage_path),
     ...entregas.filter(e => e.storage_path).map(e => e.storage_path),
     ...fotosOC.map(f => f.storage_path),
+    ...paraEl.map(a => a.storage_path),
   ].filter(Boolean));
+
+  const delCliente = loDelCliente({ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces });
+  const lista = delCliente.lista;
 
   const conUrl = x => ({ ...x, url: enlaces[x.storage_path] || null, storage_path: undefined });
 
@@ -1248,6 +1267,10 @@ async function armarInforme(lead) {
     // presupuesta no tiene fotos ni visitas, y su enlace arranca en la lista.
     proyecto: { nombre: lead.nombre, enObra: !!lead.obra_id },
     lista,
+    // Por etapa, lo último que pasó, y las fotos y archivos del proyecto.
+    etapas: delCliente.etapas,
+    novedades: delCliente.novedades,
+    archivos: delCliente.archivos,
     recorridas,
     observaciones: observaciones.map(o => ({
       ...o,

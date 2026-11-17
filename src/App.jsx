@@ -21,7 +21,7 @@ import Bandeja from "./components/Bandeja";
 import { bandeja, sinCompras, alReprogramar, alDelegar, alDescartar, alReabrir, tareaRapida } from "./lib/bandeja";
 import { avisosDelTablero } from "./lib/avisos";
 import CargadorDeAvisos from "./components/CargadorDeAvisos";
-import { avisosDelPipeline, esMiAviso, diaCorto } from "./modules/leads/pipeline";
+import { avisosDelPipeline, esMiAviso, diaCorto, etapaAlCrear } from "./modules/leads/pipeline";
 import { anotar as anotarEnProyecto, anotarEnLaTarea } from "./modules/leads/proyecto";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
@@ -295,11 +295,15 @@ export default function App() {
     // forma más cara de perder una semana.
     if (usuarioId !== usuario.id) avisarPorCorreo(t.id);
   }
+  // LA TAREA DE UN PROYECTO NACE EN SU ETAPA. La que se carga desde acá es la
+  // misma fila que la del checklist del proyecto; sin esto nacía sin etapa y
+  // quedaba fuera de su avance. Sin proyecto, o con uno ya aprobado, ninguna.
+  const etapaDeLaNueva = leadId => ({ etapa_id: leadId ? etapaAlCrear(proyectosPipeline.find(l => l.id === leadId)) : null });
   // Se agrega escribiendo y Enter. Devuelve el motivo si no se pudo.
   async function agregarRapida({ titulo, proyecto, fecha }) {
     const r = tareaRapida({ titulo, usuarioId: usuario.id, proyecto, fecha });
     if (r.error) return r.error;
-    const { data, error } = await supabase.from("tasks").insert(r.fila).select().single();
+    const { data, error } = await supabase.from("tasks").insert({ ...r.fila, ...etapaDeLaNueva(r.fila.lead_id) }).select().single();
     if (error) return mensajeErrorTarea(error);
     if (data) setTareas(prev => (prev.some(t => t.id === data.id) ? prev : [data, ...prev]));
     return null;
@@ -372,13 +376,16 @@ export default function App() {
     };
     if (id) {
       const antes = tareas.find(t => t.id === id);
-      const { error } = await guardar(form);
+      // Si pasó a otro proyecto, la etapa que traía era del anterior: toma la
+      // del nuevo, o ninguna.
+      const deOtro = !!antes && (antes.lead_id ?? null) !== (form.lead_id ?? null);
+      const { error } = await guardar({ ...form, ...(deOtro ? etapaDeLaNueva(form.lead_id) : {}) });
       if (error) { alert(mensajeErrorTarea(error)); return; }
       // Si cambió de manos, el nuevo se entera: enterarse por casualidad de que
       // algo era tuyo es la forma más cara de perder una semana.
       if (form.assignee_id && form.assignee_id !== antes?.assignee_id) await avisarPorCorreo(id);
     } else {
-      const { data: creada, error } = await guardar({ ...form, ...(form.es_aprobacion ? { aprobacion_estado: "pendiente" } : {}) });
+      const { data: creada, error } = await guardar({ ...form, ...etapaDeLaNueva(form.lead_id), ...(form.es_aprobacion ? { aprobacion_estado: "pendiente" } : {}) });
       if (error) { alert(mensajeErrorTarea(error)); return; }
       // El aviso lo manda el servidor, que es el único que ve los correos y
       // sabe de qué proyecto es. Si no se pudo mandar, se dice: antes el error

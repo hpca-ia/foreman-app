@@ -12,6 +12,13 @@ import VisorFotos from "../components/VisorFotos";
 // Tres pantallas y no una lista larga: lo que viene a hacer casi siempre es
 // una de las tres cosas, y ponerlas juntas obliga a bajar hasta encontrar la
 // suya. Arranca en el avance, que es lo que mira el 90% de las veces.
+//
+// EL CHECKLIST, PARA QUE SE ENTIENDA SIN EXPLICARLO (17/11/2026, Hernán: «el
+// cliente ve las actualizaciones de su proyecto... hazlo lo más didáctico y
+// fácil posible»). Arriba lo último que pasó, con su fecha, para no buscarlo
+// punto por punto. Después los puntos por etapa, con cuánto va cada una. Y
+// cada punto con las fotos y los archivos que se le quisieron mostrar. Las
+// fotos y archivos del proyecto en general tienen su solapa.
 
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`)
   .toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
@@ -24,6 +31,8 @@ export default function PortalCliente({ token }) {
   // arranca en su lista, que es lo único que tiene para mostrar.
   const [elegida, setSolapa] = useState(null);
   const [mirando, setMirando] = useState(null);
+  // Las fotos de un punto o del proyecto, abiertas en grande: { fotos, indice }.
+  const [galeria, setGaleria] = useState(null);
   const [enviando, setEnviando] = useState(null);
 
   const cargar = useCallback(async () => {
@@ -68,7 +77,7 @@ export default function PortalCliente({ token }) {
     );
   }
 
-  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [] } = info;
+  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [], etapas = [], novedades = [], archivos = [] } = info;
   const ocPendientes = ordenes.filter(o => o.cliente_respondio_at == null);
   const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length;
   const fotos = avance.filter(f => f.url).map(f => ({ ...f, titulo: f.titulo || dia(f.fecha) }));
@@ -80,11 +89,12 @@ export default function PortalCliente({ token }) {
   const solapas = [
     ...(lista.length ? [["lista", "Checklist", lista.length - listas]] : []),
     ...(enObra ? [["avance", "Avance", avance.length], ["recorridas", "Recorridas", observaciones.length]] : []),
+    ...(archivos.length ? [["archivos", "Fotos y archivos", archivos.length]] : []),
     ["aprobar", "Para aprobar", porContestar],
   ];
   // La obra arranca en el avance, que es lo que se viene a mirar; sin obra,
   // en la lista.
-  const porDefecto = enObra ? "avance" : lista.length ? "lista" : "aprobar";
+  const porDefecto = enObra ? "avance" : lista.length ? "lista" : archivos.length ? "archivos" : "aprobar";
   const solapa = solapas.some(([id]) => id === elegida) ? elegida : porDefecto;
 
   return (
@@ -96,14 +106,14 @@ export default function PortalCliente({ token }) {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: `1px solid ${colors.border}` }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: `1px solid ${colors.border}`, overflowX: "auto" }}>
         {solapas.map(([id, label, n]) => (
           <button key={id} onClick={() => setSolapa(id)}
             style={{ padding: "8px 13px", border: "none", background: "transparent",
               borderBottom: solapa === id ? `2px solid ${colors.brand}` : "2px solid transparent",
               color: solapa === id ? colors.brand : colors.inkSoft,
               fontSize: 13, fontWeight: solapa === id ? 600 : 400, cursor: "pointer", fontFamily: colors.font,
-              display: "flex", alignItems: "center", gap: 5 }}>
+              display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", flexShrink: 0 }}>
             {label}
             {n > 0 && (
               <span style={{ background: id === "aprobar" ? colors.warning : colors.neutralSoft,
@@ -115,7 +125,20 @@ export default function PortalCliente({ token }) {
       </div>
 
       {/* ── El checklist ───────────────────────────────────────────── */}
-      {solapa === "lista" && <Checklist lista={lista} listas={listas} />}
+      {solapa === "lista" && (
+        <Checklist lista={lista} listas={listas} etapas={etapas} novedades={novedades}
+          onFoto={(fotos, indice) => setGaleria({ fotos, indice })} />
+      )}
+
+      {/* ── Las fotos y los archivos del proyecto ──────────────────── */}
+      {solapa === "archivos" && (
+        <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: 12 }}>
+          <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 10 }}>
+            Lo que te compartimos del proyecto. Tocá una foto para verla en grande, o un archivo para abrirlo.
+          </div>
+          <FotosYArchivos archivos={archivos} grande onFoto={(fotos, indice) => setGaleria({ fotos, indice })} />
+        </div>
+      )}
 
       {/* ── El avance ──────────────────────────────────────────────── */}
       {solapa === "avance" && (
@@ -187,6 +210,10 @@ export default function PortalCliente({ token }) {
       {mirando !== null && (
         <VisorFotos fotos={fotos} indice={mirando} onIndice={setMirando} onCerrar={() => setMirando(null)} />
       )}
+      {galeria && (
+        <VisorFotos fotos={galeria.fotos} indice={galeria.indice}
+          onIndice={i => setGaleria(g => ({ ...g, indice: i }))} onCerrar={() => setGaleria(null)} />
+      )}
     </Marco>
   );
 }
@@ -201,8 +228,83 @@ const ESTADO_DE_LISTA = {
   pendiente: { dice: "Pendiente", color: colors.muted },
 };
 
-function Checklist({ lista, listas }) {
+/**
+ * Las fotos y los archivos de un punto o del proyecto.
+ *
+ * Las fotos, en miniatura, se abren en grande; lo demás es un enlace con su
+ * nombre. Lo que no tiene enlace —se venció, no se pudo firmar— no se dibuja:
+ * una miniatura rota hace dudar de todo lo demás.
+ */
+function FotosYArchivos({ archivos = [], onFoto, grande = false }) {
+  const fotos = archivos.filter(a => a.esFoto && a.url);
+  const otros = archivos.filter(a => !a.esFoto && a.url);
+  if (!fotos.length && !otros.length) return null;
+  const lado = grande ? 104 : 72;
+  const paraElVisor = fotos.map(f => ({ ...f, titulo: f.descripcion || f.nombre }));
+  return (
+    <div className="fotos-y-archivos" style={{ marginTop: grande ? 0 : 8 }}>
+      {fotos.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {fotos.map((f, i) => (
+            <img key={f.id} className="foto" src={f.url} alt={f.descripcion || f.nombre} onClick={() => onFoto?.(paraElVisor, i)}
+              style={{ width: lado, height: lado, objectFit: "cover", borderRadius: 8, border: `1px solid ${colors.border}`, display: "block", cursor: "zoom-in" }} />
+          ))}
+        </div>
+      )}
+      {otros.length > 0 && (
+        <div style={{ display: "grid", gap: 4, marginTop: fotos.length ? 8 : 0 }}>
+          {otros.map(a => (
+            <a key={a.id} className="archivo" href={a.url} target="_blank" rel="noreferrer"
+              style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, color: colors.brand,
+                textDecoration: "none", padding: "7px 10px", border: `1px solid ${colors.border}`, borderRadius: 8, background: "#fff",
+                overflowWrap: "anywhere" }}>
+              <span aria-hidden="true">📎</span> {a.nombre}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Checklist({ lista, listas, etapas = [], novedades = [], onFoto }) {
   const pct = lista.length ? Math.round((listas / lista.length) * 100) : 0;
+  // Con etapas, cada una con sus puntos; sin ellas, la lista de corrido.
+  const grupos = etapas.length
+    ? etapas.map(e => ({ ...e, puntos: lista.filter(t => (t.etapa_id || null) === e.id) })).filter(g => g.puntos.length)
+    : [{ id: "todo", nombre: "", puntos: lista }];
+  const punto = (t, i) => {
+    const e = ESTADO_DE_LISTA[t.estado] || ESTADO_DE_LISTA.pendiente;
+    const listo = t.estado === "listo";
+    return (
+      <div key={t.id} className="punto-de-lista" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0",
+        borderTop: i ? `1px solid ${colors.neutralSoft}` : "none" }}>
+        <span aria-hidden="true" style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, boxSizing: "border-box",
+          border: `1.5px solid ${listo ? colors.success : colors.border}`, background: listo ? colors.success : "#fff",
+          color: "#fff", fontSize: 12, lineHeight: "15px", textAlign: "center", fontWeight: 700 }}>{listo ? "✓" : ""}</span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
+          {/* Qué es este punto, dicho para él. */}
+          {t.descripcion && (
+            <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2, overflowWrap: "anywhere" }}>{t.descripcion}</div>
+          )}
+          <div style={{ fontSize: 11.5, color: e.color, marginTop: 2 }}>
+            {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
+          </div>
+          {/* Qué hay de nuevo, con su fecha: cuán fresca es la noticia. */}
+          {t.actualizacion && (
+            <div className="actualizacion-del-punto" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, marginTop: 6, padding: "7px 10px",
+              background: colors.bg, borderRadius: 7, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
+              {t.actualizacion}
+              {t.actualizado_el && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>Actualizado el {dia(t.actualizado_el)}</div>}
+            </div>
+          )}
+          {/* Las fotos y los archivos de este punto. */}
+          <FotosYArchivos archivos={t.archivos || []} onFoto={onFoto} />
+        </div>
+      </div>
+    );
+  };
   return (
     <div>
       <div style={{ marginBottom: 12 }}>
@@ -214,38 +316,39 @@ function Checklist({ lista, listas }) {
           <div style={{ width: `${pct}%`, height: "100%", background: colors.success, borderRadius: 3 }} />
         </div>
       </div>
-      <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: "2px 12px" }}>
-        {lista.map((t, i) => {
-          const e = ESTADO_DE_LISTA[t.estado] || ESTADO_DE_LISTA.pendiente;
-          const listo = t.estado === "listo";
-          return (
-            <div key={t.id} className="punto-de-lista" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0",
-              borderTop: i ? `1px solid ${colors.neutralSoft}` : "none" }}>
-              <span aria-hidden="true" style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, boxSizing: "border-box",
-                border: `1.5px solid ${listo ? colors.success : colors.border}`, background: listo ? colors.success : "#fff",
-                color: "#fff", fontSize: 12, lineHeight: "15px", textAlign: "center", fontWeight: 700 }}>{listo ? "✓" : ""}</span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
-                {/* Qué es este punto, dicho para él. */}
-                {t.descripcion && (
-                  <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2, overflowWrap: "anywhere" }}>{t.descripcion}</div>
-                )}
-                <div style={{ fontSize: 11.5, color: e.color, marginTop: 2 }}>
-                  {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
-                </div>
-                {/* Qué hay de nuevo, con su fecha: cuán fresca es la noticia. */}
-                {t.actualizacion && (
-                  <div className="actualizacion-del-punto" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, marginTop: 6, padding: "7px 10px",
-                    background: colors.bg, borderRadius: 7, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
-                    {t.actualizacion}
-                    {t.actualizado_el && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>Actualizado el {dia(t.actualizado_el)}</div>}
-                  </div>
-                )}
-              </div>
+
+      {/* LO ÚLTIMO. Lo que cambió desde la última vez que entró, lo más nuevo
+          arriba: no tiene que recorrer los puntos para enterarse. */}
+      {novedades.length > 0 && (
+        <div className="lo-ultimo" style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: 11, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: colors.brand, letterSpacing: 0.4, marginBottom: 5 }}>LO ÚLTIMO</div>
+          {novedades.map((n, i) => (
+            <div key={`${n.tipo}-${n.id}`} className="novedad" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, padding: "5px 0",
+              borderTop: i ? `1px solid ${colors.border}` : "none", overflowWrap: "anywhere" }}>
+              <span style={{ color: colors.muted }}>{dia(n.fecha)} · </span>
+              <strong>{n.titulo}</strong>{n.tipo === "listo" ? <span style={{ color: colors.success, fontWeight: 600 }}> · listo</span> : <>: {n.texto}</>}
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {grupos.map(g => (
+        <div key={g.id || "otros"} className="etapa-del-cliente" style={{ marginBottom: 12 }}>
+          {/* La etapa, con cuánto va. Es el camino del proyecto, dicho corto. */}
+          {g.nombre && (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", margin: "0 2px 5px" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: g.actual ? colors.brand : colors.inkSoft }}>{g.nombre.toUpperCase()}</span>
+              <span style={{ fontSize: 11.5, color: g.listas === g.total ? colors.success : colors.muted }}>
+                {g.listas === g.total ? "todo listo" : `${g.listas} de ${g.total} ${g.total === 1 ? "listo" : "listos"}`}
+                {g.actual ? " · en esto estamos ahora" : ""}
+              </span>
+            </div>
+          )}
+          <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: "2px 12px" }}>
+            {g.puntos.map(punto)}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

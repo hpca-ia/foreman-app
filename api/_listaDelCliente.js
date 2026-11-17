@@ -40,6 +40,86 @@ export function listaDelCliente(tareas = []) {
     .filter(t => t.titulo);
 }
 
+// ── LO QUE VE EL CLIENTE EN SU ENLACE: POR ETAPA, CON LO ÚLTIMO Y CON SUS FOTOS ──
+//
+// Hernán, 17/11/2026: «el cliente ve las actualizaciones de su proyecto. Se
+// pueden cargar archivos o fotos a que los vea... relacionadas al proyecto y a
+// las tareas también. Hazlo lo más didáctico y fácil posible».
+//
+// El checklist era una lista plana de puntos «Pendiente». Ahora dice en qué
+// etapa está cada cosa y cuánto va cada etapa, arriba pone lo último que pasó
+// —para no tener que buscarlo punto por punto—, y cada punto lleva las fotos y
+// los archivos que se le quisieron mostrar. Lo del proyecto en general va
+// aparte.
+
+// Una foto es lo que el navegador sabe dibujar. Un .heic del teléfono o un
+// .tiff se ofrecen para bajar: como imagen saldrían rotos.
+const ES_FOTO = /\.(jpe?g|png|webp|gif|avif)$/i;
+const paraVer = (a, enlaces) => ({
+  id: a.id, nombre: limpio(a.nombre) || "Archivo", descripcion: limpio(a.descripcion),
+  esFoto: ES_FOTO.test(limpio(a.nombre)), url: enlaces[a.storage_path] || null, fecha: dia(a.created_at),
+});
+
+/**
+ * @param tareas    las filas de `tasks` del proyecto (con `etapa_id`)
+ * @param catalogo  las etapas del pipeline: id, nombre, orden, tunel
+ * @param lead      el proyecto: tunel, etapa, resultado
+ * @param archivos  las filas de `proyecto_archivos` marcadas para el cliente
+ * @param enlaces   { storage_path: enlace temporal }
+ * @returns { lista, etapas, novedades, archivos }
+ *   lista     · los puntos, cada uno con `etapa` y sus `archivos`
+ *   etapas    · [{ id, nombre, listas, total, actual }] en el orden del
+ *               pipeline; vacío si los puntos no tienen etapa
+ *   novedades · lo último que pasó, lo más nuevo arriba: actualizaciones
+ *               escritas y puntos que quedaron listos
+ *   archivos  · los del proyecto en general, lo más nuevo arriba
+ */
+export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {} } = {}) {
+  const filas = Array.isArray(tareas) ? tareas : [];
+  const etapaDe = new Map(filas.map(t => [t?.id, t?.etapa_id || null]));
+  const cat = Array.isArray(catalogo) ? catalogo : [];
+  const nombreDe = id => limpio(cat.find(e => e.id === id)?.nombre) || null;
+  const todos = (Array.isArray(archivos) ? archivos : []).filter(a => a && a.visible_cliente !== false);
+
+  const lista = listaDelCliente(filas).map(t => {
+    const etapaId = etapaDe.get(t.id) || null;
+    return {
+      ...t, etapa_id: etapaId && nombreDe(etapaId) ? etapaId : null, etapa: etapaId ? nombreDe(etapaId) : null,
+      archivos: todos.filter(a => a.task_id === t.id).map(a => paraVer(a, enlaces)),
+    };
+  });
+
+  // Las etapas que tienen algo para mostrar, en el orden del pipeline: primero
+  // las del tipo del proyecto, después alguna de antes, y al final lo suelto.
+  const lugar = id => {
+    if (!id) return 3e6;
+    const e = cat.find(x => x.id === id);
+    return (e && lead?.tunel && e.tunel === lead.tunel ? 0 : 1e6) + (Number(e?.orden) || 0);
+  };
+  const ids = [...new Set(lista.map(t => t.etapa_id))].sort((a, b) => lugar(a) - lugar(b));
+  const etapas = ids.length === 1 && ids[0] === null ? [] : ids.map(id => {
+    const suyos = lista.filter(t => t.etapa_id === id);
+    return {
+      id, nombre: id ? nombreDe(id) : "Otros puntos", total: suyos.length, listas: suyos.filter(t => t.estado === "listo").length,
+      actual: !!id && !lead?.resultado && lead?.etapa === id,
+    };
+  });
+
+  const novedades = [
+    ...lista.filter(t => t.actualizacion && t.actualizado_el)
+      .map(t => ({ id: t.id, tipo: "actualizacion", titulo: t.titulo, texto: t.actualizacion, fecha: t.actualizado_el })),
+    ...lista.filter(t => t.estado === "listo" && t.listo_el)
+      .map(t => ({ id: t.id, tipo: "listo", titulo: t.titulo, texto: "Quedó listo.", fecha: t.listo_el })),
+  ].sort((a, b) => b.fecha.localeCompare(a.fecha) || (a.tipo === "listo" ? -1 : 1) || b.id - a.id).slice(0, 6);
+
+  return {
+    lista, etapas, novedades,
+    archivos: todos.filter(a => a.task_id == null)
+      .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")) || Number(b.id) - Number(a.id))
+      .map(a => paraVer(a, enlaces)),
+  };
+}
+
 /** Cuánto va, para el encabezado: listas de cuántas. */
 export const avanceDeLaLista = (lista = []) => ({ listas: lista.filter(t => t.estado === "listo").length, total: lista.length });
 

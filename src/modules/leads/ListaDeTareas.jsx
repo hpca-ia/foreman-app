@@ -1,18 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronRight, Eye, EyeOff, ClipboardList, Send, History } from "lucide-react";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
-import { nombreDeEtapa, hoyISO, sumarDias, etapasDelTipo, tipoDe } from "./pipeline";
+import { nombreDeEtapa, hoyISO, sumarDias, etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
 import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
-  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, moverDeEtapa,
+  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, moverDeEtapa, cargarArchivosDelCliente,
 } from "./proyecto";
-import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa } from "./tareasDelProyecto";
+import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa } from "./tareasDelProyecto";
+import { gentePara } from "../controlObra/ordenesDeCambio";
+import { deAfuera } from "../controlObra/directorioDelProyecto.js";
 import { ultimaAnotacion } from "./historialDeTarea";
 import HistorialDeTarea from "../../components/HistorialDeTarea";
 import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
+import FotosYArchivosDelCliente from "./FotosYArchivosDelCliente";
+import { cuantosDice } from "./archivosDelCliente.js";
 
 // LAS TAREAS DEL PROYECTO: UNA LISTA.
 //
@@ -75,6 +78,17 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const [sinReporte, setSinReporte] = useState(false);
   // El historial de cada punto: lo anotado y lo que la bitácora dice de él.
   const [historial, setHistorial] = useState({ comentarios: {}, movimientos: {} });
+  // Las fotos y los archivos que ve el cliente: los del proyecto y los de
+  // cada punto, con el enlace de cada foto para su miniatura.
+  const [paraVer, setParaVer] = useState({ delProyecto: [], porTarea: {}, enlaces: {}, sinMigracion: false });
+  const cargarArchivos = useCallback(async () => { setParaVer(await cargarArchivosDelCliente(lead.id)); }, [lead.id]);
+  // ARRASTRAR UN PUNTO A SU ETAPA. Las cotizaciones de RES BG habían nacido
+  // todas en «Ingenierías», que era donde estaba parado el proyecto; pasarlas
+  // a «Presupuesto» era abrir cada una y cambiarle la etapa. Se agarra el
+  // punto y se lo suelta sobre la etapa. El desplegable de cada punto sigue
+  // estando, que en el teléfono no se arrastra.
+  const [arrastrando, setArrastrando] = useState(null);   // el punto
+  const [sobre, setSobre] = useState(null);                // la etapa bajo el cursor
   // Mandarle el checklist por correo: a quién y con qué líneas.
   const [envio, setEnvio] = useState(null);   // { a: Set, otro, mensaje, dijo, mal }
   const [error, setError] = useState("");
@@ -88,6 +102,11 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const [abierta, setAbierta] = useState(null);
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una tarea puede ser de ellos aunque no entren a FOREMAN.
+  //
+  // SON LOS INVOLUCRADOS DEL PROYECTO —los de la pestaña «Gente»—. Antes salían
+  // de una lista aparte que en toda la base tenía cero filas: para mandarle el
+  // checklist al cliente había que escribir su correo cada vez, y nadie de
+  // afuera aparecía para ser responsable de un punto.
   const [invitados, setInvitados] = useState([]);
 
   // Le avisa por correo a quien quedó a cargo, igual que en el tablero.
@@ -102,9 +121,9 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   };
 
   const cargar = useCallback(async () => {
-    const [r, { data: inv }] = await Promise.all([
+    const [r, inv] = await Promise.all([
       cargarTareas(lead.id),
-      supabase.from("pipeline_invitados").select("id,nombre,rol,email").eq("lead_id", lead.id).order("nombre"),
+      gentePara(lead.id).then(g => deAfuera(g, users)).catch(() => []),
     ]);
     setSinMigracion(!!r.sinMigracion);
     setAbiertas(r.abiertas);
@@ -116,7 +135,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     setSinReporte(!!r.sinReporte);
     setInvitados(inv || []);
     onTareas?.(Object.values(r.tareas || {}));
-    // Va después y aparte: la lista se ve sin esperar al historial.
+    // Van después y aparte: la lista se ve sin esperar al historial ni a las fotos.
+    cargarArchivos();
     setHistorial(await cargarHistorial(lead.id, Object.values(r.tareas || {}).map(t => t.id)));
     // eslint-disable-next-line
   }, [lead.id]);
@@ -219,7 +239,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   async function mandar() {
     const otros = String(envio.otro || "").split(/[,;\s]+/).filter(Boolean);
     setOcupado(true);
-    const r = await enviarChecklist({ lead, invitados: [...envio.a], otros, mensaje: envio.mensaje, quien: currentUser });
+    // Los elegidos van por su correo: son los involucrados del proyecto.
+    const r = await enviarChecklist({ lead, otros: [...envio.a, ...otros], mensaje: envio.mensaje, quien: currentUser });
     setOcupado(false);
     if (r.error) { setEnvio(v => ({ ...v, dijo: r.error, mal: true })); return; }
     setEnvio(v => ({ ...v, dijo: `Enviado a ${r.enviadoA.join(", ")}.`, mal: false }));
@@ -262,10 +283,12 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
 
   const fila = item => (
     <Actividad key={item.id} item={item} etiqueta={etapaDe(item)} tarea={tareas[item.tarea_id]} users={users}
+      onAgarrar={editable && etapas.length > 0 ? agarrado => { setArrastrando(agarrado ? item : null); if (!agarrado) setSobre(null); } : null}
       abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
+      lead={lead} archivos={paraVer.porTarea[item.id] || []} enlaces={paraVer.enlaces} sinArchivos={paraVer.sinMigracion} onArchivos={cargarArchivos}
       etapas={etapas} onEtapa={id => cambiarEtapa(item, id)} etapaVieja={nombreDeEtapa(item.etapa_id, catalogo)}
       anotado={historial.comentarios[item.id]} pasado={historial.movimientos[item.id]}
       onAvisar={t => setAvisar({ item, tarea: t, a: new Set(t?.assignee_id ? ["responsable"] : []) })}
@@ -274,6 +297,15 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   );
 
   const tipoNuevo = nuevo.tipo || "gestion";
+
+  // EL AVANCE POR ETAPA: el pipeline del proyecto, de un vistazo. Mientras se
+  // persigue se ve el camino entero; en un aprobado, solo las etapas que
+  // tienen algo.
+  const camino = avancePorEtapa(Object.values(tareas), etapas, {
+    nombreDe: id => nombreDeEtapa(id, catalogo), etapaDelProyecto: etapaId, elCamino: sePersigue(lead),
+  });
+  const conCamino = camino.length > 1 || (camino.length === 1 && camino[0].id);
+  const todasLasAbiertas = abiertas.length;
 
   return (
     <div>
@@ -302,6 +334,50 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             <div style={{ width: `${Math.round((avance.hechas / avance.total) * 100)}%`, height: "100%", background: colors.success }} />
           </div>
           <span style={{ fontSize: 11, color: colors.inkSoft, whiteSpace: "nowrap" }}>{avance.hechas} de {avance.total} hechos</span>
+        </div>
+      )}
+
+      {/* EL PIPELINE DEL PROYECTO: cada etapa con cuánto va. La que tiene el
+          borde marcado es en la que está el proyecto. Tocar una abre «Agregar»
+          ya parado en esa etapa. */}
+      {conCamino && (
+        <div className="camino-de-etapas" style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {camino.map(e => {
+              const tono = e.estado === "lista" ? colors.success : e.estado === "en_curso" ? colors.brand : colors.muted;
+              const sePuede = editable && !!e.id && etapas.some(x => x.id === e.id);
+              return (
+                <button key={e.id || "sin-etapa"} className="etapa-del-camino" data-estado={e.estado} data-actual={e.actual ? "si" : "no"}
+                  onDragOver={ev => { if (arrastrando && sePuede) { ev.preventDefault(); if (sobre !== e.id) setSobre(e.id); } }}
+                  onDragLeave={() => setSobre(x => (x === e.id ? null : x))}
+                  onDrop={ev => {
+                    if (!arrastrando || !sePuede) return;
+                    ev.preventDefault();
+                    const punto = arrastrando;
+                    setArrastrando(null); setSobre(null);
+                    if ((punto.etapa_id || null) !== e.id) cambiarEtapa(punto, e.id);
+                  }}
+                  disabled={!sePuede}
+                  onClick={() => { setPegar({ abierto: false }); setError(""); setNuevo({ ...EN_BLANCO, etapa: e.id }); }}
+                  title={`${e.nombre}: ${e.total ? `${e.hechas} de ${e.total} ${e.total === 1 ? "hecho" : "hechos"}` : "todavía sin puntos"}`
+                    + `${e.actual ? " · es la etapa en la que está el proyecto" : ""}${sePuede ? " · tocá para agregar un punto acá" : ""}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: colors.font, fontSize: 11, lineHeight: 1.2,
+                    padding: "4px 9px", borderRadius: 14, cursor: sePuede ? "pointer" : "default",
+                    border: `${e.actual ? 2 : 1}px solid ${e.actual ? colors.brand : colors.border}`,
+                    outline: sobre === e.id ? `2px dashed ${colors.brand}` : "none", outlineOffset: 2,
+                    background: sobre === e.id ? colors.brandSoft : e.estado === "lista" ? colors.successSoft : "#fff", color: e.total ? colors.ink : colors.muted }}>
+                  {e.estado === "lista" && <Check size={11} color={colors.success} />}
+                  <span style={{ fontWeight: e.actual ? 700 : 500 }}>{e.nombre}</span>
+                  {e.total > 0 && <span style={{ color: tono, fontWeight: 700 }}>{e.hechas}/{e.total}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
+            Cada punto es una actividad de una etapa, con su fecha y su estado, y es la misma tarea que le aparece a su responsable en Tareas.
+            {etapaId ? " La etapa con el borde marcado es en la que está el proyecto." : ""}
+            {editable && etapas.length > 0 && todasLasAbiertas > 0 ? " Para pasar un punto a otra etapa, arrastralo hasta ella." : ""}
+          </div>
         </div>
       )}
 
@@ -512,7 +588,11 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
           haya nada que mostrarle: lo que no se ve no se encuentra. */}
       {editable && (
         <div className="lista-con-el-cliente" style={{ marginTop: 12, borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 5 }}>CHECKLIST PARA EL CLIENTE</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 5 }}>LO QUE VE EL CLIENTE</div>
+          <div className="como-funciona-el-cliente" style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, marginBottom: 7 }}>
+            El cliente entra con un enlace, sin usuario ni contraseña. Ve tres cosas, y nada más: los puntos que le muestres —con su estado,
+            lo que le escribas y sus fotos—, las fotos y archivos del proyecto, y lo que tenga para aprobar.
+          </div>
           {!todas.length ? (
             <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
               Cuando el checklist tenga puntos, acá elegís cuáles ve el cliente en su enlace y se lo mandás por correo.
@@ -540,7 +620,6 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
                   </button>
                 )}
               </div>
-              {vistas.length > 0 && <div style={{ marginTop: 10 }}><EnlaceDelCliente lead={lead} /></div>}
 
               {/* MANDÁRSELO. El enlace hay que acordarse de abrirlo; el correo
                   le llega. Lleva lo mismo que ve ahí: cada punto con su
@@ -566,7 +645,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
                       </label>
                     ))}
                     {!invitados.length && (
-                      <div style={{ fontSize: 11, color: colors.muted }}>Este proyecto no tiene gente de afuera cargada: escribí el correo abajo.</div>
+                      <div style={{ fontSize: 11, color: colors.muted }}>Este proyecto todavía no tiene gente de afuera: agregala en la pestaña «Gente», o escribí el correo abajo.</div>
                     )}
                   </div>
                   <input value={envio.otro} aria-label="Otro correo" placeholder="Otro correo (o varios, separados por coma)"
@@ -587,6 +666,18 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
               )}
             </>
           )}
+          {/* LAS FOTOS Y LOS ARCHIVOS DEL PROYECTO, los que no son de un punto:
+              el plano general, las fotos del terreno, la propuesta. */}
+          <div className="archivos-del-proyecto-para-el-cliente" style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink, marginBottom: 4 }}>
+              Fotos y archivos del proyecto <span style={{ fontWeight: 400, color: colors.muted }}>· los que no son de un punto</span>
+            </div>
+            <FotosYArchivosDelCliente lead={lead} archivos={paraVer.delProyecto} enlaces={paraVer.enlaces}
+              editable={editable} currentUser={currentUser} onCambio={cargarArchivos} sinMigracion={paraVer.sinMigracion} />
+          </div>
+
+          {/* SU ENLACE. A la vista en cuanto hay algo que mostrarle. */}
+          {(vistas.length > 0 || paraVer.delProyecto.length > 0) && <div style={{ marginTop: 10 }}><EnlaceDelCliente lead={lead} /></div>}
           {error && !nuevo.abierto && !pegar.abierto && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 5 }}>{error}</div>}
         </div>
       )}
@@ -726,7 +817,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
                     body: JSON.stringify({
                       tareaId: avisar.tarea.id,
                       alResponsable: avisar.a.has("responsable"),
-                      invitados: [...avisar.a].filter(x => x !== "responsable"),
+                      correos: [...avisar.a].filter(x => x !== "responsable"),
                     }),
                   });
                   const d = await r.json();
@@ -779,7 +870,7 @@ const boton = fuerte => ({
 // marcó y cuándo, si está esperando a alguien, y deja escribir lo que solo sabe
 // quien la trabajó. Los botones dicen su nombre: un ⧗ y un ✓ sueltos no le
 // enseñan a nadie cómo se usa esto.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // Lo último que alguien anotó: se lee en la fila sin abrirla.
@@ -830,8 +921,14 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   const vencida = !item.hecho && !item.espera && tarea?.due_date && String(tarea.due_date).slice(0, 10) < hoy;
 
   return (
-    <div style={{ borderBottom: `1px solid ${colors.neutralSoft}`, background: abierta ? colors.bg : "transparent",
-      margin: abierta ? "0 -12px" : 0, padding: abierta ? "0 12px" : 0 }}>
+    <div className="punto-del-checklist" data-id={item.id}
+      // Cerrado se agarra entero para llevarlo a otra etapa; abierto no, que
+      // adentro hay casilleros donde se selecciona texto.
+      draggable={!!onAgarrar && !abierta}
+      onDragStart={ev => { if (!onAgarrar || abierta) return; try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", String(item.id)); } catch { /* sin eso se arrastra igual */ } onAgarrar(true); }}
+      onDragEnd={() => onAgarrar?.(false)}
+      style={{ borderBottom: `1px solid ${colors.neutralSoft}`, background: abierta ? colors.bg : "transparent",
+        margin: abierta ? "0 -12px" : 0, padding: abierta ? "0 12px" : 0, cursor: onAgarrar && !abierta ? "grab" : "auto" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0" }}>
         <button onClick={() => editable && hacer(() => marcarItem(item, !item.hecho, currentUser?.name, currentUser))} disabled={ocupado || !editable}
           title={!editable ? "Solo mirar" : item.hecho ? "Desmarcar" : "Marcar como hecha"}
@@ -859,7 +956,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             {etiqueta ? ` · ${etiqueta}` : ""}
             {laVeElCliente && (
               <span className="la-ve-el-cliente" title="El cliente la ve en su enlace" style={{ color: colors.brand, fontWeight: 600 }}>
-                {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente
+                {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente{archivos.length ? `, con ${cuantosDice(archivos)}` : ""}
               </span>
             )}
           </div>
@@ -980,6 +1077,10 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                 onChange={e => { setParaEl(p => ({ ...p, actualizacion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("actualizacion")}
                 placeholder="Actualización: qué hay de nuevo. Ej: llegaron dos cotizaciones, falta la de Alumina"
                 style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
+              {/* LAS FOTOS Y LOS ARCHIVOS DE ESTE PUNTO. Lo que se adjunta acá
+                  lo ve el cliente debajo del punto: el lugar dice para quién es. */}
+              <FotosYArchivosDelCliente lead={lead || { id: item.lead_id }} punto={item} archivos={archivos} enlaces={enlaces}
+                editable={editable} currentUser={currentUser} onCambio={onArchivos} sinMigracion={sinArchivos} />
               <div style={{ fontSize: 10.5, color: colors.muted }}>
                 El estado lo ve solo: pendiente, esperando respuesta o listo.
                 {delCliente?.actualizado_at ? ` Última actualización: ${cuando(delCliente.actualizado_at)}.` : ""}

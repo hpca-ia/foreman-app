@@ -1,6 +1,8 @@
 import { supabase } from "../../lib/supabase";
 import { COLUMNAS, comoActividad, delProyecto, filaNueva, alMarcar, notaDeOrigen } from "./tareasDelProyecto.js";
 import { porTarea } from "./historialDeTarea.js";
+import { esFoto, repartir, porQueNoEntra, rutaParaSubir, filaAlSubir } from "./archivosDelCliente.js";
+import { enlacesArchivos, subirArchivo } from "../../lib/archivos";
 
 // Lo que se guarda de un proyecto: lo que cambia en él —su etapa, su tipo, si
 // espera al cliente—, sus tareas y su historia.
@@ -319,6 +321,11 @@ export async function marcarEspera(item, espera, quien) {
 
 /** Borrar una tarea del proyecto. Es la misma de Tareas: se va de los dos lados. */
 export async function borrarItem(item, quien) {
+  // LO QUE EL CLIENTE VEÍA EN ESTE PUNTO DEJA DE VERSE. Los archivos no se
+  // borran con el punto —quedan en los del proyecto—, pero sin el punto
+  // pasarían a mostrarse como «del proyecto», que nadie decidió. Si esa
+  // columna todavía no existe (migración 184), no hay nada que apagar.
+  await supabase.from("proyecto_archivos").update({ visible_cliente: false }).eq("task_id", item.id);
   const { error } = await supabase.from("tasks").delete().eq("id", item.id);
   if (!error) await anotar(item.lead_id, { detalle: `Quitó "${item.texto}"`, quien });
   return error ? error.message : null;
@@ -448,4 +455,88 @@ export async function registrarEnvio(lead, { titulo, destinatario, fecha, quien 
 
   await anotar(lead.id, { detalle: `Envío a ${destinatario || "el cliente"}: ${titulo}.`, quien, tipo: "nota" });
   return { item: r.item };
+}
+
+// ── LAS FOTOS Y LOS ARCHIVOS QUE VE EL CLIENTE ─────────────────────────────
+//
+// Del proyecto y de cada punto del checklist (migración 184). Las reglas —qué
+// entra, dónde se guarda, cómo se reparten— están en archivosDelCliente.js.
+
+export const SIN_184 = "Falta correr la migración 184 en Supabase para mostrarle fotos y archivos al cliente.";
+
+/**
+ * Lo que el cliente ve de este proyecto, ya repartido, con el enlace de cada
+ * foto para la miniatura.
+ *
+ * @returns { delProyecto, porTarea, enlaces: { [id]: url }, sinMigracion }
+ */
+export async function cargarArchivosDelCliente(leadId) {
+  const { data, error } = await supabase.from("proyecto_archivos")
+    .select("*").eq("lead_id", leadId).eq("visible_cliente", true).order("created_at");
+  if (error) return { delProyecto: [], porTarea: {}, enlaces: {}, sinMigracion: falta(error) };
+  const fotos = (data || []).filter(esFoto);
+  const urls = fotos.length ? await enlacesArchivos(fotos.map(a => a.storage_path)) : [];
+  return {
+    ...repartir(data || []),
+    enlaces: Object.fromEntries(fotos.map((a, i) => [a.id, urls[i] || null])),
+    sinMigracion: false,
+  };
+}
+
+/**
+ * Subir fotos o archivos para que los vea el cliente.
+ *
+ * De a uno: si uno no entra o falla, los demás siguen, y se dice cuál no.
+ * Queda escrito en la historia del proyecto qué se le mostró.
+ *
+ * @param punto  el punto del checklist (como lo ve la lista), o null si es del proyecto
+ * @returns { subidos, errores: [texto] }
+ */
+export async function subirParaElCliente({ lead, punto = null, archivos = [], quien = null }) {
+  const errores = [];
+  const subidos = [];
+  const ahora = Date.now();
+  let n = 0;
+  for (const archivo of archivos) {
+    const no = porQueNoEntra(archivo);
+    if (no) { errores.push(no); continue; }
+    const ruta = rutaParaSubir(lead.id, archivo.name, ahora, n++);
+    const r = await subirArchivo(ruta, archivo);
+    if (r.error) { errores.push(`«${archivo.name}» no se pudo subir: ${r.error.message || r.error}`); continue; }
+    const { error } = await supabase.from("proyecto_archivos").insert(filaAlSubir({ leadId: lead.id, taskId: punto?.id ?? null, archivo, ruta, quien }));
+    if (error) {
+      // No quedó anotado: el archivo suelto en el depósito no lo vería nadie.
+      await supabase.storage.from("task-files").remove([ruta]);
+      errores.push(falta(error) ? SIN_184 : `«${archivo.name}» no se pudo guardar: ${error.message}`);
+      if (falta(error)) break;
+      continue;
+    }
+    subidos.push(archivo.name);
+  }
+  if (subidos.length) {
+    await anotar(lead.id, {
+      detalle: `Le mostró al cliente ${subidos.length === 1 ? `«${subidos[0]}»` : `${subidos.length} archivos (${subidos.join(", ")})`}`
+        + (punto ? ` en "${punto.texto}"` : " del proyecto") + ".",
+      quien, ...(punto ? { extra: { task_id: punto.id } } : {}),
+    });
+  }
+  return { subidos: subidos.length, errores };
+}
+
+/** Quitar algo que el cliente veía: se borra el archivo y su anotación. @returns null o el error */
+export async function quitarArchivoDelCliente(a) {
+  const { error } = await supabase.from("proyecto_archivos").delete().eq("id", a.id);
+  if (error) return error.message;
+  await supabase.storage.from("task-files").remove([a.storage_path]);
+  return null;
+}
+
+/**
+ * Mostrarle al cliente un archivo del proyecto que ya estaba cargado, o dejar
+ * de mostrárselo. No lo borra: sigue en los archivos del proyecto.
+ * @returns null o el error
+ */
+export async function mostrarArchivoAlCliente(a, ver) {
+  const { error } = await supabase.from("proyecto_archivos").update({ visible_cliente: !!ver }).eq("id", a.id);
+  return error ? (falta(error) ? SIN_184 : error.message) : null;
 }
