@@ -6,7 +6,7 @@
 // versión vieja—. Los cuatro avisos entran por acá y se reparten adentro; cada
 // uno sigue viviendo en su archivo, con su nombre y sus reglas.
 //
-// POST /api/aviso?de=tarea | reunion | comentario | cuenta | resumen | orden | plan | acta | sri | libro | compra | revision | aprobar | visto | checklist
+// POST /api/aviso?de=tarea | reunion | comentario | cuenta | resumen | orden | plan | acta | sri | libro | compra | revision | aprobar | visto | checklist | pedido
 //
 // Va en la dirección y no en el cuerpo porque el aviso de cuenta ya usa "tipo"
 // para lo suyo (pin o permisos) y dos cosas no pueden llamarse igual.
@@ -26,8 +26,9 @@ import revision from "./_aviso-revision.js";
 import aprobar from "./_aviso-aprobar.js";
 import visto from "./_aviso-visto.js";
 import checklist from "./_aviso-checklist.js";
+import pedido from "./_aviso-pedido.js";
 
-const AVISOS = { tarea, reunion, comentario, cuenta, resumen, orden, plan, acta, sri, libro, compra, revision, aprobar, visto, checklist };
+const AVISOS = { tarea, reunion, comentario, cuenta, resumen, orden, plan, acta, sri, libro, compra, revision, aprobar, visto, checklist, pedido };
 
 // El acta viaja con su PDF adjunto en base64, y un acta con fotos pesa más
 // que el megabyte que viene por defecto. Sin esto el envío falla con un error

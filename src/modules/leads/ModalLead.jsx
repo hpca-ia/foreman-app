@@ -15,6 +15,7 @@ import EstadoDelLead from "./EstadoDelLead";
 import { TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, sePersigue, estaAprobado } from "./pipeline";
 import { useDictado } from "../../lib/dictado";
 import ArchivosDelProyecto from "./ArchivosDelProyecto";
+import AprobacionesDelProyecto from "./AprobacionesDelProyecto";
 
 const iconoNota = { background: "none", border: "none", color: "#8B92A5", cursor: "pointer", fontSize: 13, padding: "0 3px", lineHeight: 1 };
 
@@ -212,7 +213,7 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
   // no cuánto vale el negocio.
   const verDatos = currentUser?.role === "owner" || !editando || lead.created_by === currentUser?.id;
   const SECCIONES = editando
-    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["archivos", "Archivos"], ["gente", "Gente"]]
+    ? [["plan", "El proyecto"], ...(verDatos ? [["datos", "Datos"]] : []), ["archivos", "Archivos"], ["aprobaciones", "Aprobaciones"], ["gente", "Gente"]]
     : [["datos", "Datos"]];
 
   return (
@@ -366,6 +367,11 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
           terreno. Lo que hoy vive en el correo de quien lo recibió. */}
       {editando && seccionVisible === "archivos" && (
         <ArchivosDelProyecto lead={lead} currentUser={currentUser} editable={editable} />
+      )}
+
+      {/* El registro de lo que el cliente aprobó desde su enlace: el sustento. */}
+      {editando && seccionVisible === "aprobaciones" && (
+        <AprobacionesDelProyecto lead={lead} />
       )}
 
       {editando && seccionVisible === "gente" && (

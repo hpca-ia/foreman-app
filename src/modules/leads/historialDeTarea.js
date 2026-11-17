@@ -54,6 +54,7 @@ export function dichoAdentro(detalle) {
   // La aprobación que se le pide desde su enlace (migración 186).
   if (/^Le pidió al cliente que apruebe "/.test(d)) return "Se le pidió al cliente que lo apruebe";
   if (/^Dejó de pedirle al cliente que apruebe "/.test(d)) return "Se dejó de pedirle la aprobación al cliente";
+  if ((m = d.match(/^Le avisó por correo a (.+) que apruebe ".*"$/))) return `Se le avisó por correo a ${m[1]}`;
   if (/^Le mostró al cliente "/.test(d)) return "Se le mostró al cliente";
   if (/^Dejó de mostrarle al cliente "/.test(d)) return "Se le dejó de mostrar al cliente";
   if ((m = d.match(/^Arregló ".*": (.+)$/))) return `Se corrigió: ${m[1]}`;

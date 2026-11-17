@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { enlacesArchivos, abrirArchivo } from "../../lib/archivos";
-import { mostrarArchivoAlCliente } from "./proyecto";
+import { mostrarArchivoAlCliente, esDeUnaAprobacion } from "./proyecto";
 
 // El cajón del proyecto: planos, CAD, PDF del cliente, fotos del terreno.
 //
@@ -102,6 +102,11 @@ export default function ArchivosDelProyecto({ lead, currentUser, editable = true
   }
 
   async function borrar(a) {
+    // LO QUE EL CLIENTE YA APROBÓ NO SE BORRA: es el sustento de su aprobación.
+    if (await esDeUnaAprobacion(a)) {
+      window.alert(`"${a.nombre}" es parte de una aprobación que el cliente ya contestó: queda guardado en el registro de aprobaciones y no se borra. Si no querés que lo siga viendo, apagale el ojo.`);
+      return;
+    }
     if (!window.confirm(`¿Borrar "${a.nombre}"? No se puede deshacer.`)) return;
     await supabase.storage.from("task-files").remove([a.storage_path]);
     await supabase.from("proyecto_archivos").delete().eq("id", a.id);

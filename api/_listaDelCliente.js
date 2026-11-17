@@ -120,6 +120,66 @@ export function correoDeLaRespuesta({ proyecto = "", punto = "", aprobado = fals
   };
 }
 
+// ── EL REGISTRO DE APROBACIONES Y EL AVISO AL CLIENTE (migración 187) ───────
+//
+// Hernán, 17/11/2026: «esta colección de aprobaciones es un sustento y
+// justificación... Cada vez que se solicite una aprobación FOREMAN manda un
+// mensaje al cliente». Cada pedido es una fila del registro
+// (`aprobaciones_cliente`); cuando el cliente contesta, ahí queda qué dijo y
+// QUÉ ARCHIVOS TENÍA PARA MIRAR, copiados en ese momento.
+
+/**
+ * Los archivos que el cliente tenía en el punto al contestar, como se guardan
+ * en el registro. Solo lo que hace falta para decir cuál era y poder abrirlo.
+ * @param filas  las de `proyecto_archivos` de ese punto que él veía
+ */
+export function archivosAprobados(filas = []) {
+  return (Array.isArray(filas) ? filas : []).filter(a => a && a.storage_path)
+    .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")) || Number(a.id) - Number(b.id))
+    .map(a => ({ id: a.id, nombre: limpio(a.nombre) || "Archivo", tamano: Number(a.tamano) || null, storage_path: a.storage_path, subido_at: a.created_at || null }));
+}
+
+/**
+ * Lo que el cliente ya decidió, para leerlo en su enlace: cada pedido que
+ * contestó, lo más nuevo arriba, con lo que dijo y los archivos que aprobó.
+ * Los pedidos sin contestar no son decisiones: esos están en «Para aprobar».
+ *
+ * @param filas    las de `aprobaciones_cliente` del proyecto
+ * @param enlaces  { storage_path: enlace temporal }
+ * @returns [{ id, titulo, estado, respondido_el, nota, archivos: [{ nombre, url }] }]
+ */
+export function decisionesDelCliente(filas = [], enlaces = {}) {
+  return (Array.isArray(filas) ? filas : [])
+    .filter(f => f && RESPUESTAS.includes(f.respuesta) && f.respuesta_at)
+    .sort((a, b) => String(b.respuesta_at).localeCompare(String(a.respuesta_at)) || Number(b.id) - Number(a.id))
+    .map(f => ({
+      id: f.id, titulo: limpio(f.titulo), estado: f.respuesta, respondido_el: diaDeAca(f.respuesta_at), nota: limpio(f.respuesta_nota),
+      archivos: (Array.isArray(f.archivos) ? f.archivos : []).map(a => ({ nombre: limpio(a?.nombre) || "Archivo", url: enlaces[a?.storage_path] || null })),
+    }));
+}
+
+/**
+ * El correo que le avisa al cliente que tiene algo para aprobar.
+ *
+ * @param archivos  los nombres de lo que tiene para mirar en ese punto
+ * @param mensaje   unas líneas de quien se lo pide (opcional)
+ * @param enlace    su enlace: sin él no hay dónde aprobar, y no se manda
+ * @returns { asunto, cuerpo }  el cuerpo es HTML, con todo lo escrito escapado
+ */
+export function correoDelPedido({ proyecto = "", punto = "", descripcion = "", archivos = [], mensaje = "", enlace = "" } = {}) {
+  const nombres = (Array.isArray(archivos) ? archivos : []).map(limpio).filter(Boolean);
+  const cuerpo = `
+    ${limpio(mensaje) ? `<p style="font-size:14px;color:#374151;margin:0 0 14px;white-space:pre-line">${esc(limpio(mensaje))}</p>` : ""}
+    <p style="font-size:14px;color:#B45309;font-weight:700;margin:0 0 6px">Necesitamos tu aprobación</p>
+    <p style="font-size:16px;color:#111827;margin:0 0 4px"><strong>${esc(punto)}</strong></p>
+    ${limpio(descripcion) ? `<p style="font-size:13.5px;color:#4B5563;line-height:1.5;margin:0 0 8px">${esc(limpio(descripcion))}</p>` : ""}
+    ${nombres.length ? `<p style="font-size:13px;color:#374151;margin:10px 0 4px">Para revisar:</p>
+    <ul style="margin:0 0 4px;padding-left:18px;font-size:13.5px;color:#111827;line-height:1.6">${nombres.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+    <p style="margin:18px 0 0"><a href="${esc(enlace)}" style="display:inline-block;background:#0F3D3E;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:7px">Ver y aprobar</a></p>
+    <p style="font-size:12.5px;color:#6B7280;line-height:1.5;margin:10px 0 0">Se abre tu página del proyecto, sin usuario ni contraseña. Ahí ${nombres.length ? "abrís los archivos y " : ""}tocás «Lo apruebo», o «Tengo una observación» si hay algo que cambiar. Tu respuesta queda registrada con la fecha.</p>`;
+  return { asunto: `${proyecto ? `${proyecto} · ` : ""}necesitamos tu aprobación: ${punto}`, cuerpo };
+}
+
 /**
  * @param tareas  las filas de `tasks` del proyecto
  * @param notas   las anotaciones de esas tareas (`tarea_comentarios`): solo

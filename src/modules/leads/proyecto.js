@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { COLUMNAS, comoActividad, delProyecto, filaNueva, alMarcar, notaDeOrigen } from "./tareasDelProyecto.js";
 import { porTarea } from "./historialDeTarea.js";
 import { esFoto, repartir, porQueNoEntra, rutaParaSubir, filaAlSubir } from "./archivosDelCliente.js";
+import { filaDelPedido } from "./aprobaciones.js";
 import { enlacesArchivos, subirArchivo } from "../../lib/archivos";
 
 // Lo que se guarda de un proyecto: lo que cambia en él —su etapa, su tipo, si
@@ -27,6 +28,7 @@ export const SIN_178 = "Falta correr la migración 178 en Supabase.";
 export const SIN_171 = "Falta correr la migración 171 en Supabase.";
 export const SIN_185 = "Para que el cliente lea las anotaciones falta correr la migración 185 en Supabase.";
 export const SIN_186 = "Para pedirle la aprobación al cliente falta correr la migración 186 en Supabase.";
+export const SIN_187 = "Para llevar el registro de aprobaciones falta correr la migración 187 en Supabase.";
 
 /**
  * Guardar en el lead lo que decidió pipeline.js, y dejarlo escrito en su
@@ -95,24 +97,89 @@ export async function cargarTareas(leadId) {
 /**
  * Pedirle al cliente que apruebe un punto desde su enlace, o dejar de pedírselo.
  *
- * Pedir de nuevo borra la respuesta anterior: es para cuando algo se corrigió
- * o cambió el archivo, y hay que aprobar lo nuevo. Lo que había contestado no
- * se pierde: quedó anotado en el historial del punto.
+ * Pedir de nuevo borra la respuesta anterior DE LA TAREA: es para cuando algo
+ * se corrigió o cambió el archivo, y hay que aprobar lo nuevo. Lo que había
+ * contestado no se pierde: quedó en el registro y en el historial del punto.
  *
- * @param item  el punto, como lo ve la lista
+ * CADA PEDIDO ES UNA FILA DEL REGISTRO (migración 187). Al pedir entra una
+ * nueva; al retirar el pedido, la que estaba abierta queda como retirada. Sin
+ * la 187 se pide igual, y solo no queda en el registro.
+ *
+ * @param item         el punto, como lo ve la lista
+ * @param descripcion  lo escrito para el cliente sobre el punto: queda en el pedido
  * @returns null o el error
  */
-export async function pedirAprobacion(item, pedir, quien) {
+export async function pedirAprobacion(item, pedir, quien, { descripcion = "" } = {}) {
   const campos = pedir
     ? { cliente_aprueba: true, cliente_respuesta: null, cliente_respuesta_at: null, cliente_respuesta_nota: null }
     : { cliente_aprueba: false };
   const { error } = await supabase.from("tasks").update(campos).eq("id", item.id);
   if (error) return falta(error) ? SIN_186 : error.message;
+  // El pedido que estaba abierto ya no vale: se retira. (Al pedir de nuevo
+  // sobre uno contestado no hay ninguno abierto, y no pasa nada.)
+  await supabase.from("aprobaciones_cliente")
+    .update({ retirada_at: new Date().toISOString(), retirada_nombre: quien?.name || null })
+    .eq("task_id", item.id).is("respuesta", null).is("retirada_at", null);
+  // La hora del pedido se dice acá: de ella sale el orden y el número de cada
+  // pedido, y no puede depender de que la base la ponga sola.
+  if (pedir) await supabase.from("aprobaciones_cliente").insert({ ...filaDelPedido({ item, descripcion, quien }), pedida_at: new Date().toISOString() });
   await anotar(item.lead_id, {
     detalle: pedir ? `Le pidió al cliente que apruebe "${item.texto}"` : `Dejó de pedirle al cliente que apruebe "${item.texto}"`,
     quien, extra: { task_id: item.id },
   });
   return null;
+}
+
+/**
+ * Avisarle al cliente por correo que tiene un punto para aprobar. Lo manda el
+ * servidor, con qué tiene que revisar y el botón a su enlace.
+ *
+ * @param correos  a quién: los correos elegidos
+ * @returns { ok, enviadoA } o { error }
+ */
+export async function avisarDelPedido({ item, correos = [], mensaje = "", quien = null }) {
+  try {
+    const r = await fetch("/api/aviso?de=pedido", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leadId: item.lead_id, taskId: item.id, correos, mensaje,
+        quien: quien ? { id: quien.id, name: quien.name, email: quien.email || null } : null,
+      }),
+    });
+    const d = await r.json();
+    return d.ok ? { ok: true, enviadoA: d.enviadoA || [] } : { error: d.error || "No se pudo avisar." };
+  } catch (e) {
+    return { error: "No se pudo avisar: " + e.message };
+  }
+}
+
+/**
+ * El enlace del cliente de este proyecto, o null si no está prendido: sin él
+ * no tiene dónde aprobar, y no hay nada que mandarle.
+ */
+export async function enlaceDelClienteDe(leadId) {
+  const { data, error } = await supabase.from("leads").select("portal_token,portal_activo").eq("id", leadId).maybeSingle();
+  if (error || !data?.portal_token || !data.portal_activo) return null;
+  return `${window.location.origin}/?cliente=${data.portal_token}`;
+}
+
+/**
+ * El registro de aprobaciones de un proyecto, tal cual está en la base, y lo
+ * que hoy tienen para mirar los puntos que esperan respuesta.
+ *
+ * @returns { filas, archivosDeAhora: { [task_id]: [archivos] }, sinMigracion }
+ */
+export async function cargarAprobaciones(leadId) {
+  const { data, error } = await supabase.from("aprobaciones_cliente").select("*").eq("lead_id", leadId).order("pedida_at");
+  if (error) return { filas: [], archivosDeAhora: {}, sinMigracion: falta(error), error: falta(error) ? null : error.message };
+  const abiertos = (data || []).filter(f => !f.respuesta && !f.retirada_at && f.task_id != null).map(f => f.task_id);
+  let archivosDeAhora = {};
+  if (abiertos.length) {
+    const { data: suyos } = await supabase.from("proyecto_archivos").select("id,task_id,nombre,storage_path,created_at")
+      .eq("lead_id", leadId).eq("visible_cliente", true).in("task_id", abiertos).order("created_at");
+    archivosDeAhora = porTarea(suyos || []);
+  }
+  return { filas: data || [], archivosDeAhora, sinMigracion: false };
 }
 
 /**
@@ -619,8 +686,30 @@ export async function subirParaElCliente({ lead, punto = null, archivos = [], qu
   return { subidos: subidos.length, errores };
 }
 
-/** Quitar algo que el cliente veía: se borra el archivo y su anotación. @returns null o el error */
+/**
+ * ¿Este archivo es parte de una aprobación que el cliente ya contestó?
+ * Entonces es sustento: se puede dejar de mostrar, pero no se borra.
+ */
+export async function esDeUnaAprobacion(a) {
+  const { data, error } = await supabase.from("aprobaciones_cliente").select("id")
+    .eq("lead_id", a.lead_id).not("respuesta", "is", null).contains("archivos", [{ id: a.id }]).limit(1);
+  return !error && (data || []).length > 0;
+}
+
+/**
+ * Quitar algo que el cliente veía: se borra el archivo y su anotación.
+ *
+ * LO QUE EL CLIENTE YA APROBÓ NO SE BORRA. Si el archivo es parte de una
+ * aprobación contestada, deja de verse en el punto y en su enlace, pero queda
+ * guardado: el registro tiene que poder abrir lo que se aprobó.
+ *
+ * @returns null o el error; "guardado" si solo dejó de mostrarse
+ */
 export async function quitarArchivoDelCliente(a) {
+  if (await esDeUnaAprobacion(a)) {
+    const { error } = await supabase.from("proyecto_archivos").update({ visible_cliente: false }).eq("id", a.id);
+    return error ? error.message : "guardado";
+  }
   const { error } = await supabase.from("proyecto_archivos").delete().eq("id", a.id);
   if (error) return error.message;
   await supabase.storage.from("task-files").remove([a.storage_path]);

@@ -30,13 +30,15 @@ import { subirParaElCliente, quitarArchivoDelCliente } from "./proyecto";
 export default function FotosYArchivosDelCliente({ lead, punto = null, archivos = [], enlaces = {}, editable = true, currentUser, onCambio, sinMigracion = false }) {
   const [subiendo, setSubiendo] = useState("");
   const [errores, setErrores] = useState([]);
+  // Lo que pasó y no es un error: un archivo ya aprobado no se borró.
+  const [aviso, setAviso] = useState("");
   const [encima, setEncima] = useState(false);
   const elegir = useRef(null);
 
   async function subir(lista) {
     const todos = [...(lista || [])];
     if (!todos.length || subiendo) return;
-    setErrores([]);
+    setErrores([]); setAviso("");
     setSubiendo(todos.length === 1 ? "Subiendo…" : `Subiendo ${todos.length}…`);
     const r = await subirParaElCliente({ lead, punto, archivos: todos, quien: currentUser });
     setSubiendo("");
@@ -46,7 +48,14 @@ export default function FotosYArchivosDelCliente({ lead, punto = null, archivos 
 
   async function quitar(a) {
     if (!window.confirm(`¿Quitar «${a.nombre}»? El cliente deja de verlo y se borra.`)) return;
+    setAviso("");
     const e = await quitarArchivoDelCliente(a);
+    // Lo que el cliente ya aprobó es sustento: deja de verse, pero no se borra.
+    if (e === "guardado") {
+      setAviso(`«${a.nombre}» es parte de una aprobación que el cliente ya contestó: dejó de verse acá y en su enlace, pero queda guardado en el registro de aprobaciones.`);
+      await onCambio?.();
+      return;
+    }
     if (e) { setErrores([e]); return; }
     await onCambio?.();
   }
@@ -114,6 +123,7 @@ export default function FotosYArchivosDelCliente({ lead, punto = null, archivos 
         <div style={{ fontSize: 10.5, color: colors.muted }}>El cliente ve {cuantosDice(archivos)}.</div>
       )}
 
+      {aviso && <div className="archivo-guardado" role="status" style={{ fontSize: 10.5, color: colors.inkSoft, marginTop: 5, lineHeight: 1.45 }}>{aviso}</div>}
       {errores.length > 0 && (
         <div role="alert" style={{ fontSize: 10.5, color: colors.danger, marginTop: 5, lineHeight: 1.45 }}>
           {errores.map((e, i) => <div key={i}>{e}</div>)}

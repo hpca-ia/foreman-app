@@ -86,9 +86,12 @@ test("el servidor busca el punto por el proyecto de la llave y vuelve a filtrar 
   // Queda en el historial del punto y en la historia del proyecto, y se avisa.
   assert.match(rama, /rest\("tarea_comentarios", \{ method: "POST", body: JSON\.stringify\(\{ task_id: tarea\.id, texto: r\.anotacion,/);
   assert.match(rama, /detalle: r\.bitacora/);
-  assert.match(rama, /await avisarLaRespuesta\(lead, tarea, r\);/);
-  // Si el aviso falla, la respuesta ya quedó: no se le dice al cliente que falló.
-  assert.ok(rama.indexOf("escritas.length") < rama.indexOf("try {"));
+  assert.match(rama, /\(\) => avisarLaRespuesta\(lead, tarea, r\),/);
+  // Y entra al registro de aprobaciones, con los archivos que tenía para mirar.
+  assert.match(rama, /\(\) => alRegistro\(req, lead, tarea, r\),/);
+  // Si algo de eso falla, lo demás sigue y la respuesta ya quedó: no se le dice al cliente que falló.
+  assert.ok(rama.indexOf("escritas.length") < rama.indexOf("const despues = ["));
+  assert.match(rama, /for \(const paso of despues\) \{\s+try \{ await paso\(\); \} catch/);
   // A quien tiene el punto, a quien lo creó y a quien lleva el proyecto.
   assert.match(portal, /\[tarea\.assignee_id, tarea\.created_by, lead\.responsable_id\]/);
   // Y el enlace lee lo pedido; sin la 186, sale sin la aprobación.
@@ -122,7 +125,9 @@ test("en el checklist se le pide adentro de lo que ve el cliente, y la fila dice
   const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
   assert.ok(lista.includes("<span>¿LO TIENE QUE APROBAR?</span>"));
   const caja = lista.slice(lista.indexOf('className="para-el-cliente"'), lista.indexOf('className="no-lo-ve-el-cliente"'));
-  assert.match(caja, /className="pedir-aprobacion" onClick=\{\(\) => hacer\(\(\) => pedirAprobacion\(item, true, currentUser\)\)\}/);
+  // Pedir abre la ventana donde se le avisa; retirar el pedido es directo.
+  assert.match(caja, /className="pedir-aprobacion" onClick=\{\(\) => onPedirAprobacion\?\.\("pedir"\)\}/);
+  assert.match(caja, /className="avisar-de-nuevo" onClick=\{\(\) => onPedirAprobacion\?\.\("avisar"\)\}/);
   assert.match(caja, /className="no-pedir-aprobacion" onClick=\{\(\) => hacer\(\(\) => pedirAprobacion\(item, false, currentUser\)\)\}/);
   // La fila: espera, aprobado u observaciones; solo si el cliente ve el punto.
   assert.match(lista, /\{laVeElCliente && aprobacion && \(\s+<span className="aprobacion-del-cliente" data-estado=\{aprobacion\.estado\}/);

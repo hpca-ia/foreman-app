@@ -83,7 +83,7 @@ export default function PortalCliente({ token }) {
     );
   }
 
-  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [], etapas = [], novedades = [], archivos = [] } = info;
+  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [], etapas = [], novedades = [], archivos = [], decisiones = [] } = info;
   const ocPendientes = ordenes.filter(o => o.cliente_respondio_at == null);
   // Los puntos del checklist que se le pidió aprobar: primero los que esperan.
   const puntosParaAprobar = lista.filter(t => t.aprobar)
@@ -102,6 +102,8 @@ export default function PortalCliente({ token }) {
     ...(enObra ? [["avance", "Avance", avance.length], ["recorridas", "Recorridas", observaciones.length]] : []),
     ...(archivos.length ? [["archivos", "Fotos y archivos", archivos.length]] : []),
     ["aprobar", "Para aprobar", porContestar],
+    // Lo que ya decidió: su copia del registro de aprobaciones.
+    ...(decisiones.length ? [["decisiones", "Decisiones", decisiones.length]] : []),
   ];
   // La obra arranca en el avance, que es lo que se viene a mirar; sin obra,
   // en la lista.
@@ -150,6 +152,43 @@ export default function PortalCliente({ token }) {
             Lo que te compartimos del proyecto. Tocá una foto para verla en grande, o un archivo para abrirlo.
           </div>
           <FotosYArchivos archivos={archivos} grande onFoto={(fotos, indice) => setGaleria({ fotos, indice })} />
+        </div>
+      )}
+
+      {/* ── Lo que ya decidió ──────────────────────────────────────── */}
+      {solapa === "decisiones" && (
+        <div className="decisiones-del-cliente">
+          <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 10 }}>
+            Lo que aprobaste o dejaste con observaciones, con la fecha y los archivos que tenías para revisar en ese momento.
+          </div>
+          {decisiones.map(d => {
+            const si = d.estado === "aprobado";
+            return (
+              <div key={d.id} className="decision" data-estado={d.estado}
+                style={{ background: "#fff", border: `1px solid ${colors.border}`, borderLeft: `3px solid ${si ? colors.success : colors.warning}`, borderRadius: 11, padding: 12, marginBottom: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: colors.ink, lineHeight: 1.35, overflowWrap: "anywhere" }}>{d.titulo}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: si ? colors.success : colors.warning, marginTop: 3 }}>
+                  {si ? "✓ Lo aprobaste" : "Lo dejaste con observaciones"}{d.respondido_el ? ` el ${dia(d.respondido_el)}` : ""}
+                </div>
+                {d.nota && <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, marginTop: 3, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{d.nota}</div>}
+                {d.archivos.length > 0 && (
+                  <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                    {d.archivos.map((a, i) => (a.url ? (
+                      <a key={i} className="archivo" href={a.url} target="_blank" rel="noreferrer"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, color: colors.brand, textDecoration: "none",
+                          padding: "7px 10px", border: `1px solid ${colors.border}`, borderRadius: 8, background: "#fff", overflowWrap: "anywhere" }}>
+                        <span aria-hidden="true">📎</span> {a.nombre}
+                      </a>
+                    ) : (
+                      <div key={i} className="archivo" style={{ fontSize: 12.5, color: colors.inkSoft, padding: "7px 10px", border: `1px solid ${colors.border}`, borderRadius: 8, overflowWrap: "anywhere" }}>
+                        <span aria-hidden="true">📎</span> {a.nombre}
+                      </div>
+                    )))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

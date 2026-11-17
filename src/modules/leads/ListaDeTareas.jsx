@@ -15,6 +15,7 @@ import { ultimaAnotacion } from "./historialDeTarea";
 import HistorialDeTarea from "../../components/HistorialDeTarea";
 import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 import FotosYArchivosDelCliente from "./FotosYArchivosDelCliente";
+import PedirAprobacion from "./PedirAprobacion";
 import { cuantosDice } from "./archivosDelCliente.js";
 
 // LAS TAREAS DEL PROYECTO: UNA LISTA.
@@ -83,6 +84,12 @@ import { cuantosDice } from "./archivosDelCliente.js";
 //     contesta queda en el historial del punto, se ve en la fila y le llega
 //     por correo a quien lo lleva. Contesta una vez: si algo se corrigió, se
 //     le vuelve a pedir (migración 186).
+//   · PEDIR ES AVISARLE. «Cada vez que se solicite una aprobación FOREMAN
+//     manda un mensaje al cliente, por WhatsApp y correo»: el botón abre una
+//     ventana corta que dice qué va a ver, a quién se le avisa, y pide y manda
+//     el correo de una vez; el WhatsApp queda listo para enviar
+//     (PedirAprobacion). Cada pedido entra al registro de aprobaciones del
+//     proyecto, que es la pestaña «Aprobaciones» (migración 187).
 
 // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
@@ -115,6 +122,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // Lo que se le pidió aprobar al cliente y qué contestó, por punto.
   const [aprobaciones, setAprobaciones] = useState({});
   const [sinAprobacion, setSinAprobacion] = useState(false);
+  // La ventana de pedirle la aprobación, o de avisarle de nuevo: { item, modo }.
+  const [pedido, setPedido] = useState(null);
   // El historial de cada punto: lo anotado y lo que la bitácora dice de él.
   const [historial, setHistorial] = useState({ comentarios: {}, movimientos: {}, sinNotasAlCliente: false });
   // Las fotos y los archivos que ve el cliente: los del proyecto y los de
@@ -376,6 +385,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       hayCliente={compartidas.size > 0} sinNotas={historial.sinNotasAlCliente}
       aprobacion={aprobaciones[item.id] || null} sinAprobacion={sinAprobacion}
+      onPedirAprobacion={modo => setPedido({ item, modo })}
       delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
       lead={lead} archivos={paraVer.porTarea[item.id] || []} enlaces={paraVer.enlaces} sinArchivos={paraVer.sinMigracion} onArchivos={cargarArchivos}
       etapas={etapas} onEtapa={id => cambiarEtapa(item, id)} etapaVieja={nombreDeEtapa(item.etapa_id, catalogo)}
@@ -847,6 +857,14 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         </div>
       )}
 
+      {/* PEDIRLE LA APROBACIÓN, Y AVISARLE: a quién, por correo, y el
+          WhatsApp listo para enviar. */}
+      {pedido && (
+        <PedirAprobacion lead={lead} item={pedido.item} modo={pedido.modo} users={users} currentUser={currentUser}
+          archivos={paraVer.porTarea[pedido.item.id] || []} descripcion={paraElCliente[pedido.item.id]?.descripcion || ""}
+          onCambio={async () => { await cargar(); onBitacora?.(); }} onCerrar={() => setPedido(null)} />
+      )}
+
       {/* Corregir una tarea: quién y para cuándo, qué dice y qué es. Es una
           ventana encima: antes aparecía al pie de toda la lista, debajo de lo
           del cliente, y quien tocaba «Cambiar detalles» no veía que pasara
@@ -1047,7 +1065,7 @@ const boton = fuerte => ({
 // al tocarla: ¿PARA CUÁNDO? · ¿QUÉ PASÓ? · LO QUE VE EL CLIENTE DE ESTE PUNTO ·
 // ¿YA ESTÁ?. Al pie, lo que se toca poco. Y se cierra: arriba, abajo y con la
 // flecha.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, onPedirAprobacion = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // Lo último que alguien anotó: se lee en la fila sin abrirla.
@@ -1297,14 +1315,14 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                   ) : !aprobacion ? (
                     <>
                       <div>
-                        <button className="pedir-aprobacion" onClick={() => hacer(() => pedirAprobacion(item, true, currentUser))} disabled={ocupado}
+                        <button className="pedir-aprobacion" onClick={() => onPedirAprobacion?.("pedir")} disabled={ocupado}
                           style={{ ...mini(false), borderColor: colors.brand, color: colors.brand, padding: "4px 11px" }}>
                           <ThumbsUp size={11} /> Pedirle que lo apruebe
                         </button>
                       </div>
                       <div style={ayudita}>
-                        En su enlace, en este punto, le aparecen dos botones: «Lo apruebo» y «Tengo una observación». Lo que conteste queda
-                        en el historial, se ve en la fila y le llega por correo a quien lo lleva. Subile antes lo que tenga que revisar.
+                        Subile antes lo que tenga que revisar. Al pedirlo se le avisa por correo y te dejo el WhatsApp listo; en su enlace le
+                        aparecen «Lo apruebo» y «Tengo una observación». Lo que conteste queda en el registro de aprobaciones del proyecto.
                       </div>
                     </>
                   ) : aprobacion.estado === "pendiente" ? (
@@ -1314,10 +1332,14 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                       </div>
                       <div style={ayudita}>
                         En su enlace tiene «Lo apruebo» y «Tengo una observación» en este punto, y aparece en su solapa «Para aprobar».
-                        Para que se entere, «Enviarle el checklist por correo», al pie de la lista, se lo dice.
+                        Si no contesta, se le avisa de nuevo: por correo, o con el WhatsApp ya escrito.
                       </div>
                       {editable && (
-                        <div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button className="avisar-de-nuevo" onClick={() => onPedirAprobacion?.("avisar")} disabled={ocupado}
+                            style={{ ...mini(false), borderColor: colors.brand, color: colors.brand }}>
+                            <Mail size={11} /> Avisarle de nuevo
+                          </button>
                           <button className="no-pedir-aprobacion" onClick={() => hacer(() => pedirAprobacion(item, false, currentUser))} disabled={ocupado} style={mini(false)}>
                             <X size={11} /> Ya no hace falta que lo apruebe
                           </button>
@@ -1337,14 +1359,14 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                       {editable && (
                         <>
                           <div>
-                            <button className="pedir-aprobacion" onClick={() => hacer(() => pedirAprobacion(item, true, currentUser))} disabled={ocupado} style={mini(false)}>
+                            <button className="pedir-aprobacion" onClick={() => onPedirAprobacion?.("pedir")} disabled={ocupado} style={mini(false)}>
                               <RotateCcw size={11} /> Volver a pedirle que lo apruebe
                             </button>
                           </div>
                           <div style={ayudita}>
                             {aprobacion.estado === "aprobado"
-                              ? "Su respuesta quedó en el historial. Si cambia lo que aprobó —otro plano, otra cotización—, se le vuelve a pedir y contesta de nuevo."
-                              : "Su respuesta quedó en el historial. Cuando esté corregido, subí lo nuevo y volvé a pedirle: en su enlace le aparecen otra vez los botones."}
+                              ? "Quedó en el registro de aprobaciones, con los archivos que tenía para mirar. Si cambia lo que aprobó —otro plano, otra cotización—, se le vuelve a pedir y contesta de nuevo."
+                              : "Quedó en el registro de aprobaciones. Cuando esté corregido, subí lo nuevo y volvé a pedirle: en su enlace le aparecen otra vez los botones."}
                           </div>
                         </>
                       )}

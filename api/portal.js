@@ -5,7 +5,7 @@ import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
-import { listaDelCliente, loDelCliente, respuestaDelCliente, correoDeLaRespuesta } from "./_listaDelCliente.js";
+import { listaDelCliente, loDelCliente, respuestaDelCliente, correoDeLaRespuesta, archivosAprobados, decisionesDelCliente } from "./_listaDelCliente.js";
 import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
@@ -1268,12 +1268,21 @@ async function armarInforme(lead) {
     ? await json(await rest("pipeline_etapas?select=id,nombre,orden,tunel")) : [];
   if (!Array.isArray(catalogo)) catalogo = [];
 
+  // LO QUE YA DECIDIÓ (migración 187): cada pedido de aprobación que contestó,
+  // con lo que dijo y los archivos que tenía para mirar en ese momento. Es su
+  // copia del registro. Si la tabla todavía no está, no hay ninguna.
+  let decididas = await json(await rest(
+    `aprobaciones_cliente?lead_id=eq.${lead.id}&respuesta=not.is.null`
+    + `&select=id,titulo,respuesta,respuesta_at,respuesta_nota,archivos&order=respuesta_at.desc`));
+  if (!Array.isArray(decididas)) decididas = [];
+
   const enlaces = await firmar([
     ...fotosObs.map(f => f.storage_path),
     ...avance.map(f => f.storage_path),
     ...entregas.filter(e => e.storage_path).map(e => e.storage_path),
     ...fotosOC.map(f => f.storage_path),
     ...paraEl.map(a => a.storage_path),
+    ...decididas.flatMap(d => (Array.isArray(d.archivos) ? d.archivos : []).map(a => a?.storage_path)),
   ].filter(Boolean));
 
   const delCliente = loDelCliente({ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces, notas });
@@ -1290,6 +1299,8 @@ async function armarInforme(lead) {
     etapas: delCliente.etapas,
     novedades: delCliente.novedades,
     archivos: delCliente.archivos,
+    // Lo que ya aprobó o dejó con observaciones: su copia del registro.
+    decisiones: decisionesDelCliente(decididas, enlaces),
     recorridas,
     observaciones: observaciones.map(o => ({
       ...o,
@@ -1324,6 +1335,34 @@ async function armarInforme(lead) {
       };
     }),
   };
+}
+
+/**
+ * La respuesta del cliente entra al registro de aprobaciones (migración 187),
+ * con LOS ARCHIVOS QUE TENÍA PARA MIRAR EN ESE MOMENTO: es lo que aprobó, y
+ * tiene que seguir diciéndolo aunque después se suba otra versión.
+ *
+ * Se completa el pedido abierto de ese punto; si no hay ninguno —se le pidió
+ * antes de que existiera el registro—, se anota uno nuevo con la respuesta.
+ * Si la tabla todavía no está, no se anota: lo demás sigue.
+ */
+async function alRegistro(req, lead, tarea, r) {
+  const suyos = await json(await rest(
+    `proyecto_archivos?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&visible_cliente=eq.true`
+    + `&select=id,nombre,tamano,storage_path,created_at&order=created_at`));
+  const ip = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || null;
+  const dicho = { respuesta: r.campos.cliente_respuesta, respuesta_at: r.campos.cliente_respuesta_at,
+    respuesta_nota: r.campos.cliente_respuesta_nota, respuesta_ip: ip, archivos: archivosAprobados(suyos) };
+  const abiertos = await json(await rest(
+    `aprobaciones_cliente?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&respuesta=is.null&retirada_at=is.null`
+    + `&select=id&order=pedida_at.desc&limit=1`));
+  if (!Array.isArray(abiertos)) return;   // sin la 187 no hay registro
+  if (abiertos[0]) {
+    await rest(`aprobaciones_cliente?id=eq.${abiertos[0].id}&respuesta=is.null`, { method: "PATCH", body: JSON.stringify(dicho) });
+  } else {
+    await rest("aprobaciones_cliente", { method: "POST",
+      body: JSON.stringify({ lead_id: lead.id, task_id: tarea.id, titulo: tarea.title, pedida_at: dicho.respuesta_at, ...dicho }) });
+  }
 }
 
 /**
@@ -1401,17 +1440,22 @@ async function contestar(req, res, lead) {
       }));
     if (!Array.isArray(escritas) || !escritas.length) return res.status(409).json({ error: "Este punto ya tiene tu respuesta." });
 
-    // Queda en el historial del punto y en la historia del proyecto, y se le
-    // avisa a quien lo lleva. Si algo de esto falla, la respuesta ya quedó.
-    try {
-      await rest("tarea_comentarios", { method: "POST", body: JSON.stringify({ task_id: tarea.id, texto: r.anotacion, autor_id: null, autor_nombre: null }) });
-      await rest("lead_movimientos", {
+    // Queda en el registro de aprobaciones, en el historial del punto y en la
+    // historia del proyecto, y se le avisa a quien lo lleva. Cada cosa por su
+    // lado: si una falla, las otras siguen, y la respuesta ya quedó.
+    const despues = [
+      () => alRegistro(req, lead, tarea, r),
+      () => rest("tarea_comentarios", { method: "POST", body: JSON.stringify({ task_id: tarea.id, texto: r.anotacion, autor_id: null, autor_nombre: null }) }),
+      () => rest("lead_movimientos", {
         method: "POST",
         body: JSON.stringify({ lead_id: lead.id, tipo: "nota", automatico: true, autor_nombre: "El cliente", detalle: r.bitacora }),
-      });
-      await avisarLaRespuesta(lead, tarea, r);
-    } catch (e) {
-      console.error("[portal] la respuesta del cliente quedó, pero no se pudo anotar o avisar:", e.message);
+      }),
+      () => avisarLaRespuesta(lead, tarea, r),
+    ];
+    for (const paso of despues) {
+      try { await paso(); } catch (e) {
+        console.error("[portal] la respuesta del cliente quedó, pero algo de lo que sigue no se pudo hacer:", e.message);
+      }
     }
     return res.status(200).json({ ok: true });
   }
