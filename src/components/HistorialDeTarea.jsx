@@ -29,8 +29,10 @@ const cuando = f => (f ? new Date(String(f).length === 10 ? `${f}T12:00:00` : f)
  * @param onAnotar  texto → null o el error. Sin esto, anota por su cuenta.
  * @param children  lo que va debajo del cuadro de anotar (un tilde, una opción)
  * @param onCambio  avisa después de anotar
+ * @param titulo    cómo se llama el cuadro donde va: en el checklist es la
+ *                  pregunta «¿qué pasó?», al lado de «¿para cuándo?» y «¿ya está?»
  */
-export default function HistorialDeTarea({ tarea, users = [], currentUser, editable = true, ocupado = false, anotado, pasado, onAnotar, onCambio, children }) {
+export default function HistorialDeTarea({ tarea, users = [], currentUser, editable = true, ocupado = false, anotado, pasado, onAnotar, onCambio, children, titulo = "HISTORIAL" }) {
   const solo = anotado === undefined;
   const [traido, setTraido] = useState({ comentarios: [], movimientos: [] });
   const [paso, setPaso] = useState("");
@@ -64,7 +66,7 @@ export default function HistorialDeTarea({ tarea, users = [], currentUser, edita
   return (
     <div className="historial-del-punto" style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 4 }}>
-        <History size={11} /> HISTORIAL
+        <History size={11} /> {titulo}
       </div>
       {historia.map(h => (
         <div key={h.id} className={h.automatico ? "paso-solo" : "paso-anotado"}

@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Hourglass, AlertTriangle, ArrowRight, Check } from "lucide-react";
+import { Hourglass, AlertTriangle, ArrowRight, Check, CalendarPlus } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { HORAS } from "../../theme/constants";
 import {
-  TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, estadoDelLead, loQueDice, sePersigue, estaAprobado, estaPerdido,
+  TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, estadoDelLead, loQueDice, explicarSinPaso, sePersigue, estaAprobado, estaPerdido,
   alCambiarEtapa, alCambiarTipo, alAprobar, alPerder, alReabrir, alEsperar, alResponder, alInsistir, alPosponer,
   RECORDAR_EN, hoyISO, sumarDias,
 } from "./pipeline";
@@ -24,6 +24,14 @@ import { comoActividad } from "./tareasDelProyecto";
 //     le pone.
 //
 // Se guarda solo, y dice al lado que guardó.
+//
+// CADA COSA DICE QUÉ ES. Hernán, 17/11/2026, mirando este cuadro en RES BG:
+// «¿este cuadro de diálogo al inicio qué hace?». Eran dos desplegables sin
+// nombre, un aviso que nombraba un solo punto y una fila de botones de fecha
+// siempre abierta. Adentro del proyecto ahora lleva sus títulos —etapa, tipo,
+// próximo paso—, dice la cuenta entera («ninguno de los 8 puntos abiertos
+// tiene fecha») y por qué importa, y los botones de fecha se abren al tocar
+// «Ponerle fecha» y se cierran con «Cancelar».
 
 const APROBAR = "__aprobar", PERDER = "__perder";
 
@@ -65,7 +73,9 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
     onCambio?.(r.lead);
     return true;
   }
-  const cerrarPedido = () => { setPidiendo(null); setTexto(""); setFecha(""); setError(""); };
+  const cerrarPedido = () => { setPidiendo(null); setTexto(""); setFecha(""); setPaso(""); setCuando({ dia: "", hora: "" }); setError(""); };
+  // Por qué no tiene próximo paso, dicho entero; null si lo tiene o espera.
+  const falta = explicarSinPaso(estado, tareas);
 
   function elegirEtapa(valor) {
     if (valor === APROBAR || valor === PERDER) { setPidiendo(valor === APROBAR ? "aprobar" : "perder"); setTexto(""); setError(""); return; }
@@ -97,7 +107,7 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
       orden: tareas.length + 1,
     });
     if (r.error) { setError(r.error); setEstadoGuardado(""); return; }
-    setPaso(""); setCuando({ dia: "", hora: "" }); setEstadoGuardado("guardado");
+    setPaso(""); setCuando({ dia: "", hora: "" }); setPidiendo(null); setEstadoGuardado("guardado");
     setTimeout(() => setEstadoGuardado(e => (e === "guardado" ? "" : e)), 2500);
     onTareas?.();
   }
@@ -107,7 +117,7 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
     const e = await ponerFecha(comoActividad(estado.paso), dia, currentUser, hora);
     setCuando({ dia: "", hora: "" });
     if (e) { setError(e); setEstadoGuardado(""); return; }
-    setEstadoGuardado("guardado");
+    setPidiendo(null); setEstadoGuardado("guardado");
     setTimeout(() => setEstadoGuardado(x => (x === "guardado" ? "" : x)), 2500);
     onTareas?.();
   }
@@ -141,8 +151,9 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
     <div onClick={parar} style={{ display: "grid", gap: 6, minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         {/* La etapa: una, de las de su tipo. Al final, las dos salidas. */}
+        {ancho && <span style={rotulo}>ETAPA</span>}
         <select value={enCatalogo ? lead.etapa : ""} disabled={!editable || !tipo} aria-label="Etapa"
-          title={tipo ? "En qué etapa está" : "Elegí primero el tipo de lead"}
+          title={tipo ? "En qué etapa está el proyecto. Al final de la lista: aprobado o perdido" : "Elegí primero el tipo de lead"}
           onChange={e => elegirEtapa(e.target.value)}
           style={{ ...sel, color: enCatalogo ? colors.ink : colors.warning, borderColor: enCatalogo ? colors.border : colors.warningBorder }}>
           {!enCatalogo && <option value="">{tipo ? "Elegí la etapa" : "Sin etapa"}</option>}
@@ -158,23 +169,29 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
         {/* El tipo se cambia desde acá mismo; en la tarjeta se muestra solo
             cuando falta, porque ahí el tipo ya es el título del grupo. */}
         {(ancho || !tipo) && (
-          <select value={tipo || ""} disabled={!editable} aria-label="Tipo de lead"
-            onChange={e => guardar(alCambiarTipo(lead, e.target.value, catalogo))}
-            style={{ ...sel, fontWeight: 400, color: tipo ? colors.inkSoft : colors.warning, borderColor: tipo ? colors.border : colors.warningBorder }}>
-            {!tipo && <option value="">Elegí el tipo</option>}
-            {ORDEN_DE_TIPOS.map(t => <option key={t} value={t}>{TIPOS[t].label}</option>)}
-          </select>
+          <>
+            {ancho && <span style={{ ...rotulo, marginLeft: 6 }}>TIPO</span>}
+            <select value={tipo || ""} disabled={!editable} aria-label="Tipo de lead"
+              title="Qué tipo de proyecto es: decide qué etapas se ofrecen"
+              onChange={e => guardar(alCambiarTipo(lead, e.target.value, catalogo))}
+              style={{ ...sel, fontWeight: 400, color: tipo ? colors.inkSoft : colors.warning, borderColor: tipo ? colors.border : colors.warningBorder }}>
+              {!tipo && <option value="">Elegí el tipo</option>}
+              {ORDEN_DE_TIPOS.map(t => <option key={t} value={t}>{TIPOS[t].label}</option>)}
+            </select>
+          </>
         )}
         <Guardado estado={estadoGuardado} error="" />
       </div>
 
       {/* Qué sigue: el próximo paso, o desde cuándo espera al cliente. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-        <span style={{ fontSize: 12, color: tono, fontWeight: estado.clase === "al_dia" || estado.clase === "esperando" ? 400 : 600,
+      {ancho && <div style={{ ...rotulo, marginTop: 4 }}>PRÓXIMO PASO</div>}
+      <div className="que-sigue-del-lead" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
+        <span style={{ fontSize: ancho ? 12.5 : 12, color: tono, fontWeight: estado.clase === "al_dia" || estado.clase === "esperando" ? 400 : 600,
           display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, overflowWrap: "anywhere" }}>
           {(estado.clase === "esperando" || estado.clase === "insistir") && <Hourglass size={12} style={{ flexShrink: 0 }} />}
           {estado.clase === "sin_paso" && <AlertTriangle size={12} style={{ flexShrink: 0 }} />}
-          {loQueDice(estado)}
+          {/* Adentro del proyecto hay lugar para decir la cuenta entera. */}
+          {ancho && falta ? falta.dice : loQueDice(estado)}
         </span>
 
         {editable && !pidiendo && (
@@ -185,28 +202,44 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
               <button onClick={() => setPidiendo("posponer")} style={chip(false)}>Recordarme el…</button>
             </>
           ) : (
-            <button onClick={() => setPidiendo("esperar")} style={chip(false)} title="La pelota queda del lado del cliente, y FOREMAN te lo recuerda">
-              <Hourglass size={11} /> Esperar al cliente
-            </button>
+            <>
+              {/* SIN PRÓXIMO PASO NI ESPERA: se le pone acá, sin abrir nada. El
+                  botón dice a qué punto le pone la fecha. */}
+              {falta && (
+                <button className="poner-fecha" onClick={() => { setPidiendo("fecha"); setError(""); }} style={chip(true)}
+                  title={estado.paso ? "Elegir el día, y la hora si es una reunión" : "Escribir qué sigue y para cuándo"}>
+                  <CalendarPlus size={11} /> {ancho ? falta.boton : estado.paso ? "Ponerle fecha" : "Poner el próximo paso"}
+                </button>
+              )}
+              <button onClick={() => setPidiendo("esperar")} style={chip(false)} title="La pelota queda del lado del cliente, y FOREMAN te lo recuerda">
+                <Hourglass size={11} /> Esperar al cliente
+              </button>
+            </>
           )
         )}
       </div>
+      {ancho && falta && !pidiendo && (
+        <div className="por-que-importa" style={{ fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>
+          {falta.ayuda}{estado.paso ? " También se le puede poner fecha a cualquier otro punto, abriéndolo en el checklist de abajo." : ""}
+          {" "}Si lo que falta depende del cliente, tocá «Esperar al cliente».
+        </div>
+      )}
 
-      {/* SIN PRÓXIMO PASO NI ESPERA: se le pone acá, sin abrir nada.
-          Qué es, y cuándo. Los tres botones de un toque agendan en el acto; el
-          día exacto y la hora, con «Agendar». Antes había que adivinar que
-          tocar «Mañana» era lo que guardaba, y una reunión acordada para el
-          jueves a las 10 no tenía dónde ponerse. */}
-      {editable && !pidiendo && estado.clase === "sin_paso" && (
-        <div className="proximo-paso" style={{ display: "grid", gap: 5 }}>
+      {/* PONERLE FECHA. Qué es, y cuándo. Los tres botones de un toque agendan
+          en el acto; el día exacto y la hora, con «Agendar». Antes esta fila
+          estaba siempre abierta, sin decir de qué era. */}
+      {editable && pidiendo === "fecha" && (
+        <div className="proximo-paso" style={caja}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>
+            {estado.paso ? `¿Para cuándo «${estado.paso.title}»?` : "¿Cuál es el próximo paso, y para cuándo?"}
+          </div>
           {!estado.paso && (
-            <input value={paso} onChange={e => { setPaso(e.target.value); setError(""); }} aria-label="Próximo paso"
-              placeholder="¿Cuál es el próximo paso? Ej: reunión con el cliente"
+            <input value={paso} onChange={e => { setPaso(e.target.value); setError(""); }} aria-label="Próximo paso" autoFocus
+              placeholder="Ej: reunión con el cliente"
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumarPaso(cuando.dia || sumarDias(hoy, 1), cuando.dia ? cuando.hora || null : null); } }}
               style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: colors.muted }}>{estado.paso ? "Ponele fecha:" : "¿Cuándo?"}</span>
             {DIAS.map(([txt, n]) => (
               <button key={txt} style={chip(false)}
                 onClick={() => (estado.paso ? fecharPaso(sumarDias(hoy, n), cuando.hora || undefined) : sumarPaso(sumarDias(hoy, n), cuando.hora || null))}>{txt}</button>
@@ -225,12 +258,13 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
               onClick={() => (estado.paso ? fecharPaso(cuando.dia, cuando.hora || undefined) : sumarPaso(cuando.dia, cuando.hora || null))}>
               Agendar
             </button>
+            <button onClick={cerrarPedido} style={chip(false)}>Cancelar</button>
           </div>
-          {!estado.paso && (
-            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45 }}>
-              Queda como tarea del lead, la misma que se ve en Tareas. Con hora es una reunión: desde el checklist se le manda la invitación al cliente.
-            </div>
-          )}
+          <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45 }}>
+            {estado.paso
+              ? "«Hoy», «Mañana» y «En una semana» guardan al tocarlos. Con hora queda como reunión."
+              : "Queda como tarea del proyecto, la misma que se ve en Tareas. Con hora es una reunión: desde el checklist se le manda la invitación al cliente."}
+          </div>
         </div>
       )}
 
@@ -292,6 +326,9 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
 }
 
 const DIAS = [["Hoy", 0], ["Mañana", 1], ["En una semana", 7]];
+
+// El nombre de cada cosa, en chico: sin él, dos desplegables no dicen qué son.
+const rotulo = { fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 };
 
 // Que guardó se dice al lado de lo que se tocó, no en un cartel aparte.
 function Guardado({ estado, error }) {

@@ -20,6 +20,8 @@
 // Lo que la bitácora escribe al crear la tarea. El alta sale de la tarea misma
 // —que sabe cuándo y quién—, así que ese renglón no se repite.
 const ES_ALTA = /^Sumó "/;
+// La que nació de otra que se terminó lo dice al final de su alta.
+const VIENE_DE = /^Sumó ".*", que viene de (".*")$/;
 // Los renglones que dicen que se hizo: si hay alguno, no se deduce otro.
 const ES_CIERRE = /^(Hizo "|Hecho: )/;
 
@@ -49,6 +51,8 @@ export function dichoAdentro(detalle) {
   if (/^Le mostró al cliente "/.test(d)) return "Se le mostró al cliente";
   if (/^Dejó de mostrarle al cliente "/.test(d)) return "Se le dejó de mostrar al cliente";
   if ((m = d.match(/^Arregló ".*": (.+)$/))) return `Se corrigió: ${m[1]}`;
+  // Se terminó y de ella nació otra: adentro se lee con cuál siguió.
+  if ((m = d.match(/^".*" sigue con (".*")$/))) return `Siguió con ${m[1]}`;
   return d;
 }
 
@@ -69,7 +73,14 @@ export function historialDe({ tarea, comentarios = [], movimientos = [], nombreD
   let hayCierre = false;
   for (const m of movimientos || []) {
     const detalle = String(m.detalle || "");
-    if (ES_ALTA.test(detalle)) continue;
+    if (ES_ALTA.test(detalle)) {
+      // El alta no se repite, pero si dice de dónde viene, eso se guarda.
+      const origen = detalle.match(VIENE_DE);
+      const alta = filas.find(f => f.id === "alta");
+      if (origen && alta) alta.texto = `Se agregó al checklist: viene de ${origen[1]}`;
+      else if (origen) filas.push({ id: `m${m.id}`, cuando: m.created_at, quien: m.autor_nombre || null, texto: `Viene de ${origen[1]}`, automatico: true });
+      continue;
+    }
     if (ES_CIERRE.test(detalle)) hayCierre = true;
     filas.push({ id: `m${m.id}`, cuando: m.created_at, quien: m.autor_nombre || null, texto: dichoAdentro(detalle), automatico: m.automatico !== false });
   }

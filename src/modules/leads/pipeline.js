@@ -215,6 +215,28 @@ export function loQueDice(estado) {
   return paso ? `${paso} · sin fecha` : "Sin próximo paso";
 }
 
+/**
+ * POR QUÉ UN PROYECTO NO TIENE PRÓXIMO PASO, dicho entero.
+ *
+ * La tarjeta decía «"Revision de Electrica" · sin fecha», y Hernán preguntó
+ * qué hacía ese cuadro (17/11/2026): nombraba un solo punto, como si el
+ * problema fuera ese, cuando eran los ocho abiertos los que no tenían fecha.
+ * Acá se dice la cuenta, por qué importa y qué hace el botón.
+ *
+ * @returns null si no es el caso, o { dice, ayuda, boton }
+ */
+export function explicarSinPaso(estado, tareas = []) {
+  if (estado?.clase !== "sin_paso") return null;
+  const ayuda = "Sin un paso con fecha nadie lo vuelve a mirar: FOREMAN lo recuerda el día que le pongas.";
+  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t)).length;
+  const titulo = estado.paso?.title || "";
+  if (!titulo) return { dice: "No queda nada abierto en el checklist.", ayuda, boton: "Poner el próximo paso" };
+  return {
+    dice: abiertas > 1 ? `Ninguno de los ${abiertas} puntos abiertos tiene fecha.` : `«${titulo}» no tiene fecha.`,
+    ayuda, boton: `Ponerle fecha a «${titulo}»`,
+  };
+}
+
 // ─── Los avisos ────────────────────────────────────────────────────────────
 
 const ORDEN_DE_AVISOS = { insistir: 0, vencido: 1, sin_paso: 2 };

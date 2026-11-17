@@ -169,7 +169,7 @@ const lista = readFileSync(new URL("../src/modules/leads/ListaDeTareas.jsx", imp
 
 test("cada renglón de la bitácora que es de una tarea lleva de cuál: si no, no llega a su historial", () => {
   // Las frases que nombran UNA tarea entre comillas.
-  const frases = ['`Sumó "${tarea.title}"`', '`Le encargó "${tarea.title}"', '"Hizo" : "Volvió a abrir"', "queda para el ${enCriollo(fecha)}", '"queda esperando a un tercero" : "ya no espera"'];
+  const frases = ['`Sumó "${tarea.title}"', '`Le encargó "${tarea.title}"', '"Hizo" : "Volvió a abrir"', "queda para el ${enCriollo(fecha)}", '"queda esperando a un tercero" : "ya no espera"'];
   for (const f of frases) {
     const desde = proyecto.indexOf(f);
     assert.ok(desde > 0, `proyecto.js ya no escribe ${f}`);
@@ -177,6 +177,42 @@ test("cada renglón de la bitácora que es de una tarea lleva de cuál: si no, n
     assert.match(tramo, /extra: \{ task_id: (tarea|item)\.id \}/, `el renglón de ${f} no dice de qué tarea es`);
   }
   assert.match(lista, /anotarCorreccion\(lead, `Arregló "\$\{aTarea\.item\.texto\}"[^\n]+, currentUser, aTarea\.item\.id\)/);
+  // La que nace de otra lo deja escrito en las dos: en la nueva, al final de
+  // su alta; en la que se terminó, con su propio renglón.
+  assert.match(proyecto, /detalle: `Sumó "\$\{tarea\.title\}"\$\{vieneDe\?\.texto \? `, que viene de "\$\{vieneDe\.texto\}"` : ""\}`, quien, extra: \{ task_id: tarea\.id \}/);
+  assert.match(proyecto, /detalle: `"\$\{vieneDe\.texto\}" sigue con "\$\{tarea\.title\}"`, quien, extra: \{ task_id: vieneDe\.id \}/);
+});
+
+test("LA CONTINUIDAD se lee desde los dos lados: de dónde viene la nueva y con qué siguió la que se terminó", () => {
+  // Adentro de la que se terminó.
+  assert.equal(dichoAdentro('"Revision de Electrica" sigue con "Pedir la corrección de los planos"'), 'Siguió con "Pedir la corrección de los planos"');
+  const vieja = { id: 135, title: "Revision de Electrica", status: "listo", created_at: "2026-10-14T15:00:00Z", created_by: 1, hecha_at: "2026-11-17T16:00:00Z", hecha_por: "Hernan Cueva" };
+  assert.deepEqual(historialDe({
+    tarea: vieja, nombreDe,
+    movimientos: [
+      { id: 1, detalle: 'Hizo "Revision de Electrica"', autor_nombre: "Hernan Cueva", automatico: true, created_at: "2026-11-17T16:00:00Z" },
+      { id: 2, detalle: '"Revision de Electrica" sigue con "Pedir la corrección de los planos"', autor_nombre: "Hernan Cueva", automatico: true, created_at: "2026-11-17T16:00:20Z" },
+    ],
+  }).map(h => h.texto), ["Se agregó al checklist", "Se marcó como hecha", 'Siguió con "Pedir la corrección de los planos"']);
+  // Adentro de la que nació: el alta no se repite, pero dice de dónde viene.
+  const nueva = { id: 240, title: "Pedir la corrección de los planos", status: "en-progreso", created_at: "2026-11-17T16:00:20Z", created_by: 1 };
+  const h = historialDe({
+    tarea: nueva, nombreDe,
+    movimientos: [
+      { id: 3, detalle: 'Sumó "Pedir la corrección de los planos", que viene de "Revision de Electrica"', autor_nombre: "Hernan Cueva", automatico: true, created_at: "2026-11-17T16:00:20Z" },
+      { id: 4, detalle: 'Le encargó "Pedir la corrección de los planos" a Hernan Cueva', autor_nombre: "Hernan Cueva", automatico: true, created_at: "2026-11-17T16:00:21Z" },
+    ],
+  });
+  assert.deepEqual(h.map(x => [x.texto, x.quien, x.automatico]), [
+    ['Se agregó al checklist: viene de "Revision de Electrica"', "Hernan Cueva", true],
+    ["Se le encargó a Hernan Cueva", "Hernan Cueva", true],
+  ]);
+  // Un título con comillas adentro no confunde de dónde viene.
+  assert.equal(historialDe({ tarea: nueva, nombreDe, movimientos: [{ id: 5, detalle: 'Sumó "Cocina "tipo isla"", que viene de "MADEVAL "cocina""', created_at: "2026-11-17T16:00:20Z" }] })[0].texto,
+    'Se agregó al checklist: viene de "MADEVAL "cocina""');
+  // Y el alta común sigue sin repetirse.
+  assert.deepEqual(historialDe({ tarea: nueva, nombreDe, movimientos: [{ id: 6, detalle: 'Sumó "Pedir la corrección de los planos"', created_at: "2026-11-17T16:00:20Z" }] }).map(x => x.texto),
+    ["Se agregó al checklist"]);
 });
 
 test("lo que se hace desde la bandeja de Tareas también dice de qué tarea es", () => {

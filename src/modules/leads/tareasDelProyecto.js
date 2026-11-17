@@ -180,6 +180,41 @@ export function filaNueva({
   };
 }
 
+/**
+ * LO QUE SIGUE, cuando un punto se termina.
+ *
+ * Hernán, 17/11/2026: «¿qué sucede cuando ya se completa esa tarea o
+ * gestión... si se agenda reunión o se pasa a otra actividad relacionada? ¿Se
+ * abre una nueva tarea? ¿O se genera desde ahí mismo, por continuidad?». No
+ * pasaba nada: el punto se iba a «hechos» y lo que seguía había que acordarse
+ * de cargarlo aparte, sin nada que dijera de dónde venía.
+ *
+ * Ahora al terminarlo se pregunta qué sigue, y lo que se escriba nace de él:
+ * en su misma etapa, a cargo de la misma persona, y con día y hora es una
+ * reunión. No es obligatorio: «Nada más» y listo.
+ *
+ * @param de      el punto que se terminó, como lo dibuja la lista
+ * @param tarea   su fila: de ahí sale quién lo tenía
+ * @param clase   qué era (claseDe): una tarea sigue en tarea, lo demás en gestión
+ * @returns { error } o lo que se le pasa a agregarTarea
+ */
+export function loQueSigue({ de, tarea = null, clase = "gestion", texto, due_date = null, hora = null }) {
+  const titulo = String(texto || "").trim();
+  if (!titulo) return { error: "Escribí qué sigue, o tocá «Nada más»." };
+  if (hora && !due_date) return { error: "Para ponerle hora, primero elegí el día." };
+  const conHora = !!(due_date && hora);
+  return {
+    titulo,
+    etapaId: de?.etapa_id || null,
+    tipo: conHora ? "Reunión" : clase === "tarea" ? "Otro" : "Gestión",
+    due_date: due_date || null,
+    hora: conHora ? hora : null,
+    assignee_id: tarea?.assignee_id || null,
+    responsable_externo: tarea?.responsable_externo || null,
+    vieneDe: de ? { id: de.id, texto: de.texto } : null,
+  };
+}
+
 /** Lo que cambia en la tarea al marcarla hecha, o al volver a abrirla. */
 export function alMarcar(hecha, quienNombre = null, ahora = new Date()) {
   return hecha

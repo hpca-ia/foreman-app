@@ -131,11 +131,13 @@ export async function enviarChecklist({ lead, invitados = [], otros = [], mensaj
  *
  * @param etapaId  en qué etapa está el lead ahora: queda de etiqueta en la tarea
  * @param hecha    un envío ya ocurrió: nace cerrado y queda de registro
+ * @param vieneDe  { id, texto } del punto que se terminó y del que esta sigue:
+ *                 queda escrito en el historial de las dos
  * @returns { tarea, item } o { error }
  */
 export async function agregarTarea({
   lead, etapaId = null, titulo, orden = 0, tipo = "Gestión", assignee_id = null, due_date = null, hora = null,
-  urgente = false, responsable_externo = null, hecha = false, quien = null, nombreResponsable = null,
+  urgente = false, responsable_externo = null, hecha = false, quien = null, nombreResponsable = null, vieneDe = null,
 }) {
   const fila = filaNueva({
     lead, etapaId, titulo, orden, tipo, assignee_id, due_date, hora, urgente, responsable_externo, hecha,
@@ -148,7 +150,14 @@ export async function agregarTarea({
   // Un envío no se «suma» ni se «encarga»: se registra, y eso lo anota quien
   // lo llama, con a quién fue.
   if (!hecha) {
-    await anotar(lead.id, { detalle: `Sumó "${tarea.title}"`, quien, extra: { task_id: tarea.id } });
+    await anotar(lead.id, {
+      detalle: `Sumó "${tarea.title}"${vieneDe?.texto ? `, que viene de "${vieneDe.texto}"` : ""}`, quien, extra: { task_id: tarea.id },
+    });
+    // La continuidad se lee desde los dos lados: en la que nace, de dónde
+    // viene; en la que se terminó, con qué siguió.
+    if (vieneDe?.id) {
+      await anotar(lead.id, { detalle: `"${vieneDe.texto}" sigue con "${tarea.title}"`, quien, extra: { task_id: vieneDe.id } });
+    }
     // Encargarle algo a alguien es de las cosas que hay que poder rastrear.
     if (assignee_id || responsable_externo) {
       await anotar(lead.id, {
