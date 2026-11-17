@@ -267,6 +267,42 @@ function FotosYArchivos({ archivos = [], onFoto, grande = false }) {
   );
 }
 
+/**
+ * Las actualizaciones de un punto: lo que se anotó para el cliente, lo más
+ * nuevo arriba y cada una con su fecha.
+ *
+ * Hernán, 17/11/2026: «cliente debe ver las actualizaciones de cada uno». Era
+ * una sola, que se pisaba al escribir la siguiente; ahora es la historia del
+ * punto contada para él. Se ven las tres últimas y las anteriores se abren:
+ * un punto con diez anotaciones no tiene que tapar a los demás.
+ */
+function Actualizaciones({ punto }) {
+  const [todas, setTodas] = useState(false);
+  // Un enlace abierto contra la versión de antes trae solo la última.
+  const lista = Array.isArray(punto.actualizaciones) ? punto.actualizaciones
+    : punto.actualizacion ? [{ id: "ultima", texto: punto.actualizacion, fecha: punto.actualizado_el }] : [];
+  if (!lista.length) return null;
+  const A_LA_VISTA = 3;
+  const visibles = todas ? lista : lista.slice(0, A_LA_VISTA);
+  return (
+    <div className="actualizaciones-del-punto" style={{ marginTop: 6, background: colors.bg, borderRadius: 7, padding: "3px 10px" }}>
+      {visibles.map((a, i) => (
+        <div key={a.id} className="actualizacion-del-punto" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, padding: "5px 0",
+          borderTop: i ? `1px solid ${colors.neutralSoft}` : "none", whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
+          {a.fecha && <div style={{ fontSize: 10.5, color: colors.muted, fontWeight: 600 }}>{dia(a.fecha)}</div>}
+          {a.texto}
+        </div>
+      ))}
+      {lista.length > A_LA_VISTA && (
+        <button className="ver-anteriores" onClick={() => setTodas(v => !v)}
+          style={{ background: "none", border: "none", padding: "4px 0 6px", cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, fontWeight: 600, color: colors.brand }}>
+          {todas ? "Ver solo las últimas" : `Ver las ${lista.length - A_LA_VISTA} anteriores`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Checklist({ lista, listas, etapas = [], novedades = [], onFoto }) {
   const pct = lista.length ? Math.round((listas / lista.length) * 100) : 0;
   // Con etapas, cada una con sus puntos; sin ellas, la lista de corrido.
@@ -291,14 +327,8 @@ function Checklist({ lista, listas, etapas = [], novedades = [], onFoto }) {
           <div style={{ fontSize: 11.5, color: e.color, marginTop: 2 }}>
             {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
           </div>
-          {/* Qué hay de nuevo, con su fecha: cuán fresca es la noticia. */}
-          {t.actualizacion && (
-            <div className="actualizacion-del-punto" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, marginTop: 6, padding: "7px 10px",
-              background: colors.bg, borderRadius: 7, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
-              {t.actualizacion}
-              {t.actualizado_el && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3 }}>Actualizado el {dia(t.actualizado_el)}</div>}
-            </div>
-          )}
+          {/* Qué hay de nuevo, cada cosa con su fecha: cuán fresca es la noticia. */}
+          <Actualizaciones punto={t} />
           {/* Las fotos y los archivos de este punto. */}
           <FotosYArchivos archivos={t.archivos || []} onFoto={onFoto} />
         </div>
@@ -323,7 +353,7 @@ function Checklist({ lista, listas, etapas = [], novedades = [], onFoto }) {
         <div className="lo-ultimo" style={{ background: colors.brandSoft, border: `1px solid ${colors.border}`, borderRadius: 11, padding: "10px 12px", marginBottom: 12 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: colors.brand, letterSpacing: 0.4, marginBottom: 5 }}>LO ÚLTIMO</div>
           {novedades.map((n, i) => (
-            <div key={`${n.tipo}-${n.id}`} className="novedad" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, padding: "5px 0",
+            <div key={`${n.tipo}-${n.id}-${i}`} className="novedad" style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.5, padding: "5px 0",
               borderTop: i ? `1px solid ${colors.border}` : "none", overflowWrap: "anywhere" }}>
               <span style={{ color: colors.muted }}>{dia(n.fecha)} · </span>
               <strong>{n.titulo}</strong>{n.tipo === "listo" ? <span style={{ color: colors.success, fontWeight: 600 }}> · listo</span> : <>: {n.texto}</>}

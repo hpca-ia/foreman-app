@@ -2,8 +2,9 @@
 //
 // El checklist se ve en su enlace, pero un enlace hay que acordarse de
 // abrirlo. Esto se lo manda: los puntos que se decidió mostrarle, con su
-// descripción, en qué está cada uno y la última actualización, y el botón al
-// enlace si está prendido. Es lo mismo que vería ahí, ni un dato más.
+// descripción, en qué está cada uno y la última actualización —la última
+// anotación del punto que se marcó para él—, y el botón al enlace si está
+// prendido. Es lo mismo que vería ahí, ni un dato más.
 //
 // Lo manda una persona, cuando quiere y a quien elige: no sale solo.
 //
@@ -33,7 +34,13 @@ export default async function handler(req, res) {
     const base = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente`;
     let filas = await json(await rest(`${base},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`));
     if (!Array.isArray(filas)) filas = await json(await rest(base));
-    const lista = listaDelCliente(filas);
+    // Las anotaciones marcadas para él (migración 185): de ahí sale la
+    // última actualización de cada punto. Sin la columna, no hay ninguna.
+    const ids = listaDelCliente(filas).map(t => Number(t.id)).filter(Boolean);
+    let notas = ids.length ? await json(await rest(
+      `tarea_comentarios?task_id=in.(${ids.join(",")})&visible_cliente=eq.true&select=id,task_id,texto,visible_cliente,created_at`)) : [];
+    if (!Array.isArray(notas)) notas = [];
+    const lista = listaDelCliente(filas, notas);
     if (!lista.length) return res.status(200).json({ ok: false, error: "El cliente todavía no ve ninguna tarea de este proyecto: no hay checklist que mandar." });
 
     // A quién: la gente de afuera de ESTE proyecto que se eligió, y los

@@ -11,8 +11,10 @@ import { subirParaElCliente, quitarArchivoDelCliente } from "./proyecto";
 // relacionadas al proyecto y a las tareas también. Hazlo lo más didáctico y
 // fácil posible».
 //
-// UN SOLO BOTÓN, Y EL LUGAR DICE PARA QUIÉN ES. Lo que se adjunta acá lo ve el
-// cliente: está adentro del recuadro «lo que lee el cliente». No hay un tilde
+// UN SOLO BOTÓN, Y EL LUGAR DICE PARA QUIÉN ES. Lo que se sube acá lo ve el
+// cliente: está adentro del recuadro «lo que ve el cliente», bajo el título
+// «Fotos y archivos para el cliente» —el mismo día preguntó «¿dónde se sube
+// archivos relacionados?», y el botón decía «Adjuntar»—. No hay un tilde
 // por archivo que decidir ni que olvidarse: un archivo interno —la cotización
 // del proveedor— no se sube acá, y por eso no se le puede escapar.
 //
@@ -99,7 +101,7 @@ export default function FotosYArchivosDelCliente({ lead, punto = null, archivos 
           <button className="adjuntar-para-el-cliente" onClick={() => elegir.current?.click()} disabled={!!subiendo}
             style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, fontWeight: 600,
               border: `1px dashed ${colors.brand}`, background: "#fff", color: colors.brand, borderRadius: 8, padding: "5px 11px" }}>
-            <Paperclip size={12} /> {subiendo || (archivos.length ? "Adjuntar más fotos o archivos" : "Adjuntar fotos o archivos")}
+            <Paperclip size={12} /> {subiendo || (archivos.length ? "Subir más fotos o archivos" : "Subir fotos o archivos")}
           </button>
           <input ref={elegir} type="file" multiple style={{ display: "none" }} aria-label="Fotos o archivos para el cliente"
             onChange={e => { const f = [...(e.target.files || [])]; e.target.value = ""; subir(f); }} />

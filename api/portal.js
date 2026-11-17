@@ -1224,8 +1224,9 @@ async function armarInforme(lead) {
 
   // EL CHECKLIST QUE SE DECIDIÓ MOSTRARLE: las tareas del proyecto marcadas
   // una por una. Se piden solo las marcadas y solo las columnas que hacen
-  // falta para decir qué es y en qué está; la nota y los comentarios ni se
-  // leen. Si la columna todavía no existe (migración 176), no hay lista.
+  // falta para decir qué es y en qué está; la nota suelta ni se lee, y de lo
+  // anotado solo lo que se marcó para él (más abajo). Si la columna todavía
+  // no existe (migración 176), no hay lista.
   const deLaLista = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id`
     + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente,etapa_id`;
   // Con la descripción y la actualización escritas para él (migración 178);
@@ -1244,6 +1245,15 @@ async function armarInforme(lead) {
   const seVen = new Set(listaDelCliente(marcadas).map(t => t.id));
   paraEl = paraEl.filter(a => a.task_id == null || seVen.has(a.task_id));
 
+  // LAS ANOTACIONES DE CADA PUNTO QUE SE MARCARON PARA ÉL (migración 185).
+  // Solo las marcadas y solo de los puntos que ve; se pide el texto y la
+  // fecha, no quién la escribió. Lo anotado sin marcar es interno y ni se
+  // lee. Si la columna todavía no está, no hay ninguna y el enlace abre igual.
+  let notas = seVen.size ? await json(await rest(
+    `tarea_comentarios?task_id=in.(${[...seVen].map(Number).join(",")})&visible_cliente=eq.true`
+    + `&select=id,task_id,texto,visible_cliente,created_at&order=created_at.desc`)) : [];
+  if (!Array.isArray(notas)) notas = [];
+
   // Las etapas del pipeline, para decirle en cuál está cada punto.
   let catalogo = marcadas.some(t => t.etapa_id)
     ? await json(await rest("pipeline_etapas?select=id,nombre,orden,tunel")) : [];
@@ -1257,7 +1267,7 @@ async function armarInforme(lead) {
     ...paraEl.map(a => a.storage_path),
   ].filter(Boolean));
 
-  const delCliente = loDelCliente({ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces });
+  const delCliente = loDelCliente({ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces, notas });
   const lista = delCliente.lista;
 
   const conUrl = x => ({ ...x, url: enlaces[x.storage_path] || null, storage_path: undefined });

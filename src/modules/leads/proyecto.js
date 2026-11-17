@@ -25,6 +25,7 @@ const SIN_170 = "Falta correr la migración 170 en Supabase.";
 export const SIN_176 = "Falta correr la migración 176 en Supabase.";
 export const SIN_178 = "Falta correr la migración 178 en Supabase.";
 export const SIN_171 = "Falta correr la migración 171 en Supabase.";
+export const SIN_185 = "Para que el cliente lea las anotaciones falta correr la migración 185 en Supabase.";
 
 /**
  * Guardar en el lead lo que decidió pipeline.js, y dejarlo escrito en su
@@ -381,22 +382,37 @@ export const anotarCorreccion = (lead, detalle, quien, tareaId = null) =>
  * anotó en la tarea (sus comentarios, los mismos de Tareas) y lo que la
  * bitácora del proyecto dice de ella (migración 181).
  *
+ * Cada anotación trae si la lee el cliente (`visible_cliente`, migración
+ * 185). Sin esa columna se leen igual, todas internas, y `sinNotasAlCliente`
+ * lo dice para que la pantalla no ofrezca lo que no se puede guardar.
+ *
  * @param ids  las tareas del proyecto
  * @returns { comentarios, movimientos } por id de tarea, y `sinEnlace` si
  *          falta la 181: ahí se ve lo anotado, y lo automático todavía no
  */
 export async function cargarHistorial(leadId, ids = []) {
-  if (!leadId || !ids.length) return { comentarios: {}, movimientos: {}, sinEnlace: false };
-  const [{ data: notas, error: eNotas }, { data: movs, error: eMovs }] = await Promise.all([
-    supabase.from("tarea_comentarios").select("id,task_id,texto,autor_id,autor_nombre,created_at").in("task_id", ids).order("created_at"),
+  if (!leadId || !ids.length) return { comentarios: {}, movimientos: {}, sinEnlace: false, sinNotasAlCliente: false };
+  const [anotado, { data: movs, error: eMovs }] = await Promise.all([
+    lasNotas(q => q.in("task_id", ids)),
     supabase.from("lead_movimientos").select("id,task_id,detalle,autor_nombre,automatico,created_at")
       .eq("lead_id", leadId).not("task_id", "is", null).order("created_at"),
   ]);
   return {
-    comentarios: porTarea(eNotas ? [] : notas || []),
+    comentarios: porTarea(anotado.notas),
     movimientos: porTarea(eMovs ? [] : movs || []),
     sinEnlace: !!eMovs && falta(eMovs),
+    sinNotasAlCliente: anotado.sinMarca,
   };
+}
+
+// Lo anotado, con la marca de si lo lee el cliente; y sin ella si la columna
+// todavía no está.
+const NOTA = "id,task_id,texto,autor_id,autor_nombre,created_at";
+async function lasNotas(filtro) {
+  let { data, error } = await filtro(supabase.from("tarea_comentarios").select(`${NOTA},visible_cliente`)).order("created_at");
+  const sinMarca = !!error && falta(error);
+  if (sinMarca) ({ data, error } = await filtro(supabase.from("tarea_comentarios").select(NOTA)).order("created_at"));
+  return { notas: error ? [] : data || [], sinMarca };
 }
 
 /**
@@ -404,15 +420,15 @@ export async function cargarHistorial(leadId, ids = []) {
  * que no tienen el proyecto entero a mano. Una tarea sin proyecto no tiene
  * bitácora: su historial es lo anotado, más cuándo entró y cuándo se hizo.
  *
- * @returns { comentarios, movimientos }
+ * @returns { comentarios, movimientos, sinNotasAlCliente }
  */
 export async function cargarHistorialDeTarea(taskId) {
-  if (!taskId) return { comentarios: [], movimientos: [] };
-  const [{ data: notas, error: eNotas }, { data: movs, error: eMovs }] = await Promise.all([
-    supabase.from("tarea_comentarios").select("id,task_id,texto,autor_id,autor_nombre,created_at").eq("task_id", taskId).order("created_at"),
+  if (!taskId) return { comentarios: [], movimientos: [], sinNotasAlCliente: false };
+  const [anotado, { data: movs, error: eMovs }] = await Promise.all([
+    lasNotas(q => q.eq("task_id", taskId)),
     supabase.from("lead_movimientos").select("id,task_id,detalle,autor_nombre,automatico,created_at").eq("task_id", taskId).order("created_at"),
   ]);
-  return { comentarios: eNotas ? [] : notas || [], movimientos: eMovs ? [] : movs || [] };
+  return { comentarios: anotado.notas, movimientos: eMovs ? [] : movs || [], sinNotasAlCliente: anotado.sinMarca };
 }
 
 /**
@@ -422,19 +438,57 @@ export async function cargarHistorialDeTarea(taskId) {
  * y con nombre. Les llega por correo a los involucrados, menos a quien lo
  * escribe; si el correo falla, lo anotado ya quedó.
  *
+ * LA ANOTACIÓN PUEDE SER LA ACTUALIZACIÓN QUE LEE EL CLIENTE. Hernán,
+ * 17/11/2026: «cliente debe ver las actualizaciones de cada uno». Con
+ * `alCliente` queda marcada (migración 185) y sale en su enlace debajo del
+ * punto, con su fecha. Sin marcar es interna.
+ *
+ * @param alCliente  que la lea el cliente en su enlace
  * @returns null o el error
  */
-export async function anotarEnLaTarea(item, texto, quien) {
+export async function anotarEnLaTarea(item, texto, quien, { alCliente = false } = {}) {
   const limpio = String(texto || "").trim();
   if (!limpio) return "Escribí qué pasó.";
-  const { error } = await supabase.from("tarea_comentarios").insert({
-    task_id: item.id, texto: limpio, autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null,
-  });
+  const fila = { task_id: item.id, texto: limpio, autor_id: quien?.id ?? null, autor_nombre: quien?.name ?? null };
+  let { error } = await supabase.from("tarea_comentarios").insert(alCliente ? { ...fila, visible_cliente: true } : fila);
+  // Sin la 185 se anota igual, interna, y se dice que el cliente no la lee.
+  let sinMarca = false;
+  if (error && alCliente && falta(error)) {
+    sinMarca = true;
+    ({ error } = await supabase.from("tarea_comentarios").insert(fila));
+  }
   if (error) return "No se pudo anotar: " + error.message;
   fetch("/api/aviso?de=comentario", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ taskId: item.id, texto: limpio, autorId: quien?.id ?? null }),
   }).catch(() => {});
+  return sinMarca ? `Quedó anotado, pero el cliente no lo lee: ${SIN_185}` : null;
+}
+
+/**
+ * Que el cliente lea una anotación que ya estaba escrita, o deje de leerla.
+ *
+ * Queda dicho en la historia del proyecto —qué se le mostró y quién lo
+ * decidió—, sin sumar un renglón al historial del punto: ahí la anotación
+ * misma dice si la lee.
+ *
+ * @param nota   { id, texto }
+ * @param punto  el punto del checklist, como lo ve la lista, o la tarea
+ * @returns null o el error
+ */
+export async function mostrarNotaAlCliente(nota, ver, { punto = null, quien = null } = {}) {
+  if (!nota?.id) return "No se encontró esa anotación.";
+  const { error } = await supabase.from("tarea_comentarios").update({ visible_cliente: !!ver }).eq("id", nota.id);
+  if (error) return falta(error) ? SIN_185 : error.message;
+  const leadId = punto?.lead_id;
+  if (leadId) {
+    const corto = String(nota.texto || "").trim().replace(/\s+/g, " ");
+    await anotar(leadId, {
+      detalle: `${ver ? "Le mostró al cliente" : "Dejó de mostrarle al cliente"} una anotación de "${punto.texto || punto.title || ""}"`
+        + (corto ? `: «${corto.length > 90 ? `${corto.slice(0, 90)}…` : corto}»` : "") + ".",
+      quien,
+    });
+  }
   return null;
 }
 

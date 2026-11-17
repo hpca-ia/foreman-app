@@ -102,7 +102,7 @@ test("LO QUE PIDIÓ: las fotos y archivos de cada punto van con su punto, y los 
 });
 
 test("el correo del checklist sigue saliendo de la misma lista, sin etapas ni archivos", () => {
-  assert.deepEqual(Object.keys(listaDelCliente(TAREAS)[0]), ["id", "titulo", "descripcion", "estado", "listo_el", "actualizacion", "actualizado_el"]);
+  assert.deepEqual(Object.keys(listaDelCliente(TAREAS)[0]), ["id", "titulo", "descripcion", "estado", "listo_el", "actualizacion", "actualizado_el", "actualizaciones"]);
 });
 
 test("el enlace del cliente pide solo lo marcado para él, y un archivo de un punto solo si el punto se le muestra", () => {
@@ -169,7 +169,7 @@ test("la migración 184 solo suma dos datos a los archivos del proyecto, y lo ya
   assert.doesNotMatch(sql.split("\n").filter(l => !l.trim().startsWith("--")).join("\n"), /^\s*(delete|update|drop|truncate|insert)\b/im);
 });
 
-test("en el checklist se adjunta adentro de «lo que lee el cliente», y en el proyecto en «lo que ve el cliente»", () => {
+test("en el checklist se sube adentro de «lo que ve el cliente de este punto», y en el proyecto en «lo que ve el cliente»", () => {
   const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
   assert.match(lista, /<FotosYArchivosDelCliente lead=\{lead \|\| \{ id: item\.lead_id \}\} punto=\{item\}/);
   assert.match(lista, /<FotosYArchivosDelCliente lead=\{lead\} archivos=\{paraVer\.delProyecto\}/);

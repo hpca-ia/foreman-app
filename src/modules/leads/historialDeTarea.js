@@ -63,7 +63,9 @@ export function dichoAdentro(detalle) {
  * @param comentarios  lo que se anotó en ella (`tarea_comentarios`)
  * @param movimientos  lo que la bitácora del proyecto dice de ella
  * @param nombreDe     id de usuario → nombre, para decir quién la agregó
- * @returns [{ id, cuando, quien, texto, automatico }]
+ * @returns [{ id, cuando, quien, texto, automatico }]; lo anotado lleva además
+ *          `nota` —el id de la anotación— y `alCliente`: si la lee el cliente
+ *          en su enlace (migración 185)
  */
 export function historialDe({ tarea, comentarios = [], movimientos = [], nombreDe = () => null }) {
   const filas = [];
@@ -87,7 +89,8 @@ export function historialDe({ tarea, comentarios = [], movimientos = [], nombreD
   for (const c of comentarios || []) {
     const texto = String(c.texto || "").trim();
     if (!texto) continue;
-    filas.push({ id: `c${c.id}`, cuando: c.created_at, quien: c.autor_nombre || null, texto, automatico: false });
+    filas.push({ id: `c${c.id}`, cuando: c.created_at, quien: c.autor_nombre || null, texto, automatico: false,
+      nota: c.id, alCliente: c.visible_cliente === true });
   }
   // Una tarea hecha antes de la 181, o marcada desde Tareas: la bitácora no
   // lo dice de ella, pero la tarea sabe cuándo se hizo y quién la marcó.

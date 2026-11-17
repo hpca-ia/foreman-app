@@ -121,14 +121,15 @@ test("al marcar un punto se pregunta qué sigue; a un envío y a una compra no",
   assert.match(lista, /assignee_id: r\.assignee_id, responsable_externo: r\.responsable_externo, vieneDe: r\.vieneDe,/);
   // No es obligatorio.
   assert.match(lista, /<button onClick=\{\(\) => setSigue\(null\)\} style=\{boton\(false\)\}>Nada más<\/button>/);
-  // Lo del cliente no se hereda solo: se pregunta, y solo si el anterior se le mostraba.
+  // Lo del cliente se pregunta solo si el anterior se le mostraba, y entonces
+  // viene marcado: lo que sigue de un punto que él ve, también lo ve (17/11/2026).
   assert.match(lista, /\{sigue\.loVeia && !sinCompartir && \(/);
-  assert.match(lista, /alCliente: false, loVeia: compartidas\.has\(item\.id\)/);
+  assert.match(lista, /alCliente: compartidas\.has\(item\.id\), loVeia: compartidas\.has\(item\.id\)/);
 });
 
 test("un punto abierto se lee en partes con título, y se cierra: arriba, abajo y con la flecha de la fila", () => {
   const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
-  for (const titulo of ["¿PARA CUÁNDO?", "LO QUE LEE EL CLIENTE", "¿YA ESTÁ?"]) assert.ok(lista.includes(`>${titulo}<`), `falta el título ${titulo}`);
+  for (const titulo of ["¿PARA CUÁNDO?", "LO QUE VE EL CLIENTE DE ESTE PUNTO", "¿YA ESTÁ?"]) assert.ok(lista.includes(`>${titulo}<`), `falta el título ${titulo}`);
   assert.match(lista, /titulo="¿QUÉ PASÓ\? · EL HISTORIAL DE ESTE PUNTO"/);
   assert.equal((lista.match(/className="cerrar-punto" onClick=\{onAbrir\}/g) || []).length, 2);
   assert.match(lista, /className="abrir-o-cerrar" onClick=\{onAbrir\} aria-expanded=\{abierta\}/);

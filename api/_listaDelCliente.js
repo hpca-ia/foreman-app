@@ -1,24 +1,61 @@
 // EL CHECKLIST QUE VE EL CLIENTE EN SU ENLACE, Y EL QUE LE LLEGA POR CORREO.
 //
 // De cada tarea que el equipo decidió mostrarle sale lo que se escribió PARA
-// ÉL: qué dice, su descripción, en qué está y la última actualización. Lo
-// demás es interno y no viaja: la nota de quien la trabajó, los comentarios,
-// quién la tiene, para cuándo estaba.
+// ÉL: qué dice, su descripción, en qué está y sus actualizaciones. Lo demás es
+// interno y no viaja: quién la tiene, para cuándo estaba, lo que pasó solo.
+//
+// LAS ACTUALIZACIONES SON LAS ANOTACIONES DEL PUNTO QUE SE MARCARON PARA ÉL.
+// Hernán, 17/11/2026, después de anotar en RES BG «Se recibe presupuesto y
+// diseño BASE» y «Se recibe diseño preliminar, se envía para correcciones» y
+// no verlas en el enlace: «cliente debe ver las actualizaciones de cada uno».
+// Había dos lugares donde escribir —el historial, interno, y una
+// «actualización para el cliente» aparte, que en toda la base nadie llenó
+// nunca—. Ahora es uno: se anota en el punto y la anotación dice si la lee el
+// cliente (migración 185). La que no está marcada no viaja.
 //
 // Sin base: recibe las filas y devuelve lo que se manda. Así se puede probar
 // qué sale y, sobre todo, qué no (pruebas/checklistDelLead.test.mjs).
 
 const dia = f => String(f || "").slice(0, 10) || null;
+// El día EN ECUADOR (UTC−5, sin horario de verano). Lo que se anota a las
+// nueve de la noche es de ese día; leído con la hora de Londres, el cliente lo
+// veía fechado al día siguiente.
+const diaDeAca = f => {
+  const s = String(f || "");
+  if (s.length <= 10) return s || null;
+  const t = new Date(s).getTime();
+  return Number.isFinite(t) ? new Date(t - 5 * 3600 * 1000).toISOString().slice(0, 10) : s.slice(0, 10);
+};
 const limpio = t => String(t || "").trim();
 const esc = t => String(t ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /**
- * @param tareas  las filas de `tasks` del proyecto
- * @returns [{ id, titulo, descripcion, estado, listo_el, actualizacion, actualizado_el }]
- *          `estado` es "listo" | "espera" | "pendiente". En el orden en que se
- *          escribieron, que es el orden de un checklist.
+ * Lo que el cliente lee de un punto, lo más nuevo arriba: las anotaciones
+ * marcadas para él y, si la hay, la actualización escrita aparte de antes.
+ * De la anotación viaja el texto y el día: ni quién la escribió.
  */
-export function listaDelCliente(tareas = []) {
+function actualizacionesDe(t, notas) {
+  const suyas = notas
+    .filter(n => n && n.visible_cliente === true && String(n.task_id) === String(t.id) && limpio(n.texto))
+    .map(n => ({ id: `n${n.id}`, texto: limpio(n.texto), fecha: diaDeAca(n.created_at), cuando: String(n.created_at || "") }));
+  const escrita = limpio(t.cliente_actualizacion);
+  if (escrita) suyas.push({ id: "escrita", texto: escrita, fecha: diaDeAca(t.cliente_actualizado_at), cuando: String(t.cliente_actualizado_at || "") });
+  return suyas.sort((a, b) => b.cuando.localeCompare(a.cuando));
+}
+const sinHora = ({ cuando, ...n }) => n;
+
+/**
+ * @param tareas  las filas de `tasks` del proyecto
+ * @param notas   las anotaciones de esas tareas (`tarea_comentarios`): solo
+ *                cuentan las que tienen `visible_cliente`
+ * @returns [{ id, titulo, descripcion, estado, listo_el, actualizacion, actualizado_el, actualizaciones }]
+ *          `estado` es "listo" | "espera" | "pendiente". En el orden en que se
+ *          escribieron, que es el orden de un checklist. `actualizaciones` es
+ *          [{ id, texto, fecha }], lo más nuevo arriba; `actualizacion` y
+ *          `actualizado_el` son la última, que es la que va en el correo.
+ */
+export function listaDelCliente(tareas = [], notas = []) {
+  const anotado = Array.isArray(notas) ? notas : [];
   return (Array.isArray(tareas) ? tareas : [])
     // Solo lo marcado. Las compras tienen su circuito y lo que se cerró con
     // «ya no va» no se hizo ni falta: mostrárselo al cliente sería ruido.
@@ -26,15 +63,16 @@ export function listaDelCliente(tareas = []) {
     .sort((a, b) => (Number(a.ruta_orden) || 0) - (Number(b.ruta_orden) || 0) || Number(a.id) - Number(b.id))
     .map(t => {
       const listo = t.status === "listo";
-      const actualizacion = limpio(t.cliente_actualizacion);
+      const actualizaciones = actualizacionesDe(t, anotado).map(sinHora);
       return {
         id: t.id,
         titulo: limpio(t.title),
         descripcion: limpio(t.cliente_descripcion),
         estado: listo ? "listo" : t.espera ? "espera" : "pendiente",
-        listo_el: listo ? dia(t.hecha_at) : null,
-        actualizacion,
-        actualizado_el: actualizacion ? dia(t.cliente_actualizado_at) : null,
+        listo_el: listo ? diaDeAca(t.hecha_at) : null,
+        actualizacion: actualizaciones[0]?.texto || "",
+        actualizado_el: actualizaciones[0]?.fecha || null,
+        actualizaciones,
       };
     })
     .filter(t => t.titulo);
@@ -57,7 +95,7 @@ export function listaDelCliente(tareas = []) {
 const ES_FOTO = /\.(jpe?g|png|webp|gif|avif)$/i;
 const paraVer = (a, enlaces) => ({
   id: a.id, nombre: limpio(a.nombre) || "Archivo", descripcion: limpio(a.descripcion),
-  esFoto: ES_FOTO.test(limpio(a.nombre)), url: enlaces[a.storage_path] || null, fecha: dia(a.created_at),
+  esFoto: ES_FOTO.test(limpio(a.nombre)), url: enlaces[a.storage_path] || null, fecha: diaDeAca(a.created_at),
 });
 
 /**
@@ -66,22 +104,25 @@ const paraVer = (a, enlaces) => ({
  * @param lead      el proyecto: tunel, etapa, resultado
  * @param archivos  las filas de `proyecto_archivos` marcadas para el cliente
  * @param enlaces   { storage_path: enlace temporal }
+ * @param notas     las anotaciones de los puntos marcadas para el cliente
  * @returns { lista, etapas, novedades, archivos }
- *   lista     · los puntos, cada uno con `etapa` y sus `archivos`
+ *   lista     · los puntos, cada uno con `etapa`, sus `actualizaciones` y sus `archivos`
  *   etapas    · [{ id, nombre, listas, total, actual }] en el orden del
  *               pipeline; vacío si los puntos no tienen etapa
- *   novedades · lo último que pasó, lo más nuevo arriba: actualizaciones
- *               escritas y puntos que quedaron listos
+ *   novedades · lo último que pasó, lo más nuevo arriba: cada anotación
+ *               que se le mostró y los puntos que quedaron listos
  *   archivos  · los del proyecto en general, lo más nuevo arriba
  */
-export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {} } = {}) {
+export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {}, notas = [] } = {}) {
   const filas = Array.isArray(tareas) ? tareas : [];
+  const anotado = Array.isArray(notas) ? notas : [];
+  const filaDe = new Map(filas.map(t => [t?.id, t]));
   const etapaDe = new Map(filas.map(t => [t?.id, t?.etapa_id || null]));
   const cat = Array.isArray(catalogo) ? catalogo : [];
   const nombreDe = id => limpio(cat.find(e => e.id === id)?.nombre) || null;
   const todos = (Array.isArray(archivos) ? archivos : []).filter(a => a && a.visible_cliente !== false);
 
-  const lista = listaDelCliente(filas).map(t => {
+  const lista = listaDelCliente(filas, anotado).map(t => {
     const etapaId = etapaDe.get(t.id) || null;
     return {
       ...t, etapa_id: etapaId && nombreDe(etapaId) ? etapaId : null, etapa: etapaId ? nombreDe(etapaId) : null,
@@ -105,12 +146,16 @@ export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos
     };
   });
 
+  // Cada anotación es una novedad: si en un punto se anotó dos veces, son dos.
+  // Del mismo día, primero lo que quedó listo y después lo más reciente.
   const novedades = [
-    ...lista.filter(t => t.actualizacion && t.actualizado_el)
-      .map(t => ({ id: t.id, tipo: "actualizacion", titulo: t.titulo, texto: t.actualizacion, fecha: t.actualizado_el })),
+    ...lista.flatMap(t => actualizacionesDe(filaDe.get(t.id) || {}, anotado).filter(a => a.fecha)
+      .map(a => ({ id: t.id, tipo: "actualizacion", titulo: t.titulo, texto: a.texto, fecha: a.fecha, cuando: a.cuando }))),
     ...lista.filter(t => t.estado === "listo" && t.listo_el)
-      .map(t => ({ id: t.id, tipo: "listo", titulo: t.titulo, texto: "Quedó listo.", fecha: t.listo_el })),
-  ].sort((a, b) => b.fecha.localeCompare(a.fecha) || (a.tipo === "listo" ? -1 : 1) || b.id - a.id).slice(0, 6);
+      .map(t => ({ id: t.id, tipo: "listo", titulo: t.titulo, texto: "Quedó listo.", fecha: t.listo_el, cuando: "" })),
+  ].sort((a, b) => b.fecha.localeCompare(a.fecha) || (a.tipo === b.tipo ? 0 : a.tipo === "listo" ? -1 : 1)
+    || b.cuando.localeCompare(a.cuando) || Number(b.id) - Number(a.id))
+    .slice(0, 6).map(sinHora);
 
   return {
     lista, etapas, novedades,

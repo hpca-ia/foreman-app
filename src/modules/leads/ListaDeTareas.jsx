@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, ClipboardList, Send, History, RotateCcw, CornerDownRight } from "lucide-react";
+import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, ClipboardList, Send, History, RotateCcw, CornerDownRight, Paperclip } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import { nombreDeEtapa, hoyISO, sumarDias, etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
 import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
-  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, moverDeEtapa, cargarArchivosDelCliente,
+  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente,
 } from "./proyecto";
 import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa, loQueSigue } from "./tareasDelProyecto";
 import { gentePara } from "../controlObra/ordenesDeCambio";
@@ -62,13 +62,29 @@ import { cuantosDice } from "./archivosDelCliente.js";
 // y cuando el punto se termina se pregunta qué sigue, y lo que se escriba
 // nace de él —misma etapa, misma persona— con el historial de los dos
 // diciendo que uno sigue del otro (loQueSigue).
+//
+// LO QUE VE EL CLIENTE DE CADA PUNTO. Hernán, 17/11/2026, mirando RES BG: «el
+// cliente no ve el modelado en Revit... no sé por qué. Cliente debe ver las
+// actualizaciones de cada uno... ¿dónde se sube archivos relacionados? Estos
+// debe poder ver cliente para que apruebe». En la base: el punto de Revit se
+// había agregado dos minutos después de «mostrarle los otros abiertos» y nació
+// oculto, sin que nada lo dijera; las dos anotaciones de ese día estaban en el
+// historial, que el cliente no lee; y no había un solo archivo subido.
+//   · EL PUNTO NUEVO DICE SI LO VE. «Agregar» lleva su tilde, y nace marcado
+//     cuando el cliente ya ve todo lo abierto. La fila que no ve, lo dice.
+//   · LO QUE SE ANOTA ES SU ACTUALIZACIÓN. En un punto que ve, la anotación
+//     nace para él —lo dice el botón— y se elige «Solo nosotros» para lo
+//     interno. Cada anotación dice si la lee y se cambia de un toque. Ya no
+//     hay un cuadro aparte de «actualización» que llenar.
+//   · LOS ARCHIVOS TIENEN SU TÍTULO: «Fotos y archivos para el cliente», con
+//     «Subir fotos o archivos», adentro de lo que ve el cliente de ese punto.
 
 // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
 const cuando = f => (f ? new Date(String(f).length === 10 ? `${f}T12:00:00` : f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
 const EN_BLANCO = { abierto: true, tipo: "gestion", texto: "", assignee_id: "", due_date: "", hora: "", destinatario: "" };
-const LISTA_EN_BLANCO = { abierto: true, texto: "", assignee_id: "", due_date: "", alCliente: false };
+const LISTA_EN_BLANCO = { abierto: true, texto: "", assignee_id: "", due_date: "" };
 
 /**
  * @param etapaId   en qué etapa está el lead ahora: es la etiqueta con la que
@@ -92,7 +108,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const [paraElCliente, setParaElCliente] = useState({});
   const [sinReporte, setSinReporte] = useState(false);
   // El historial de cada punto: lo anotado y lo que la bitácora dice de él.
-  const [historial, setHistorial] = useState({ comentarios: {}, movimientos: {} });
+  const [historial, setHistorial] = useState({ comentarios: {}, movimientos: {}, sinNotasAlCliente: false });
   // Las fotos y los archivos que ve el cliente: los del proyecto y los de
   // cada punto, con el enlace de cada foto para su miniatura.
   const [paraVer, setParaVer] = useState({ delProyecto: [], porTarea: {}, enlaces: {}, sinMigracion: false });
@@ -180,7 +196,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
 
   // MARCAR UN PUNTO. Al terminarlo se pregunta qué sigue; un envío ya nació
   // cerrado y una compra tiene su módulo: a esos no se les pregunta.
-  const preguntarQueSigue = item => setSigue({ de: item, texto: "", due_date: "", hora: "", alCliente: false, loVeia: compartidas.has(item.id), error: "" });
+  const preguntarQueSigue = item => setSigue({ de: item, texto: "", due_date: "", hora: "", alCliente: compartidas.has(item.id), loVeia: compartidas.has(item.id), error: "" });
   const marcar = (item, hecho) => hacer(async () => {
     const e = await marcarItem(item, hecho, currentUser?.name, currentUser);
     if (e) { setError(e); return; }
@@ -209,6 +225,13 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       setSigue({ de: v.de, nuevo: n.item, reunion: r.tipo === "Reunión" });
     });
   }
+
+  // LO NUEVO NACE COMO LO DEMÁS. Si el cliente ya ve todo lo abierto, el punto
+  // que se agrega también: el de Revit de RES BG se agregó dos minutos después
+  // de mostrarle los otros nueve y quedó oculto sin que nada lo dijera. Si ve
+  // solo algunos —o ninguno— nace sin mostrarse. En los dos casos el tilde
+  // está a la vista al agregar, y se cambia.
+  const naceALaVista = !sinCompartir && abiertas.length > 0 && abiertas.every(i => compartidas.has(i.id));
 
   // Sumar algo, diciendo qué falta en vez de quedarse callado.
   //
@@ -247,6 +270,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         quien: currentUser,
       });
       if (r?.error) { setError(r.error); return; }
+      if (!sinCompartir && (n.alCliente ?? naceALaVista)) { const e = await mostrarAlCliente(r.item, true, currentUser); if (e) setError(e); }
       if (r.tarea?.assignee_id) await avisarPorCorreo(r.tarea.id);
       if (tipo === "envio") {
         await anotar(lead.id, { tipo: "nota", detalle: `Envío a ${n.destinatario.trim()}: ${texto}.`, quien: currentUser });
@@ -254,7 +278,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       // Se queda abierto y con el tipo elegido: casi siempre se cargan varias
       // seguidas, y volver a abrir el cuadro cada vez era un clic de más.
       // Y en la misma etapa, que es donde se estaba cargando.
-      setNuevo({ ...EN_BLANCO, tipo, ...(n.etapa !== undefined ? { etapa: n.etapa } : {}) });
+      // Y con lo del cliente como se eligió.
+      setNuevo({ ...EN_BLANCO, tipo, ...(n.etapa !== undefined ? { etapa: n.etapa } : {}), ...(n.alCliente !== undefined ? { alCliente: n.alCliente } : {}) });
     });
   }
 
@@ -273,7 +298,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         lead, etapaId: pegar.etapa !== undefined ? pegar.etapa || null : etapaId, titulos: deLaLista.nuevos, desde: abiertas.length + hechas.length,
         assignee_id: pegar.assignee_id && !externo ? Number(pegar.assignee_id) : null, responsable_externo: externo,
         nombreResponsable: users.find(u => String(u.id) === String(pegar.assignee_id))?.name,
-        due_date: pegar.due_date || null, alCliente: !!pegar.alCliente && !sinCompartir, quien: currentUser,
+        due_date: pegar.due_date || null, alCliente: (pegar.alCliente ?? naceALaVista) && !sinCompartir, quien: currentUser,
       });
       if (r?.error) { setError(r.error); return; }
       setPegar({ abierto: false });
@@ -339,6 +364,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       onMarcar={hecho => marcar(item, hecho)} onSigue={() => preguntarQueSigue(item)}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
+      hayCliente={compartidas.size > 0} sinNotas={historial.sinNotasAlCliente}
       delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
       lead={lead} archivos={paraVer.porTarea[item.id] || []} enlaces={paraVer.enlaces} sinArchivos={paraVer.sinMigracion} onArchivos={cargarArchivos}
       etapas={etapas} onEtapa={id => cambiarEtapa(item, id)} etapaVieja={nombreDeEtapa(item.etapa_id, catalogo)}
@@ -457,7 +483,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
           </div>
           {!sinCompartir && (
             <label style={{ ...linea, fontSize: 11.5, marginTop: 7 }}>
-              <input type="checkbox" checked={!!pegar.alCliente} onChange={e => setPegar(p => ({ ...p, alCliente: e.target.checked }))} />
+              <input type="checkbox" checked={pegar.alCliente ?? naceALaVista} onChange={e => setPegar(p => ({ ...p, alCliente: e.target.checked }))} />
               El cliente las ve en su enlace <span style={{ color: colors.muted }}>· qué dice cada una y si está lista</span>
             </label>
           )}
@@ -564,6 +590,20 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
           )}
 
           <div style={{ fontSize: 10, color: colors.muted, marginTop: 5 }}>{PIDE[tipoNuevo]}</div>
+
+          {/* SI LO VE EL CLIENTE, dicho al agregar: nace marcado cuando ya ve
+              todo lo abierto, y se cambia acá mismo. */}
+          {!sinCompartir && (
+            <label className="nace-a-la-vista" style={{ ...linea, fontSize: 11.5, marginTop: 7, flexWrap: "wrap" }}>
+              <input type="checkbox" checked={nuevo.alCliente ?? naceALaVista} onChange={e => setNuevo(n => ({ ...n, alCliente: e.target.checked }))} />
+              El cliente lo ve en su enlace
+              <span style={{ color: colors.muted }}>
+                · {(nuevo.alCliente ?? naceALaVista)
+                  ? (nuevo.alCliente === undefined ? "ya ve todos los abiertos, así que este también" : "qué dice y si está listo")
+                  : "así nace interno; se le puede mostrar después, abriéndolo"}
+              </span>
+            </label>
+          )}
 
           <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
             {/* El botón no se apaga por falta de datos: apagado no explica
@@ -705,7 +745,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
           <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 5 }}>LO QUE VE EL CLIENTE</div>
           <div className="como-funciona-el-cliente" style={{ fontSize: 11, color: colors.muted, lineHeight: 1.5, marginBottom: 7 }}>
             El cliente entra con un enlace, sin usuario ni contraseña. Ve tres cosas, y nada más: los puntos que le muestres —con su estado,
-            lo que le escribas y sus fotos—, las fotos y archivos del proyecto, y lo que tenga para aprobar.
+            las anotaciones que marques para él y sus fotos y archivos—, las fotos y archivos del proyecto, y lo que tenga para aprobar.
           </div>
           {!todas.length ? (
             <div style={{ fontSize: 11.5, color: colors.muted, lineHeight: 1.5 }}>
@@ -719,13 +759,13 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             <>
               <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
                 {vistas.length
-                  ? <>El cliente ve <strong style={{ color: colors.ink }}>{vistas.length} de {todas.length}</strong> en su enlace: qué dice cada punto y si está listo. No ve el historial ni quién lo tiene.</>
+                  ? <>El cliente ve <strong style={{ color: colors.ink }}>{vistas.length} de {todas.length}</strong> en su enlace: qué dice cada punto, si está listo, y de su historial solo las anotaciones marcadas «la lee el cliente». No ve quién lo tiene ni para cuándo está.</>
                   : <>El cliente todavía no ve ningún punto. Para mostrarle uno, abrilo y tocá «Mostrar al cliente».</>}
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                 {abiertasSinMostrar.length > 0 && (
                   <button disabled={ocupado} onClick={() => alCliente(abiertasSinMostrar, true)} style={mini(false)}>
-                    <Eye size={11} /> {vistas.length ? `Mostrarle los otros ${abiertasSinMostrar.length} abiertos` : abiertasSinMostrar.length === 1 ? "Mostrarle el punto abierto" : `Mostrarle los ${abiertasSinMostrar.length} abiertos`}
+                    <Eye size={11} /> {vistas.length ? (abiertasSinMostrar.length === 1 ? "Mostrarle el otro abierto" : `Mostrarle los otros ${abiertasSinMostrar.length} abiertos`) : abiertasSinMostrar.length === 1 ? "Mostrarle el punto abierto" : `Mostrarle los ${abiertasSinMostrar.length} abiertos`}
                   </button>
                 )}
                 {vistas.length > 0 && (
@@ -993,40 +1033,40 @@ const boton = fuerte => ({
 // enseñan a nadie cómo se usa esto.
 //
 // Abierta se lee en cuatro partes, cada una con su título y diciendo qué pasa
-// al tocarla: ¿PARA CUÁNDO? · ¿QUÉ PASÓ? · LO QUE LEE EL CLIENTE · ¿YA ESTÁ?.
-// Al pie, lo que se toca poco. Y se cierra: arriba, abajo y con la flecha.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
+// al tocarla: ¿PARA CUÁNDO? · ¿QUÉ PASÓ? · LO QUE VE EL CLIENTE DE ESTE PUNTO ·
+// ¿YA ESTÁ?. Al pie, lo que se toca poco. Y se cierra: arriba, abajo y con la
+// flecha.
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // Lo último que alguien anotó: se lee en la fila sin abrirla.
   const ultima = ultimaAnotacion(anotado);
-  // EL PASO TAMBIÉN PUEDE SER LA ACTUALIZACIÓN QUE LEE EL CLIENTE. El punto
-  // tiene, para él, descripción, actualización y estado; y casi siempre lo que
-  // hay de nuevo es justo el paso que se acaba de dar —«reunión agendada para
-  // el 18»—. Con un tilde se escribe una vez y vale para los dos. Sin tilde no
-  // viaja: lo anotado es interno salvo que se diga lo contrario.
-  const [queLoLea, setQueLoLea] = useState(false);
-  const puedeLeerlo = laVeElCliente && !sinReporte;
+  // LO QUE SE ANOTA ES LA ACTUALIZACIÓN QUE LEE EL CLIENTE. En un punto que
+  // él ve, la anotación nace para él —lo dice el botón— y se elige «Solo
+  // nosotros» para lo interno. Antes había un tilde apagado debajo y un cuadro
+  // aparte de «actualización»: se anotaba en el historial, que él no lee, y en
+  // su enlace no aparecía nada.
+  const puedeLeerlo = laVeElCliente && !sinNotas;
   // Devuelve null o el motivo: el cuadro del historial lo dice ahí mismo.
-  const anotarPaso = async paso => {
+  const anotarPaso = async (paso, { alCliente = false } = {}) => {
     let dijo = null;
-    await hacer(async () => {
-      dijo = await anotarEnLaTarea(item, paso, currentUser);
-      if (dijo) return;
-      if (queLoLea && puedeLeerlo) {
-        const e2 = await escribirleAlCliente(item, { actualizacion: paso });
-        if (e2) { dijo = `Quedó anotado, pero no se actualizó lo que lee el cliente: ${e2}`; return; }
-      }
-      setQueLoLea(false);
-    });
+    await hacer(async () => { dijo = await anotarEnLaTarea(item, paso, currentUser, { alCliente: alCliente && puedeLeerlo }); });
     return dijo;
   };
-  // Lo que se le escribe al cliente sobre este punto. Se guarda solo al salir
-  // del cuadro, y dice al lado que quedó guardado.
-  const [paraEl, setParaEl] = useState({ descripcion: delCliente?.descripcion || "", actualizacion: delCliente?.actualizacion || "" });
+  // Mostrarle una anotación que ya estaba, o dejar de mostrársela.
+  const mostrarNota = async (nota, ver) => {
+    let dijo = null;
+    await hacer(async () => { dijo = await mostrarNotaAlCliente(nota, ver, { punto: item, quien: currentUser }); });
+    return dijo;
+  };
+  // Cuántas anotaciones lee, y cómo se le dice a él en qué está el punto.
+  const leidas = (anotado || []).filter(c => c.visible_cliente === true && String(c.texto || "").trim()).length;
+  const estadoParaEl = item.hecho ? "Listo" : item.espera ? "Hecho de nuestro lado · esperando respuesta" : "Pendiente";
+  // La descripción para el cliente: qué es este punto, dicho para él. Se
+  // guarda sola al salir del casillero, y dice al lado que quedó guardada.
+  const [paraEl, setParaEl] = useState({ descripcion: delCliente?.descripcion || "" });
   const [guardado, setGuardado] = useState("");
-  useEffect(() => { setParaEl({ descripcion: delCliente?.descripcion || "", actualizacion: delCliente?.actualizacion || "" }); },
-    [delCliente?.descripcion, delCliente?.actualizacion]);
+  useEffect(() => { setParaEl({ descripcion: delCliente?.descripcion || "" }); }, [delCliente?.descripcion]);
   const escribir = campo => {
     if ((delCliente?.[campo] || "") === paraEl[campo].trim()) return;
     setGuardado("guardando");
@@ -1084,12 +1124,22 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                 {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente{archivos.length ? `, con ${cuantosDice(archivos)}` : ""}
               </span>
             )}
+            {/* Y la que no ve, lo dice: en un proyecto donde ve las demás, una
+                fila sin la marca no explicaba por qué. */}
+            {!laVeElCliente && hayCliente && !item.hecho && onCliente && (
+              <span className="no-la-ve-el-cliente" title="El cliente no ve este punto. Abrilo y tocá «Mostrar al cliente»." style={{ color: colors.warning }}>
+                {" · "}<EyeOff size={10} style={{ verticalAlign: "-1px" }} /> no la ve el cliente
+              </span>
+            )}
           </div>
           {/* Lo último que se anotó: en qué va la gestión, sin abrirla. */}
           {ultima && !abierta && (
             <div className="ultima-anotacion" title={ultima.texto}
               style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              <History size={10} style={{ verticalAlign: "-1px", marginRight: 3 }} color={colors.muted} />
+              {/* El ojo dice que esa anotación la lee el cliente. */}
+              {laVeElCliente && ultima.visible_cliente === true
+                ? <Eye size={10} style={{ verticalAlign: "-1px", marginRight: 3 }} color={colors.brand} />
+                : <History size={10} style={{ verticalAlign: "-1px", marginRight: 3 }} color={colors.muted} />}
               <span style={{ color: colors.muted }}>{cuando(ultima.created_at)} · </span>{ultima.texto}
             </div>
           )}
@@ -1182,50 +1232,58 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               un «Comentarios», una nota suelta que se pisaba y la bitácora del
               proyecto, cada cosa por su lado. */}
           <HistorialDeTarea tarea={tarea} users={users} currentUser={currentUser} editable={editable} ocupado={ocupado}
-            anotado={anotado} pasado={pasado} onAnotar={anotarPaso} titulo="¿QUÉ PASÓ? · EL HISTORIAL DE ESTE PUNTO">
-            {puedeLeerlo && (
-              <label style={{ ...linea, fontSize: 11, marginTop: 5 }}>
-                <input type="checkbox" checked={queLoLea} onChange={e => setQueLoLea(e.target.checked)} />
-                Que también lo lea el cliente <span style={{ color: colors.muted }}>· queda como la actualización de este punto</span>
-              </label>
-            )}
-          </HistorialDeTarea>
+            anotado={anotado} pasado={pasado} onAnotar={anotarPaso} titulo="¿QUÉ PASÓ? · EL HISTORIAL DE ESTE PUNTO"
+            paraElCliente={puedeLeerlo} onMostrarNota={mostrarNota} />
 
-          {/* PARA EL CLIENTE. Lo que lee él de este punto en su enlace y en el
-              correo: qué es y qué hay de nuevo. Aparte de la nota de abajo, que
-              es interna y no viaja. */}
-          {laVeElCliente && !sinReporte && (
-            <div className="para-el-cliente" style={{ background: colors.brandSoft, borderRadius: colors.radiusSm, padding: "8px 10px", display: "grid", gap: 5 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: colors.brand, letterSpacing: 0.4 }}>LO QUE LEE EL CLIENTE</span>
+          {/* LO QUE VE EL CLIENTE DE ESTE PUNTO, en su enlace y en el correo:
+              el título y en qué está, las anotaciones del historial marcadas
+              para él, y las fotos y archivos que se suben acá. */}
+          {laVeElCliente && (
+            <div className="para-el-cliente" style={{ background: colors.brandSoft, borderRadius: colors.radiusSm, padding: "8px 10px", display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <Eye size={11} color={colors.brand} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: colors.brand, letterSpacing: 0.4 }}>LO QUE VE EL CLIENTE DE ESTE PUNTO</span>
                 <span role="status" style={{ fontSize: 10.5, color: guardado === "guardado" || guardado === "guardando" || !guardado ? colors.muted : colors.danger }}>
                   {guardado === "guardando" ? "Guardando…" : guardado === "guardado" ? "Guardado" : guardado}
                 </span>
               </div>
-              <input value={paraEl.descripcion} readOnly={!editable} aria-label="Descripción para el cliente"
-                onChange={e => { setParaEl(p => ({ ...p, descripcion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("descripcion")}
-                placeholder="Descripción: qué es este punto (opcional)"
-                style={{ ...chico, width: "100%", boxSizing: "border-box" }} />
-              <textarea value={paraEl.actualizacion} readOnly={!editable} rows={2} aria-label="Actualización para el cliente"
-                onChange={e => { setParaEl(p => ({ ...p, actualizacion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("actualizacion")}
-                placeholder="Actualización: qué hay de nuevo. Ej: llegaron dos cotizaciones, falta la de Alumina"
-                style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
-              {/* LAS FOTOS Y LOS ARCHIVOS DE ESTE PUNTO. Lo que se adjunta acá
-                  lo ve el cliente debajo del punto: el lugar dice para quién es. */}
-              <FotosYArchivosDelCliente lead={lead || { id: item.lead_id }} punto={item} archivos={archivos} enlaces={enlaces}
-                editable={editable} currentUser={currentUser} onCambio={onArchivos} sinMigracion={sinArchivos} />
-              <div style={{ fontSize: 10.5, color: colors.muted }}>
-                Se guarda solo al salir de cada casillero. El estado lo ve solo: pendiente, esperando respuesta o listo.
-                {delCliente?.actualizado_at ? ` Última actualización: ${cuando(delCliente.actualizado_at)}.` : ""}
+              <div className="que-ve-el-cliente" style={{ ...ayudita, color: colors.inkSoft }}>
+                El título, que está <strong style={{ color: colors.ink }}>{estadoParaEl}</strong>
+                {leidas > 0 ? <>, <strong style={{ color: colors.ink }}>{leidas === 1 ? "1 anotación" : `${leidas} anotaciones`}</strong> del historial</> : null}
+                {archivos.length > 0 ? <> y <strong style={{ color: colors.ink }}>{cuantosDice(archivos)}</strong></> : null}.
+                {sinNotas
+                  ? " Para que también lea las anotaciones falta correr la migración 185 en Supabase."
+                  : leidas > 0 ? "" : " Todavía no lee ninguna anotación: la que escribas arriba le llega, y a una que ya está se le toca «solo nosotros» para mostrársela."}
               </div>
+              {/* LAS FOTOS Y LOS ARCHIVOS DE ESTE PUNTO. Lo que se sube acá lo
+                  ve el cliente debajo del punto: el lugar dice para quién es. */}
+              <div className="archivos-del-punto" style={{ display: "grid", gap: 5 }}>
+                <div style={{ ...titulito, color: colors.brand, display: "flex", alignItems: "center", gap: 5 }}>
+                  <Paperclip size={11} /> <span>FOTOS Y ARCHIVOS PARA EL CLIENTE</span>
+                </div>
+                <FotosYArchivosDelCliente lead={lead || { id: item.lead_id }} punto={item} archivos={archivos} enlaces={enlaces}
+                  editable={editable} currentUser={currentUser} onCambio={onArchivos} sinMigracion={sinArchivos} />
+                <div style={ayudita}>El plano, la cotización o la foto que tenga que revisar: los ve debajo de este punto, y los abre o los baja.</div>
+              </div>
+              {!sinReporte && (
+                <input value={paraEl.descripcion} readOnly={!editable} aria-label="Descripción para el cliente"
+                  onChange={e => { setParaEl(p => ({ ...p, descripcion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("descripcion")}
+                  placeholder="Descripción para él: qué es este punto (opcional, se guarda solo)"
+                  style={{ ...chico, width: "100%", boxSizing: "border-box" }} />
+              )}
             </div>
           )}
           {/* Si no se le muestra, lo dice, y ahí mismo se le muestra. */}
           {!laVeElCliente && onCliente && editable && (
-            <div className="no-lo-ve-el-cliente" style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>
-              <span><EyeOff size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />El cliente no ve este punto.</span>
-              <button onClick={() => onCliente(true)} disabled={ocupado} style={mini(false)}><Eye size={11} /> Mostrar al cliente</button>
-              <span>Al mostrárselo se abre acá lo que lee él: descripción, actualización, fotos y archivos.</span>
+            <div className="no-lo-ve-el-cliente" style={{ border: `1px dashed ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px", display: "grid", gap: 5 }}>
+              <div style={{ ...titulito, display: "flex", alignItems: "center", gap: 5 }}><EyeOff size={11} /> <span>EL CLIENTE NO VE ESTE PUNTO</span></div>
+              <div>
+                <button className="mostrar-al-cliente" onClick={() => onCliente(true)} disabled={ocupado}
+                  style={{ ...mini(false), borderColor: colors.brand, color: colors.brand, padding: "4px 11px" }}><Eye size={11} /> Mostrar al cliente</button>
+              </div>
+              <div style={ayudita}>
+                Al mostrárselo ve el título y si está listo. Y acá mismo se abre dónde subirle fotos y archivos, y lo que anotes en el historial pasa a ser su actualización.
+              </div>
             </div>
           )}
 
@@ -1254,7 +1312,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                 </button>
               </div>
               <div style={ayudita}>
-                Al marcarla pasa a «hechos» y te pregunto qué sigue: lo que sigue nace de este punto, en su misma etapa y a cargo de la misma persona.
+                Al marcarla pasa a «hechos»{laVeElCliente ? " —el cliente la ve como lista—" : ""} y te pregunto qué sigue: lo que sigue nace de este punto, en su misma etapa y a cargo de la misma persona.
               </div>
             </div>
           )}
