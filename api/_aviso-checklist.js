@@ -17,6 +17,9 @@ import { listaDelCliente, avanceDeLaLista, correoDeLaLista } from "./_listaDelCl
 
 const APP = process.env.APP_URL || "https://foreman-app-ebon.vercel.app";
 const esCorreo = c => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(c || "").trim());
+// La respuesta tal cual: una lista son filas; un objeto es el error de la
+// base (falta una columna), y entonces se prueba sin ella.
+const crudo = async r => { try { return await r.json(); } catch { return null; } };
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Método no permitido" });
@@ -29,10 +32,13 @@ export default async function handler(req, res) {
     const [lead] = await json(await rest(`leads?id=eq.${Number(leadId)}&select=id,nombre,portal_token,portal_activo`)) || [];
     if (!lead) return res.status(404).json({ error: "No se encontró el proyecto" });
 
-    // Solo lo marcado para el cliente. Si faltan las columnas del reporte
-    // (migración 178), sale igual con el título y el estado.
+    // Solo lo marcado para el cliente, con lo que se le pidió aprobar
+    // (migración 186). Si faltan esas columnas, o las del reporte (migración
+    // 178), sale igual: sin la aprobación, o solo con el título y el estado.
     const base = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente`;
-    let filas = await json(await rest(`${base},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`));
+    const conTextos = `${base},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`;
+    let filas = await crudo(await rest(`${conTextos},cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota`));
+    if (!Array.isArray(filas)) filas = await crudo(await rest(conTextos));
     if (!Array.isArray(filas)) filas = await json(await rest(base));
     // Las anotaciones marcadas para él (migración 185): de ahí sale la
     // última actualización de cada punto. Sin la columna, no hay ninguna.

@@ -106,8 +106,9 @@ export default function HistorialDeTarea({ tarea, users = [], currentUser, edita
             {h.texto}
             {h.quien ? <span style={{ color: colors.muted }}> · {h.quien}</span> : null}
           </span>
-          {/* Cada anotación dice si la lee el cliente, y se cambia de un toque. */}
-          {loLee && h.nota != null && (
+          {/* Cada anotación dice si la lee el cliente, y se cambia de un toque.
+              Lo que contestó él desde su enlace no: ya lo ve ahí, en el punto. */}
+          {loLee && h.nota != null && !h.delCliente && (
             editable ? (
               <button className="nota-al-cliente" data-la-lee={h.alCliente ? "si" : "no"} aria-pressed={h.alCliente} disabled={ocupado || anotando}
                 onClick={() => mostrar(h, !h.alCliente)}

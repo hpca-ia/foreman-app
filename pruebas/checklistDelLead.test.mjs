@@ -70,10 +70,10 @@ test("al cliente le llega solo lo marcado", () => {
 
 test("de cada tarea viaja lo escrito para el cliente y en qué está, y nada más", () => {
   const [lista] = listaDelCliente(tareas);
-  assert.deepEqual(lista, { id: 11, titulo: "Cotizar ventanería", descripcion: "", estado: "listo", listo_el: "2026-11-09", actualizacion: "", actualizado_el: null, actualizaciones: [] });
+  assert.deepEqual(lista, { id: 11, titulo: "Cotizar ventanería", descripcion: "", estado: "listo", listo_el: "2026-11-09", actualizacion: "", actualizado_el: null, actualizaciones: [], aprobar: null });
   // Ni la nota interna, ni de quién es, ni para cuándo estaba.
   listaDelCliente(tareas).forEach(t => assert.deepEqual(Object.keys(t).sort(),
-    ["actualizacion", "actualizaciones", "actualizado_el", "descripcion", "estado", "id", "listo_el", "titulo"]));
+    ["actualizacion", "actualizaciones", "actualizado_el", "aprobar", "descripcion", "estado", "id", "listo_el", "titulo"]));
   assert.equal(JSON.stringify(listaDelCliente(tareas)).includes("8%"), false);
 });
 

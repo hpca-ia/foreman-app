@@ -26,6 +26,7 @@ export const SIN_176 = "Falta correr la migración 176 en Supabase.";
 export const SIN_178 = "Falta correr la migración 178 en Supabase.";
 export const SIN_171 = "Falta correr la migración 171 en Supabase.";
 export const SIN_185 = "Para que el cliente lea las anotaciones falta correr la migración 185 en Supabase.";
+export const SIN_186 = "Para pedirle la aprobación al cliente falta correr la migración 186 en Supabase.";
 
 /**
  * Guardar en el lead lo que decidió pipeline.js, y dejarlo escrito en su
@@ -51,10 +52,11 @@ export async function aplicar(lead, cambio, quien) {
 /**
  * Las tareas del proyecto.
  *
- * @returns { abiertas, hechas, tareas, sinMigracion, compartidas, sinCompartir }
+ * @returns { abiertas, hechas, tareas, sinMigracion, compartidas, sinCompartir, aprobaciones, sinAprobacion }
  *   `abiertas` y `hechas` con los nombres que usa la pantalla, ya en el orden
  *   en que se leen; `tareas`, las mismas filas enteras, por id; `compartidas`,
- *   los id de las que ve el cliente en su enlace.
+ *   los id de las que ve el cliente en su enlace; `aprobaciones`, por id, lo
+ *   que se le pidió aprobar y qué contestó: { estado, respondido_at, nota }.
  */
 export async function cargarTareas(leadId) {
   // Cuáles ve el cliente se pide aparte: si falta esa columna (migración 176)
@@ -62,12 +64,15 @@ export async function cargarTareas(leadId) {
   // Y lo escrito para él —la descripción y la actualización de cada punto—,
   // también aparte: sin la migración 178 se comparte igual, solo con el
   // título y el estado.
-  const [{ data, error }, { data: vistas, error: eVistas }, { data: textos, error: eTextos }] = await Promise.all([
+  // Y lo que se le pidió aprobar, también aparte (migración 186): sin ella
+  // todo lo demás anda, y solo no se ofrece pedirle la aprobación.
+  const [{ data, error }, { data: vistas, error: eVistas }, { data: textos, error: eTextos }, { data: pedidas, error: ePedidas }] = await Promise.all([
     supabase.from("tasks").select(COLUMNAS).eq("lead_id", leadId).order("id"),
     supabase.from("tasks").select("id").eq("lead_id", leadId).eq("visible_cliente", true),
     supabase.from("tasks").select("id,cliente_descripcion,cliente_actualizacion,cliente_actualizado_at").eq("lead_id", leadId).eq("visible_cliente", true),
+    supabase.from("tasks").select("id,cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota").eq("lead_id", leadId).eq("cliente_aprueba", true),
   ]);
-  if (error) return { abiertas: [], hechas: [], tareas: {}, compartidas: new Set(), paraElCliente: {}, sinMigracion: falta(error), error: error.message };
+  if (error) return { abiertas: [], hechas: [], tareas: {}, compartidas: new Set(), paraElCliente: {}, aprobaciones: {}, sinMigracion: falta(error), error: error.message };
   const { abiertas, hechas } = delProyecto(data || []);
   return {
     abiertas: abiertas.map(comoActividad), hechas: hechas.map(comoActividad),
@@ -78,8 +83,36 @@ export async function cargarTareas(leadId) {
       descripcion: t.cliente_descripcion || "", actualizacion: t.cliente_actualizacion || "", actualizado_at: t.cliente_actualizado_at || null,
     }])),
     sinReporte: !!eTextos && !eVistas,
+    aprobaciones: Object.fromEntries((ePedidas ? [] : pedidas || []).map(t => [t.id, {
+      estado: ["aprobado", "observado"].includes(t.cliente_respuesta) ? t.cliente_respuesta : "pendiente",
+      respondido_at: t.cliente_respuesta_at || null, nota: t.cliente_respuesta_nota || "",
+    }])),
+    sinAprobacion: !!ePedidas && !eVistas,
     sinMigracion: false,
   };
+}
+
+/**
+ * Pedirle al cliente que apruebe un punto desde su enlace, o dejar de pedírselo.
+ *
+ * Pedir de nuevo borra la respuesta anterior: es para cuando algo se corrigió
+ * o cambió el archivo, y hay que aprobar lo nuevo. Lo que había contestado no
+ * se pierde: quedó anotado en el historial del punto.
+ *
+ * @param item  el punto, como lo ve la lista
+ * @returns null o el error
+ */
+export async function pedirAprobacion(item, pedir, quien) {
+  const campos = pedir
+    ? { cliente_aprueba: true, cliente_respuesta: null, cliente_respuesta_at: null, cliente_respuesta_nota: null }
+    : { cliente_aprueba: false };
+  const { error } = await supabase.from("tasks").update(campos).eq("id", item.id);
+  if (error) return falta(error) ? SIN_186 : error.message;
+  await anotar(item.lead_id, {
+    detalle: pedir ? `Le pidió al cliente que apruebe "${item.texto}"` : `Dejó de pedirle al cliente que apruebe "${item.texto}"`,
+    quien, extra: { task_id: item.id },
+  });
+  return null;
 }
 
 /**

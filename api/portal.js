@@ -5,7 +5,7 @@ import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
-import { listaDelCliente, loDelCliente } from "./_listaDelCliente.js";
+import { listaDelCliente, loDelCliente, respuestaDelCliente, correoDeLaRespuesta } from "./_listaDelCliente.js";
 import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
@@ -31,6 +31,11 @@ import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 // que ya son suyas. No puede crear nada, no puede borrar nada, y cada
 // escritura se vuelve a filtrar por el lead de la llave: mandar el id de una
 // observación de otra obra no alcanza, porque el update no la encuentra.
+//
+// Y UN PUNTO DEL CHECKLIST QUE SE LE PIDIÓ APROBAR (migración 186): contesta
+// «lo apruebo» o deja observaciones, una vez. Su respuesta queda anotada en el
+// historial del punto —es lo único que el enlace escribe por su cuenta, y lo
+// escribe el servidor con sus propias palabras más lo que el cliente dijo—.
 
 const json = async r => { try { return await r.json(); } catch { return null; } };
 
@@ -54,7 +59,7 @@ async function proyectoDe(token) {
   const limpio = String(token).replace(/[^A-Za-z0-9_-]/g, "");
   if (limpio.length < 20) return null;
   const filas = await json(await rest(
-    `leads?portal_token=eq.${encodeURIComponent(limpio)}&select=id,nombre,obra_id,portal_activo,tunel,etapa,resultado`));
+    `leads?portal_token=eq.${encodeURIComponent(limpio)}&select=id,nombre,obra_id,portal_activo,tunel,etapa,resultado,responsable_id`));
   if (!Array.isArray(filas)) throw new Error(`leads no contestó: ${filas?.message || filas?.code || "sin respuesta"}`);
   const lead = filas[0];
   if (!lead || !lead.portal_activo) return null;
@@ -1229,9 +1234,13 @@ async function armarInforme(lead) {
   // no existe (migración 176), no hay lista.
   const deLaLista = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id`
     + `&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente,etapa_id`;
-  // Con la descripción y la actualización escritas para él (migración 178);
-  // si esas columnas todavía no están, sale el título y el estado.
-  let marcadas = await json(await rest(`${deLaLista},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`));
+  // Con la descripción y la actualización escritas para él (migración 178), y
+  // con lo que se le pidió aprobar y qué contestó (migración 186). Si esas
+  // columnas todavía no están, sale sin ellas: primero sin la aprobación,
+  // después solo el título y el estado.
+  const paraEl178 = `${deLaLista},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`;
+  let marcadas = await json(await rest(`${paraEl178},cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota`));
+  if (!Array.isArray(marcadas)) marcadas = await json(await rest(paraEl178));
   if (!Array.isArray(marcadas)) marcadas = await json(await rest(deLaLista));
   if (!Array.isArray(marcadas)) marcadas = [];
 
@@ -1317,6 +1326,23 @@ async function armarInforme(lead) {
   };
 }
 
+/**
+ * Avisarle al equipo que el cliente contestó: a quien tiene el punto, a quien
+ * lo creó y a quien lleva el proyecto. Sin copiar a toda la oficina.
+ */
+async function avisarLaRespuesta(lead, tarea, r) {
+  const ids = [...new Set([tarea.assignee_id, tarea.created_by, lead.responsable_id].map(Number).filter(Boolean))];
+  if (!ids.length) return;
+  const usuarios = await json(await rest(`usuarios?id=in.(${ids.join(",")})&activo=eq.true&select=id,email`));
+  const para = [...new Set((Array.isArray(usuarios) ? usuarios : []).map(u => String(u.email || "").trim()).filter(Boolean))];
+  if (!para.length) return;
+  const { asunto, cuerpo } = correoDeLaRespuesta({
+    proyecto: lead.nombre, punto: tarea.title, aprobado: r.aprobado, nota: r.nota,
+    app: process.env.APP_URL || "https://foreman-app-ebon.vercel.app",
+  });
+  await enviarCorreo({ to: para, subject: asunto, html: plantilla({ titulo: lead.nombre, subtitulo: "Respuesta del cliente", cuerpo }) });
+}
+
 async function contestar(req, res, lead) {
   const { que, id, conforme, nota, estado } = req.body || {};
   const cuando = new Date().toISOString();
@@ -1351,6 +1377,42 @@ async function contestar(req, res, lead) {
     });
     const filas = await json(r);
     if (!filas?.length) return res.status(404).json({ error: "No se encontró eso." });
+    return res.status(200).json({ ok: true });
+  }
+
+  // UN PUNTO DEL CHECKLIST QUE SE LE PIDIÓ APROBAR. Se busca por su id Y por
+  // el proyecto de la llave: el punto de otro proyecto no se encuentra. Las
+  // reglas —que se le muestre, que se le haya pedido, que no haya contestado,
+  // que una observación diga qué— están en respuestaDelCliente.
+  if (que === "punto") {
+    const filas = await json(await rest(
+      `tasks?id=eq.${Number(id)}&lead_id=eq.${lead.id}`
+      + `&select=id,title,assignee_id,created_by,visible_cliente,descartada,cliente_aprueba,cliente_respuesta`));
+    const tarea = Array.isArray(filas) ? filas[0] : null;
+    const r = respuestaDelCliente({ tarea, conforme: !!conforme, nota });
+    if (r.error) return res.status(r.codigo).json({ error: r.error });
+    // Se vuelve a filtrar al escribir: solo si sigue pedido y sin contestar.
+    // Dos toques seguidos no dejan dos respuestas.
+    const escritas = await json(await rest(
+      `tasks?id=eq.${tarea.id}&lead_id=eq.${lead.id}&visible_cliente=eq.true&cliente_aprueba=eq.true&cliente_respuesta=is.null`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify(r.campos),
+      }));
+    if (!Array.isArray(escritas) || !escritas.length) return res.status(409).json({ error: "Este punto ya tiene tu respuesta." });
+
+    // Queda en el historial del punto y en la historia del proyecto, y se le
+    // avisa a quien lo lleva. Si algo de esto falla, la respuesta ya quedó.
+    try {
+      await rest("tarea_comentarios", { method: "POST", body: JSON.stringify({ task_id: tarea.id, texto: r.anotacion, autor_id: null, autor_nombre: null }) });
+      await rest("lead_movimientos", {
+        method: "POST",
+        body: JSON.stringify({ lead_id: lead.id, tipo: "nota", automatico: true, autor_nombre: "El cliente", detalle: r.bitacora }),
+      });
+      await avisarLaRespuesta(lead, tarea, r);
+    } catch (e) {
+      console.error("[portal] la respuesta del cliente quedó, pero no se pudo anotar o avisar:", e.message);
+    }
     return res.status(200).json({ ok: true });
   }
 

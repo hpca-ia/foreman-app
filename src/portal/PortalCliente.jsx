@@ -19,6 +19,12 @@ import VisorFotos from "../components/VisorFotos";
 // punto por punto. Después los puntos por etapa, con cuánto va cada una. Y
 // cada punto con las fotos y los archivos que se le quisieron mostrar. Las
 // fotos y archivos del proyecto en general tienen su solapa.
+//
+// Y LO QUE TIENE QUE APROBAR (17/11/2026: «estos debe poder ver cliente para
+// que apruebe»). El punto que se le pidió aprobar lleva, debajo de sus
+// archivos, «Lo apruebo» y «Tengo una observación». Aparece en el checklist,
+// donde están los archivos, y en la solapa «Para aprobar», que es donde se
+// busca. Contesta una vez; lo que contestó queda escrito ahí mismo.
 
 const dia = f => (f ? new Date(`${String(f).slice(0, 10)}T12:00:00`)
   .toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
@@ -79,7 +85,12 @@ export default function PortalCliente({ token }) {
 
   const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [], etapas = [], novedades = [], archivos = [] } = info;
   const ocPendientes = ordenes.filter(o => o.cliente_respondio_at == null);
-  const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length;
+  // Los puntos del checklist que se le pidió aprobar: primero los que esperan.
+  const puntosParaAprobar = lista.filter(t => t.aprobar)
+    .sort((a, b) => (a.aprobar.estado === "pendiente" ? 0 : 1) - (b.aprobar.estado === "pendiente" ? 0 : 1));
+  const puntosPendientes = puntosParaAprobar.filter(t => t.aprobar.estado === "pendiente");
+  const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length + puntosPendientes.length;
+  const contestarPunto = (t, conforme, nota) => contestar({ que: "punto", id: t.id, conforme, nota });
   const fotos = avance.filter(f => f.url).map(f => ({ ...f, titulo: f.titulo || dia(f.fecha) }));
 
   const listas = lista.filter(t => t.estado === "listo").length;
@@ -127,7 +138,9 @@ export default function PortalCliente({ token }) {
       {/* ── El checklist ───────────────────────────────────────────── */}
       {solapa === "lista" && (
         <Checklist lista={lista} listas={listas} etapas={etapas} novedades={novedades}
-          onFoto={(fotos, indice) => setGaleria({ fotos, indice })} />
+          onFoto={(fotos, indice) => setGaleria({ fotos, indice })}
+          porAprobar={puntosPendientes} onIrAAprobar={() => setSolapa("aprobar")}
+          onContestar={contestarPunto} enviando={enviando} />
       )}
 
       {/* ── Las fotos y los archivos del proyecto ──────────────────── */}
@@ -191,9 +204,17 @@ export default function PortalCliente({ token }) {
 
       {/* ── Lo que esperamos que mire ──────────────────────────────── */}
       {solapa === "aprobar" && (
-        !entregas.length && !ordenes.length
+        !entregas.length && !ordenes.length && !puntosParaAprobar.length
           ? <Vacio>No hay nada esperando tu respuesta.</Vacio>
           : <>
+            {/* Los puntos del checklist que hay que aprobar, cada uno con lo
+                que hay que mirar: su descripción, lo último y sus archivos. */}
+            {puntosParaAprobar.map(t => (
+              <div key={`punto-${t.id}`} className="punto-para-aprobar"
+                style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: "2px 12px", marginBottom: 8 }}>
+                <Punto t={t} onFoto={(fotos, indice) => setGaleria({ fotos, indice })} onContestar={contestarPunto} enviando={enviando === t.id} />
+              </div>
+            ))}
             {/* Las órdenes de cambio van primero: es plata que se suma al
                 contrato, y es lo único acá que cambia lo que se va a pagar. */}
             {ordenes.map(o => (
@@ -303,38 +324,98 @@ function Actualizaciones({ punto }) {
   );
 }
 
-function Checklist({ lista, listas, etapas = [], novedades = [], onFoto }) {
+/**
+ * La aprobación de un punto: los dos botones mientras no conteste, y lo que
+ * contestó después.
+ *
+ * Igual que una entrega: «Lo apruebo» es un toque; una observación pide decir
+ * qué. Contesta una vez —con la respuesta puesta ya no hay botones—: si algo
+ * se corrige, el equipo se lo vuelve a pedir y los botones vuelven.
+ */
+function Aprobacion({ punto, onContestar, enviando }) {
+  const [nota, setNota] = useState("");
+  const [abierto, setAbierto] = useState(false);
+  const a = punto.aprobar;
+  if (!a) return null;
+  const hayArchivos = (punto.archivos || []).some(x => x.url);
+  if (a.estado !== "pendiente") {
+    const si = a.estado === "aprobado";
+    return (
+      <div className="aprobacion-del-punto" data-estado={a.estado}
+        style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, lineHeight: 1.45,
+          background: si ? colors.successSoft : colors.warningSoft, color: si ? colors.success : colors.warning }}>
+        {si ? "✓ Lo aprobaste" : "Lo dejaste con observaciones"}{a.respondido_el ? ` el ${dia(a.respondido_el)}` : ""}
+        {a.nota && <div style={{ color: colors.ink, fontWeight: 400, marginTop: 2, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{a.nota}</div>}
+        {!si && <div style={{ color: colors.inkSoft, fontWeight: 400, marginTop: 3 }}>Lo estamos revisando. Cuando esté corregido te lo volvemos a mostrar acá.</div>}
+      </div>
+    );
+  }
+  return (
+    <div className="aprobacion-del-punto" data-estado="pendiente"
+      style={{ marginTop: 8, padding: "9px 10px", borderRadius: 8, background: colors.warningSoft, border: `1px solid ${colors.warning}` }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.warning }}>Necesitamos tu aprobación</div>
+      <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.45, margin: "2px 0 8px" }}>
+        {hayArchivos ? "Revisá los archivos de arriba y decinos si está bien así." : "Decinos si está bien así."}
+        {" "}Si hay algo que cambiar, tocá «Tengo una observación» y contanos qué.
+      </div>
+      {abierto && (
+        <textarea value={nota} onChange={ev => setNota(ev.target.value)} rows={2} aria-label="Qué habría que cambiar"
+          placeholder="¿Qué habría que cambiar?" style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${colors.border}`, borderRadius: 8,
+            padding: "7px 9px", fontSize: 12.5, fontFamily: colors.font, marginBottom: 6, resize: "vertical" }} />
+      )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <button className="lo-apruebo" disabled={enviando} onClick={() => onContestar?.(punto, true, nota)} style={botonSi}>Lo apruebo</button>
+        <button className="tengo-una-observacion" disabled={enviando}
+          onClick={() => (abierto ? onContestar?.(punto, false, nota) : setAbierto(true))}
+          style={botonNo}>{abierto ? "Mandar la observación" : "Tengo una observación"}</button>
+        {abierto && <button disabled={enviando} onClick={() => { setAbierto(false); setNota(""); }} style={{ ...botonNo, border: "none" }}>Cancelar</button>}
+      </div>
+    </div>
+  );
+}
+
+/** Un punto del checklist, como lo lee el cliente: en la lista y en «Para aprobar». */
+function Punto({ t, conLinea = false, onFoto, onContestar, enviando = false }) {
+  const listo = t.estado === "listo";
+  // Mientras espera su respuesta, eso es lo que dice el punto.
+  const e = !listo && t.aprobar?.estado === "pendiente"
+    ? { dice: "Esperando tu aprobación", color: colors.warning }
+    : ESTADO_DE_LISTA[t.estado] || ESTADO_DE_LISTA.pendiente;
+  return (
+    <div className="punto-de-lista" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0",
+      borderTop: conLinea ? `1px solid ${colors.neutralSoft}` : "none" }}>
+      <span aria-hidden="true" style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, boxSizing: "border-box",
+        border: `1.5px solid ${listo ? colors.success : colors.border}`, background: listo ? colors.success : "#fff",
+        color: "#fff", fontSize: 12, lineHeight: "15px", textAlign: "center", fontWeight: 700 }}>{listo ? "✓" : ""}</span>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
+        {/* Qué es este punto, dicho para él. */}
+        {t.descripcion && (
+          <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2, overflowWrap: "anywhere" }}>{t.descripcion}</div>
+        )}
+        <div className="estado-del-punto" style={{ fontSize: 11.5, color: e.color, marginTop: 2 }}>
+          {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
+        </div>
+        {/* Qué hay de nuevo, cada cosa con su fecha: cuán fresca es la noticia. */}
+        <Actualizaciones punto={t} />
+        {/* Las fotos y los archivos de este punto. */}
+        <FotosYArchivos archivos={t.archivos || []} onFoto={onFoto} />
+        {/* Y si hay que aprobarlo, acá: debajo de lo que hay que mirar. */}
+        <Aprobacion punto={t} onContestar={onContestar} enviando={enviando} />
+      </div>
+    </div>
+  );
+}
+
+function Checklist({ lista, listas, etapas = [], novedades = [], onFoto, porAprobar = [], onIrAAprobar, onContestar, enviando = null }) {
   const pct = lista.length ? Math.round((listas / lista.length) * 100) : 0;
   // Con etapas, cada una con sus puntos; sin ellas, la lista de corrido.
   const grupos = etapas.length
     ? etapas.map(e => ({ ...e, puntos: lista.filter(t => (t.etapa_id || null) === e.id) })).filter(g => g.puntos.length)
     : [{ id: "todo", nombre: "", puntos: lista }];
-  const punto = (t, i) => {
-    const e = ESTADO_DE_LISTA[t.estado] || ESTADO_DE_LISTA.pendiente;
-    const listo = t.estado === "listo";
-    return (
-      <div key={t.id} className="punto-de-lista" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0",
-        borderTop: i ? `1px solid ${colors.neutralSoft}` : "none" }}>
-        <span aria-hidden="true" style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, boxSizing: "border-box",
-          border: `1.5px solid ${listo ? colors.success : colors.border}`, background: listo ? colors.success : "#fff",
-          color: "#fff", fontSize: 12, lineHeight: "15px", textAlign: "center", fontWeight: 700 }}>{listo ? "✓" : ""}</span>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 14, color: listo ? colors.inkSoft : colors.ink, fontWeight: 600, lineHeight: 1.35, overflowWrap: "anywhere" }}>{t.titulo}</div>
-          {/* Qué es este punto, dicho para él. */}
-          {t.descripcion && (
-            <div style={{ fontSize: 12.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2, overflowWrap: "anywhere" }}>{t.descripcion}</div>
-          )}
-          <div style={{ fontSize: 11.5, color: e.color, marginTop: 2 }}>
-            {e.dice}{listo && t.listo_el ? ` · ${dia(t.listo_el)}` : ""}
-          </div>
-          {/* Qué hay de nuevo, cada cosa con su fecha: cuán fresca es la noticia. */}
-          <Actualizaciones punto={t} />
-          {/* Las fotos y los archivos de este punto. */}
-          <FotosYArchivos archivos={t.archivos || []} onFoto={onFoto} />
-        </div>
-      </div>
-    );
-  };
+  const punto = (t, i) => (
+    <Punto key={t.id} t={t} conLinea={i > 0} onFoto={onFoto} onContestar={onContestar} enviando={enviando === t.id} />
+  );
   return (
     <div>
       <div style={{ marginBottom: 12 }}>
@@ -346,6 +427,22 @@ function Checklist({ lista, listas, etapas = [], novedades = [], onFoto }) {
           <div style={{ width: `${pct}%`, height: "100%", background: colors.success, borderRadius: 3 }} />
         </div>
       </div>
+
+      {/* LO QUE ESPERA SU APROBACIÓN, antes que nada: es lo único de esta
+          pantalla que depende de él. */}
+      {porAprobar.length > 0 && (
+        <button className="hay-para-aprobar" onClick={onIrAAprobar}
+          style={{ display: "block", width: "100%", textAlign: "left", cursor: "pointer", fontFamily: colors.font, background: colors.warningSoft,
+            border: `1px solid ${colors.warning}`, borderRadius: 11, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: colors.warning }}>
+            {porAprobar.length === 1 ? "Hay 1 punto esperando tu aprobación" : `Hay ${porAprobar.length} puntos esperando tu aprobación`}
+          </div>
+          <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.45, marginTop: 2, overflowWrap: "anywhere" }}>
+            {porAprobar.map(t => t.titulo).join(" · ")}
+          </div>
+          <div style={{ fontSize: 12, color: colors.brand, fontWeight: 600, marginTop: 4 }}>Verlos en «Para aprobar» →</div>
+        </button>
+      )}
 
       {/* LO ÚLTIMO. Lo que cambió desde la última vez que entró, lo más nuevo
           arriba: no tiene que recorrer los puntos para enterarse. */}

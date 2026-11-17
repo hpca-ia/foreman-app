@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, ClipboardList, Send, History, RotateCcw, CornerDownRight, Paperclip } from "lucide-react";
+import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, ClipboardList, Send, History, RotateCcw, CornerDownRight, Paperclip, ThumbsUp, MessageSquareWarning } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import { nombreDeEtapa, hoyISO, sumarDias, etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
 import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
-  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente,
+  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente, pedirAprobacion,
 } from "./proyecto";
 import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa, loQueSigue } from "./tareasDelProyecto";
 import { gentePara } from "../controlObra/ordenesDeCambio";
@@ -78,6 +78,11 @@ import { cuantosDice } from "./archivosDelCliente.js";
 //     hay un cuadro aparte de «actualización» que llenar.
 //   · LOS ARCHIVOS TIENEN SU TÍTULO: «Fotos y archivos para el cliente», con
 //     «Subir fotos o archivos», adentro de lo que ve el cliente de ese punto.
+//   · Y SE LE PIDE QUE LO APRUEBE, ahí mismo: «¿Lo tiene que aprobar?». En su
+//     enlace le aparecen «Lo apruebo» y «Tengo una observación»; lo que
+//     contesta queda en el historial del punto, se ve en la fila y le llega
+//     por correo a quien lo lleva. Contesta una vez: si algo se corrigió, se
+//     le vuelve a pedir (migración 186).
 
 // Una fecha sin hora la lee el navegador como medianoche en Londres, y en
 // Ecuador eso es el día anterior: por eso se lee al mediodía.
@@ -107,6 +112,9 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // Lo escrito para él en cada punto: qué es y qué hay de nuevo.
   const [paraElCliente, setParaElCliente] = useState({});
   const [sinReporte, setSinReporte] = useState(false);
+  // Lo que se le pidió aprobar al cliente y qué contestó, por punto.
+  const [aprobaciones, setAprobaciones] = useState({});
+  const [sinAprobacion, setSinAprobacion] = useState(false);
   // El historial de cada punto: lo anotado y lo que la bitácora dice de él.
   const [historial, setHistorial] = useState({ comentarios: {}, movimientos: {}, sinNotasAlCliente: false });
   // Las fotos y los archivos que ve el cliente: los del proyecto y los de
@@ -168,6 +176,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     setSinCompartir(!!r.sinCompartir);
     setParaElCliente(r.paraElCliente || {});
     setSinReporte(!!r.sinReporte);
+    setAprobaciones(r.aprobaciones || {});
+    setSinAprobacion(!!r.sinAprobacion);
     setInvitados(inv || []);
     onTareas?.(Object.values(r.tareas || {}));
     // Van después y aparte: la lista se ve sin esperar al historial ni a las fotos.
@@ -365,6 +375,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       hayCliente={compartidas.size > 0} sinNotas={historial.sinNotasAlCliente}
+      aprobacion={aprobaciones[item.id] || null} sinAprobacion={sinAprobacion}
       delCliente={paraElCliente[item.id]} sinReporte={sinReporte}
       lead={lead} archivos={paraVer.porTarea[item.id] || []} enlaces={paraVer.enlaces} sinArchivos={paraVer.sinMigracion} onArchivos={cargarArchivos}
       etapas={etapas} onEtapa={id => cambiarEtapa(item, id)} etapaVieja={nombreDeEtapa(item.etapa_id, catalogo)}
@@ -1036,7 +1047,7 @@ const boton = fuerte => ({
 // al tocarla: ¿PARA CUÁNDO? · ¿QUÉ PASÓ? · LO QUE VE EL CLIENTE DE ESTE PUNTO ·
 // ¿YA ESTÁ?. Al pie, lo que se toca poco. Y se cierra: arriba, abajo y con la
 // flecha.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
   const [nota, setNota] = useState(item.nota || "");
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // Lo último que alguien anotó: se lee en la fila sin abrirla.
@@ -1061,7 +1072,8 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   };
   // Cuántas anotaciones lee, y cómo se le dice a él en qué está el punto.
   const leidas = (anotado || []).filter(c => c.visible_cliente === true && String(c.texto || "").trim()).length;
-  const estadoParaEl = item.hecho ? "Listo" : item.espera ? "Hecho de nuestro lado · esperando respuesta" : "Pendiente";
+  const estadoParaEl = item.hecho ? "Listo" : aprobacion?.estado === "pendiente" ? "Esperando su aprobación"
+    : item.espera ? "Hecho de nuestro lado · esperando respuesta" : "Pendiente";
   // La descripción para el cliente: qué es este punto, dicho para él. Se
   // guarda sola al salir del casillero, y dice al lado que quedó guardada.
   const [paraEl, setParaEl] = useState({ descripcion: delCliente?.descripcion || "" });
@@ -1122,6 +1134,15 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             {laVeElCliente && (
               <span className="la-ve-el-cliente" title="El cliente la ve en su enlace" style={{ color: colors.brand, fontWeight: 600 }}>
                 {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente{archivos.length ? `, con ${cuantosDice(archivos)}` : ""}
+              </span>
+            )}
+            {/* Si se le pidió que lo apruebe, en qué está: es lo que se
+                viene a mirar sin abrir el punto. */}
+            {laVeElCliente && aprobacion && (
+              <span className="aprobacion-del-cliente" data-estado={aprobacion.estado}
+                style={{ fontWeight: 700, color: aprobacion.estado === "aprobado" ? colors.success : aprobacion.estado === "observado" ? colors.danger : colors.warning }}>
+                {" · "}
+                {aprobacion.estado === "aprobado" ? "aprobado por el cliente" : aprobacion.estado === "observado" ? "el cliente dejó observaciones" : "espera que el cliente apruebe"}
               </span>
             )}
             {/* Y la que no ve, lo dice: en un proyecto donde ve las demás, una
@@ -1265,6 +1286,72 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                   editable={editable} currentUser={currentUser} onCambio={onArchivos} sinMigracion={sinArchivos} />
                 <div style={ayudita}>El plano, la cotización o la foto que tenga que revisar: los ve debajo de este punto, y los abre o los baja.</div>
               </div>
+              {/* ¿LO TIENE QUE APROBAR? Se le pide acá; contesta en su enlace. */}
+              {(editable || aprobacion) && (
+                <div className="aprobacion-del-punto" data-estado={aprobacion?.estado || "sin-pedir"} style={{ display: "grid", gap: 5 }}>
+                  <div style={{ ...titulito, color: colors.brand, display: "flex", alignItems: "center", gap: 5 }}>
+                    <ThumbsUp size={11} /> <span>¿LO TIENE QUE APROBAR?</span>
+                  </div>
+                  {sinAprobacion ? (
+                    <div style={{ ...ayudita, color: colors.warning }}>Para pedirle la aprobación al cliente falta correr la migración 186 en Supabase.</div>
+                  ) : !aprobacion ? (
+                    <>
+                      <div>
+                        <button className="pedir-aprobacion" onClick={() => hacer(() => pedirAprobacion(item, true, currentUser))} disabled={ocupado}
+                          style={{ ...mini(false), borderColor: colors.brand, color: colors.brand, padding: "4px 11px" }}>
+                          <ThumbsUp size={11} /> Pedirle que lo apruebe
+                        </button>
+                      </div>
+                      <div style={ayudita}>
+                        En su enlace, en este punto, le aparecen dos botones: «Lo apruebo» y «Tengo una observación». Lo que conteste queda
+                        en el historial, se ve en la fila y le llega por correo a quien lo lleva. Subile antes lo que tenga que revisar.
+                      </div>
+                    </>
+                  ) : aprobacion.estado === "pendiente" ? (
+                    <>
+                      <div style={{ fontSize: 12, color: colors.warning, fontWeight: 600, lineHeight: 1.4 }}>
+                        <Hourglass size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />Esperando que el cliente lo apruebe.
+                      </div>
+                      <div style={ayudita}>
+                        En su enlace tiene «Lo apruebo» y «Tengo una observación» en este punto, y aparece en su solapa «Para aprobar».
+                        Para que se entere, «Enviarle el checklist por correo», al pie de la lista, se lo dice.
+                      </div>
+                      {editable && (
+                        <div>
+                          <button className="no-pedir-aprobacion" onClick={() => hacer(() => pedirAprobacion(item, false, currentUser))} disabled={ocupado} style={mini(false)}>
+                            <X size={11} /> Ya no hace falta que lo apruebe
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4, color: aprobacion.estado === "aprobado" ? colors.success : colors.danger, overflowWrap: "anywhere" }}>
+                        {aprobacion.estado === "aprobado"
+                          ? <><Check size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />El cliente lo aprobó{aprobacion.respondido_at ? ` el ${cuando(aprobacion.respondido_at)}` : ""}.</>
+                          : <><MessageSquareWarning size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />El cliente dejó observaciones{aprobacion.respondido_at ? ` el ${cuando(aprobacion.respondido_at)}` : ""}.</>}
+                        {aprobacion.nota && (
+                          <div className="nota-del-cliente" style={{ fontWeight: 400, color: colors.ink, marginTop: 3, whiteSpace: "pre-wrap" }}>«{aprobacion.nota}»</div>
+                        )}
+                      </div>
+                      {editable && (
+                        <>
+                          <div>
+                            <button className="pedir-aprobacion" onClick={() => hacer(() => pedirAprobacion(item, true, currentUser))} disabled={ocupado} style={mini(false)}>
+                              <RotateCcw size={11} /> Volver a pedirle que lo apruebe
+                            </button>
+                          </div>
+                          <div style={ayudita}>
+                            {aprobacion.estado === "aprobado"
+                              ? "Su respuesta quedó en el historial. Si cambia lo que aprobó —otro plano, otra cotización—, se le vuelve a pedir y contesta de nuevo."
+                              : "Su respuesta quedó en el historial. Cuando esté corregido, subí lo nuevo y volvé a pedirle: en su enlace le aparecen otra vez los botones."}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {!sinReporte && (
                 <input value={paraEl.descripcion} readOnly={!editable} aria-label="Descripción para el cliente"
                   onChange={e => { setParaEl(p => ({ ...p, descripcion: e.target.value })); setGuardado(""); }} onBlur={() => editable && escribir("descripcion")}

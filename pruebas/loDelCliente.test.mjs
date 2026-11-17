@@ -102,7 +102,7 @@ test("LO QUE PIDIÓ: las fotos y archivos de cada punto van con su punto, y los 
 });
 
 test("el correo del checklist sigue saliendo de la misma lista, sin etapas ni archivos", () => {
-  assert.deepEqual(Object.keys(listaDelCliente(TAREAS)[0]), ["id", "titulo", "descripcion", "estado", "listo_el", "actualizacion", "actualizado_el", "actualizaciones"]);
+  assert.deepEqual(Object.keys(listaDelCliente(TAREAS)[0]), ["id", "titulo", "descripcion", "estado", "listo_el", "actualizacion", "actualizado_el", "actualizaciones", "aprobar"]);
 });
 
 test("el enlace del cliente pide solo lo marcado para él, y un archivo de un punto solo si el punto se le muestra", () => {

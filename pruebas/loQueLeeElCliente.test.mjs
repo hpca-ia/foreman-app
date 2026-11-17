@@ -129,7 +129,7 @@ test("en el historial, cada anotación dice si la lee el cliente", () => {
   assert.equal(ultimaAnotacion(NOTAS.filter(n => n.task_id === 196)).visible_cliente, true);
   const cuadro = codigoDe("../src/components/HistorialDeTarea.jsx");
   // Se cambia de un toque, y solo donde el cliente ve el punto.
-  assert.match(cuadro, /\{loLee && h\.nota != null && \(/);
+  assert.match(cuadro, /\{loLee && h\.nota != null && !h\.delCliente && \(/);
   assert.match(cuadro, /className="nota-al-cliente" data-la-lee=\{h\.alCliente \? "si" : "no"\} aria-pressed=\{h\.alCliente\}/);
   assert.match(cuadro, /onClick=\{\(\) => mostrar\(h, !h\.alCliente\)\}/);
 });

@@ -44,15 +44,92 @@ function actualizacionesDe(t, notas) {
 }
 const sinHora = ({ cuando, ...n }) => n;
 
+// ── LA APROBACIÓN DEL CLIENTE, PUNTO POR PUNTO (migración 186) ──────────────
+//
+// Hernán, 17/11/2026: «¿dónde se sube archivos relacionados? Estos debe poder
+// ver cliente para que apruebe». Los archivos ya se le mostraban; el «apruebo»
+// quedaba en un WhatsApp. Ahora a un punto se le puede pedir la aprobación: el
+// cliente contesta en su enlace —lo aprueba o deja observaciones—, y eso queda
+// en el punto con su fecha.
+//
+// CONTESTA UNA VEZ. Con la respuesta puesta ya no hay botones: si se corrigió
+// algo o cambió el archivo, es el equipo el que vuelve a pedirle. Así un
+// «aprobado» no se cambia solo por un toque de más, ni se aprueba sin saberlo
+// una versión nueva.
+
+const RESPUESTAS = ["aprobado", "observado"];
+
+/**
+ * Qué se le pidió aprobar de un punto y qué contestó.
+ * @returns null si no se le pidió, o { estado, respondido_el, nota } con
+ *          `estado` "pendiente" | "aprobado" | "observado"
+ */
+export function aprobacionDe(t) {
+  if (!t || t.cliente_aprueba !== true) return null;
+  const r = RESPUESTAS.includes(t.cliente_respuesta) ? t.cliente_respuesta : null;
+  return { estado: r || "pendiente", respondido_el: r ? diaDeAca(t.cliente_respuesta_at) : null, nota: r ? limpio(t.cliente_respuesta_nota) : "" };
+}
+
+/**
+ * Lo que se guarda cuando el cliente contesta, o por qué no se puede.
+ *
+ * @param tarea     la fila de `tasks` que nombró, ya filtrada por el proyecto de su llave
+ * @param conforme  true si lo aprueba; false si deja observaciones
+ * @returns { error, codigo } o { campos, anotacion, bitacora, aprobado, nota }:
+ *          `campos` va a la tarea, `anotacion` a su historial y `bitacora` a
+ *          la historia del proyecto
+ */
+export function respuestaDelCliente({ tarea, conforme, nota = "", ahora = new Date() } = {}) {
+  if (!tarea || tarea.visible_cliente !== true || tarea.descartada) return { error: "No se encontró ese punto.", codigo: 404 };
+  if (tarea.cliente_aprueba !== true) return { error: "Este punto no está esperando tu aprobación.", codigo: 409 };
+  if (RESPUESTAS.includes(tarea.cliente_respuesta)) return { error: "Este punto ya tiene tu respuesta.", codigo: 409 };
+  const texto = limpio(nota).slice(0, 2000);
+  // Aprobar sin decir nada está bien; observar sin decir qué deja al equipo
+  // frenado sin saber por qué.
+  if (!conforme && !texto) return { error: "Contanos qué hay que cambiar.", codigo: 400 };
+  const titulo = limpio(tarea.title);
+  return {
+    aprobado: !!conforme, nota: texto,
+    campos: { cliente_respuesta: conforme ? "aprobado" : "observado", cliente_respuesta_at: ahora.toISOString(), cliente_respuesta_nota: texto || null },
+    anotacion: conforme
+      ? `El cliente lo aprobó desde su enlace.${texto ? ` Dijo: «${texto}»` : ""}`
+      : `El cliente dejó observaciones desde su enlace: «${texto}»`,
+    bitacora: conforme
+      ? `El cliente aprobó "${titulo}" desde su enlace.${texto ? ` Dijo: «${texto}»` : ""}`
+      : `El cliente dejó observaciones en "${titulo}" desde su enlace: «${texto}»`,
+  };
+}
+
+/**
+ * El correo que le avisa al equipo que el cliente contestó.
+ * @returns { asunto, cuerpo }  el cuerpo es HTML, con lo que escribió escapado
+ */
+export function correoDeLaRespuesta({ proyecto = "", punto = "", aprobado = false, nota = "", app = null } = {}) {
+  const color = aprobado ? "#15803D" : "#B45309";
+  const cuerpo = `
+    <p style="font-size:15px;color:#111827;margin:0 0 4px"><strong>${esc(punto)}</strong></p>
+    <p style="font-size:14px;color:${color};font-weight:600;margin:0 0 10px">${aprobado ? "El cliente lo aprobó desde su enlace." : "El cliente dejó observaciones desde su enlace."}</p>
+    ${limpio(nota) ? `<div style="background:#F9FAFB;border-left:3px solid ${color};border-radius:4px;padding:10px 12px;font-size:14px;color:#374151;white-space:pre-line">${esc(limpio(nota))}</div>` : ""}
+    <p style="font-size:12.5px;color:#6B7280;margin:14px 0 0">${aprobado
+      ? "Quedó anotado en el historial del punto, con la fecha."
+      : "Quedó anotado en el historial del punto. Cuando esté corregido, en el punto se le vuelve a pedir la aprobación."}</p>
+    ${app ? `<p style="margin:16px 0 0"><a href="${esc(app)}" style="display:inline-block;background:#0F3D3E;color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:9px 16px;border-radius:7px">Abrir FOREMAN</a></p>` : ""}`;
+  return {
+    asunto: `${proyecto ? `${proyecto} · ` : ""}el cliente ${aprobado ? "aprobó" : "dejó observaciones en"} «${punto}»`,
+    cuerpo,
+  };
+}
+
 /**
  * @param tareas  las filas de `tasks` del proyecto
  * @param notas   las anotaciones de esas tareas (`tarea_comentarios`): solo
  *                cuentan las que tienen `visible_cliente`
- * @returns [{ id, titulo, descripcion, estado, listo_el, actualizacion, actualizado_el, actualizaciones }]
+ * @returns [{ id, titulo, descripcion, estado, listo_el, actualizacion, actualizado_el, actualizaciones, aprobar }]
  *          `estado` es "listo" | "espera" | "pendiente". En el orden en que se
  *          escribieron, que es el orden de un checklist. `actualizaciones` es
  *          [{ id, texto, fecha }], lo más nuevo arriba; `actualizacion` y
  *          `actualizado_el` son la última, que es la que va en el correo.
+ *          `aprobar` es null, o qué se le pidió aprobar y qué contestó.
  */
 export function listaDelCliente(tareas = [], notas = []) {
   const anotado = Array.isArray(notas) ? notas : [];
@@ -73,6 +150,7 @@ export function listaDelCliente(tareas = [], notas = []) {
         actualizacion: actualizaciones[0]?.texto || "",
         actualizado_el: actualizaciones[0]?.fecha || null,
         actualizaciones,
+        aprobar: aprobacionDe(t),
       };
     })
     .filter(t => t.titulo);
@@ -200,6 +278,9 @@ export function correoDeLaLista({ proyecto = "", lista = [], mensaje = "", enlac
           ${t.descripcion ? `<div style="font-size:13px;color:#4B5563;line-height:1.5;margin-top:2px">${esc(t.descripcion)}</div>` : ""}
           <div style="font-size:12px;color:${e.color};margin-top:3px">${esc(e.dice)}${listo && t.listo_el ? ` · ${esc(enCriollo(t.listo_el))}` : ""}</div>
           ${t.actualizacion ? `<div style="font-size:13px;color:#374151;line-height:1.5;margin-top:6px;padding:7px 10px;background:#F9FAFB;border-radius:6px">${esc(t.actualizacion)}${t.actualizado_el ? `<div style="font-size:11px;color:#9CA3AF;margin-top:3px">Actualizado el ${esc(enCriollo(t.actualizado_el))}</div>` : ""}</div>` : ""}
+          ${t.aprobar?.estado === "pendiente" ? `<div style="font-size:12.5px;color:#B45309;font-weight:600;margin-top:6px">Necesitamos tu aprobación${enlace ? ": entrá al enlace de abajo para aprobarlo o dejar tus observaciones" : ""}.</div>`
+    : t.aprobar?.estado === "aprobado" ? `<div style="font-size:12.5px;color:#15803D;font-weight:600;margin-top:6px">Lo aprobaste${t.aprobar.respondido_el ? ` el ${esc(enCriollo(t.aprobar.respondido_el))}` : ""}.</div>`
+    : t.aprobar?.estado === "observado" ? `<div style="font-size:12.5px;color:#B45309;font-weight:600;margin-top:6px">Lo dejaste con observaciones${t.aprobar.respondido_el ? ` el ${esc(enCriollo(t.aprobar.respondido_el))}` : ""}.</div>` : ""}
         </td>
       </tr>`;
   }).join("");

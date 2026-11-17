@@ -22,6 +22,9 @@
 const ES_ALTA = /^Sumó "/;
 // La que nació de otra que se terminó lo dice al final de su alta.
 const VIENE_DE = /^Sumó ".*", que viene de (".*")$/;
+// Lo que el cliente contestó desde su enlace cuando se le pidió aprobar el
+// punto: lo anota el servidor, sin autor (migración 186).
+const ES_DEL_CLIENTE = /^El cliente (lo aprobó|dejó observaciones) desde su enlace/;
 // Los renglones que dicen que se hizo: si hay alguno, no se deduce otro.
 const ES_CIERRE = /^(Hizo "|Hecho: )/;
 
@@ -48,6 +51,9 @@ export function dichoAdentro(detalle) {
   if (/^".*" se queda sin fecha$/.test(d)) return "Se queda sin fecha";
   if (/^".*" queda esperando a un tercero$/.test(d)) return "Queda esperando a un tercero";
   if (/^".*" ya no espera$/.test(d)) return "Ya no espera a un tercero";
+  // La aprobación que se le pide desde su enlace (migración 186).
+  if (/^Le pidió al cliente que apruebe "/.test(d)) return "Se le pidió al cliente que lo apruebe";
+  if (/^Dejó de pedirle al cliente que apruebe "/.test(d)) return "Se dejó de pedirle la aprobación al cliente";
   if (/^Le mostró al cliente "/.test(d)) return "Se le mostró al cliente";
   if (/^Dejó de mostrarle al cliente "/.test(d)) return "Se le dejó de mostrar al cliente";
   if ((m = d.match(/^Arregló ".*": (.+)$/))) return `Se corrigió: ${m[1]}`;
@@ -64,8 +70,9 @@ export function dichoAdentro(detalle) {
  * @param movimientos  lo que la bitácora del proyecto dice de ella
  * @param nombreDe     id de usuario → nombre, para decir quién la agregó
  * @returns [{ id, cuando, quien, texto, automatico }]; lo anotado lleva además
- *          `nota` —el id de la anotación— y `alCliente`: si la lee el cliente
- *          en su enlace (migración 185)
+ *          `nota` —el id de la anotación—, `alCliente`: si la lee el cliente
+ *          en su enlace (migración 185), y `delCliente`: si es lo que él
+ *          contestó desde su enlace, que no se le muestra ni se le oculta
  */
 export function historialDe({ tarea, comentarios = [], movimientos = [], nombreDe = () => null }) {
   const filas = [];
@@ -90,7 +97,7 @@ export function historialDe({ tarea, comentarios = [], movimientos = [], nombreD
     const texto = String(c.texto || "").trim();
     if (!texto) continue;
     filas.push({ id: `c${c.id}`, cuando: c.created_at, quien: c.autor_nombre || null, texto, automatico: false,
-      nota: c.id, alCliente: c.visible_cliente === true });
+      nota: c.id, alCliente: c.visible_cliente === true, delCliente: c.autor_id == null && ES_DEL_CLIENTE.test(texto) });
   }
   // Una tarea hecha antes de la 181, o marcada desde Tareas: la bitácora no
   // lo dice de ella, pero la tarea sabe cuándo se hizo y quién la marcó.
