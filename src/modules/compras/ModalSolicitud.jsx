@@ -118,6 +118,26 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   });
   const [pago, setPago] = useState({ monto: "" });
 
+  // «COMPRAR CON ESTA».
+  //
+  // Hernán, 18/11/2026, con el pedido del porcelanato abierto y dos
+  // cotizaciones de Graiman: «el botón comprar con esta, no funciona...».
+  // Funcionaba y no se veía: guardaba la elección en la base, pero la ventana
+  // seguía mostrando el pedido como lo recibió al abrirse —`viva` no se
+  // tocaba— y el historial no se volvía a leer. Ni «ELEGIDA», ni un renglón,
+  // ni un error: el botón seguía ahí, igual. Lo tocó nueve veces en quince
+  // segundos y quedaron nueve renglones «Proforma elegida» en el historial,
+  // uno de ellos de la cotización cara.
+  //
+  // Ahora la fila queda marcada en el momento, el historial lo muestra, se
+  // dice con cuál se compra y qué falta —elegir no es dar el visto—, y si la
+  // base no deja, se dice al lado. Mientras guarda no se puede volver a
+  // tocar: el candado es un ref porque nueve clics seguidos llegan antes de
+  // que React alcance a apagar el botón.
+  const [eligiendo, setEligiendo] = useState(null);
+  const [noSeEligio, setNoSeEligio] = useState("");
+  const eligiendoRef = useRef(false);
+
   const gestionaCompras = puede("compras.gestionar");
   // Su propio permiso, no prestado de "asignar tareas": el módulo se apoya en
   // que quien pide no compra y quien compra no aprueba.
@@ -240,6 +260,28 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     setEnlaces(await enlacesDeAdjuntos([...cotizaciones, ...cierre]));
   }, [viva?.id]);
   useEffect(() => { cargarPapeles(); }, [cargarPapeles]);
+
+  async function comprarConEsta(a) {
+    if (eligiendoRef.current) return;
+    eligiendoRef.current = true;
+    setEligiendo(a.id); setNoSeEligio("");
+    try {
+      const err = await elegirProforma(viva, a, currentUser, comentario);
+      if (err) { setNoSeEligio(`No se pudo elegir esa cotización: ${err}`); return; }
+      // Lo mismo que quedó en la base: la cotización, su proveedor y su monto.
+      const suMonto = a.monto ? { monto: Number(a.monto) } : {};
+      setViva(v => ({ ...v, proforma_id: a.id, proveedor: a.proveedor || v.proveedor || null, ...suMonto }));
+      setCompra(c => ({ ...c, proveedor: a.proveedor || c.proveedor, ...suMonto }));
+      historialDe(viva.id).then(setHistorial);
+      await cargarPapeles();
+      onCambio?.();
+    } catch (ex) {
+      setNoSeEligio(`No se pudo elegir esa cotización: ${ex.message}`);
+    } finally { eligiendoRef.current = false; setEligiendo(null); }
+  }
+  // Con cuál se compra, para decírselo a quien da el visto debajo de la lista.
+  const conCualSeCompra = apruebo && viva?.proforma_id != null
+    ? proformas.find(a => Number(a.id) === Number(viva.proforma_id)) || null : null;
 
   // EL PRESUPUESTO, PARA APROBAR MIRÁNDOLO. Lo ve quien da el visto: cuánto
   // tenía ese rubro o esa agrupación, cuánto se lleva gastado, cuánto ya está
@@ -1113,9 +1155,10 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             {proformas.length ? ` · ${proformas.length}` : ""}
           </label>
           {proformas.map(a => {
-            const elegida = viva?.proforma_id === a.id;
+            const elegida = viva?.proforma_id != null && Number(viva.proforma_id) === Number(a.id);
             return (
-              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", marginBottom: 4,
+              <div key={a.id} className={elegida ? "cotizacion cotizacion-elegida" : "cotizacion"}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", marginBottom: 4,
                 background: elegida ? colors.brandSoft : colors.bg, borderRadius: 8,
                 border: `1px solid ${elegida ? colors.brand : "transparent"}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1145,10 +1188,11 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                     style={{ color: colors.inkSoft, display: "flex" }}><FileText size={14} /></a>
                 )}
                 {apruebo && !elegida && (
-                  <button onClick={async () => { await elegirProforma(viva, a, currentUser, comentario); await cargarPapeles(); onCambio?.(); }}
+                  <button className="comprar-con-esta" disabled={eligiendo != null} onClick={() => comprarConEsta(a)}
                     style={{ border: `1px solid ${colors.brand}`, background: "#fff", color: colors.brand, borderRadius: 12,
-                      padding: "3px 10px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, whiteSpace: "nowrap" }}>
-                    Comprar con esta
+                      padding: "3px 10px", fontSize: 10.5, fontWeight: 600, cursor: eligiendo != null ? "default" : "pointer",
+                      opacity: eligiendo != null && eligiendo !== a.id ? 0.5 : 1, fontFamily: colors.font, whiteSpace: "nowrap" }}>
+                    {eligiendo === a.id ? "Eligiendo…" : "Comprar con esta"}
                   </button>
                 )}
                 {esMia && (
@@ -1160,6 +1204,16 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               </div>
             );
           })}
+          {conCualSeCompra && (
+            <div className="que-se-eligio" role="status" style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.45, margin: "2px 0 6px" }}>
+              <Check size={12} color={colors.brand} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+              Se compra con <strong style={{ color: colors.ink }}>{conCualSeCompra.proveedor || conCualSeCompra.nombre}{conCualSeCompra.monto ? ` · $${Number(conCualSeCompra.monto).toFixed(2)}` : ""}</strong>.
+              {estado === "pendiente_aprobacion" && " Falta tu visto: tocá «Aprobar», más abajo."}
+            </div>
+          )}
+          {noSeEligio && (
+            <div className="no-se-eligio" role="alert" style={{ fontSize: 11.5, color: colors.danger, lineHeight: 1.45, margin: "2px 0 6px" }}>{noSeEligio}</div>
+          )}
 
           {/* Primero el archivo, el nombre después. Antes había que escribir el
               proveedor ANTES de poder subir, y como al terminar los campos se
