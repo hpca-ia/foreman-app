@@ -22,6 +22,7 @@ import { bandeja, sinCompras, alReprogramar, alDelegar, alDescartar, alReabrir, 
 import { avisosDelTablero } from "./lib/avisos";
 import CargadorDeAvisos from "./components/CargadorDeAvisos";
 import VisorDeArchivo from "./components/VisorDeArchivo";
+import AvisoDeVersionNueva from "./components/AvisoDeVersionNueva";
 import { avisosDelPipeline, esMiAviso, diaCorto, etapaAlCrear } from "./modules/leads/pipeline";
 import { aprobacionesVencidas, esMiAprobacion } from "./modules/leads/aprobaciones.js";
 import { anotar as anotarEnProyecto, anotarEnLaTarea } from "./modules/leads/proyecto";
@@ -781,6 +782,8 @@ export default function App() {
       {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} permisosUsuario={permisosUsuario} setPermisosUsuario={setPermisosUsuario} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
       {/* El visor de archivos: uno solo para todo FOREMAN. Lo abre `abrirArchivo`. */}
       <VisorDeArchivo />
+      {/* Una pestaña abierta sigue con el código de antes: que avise cuando se publicó otro. */}
+      <AvisoDeVersionNueva />
     </div>
   );
 }
