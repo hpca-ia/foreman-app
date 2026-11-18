@@ -4,6 +4,7 @@ import { agruparOrdenesAprobadas } from "../controlObra/agruparOrdenes.js";
 import { solicitudesDeLaObra, repartirSolicitudes } from "../controlObra/calculos";
 import { registrarPago as pagarFactura } from "../controlObra/pagos";
 import { documentoSugerido, abonoAlControl, candidatasDelControl, pagoAlEnganchar } from "./alControl.js";
+import { eleccionesDeAntes } from "./eleccionDeProforma.js";
 import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
 import { buscarDuplicados } from "../controlObra/duplicados";
 import { rubrosParaGastarDe } from "../controlObra/quitasDeOrdenes.js";
@@ -509,6 +510,12 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
     ({ error } = await supabase.from("compras_solicitudes").update(resto).eq("id", solicitud.id));
   }
   if (error) return error.message;
+  // EN EL HISTORIAL QUEDA LA ELECCIÓN FINAL (eleccionDeProforma.js): las
+  // elecciones seguidas de antes —cambios de idea, toques de más— se quitan,
+  // y se anota esta. Si no se pueden leer o quitar, se anota igual: la
+  // pantalla saltea las repetidas al mostrarlas.
+  const antes = eleccionesDeAntes(await historialDe(solicitud.id));
+  if (antes.length) await supabase.from("compras_historial").delete().in("id", antes);
   await anotar(solicitud.id, solicitud.estado, solicitud.estado, quien,
     `Proforma elegida: ${proforma.proveedor || proforma.nombre}${proforma.monto ? ` · $${Number(proforma.monto).toFixed(2)}` : ""}${comentario ? ` · ${comentario}` : ""}`);
   return null;

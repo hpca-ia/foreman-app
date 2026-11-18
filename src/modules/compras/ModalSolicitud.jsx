@@ -10,6 +10,7 @@ import { ESTADOS, crearSolicitud, guardarSolicitud, moverA, comentarSolicitud, h
   moverDeProyecto, facturarCompra, borrarSolicitud, guardarImputacion, SIN_PROYECTO, leadDe,
   marcarPagoDelPedido, documentosDelControlPara, engancharYPonerAlDia, datosDelControlPara } from "./compras";
 import { faltaEnElControl, documentoSugerido } from "./alControl";
+import { soloLaEleccionFinal } from "./eleccionDeProforma.js";
 import { avisoDeSobra } from "../controlObra/repartoDeFactura.js";
 import { recibeGasto } from "../controlObra/calculos";
 import { presupuestoDelDestino, loDeCadaRubro } from "./presupuestoDelDestino";
@@ -1728,8 +1729,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       {historial.length > 0 && (
         <div style={{ marginTop: 16, borderTop: `1px solid ${colors.neutralSoft}`, paddingTop: 10 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>HISTORIAL</div>
-          {historial.map(h => (
-            <div key={h.id} style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 12, color: colors.inkSoft }}>
+          {/* De las elecciones de cotización seguidas, solo la final. */}
+          {soloLaEleccionFinal(historial).map(h => (
+            <div key={h.id} className="paso-del-historial" style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 12, color: colors.inkSoft }}>
               <Clock size={11} style={{ marginTop: 3, flexShrink: 0, color: colors.muted }} />
               <div>
                 <strong style={{ color: ESTADOS[h.estado_nuevo]?.color || colors.ink }}>{ESTADOS[h.estado_nuevo]?.label || h.estado_nuevo}</strong>
