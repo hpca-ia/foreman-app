@@ -224,19 +224,53 @@ export async function enviarParaAprobar({ lead, titulo, descripcion = "", etapaI
  * @param correos  a quién: los correos elegidos
  * @returns { ok, enviadoA } o { error }
  */
-export async function avisarDelPedido({ item, correos = [], mensaje = "", quien = null }) {
+export async function avisarDelPedido({ item, correos = [], whatsapps = [], mensaje = "", quien = null }) {
   try {
     const r = await fetch("/api/aviso?de=pedido", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         leadId: item.lead_id, taskId: item.id, correos, mensaje,
+        ...(whatsapps.length ? { whatsapps } : {}),
         quien: quien ? { id: quien.id, name: quien.name, email: quien.email || null } : null,
       }),
     });
     const d = await r.json();
-    return d.ok ? { ok: true, enviadoA: d.enviadoA || [] } : { error: d.error || "No se pudo avisar." };
+    // `porWhatsApp` es [{ nombre, telefono, ok, error }]: a quién le salió y a quién no.
+    const porWhatsApp = Array.isArray(d.porWhatsApp) ? d.porWhatsApp : [];
+    return d.ok
+      ? { ok: true, enviadoA: d.enviadoA || [], porWhatsApp, correoError: d.correoError || "" }
+      : { error: d.error || "No se pudo avisar.", porWhatsApp };
   } catch (e) {
     return { error: "No se pudo avisar: " + e.message };
+  }
+}
+
+/**
+ * Cómo está el WhatsApp de FOREMAN: si el número ya está configurado en Meta
+ * —y entonces el aviso sale solo— y, con `leadId`, qué pasó con cada WhatsApp
+ * que salió por ese proyecto. Si no se puede preguntar, se toma como que no
+ * está: la pantalla sigue ofreciendo el botón que abre el WhatsApp de uno.
+ * @returns { configurado, falta, plantilla, webhook, ultimaPrueba, sinMigracion, estados }
+ */
+export async function whatsappDeForeman(leadId = null) {
+  try {
+    const r = await fetch(`/api/aviso?de=whatsapp${leadId ? `&lead=${leadId}` : ""}`);
+    const d = await r.json();
+    return { configurado: d?.configurado === true, falta: d?.falta || [], plantilla: d?.plantilla || null, webhook: d?.webhook || "",
+      ultimaPrueba: d?.ultimaPrueba || null, sinMigracion: !!d?.sinMigracion, estados: Array.isArray(d?.estados) ? d.estados : [] };
+  } catch {
+    return { configurado: false, falta: [], plantilla: null, webhook: "", ultimaPrueba: null, sinMigracion: false, estados: [] };
+  }
+}
+
+/** Manda la plantilla, con datos de prueba, al celular de quien la pide. @returns { ok, enviadoA, termina } | { error } */
+export async function probarWhatsApp(usuarioId) {
+  try {
+    const r = await fetch("/api/aviso?de=whatsapp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ usuarioId }) });
+    const d = await r.json();
+    return d.ok ? d : { error: d.error || "No se pudo mandar la prueba." };
+  } catch (e) {
+    return { error: "No se pudo mandar la prueba: " + e.message };
   }
 }
 

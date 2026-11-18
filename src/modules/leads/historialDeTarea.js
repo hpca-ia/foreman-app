@@ -57,7 +57,10 @@ export function dichoAdentro(detalle) {
   if ((m = d.match(/^El cliente tiene hasta el (.+) para aprobar ".*"$/))) return `El cliente tiene hasta el ${m[1]} para aprobarlo`;
   if (/^".*" queda sin fecha límite para que el cliente apruebe$/.test(d)) return "Queda sin fecha límite para que el cliente lo apruebe";
   if (/^Dejó de pedirle al cliente que apruebe "/.test(d)) return "Se dejó de pedirle la aprobación al cliente";
-  if ((m = d.match(/^Le avisó por correo a (.+) que apruebe ".*"$/))) return `Se le avisó por correo a ${m[1]}`;
+  // Por correo, por WhatsApp o por los dos: «por correo a x@y y por WhatsApp a Ana (5939…)».
+  if ((m = d.match(/^Le avisó (por (?:correo|WhatsApp) a .+) que apruebe ".*"$/))) return `Se le avisó ${m[1]}`;
+  if ((m = d.match(/^El WhatsApp a (.+) por ".*" no llegó: (.+)$/))) return `El WhatsApp a ${m[1]} no llegó: ${m[2]}`;
+  if ((m = d.match(/^(.+) contestó por WhatsApp sobre ".*": (.+)$/))) return `${m[1]} contestó por WhatsApp: ${m[2]}`;
   if (/^Le mostró al cliente "/.test(d)) return "Se le mostró al cliente";
   if (/^Dejó de mostrarle al cliente "/.test(d)) return "Se le dejó de mostrar al cliente";
   if ((m = d.match(/^Arregló ".*": (.+)$/))) return `Se corrigió: ${m[1]}`;

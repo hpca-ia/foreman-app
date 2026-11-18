@@ -87,13 +87,16 @@ test("el aviso lo manda el servidor solo si hay dónde aprobar, y queda anotado 
   assert.match(aviso, /if \(tarea\.cliente_aprueba !== true\)/);
   assert.match(aviso, /if \(tarea\.cliente_respuesta\)/);
   // A quién se le avisó: en el pedido abierto del registro y en el historial del punto.
-  assert.match(aviso, /const avisos = \[\.\.\.\(Array\.isArray\(abiertos\[0\]\.avisos\) \? abiertos\[0\]\.avisos : \[\]\), \{ correos: para, cuando, quien: quien\?\.name \|\| null \}\];/);
-  assert.match(aviso, /detalle: `Le avisó por correo a \$\{para\.join\(", "\)\} que apruebe "\$\{tarea\.title\}"`,/);
+  // (Desde el 18/11/2026 el aviso también sale por WhatsApp: se anota por dónde salió.)
+  assert.match(aviso, /const avisos = \[\.\.\.\(Array\.isArray\(abierto\.avisos\) \? abierto\.avisos : \[\]\), esteAviso\];/);
+  assert.match(aviso, /correos: enviadoA, cuando, quien: quien\?\.name \|\| null,/);
+  assert.match(aviso, /enviadoA\.length \? `por correo a \$\{enviadoA\.join\(", "\)\}` : "",/);
+  assert.match(aviso, /detalle: `Le avisó \$\{porDonde\} que apruebe "\$\{tarea\.title\}"`,/);
   assert.equal(dichoAdentro('Le avisó por correo a xb@cliente.test que apruebe "Plano de cocina"'), "Se le avisó por correo a xb@cliente.test");
   // Entra por la misma puerta de los avisos: no es una función más de Vercel.
   const puerta = codigoDe("../api/aviso.js");
   assert.match(puerta, /import pedido from "\.\/_aviso-pedido\.js";/);
-  assert.match(puerta, /visto, checklist, pedido \};/);
+  assert.match(puerta, /visto, checklist, pedido, whatsapp \};/);
 });
 
 test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y deja el WhatsApp listo", () => {
@@ -102,9 +105,9 @@ test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y de
   assert.match(lista, /<PedirAprobacion lead=\{lead\} item=\{pedido\.item\} modo=\{pedido\.modo\}/);
   const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
   assert.match(ventana, /const e = await pedirAprobacion\(item, true, currentUser, \{ descripcion, hasta: hasta \|\| null \}\);/);
-  assert.match(ventana, /const r = await avisarDelPedido\(\{ item: el, correos, mensaje, quien: currentUser \}\);/);
+  assert.match(ventana, /const r = await avisarDelPedido\(\{ item: el, correos, whatsapps, mensaje, quien: currentUser \}\);/);
   // El cliente, ya tildado.
-  assert.match(ventana, /setElegidos\(new Set\(lista\.filter\(p => p\.esCliente && p\.email\)\.map\(p => p\.clave\)\)\);/);
+  assert.match(ventana, /setElegidos\(new Set\(lista\.filter\(p => p\.esCliente && \(p\.email \|\| \(numero\.configurado && p\.whatsapp\)\)\)\.map\(p => p\.clave\)\)\);/);
   // Si no hay a quién avisarle, se lo carga ahí mismo, con el contacto del proyecto, y queda en «Gente».
   assert.match(ventana, /if \(!lista\.length\) setNueva\(\{ \.\.\.VACIA, nombre: String\(lead\.contacto \|\| ""\)\.trim\(\) \}\);/);
   assert.match(ventana, /const r = personaDeLaFicha\(\{ \.\.\.nueva, rol: "cliente" \}, lead\.id\);/);
@@ -142,7 +145,7 @@ test("LO QUE PREGUNTÓ: «¿desde dónde envío presupuestos, planos, documentos
   assert.match(ventana, /if \(modo === "enviar" && !hecho && !que\.trim\(\)\) \{/);
   // Y si no se pudo pedir, lo dice y no ofrece avisarle.
   assert.match(ventana, /if \(r\.error \|\| r\.sinPedir\) \{\s+setHecho\(\{ pedido: false, sinPedir: true,/);
-  assert.match(ventana, /\{hecho\.sinPedir \|\| !punto \? null : conWhatsApp\.length > 0 \? \(/);
+  assert.match(ventana, /\{hecho\.sinPedir \|\| !punto \|\| \(wa && !aMano\.length\) \? null : aMano\.length > 0 \? \(/);
 });
 
 // ── El registro ─────────────────────────────────────────────────────────────
@@ -236,7 +239,7 @@ test("el registro se lee en la pestaña «Aprobaciones» del proyecto y se baja 
   assert.match(ficha, /\["archivos", "Archivos"\], \["aprobaciones", "Aprobaciones"\], \["gente", "Gente"\]\]/);
   assert.match(ficha, /seccionVisible === "aprobaciones" && \(\s+<AprobacionesDelProyecto lead=\{vivo\} catalogo=\{catalogo\} users=\{users\} currentUser=\{currentUser\} editable=\{editable\} \/>/);
   const pantalla = codigoDe("../src/modules/leads/AprobacionesDelProyecto.jsx");
-  assert.match(pantalla, /const registro = registroDeAprobaciones\(datos\.filas, datos\.archivosDeAhora\);/);
+  assert.match(pantalla, /const registro = registroDeAprobaciones\(datos\.filas, datos\.archivosDeAhora, undefined, datos\.estados\);/);
   assert.match(pantalla, /await exportarPDF\(registroParaPdf\(registro, \{ proyecto: lead\.nombre \}\)\);/);
   // El documento: en orden de pedido, con lo que hace falta para sustentar.
   const doc = registroParaPdf(registroDeAprobaciones(FILAS, DE_AHORA), { proyecto: "RES BG" });

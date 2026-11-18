@@ -178,11 +178,23 @@ export const estadoDelPedido = (estado, vencida = false) => (estado === "pendien
  * @param archivosDeAhora  { [task_id]: [filas de proyecto_archivos] } lo que
  *                 hoy tiene para mirar un pedido que todavía no contestó
  * @param hoy      contra qué día se mira si un plazo ya venció
+ * @param estados  qué pasó con cada WhatsApp que salió por este proyecto
+ *                 ([{ wa_id, estado, estado_at, error }], del servidor): en el
+ *                 registro queda a quién se le escribió, y esto dice si llegó
  * @returns [{ id, numero, task_id, titulo, descripcion, estado, pedida_at,
  *            pedida_nombre, avisos, respuesta_at, nota, archivos, vigente,
  *            vence_el, vencida }]
  */
-export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = hoyISO()) {
+export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = hoyISO(), estados = []) {
+  const queLePaso = new Map((Array.isArray(estados) ? estados : []).filter(e => e?.wa_id).map(e => [e.wa_id, e]));
+  // Un aviso, como se guardó: a qué correos y, si salió por WhatsApp, a quién y si llegó.
+  const unAviso = a => {
+    const whatsapps = [].concat(a?.whatsapps || []).filter(w => w && (w.telefono || w.nombre)).map(w => {
+      const e = queLePaso.get(w.wa_id) || {};
+      return { nombre: texto(w.nombre), telefono: texto(w.telefono), estado: e.estado || "enviado", estado_at: e.estado_at || null, error: texto(e.error) };
+    });
+    return { correos: [].concat(a?.correos || []).map(texto).filter(Boolean), cuando: a?.cuando || null, quien: texto(a?.quien), ...(whatsapps.length ? { whatsapps } : {}) };
+  };
   const enOrden = (Array.isArray(filas) ? filas : []).filter(f => f && f.id != null)
     .sort((a, b) => String(a.pedida_at || "").localeCompare(String(b.pedida_at || "")) || Number(a.id) - Number(b.id));
   const ultimoDe = new Map();
@@ -197,7 +209,7 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = h
     return {
       id: f.id, numero: i + 1, task_id: f.task_id ?? null, titulo: texto(f.titulo), descripcion: texto(f.descripcion),
       estado, pedida_at: f.pedida_at || null, pedida_nombre: texto(f.pedida_nombre),
-      avisos: (Array.isArray(f.avisos) ? f.avisos : []).map(a => ({ correos: [].concat(a?.correos || []).map(texto).filter(Boolean), cuando: a?.cuando || null, quien: texto(a?.quien) })),
+      avisos: (Array.isArray(f.avisos) ? f.avisos : []).map(unAviso),
       respuesta_at: estado === "retirado" ? f.retirada_at : f.respuesta_at || null,
       nota: texto(f.respuesta_nota), archivos,
       vigente: f.task_id == null || ultimoDe.get(f.task_id) === f.id,
@@ -206,6 +218,25 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = h
       vencida: estado === "pendiente" && !!soloDia(f.vence_el) && soloDia(f.vence_el) < hoy,
     };
   }).reverse();
+}
+
+// Qué pasó con un WhatsApp, como lo avisa Meta.
+export const ESTADOS_DE_WHATSAPP = {
+  enviado: { dice: "enviado", tono: "muted" },
+  entregado: { dice: "entregado", tono: "success" },
+  leido: { dice: "leído", tono: "success" },
+  fallo: { dice: "no llegó", tono: "danger" },
+};
+/** «Xavier (leído)», o «Xavier (no llegó: ese número no tiene WhatsApp)». */
+export function whatsappDice(w) {
+  const e = ESTADOS_DE_WHATSAPP[w?.estado] || ESTADOS_DE_WHATSAPP.enviado;
+  return `${texto(w?.nombre) || texto(w?.telefono)} (${e.dice}${w?.estado === "fallo" && w?.error ? `: ${w.error}` : ""})`;
+}
+/** Un aviso en una línea: «Avisado a x@y y por WhatsApp a Xavier (leído)». */
+export function avisoDice(a) {
+  const correos = a?.correos?.length ? `a ${a.correos.join(", ")}` : "";
+  const wa = a?.whatsapps?.length ? `por WhatsApp a ${a.whatsapps.map(whatsappDice).join(", ")}` : "";
+  return ["Avisado", correos, correos && wa ? "y" : "", wa].filter(Boolean).join(" ");
 }
 
 /** Cuántas hay de cada una: es lo primero que se pregunta de una colección. */
@@ -253,7 +284,7 @@ export function registroParaPdf(registro = [], { proyecto = "" } = {}) {
         p.archivos.length ? p.archivos.map(a => a.nombre).join("\n") : "Sin archivos",
         [momento(p.pedida_at), p.pedida_nombre ? `por ${p.pedida_nombre}` : "",
           p.vence_el ? `Plazo: hasta el ${diaCorto(p.vence_el)} ${p.vence_el.slice(0, 4)}` : "",
-          ...p.avisos.map(a => `Avisado a ${a.correos.join(", ")} · ${momento(a.cuando)}`)].filter(Boolean).join("\n"),
+          ...p.avisos.map(a => `${avisoDice(a)} · ${momento(a.cuando)}`)].filter(Boolean).join("\n"),
         estadoDelPedido(p.estado, p.vencida).dice + (p.respuesta_at ? `\n${momento(p.respuesta_at)}` : ""),
         p.nota,
       ]),

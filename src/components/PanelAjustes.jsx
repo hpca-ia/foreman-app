@@ -15,6 +15,7 @@ import { inputStyle } from "./ui/Input";
 import UserForm from "./UserForm";
 import PanelPermisos from "./PanelPermisos";
 import ProyectosDelPipeline from "./ProyectosDelPipeline";
+import WhatsAppDeForeman from "./WhatsAppDeForeman";
 import PermisosDeUsuario from "./PermisosDeUsuario";
 
 /**
@@ -177,6 +178,9 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
               {resumenDijo && <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{resumenDijo}</span>}
             </div>
           </div>
+          {/* Cómo está el WhatsApp de FOREMAN, la plantilla para Meta y la
+              prueba: es de quien configura la cuenta. */}
+          {usuario?.role === "owner" && <WhatsAppDeForeman usuario={usuario} />}
           <div style={{ background: "var(--bg)", borderRadius: "var(--radius-md)", padding: 14, border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)", marginBottom: 10 }}>Logo de la empresa</div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>

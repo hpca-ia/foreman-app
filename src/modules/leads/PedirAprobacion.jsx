@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { ThumbsUp, Mail, MessageCircle, Check, AlertTriangle, Paperclip, X, Send, FileText, CalendarClock } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
-import { pedirAprobacion, avisarDelPedido, enlaceDelClienteDe, enviarParaAprobar } from "./proyecto";
+import { pedirAprobacion, avisarDelPedido, enlaceDelClienteDe, enviarParaAprobar, whatsappDeForeman } from "./proyecto";
 import { involucradosDe, agregarALaFicha } from "./involucrados";
 import { personaDeLaFicha } from "../controlObra/directorioDelProyecto.js";
 import { aQuienAvisar, mensajeDelPedido, enlaceDeWhatsApp, paraWhatsApp, PLAZOS, plazoDe } from "./aprobaciones.js";
@@ -86,6 +86,11 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
     setDijo("");
   };
   const [gente, setGente] = useState(null);
+  // ¿EL WHATSAPP DE FOREMAN YA ESTÁ CONFIGURADO EN META? (Hernán, 18/11/2026:
+  // «es importante ya integrar WhatsApp».) Si lo está, a quien tenga celular
+  // cargado le sale solo, desde el número de FOREMAN, junto con el correo. Si
+  // no, queda como antes: el botón que abre el WhatsApp de quien lo pide.
+  const [wa, setWa] = useState(false);
   // undefined mientras se lee; null si el enlace del cliente está apagado.
   const [enlace, setEnlace] = useState(undefined);
   const [elegidos, setElegidos] = useState(() => new Set());
@@ -101,13 +106,15 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
   useEffect(() => {
     let vivo = true;
     (async () => {
-      const [{ personas }, url] = await Promise.all([involucradosDe(lead.id).catch(() => ({ personas: [] })), enlaceDelClienteDe(lead.id)]);
+      const [{ personas }, url, numero] = await Promise.all([involucradosDe(lead.id).catch(() => ({ personas: [] })), enlaceDelClienteDe(lead.id), whatsappDeForeman()]);
       if (!vivo) return;
       const lista = aQuienAvisar(personas, users);
       setGente(lista);
       setEnlace(url);
-      // El cliente, ya tildado: es a quien se le pide.
-      setElegidos(new Set(lista.filter(p => p.esCliente && p.email).map(p => p.clave)));
+      setWa(numero.configurado);
+      // El cliente, ya tildado: es a quien se le pide. Con el WhatsApp de
+      // FOREMAN andando, también el que solo tiene celular.
+      setElegidos(new Set(lista.filter(p => p.esCliente && (p.email || (numero.configurado && p.whatsapp))).map(p => p.clave)));
       // Sin nadie a quien avisarle, se abre dónde cargarlo, con el contacto del proyecto.
       if (!lista.length) setNueva({ ...VACIA, nombre: String(lead.contacto || "").trim() });
     })();
@@ -147,7 +154,13 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
       const todos = sumada ? [sumada, ...(gente || [])] : gente || [];
       const claves = sumada ? new Set([...elegidos, sumada.clave]) : elegidos;
       const correos = [...new Set([...todos.filter(p => claves.has(p.clave) && p.email).map(p => p.email), ...otros])];
-      if (conAviso && !correos.length) { setDijo(`Elegí a quién avisarle por correo, o escribí su correo. Si no tenés su correo, tocá «${modo === "enviar" ? "Enviar" : "Pedir"} sin avisar» y escribile por WhatsApp.`); return; }
+      // Por WhatsApp, a los elegidos que tienen celular: solo si el número de FOREMAN ya manda.
+      const whatsapps = wa ? todos.filter(p => claves.has(p.clave) && p.whatsapp).map(p => ({ nombre: p.nombre, telefono: p.whatsapp })) : [];
+      if (conAviso && !correos.length && !whatsapps.length) {
+        setDijo(wa ? "Elegí a quién avisarle, o cargá su correo o su WhatsApp."
+          : `Elegí a quién avisarle por correo, o escribí su correo. Si no tenés su correo, tocá «${modo === "enviar" ? "Enviar" : "Pedir"} sin avisar» y escribile por WhatsApp.`);
+        return;
+      }
 
       let pedido = false, el = punto, noSubieron = [], aviso = "";
       if (modo === "pedir" && !hecho) {
@@ -170,12 +183,15 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
         }
         el = r.item; pedido = true; noSubieron = r.errores || []; aviso = r.aviso || "";
       }
-      let enviadoA = [], noSalio = "";
+      let enviadoA = [], noSalio = "", porWhatsApp = [];
       if (conAviso) {
-        const r = await avisarDelPedido({ item: el, correos, mensaje, quien: currentUser });
-        if (r.error) noSalio = r.error; else enviadoA = r.enviadoA;
+        const r = await avisarDelPedido({ item: el, correos, whatsapps, mensaje, quien: currentUser });
+        porWhatsApp = r.porWhatsApp || [];
+        // Lo de cada WhatsApp se dice en su renglón; acá, lo del correo o lo que frenó todo.
+        if (r.error) noSalio = correos.length || !porWhatsApp.length ? r.error : "";
+        else { enviadoA = r.enviadoA; noSalio = r.correoError || ""; }
       }
-      setHecho({ pedido, enviadoA, noSalio, errores: noSubieron, aviso });
+      setHecho({ pedido, enviadoA, noSalio, porWhatsApp, sinCorreo: !correos.length, errores: noSubieron, aviso });
       await onCambio?.();
     } finally { setOcupado(false); }
   }
@@ -183,6 +199,10 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
   const cargando = gente === null || enlace === undefined;
   const sinEnlace = !cargando && !enlace;
   const conWhatsApp = (gente || []).filter(p => p.whatsapp);
+  // A quién ya le escribió FOREMAN: a esos no hace falta escribirles desde el WhatsApp de uno.
+  const yaLesLlego = new Set((hecho?.porWhatsApp || []).filter(w => w.ok).map(w => w.telefono));
+  const aMano = conWhatsApp.filter(p => !yaLesLlego.has(p.whatsapp));
+  const seAvisa = p => !!p.email || (wa && !!p.whatsapp);
   const yaEsta = !!hecho && (modo !== "avisar" || hecho.enviadoA || hecho.noSalio);
   const nombreDeEtapa = id => etapas.find(e => e.id === id)?.nombre || "";
 
@@ -301,12 +321,13 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
             )}
 
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, margin: "12px 0 5px" }}>
-              <Mail size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />AVISARLE POR CORREO
+              <Mail size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{wa ? "AVISARLE POR CORREO Y WHATSAPP" : "AVISARLE POR CORREO"}
             </div>
             <div style={{ display: "grid", gap: 4 }}>
               {gente.map(p => (
-                <label key={p.clave} className="a-quien-avisar" style={{ ...linea, opacity: p.email ? 1 : 0.55 }} title={p.email || "No tiene correo cargado: se le avisa por WhatsApp"}>
-                  <input type="checkbox" disabled={!p.email} checked={elegidos.has(p.clave) && !!p.email} onChange={() => tildar(p.clave)} />
+                <label key={p.clave} className="a-quien-avisar" style={{ ...linea, opacity: seAvisa(p) ? 1 : 0.55 }}
+                  title={p.email || (wa ? "No tiene correo cargado: le llega por WhatsApp" : "No tiene correo cargado: se le avisa por WhatsApp")}>
+                  <input type="checkbox" disabled={!seAvisa(p)} checked={elegidos.has(p.clave) && seAvisa(p)} onChange={() => tildar(p.clave)} />
                   <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                     {p.nombre} <span style={{ color: colors.muted }}>· {[p.rol, p.email || "sin correo", p.whatsapp ? "con WhatsApp" : ""].filter(Boolean).join(" · ")}</span>
                   </span>
@@ -340,8 +361,10 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
               onChange={e => setMensaje(e.target.value)}
               style={{ ...chico, width: "100%", boxSizing: "border-box", marginTop: 5, resize: "vertical", lineHeight: 1.4 }} />
             <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45, marginTop: 5 }}>
-              El correo le dice qué tiene que revisar y lleva el botón «Ver y aprobar» a su enlace. Queda anotado a quién se le avisó.
-              Por WhatsApp no sale solo todavía: después de {modo === "enviar" ? "enviar" : "pedir"} te dejo el mensaje listo para mandarlo desde tu WhatsApp.
+              El correo le dice qué tiene que revisar y lleva el botón «Ver y aprobar» a su enlace. Queda anotado a quién se le avisó.{" "}
+              {wa
+                ? "Por WhatsApp le llega desde el número de FOREMAN a quien tenga celular cargado, con qué tiene que aprobar, hasta cuándo y el mismo botón. Las líneas de arriba van solo en el correo."
+                : `Por WhatsApp no sale solo todavía: después de ${modo === "enviar" ? "enviar" : "pedir"} te dejo el mensaje listo para mandarlo desde tu WhatsApp.`}
             </div>
           </>
         )}
@@ -390,18 +413,32 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
             )}
             {hecho.noSalio && (
               <div className="correo-no-salio" role="alert" style={{ fontSize: 12, color: colors.danger, lineHeight: 1.45 }}>
-                {hecho.pedido ? "El pedido quedó hecho, pero el correo no salió: " : "El correo no salió: "}{hecho.noSalio}
+                {hecho.sinCorreo ? (hecho.pedido ? "El pedido quedó hecho, pero no se le pudo avisar: " : "No se le pudo avisar: ")
+                  : hecho.pedido ? "El pedido quedó hecho, pero el correo no salió: " : "El correo no salió: "}{hecho.noSalio}
               </div>
             )}
-            {!hecho.sinPedir && (
+            {/* LO QUE SALIÓ DESDE EL NÚMERO DE FOREMAN, y a quién no. */}
+            {yaLesLlego.size > 0 && (
+              <div className="whatsapp-enviado" role="status" style={{ fontSize: 12, color: colors.ink, lineHeight: 1.45, overflowWrap: "anywhere" }}>
+                <MessageCircle size={12} color={colors.success} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                WhatsApp enviado a {hecho.porWhatsApp.filter(w => w.ok).map(w => w.nombre || w.telefono).join(", ")}, desde el número de FOREMAN.
+                <span style={{ color: colors.muted }}> En «Aprobaciones» se ve si le llegó y si lo leyó.</span>
+              </div>
+            )}
+            {(hecho.porWhatsApp || []).filter(w => !w.ok).map((w, i) => (
+              <div key={i} className="whatsapp-no-salio" role="alert" style={{ fontSize: 12, color: colors.danger, lineHeight: 1.45, overflowWrap: "anywhere" }}>
+                A {w.nombre || w.telefono} no le salió el WhatsApp: {w.error}
+              </div>
+            ))}
+            {!hecho.sinPedir && (!wa || aMano.length > 0) && (
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginTop: 4 }}>
-              <MessageCircle size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />AVISARLE POR WHATSAPP
+              <MessageCircle size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{wa ? "ESCRIBIRLE DESDE TU WHATSAPP" : "AVISARLE POR WHATSAPP"}
             </div>
             )}
-            {hecho.sinPedir || !punto ? null : conWhatsApp.length > 0 ? (
+            {hecho.sinPedir || !punto || (wa && !aMano.length) ? null : aMano.length > 0 ? (
               <>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {conWhatsApp.map(p => (
+                  {aMano.map(p => (
                     <a key={p.clave} className="por-whatsapp" target="_blank" rel="noreferrer"
                       href={enlaceDeWhatsApp(p.whatsapp, mensajeDelPedido({ nombre: p.nombre, proyecto: lead.nombre, punto: punto.texto, enlace, hasta: hecho.aviso ? null : hasta }))}
                       style={{ ...boton(false), textDecoration: "none", borderColor: colors.success, color: colors.success }}>
@@ -429,7 +466,8 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
               <button className="pedir-y-avisar" disabled={ocupado} onClick={() => hacer(true)} style={boton(true)}>
                 {modo === "avisar" ? <Mail size={12} /> : modo === "enviar" ? <Send size={12} /> : <ThumbsUp size={12} />}{" "}
                 {ocupado ? (modo === "enviar" && adjuntos.length ? "Subiendo y enviando…" : "Un momento…")
-                  : modo === "avisar" ? "Avisarle por correo" : modo === "enviar" ? "Enviar y avisarle por correo" : "Pedir y avisarle por correo"}
+                  : wa ? (modo === "avisar" ? "Avisarle" : modo === "enviar" ? "Enviar y avisarle" : "Pedir y avisarle")
+                    : modo === "avisar" ? "Avisarle por correo" : modo === "enviar" ? "Enviar y avisarle por correo" : "Pedir y avisarle por correo"}
               </button>
               {modo !== "avisar" && (
                 <button className="pedir-sin-avisar" disabled={ocupado} onClick={() => hacer(false)} style={boton(false)}>{modo === "enviar" ? "Enviar sin avisar" : "Pedir sin avisar"}</button>

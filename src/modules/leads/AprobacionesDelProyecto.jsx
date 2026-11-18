@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { FileDown, FileText, ThumbsUp, Mail, Send, CalendarClock } from "lucide-react";
+import { FileDown, FileText, ThumbsUp, Mail, Send, CalendarClock, MessageCircle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { abrirArchivo } from "../../lib/archivos";
-import { cargarAprobaciones } from "./proyecto";
-import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, registroParaPdf, plazoDe } from "./aprobaciones.js";
+import { cargarAprobaciones, whatsappDeForeman } from "./proyecto";
+import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, registroParaPdf, plazoDe, ESTADOS_DE_WHATSAPP } from "./aprobaciones.js";
 import { etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
 import PedirAprobacion from "./PedirAprobacion";
 
@@ -38,7 +38,12 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
   const [ventana, setVentana] = useState(null);
   const etapas = etapasDelTipo(catalogo, tipoDe(lead));
 
-  const cargar = useCallback(async () => { setDatos(await cargarAprobaciones(lead.id)); }, [lead.id]);
+  // Con el registro viene qué pasó con cada WhatsApp que salió (entregado,
+  // leído, no llegó): eso lo sabe el servidor, que es a quien le avisa Meta.
+  const cargar = useCallback(async () => {
+    const [d, wa] = await Promise.all([cargarAprobaciones(lead.id), whatsappDeForeman(lead.id)]);
+    setDatos({ ...d, estados: wa.estados });
+  }, [lead.id]);
   useEffect(() => { cargar(); }, [cargar]);
 
   if (!datos) return <div style={{ fontSize: 12, color: colors.muted, padding: "10px 0" }}>Leyendo el registro…</div>;
@@ -50,7 +55,7 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
     );
   }
 
-  const registro = registroDeAprobaciones(datos.filas, datos.archivosDeAhora);
+  const registro = registroDeAprobaciones(datos.filas, datos.archivosDeAhora, undefined, datos.estados);
   const r = resumenDelRegistro(registro);
 
   async function bajar() {
@@ -151,12 +156,29 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
               )}
               {p.avisos.map((a, i) => (
                 <div key={i} className="aviso-del-pedido" style={{ overflowWrap: "anywhere" }}>
-                  <Mail size={11} color={colors.muted} style={{ verticalAlign: "-1px", marginRight: 4 }} />
-                  Se le avisó por correo a {a.correos.join(", ")} el {momento(a.cuando)}
+                  {a.correos.length > 0 && (
+                    <div>
+                      <Mail size={11} color={colors.muted} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                      Se le avisó por correo a {a.correos.join(", ")} el {momento(a.cuando)}
+                    </div>
+                  )}
+                  {/* Por WhatsApp, con lo que Meta avisó después: si llegó o no. */}
+                  {(a.whatsapps || []).map((w, k) => {
+                    const e = ESTADOS_DE_WHATSAPP[w.estado] || ESTADOS_DE_WHATSAPP.enviado;
+                    return (
+                      <div key={k} className={`whatsapp-del-pedido whatsapp-${w.estado}`}>
+                        <MessageCircle size={11} color={TONOS[e.tono]} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                        Se le escribió por WhatsApp a {w.nombre || w.telefono} el {momento(a.cuando)}
+                        {" · "}<strong style={{ color: TONOS[e.tono] }}>{e.dice}</strong>
+                        {w.estado !== "enviado" && w.estado_at ? ` el ${momento(w.estado_at)}` : ""}
+                        {w.estado === "fallo" && w.error && <div style={{ color: colors.danger }}>{w.error}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
               {p.estado === "pendiente" && !p.avisos.length && (
-                <div style={{ color: colors.warning }}>Todavía no se le avisó por correo.</div>
+                <div style={{ color: colors.warning }}>Todavía no se le avisó.</div>
               )}
               {/* Sigue esperando: se le avisa de nuevo desde acá. */}
               {editable && p.estado === "pendiente" && p.task_id != null && (

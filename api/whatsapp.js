@@ -8,10 +8,18 @@
 // Y siempre se le responde 200 a Meta, aunque adentro algo falle: si no,
 // reintenta el mismo mensaje una y otra vez, y NOVA terminaría creando la
 // misma tarea cuatro veces.
+//
+// Por acá entran también dos cosas de los avisos a CLIENTES (Hernán,
+// 18/11/2026: «es importante ya integrar WhatsApp»), que viven en
+// _whatsappDeClientes.js: el aviso de Meta de si un mensaje llegó, y lo que un
+// cliente contesta al aviso de una aprobación. Un cliente no es del equipo,
+// pero tampoco es un desconocido: se le contesta y su mensaje se le pasa a
+// quien le pidió la aprobación.
 
 import { configurado, firmaValida, identificar, enviar, marcarLeido, esNuevo, anotarSalida, historial } from "./_whatsapp.js";
 import { permisosDe } from "./_permisos.js";
 import { responder } from "./_agente.js";
+import { anotarEntrega, avisoAlCliente, atenderAlCliente } from "./_whatsappDeClientes.js";
 import { rest, configurado as baseConfigurada } from "./_supabase.js";
 
 export const config = { api: { bodyParser: false } };   // la firma se calcula sobre el cuerpo crudo
@@ -43,8 +51,12 @@ export default async function handler(req, res) {
   try { aviso = JSON.parse(crudo || "{}"); } catch { return res.status(200).json({ ok: true }); }
 
   const valor = aviso?.entry?.[0]?.changes?.[0]?.value || {};
+  // Qué pasó con lo que salió: entregado, leído, o que no llegó.
+  for (const st of Array.isArray(valor.statuses) ? valor.statuses : []) {
+    try { await anotarEntrega(st); } catch (e) { console.error("[whatsapp] no se pudo anotar la entrega:", e.message); }
+  }
   const mensaje = valor.messages?.[0];
-  if (!mensaje) return res.status(200).json({ ok: true });       // avisos de entrega y demás
+  if (!mensaje) return res.status(200).json({ ok: true });       // era solo un aviso de entrega
 
   const de = mensaje.from;
   const texto = mensaje.type === "text" ? (mensaje.text?.body || "").trim() : "";
@@ -59,6 +71,12 @@ export default async function handler(req, res) {
 
     const usuario = await identificar(de);
     if (!usuario) {
+      // ¿Es un cliente contestando el aviso de una aprobación?
+      const aviso = await avisoAlCliente(de);
+      if (aviso) {
+        await atenderAlCliente({ de, texto, tipo: mensaje.type, mensajeId: mensaje.id, aviso });
+        return res.status(200).json({ ok: true });
+      }
       await enviar(de, "Este número es de FOREMAN, el sistema interno de HCA Studio. No reconozco tu número: si eres del equipo, pide que lo registren en tu usuario.");
       return res.status(200).json({ ok: true });
     }
