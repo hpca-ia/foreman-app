@@ -121,7 +121,7 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
         )}
       </div>
       {f.archivo_url && (
-        <button onClick={() => abrirArchivo(f.archivo_url)} title={f.archivo_nombre || "Ver la factura escaneada"}
+        <button onClick={() => abrirArchivo(f.archivo_url, { nombre: f.archivo_nombre })} title={f.archivo_nombre || "Ver la factura escaneada"}
           style={{ color: colors.muted, display: "flex", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
           <Paperclip size={14} />
         </button>

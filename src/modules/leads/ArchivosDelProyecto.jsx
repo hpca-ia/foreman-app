@@ -207,7 +207,7 @@ export default function ArchivosDelProyecto({ lead, currentUser, editable = true
                       {a.visible_cliente ? <Eye size={13} /> : <EyeOff size={13} />}
                     </button>
                   )}
-                  <button onClick={() => abrirArchivo(a.storage_path)} title="Abrir o descargar"
+                  <button onClick={() => abrirArchivo(a.storage_path, { nombre: a.nombre })} title="Abrir o descargar"
                     style={{ background: "none", border: `1px solid ${colors.border}`, borderRadius: 7, padding: "5px 7px",
                       color: colors.inkSoft, cursor: "pointer", display: "flex" }}>
                     <Download size={13} />

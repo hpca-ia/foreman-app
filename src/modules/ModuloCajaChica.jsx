@@ -1581,7 +1581,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
                   <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{g.fecha} {g.proveedor?`· ${g.proveedor}`:""} {g.capitulo?`· ${g.capitulo}`:""} · {g.tipo}</div>
-                  {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url)} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
+                  {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url,{nombre:g.archivo_nombre})} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
                   {/* ¿DÓNDE TERMINÓ ESTE GASTO?
                       Un gasto de caja chica no termina en la caja: entra al
                       control de la obra como factura y después alguien le pone

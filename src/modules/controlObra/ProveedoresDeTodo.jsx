@@ -132,7 +132,7 @@ export default function ProveedoresDeTodo({ obras = [], nombreDeObra, onVolver }
                             {d.numero_factura ? `${d.numero_factura} · ` : ""}{d.detalle || "sin detalle"}
                           </span>
                           {d.archivo_url && (
-                            <button onClick={() => abrirArchivo(d.archivo_url)} title={d.archivo_nombre || "Ver el respaldo"}
+                            <button onClick={() => abrirArchivo(d.archivo_url, { nombre: d.archivo_nombre })} title={d.archivo_nombre || "Ver el respaldo"}
                               style={{ background: "none", border: "none", color: colors.inkSoft, cursor: "pointer", display: "flex", padding: 0 }}>
                               <FileText size={13} />
                             </button>

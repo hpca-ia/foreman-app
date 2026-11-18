@@ -184,7 +184,7 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
                 {p.archivos.length ? (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {p.archivos.map((a, i) => (
-                      <button key={a.id ?? i} className="archivo-del-pedido" disabled={!a.storage_path} onClick={() => a.storage_path && abrirArchivo(a.storage_path)}
+                      <button key={a.id ?? i} className="archivo-del-pedido" disabled={!a.storage_path} onClick={() => a.storage_path && abrirArchivo(a.storage_path, { nombre: a.nombre })}
                         title={a.storage_path ? `Abrir ${a.nombre}` : a.nombre}
                         style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: "100%", cursor: a.storage_path ? "pointer" : "default", fontFamily: colors.font,
                           fontSize: 11.5, color: colors.ink, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 7, padding: "4px 9px" }}>

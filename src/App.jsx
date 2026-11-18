@@ -21,6 +21,7 @@ import Bandeja from "./components/Bandeja";
 import { bandeja, sinCompras, alReprogramar, alDelegar, alDescartar, alReabrir, tareaRapida } from "./lib/bandeja";
 import { avisosDelTablero } from "./lib/avisos";
 import CargadorDeAvisos from "./components/CargadorDeAvisos";
+import VisorDeArchivo from "./components/VisorDeArchivo";
 import { avisosDelPipeline, esMiAviso, diaCorto, etapaAlCrear } from "./modules/leads/pipeline";
 import { aprobacionesVencidas, esMiAprobacion } from "./modules/leads/aprobaciones.js";
 import { anotar as anotarEnProyecto, anotarEnLaTarea } from "./modules/leads/proyecto";
@@ -778,6 +779,8 @@ export default function App() {
       )}
       {showModal && <ModalTarea editTask={editTask} proyectos={proyectosTodos} mios={mios} tareas={tareas} onCambio={fetchTareas} puede={puede} currentUser={usuario} users={users} asignables={asignables} onEliminar={eliminarTarea} onCerrar={() => { setShowModal(false); setEditTask(null); }} onGuardar={guardarTarea} />}
       {showAjustes && <Suspense fallback={null}><PanelAjustes puede={puede} usuario={usuario} permisos={permisos} setPermisos={setPermisos} permisosUsuario={permisosUsuario} setPermisosUsuario={setPermisosUsuario} equipoRemoto={equipoRemoto} onEquipoCambio={recargarEquipo} users={users} setUsers={setUsers} empresa={empresa} setEmpresa={setEmpresa} onClose={() => setShowAjustes(false)} /></Suspense>}
+      {/* El visor de archivos: uno solo para todo FOREMAN. Lo abre `abrirArchivo`. */}
+      <VisorDeArchivo />
     </div>
   );
 }

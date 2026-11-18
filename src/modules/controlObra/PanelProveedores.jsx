@@ -262,7 +262,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                           {d.numero_factura || d.detalle || "Sin número"} · {dia(d.fecha)}
                         </span>
                         {d.archivo_url && (
-                          <button onClick={() => abrirArchivo(d.archivo_url)} title={d.archivo_nombre || "Ver el respaldo"}
+                          <button onClick={() => abrirArchivo(d.archivo_url, { nombre: d.archivo_nombre })} title={d.archivo_nombre || "Ver el respaldo"}
                             style={{ background: "none", border: "none", color: colors.inkSoft, cursor: "pointer", display: "flex", padding: 0 }}>
                             <FileText size={14} />
                           </button>

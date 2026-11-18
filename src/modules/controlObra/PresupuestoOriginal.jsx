@@ -63,7 +63,7 @@ export default function PresupuestoOriginal({ obra, rubros, currentUser }) {
           )}
         </div>
         {obra.archivo_presupuesto_url && (
-          <button onClick={() => abrirArchivo(obra.archivo_presupuesto_url)}
+          <button onClick={() => abrirArchivo(obra.archivo_presupuesto_url, { nombre: obra.archivo_presupuesto_nombre })}
             style={{ display: "inline-flex", alignItems: "center", gap: 6, background: colors.brand, color: "#fff", border: "none", borderRadius: colors.radiusSm, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
             <Download size={13} /> {obra.archivo_presupuesto_nombre || "Descargar el archivo original"}
           </button>

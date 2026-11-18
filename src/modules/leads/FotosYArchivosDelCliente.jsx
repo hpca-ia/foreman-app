@@ -84,9 +84,9 @@ export default function FotosYArchivosDelCliente({ lead, punto = null, archivos 
           {fotos.map(a => (
             <span key={a.id} className="foto-del-cliente" style={{ position: "relative", display: "inline-block" }}>
               {enlaces[a.id]
-                ? <img src={enlaces[a.id]} alt={a.nombre} title={a.nombre} onClick={() => abrirArchivo(a.storage_path)}
+                ? <img src={enlaces[a.id]} alt={a.nombre} title={a.nombre} onClick={() => abrirArchivo(a.storage_path, { nombre: a.nombre })}
                     style={{ width: 58, height: 58, objectFit: "cover", borderRadius: 7, border: `1px solid ${colors.border}`, display: "block", cursor: "zoom-in" }} />
-                : <span title={a.nombre} onClick={() => abrirArchivo(a.storage_path)}
+                : <span title={a.nombre} onClick={() => abrirArchivo(a.storage_path, { nombre: a.nombre })}
                     style={{ width: 58, height: 58, borderRadius: 7, border: `1px solid ${colors.border}`, background: colors.neutralSoft,
                       display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, color: colors.muted, cursor: "pointer" }}>foto</span>}
               {editable && <button className="quitar-archivo" onClick={() => quitar(a)} title={`Quitar ${a.nombre}`} aria-label={`Quitar ${a.nombre}`} style={equis}><X size={10} /></button>}
@@ -96,7 +96,7 @@ export default function FotosYArchivosDelCliente({ lead, punto = null, archivos 
             <span key={a.id} className="archivo-del-cliente" style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 5,
               maxWidth: 230, padding: "5px 9px", borderRadius: 7, border: `1px solid ${colors.border}`, background: "#fff" }}>
               <FileText size={12} color={colors.muted} style={{ flexShrink: 0 }} />
-              <button onClick={() => abrirArchivo(a.storage_path)} title={`Abrir ${a.nombre}`}
+              <button onClick={() => abrirArchivo(a.storage_path, { nombre: a.nombre })} title={`Abrir ${a.nombre}`}
                 style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, color: colors.ink,
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{a.nombre}</button>
               {editable && <button className="quitar-archivo" onClick={() => quitar(a)} title={`Quitar ${a.nombre}`} aria-label={`Quitar ${a.nombre}`} style={equis}><X size={10} /></button>}

@@ -11,6 +11,7 @@ import { simulacionesDe, guardarSimulacion, borrarSimulacion } from "./simulacio
 import { liquidacion, subtotalesDeLiquidacion, modalidadDe, MODALIDADES, claveDe, seMide, costosDe, cantidadEscrita } from "./liquidacion.js";
 import { cargarEjecutado, anotarEjecutado, guardarModalidad } from "./ejecutado.js";
 import DiferenciasDeCantidad from "./DiferenciasDeCantidad";
+import { useArrastrarParaRecorrer } from "../../lib/arrastrarParaRecorrer.js";
 
 // EL PRESUPUESTO ACTUALIZADO, EN PANTALLA.
 //
@@ -83,6 +84,14 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser,
   const [sinEjecutado, setSinEjecutado] = useState(false);
   const [modalidad, setModalidad] = useState(modalidadDeAfuera || modalidadDe(obra));
   const [guardadoEj, setGuardadoEj] = useState({ estado: "", error: "", hora: null });
+  // SE RECORRE AGARRÁNDOLO, COMO EL CRONOGRAMA. Hernán, 18/11/2026: «en el
+  // presupuesto actualizado quiero poder panear para navegar todo el archivo,
+  // así como los cronogramas». La matriz tiene quince columnas y no entra en
+  // ninguna pantalla; para moverla había que bajar hasta su barra, al final de
+  // todos los rubros. Las dos tablas anchas —las órdenes y la matriz— se
+  // agarran del fondo y se arrastran. De un casillero o de un botón no.
+  const paneoDeOrdenes = useArrastrarParaRecorrer();
+  const paneoDeLaMatriz = useArrastrarParaRecorrer();
 
   const cargarSimulaciones = useCallback(async () => {
     const r = await simulacionesDe(obra.id);
@@ -436,7 +445,8 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser,
           nuevo en su bloque. Acá va lo que vale cada una, con los mismos
           números del documento que el cliente firma. */}
       {matriz.ordenes.length > 0 && (
-        <div style={{ ...caja, padding: 0, overflowX: "auto" }}>
+        <div ref={paneoDeOrdenes.cajaRef} onMouseDown={paneoDeOrdenes.agarrar} className="se-recorre"
+          style={{ ...caja, padding: 0, overflowX: "auto", ...paneoDeOrdenes.estilo }}>
           <div style={{ padding: "9px 12px 5px", fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 }}>
             LAS ÓRDENES DE CAMBIO, CADA UNA CON SU VALOR
           </div>
@@ -604,7 +614,11 @@ export default function PanelPresupuestoActualizado({ obra, rubros, currentUser,
         )}
       </div>
 
-      <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflowX: "auto" }}>
+      <div className="como-se-recorre" style={{ fontSize: 10.5, color: colors.muted, margin: "0 2px 5px" }}>
+        Para recorrerlo, agarralo con el mouse y arrastrá: a los costados corre la tabla; arriba y abajo, la página.
+      </div>
+      <div ref={paneoDeLaMatriz.cajaRef} onMouseDown={paneoDeLaMatriz.agarrar} className="se-recorre matriz-del-presupuesto"
+        style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflowX: "auto", ...paneoDeLaMatriz.estilo }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1500 }}>
           <thead>
             <tr style={{ background: colors.bg }}>
