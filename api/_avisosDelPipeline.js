@@ -89,5 +89,34 @@ export function avisosDelPipeline({ leads = [], tareas = [], hoy = hoyISO() }) {
 }
 
 /** ¿Este aviso es de esta persona? El Director ve los de toda la oficina. */
+/**
+ * LAS APROBACIONES QUE EL CLIENTE DEJÓ PASAR: se le pidió, tenía fecha límite,
+ * el día ya pasó y no contestó (migración 188). Es la misma regla que
+ * `aprobacionesVencidas` de src/modules/leads/aprobaciones.js, copiada acá
+ * porque el correo de la mañana corre en el servidor;
+ * pruebas/fechaLimiteDeAprobacion.test.mjs exige que las dos digan lo mismo.
+ *
+ * @returns [{ lead_id, nombre, task_id, titulo, hasta, dias, texto, responsable_id, created_by, assignee_id }]
+ */
+export function aprobacionesVencidas({ leads = [], tareas = [], hoy = hoyISO() } = {}) {
+  const porId = new Map((leads || []).map(l => [String(l.id), l]));
+  const texto = v => String(v ?? "").trim();
+  return (tareas || [])
+    .filter(t => t && t.cliente_aprueba === true && !t.cliente_respuesta && soloDia(t.cliente_aprueba_hasta) && soloDia(t.cliente_aprueba_hasta) < hoy
+      && t.visible_cliente !== false && t.status !== "listo" && !t.descartada && t.lead_id != null)
+    .map(t => {
+      const l = porId.get(String(t.lead_id));
+      if (!l || l.resultado === "perdido") return null;
+      const hasta = soloDia(t.cliente_aprueba_hasta), n = diasEntre(hasta, hoy);
+      return {
+        lead_id: l.id, nombre: l.nombre, task_id: t.id, titulo: texto(t.title), hasta, dias: n,
+        texto: `«${texto(t.title)}» venció el ${diaCorto(hasta)}, hace ${n} ${n === 1 ? "día" : "días"}`,
+        responsable_id: l.responsable_id ?? null, created_by: l.created_by ?? null, assignee_id: t.assignee_id ?? null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.dias - a.dias || String(a.nombre).localeCompare(String(b.nombre)) || Number(a.task_id) - Number(b.task_id));
+}
+
 export const esMiAviso = (aviso, usuarioId, veTodo = false) =>
   veTodo || String(aviso.responsable_id) === String(usuarioId) || String(aviso.created_by) === String(usuarioId);

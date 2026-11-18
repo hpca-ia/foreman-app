@@ -41,8 +41,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, error: "El enlace del cliente está apagado: prendelo, al pie del checklist, para que tenga dónde aprobar." });
     }
 
-    const tareas = await crudo(await rest(
-      `tasks?id=eq.${Number(taskId)}&lead_id=eq.${lead.id}&select=id,title,visible_cliente,cliente_aprueba,cliente_respuesta,cliente_descripcion`));
+    // Con la fecha límite, si la migración 188 ya está; si no, sin ella.
+    const deLaTarea = `tasks?id=eq.${Number(taskId)}&lead_id=eq.${lead.id}&select=id,title,visible_cliente,cliente_aprueba,cliente_respuesta,cliente_descripcion`;
+    let tareas = await crudo(await rest(`${deLaTarea},cliente_aprueba_hasta`));
+    if (!Array.isArray(tareas)) tareas = await crudo(await rest(deLaTarea));
     const tarea = Array.isArray(tareas) ? tareas[0] : null;
     if (!tarea) return res.status(404).json({ error: "No se encontró ese punto." });
     if (tarea.visible_cliente !== true) return res.status(200).json({ ok: false, error: "El cliente no ve ese punto: mostráselo antes de avisarle." });
@@ -59,7 +61,7 @@ export default async function handler(req, res) {
     const { asunto, cuerpo } = correoDelPedido({
       proyecto: lead.nombre, punto: tarea.title, descripcion: tarea.cliente_descripcion,
       archivos: (Array.isArray(suyos) ? suyos : []).map(a => a.nombre), mensaje,
-      enlace: `${APP}/?cliente=${lead.portal_token}`,
+      enlace: `${APP}/?cliente=${lead.portal_token}`, hasta: tarea.cliente_aprueba_hasta || null,
     });
     const r = await enviarCorreo({
       to: para, subject: asunto,

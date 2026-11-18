@@ -101,7 +101,7 @@ test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y de
   assert.match(lista, /onPedirAprobacion=\{modo => setPedido\(\{ item, modo \}\)\}/);
   assert.match(lista, /<PedirAprobacion lead=\{lead\} item=\{pedido\.item\} modo=\{pedido\.modo\}/);
   const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
-  assert.match(ventana, /const e = await pedirAprobacion\(item, true, currentUser, \{ descripcion \}\);/);
+  assert.match(ventana, /const e = await pedirAprobacion\(item, true, currentUser, \{ descripcion, hasta: hasta \|\| null \}\);/);
   assert.match(ventana, /const r = await avisarDelPedido\(\{ item: el, correos, mensaje, quien: currentUser \}\);/);
   // El cliente, ya tildado.
   assert.match(ventana, /setElegidos\(new Set\(lista\.filter\(p => p\.esCliente && p\.email\)\.map\(p => p\.clave\)\)\);/);
@@ -110,7 +110,7 @@ test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y de
   assert.match(ventana, /const r = personaDeLaFicha\(\{ \.\.\.nueva, rol: "cliente" \}, lead\.id\);/);
   assert.match(ventana, /const e = await agregarALaFicha\(r\.fila\);/);
   // El WhatsApp: el mensaje con su enlace, ya escrito.
-  assert.match(ventana, /href=\{enlaceDeWhatsApp\(p\.whatsapp, mensajeDelPedido\(\{ nombre: p\.nombre, proyecto: lead\.nombre, punto: punto\.texto, enlace \}\)\)\}/);
+  assert.match(ventana, /href=\{enlaceDeWhatsApp\(p\.whatsapp, mensajeDelPedido\(\{ nombre: p\.nombre, proyecto: lead\.nombre, punto: punto\.texto, enlace, hasta: hecho\.aviso \? null : hasta \}\)\)\}/);
   // Sin el enlace del cliente no se pide: no tendría dónde aprobar.
   assert.match(ventana, /const sinEnlace = !cargando && !enlace;/);
 });
@@ -122,11 +122,11 @@ test("LO QUE PREGUNTÓ: «¿desde dónde envío presupuestos, planos, documentos
   assert.match(pestana, /<PedirAprobacion lead=\{lead\} modo=\{ventana\.modo\} item=\{ventana\.item \|\| null\}/);
   assert.match(pestana, /etapas=\{etapas\} etapaId=\{sePersigue\(lead\) \? lead\.etapa : null\}/);
   // Lo que sigue esperando se avisa de nuevo desde su renglón.
-  assert.match(pestana, /className="avisar-de-nuevo" onClick=\{\(\) => setVentana\(\{ modo: "avisar", item: \{ id: p\.task_id, tarea_id: p\.task_id, lead_id: lead\.id, texto: p\.titulo \}, archivos: p\.archivos \}\)\}/);
+  assert.match(pestana, /className="avisar-de-nuevo" onClick=\{\(\) => setVentana\(\{ modo: "avisar", item: \{ id: p\.task_id, tarea_id: p\.task_id, lead_id: lead\.id, texto: p\.titulo \}, archivos: p\.archivos, plazo: p\.vence_el \}\)\}/);
   // Los cuatro pasos, seguidos: nace el punto, se le muestra, se suben sus archivos y se le pide.
   const datos = codigoDe("../src/modules/leads/proyecto.js");
   const fn = datos.slice(datos.indexOf("export async function enviarParaAprobar"), datos.indexOf("export async function avisarDelPedido"));
-  const orden = ["await agregarTarea({", "await mostrarAlCliente(item, true, quien)", "await subirParaElCliente({ lead, punto: item, archivos, quien })", "await pedirAprobacion(item, true, quien, { descripcion })"].map(x => fn.indexOf(x));
+  const orden = ["await agregarTarea({", "await mostrarAlCliente(item, true, quien)", "await subirParaElCliente({ lead, punto: item, archivos, quien })", "await pedirAprobacion(item, true, quien, { descripcion, hasta })"].map(x => fn.indexOf(x));
   assert.ok(orden.every(i => i >= 0), "están los cuatro pasos");
   assert.deepEqual([...orden].sort((a, b) => a - b), orden, "en ese orden");
   // Sin título no nace nada.
@@ -138,7 +138,7 @@ test("LO QUE PREGUNTÓ: «¿desde dónde envío presupuestos, planos, documentos
   assert.ok(fn.indexOf("sinPedir: true") < fn.indexOf("await pedirAprobacion("), "antes de pedir");
   // La ventana es la misma de «Pedirle que lo apruebe», en modo «enviar».
   const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
-  assert.match(ventana, /const r = await enviarParaAprobar\(\{ lead, titulo: que, descripcion: paraEl, etapaId: etapa \|\| null, archivos: adjuntos, quien: currentUser \}\);/);
+  assert.match(ventana, /const r = await enviarParaAprobar\(\{ lead, titulo: que, descripcion: paraEl, etapaId: etapa \|\| null, archivos: adjuntos, quien: currentUser, hasta: hasta \|\| null \}\);/);
   assert.match(ventana, /if \(modo === "enviar" && !hecho && !que\.trim\(\)\) \{/);
   // Y si no se pudo pedir, lo dice y no ofrece avisarle.
   assert.match(ventana, /if \(r\.error \|\| r\.sinPedir\) \{\s+setHecho\(\{ pedido: false, sinPedir: true,/);
@@ -181,7 +181,7 @@ test("LO QUE PIDIÓ: la colección entera, cada pedido con su número, qué cont
   assert.deepEqual(de(4).archivos, [{ id: 12, nombre: "Cocina planta.pdf", storage_path: "proyecto-13/cliente/c.pdf", subido_at: "2026-11-21T08:50:00Z" }]);
   // Retirado: cuándo se retiró.
   assert.equal(de(2).respuesta_at, "2026-11-19T11:00:00Z");
-  assert.deepEqual(resumenDelRegistro(registro), { total: 4, aprobadas: 1, observadas: 1, pendientes: 1, retiradas: 1 });
+  assert.deepEqual(resumenDelRegistro(registro), { total: 4, aprobadas: 1, observadas: 1, pendientes: 1, retiradas: 1, vencidas: 0 });
   assert.deepEqual(registroDeAprobaciones(), []);
   assert.deepEqual(registroDeAprobaciones({ message: "relation does not exist" }), []);
   assert.equal(estadoDelPedido("aprobado").dice, "Aprobado");
@@ -193,7 +193,7 @@ test("cada pedido entra al registro con cómo se llamaba el punto y quién lo pi
     { lead_id: 13, task_id: 196, titulo: "FOGA", descripcion: "Cocina", pedida_por: 1, pedida_nombre: "Hernan Cueva" });
   const datos = codigoDe("../src/modules/leads/proyecto.js");
   // Al pedir entra una fila; el pedido que estaba abierto se retira.
-  assert.match(datos, /if \(pedir\) await supabase\.from\("aprobaciones_cliente"\)\.insert\(\{ \.\.\.filaDelPedido\(\{ item, descripcion, quien \}\), pedida_at: new Date\(\)\.toISOString\(\) \}\);/);
+  assert.match(datos, /const fila = \{ \.\.\.filaDelPedido\(\{ item, descripcion, quien, hasta: sinPlazo \? null : plazo \}\), pedida_at: new Date\(\)\.toISOString\(\) \};\s+const \{ error: eFila \} = await supabase\.from\("aprobaciones_cliente"\)\.insert\(fila\);/);
   assert.match(datos, /\.update\(\{ retirada_at: new Date\(\)\.toISOString\(\), retirada_nombre: quien\?\.name \|\| null \}\)\s+\.eq\("task_id", item\.id\)\.is\("respuesta", null\)\.is\("retirada_at", null\);/);
 });
 

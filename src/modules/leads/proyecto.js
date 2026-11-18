@@ -29,6 +29,7 @@ export const SIN_171 = "Falta correr la migración 171 en Supabase.";
 export const SIN_185 = "Para que el cliente lea las anotaciones falta correr la migración 185 en Supabase.";
 export const SIN_186 = "Para pedirle la aprobación al cliente falta correr la migración 186 en Supabase.";
 export const SIN_187 = "Para llevar el registro de aprobaciones falta correr la migración 187 en Supabase.";
+export const SIN_188 = "Para ponerle fecha límite a una aprobación falta correr la migración 188 en Supabase.";
 
 /**
  * Guardar en el lead lo que decidió pipeline.js, y dejarlo escrito en su
@@ -74,6 +75,10 @@ export async function cargarTareas(leadId) {
     supabase.from("tasks").select("id,cliente_descripcion,cliente_actualizacion,cliente_actualizado_at").eq("lead_id", leadId).eq("visible_cliente", true),
     supabase.from("tasks").select("id,cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota").eq("lead_id", leadId).eq("cliente_aprueba", true),
   ]);
+  // La fecha límite de cada pedido (migración 188), aparte: sin ella se pide igual, sin plazo.
+  const { data: plazos, error: ePlazos } = ePedidas ? { data: [], error: null }
+    : await supabase.from("tasks").select("id,cliente_aprueba_hasta").eq("lead_id", leadId).eq("cliente_aprueba", true);
+  const hastaDe = Object.fromEntries((ePlazos ? [] : plazos || []).map(t => [t.id, t.cliente_aprueba_hasta || null]));
   if (error) return { abiertas: [], hechas: [], tareas: {}, compartidas: new Set(), paraElCliente: {}, aprobaciones: {}, sinMigracion: falta(error), error: error.message };
   const { abiertas, hechas } = delProyecto(data || []);
   return {
@@ -87,9 +92,10 @@ export async function cargarTareas(leadId) {
     sinReporte: !!eTextos && !eVistas,
     aprobaciones: Object.fromEntries((ePedidas ? [] : pedidas || []).map(t => [t.id, {
       estado: ["aprobado", "observado"].includes(t.cliente_respuesta) ? t.cliente_respuesta : "pendiente",
-      respondido_at: t.cliente_respuesta_at || null, nota: t.cliente_respuesta_nota || "",
+      respondido_at: t.cliente_respuesta_at || null, nota: t.cliente_respuesta_nota || "", hasta: hastaDe[t.id] || null,
     }])),
     sinAprobacion: !!ePedidas && !eVistas,
+    sinPlazo: !!ePlazos,
     sinMigracion: false,
   };
 }
@@ -105,15 +111,24 @@ export async function cargarTareas(leadId) {
  * nueva; al retirar el pedido, la que estaba abierta queda como retirada. Sin
  * la 187 se pide igual, y solo no queda en el registro.
  *
+ * LA FECHA LÍMITE (migración 188) va en la tarea —la del pedido abierto— y en
+ * la fila del registro, que la conserva aunque después se le vuelva a pedir
+ * con otra. Sin la 188 se pide igual, sin plazo.
+ *
  * @param item         el punto, como lo ve la lista
  * @param descripcion  lo escrito para el cliente sobre el punto: queda en el pedido
+ * @param hasta        hasta qué día tiene para aprobar (AAAA-MM-DD), o nada
  * @returns null o el error
  */
-export async function pedirAprobacion(item, pedir, quien, { descripcion = "" } = {}) {
+export async function pedirAprobacion(item, pedir, quien, { descripcion = "", hasta = null } = {}) {
+  const plazo = pedir ? String(hasta || "").slice(0, 10) || null : null;
   const campos = pedir
     ? { cliente_aprueba: true, cliente_respuesta: null, cliente_respuesta_at: null, cliente_respuesta_nota: null }
     : { cliente_aprueba: false };
-  const { error } = await supabase.from("tasks").update(campos).eq("id", item.id);
+  let { error } = await supabase.from("tasks").update({ ...campos, cliente_aprueba_hasta: plazo }).eq("id", item.id);
+  // Sin la 188 esa columna no existe: se pide sin plazo.
+  const sinPlazo = !!error && falta(error) && /cliente_aprueba_hasta/.test(error.message || "");
+  if (sinPlazo) ({ error } = await supabase.from("tasks").update(campos).eq("id", item.id));
   if (error) return falta(error) ? SIN_186 : error.message;
   // El pedido que estaba abierto ya no vale: se retira. (Al pedir de nuevo
   // sobre uno contestado no hay ninguno abierto, y no pasa nada.)
@@ -122,9 +137,34 @@ export async function pedirAprobacion(item, pedir, quien, { descripcion = "" } =
     .eq("task_id", item.id).is("respuesta", null).is("retirada_at", null);
   // La hora del pedido se dice acá: de ella sale el orden y el número de cada
   // pedido, y no puede depender de que la base la ponga sola.
-  if (pedir) await supabase.from("aprobaciones_cliente").insert({ ...filaDelPedido({ item, descripcion, quien }), pedida_at: new Date().toISOString() });
+  if (pedir) {
+    const fila = { ...filaDelPedido({ item, descripcion, quien, hasta: sinPlazo ? null : plazo }), pedida_at: new Date().toISOString() };
+    const { error: eFila } = await supabase.from("aprobaciones_cliente").insert(fila);
+    // Si lo que falta es solo la columna del plazo, la fila entra sin él.
+    if (eFila && fila.vence_el && falta(eFila)) { const { vence_el, ...sinEl } = fila; await supabase.from("aprobaciones_cliente").insert(sinEl); }
+  }
   await anotar(item.lead_id, {
-    detalle: pedir ? `Le pidió al cliente que apruebe "${item.texto}"` : `Dejó de pedirle al cliente que apruebe "${item.texto}"`,
+    detalle: pedir
+      ? `Le pidió al cliente que apruebe "${item.texto}"${plazo && !sinPlazo ? `, hasta el ${enCriollo(plazo)}` : ""}`
+      : `Dejó de pedirle al cliente que apruebe "${item.texto}"`,
+    quien, extra: { task_id: item.id },
+  });
+  return plazo && sinPlazo ? `Quedó pedido, pero sin fecha límite: ${SIN_188}` : null;
+}
+
+/**
+ * Cambiarle la fecha límite a un pedido que sigue esperando, o quitársela.
+ * Cambia en la tarea y en el pedido abierto del registro, y queda en el
+ * historial del punto.
+ * @returns null o el error
+ */
+export async function ponerPlazoDeAprobacion(item, hasta, quien) {
+  const plazo = String(hasta || "").slice(0, 10) || null;
+  const { error } = await supabase.from("tasks").update({ cliente_aprueba_hasta: plazo }).eq("id", item.id);
+  if (error) return falta(error) ? SIN_188 : error.message;
+  await supabase.from("aprobaciones_cliente").update({ vence_el: plazo }).eq("task_id", item.id).is("respuesta", null).is("retirada_at", null);
+  await anotar(item.lead_id, {
+    detalle: plazo ? `El cliente tiene hasta el ${enCriollo(plazo)} para aprobar "${item.texto}"` : `"${item.texto}" queda sin fecha límite para que el cliente apruebe`,
     quien, extra: { task_id: item.id },
   });
   return null;
@@ -148,10 +188,11 @@ export async function pedirAprobacion(item, pedir, quien, { descripcion = "" } =
  * @param descripcion  unas palabras para él (opcional)
  * @param etapaId      en qué etapa del checklist queda
  * @param archivos     los File elegidos
+ * @param hasta        hasta qué día tiene para aprobar, o nada
  * @returns { error } si no se pudo ni crear · { item, sinPedir, errores } si
- *          no subió nada · { item, subidos, errores } si quedó pedido
+ *          no subió nada · { item, subidos, errores, aviso } si quedó pedido
  */
-export async function enviarParaAprobar({ lead, titulo, descripcion = "", etapaId = null, archivos = [], quien = null }) {
+export async function enviarParaAprobar({ lead, titulo, descripcion = "", etapaId = null, archivos = [], quien = null, hasta = null }) {
   const que = String(titulo || "").trim();
   if (!que) return { error: "Escribí qué tiene que aprobar: «Plano de cocina», «Presupuesto rev. 2»…" };
   const { count } = await supabase.from("tasks").select("id", { count: "exact", head: true }).eq("lead_id", lead.id);
@@ -170,9 +211,10 @@ export async function enviarParaAprobar({ lead, titulo, descripcion = "", etapaI
     subida = await subirParaElCliente({ lead, punto: item, archivos, quien });
     if (!subida.subidos) return { item, sinPedir: true, errores: subida.errores };
   }
-  const e2 = await pedirAprobacion(item, true, quien, { descripcion });
-  if (e2) return { error: `El punto quedó en el checklist, pero no se pudo pedir la aprobación: ${e2}`, item, errores: subida.errores };
-  return { item, subidos: subida.subidos, errores: subida.errores };
+  const e2 = await pedirAprobacion(item, true, quien, { descripcion, hasta });
+  // «Quedó pedido, pero…» no es un error: es un aviso, y el pedido está hecho.
+  if (e2 && !/^Quedó pedido/.test(e2)) return { error: `El punto quedó en el checklist, pero no se pudo pedir la aprobación: ${e2}`, item, errores: subida.errores };
+  return { item, subidos: subida.subidos, errores: subida.errores, aviso: e2 || "" };
 }
 
 /**

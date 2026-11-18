@@ -6,7 +6,7 @@ import { CLASES, claseDe, HORAS } from "../../theme/constants";
 import { nombreDeEtapa, hoyISO, sumarDias, etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
 import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
-  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente, pedirAprobacion,
+  anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente, pedirAprobacion, ponerPlazoDeAprobacion,
 } from "./proyecto";
 import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa, loQueSigue } from "./tareasDelProyecto";
 import { gentePara } from "../controlObra/ordenesDeCambio";
@@ -17,6 +17,7 @@ import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 import FotosYArchivosDelCliente from "./FotosYArchivosDelCliente";
 import PedirAprobacion from "./PedirAprobacion";
 import { cuantosDice } from "./archivosDelCliente.js";
+import { plazoDe } from "./aprobaciones.js";
 
 // LAS TAREAS DEL PROYECTO: UNA LISTA.
 //
@@ -862,6 +863,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       {pedido && (
         <PedirAprobacion lead={lead} item={pedido.item} modo={pedido.modo} users={users} currentUser={currentUser}
           archivos={paraVer.porTarea[pedido.item.id] || []} descripcion={paraElCliente[pedido.item.id]?.descripcion || ""}
+          plazo={aprobaciones[pedido.item.id]?.hasta || null}
           onCambio={async () => { await cargar(); onBitacora?.(); }} onCerrar={() => setPedido(null)} />
       )}
 
@@ -1090,6 +1092,8 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   };
   // Cuántas anotaciones lee, y cómo se le dice a él en qué está el punto.
   const leidas = (anotado || []).filter(c => c.visible_cliente === true && String(c.texto || "").trim()).length;
+  // El plazo del pedido que espera respuesta: cuánto le queda, o hace cuánto venció.
+  const plazo = aprobacion?.estado === "pendiente" ? plazoDe(aprobacion.hasta, hoyISO()) : null;
   const estadoParaEl = item.hecho ? "Listo" : aprobacion?.estado === "pendiente" ? "Esperando su aprobación"
     : item.espera ? "Hecho de nuestro lado · esperando respuesta" : "Pendiente";
   // La descripción para el cliente: qué es este punto, dicho para él. Se
@@ -1157,10 +1161,12 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             {/* Si se le pidió que lo apruebe, en qué está: es lo que se
                 viene a mirar sin abrir el punto. */}
             {laVeElCliente && aprobacion && (
-              <span className="aprobacion-del-cliente" data-estado={aprobacion.estado}
-                style={{ fontWeight: 700, color: aprobacion.estado === "aprobado" ? colors.success : aprobacion.estado === "observado" ? colors.danger : colors.warning }}>
+              <span className="aprobacion-del-cliente" data-estado={aprobacion.estado} data-vencida={plazo?.vencida ? "si" : "no"}
+                style={{ fontWeight: 700, color: aprobacion.estado === "aprobado" ? colors.success : aprobacion.estado === "observado" || plazo?.vencida ? colors.danger : colors.warning }}>
                 {" · "}
-                {aprobacion.estado === "aprobado" ? "aprobado por el cliente" : aprobacion.estado === "observado" ? "el cliente dejó observaciones" : "espera que el cliente apruebe"}
+                {aprobacion.estado === "aprobado" ? "aprobado por el cliente" : aprobacion.estado === "observado" ? "el cliente dejó observaciones"
+                  // Con fecha límite, la fila dice cuánto le queda; y si se le pasó, que venció.
+                  : plazo?.vencida ? `el cliente no aprobó: ${plazo.dice}` : `espera que el cliente apruebe${plazo ? ` · ${plazo.dice}` : ""}`}
               </span>
             )}
             {/* Y la que no ve, lo dice: en un proyecto donde ve las demás, una
@@ -1330,6 +1336,26 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                       <div style={{ fontSize: 12, color: colors.warning, fontWeight: 600, lineHeight: 1.4 }}>
                         <Hourglass size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />Esperando que el cliente lo apruebe.
                       </div>
+                      {/* LA FECHA LÍMITE: cuánto le queda, y se cambia acá mismo. Se guarda al elegir. */}
+                      <div className="plazo-del-pedido" data-vencida={plazo?.vencida ? "si" : "no"} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11.5 }}>
+                        <span style={{ color: plazo?.vencida ? colors.danger : plazo ? colors.ink : colors.muted, fontWeight: plazo ? 600 : 400 }}>
+                          {plazo ? `${plazo.frase}.` : "Sin fecha límite."}
+                        </span>
+                        {editable && (
+                          <>
+                            <input type="date" value={plazo?.hasta || ""} disabled={ocupado} aria-label="Hasta cuándo tiene para aprobar"
+                              title={plazo ? "Cambiarle la fecha límite" : "Ponerle una fecha límite"}
+                              onChange={e => hacer(() => ponerPlazoDeAprobacion(item, e.target.value || null, currentUser))}
+                              style={{ ...chico, width: 128, padding: "2px 6px", fontSize: 11.5 }} />
+                            {plazo && <button className="quitar-plazo" disabled={ocupado} onClick={() => hacer(() => ponerPlazoDeAprobacion(item, null, currentUser))} style={mini(false)}>Sin fecha límite</button>}
+                          </>
+                        )}
+                      </div>
+                      {plazo?.vencida && (
+                        <div style={{ ...ayudita, color: colors.danger }}>
+                          Se le pasó el plazo sin contestar. Todavía puede aprobar desde su enlace: avisale de nuevo, o dale otra fecha.
+                        </div>
+                      )}
                       <div style={ayudita}>
                         En su enlace tiene «Lo apruebo» y «Tengo una observación» en este punto, y aparece en su solapa «Para aprobar».
                         Si no contesta, se le avisa de nuevo: por correo, o con el WhatsApp ya escrito.

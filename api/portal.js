@@ -1239,7 +1239,10 @@ async function armarInforme(lead) {
   // columnas todavía no están, sale sin ellas: primero sin la aprobación,
   // después solo el título y el estado.
   const paraEl178 = `${deLaLista},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`;
-  let marcadas = await json(await rest(`${paraEl178},cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota`));
+  const conAprobacion = `${paraEl178},cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota`;
+  // Y con la fecha límite de la aprobación (migración 188); sin ella, sin plazo.
+  let marcadas = await json(await rest(`${conAprobacion},cliente_aprueba_hasta`));
+  if (!Array.isArray(marcadas)) marcadas = await json(await rest(conAprobacion));
   if (!Array.isArray(marcadas)) marcadas = await json(await rest(paraEl178));
   if (!Array.isArray(marcadas)) marcadas = await json(await rest(deLaLista));
   if (!Array.isArray(marcadas)) marcadas = [];

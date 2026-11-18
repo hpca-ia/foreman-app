@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { FileDown, FileText, ThumbsUp, Mail, Send } from "lucide-react";
+import { FileDown, FileText, ThumbsUp, Mail, Send, CalendarClock } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { abrirArchivo } from "../../lib/archivos";
 import { cargarAprobaciones } from "./proyecto";
-import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, registroParaPdf } from "./aprobaciones.js";
+import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, registroParaPdf, plazoDe } from "./aprobaciones.js";
 import { etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
 import PedirAprobacion from "./PedirAprobacion";
 
@@ -97,7 +97,8 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
       {registro.length > 0 && (
         <div className="resumen-del-registro" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
           {[[r.total, r.total === 1 ? "pedida" : "pedidas", colors.ink], [r.aprobadas, r.aprobadas === 1 ? "aprobada" : "aprobadas", colors.success],
-            [r.observadas, "con observaciones", colors.danger], [r.pendientes, "esperando respuesta", colors.warning]]
+            [r.observadas, "con observaciones", colors.danger], [r.pendientes, "esperando respuesta", colors.warning],
+            [r.vencidas, "con el plazo vencido", colors.danger]]
             .filter(([n], i) => i === 0 || n > 0)
             .map(([n, dice, tono]) => (
               <span key={dice} style={{ fontSize: 11.5, color: colors.inkSoft, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "3px 10px", background: "#fff" }}>
@@ -119,10 +120,11 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
       )}
 
       {registro.map(p => {
-        const e = estadoDelPedido(p.estado);
+        const e = estadoDelPedido(p.estado, p.vencida);
         const tono = TONOS[e.tono];
+        const plazo = p.estado === "pendiente" ? plazoDe(p.vence_el) : null;
         return (
-          <div key={p.id} className="pedido-del-registro" data-estado={p.estado}
+          <div key={p.id} className="pedido-del-registro" data-estado={p.estado} data-vencida={p.vencida ? "si" : "no"}
             style={{ background: "#fff", border: `1px solid ${colors.border}`, borderLeft: `3px solid ${tono}`, borderRadius: colors.radiusMd, padding: "9px 12px", marginBottom: 7,
               opacity: p.vigente ? 1 : 0.75 }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -140,6 +142,13 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
                 <ThumbsUp size={11} color={colors.muted} style={{ verticalAlign: "-1px", marginRight: 4 }} />
                 Se le pidió{p.pedida_at ? ` el ${momento(p.pedida_at)}` : ""}{p.pedida_nombre ? ` · ${p.pedida_nombre}` : ""}
               </div>
+              {/* El plazo que se le dio en ESTE pedido. */}
+              {p.vence_el && (
+                <div className="plazo-del-pedido" style={{ color: p.vencida ? colors.danger : colors.inkSoft, fontWeight: p.vencida ? 600 : 400 }}>
+                  <CalendarClock size={11} color={p.vencida ? colors.danger : colors.muted} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                  {plazo ? plazo.frase : `Tenía plazo hasta el ${momento(`${p.vence_el}T12:00:00`).split(",")[0]}`}
+                </div>
+              )}
               {p.avisos.map((a, i) => (
                 <div key={i} className="aviso-del-pedido" style={{ overflowWrap: "anywhere" }}>
                   <Mail size={11} color={colors.muted} style={{ verticalAlign: "-1px", marginRight: 4 }} />
@@ -151,7 +160,7 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
               )}
               {/* Sigue esperando: se le avisa de nuevo desde acá. */}
               {editable && p.estado === "pendiente" && p.task_id != null && (
-                <button className="avisar-de-nuevo" onClick={() => setVentana({ modo: "avisar", item: { id: p.task_id, tarea_id: p.task_id, lead_id: lead.id, texto: p.titulo }, archivos: p.archivos })}
+                <button className="avisar-de-nuevo" onClick={() => setVentana({ modo: "avisar", item: { id: p.task_id, tarea_id: p.task_id, lead_id: lead.id, texto: p.titulo }, archivos: p.archivos, plazo: p.vence_el })}
                   style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, cursor: "pointer", fontFamily: colors.font, fontSize: 11, fontWeight: 600,
                     border: `1px solid ${colors.brand}`, background: "#fff", color: colors.brand, borderRadius: 14, padding: "3px 10px" }}>
                   <Mail size={11} /> {p.avisos.length ? "Avisarle de nuevo" : "Avisarle"}
@@ -201,7 +210,7 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
       })}
 
       {ventana && (
-        <PedirAprobacion lead={lead} modo={ventana.modo} item={ventana.item || null} archivos={ventana.archivos || []}
+        <PedirAprobacion lead={lead} modo={ventana.modo} item={ventana.item || null} archivos={ventana.archivos || []} plazo={ventana.plazo || null}
           etapas={etapas} etapaId={sePersigue(lead) ? lead.etapa : null} users={users} currentUser={currentUser}
           onCambio={cargar} onCerrar={() => setVentana(null)} />
       )}

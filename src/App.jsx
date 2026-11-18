@@ -22,6 +22,7 @@ import { bandeja, sinCompras, alReprogramar, alDelegar, alDescartar, alReabrir, 
 import { avisosDelTablero } from "./lib/avisos";
 import CargadorDeAvisos from "./components/CargadorDeAvisos";
 import { avisosDelPipeline, esMiAviso, diaCorto, etapaAlCrear } from "./modules/leads/pipeline";
+import { aprobacionesVencidas, esMiAprobacion } from "./modules/leads/aprobaciones.js";
 import { anotar as anotarEnProyecto, anotarEnLaTarea } from "./modules/leads/proyecto";
 import TareasCalendario from "./components/TareasCalendario";
 import TareasDeLosDemas from "./components/TareasDeLosDemas";
@@ -575,6 +576,11 @@ export default function App() {
     devueltas: puede("compras.ver") ? comprasQueMeTocan.filter(volvioAlVisto).length : 0,
     observaciones: puede("observaciones.ver") ? misObs : [],
     modulos: avisosDeModulos,
+    // Lo que el cliente no aprobó a tiempo, de los proyectos a los que llega.
+    aprobaciones: verPipeline
+      ? aprobacionesVencidas({ leads: proyectosPipeline.filter(l => nivelProyecto(l.id)), tareas })
+          .filter(a => esMiAprobacion(a, usuario.id, entraATodo))
+      : [],
   });
   // El nivel de esta persona en el proyecto de una tarea. Una tarea sin
   // proyecto no es de ninguno: la ve quien la tiene o quien la escribió.

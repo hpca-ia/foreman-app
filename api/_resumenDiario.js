@@ -5,7 +5,7 @@ import { rest } from "./_supabase.js";
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
 import { json, traer } from "./_pipeline.js";
 import { armarResumen, hoyISO } from "./_resumen.js";
-import { avisosDelPipeline } from "./_avisosDelPipeline.js";
+import { avisosDelPipeline, aprobacionesVencidas } from "./_avisosDelPipeline.js";
 import { vencidos as compromisosVencidos } from "./_compromisos.js";
 
 const COLOR = { gestion: "#B45309", tarea: "#0F3D3E", reunion: "#6D28D9" };
@@ -92,6 +92,27 @@ const bloqueDelPipeline = lista => (lista.length ? `
   ${lista.length > 10 ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${lista.length - 10} más.</div>` : ""}
   <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
     En el Pipeline, cada lead tiene sus tres salidas de un toque: ya respondió, insistí hoy, o recordarme otro día.
+  </div>` : "");
+
+/**
+ * LO QUE EL CLIENTE NO APROBÓ A TIEMPO.
+ *
+ * Hernán, 18/11/2026, al pedir la fecha límite de una aprobación: cuando llega
+ * y el cliente no contestó, «marcar vencida y avisarme». Es la misma lista del
+ * panel de Avisos del tablero. No se le escribe al cliente desde acá: eso lo
+ * decide quien lleva el proyecto, con «Avisarle de nuevo».
+ */
+const bloqueDeAprobaciones = lista => (lista.length ? `
+  <div style="font-size:11px;font-weight:700;color:#B91C1C;letter-spacing:.4px;margin:20px 0 6px">
+    APROBACIONES DEL CLIENTE CON EL PLAZO VENCIDO · ${lista.length}
+  </div>
+  ${lista.slice(0, 10).map(a => `<div style="font-size:13px;color:#374151;padding:3px 0">
+    <strong>${esc(a.nombre)}</strong>
+    <span style="color:#B91C1C">· ${esc(a.texto)}</span>
+  </div>`).join("")}
+  ${lista.length > 10 ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${lista.length - 10} más.</div>` : ""}
+  <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
+    El cliente no contestó. En el proyecto, pestaña «Aprobaciones»: «Avisarle de nuevo», o abrí el punto para darle otra fecha. Todavía puede aprobar desde su enlace.
   </div>` : "");
 
 /**
@@ -249,6 +270,8 @@ function cuerpoDelCorreo(s) {
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
     // Los leads que hoy piden algo: insistirle al cliente, o ponerles próximo paso.
     bloqueDelPipeline(s.pipeline || []),
+    // Lo que el cliente no aprobó a tiempo, a quien lleva el proyecto o tiene el punto.
+    bloqueDeAprobaciones(s.aprobaciones || []),
     // Las órdenes que el cliente no firma, a quien puede levantar el teléfono.
     s.esAdmin ? bloqueDeOrdenes(s.ordenes || [], String(s.usuario?.email || "").trim().toLowerCase()) : "",
     // Lo alquilado que se pasa de plazo: cada día es plata que ya salió.
@@ -257,7 +280,7 @@ function cuerpoDelCorreo(s) {
 
     !s.atrasadas.length && !s.hoy.length && !s.manana.length && !s.ayer.length && !s.equipo.length
       && !(s.estaSemana || []).length && !(s.masAdelante || []).length && !(s.sinFecha || []).length && !(s.pipeline || []).length
-      && !s.compras?.total && !(s.espero || []).some(t => t.vencida)
+      && !(s.aprobaciones || []).length && !s.compras?.total && !(s.espero || []).some(t => t.vencida)
       ? `<p style="font-size:13px;color:#4B5563;margin:0">Hoy no tenés nada con fecha. Lo que esté sin fecha te espera en FOREMAN.</p>` : "",
 
     `<div style="margin-top:20px"><a href="${APP}" style="display:inline-block;background:#0F3D3E;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Abrir FOREMAN →</a></div>`,
@@ -304,7 +327,17 @@ export async function mandarResumen(soloPara = null) {
   if (!columnas) return { ok: false, error: "No se pudieron leer las tareas: revisá las columnas de la tabla tasks" };
 
   const pipeline = avisosDelPipeline({ leads, tareas, hoy: hoyISO() });
-  let sobres = armarResumen({ tareas, usuarios, leads, accesos, hoy: hoyISO(), pipeline });
+  // Lo que el cliente no aprobó a tiempo (migración 188). Se pide aparte, y
+  // solo lo que tiene plazo y sigue sin respuesta: si esas columnas todavía no
+  // están, no hay ninguna y el resumen sale igual.
+  let aprobaciones = [];
+  try {
+    const conPlazo = await json(await rest(
+      "tasks?cliente_aprueba=eq.true&cliente_respuesta=is.null&cliente_aprueba_hasta=not.is.null"
+      + "&select=id,title,lead_id,assignee_id,status,descartada,visible_cliente,cliente_aprueba,cliente_respuesta,cliente_aprueba_hasta"));
+    aprobaciones = aprobacionesVencidas({ leads, tareas: conPlazo, hoy: hoyISO() });
+  } catch { /* el resumen sale igual */ }
+  let sobres = armarResumen({ tareas, usuarios, leads, accesos, hoy: hoyISO(), pipeline, aprobaciones });
   if (soloPara) {
     sobres = sobres.filter(s => s.usuario.id === Number(soloPara));
     // Probando, un sobre vacío también sirve: dice que el correo llega.
@@ -314,7 +347,7 @@ export async function mandarResumen(soloPara = null) {
       if (!u.email) return { ok: false, error: `${u.nombre} no tiene correo cargado: ponéselo en Ajustes → Usuarios` };
       sobres = [{ usuario: u, esAdmin: u.rol === "owner" || u.rol === "assistant",
         atrasadas: [], hoy: [], manana: [], estaSemana: [], masAdelante: [], sinFecha: [], ayer: [], deSusProyectos: [], equipo: [], sinDueno: [], pipeline: [],
-        espero: [], compras: { total: 0 } }];
+        aprobaciones: [], espero: [], compras: { total: 0 } }];
     }
   }
 

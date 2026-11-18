@@ -392,7 +392,15 @@ function Aprobacion({ punto, onContestar, enviando }) {
   return (
     <div className="aprobacion-del-punto" data-estado="pendiente"
       style={{ marginTop: 8, padding: "9px 10px", borderRadius: 8, background: colors.warningSoft, border: `1px solid ${colors.warning}` }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.warning }}>Necesitamos tu aprobación</div>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.warning }}>
+        Necesitamos tu aprobación{a.hasta && !a.vencida ? ` hasta el ${dia(a.hasta)}` : ""}
+      </div>
+      {/* El plazo ya pasó: se dice, y todavía puede contestar. */}
+      {a.vencida && (
+        <div className="plazo-vencido" style={{ fontSize: 12, color: colors.danger, fontWeight: 600, lineHeight: 1.45 }}>
+          El plazo era el {dia(a.hasta)}. Todavía podés contestar.
+        </div>
+      )}
       <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.45, margin: "2px 0 8px" }}>
         {hayArchivos ? "Revisá los archivos de arriba y decinos si está bien así." : "Decinos si está bien así."}
         {" "}Si hay algo que cambiar, tocá «Tengo una observación» y contanos qué.
@@ -418,7 +426,7 @@ function Punto({ t, conLinea = false, onFoto, onContestar, enviando = false }) {
   const listo = t.estado === "listo";
   // Mientras espera su respuesta, eso es lo que dice el punto.
   const e = !listo && t.aprobar?.estado === "pendiente"
-    ? { dice: "Esperando tu aprobación", color: colors.warning }
+    ? { dice: `Esperando tu aprobación${t.aprobar.hasta ? ` · hasta el ${dia(t.aprobar.hasta)}` : ""}`, color: t.aprobar.vencida ? colors.danger : colors.warning }
     : ESTADO_DE_LISTA[t.estado] || ESTADO_DE_LISTA.pendiente;
   return (
     <div className="punto-de-lista" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0",

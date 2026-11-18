@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { ThumbsUp, Mail, MessageCircle, Check, AlertTriangle, Paperclip, X, Send, FileText } from "lucide-react";
+import { ThumbsUp, Mail, MessageCircle, Check, AlertTriangle, Paperclip, X, Send, FileText, CalendarClock } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { pedirAprobacion, avisarDelPedido, enlaceDelClienteDe, enviarParaAprobar } from "./proyecto";
 import { involucradosDe, agregarALaFicha } from "./involucrados";
 import { personaDeLaFicha } from "../controlObra/directorioDelProyecto.js";
-import { aQuienAvisar, mensajeDelPedido, enlaceDeWhatsApp, paraWhatsApp } from "./aprobaciones.js";
+import { aQuienAvisar, mensajeDelPedido, enlaceDeWhatsApp, paraWhatsApp, PLAZOS, plazoDe } from "./aprobaciones.js";
+import { hoyISO, sumarDias } from "./pipeline";
 import { cuantosDice, porQueNoEntra, pesoLegible } from "./archivosDelCliente.js";
 
 // PEDIRLE AL CLIENTE QUE APRUEBE UN PUNTO, Y AVISARLE.
@@ -32,6 +33,12 @@ import { cuantosDice, porQueNoEntra, pesoLegible } from "./archivosDelCliente.js
 // y pedirle la aprobación, en dos lugares. Desde la pestaña «Aprobaciones» la
 // misma ventana pregunta qué tiene que aprobar y qué archivos lleva, y hace
 // los cuatro pasos seguidos; el punto queda en el checklist.
+//
+// Y LA FECHA LÍMITE. El mismo día: «¿hay cómo poner una fecha límite en que el
+// cliente debe aprobar?». Se elige acá, de un toque —tres días, una semana,
+// dos— o el día que sea; va en el correo, en el WhatsApp y en su enlace. Si no
+// se elige, no tiene plazo. Cuando se pasa y no contestó, queda marcada como
+// vencida y se avisa en el tablero y en el correo de la mañana.
 
 const chico = { ...inputStyle, padding: "5px 8px", fontSize: 12 };
 const linea = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.ink, cursor: "pointer" };
@@ -53,9 +60,14 @@ const VACIA = { nombre: "", email: "", telefono: "" };
  * @param descripcion  lo escrito para él sobre el punto: queda en el pedido
  * @param etapas       las etapas del tipo del proyecto, para elegir en cuál
  *                     queda lo que se envía; `etapaId` es la del proyecto
+ * @param plazo        en modo «avisar», la fecha límite que ya tiene el
+ *                     pedido: va en el mensaje. En los otros se elige acá
  * @param onCambio     se llama cuando algo cambió, para volver a leer
  */
-export default function PedirAprobacion({ lead, item = null, modo = "pedir", archivos = [], descripcion = "", etapas = [], etapaId = null, users = [], currentUser, onCambio, onCerrar }) {
+export default function PedirAprobacion({ lead, item = null, modo = "pedir", archivos = [], descripcion = "", etapas = [], etapaId = null, plazo = null, users = [], currentUser, onCambio, onCerrar }) {
+  // HASTA CUÁNDO TIENE PARA APROBAR. Vacío es sin fecha límite.
+  const [hasta, setHasta] = useState(modo === "avisar" ? String(plazo || "").slice(0, 10) : "");
+  const hoy = hoyISO();
   // LO QUE SE ENVÍA, en modo «enviar»: qué es, unas palabras, sus archivos y
   // en qué etapa del checklist queda. `creado` es el punto, una vez que nació.
   const [que, setQue] = useState("");
@@ -137,15 +149,17 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
       const correos = [...new Set([...todos.filter(p => claves.has(p.clave) && p.email).map(p => p.email), ...otros])];
       if (conAviso && !correos.length) { setDijo(`Elegí a quién avisarle por correo, o escribí su correo. Si no tenés su correo, tocá «${modo === "enviar" ? "Enviar" : "Pedir"} sin avisar» y escribile por WhatsApp.`); return; }
 
-      let pedido = false, el = punto, noSubieron = [];
+      let pedido = false, el = punto, noSubieron = [], aviso = "";
       if (modo === "pedir" && !hecho) {
-        const e = await pedirAprobacion(item, true, currentUser, { descripcion });
-        if (e) { setDijo(e); return; }
+        const e = await pedirAprobacion(item, true, currentUser, { descripcion, hasta: hasta || null });
+        // «Quedó pedido, pero…» no frena: el pedido está hecho, y se dice.
+        if (e && !/^Quedó pedido/.test(e)) { setDijo(e); return; }
+        if (e) aviso = e;
         pedido = true;
       }
       // Lo nuevo: nace el punto, se le muestra, se le suben los archivos y se le pide.
       if (modo === "enviar" && !hecho) {
-        const r = await enviarParaAprobar({ lead, titulo: que, descripcion: paraEl, etapaId: etapa || null, archivos: adjuntos, quien: currentUser });
+        const r = await enviarParaAprobar({ lead, titulo: que, descripcion: paraEl, etapaId: etapa || null, archivos: adjuntos, quien: currentUser, hasta: hasta || null });
         if (r.error && !r.item) { setDijo(r.error); return; }
         setCreado(r.item);
         // Quedó el punto, pero sin pedirle nada: no subió el archivo, o falló el pedido.
@@ -154,14 +168,14 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
           await onCambio?.();
           return;
         }
-        el = r.item; pedido = true; noSubieron = r.errores || [];
+        el = r.item; pedido = true; noSubieron = r.errores || []; aviso = r.aviso || "";
       }
       let enviadoA = [], noSalio = "";
       if (conAviso) {
         const r = await avisarDelPedido({ item: el, correos, mensaje, quien: currentUser });
         if (r.error) noSalio = r.error; else enviadoA = r.enviadoA;
       }
-      setHecho({ pedido, enviadoA, noSalio, errores: noSubieron });
+      setHecho({ pedido, enviadoA, noSalio, errores: noSubieron, aviso });
       await onCambio?.();
     } finally { setOcupado(false); }
   }
@@ -258,6 +272,34 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
 
         {!cargando && !sinEnlace && !yaEsta && (
           <>
+            {/* HASTA CUÁNDO TIENE. Al avisar de nuevo no se cambia acá: se cambia en el punto. */}
+            {modo !== "avisar" && (
+              <div className="plazo-para-aprobar" style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
+                  <CalendarClock size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />¿HASTA CUÁNDO TIENE PARA APROBAR?
+                </div>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                  {PLAZOS.map(p => {
+                    const f = sumarDias(hoy, p.dias);
+                    const activo = hasta === f;
+                    return (
+                      <button key={p.dias} aria-pressed={activo} onClick={() => setHasta(activo ? "" : f)}
+                        style={{ ...boton(false), padding: "3px 10px", fontSize: 11, borderRadius: 14, borderColor: activo ? colors.brand : colors.border,
+                          background: activo ? colors.brandSoft : "#fff", color: activo ? colors.brand : colors.inkSoft }}>{p.label}</button>
+                    );
+                  })}
+                  <input type="date" value={hasta} min={hoy} aria-label="Hasta qué día tiene para aprobar" onChange={e => setHasta(e.target.value)}
+                    style={{ ...chico, width: 132, padding: "2px 6px", fontSize: 11.5 }} />
+                  {hasta && <button className="sin-plazo" onClick={() => setHasta("")} style={{ ...boton(false), padding: "3px 10px", fontSize: 11, borderRadius: 14 }}>Sin fecha límite</button>}
+                </div>
+                <div className="que-plazo" style={{ fontSize: 10.5, color: hasta ? colors.inkSoft : colors.muted, lineHeight: 1.45, marginTop: 4 }}>
+                  {hasta
+                    ? `${plazoDe(hasta, hoy).frase}. Lo ve en su enlace, en el correo y en el WhatsApp. Si se pasa sin contestar, queda como vencida y te aviso en el tablero y en el correo de la mañana.`
+                    : "Sin fecha límite: queda esperando hasta que conteste. Con una fecha, él la ve, y si se pasa te aviso."}
+                </div>
+              </div>
+            )}
+
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, margin: "12px 0 5px" }}>
               <Mail size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />AVISARLE POR CORREO
             </div>
@@ -330,6 +372,12 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
                 <div style={{ color: colors.inkSoft }}>Abrí ese punto en «El proyecto», subí el archivo y tocá «Pedirle que lo apruebe».</div>
               </div>
             )}
+            {hecho.pedido && hasta && !hecho.aviso && (
+              <div className="plazo-puesto" role="status" style={{ fontSize: 12, color: colors.ink, lineHeight: 1.45 }}>
+                <CalendarClock size={12} color={colors.brand} style={{ verticalAlign: "-2px", marginRight: 4 }} />{plazoDe(hasta, hoy).frase}.
+              </div>
+            )}
+            {hecho.aviso && <div className="aviso-del-pedido" role="alert" style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.45 }}>{hecho.aviso}</div>}
             {hecho.pedido && (hecho.errores || []).length > 0 && (
               <div className="no-subieron" role="alert" style={{ fontSize: 11.5, color: colors.danger, lineHeight: 1.45, overflowWrap: "anywhere" }}>
                 {hecho.errores.map((e, i) => <div key={i}>{e}</div>)}
@@ -355,7 +403,7 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {conWhatsApp.map(p => (
                     <a key={p.clave} className="por-whatsapp" target="_blank" rel="noreferrer"
-                      href={enlaceDeWhatsApp(p.whatsapp, mensajeDelPedido({ nombre: p.nombre, proyecto: lead.nombre, punto: punto.texto, enlace }))}
+                      href={enlaceDeWhatsApp(p.whatsapp, mensajeDelPedido({ nombre: p.nombre, proyecto: lead.nombre, punto: punto.texto, enlace, hasta: hecho.aviso ? null : hasta }))}
                       style={{ ...boton(false), textDecoration: "none", borderColor: colors.success, color: colors.success }}>
                       <MessageCircle size={12} /> WhatsApp a {p.nombre}
                     </a>

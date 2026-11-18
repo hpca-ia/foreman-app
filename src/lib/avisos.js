@@ -31,10 +31,12 @@ const DEL_PIPELINE = {
  * @param observaciones  las observaciones de obra que tiene encima
  * @param modulos        lo que trae cargarAvisosDeModulos: órdenes de cambio,
  *                       las revisiones de Control, alquileres y actas
+ * @param aprobaciones   lo que devuelve aprobacionesVencidas, ya filtrado a lo
+ *                       que ve esta persona: lo que el cliente no aprobó a tiempo
  * @returns [{ clave, modulo, vista, tono, cuenta, texto, detalle }]
  *   `vista` es a dónde lleva tocarlo; `tono`, qué tan fuerte se pinta.
  */
-export function avisosDelTablero({ pipeline = [], compras = [], devueltas = 0, observaciones = [], modulos = null }) {
+export function avisosDelTablero({ pipeline = [], compras = [], devueltas = 0, observaciones = [], modulos = null, aprobaciones = [] }) {
   const lista = [];
 
   // PRIMERO LA PLATA QUE NO CUADRA. Si el control dejó de decir lo mismo que
@@ -64,6 +66,18 @@ export function avisosDelTablero({ pipeline = [], compras = [], devueltas = 0, o
       detalle: suyos.length === 1 ? `${suyos[0].nombre}: ${suyos[0].texto}` : nombres(suyos.map(a => a.nombre)),
     });
   });
+
+  // LO QUE EL CLIENTE NO APROBÓ A TIEMPO. Hernán, 18/11/2026, al pedir la
+  // fecha límite de una aprobación: cuando llega y no contestó, «marcar
+  // vencida y avisarme». Va con lo del pipeline: es algo que hay que reclamar.
+  if (aprobaciones.length) {
+    lista.push({
+      clave: "aprobaciones-vencidas", modulo: "Aprobaciones del cliente", vista: "leads", tono: "peligro", cuenta: aprobaciones.length,
+      texto: aprobaciones.length === 1 ? "aprobación del cliente con el plazo vencido" : "aprobaciones del cliente con el plazo vencido",
+      // Con una sola se dice cuál y hace cuánto; con varias, de qué proyectos.
+      detalle: aprobaciones.length === 1 ? `${aprobaciones[0].nombre}: ${aprobaciones[0].texto}` : nombres(aprobaciones.map(a => a.nombre)),
+    });
+  }
 
   if (compras.length) {
     lista.push({

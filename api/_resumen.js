@@ -32,8 +32,10 @@ export const claseDe = t => (t?.type === "Reunión" ? "reunion"
   : "tarea");
 
 /**
- * @param {object} d  { tareas, usuarios, leads, accesos, miembros, hoy, pipeline }
- *                    `pipeline` es lo que arma avisosDelPipeline
+ * @param {object} d  { tareas, usuarios, leads, accesos, miembros, hoy, pipeline, aprobaciones }
+ *                    `pipeline` es lo que arma avisosDelPipeline;
+ *                    `aprobaciones`, lo que arma aprobacionesVencidas: lo que
+ *                    el cliente no aprobó a tiempo
  * @returns {Array} un sobre por persona: { usuario, atrasadas, hoy, manana,
  *                  estaSemana, masAdelante, sinFecha, ayer, deSusProyectos,
  *                  esAdmin, equipo, sinDueno, pipeline, espero, compras }
@@ -112,6 +114,10 @@ export function armarResumen(d) {
         sinDueno: [],
         pipeline: delPipeline.filter(a => esAdmin
           || String(a.responsable_id) === String(u.id) || String(a.created_by) === String(u.id)),
+        // Lo que el cliente no aprobó a tiempo: a quien lleva el proyecto y a
+        // quien tiene el punto. El Director, las de toda la oficina.
+        aprobaciones: (d.aprobaciones || []).filter(a => esAdmin
+          || [a.responsable_id, a.created_by, a.assignee_id].some(id => id != null && String(id) === String(u.id))),
         // Lo que encargó: lo escribió él y lo tiene otro, del equipo o de afuera.
         espero: abiertas
           .filter(t => t.created_by === u.id && t.assignee_id !== u.id && (t.assignee_id || t.responsable_externo))
@@ -144,6 +150,6 @@ export function armarResumen(d) {
     })
     .filter(s => s.atrasadas.length || s.hoy.length || s.manana.length || s.ayer.length
       || s.estaSemana.length || s.masAdelante.length || s.sinFecha.length
-      || s.deSusProyectos.length || s.pipeline.length || s.compras.total || s.espero.some(t => t.vencida)
+      || s.deSusProyectos.length || s.pipeline.length || s.aprobaciones.length || s.compras.total || s.espero.some(t => t.vencida)
       || (s.esAdmin && (s.equipo.length || s.sinDueno.length)));
 }

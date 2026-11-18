@@ -18,9 +18,45 @@
 // que se arma el mensaje con su enlace y se abre el WhatsApp de quien lo pide,
 // para que toque enviar. Eligió eso por ahora, y automático después.
 //
+// LA FECHA LÍMITE. Hernán, 18/11/2026: «¿hay cómo poner una fecha límite en
+// que el cliente debe aprobar?». Se elige al pedir o al enviar; el cliente la
+// ve en su enlace, en el correo y en el WhatsApp. Lo que definió para cuando
+// llega y no contestó: «marcar vencida y avisarme» —en el punto, en el
+// registro, en el panel de avisos y en el correo de la mañana—. No se da por
+// aprobado solo, y el cliente puede seguir contestando (migración 188).
+//
 // Acá están las reglas, sin base de datos, para poder probarlas.
 
+import { hoyISO, diasEntre, diaCorto } from "./pipeline.js";
+
 const texto = v => String(v ?? "").trim();
+const soloDia = f => String(f || "").slice(0, 10);
+const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+/** «21 de noviembre», para decírselo al cliente. */
+const diaLargo = f => (soloDia(f) ? `${Number(soloDia(f).slice(8, 10))} de ${MESES_LARGOS[Number(soloDia(f).slice(5, 7)) - 1]}` : "");
+
+/** Los plazos de un toque. El cuarto es elegir el día. */
+export const PLAZOS = [{ dias: 3, label: "3 días" }, { dias: 7, label: "Una semana" }, { dias: 14, label: "Dos semanas" }];
+
+/**
+ * En qué está el plazo de un pedido que espera respuesta.
+ * @returns null si no tiene plazo, o { hasta, faltan, vencida, dice, frase }:
+ *          `dice` es corto, para la fila —«vence mañana»—; `frase` es la
+ *          oración entera —«El plazo vence mañana»—
+ */
+export function plazoDe(hasta, hoy = hoyISO()) {
+  const d = soloDia(hasta);
+  if (!d) return null;
+  const faltan = diasEntre(hoy, d);
+  const n = Math.abs(faltan);
+  return {
+    hasta: d, faltan, vencida: faltan < 0,
+    dice: faltan < 0 ? `venció el ${diaCorto(d)}, hace ${n} ${n === 1 ? "día" : "días"}`
+      : faltan === 0 ? "vence hoy" : faltan === 1 ? "vence mañana" : `hasta el ${diaCorto(d)}, faltan ${n} días`,
+    frase: faltan < 0 ? `El plazo venció el ${diaCorto(d)}, hace ${n} ${n === 1 ? "día" : "días"}`
+      : faltan === 0 ? "El plazo vence hoy" : faltan === 1 ? "El plazo vence mañana" : `Tiene hasta el ${diaCorto(d)}, faltan ${n} días`,
+  };
+}
 const ES_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const correoLimpio = c => texto(c).toLowerCase();
 
@@ -39,11 +75,11 @@ export function paraWhatsApp(telefono) {
   return d.length >= 10 ? d : "";
 }
 
-/** Lo que se le escribe al cliente para que entre a aprobar. */
-export function mensajeDelPedido({ nombre = "", proyecto = "", punto = "", enlace = "" } = {}) {
+/** Lo que se le escribe al cliente para que entre a aprobar. Con el plazo, si lo tiene. */
+export function mensajeDelPedido({ nombre = "", proyecto = "", punto = "", enlace = "", hasta = null } = {}) {
   const primero = texto(nombre).split(/\s+/)[0];
   const saludo = primero ? `Hola ${primero.charAt(0).toUpperCase()}${primero.slice(1).toLowerCase()}` : "Hola";
-  return `${saludo}, en ${texto(proyecto) || "tu proyecto"} necesitamos tu aprobación de «${texto(punto)}». `
+  return `${saludo}, en ${texto(proyecto) || "tu proyecto"} necesitamos tu aprobación de «${texto(punto)}»${soloDia(hasta) ? `, hasta el ${diaLargo(hasta)}` : ""}. `
     + `Lo revisás y lo aprobás acá, sin usuario ni contraseña:\n${texto(enlace)}`;
 }
 
@@ -73,13 +109,50 @@ export function aQuienAvisar(personas = [], usuarios = []) {
     .sort((a, b) => Number(b.esCliente) - Number(a.esCliente) || a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
 }
 
-/** La fila con que un pedido entra al registro. */
-export function filaDelPedido({ item, descripcion = "", quien = null } = {}) {
+/** La fila con que un pedido entra al registro. Con su fecha límite, si se le puso. */
+export function filaDelPedido({ item, descripcion = "", quien = null, hasta = null } = {}) {
   return {
     lead_id: item.lead_id, task_id: item.id, titulo: texto(item.texto), descripcion: texto(descripcion) || null,
     pedida_por: quien?.id ?? null, pedida_nombre: quien?.name || null,
+    ...(soloDia(hasta) ? { vence_el: soloDia(hasta) } : {}),
   };
 }
+
+/**
+ * LAS APROBACIONES QUE EL CLIENTE DEJÓ PASAR: se le pidió, tenía fecha límite,
+ * el día ya pasó y no contestó. Es lo que avisa el panel del tablero y el
+ * correo de la mañana; la misma regla está copiada en api/_avisosDelPipeline.js
+ * y pruebas/fechaLimiteDeAprobacion.test.mjs exige que digan lo mismo.
+ *
+ * No cuenta lo que el cliente ya no ve, lo que se cerró, ni lo de un proyecto
+ * perdido: ahí no hay nada que reclamarle.
+ *
+ * @param tareas  las tareas, con su `lead_id`
+ * @returns [{ lead_id, nombre, task_id, titulo, hasta, dias, texto, responsable_id, created_by, assignee_id }]
+ *          primero la que lleva más días vencida
+ */
+export function aprobacionesVencidas({ leads = [], tareas = [], hoy = hoyISO() } = {}) {
+  const porId = new Map((leads || []).map(l => [String(l.id), l]));
+  return (tareas || [])
+    .filter(t => t && t.cliente_aprueba === true && !t.cliente_respuesta && soloDia(t.cliente_aprueba_hasta) && soloDia(t.cliente_aprueba_hasta) < hoy
+      && t.visible_cliente !== false && t.status !== "listo" && !t.descartada && t.lead_id != null)
+    .map(t => {
+      const l = porId.get(String(t.lead_id));
+      if (!l || l.resultado === "perdido") return null;
+      const hasta = soloDia(t.cliente_aprueba_hasta), dias = diasEntre(hasta, hoy);
+      return {
+        lead_id: l.id, nombre: l.nombre, task_id: t.id, titulo: texto(t.title), hasta, dias,
+        texto: `«${texto(t.title)}» venció el ${diaCorto(hasta)}, hace ${dias} ${dias === 1 ? "día" : "días"}`,
+        responsable_id: l.responsable_id ?? null, created_by: l.created_by ?? null, assignee_id: t.assignee_id ?? null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.dias - a.dias || String(a.nombre).localeCompare(String(b.nombre)) || Number(a.task_id) - Number(b.task_id));
+}
+
+/** ¿Esta aprobación vencida es de esta persona? El Director ve las de toda la oficina. */
+export const esMiAprobacion = (a, usuarioId, veTodo = false) =>
+  veTodo || [a.responsable_id, a.created_by, a.assignee_id].some(id => id != null && String(id) === String(usuarioId));
 
 // ── EL REGISTRO ────────────────────────────────────────────────────────────
 
@@ -87,9 +160,11 @@ const ESTADOS = {
   aprobado: { dice: "Aprobado", tono: "success" },
   observado: { dice: "Con observaciones", tono: "danger" },
   pendiente: { dice: "Esperando respuesta", tono: "warning" },
+  vencido: { dice: "Vencida · sin respuesta", tono: "danger" },
   retirado: { dice: "Pedido retirado", tono: "muted" },
 };
-export const estadoDelPedido = estado => ESTADOS[estado] || ESTADOS.pendiente;
+/** Cómo se dice el estado de un pedido. El que espera con el plazo pasado, vencido. */
+export const estadoDelPedido = (estado, vencida = false) => (estado === "pendiente" && vencida ? ESTADOS.vencido : ESTADOS[estado] || ESTADOS.pendiente);
 
 /**
  * La colección de aprobaciones de un proyecto, lista para leer.
@@ -102,10 +177,12 @@ export const estadoDelPedido = estado => ESTADOS[estado] || ESTADOS.pendiente;
  * @param filas    las de `aprobaciones_cliente` del proyecto
  * @param archivosDeAhora  { [task_id]: [filas de proyecto_archivos] } lo que
  *                 hoy tiene para mirar un pedido que todavía no contestó
+ * @param hoy      contra qué día se mira si un plazo ya venció
  * @returns [{ id, numero, task_id, titulo, descripcion, estado, pedida_at,
- *            pedida_nombre, avisos, respuesta_at, nota, archivos, vigente }]
+ *            pedida_nombre, avisos, respuesta_at, nota, archivos, vigente,
+ *            vence_el, vencida }]
  */
-export function registroDeAprobaciones(filas = [], archivosDeAhora = {}) {
+export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = hoyISO()) {
   const enOrden = (Array.isArray(filas) ? filas : []).filter(f => f && f.id != null)
     .sort((a, b) => String(a.pedida_at || "").localeCompare(String(b.pedida_at || "")) || Number(a.id) - Number(b.id));
   const ultimoDe = new Map();
@@ -124,6 +201,9 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}) {
       respuesta_at: estado === "retirado" ? f.retirada_at : f.respuesta_at || null,
       nota: texto(f.respuesta_nota), archivos,
       vigente: f.task_id == null || ultimoDe.get(f.task_id) === f.id,
+      // El plazo que se le dio en ESE pedido, y si se le pasó sin contestar.
+      vence_el: soloDia(f.vence_el) || null,
+      vencida: estado === "pendiente" && !!soloDia(f.vence_el) && soloDia(f.vence_el) < hoy,
     };
   }).reverse();
 }
@@ -131,7 +211,10 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}) {
 /** Cuántas hay de cada una: es lo primero que se pregunta de una colección. */
 export function resumenDelRegistro(registro = []) {
   const cuenta = e => registro.filter(r => r.estado === e).length;
-  return { total: registro.length, aprobadas: cuenta("aprobado"), observadas: cuenta("observado"), pendientes: cuenta("pendiente"), retiradas: cuenta("retirado") };
+  return {
+    total: registro.length, aprobadas: cuenta("aprobado"), observadas: cuenta("observado"), pendientes: cuenta("pendiente"), retiradas: cuenta("retirado"),
+    vencidas: registro.filter(r => r.vencida).length,
+  };
 }
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -169,8 +252,9 @@ export function registroParaPdf(registro = [], { proyecto = "" } = {}) {
         p.titulo + (p.descripcion ? `\n${p.descripcion}` : ""),
         p.archivos.length ? p.archivos.map(a => a.nombre).join("\n") : "Sin archivos",
         [momento(p.pedida_at), p.pedida_nombre ? `por ${p.pedida_nombre}` : "",
+          p.vence_el ? `Plazo: hasta el ${diaCorto(p.vence_el)} ${p.vence_el.slice(0, 4)}` : "",
           ...p.avisos.map(a => `Avisado a ${a.correos.join(", ")} · ${momento(a.cuando)}`)].filter(Boolean).join("\n"),
-        estadoDelPedido(p.estado).dice + (p.respuesta_at ? `\n${momento(p.respuesta_at)}` : ""),
+        estadoDelPedido(p.estado, p.vencida).dice + (p.respuesta_at ? `\n${momento(p.respuesta_at)}` : ""),
         p.nota,
       ]),
       anchos: { 0: { cellWidth: 26 }, 1: { cellWidth: 190 }, 2: { cellWidth: 150 }, 3: { cellWidth: 130 }, 4: { cellWidth: 100 } },

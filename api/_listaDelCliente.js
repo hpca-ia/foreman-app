@@ -59,15 +59,29 @@ const sinHora = ({ cuando, ...n }) => n;
 
 const RESPUESTAS = ["aprobado", "observado"];
 
+/** Hoy, en Ecuador: contra ese día se mira si un plazo ya pasó. */
+export const hoyDeAca = (ahora = new Date()) => diaDeAca(ahora.toISOString());
+
 /**
  * Qué se le pidió aprobar de un punto y qué contestó.
- * @returns null si no se le pidió, o { estado, respondido_el, nota } con
- *          `estado` "pendiente" | "aprobado" | "observado"
+ *
+ * LA FECHA LÍMITE (migración 188). Hernán, 18/11/2026: «¿hay cómo poner una
+ * fecha límite en que el cliente debe aprobar?». Va en `hasta`, y `vencida`
+ * dice si ese día ya pasó sin que contestara. Vencida no es cerrada: puede
+ * seguir aprobando, y al equipo se le avisa.
+ *
+ * @param hoy  el día de hoy en Ecuador (AAAA-MM-DD)
+ * @returns null si no se le pidió, o { estado, respondido_el, nota, hasta, vencida }
+ *          con `estado` "pendiente" | "aprobado" | "observado"
  */
-export function aprobacionDe(t) {
+export function aprobacionDe(t, hoy = hoyDeAca()) {
   if (!t || t.cliente_aprueba !== true) return null;
   const r = RESPUESTAS.includes(t.cliente_respuesta) ? t.cliente_respuesta : null;
-  return { estado: r || "pendiente", respondido_el: r ? diaDeAca(t.cliente_respuesta_at) : null, nota: r ? limpio(t.cliente_respuesta_nota) : "" };
+  const hasta = dia(t.cliente_aprueba_hasta);
+  return {
+    estado: r || "pendiente", respondido_el: r ? diaDeAca(t.cliente_respuesta_at) : null, nota: r ? limpio(t.cliente_respuesta_nota) : "",
+    hasta, vencida: !r && !!hasta && hasta < hoy,
+  };
 }
 
 /**
@@ -166,24 +180,27 @@ export function decisionesDelCliente(filas = [], enlaces = {}) {
  * @param enlace    su enlace: sin él no hay dónde aprobar, y no se manda
  * @returns { asunto, cuerpo }  el cuerpo es HTML, con todo lo escrito escapado
  */
-export function correoDelPedido({ proyecto = "", punto = "", descripcion = "", archivos = [], mensaje = "", enlace = "" } = {}) {
+export function correoDelPedido({ proyecto = "", punto = "", descripcion = "", archivos = [], mensaje = "", enlace = "", hasta = null } = {}) {
   const nombres = (Array.isArray(archivos) ? archivos : []).map(limpio).filter(Boolean);
+  const plazo = dia(hasta);
   const cuerpo = `
     ${limpio(mensaje) ? `<p style="font-size:14px;color:#374151;margin:0 0 14px;white-space:pre-line">${esc(limpio(mensaje))}</p>` : ""}
-    <p style="font-size:14px;color:#B45309;font-weight:700;margin:0 0 6px">Necesitamos tu aprobación</p>
+    <p style="font-size:14px;color:#B45309;font-weight:700;margin:0 0 6px">Necesitamos tu aprobación${plazo ? ` hasta el ${esc(enCriollo(plazo))}` : ""}</p>
     <p style="font-size:16px;color:#111827;margin:0 0 4px"><strong>${esc(punto)}</strong></p>
     ${limpio(descripcion) ? `<p style="font-size:13.5px;color:#4B5563;line-height:1.5;margin:0 0 8px">${esc(limpio(descripcion))}</p>` : ""}
     ${nombres.length ? `<p style="font-size:13px;color:#374151;margin:10px 0 4px">Para revisar:</p>
     <ul style="margin:0 0 4px;padding-left:18px;font-size:13.5px;color:#111827;line-height:1.6">${nombres.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
     <p style="margin:18px 0 0"><a href="${esc(enlace)}" style="display:inline-block;background:#0F3D3E;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:7px">Ver y aprobar</a></p>
     <p style="font-size:12.5px;color:#6B7280;line-height:1.5;margin:10px 0 0">Se abre tu página del proyecto, sin usuario ni contraseña. Ahí ${nombres.length ? "abrís los archivos y " : ""}tocás «Lo apruebo», o «Tengo una observación» si hay algo que cambiar. Tu respuesta queda registrada con la fecha.</p>`;
-  return { asunto: `${proyecto ? `${proyecto} · ` : ""}necesitamos tu aprobación: ${punto}`, cuerpo };
+  return { asunto: `${proyecto ? `${proyecto} · ` : ""}necesitamos tu aprobación${plazo ? ` hasta el ${enCorto(plazo)}` : ""}: ${punto}`, cuerpo };
 }
 
 /**
  * @param tareas  las filas de `tasks` del proyecto
  * @param notas   las anotaciones de esas tareas (`tarea_comentarios`): solo
  *                cuentan las que tienen `visible_cliente`
+ * @param hoy     el día de hoy en Ecuador: contra él se mira si un plazo de
+ *                aprobación ya venció
  * @returns [{ id, titulo, descripcion, estado, listo_el, actualizacion, actualizado_el, actualizaciones, aprobar }]
  *          `estado` es "listo" | "espera" | "pendiente". En el orden en que se
  *          escribieron, que es el orden de un checklist. `actualizaciones` es
@@ -191,7 +208,7 @@ export function correoDelPedido({ proyecto = "", punto = "", descripcion = "", a
  *          `actualizado_el` son la última, que es la que va en el correo.
  *          `aprobar` es null, o qué se le pidió aprobar y qué contestó.
  */
-export function listaDelCliente(tareas = [], notas = []) {
+export function listaDelCliente(tareas = [], notas = [], hoy = hoyDeAca()) {
   const anotado = Array.isArray(notas) ? notas : [];
   return (Array.isArray(tareas) ? tareas : [])
     // Solo lo marcado. Las compras tienen su circuito y lo que se cerró con
@@ -210,7 +227,7 @@ export function listaDelCliente(tareas = [], notas = []) {
         actualizacion: actualizaciones[0]?.texto || "",
         actualizado_el: actualizaciones[0]?.fecha || null,
         actualizaciones,
-        aprobar: aprobacionDe(t),
+        aprobar: aprobacionDe(t, hoy),
       };
     })
     .filter(t => t.titulo);
@@ -251,7 +268,7 @@ const paraVer = (a, enlaces) => ({
  *               que se le mostró y los puntos que quedaron listos
  *   archivos  · los del proyecto en general, lo más nuevo arriba
  */
-export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {}, notas = [] } = {}) {
+export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {}, notas = [], hoy = hoyDeAca() } = {}) {
   const filas = Array.isArray(tareas) ? tareas : [];
   const anotado = Array.isArray(notas) ? notas : [];
   const filaDe = new Map(filas.map(t => [t?.id, t]));
@@ -260,7 +277,7 @@ export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos
   const nombreDe = id => limpio(cat.find(e => e.id === id)?.nombre) || null;
   const todos = (Array.isArray(archivos) ? archivos : []).filter(a => a && a.visible_cliente !== false);
 
-  const lista = listaDelCliente(filas, anotado).map(t => {
+  const lista = listaDelCliente(filas, anotado, hoy).map(t => {
     const etapaId = etapaDe.get(t.id) || null;
     return {
       ...t, etapa_id: etapaId && nombreDe(etapaId) ? etapaId : null, etapa: etapaId ? nombreDe(etapaId) : null,
@@ -314,6 +331,8 @@ export const ESTADOS = {
 };
 
 const enCriollo = f => (f ? new Date(`${dia(f)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" }) : "");
+// Corto, para el asunto de un correo: «21 nov».
+const enCorto = f => (f ? new Date(`${dia(f)}T12:00:00`).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
 
 /**
  * El cuerpo del correo con el checklist: lo mismo que ve en su enlace.
@@ -338,7 +357,7 @@ export function correoDeLaLista({ proyecto = "", lista = [], mensaje = "", enlac
           ${t.descripcion ? `<div style="font-size:13px;color:#4B5563;line-height:1.5;margin-top:2px">${esc(t.descripcion)}</div>` : ""}
           <div style="font-size:12px;color:${e.color};margin-top:3px">${esc(e.dice)}${listo && t.listo_el ? ` · ${esc(enCriollo(t.listo_el))}` : ""}</div>
           ${t.actualizacion ? `<div style="font-size:13px;color:#374151;line-height:1.5;margin-top:6px;padding:7px 10px;background:#F9FAFB;border-radius:6px">${esc(t.actualizacion)}${t.actualizado_el ? `<div style="font-size:11px;color:#9CA3AF;margin-top:3px">Actualizado el ${esc(enCriollo(t.actualizado_el))}</div>` : ""}</div>` : ""}
-          ${t.aprobar?.estado === "pendiente" ? `<div style="font-size:12.5px;color:#B45309;font-weight:600;margin-top:6px">Necesitamos tu aprobación${enlace ? ": entrá al enlace de abajo para aprobarlo o dejar tus observaciones" : ""}.</div>`
+          ${t.aprobar?.estado === "pendiente" ? `<div style="font-size:12.5px;color:#B45309;font-weight:600;margin-top:6px">Necesitamos tu aprobación${t.aprobar.hasta ? ` hasta el ${esc(enCriollo(t.aprobar.hasta))}` : ""}${enlace ? ": entrá al enlace de abajo para aprobarlo o dejar tus observaciones" : ""}.</div>`
     : t.aprobar?.estado === "aprobado" ? `<div style="font-size:12.5px;color:#15803D;font-weight:600;margin-top:6px">Lo aprobaste${t.aprobar.respondido_el ? ` el ${esc(enCriollo(t.aprobar.respondido_el))}` : ""}.</div>`
     : t.aprobar?.estado === "observado" ? `<div style="font-size:12.5px;color:#B45309;font-weight:600;margin-top:6px">Lo dejaste con observaciones${t.aprobar.respondido_el ? ` el ${esc(enCriollo(t.aprobar.respondido_el))}` : ""}.</div>` : ""}
         </td>

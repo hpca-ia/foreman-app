@@ -37,7 +37,10 @@ export default async function handler(req, res) {
     // 178), sale igual: sin la aprobación, o solo con el título y el estado.
     const base = `tasks?lead_id=eq.${lead.id}&visible_cliente=eq.true&order=id&select=id,title,status,espera,hecha_at,descartada,compra_id,type,ruta_orden,visible_cliente`;
     const conTextos = `${base},cliente_descripcion,cliente_actualizacion,cliente_actualizado_at`;
-    let filas = await crudo(await rest(`${conTextos},cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota`));
+    const conAprobacion = `${conTextos},cliente_aprueba,cliente_respuesta,cliente_respuesta_at,cliente_respuesta_nota`;
+    // Y con su fecha límite (migración 188), si ya está.
+    let filas = await crudo(await rest(`${conAprobacion},cliente_aprueba_hasta`));
+    if (!Array.isArray(filas)) filas = await crudo(await rest(conAprobacion));
     if (!Array.isArray(filas)) filas = await crudo(await rest(conTextos));
     if (!Array.isArray(filas)) filas = await json(await rest(base));
     // Las anotaciones marcadas para él (migración 185): de ahí sale la

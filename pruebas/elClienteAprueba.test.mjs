@@ -19,10 +19,10 @@ const AHORA = new Date("2026-11-18T15:00:00Z");
 test("LO QUE PIDIÓ: al punto se le pide la aprobación, y el cliente lo ve como algo que espera su respuesta", () => {
   assert.equal(aprobacionDe(punto(195, "MADEVAL")), null);
   assert.equal(aprobacionDe(null), null);
-  assert.deepEqual(aprobacionDe(FOGA), { estado: "pendiente", respondido_el: null, nota: "" });
+  assert.deepEqual(aprobacionDe(FOGA), { estado: "pendiente", respondido_el: null, nota: "", hasta: null, vencida: false });
   // Viaja en el punto, y nada más del punto cambia.
   const [t] = listaDelCliente([FOGA]);
-  assert.deepEqual(t.aprobar, { estado: "pendiente", respondido_el: null, nota: "" });
+  assert.deepEqual(t.aprobar, { estado: "pendiente", respondido_el: null, nota: "", hasta: null, vencida: false });
   assert.equal(t.estado, "pendiente");
   assert.equal(listaDelCliente([punto(195, "MADEVAL")])[0].aprobar, null);
   // Y en lo que arma el enlace, con sus archivos al lado: es lo que tiene que mirar.
@@ -48,7 +48,7 @@ test("lo aprueba: queda en la tarea con su fecha, en el historial del punto y en
   assert.equal(conNota.anotacion, "El cliente lo aprobó desde su enlace. Dijo: «Perfecto, adelante»");
   // Después se lee así, en su enlace y en el correo.
   const contestado = { ...FOGA, ...r.campos };
-  assert.deepEqual(aprobacionDe(contestado), { estado: "aprobado", respondido_el: "2026-11-18", nota: "" });
+  assert.deepEqual(aprobacionDe(contestado), { estado: "aprobado", respondido_el: "2026-11-18", nota: "", hasta: null, vencida: false });
 });
 
 test("deja observaciones: tiene que decir cuáles, y quedan escritas", () => {
@@ -58,7 +58,7 @@ test("deja observaciones: tiene que decir cuáles, y quedan escritas", () => {
   assert.deepEqual(r.campos, { cliente_respuesta: "observado", cliente_respuesta_at: "2026-11-18T15:00:00.000Z", cliente_respuesta_nota: "El mesón va en cuarzo blanco, no gris." });
   assert.equal(r.anotacion, "El cliente dejó observaciones desde su enlace: «El mesón va en cuarzo blanco, no gris.»");
   assert.equal(r.bitacora, 'El cliente dejó observaciones en "FOGA" desde su enlace: «El mesón va en cuarzo blanco, no gris.»');
-  assert.deepEqual(aprobacionDe({ ...FOGA, ...r.campos }), { estado: "observado", respondido_el: "2026-11-18", nota: "El mesón va en cuarzo blanco, no gris." });
+  assert.deepEqual(aprobacionDe({ ...FOGA, ...r.campos }), { estado: "observado", respondido_el: "2026-11-18", nota: "El mesón va en cuarzo blanco, no gris.", hasta: null, vencida: false });
   // Un texto larguísimo se corta: es una nota, no un archivo.
   assert.equal(respuestaDelCliente({ tarea: FOGA, conforme: false, nota: "x".repeat(5000) }).campos.cliente_respuesta_nota.length, 2000);
 });
@@ -135,7 +135,7 @@ test("en el checklist se le pide adentro de lo que ve el cliente, y la fila dice
   // Guardar: pedir de nuevo borra la respuesta anterior, y queda en el historial del punto.
   const datos = codigoDe("../src/modules/leads/proyecto.js");
   assert.match(datos, /\? \{ cliente_aprueba: true, cliente_respuesta: null, cliente_respuesta_at: null, cliente_respuesta_nota: null \}\s+: \{ cliente_aprueba: false \};/);
-  assert.match(datos, /detalle: pedir \? `Le pidió al cliente que apruebe "\$\{item\.texto\}"` : `Dejó de pedirle al cliente que apruebe "\$\{item\.texto\}"`,\s+quien, extra: \{ task_id: item\.id \},/);
+  assert.match(datos, /\? `Le pidió al cliente que apruebe "\$\{item\.texto\}"\$\{plazo && !sinPlazo \? `, hasta el \$\{enCriollo\(plazo\)\}` : ""\}`\s+: `Dejó de pedirle al cliente que apruebe "\$\{item\.texto\}"`,\s+quien, extra: \{ task_id: item\.id \},/);
   // Sin la 186 todo lo demás anda, y solo no se ofrece.
   assert.match(datos, /sinAprobacion: !!ePedidas && !eVistas,/);
 });
