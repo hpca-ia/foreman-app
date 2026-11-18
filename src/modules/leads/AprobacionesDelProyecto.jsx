@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { FileDown, FileText, ThumbsUp, Mail } from "lucide-react";
+import { FileDown, FileText, ThumbsUp, Mail, Send } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { abrirArchivo } from "../../lib/archivos";
 import { cargarAprobaciones } from "./proyecto";
 import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, registroParaPdf } from "./aprobaciones.js";
+import { etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
+import PedirAprobacion from "./PedirAprobacion";
 
 // EL REGISTRO DE APROBACIONES DEL CLIENTE, de un proyecto.
 //
@@ -18,13 +20,23 @@ import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, r
 // en PDF, que es como sale de la oficina.
 //
 // No se edita: lo que el cliente contestó lo escribió él desde su enlace.
+//
+// Y DESDE ACÁ SE ENVÍA. Hernán, 18/11/2026: «¿desde dónde envío presupuestos,
+// planos, documentos para aprobar?». Había que ir al checklist: agregar el
+// punto, mostrárselo, subirle el archivo y pedirle la aprobación. «Enviar para
+// aprobar» abre una ventana que pregunta qué es, qué archivos lleva y a quién
+// se le avisa, y hace todo de una vez; el punto queda en el checklist. A lo
+// que sigue esperando se le avisa de nuevo desde su renglón.
 
 const TONOS = { success: colors.success, danger: colors.danger, warning: colors.warning, muted: colors.muted };
 
-export default function AprobacionesDelProyecto({ lead }) {
+export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [], currentUser = null, editable = true }) {
   const [datos, setDatos] = useState(null);
   const [bajando, setBajando] = useState(false);
   const [error, setError] = useState("");
+  // La ventana: enviar algo nuevo, o avisarle de nuevo de un pedido. { modo, item, archivos }
+  const [ventana, setVentana] = useState(null);
+  const etapas = etapasDelTipo(catalogo, tipoDe(lead));
 
   const cargar = useCallback(async () => { setDatos(await cargarAprobaciones(lead.id)); }, [lead.id]);
   useEffect(() => { cargar(); }, [cargar]);
@@ -58,16 +70,25 @@ export default function AprobacionesDelProyecto({ lead }) {
           <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 }}>APROBACIONES DEL CLIENTE</div>
           <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 3 }}>
             Todo lo que se le pidió aprobar al cliente en este proyecto, y qué contestó desde su enlace: es el sustento de lo que aprobó.
-            Se pide desde un punto del checklist, en «¿Lo tiene que aprobar?».
+            Un plano, un presupuesto o un documento se le mandan con «Enviar para aprobar».
           </div>
         </div>
-        {registro.length > 0 && (
-          <button className="bajar-registro" onClick={bajar} disabled={bajando}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
-              border: `1px solid ${colors.ink}`, background: colors.ink, color: "#fff", borderRadius: 8, padding: "6px 12px", whiteSpace: "nowrap" }}>
-            <FileDown size={13} /> {bajando ? "Armando…" : "Bajar en PDF"}
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {editable && (
+            <button className="enviar-para-aprobar" onClick={() => setVentana({ modo: "enviar" })}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
+                border: `1px solid ${colors.brand}`, background: colors.brand, color: "#fff", borderRadius: 8, padding: "6px 12px", whiteSpace: "nowrap" }}>
+              <Send size={13} /> Enviar para aprobar
+            </button>
+          )}
+          {registro.length > 0 && (
+            <button className="bajar-registro" onClick={bajar} disabled={bajando}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 600,
+                border: `1px solid ${colors.border}`, background: "#fff", color: colors.inkSoft, borderRadius: 8, padding: "6px 12px", whiteSpace: "nowrap" }}>
+              <FileDown size={13} /> {bajando ? "Armando…" : "Bajar en PDF"}
+            </button>
+          )}
+        </div>
       </div>
       {error && <div role="alert" style={{ fontSize: 11.5, color: colors.danger, marginBottom: 8 }}>{error}</div>}
       {datos.error && <div role="alert" style={{ fontSize: 11.5, color: colors.danger, marginBottom: 8 }}>No se pudo leer el registro: {datos.error}</div>}
@@ -90,8 +111,9 @@ export default function AprobacionesDelProyecto({ lead }) {
         <div className="registro-vacio" style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: 13 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink }}>Todavía no se le pidió ninguna aprobación al cliente.</div>
           <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55, marginTop: 3 }}>
-            Para pedirle una: en «El proyecto», abrí el punto del checklist —o agregá uno: «Plano de cocina», «Presupuesto rev. 2»—, mostráselo al
-            cliente, subí lo que tenga que revisar en «Fotos y archivos para el cliente» y tocá «Pedirle que lo apruebe». Lo que conteste aparece acá.
+            Tocá «Enviar para aprobar»: escribís qué es —«Plano de cocina», «Presupuesto rev. 2»—, elegís los archivos y a quién avisarle.
+            Queda como un punto del checklist, el cliente lo aprueba desde su enlace y lo que conteste aparece acá.
+            También se le puede pedir desde un punto que ya esté en el checklist, en «¿Lo tiene que aprobar?».
           </div>
         </div>
       )}
@@ -125,7 +147,15 @@ export default function AprobacionesDelProyecto({ lead }) {
                 </div>
               ))}
               {p.estado === "pendiente" && !p.avisos.length && (
-                <div style={{ color: colors.warning }}>No se le avisó por correo. Desde el punto: «Avisarle de nuevo».</div>
+                <div style={{ color: colors.warning }}>Todavía no se le avisó por correo.</div>
+              )}
+              {/* Sigue esperando: se le avisa de nuevo desde acá. */}
+              {editable && p.estado === "pendiente" && p.task_id != null && (
+                <button className="avisar-de-nuevo" onClick={() => setVentana({ modo: "avisar", item: { id: p.task_id, tarea_id: p.task_id, lead_id: lead.id, texto: p.titulo }, archivos: p.archivos })}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, cursor: "pointer", fontFamily: colors.font, fontSize: 11, fontWeight: 600,
+                    border: `1px solid ${colors.brand}`, background: "#fff", color: colors.brand, borderRadius: 14, padding: "3px 10px" }}>
+                  <Mail size={11} /> {p.avisos.length ? "Avisarle de nuevo" : "Avisarle"}
+                </button>
               )}
               {p.estado !== "pendiente" && (
                 <div className="lo-que-contesto" style={{ color: tono, fontWeight: 600, marginTop: 2 }}>
@@ -169,6 +199,12 @@ export default function AprobacionesDelProyecto({ lead }) {
           </div>
         );
       })}
+
+      {ventana && (
+        <PedirAprobacion lead={lead} modo={ventana.modo} item={ventana.item || null} archivos={ventana.archivos || []}
+          etapas={etapas} etapaId={sePersigue(lead) ? lead.etapa : null} users={users} currentUser={currentUser}
+          onCambio={cargar} onCerrar={() => setVentana(null)} />
+      )}
     </div>
   );
 }

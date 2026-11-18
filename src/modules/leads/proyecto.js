@@ -131,6 +131,51 @@ export async function pedirAprobacion(item, pedir, quien, { descripcion = "" } =
 }
 
 /**
+ * ENVIARLE ALGO AL CLIENTE PARA QUE LO APRUEBE, DE UNA VEZ.
+ *
+ * Hernán, 18/11/2026, con todo ya publicado: «¿desde dónde envío presupuestos,
+ * planos, documentos para aprobar?». Eran cuatro pasos en dos lugares:
+ * agregar el punto al checklist, mostrárselo al cliente, subirle el archivo y
+ * pedirle que lo apruebe. Esto los hace seguidos, desde una sola ventana de la
+ * pestaña «Aprobaciones»; el punto queda igual en el checklist, donde se le
+ * sigue el rastro.
+ *
+ * SI SE ELIGIERON ARCHIVOS Y NO SUBIÓ NINGUNO, NO SE LE PIDE NADA: el cliente
+ * tendría los botones de aprobar delante de un punto vacío. El punto queda
+ * creado y a la vista, y se dice qué falló, para subirlo desde ahí.
+ *
+ * @param titulo       qué tiene que aprobar: es el título del punto
+ * @param descripcion  unas palabras para él (opcional)
+ * @param etapaId      en qué etapa del checklist queda
+ * @param archivos     los File elegidos
+ * @returns { error } si no se pudo ni crear · { item, sinPedir, errores } si
+ *          no subió nada · { item, subidos, errores } si quedó pedido
+ */
+export async function enviarParaAprobar({ lead, titulo, descripcion = "", etapaId = null, archivos = [], quien = null }) {
+  const que = String(titulo || "").trim();
+  if (!que) return { error: "Escribí qué tiene que aprobar: «Plano de cocina», «Presupuesto rev. 2»…" };
+  const { count } = await supabase.from("tasks").select("id", { count: "exact", head: true }).eq("lead_id", lead.id);
+  // El punto queda a cargo de quien lo envía: es quien va a esperar la respuesta.
+  const r = await agregarTarea({
+    lead, etapaId, titulo: que, tipo: "Gestión", orden: (count || 0) + 1,
+    assignee_id: quien?.id ?? null, nombreResponsable: quien?.name || null, quien,
+  });
+  if (r.error) return { error: r.error };
+  const item = r.item;
+  const e = await mostrarAlCliente(item, true, quien);
+  if (e) return { error: `El punto quedó en el checklist, pero no se le pudo mostrar al cliente: ${e}`, item };
+  if (String(descripcion || "").trim()) await escribirleAlCliente(item, { descripcion });
+  let subida = { subidos: 0, errores: [] };
+  if (archivos.length) {
+    subida = await subirParaElCliente({ lead, punto: item, archivos, quien });
+    if (!subida.subidos) return { item, sinPedir: true, errores: subida.errores };
+  }
+  const e2 = await pedirAprobacion(item, true, quien, { descripcion });
+  if (e2) return { error: `El punto quedó en el checklist, pero no se pudo pedir la aprobación: ${e2}`, item, errores: subida.errores };
+  return { item, subidos: subida.subidos, errores: subida.errores };
+}
+
+/**
  * Avisarle al cliente por correo que tiene un punto para aprobar. Lo manda el
  * servidor, con qué tiene que revisar y el botón a su enlace.
  *

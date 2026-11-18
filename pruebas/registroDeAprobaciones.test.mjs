@@ -102,7 +102,7 @@ test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y de
   assert.match(lista, /<PedirAprobacion lead=\{lead\} item=\{pedido\.item\} modo=\{pedido\.modo\}/);
   const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
   assert.match(ventana, /const e = await pedirAprobacion\(item, true, currentUser, \{ descripcion \}\);/);
-  assert.match(ventana, /const r = await avisarDelPedido\(\{ item, correos, mensaje, quien: currentUser \}\);/);
+  assert.match(ventana, /const r = await avisarDelPedido\(\{ item: el, correos, mensaje, quien: currentUser \}\);/);
   // El cliente, ya tildado.
   assert.match(ventana, /setElegidos\(new Set\(lista\.filter\(p => p\.esCliente && p\.email\)\.map\(p => p\.clave\)\)\);/);
   // Si no hay a quién avisarle, se lo carga ahí mismo, con el contacto del proyecto, y queda en «Gente».
@@ -110,9 +110,39 @@ test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y de
   assert.match(ventana, /const r = personaDeLaFicha\(\{ \.\.\.nueva, rol: "cliente" \}, lead\.id\);/);
   assert.match(ventana, /const e = await agregarALaFicha\(r\.fila\);/);
   // El WhatsApp: el mensaje con su enlace, ya escrito.
-  assert.match(ventana, /href=\{enlaceDeWhatsApp\(p\.whatsapp, mensajeDelPedido\(\{ nombre: p\.nombre, proyecto: lead\.nombre, punto: item\.texto, enlace \}\)\)\}/);
+  assert.match(ventana, /href=\{enlaceDeWhatsApp\(p\.whatsapp, mensajeDelPedido\(\{ nombre: p\.nombre, proyecto: lead\.nombre, punto: punto\.texto, enlace \}\)\)\}/);
   // Sin el enlace del cliente no se pide: no tendría dónde aprobar.
   assert.match(ventana, /const sinEnlace = !cargando && !enlace;/);
+});
+
+test("LO QUE PREGUNTÓ: «¿desde dónde envío presupuestos, planos, documentos para aprobar?» — desde la pestaña, en una sola ventana", () => {
+  // Hernán, 18/11/2026, con todo publicado. Eran cuatro pasos en dos lugares.
+  const pestana = codigoDe("../src/modules/leads/AprobacionesDelProyecto.jsx");
+  assert.match(pestana, /className="enviar-para-aprobar" onClick=\{\(\) => setVentana\(\{ modo: "enviar" \}\)\}/);
+  assert.match(pestana, /<PedirAprobacion lead=\{lead\} modo=\{ventana\.modo\} item=\{ventana\.item \|\| null\}/);
+  assert.match(pestana, /etapas=\{etapas\} etapaId=\{sePersigue\(lead\) \? lead\.etapa : null\}/);
+  // Lo que sigue esperando se avisa de nuevo desde su renglón.
+  assert.match(pestana, /className="avisar-de-nuevo" onClick=\{\(\) => setVentana\(\{ modo: "avisar", item: \{ id: p\.task_id, tarea_id: p\.task_id, lead_id: lead\.id, texto: p\.titulo \}, archivos: p\.archivos \}\)\}/);
+  // Los cuatro pasos, seguidos: nace el punto, se le muestra, se suben sus archivos y se le pide.
+  const datos = codigoDe("../src/modules/leads/proyecto.js");
+  const fn = datos.slice(datos.indexOf("export async function enviarParaAprobar"), datos.indexOf("export async function avisarDelPedido"));
+  const orden = ["await agregarTarea({", "await mostrarAlCliente(item, true, quien)", "await subirParaElCliente({ lead, punto: item, archivos, quien })", "await pedirAprobacion(item, true, quien, { descripcion })"].map(x => fn.indexOf(x));
+  assert.ok(orden.every(i => i >= 0), "están los cuatro pasos");
+  assert.deepEqual([...orden].sort((a, b) => a - b), orden, "en ese orden");
+  // Sin título no nace nada.
+  assert.match(fn, /if \(!que\) return \{ error: "Escribí qué tiene que aprobar/);
+  // Queda a cargo de quien lo envía.
+  assert.match(fn, /assignee_id: quien\?\.id \?\? null, nombreResponsable: quien\?\.name \|\| null, quien,/);
+  // Si eligió archivos y no subió ninguno, no se le pide: tendría los botones delante de un punto vacío.
+  assert.match(fn, /if \(!subida\.subidos\) return \{ item, sinPedir: true, errores: subida\.errores \};/);
+  assert.ok(fn.indexOf("sinPedir: true") < fn.indexOf("await pedirAprobacion("), "antes de pedir");
+  // La ventana es la misma de «Pedirle que lo apruebe», en modo «enviar».
+  const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
+  assert.match(ventana, /const r = await enviarParaAprobar\(\{ lead, titulo: que, descripcion: paraEl, etapaId: etapa \|\| null, archivos: adjuntos, quien: currentUser \}\);/);
+  assert.match(ventana, /if \(modo === "enviar" && !hecho && !que\.trim\(\)\) \{/);
+  // Y si no se pudo pedir, lo dice y no ofrece avisarle.
+  assert.match(ventana, /if \(r\.error \|\| r\.sinPedir\) \{\s+setHecho\(\{ pedido: false, sinPedir: true,/);
+  assert.match(ventana, /\{hecho\.sinPedir \|\| !punto \? null : conWhatsApp\.length > 0 \? \(/);
 });
 
 // ── El registro ─────────────────────────────────────────────────────────────
@@ -204,7 +234,7 @@ test("lo que el cliente ya aprobó no se borra: deja de verse, y queda para el r
 test("el registro se lee en la pestaña «Aprobaciones» del proyecto y se baja en PDF", () => {
   const ficha = codigoDe("../src/modules/leads/ModalLead.jsx");
   assert.match(ficha, /\["archivos", "Archivos"\], \["aprobaciones", "Aprobaciones"\], \["gente", "Gente"\]\]/);
-  assert.match(ficha, /seccionVisible === "aprobaciones" && \(\s+<AprobacionesDelProyecto lead=\{lead\} \/>/);
+  assert.match(ficha, /seccionVisible === "aprobaciones" && \(\s+<AprobacionesDelProyecto lead=\{vivo\} catalogo=\{catalogo\} users=\{users\} currentUser=\{currentUser\} editable=\{editable\} \/>/);
   const pantalla = codigoDe("../src/modules/leads/AprobacionesDelProyecto.jsx");
   assert.match(pantalla, /const registro = registroDeAprobaciones\(datos\.filas, datos\.archivosDeAhora\);/);
   assert.match(pantalla, /await exportarPDF\(registroParaPdf\(registro, \{ proyecto: lead\.nombre \}\)\);/);

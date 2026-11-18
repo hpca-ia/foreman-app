@@ -371,7 +371,7 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
 
       {/* El registro de lo que el cliente aprobó desde su enlace: el sustento. */}
       {editando && seccionVisible === "aprobaciones" && (
-        <AprobacionesDelProyecto lead={lead} />
+        <AprobacionesDelProyecto lead={vivo} catalogo={catalogo} users={users} currentUser={currentUser} editable={editable} />
       )}
 
       {editando && seccionVisible === "gente" && (
