@@ -40,6 +40,29 @@ const c2 = v => Math.round(n(v) * 100) / 100;
 export const vivo = r => r && !r.anulado_por_oc && !r.oculto;
 
 /**
+ * UN RUBRO NEGATIVO NO ES UNA PÉRDIDA.
+ *
+ * Hernán, 18/11/2026, mirando «Beneficios y pérdidas» del Aeropuerto: «en
+ * pérdidas y beneficios no debería estar este rubro... no es una pérdida, es
+ * solo un rubro negativo».
+ *
+ * El renglón en negativo de una orden de cambio —«(–) PISO DE MICROCEMENTO ·
+ * OC-01», −$8.658,68— es obra que ya no se hace: no tiene nada que comprar.
+ * Medirlo como a los demás, «lo presupuestado menos lo gastado», da siempre
+ * negativo, porque lo presupuestado ya lo es. Ya estaba dicho que sin gasto no
+ * era pérdida; pero con dos gastos de caja chica cargados ahí por error
+ * ($149,32) pasaba a «rubro pasado» con −$7.659,13: de los −$8.210,48 que
+ * mostraba la obra, el 93% era ese renglón.
+ *
+ * No se mide: ni como pérdida, ni como sobreprecio, ni como ahorro. El gasto
+ * que tenga cargado lo marca Alertas, para pasarlo al rubro que sí se hace.
+ */
+export const esNegativo = r => n(r?.total_base) < 0;
+
+/** Los rubros que se miden contra su gasto: los vivos que no son un renglón en negativo. */
+export const seMide = r => vivo(r) && !esNegativo(r);
+
+/**
  * De sin IVA a la base del control, que es donde vive el gasto.
  *
  * El control trabaja con el IVA adentro porque es lo que se le factura al
@@ -82,7 +105,7 @@ export function eficienciaDeRubros({ rubros = [], porRubro = {} } = {}) {
   const filas = [];
   let sinCosto = 0, sinCostoConGasto = 0;
 
-  for (const r of rubros.filter(vivo)) {
+  for (const r of rubros.filter(seMide)) {
     const gastado = sinIvaDelGasto(r, porRubro[r.id]?.acumulado);
     // EL RUBRO SIN COSTO TAMBIÉN DEJA PLATA, y hay que contarla.
     //

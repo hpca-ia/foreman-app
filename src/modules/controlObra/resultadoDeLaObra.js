@@ -1,4 +1,4 @@
-import { conCosto, vivo, sinIvaDelGasto } from "./eficienciaDeRubros.js";
+import { conCosto, vivo, sinIvaDelGasto, esNegativo, seMide } from "./eficienciaDeRubros.js";
 import { baseSinIva } from "./contratoDeLaObra.js";
 import { totales } from "./cuentaBeneficios.js";
 import { precioDelContrato } from "./clasesDePartida.js";
@@ -47,7 +47,12 @@ export function seguimientoDeRubro(r, porRubro = {}) {
   // negativo. La reducción de una orden de cambio —"(–) piso de
   // microcemento", total en negativo— no tiene nada que comprar: sin gasto
   // no es pérdida de nada, aunque la resta dé negativo.
-  const pasado = gastado > 0 && resultado < 0;
+  //
+  // Y UN RUBRO NEGATIVO NO ES UNA PÉRDIDA NUNCA, tenga gasto o no (Hernán,
+  // 18/11/2026: «no es una pérdida, es solo un rubro negativo»). Con gasto
+  // cargado por error la resta daba el total del renglón como perdido. Ver
+  // `esNegativo`, en eficienciaDeRubros.js.
+  const pasado = !esNegativo(r) && gastado > 0 && resultado < 0;
   const estado = pasado ? "pasado" : !gastado ? "sin_empezar" : terminado ? "terminado" : "en_curso";
   return {
     id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
@@ -61,7 +66,7 @@ export function seguimientoDeRubro(r, porRubro = {}) {
 
 /** Los rubros que ya gastaron más de su presupuesto, se sigan o no. */
 export function perdidasEnRubros(rubros = [], porRubro = {}) {
-  const filas = rubros.filter(vivo).map(r => seguimientoDeRubro(r, porRubro))
+  const filas = rubros.filter(seMide).map(r => seguimientoDeRubro(r, porRubro))
     .filter(f => f.estado === "pasado").sort((a, b) => a.resultado - b.resultado);
   return { filas, total: c2(filas.reduce((t, f) => t + f.resultado, 0)) };
 }
