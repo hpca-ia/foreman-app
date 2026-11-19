@@ -163,7 +163,7 @@ test("en el historial del punto se lee que se le pidió y qué contestó", () =>
 
 test("el cliente contesta en el punto y en «Para aprobar», con los mismos botones que una entrega", () => {
   const pantalla = codigoDe("../src/portal/PortalCliente.jsx");
-  assert.match(pantalla, /<Aprobacion punto=\{t\} onContestar=\{onContestar\} enviando=\{enviando\} \/>/);
+  assert.match(pantalla, /<Aprobacion punto=\{t\} onContestar=\{onContestar\} enviando=\{enviando\} onFoto=\{onFoto\} \/>/);
   assert.match(pantalla, /className="lo-apruebo" disabled=\{enviando\} onClick=\{\(\) => onContestar\?\.\(punto, true, nota\)\}/);
   assert.match(pantalla, /onClick=\{\(\) => \(abierto \? onContestar\?\.\(punto, false, nota\) : setAbierto\(true\)\)\}/);
   assert.match(pantalla, /const contestarPunto = \(t, conforme, nota\) => contestar\(\{ que: "punto", id: t\.id, conforme, nota \}\);/);

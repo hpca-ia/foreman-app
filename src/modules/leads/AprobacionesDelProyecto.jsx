@@ -201,7 +201,8 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
             {p.estado !== "retirado" && (
               <div style={{ marginTop: 6 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 3 }}>
-                  {p.estado === "pendiente" ? "LO QUE TIENE PARA MIRAR HOY" : "LO QUE TENÍA PARA MIRAR AL CONTESTAR"}
+                  {p.soloAlgunos ? (p.estado === "pendiente" ? "LO QUE SE LE PIDIÓ APROBAR" : "LO QUE SE LE PIDIÓ APROBAR, COMO ESTABA AL CONTESTAR")
+                    : p.estado === "pendiente" ? "LO QUE TIENE PARA MIRAR HOY" : "LO QUE TENÍA PARA MIRAR AL CONTESTAR"}
                 </div>
                 {p.archivos.length ? (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

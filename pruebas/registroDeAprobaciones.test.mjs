@@ -104,7 +104,7 @@ test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y de
   assert.match(lista, /onPedirAprobacion=\{modo => setPedido\(\{ item, modo \}\)\}/);
   assert.match(lista, /<PedirAprobacion lead=\{lead\} item=\{pedido\.item\} modo=\{pedido\.modo\}/);
   const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
-  assert.match(ventana, /const e = await pedirAprobacion\(item, true, currentUser, \{ descripcion, hasta: hasta \|\| null \}\);/);
+  assert.match(ventana, /const e = await pedirAprobacion\(item, true, currentUser, \{ descripcion, hasta: hasta \|\| null, archivos: soloAlgunos \? losQuePide\.map\(a => a\.id\) : null \}\);/);
   assert.match(ventana, /const r = await avisarDelPedido\(\{ item: el, correos, whatsapps, mensaje, quien: currentUser \}\);/);
   // El cliente, ya tildado.
   assert.match(ventana, /setElegidos\(new Set\(lista\.filter\(p => p\.esCliente && \(p\.email \|\| \(numero\.configurado && p\.whatsapp\)\)\)\.map\(p => p\.clave\)\)\);/);
@@ -196,7 +196,7 @@ test("cada pedido entra al registro con cómo se llamaba el punto y quién lo pi
     { lead_id: 13, task_id: 196, titulo: "FOGA", descripcion: "Cocina", pedida_por: 1, pedida_nombre: "Hernan Cueva" });
   const datos = codigoDe("../src/modules/leads/proyecto.js");
   // Al pedir entra una fila; el pedido que estaba abierto se retira.
-  assert.match(datos, /const fila = \{ \.\.\.filaDelPedido\(\{ item, descripcion, quien, hasta: sinPlazo \? null : plazo \}\), pedida_at: new Date\(\)\.toISOString\(\) \};\s+const \{ error: eFila \} = await supabase\.from\("aprobaciones_cliente"\)\.insert\(fila\);/);
+  assert.match(datos, /const fila = \{ \.\.\.filaDelPedido\(\{ item, descripcion, quien, hasta: sinPlazo \? null : plazo \}\), pedida_at: new Date\(\)\.toISOString\(\) \};\s+const \{ pide_archivos \} = filaDelPedido\(\{ item, archivos \}\);\s+let \{ error: eFila \} = await supabase\.from\("aprobaciones_cliente"\)\.insert\(pide_archivos \? \{ \.\.\.fila, pide_archivos \} : fila\);/);
   assert.match(datos, /\.update\(\{ retirada_at: new Date\(\)\.toISOString\(\), retirada_nombre: quien\?\.name \|\| null \}\)\s+\.eq\("task_id", item\.id\)\.is\("respuesta", null\)\.is\("retirada_at", null\);/);
 });
 
@@ -214,7 +214,7 @@ test("cuando el cliente contesta, el servidor copia al registro los archivos que
   const fn = portal.slice(portal.indexOf("async function alRegistro"), portal.indexOf("async function avisarLaRespuesta"));
   // Los del punto, y solo los que él veía.
   assert.match(fn, /`proyecto_archivos\?lead_id=eq\.\$\{lead\.id\}&task_id=eq\.\$\{tarea\.id\}&visible_cliente=eq\.true`/);
-  assert.match(fn, /respuesta_ip: ip, archivos: archivosAprobados\(suyos\) \};/);
+  assert.match(fn, /archivos: archivosAprobados\(archivosDelPedido\(suyos, abiertos\[0\]\?\.pide_archivos\)\.archivos\) \};/);
   // Completa el pedido abierto; si no hay, anota uno. Sin la 187, nada.
   assert.match(fn, /&respuesta=is\.null&retirada_at=is\.null`/);
   assert.match(fn, /if \(!Array\.isArray\(abiertos\)\) return;/);

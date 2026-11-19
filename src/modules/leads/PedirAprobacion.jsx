@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { ThumbsUp, Mail, MessageCircle, Check, AlertTriangle, Paperclip, X, Send, FileText, CalendarClock } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
-import { pedirAprobacion, avisarDelPedido, enlaceDelClienteDe, enviarParaAprobar, whatsappDeForeman } from "./proyecto";
+import { pedirAprobacion, avisarDelPedido, enlaceDelClienteDe, enviarParaAprobar, whatsappDeForeman, pedidosDelPunto } from "./proyecto";
 import { involucradosDe, agregarALaFicha } from "./involucrados";
 import { personaDeLaFicha } from "../controlObra/directorioDelProyecto.js";
-import { aQuienAvisar, mensajeDelPedido, enlaceDeWhatsApp, paraWhatsApp, PLAZOS, plazoDe } from "./aprobaciones.js";
+import { aQuienAvisar, mensajeDelPedido, enlaceDeWhatsApp, paraWhatsApp, PLAZOS, plazoDe, queSePide, archivosDelPedido } from "./aprobaciones.js";
 import { hoyISO, sumarDias } from "./pipeline";
 import { cuantosDice, porQueNoEntra, pesoLegible } from "./archivosDelCliente.js";
 
@@ -39,6 +39,14 @@ import { cuantosDice, porQueNoEntra, pesoLegible } from "./archivosDelCliente.js
 // dos— o el día que sea; va en el correo, en el WhatsApp y en su enlace. Si no
 // se elige, no tiene plazo. Cuando se pasa y no contestó, queda marcada como
 // vencida y se avisa en el tablero y en el correo de la mañana.
+//
+// Y QUÉ ARCHIVO TIENE QUE APROBAR. Hernán, 19/11/2026, con FOGA: «cada vez que
+// se sube un archivo se puede pedir aprobación de ese archivo nuevo, el
+// anterior ya se aprobó... no lo anterior que ya estaba». El pedido era del
+// punto entero, con todos sus archivos. Ahora, si el punto tiene más de uno,
+// se tilda cuáles: salen tildados los nuevos —los que no aprobó todavía— y los
+// que ya aprobó dicen cuándo. El cliente ve «Lo apruebo» delante de esos, el
+// correo nombra esos, y en el registro quedan esos.
 
 const chico = { ...inputStyle, padding: "5px 8px", fontSize: 12 };
 const linea = { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.ink, cursor: "pointer" };
@@ -85,6 +93,10 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
     setAdjuntos(v => [...v, ...nuevos.filter(f => !porQueNoEntra(f) && !v.some(x => x.name === f.name && x.size === f.size))]);
     setDijo("");
   };
+  // QUÉ ARCHIVOS SE LE PIDEN. `historia` es lo que dice el registro del punto:
+  // cuáles ya aprobó y cuáles lleva el pedido que sigue esperando.
+  const [pide, setPide] = useState(() => new Set(archivos.map(a => Number(a.id))));
+  const [historia, setHistoria] = useState({ aprobados: {}, abierto: null });
   const [gente, setGente] = useState(null);
   // ¿EL WHATSAPP DE FOREMAN YA ESTÁ CONFIGURADO EN META? (Hernán, 18/11/2026:
   // «es importante ya integrar WhatsApp».) Si lo está, a quien tenga celular
@@ -106,8 +118,13 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
   useEffect(() => {
     let vivo = true;
     (async () => {
-      const [{ personas }, url, numero] = await Promise.all([involucradosDe(lead.id).catch(() => ({ personas: [] })), enlaceDelClienteDe(lead.id), whatsappDeForeman()]);
+      const [{ personas }, url, numero, filas] = await Promise.all([involucradosDe(lead.id).catch(() => ({ personas: [] })), enlaceDelClienteDe(lead.id), whatsappDeForeman(),
+        item?.id != null && archivos.length > 1 ? pedidosDelPunto(item.id) : []]);
       if (!vivo) return;
+      // Tildados, los archivos nuevos: los que ya aprobó quedan a la vista, sin tildar.
+      const q = queSePide(archivos, filas);
+      setHistoria(q);
+      setPide(new Set(q.tildados));
       const lista = aQuienAvisar(personas, users);
       setGente(lista);
       setEnlace(url);
@@ -164,7 +181,8 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
 
       let pedido = false, el = punto, noSubieron = [], aviso = "";
       if (modo === "pedir" && !hecho) {
-        const e = await pedirAprobacion(item, true, currentUser, { descripcion, hasta: hasta || null });
+        if (archivos.length && !losQuePide.length) { setDijo("Tildá qué archivo tiene que aprobar."); return; }
+        const e = await pedirAprobacion(item, true, currentUser, { descripcion, hasta: hasta || null, archivos: soloAlgunos ? losQuePide.map(a => a.id) : null });
         // «Quedó pedido, pero…» no frena: el pedido está hecho, y se dice.
         if (e && !/^Quedó pedido/.test(e)) { setDijo(e); return; }
         if (e) aviso = e;
@@ -205,6 +223,12 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
   const seAvisa = p => !!p.email || (wa && !!p.whatsapp);
   const yaEsta = !!hecho && (modo !== "avisar" || hecho.enviadoA || hecho.noSalio);
   const nombreDeEtapa = id => etapas.find(e => e.id === id)?.nombre || "";
+  // LOS ARCHIVOS DE ESTE PEDIDO. Al pedir, los tildados; al avisar de nuevo,
+  // los que lleva el pedido que sigue esperando.
+  const losQuePide = modo === "avisar" ? archivosDelPedido(archivos, historia.abierto).archivos : archivos.filter(a => pide.has(Number(a.id)));
+  const soloAlgunos = losQuePide.length > 0 && losQuePide.length < archivos.length;
+  const tildarArchivo = id => { setDijo(""); setPide(v => { const a = new Set(v); a.has(id) ? a.delete(id) : a.add(id); return a; }); };
+  const fechaCorta = iso => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("es-EC", { day: "numeric", month: "short", timeZone: "America/Guayaquil" }); };
 
   return (
     <div className="pedir-la-aprobacion"
@@ -219,9 +243,36 @@ export default function PedirAprobacion({ lead, item = null, modo = "pedir", arc
         {/* Qué va a mirar. Pedir una aprobación sin nada que revisar es raro: se dice. */}
         {modo !== "enviar" && (
           <div className="que-va-a-aprobar" style={{ fontSize: 11.5, lineHeight: 1.5, marginTop: 4, color: archivos.length ? colors.inkSoft : colors.warning }}>
-            {archivos.length
+            {soloAlgunos
+              ? <>Se le pide aprobar <strong style={{ color: colors.ink }}>{losQuePide.map(a => `«${a.nombre}»`).join(", ")}</strong>: en su enlace «Lo apruebo» y «Tengo una observación» van con {losQuePide.length === 1 ? "ese archivo" : "esos archivos"}. Lo demás del punto lo sigue viendo, aparte.</>
+              : archivos.length
               ? <>En su enlace va a ver este punto con <strong style={{ color: colors.ink }}>{cuantosDice(archivos)}</strong>, y debajo «Lo apruebo» y «Tengo una observación».</>
               : <><AlertTriangle size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />Este punto todavía no tiene fotos ni archivos para el cliente: va a aprobar solo el título. Si tiene que revisar un plano o un presupuesto, cerrá esto y subilo antes.</>}
+          </div>
+        )}
+
+        {/* QUÉ ARCHIVO TIENE QUE APROBAR, si el punto tiene más de uno. */}
+        {modo === "pedir" && !hecho && archivos.length > 1 && (
+          <div className="que-archivos-aprueba" style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4, marginBottom: 5 }}>
+              <Paperclip size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />¿QUÉ TIENE QUE APROBAR?
+            </div>
+            <div style={{ display: "grid", gap: 4 }}>
+              {archivos.map(a => (
+                <label key={a.id} className="archivo-a-aprobar" style={linea}>
+                  <input type="checkbox" checked={pide.has(Number(a.id))} onChange={() => tildarArchivo(Number(a.id))} />
+                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                    {a.nombre}
+                    {a.id in historia.aprobados
+                      ? <span className="ya-aprobado" style={{ color: colors.success }}> · ya lo aprobó{fechaCorta(historia.aprobados[a.id]) ? ` el ${fechaCorta(historia.aprobados[a.id])}` : ""}</span>
+                      : Object.keys(historia.aprobados).length > 0 && <span style={{ color: colors.brand, fontWeight: 600 }}> · nuevo</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45, marginTop: 4 }}>
+              Aprueba solo lo tildado, y eso queda en el registro. Lo que ya aprobó sigue aprobado: no se le vuelve a preguntar.
+            </div>
           </div>
         )}
 

@@ -24,7 +24,7 @@
 
 import { rest, sesionValida } from "./_supabase.js";
 import { enviarCorreo, plantilla } from "./_correo.js";
-import { correoDelPedido } from "./_listaDelCliente.js";
+import { correoDelPedido, archivosDelPedido } from "./_listaDelCliente.js";
 import { configurado as hayWhatsApp, enviarPlantilla, anotarPlantilla, plantillaDelPedido, huecosDelPedido, textoDeLaPlantilla } from "./_whatsapp.js";
 
 const APP = process.env.APP_URL || "https://foreman-app-ebon.vercel.app";
@@ -79,9 +79,23 @@ export default async function handler(req, res) {
         : "Elegí a quién avisarle: nadie de los elegidos tiene un correo válido." });
     }
 
-    // Lo que tiene para revisar en ese punto: los nombres, para que sepa a qué entra.
-    const suyos = await crudo(await rest(
-      `proyecto_archivos?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&visible_cliente=eq.true&select=nombre&order=created_at`));
+    // El pedido abierto del registro (migración 187): ahí queda a quién se le
+    // avisó, y cada WhatsApp se anota con él para saber después si llegó. Y
+    // dice qué archivos pide (migración 191); sin esa columna, todo el punto.
+    const cuando = new Date().toISOString();
+    const elAbierto = `aprobaciones_cliente?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&respuesta=is.null&retirada_at=is.null`;
+    let abiertos = null;
+    try {
+      abiertos = await crudo(await rest(`${elAbierto}&select=id,avisos,pide_archivos&order=pedida_at.desc&limit=1`));
+      if (!Array.isArray(abiertos)) abiertos = await crudo(await rest(`${elAbierto}&select=id,avisos&order=pedida_at.desc&limit=1`));
+    } catch { abiertos = null; }
+    const abierto = Array.isArray(abiertos) && abiertos[0] ? abiertos[0] : null;
+
+    // Lo que tiene para revisar: los nombres, para que sepa a qué entra. Si el
+    // pedido es de un archivo en particular, ese y no todos los del punto.
+    const delPunto = await crudo(await rest(
+      `proyecto_archivos?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&visible_cliente=eq.true&select=id,nombre&order=created_at`));
+    const suyos = archivosDelPedido(Array.isArray(delPunto) ? delPunto : [], abierto?.pide_archivos).archivos;
 
     const { asunto, cuerpo } = correoDelPedido({
       proyecto: lead.nombre, punto: tarea.title, descripcion: tarea.cliente_descripcion,
@@ -99,17 +113,6 @@ export default async function handler(req, res) {
       });
       if (r.ok) enviadoA = para; else correoError = r.error || "No se pudo mandar el correo.";
     }
-
-    // El pedido abierto del registro (migración 187): ahí queda a quién se le
-    // avisó, y cada WhatsApp se anota con él para saber después si llegó.
-    const cuando = new Date().toISOString();
-    let abiertos = null;
-    try {
-      abiertos = await crudo(await rest(
-        `aprobaciones_cliente?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&respuesta=is.null&retirada_at=is.null`
-        + `&select=id,avisos&order=pedida_at.desc&limit=1`));
-    } catch { abiertos = null; }
-    const abierto = Array.isArray(abiertos) && abiertos[0] ? abiertos[0] : null;
 
     // EL WHATSAPP, de a uno: cada persona lleva su nombre en el saludo.
     const porWhatsApp = [];

@@ -116,7 +116,7 @@ test("el enlace del cliente pide solo lo marcado para él, y un archivo de un pu
   const pantalla = codigoDe("../src/portal/PortalCliente.jsx");
   assert.match(pantalla, /className="lo-ultimo"/);
   assert.match(pantalla, /className="etapa-del-cliente"/);
-  assert.match(pantalla, /<FotosYArchivos archivos=\{t\.archivos \|\| \[\]\} onFoto=\{onFoto\} \/>/);
+  assert.match(pantalla, /<FotosYArchivos archivos=\{\(t\.archivos \|\| \[\]\)\.filter\(x => !\(t\.aprobar\?\.archivos \|\| \[\]\)\.some\(y => y\.id === x\.id\)\)\} onFoto=\{onFoto\} \/>/);
   assert.match(pantalla, /\["archivos", "Fotos y archivos", archivos\.length\]/);
 });
 

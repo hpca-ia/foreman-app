@@ -371,12 +371,14 @@ function Actualizaciones({ punto }) {
  * qué. Contesta una vez —con la respuesta puesta ya no hay botones—: si algo
  * se corrige, el equipo se lo vuelve a pedir y los botones vuelven.
  */
-function Aprobacion({ punto, onContestar, enviando }) {
+function Aprobacion({ punto, onContestar, enviando, onFoto }) {
   const [nota, setNota] = useState("");
   const [abierto, setAbierto] = useState(false);
   const a = punto.aprobar;
   if (!a) return null;
   const hayArchivos = (punto.archivos || []).some(x => x.url);
+  // Se le pide aprobar algunos archivos y no todo el punto: van acá, con los botones.
+  const estos = (a.archivos || []).filter(x => x.url);
   if (a.estado !== "pendiente") {
     const si = a.estado === "aprobado";
     return (
@@ -401,8 +403,14 @@ function Aprobacion({ punto, onContestar, enviando }) {
           El plazo era el {dia(a.hasta)}. Todavía podés contestar.
         </div>
       )}
+      {estos.length > 0 && (
+        <div className="lo-que-aprueba" style={{ margin: "6px 0 2px" }}>
+          <FotosYArchivos archivos={estos} onFoto={onFoto} grande />
+        </div>
+      )}
       <div style={{ fontSize: 12, color: colors.inkSoft, lineHeight: 1.45, margin: "2px 0 8px" }}>
-        {hayArchivos ? "Revisá los archivos de arriba y decinos si está bien así." : "Decinos si está bien así."}
+        {estos.length ? `Revisá ${estos.length === 1 ? "este archivo" : "estos archivos"} y decinos si está bien así. Tu respuesta es solo por ${estos.length === 1 ? "él" : "ellos"}.`
+          : hayArchivos ? "Revisá los archivos de arriba y decinos si está bien así." : "Decinos si está bien así."}
         {" "}Si hay algo que cambiar, tocá «Tengo una observación» y contanos qué.
       </div>
       {abierto && (
@@ -446,9 +454,11 @@ function Punto({ t, conLinea = false, onFoto, onContestar, enviando = false }) {
         {/* Qué hay de nuevo, cada cosa con su fecha: cuán fresca es la noticia. */}
         <Actualizaciones punto={t} />
         {/* Las fotos y los archivos de este punto. */}
-        <FotosYArchivos archivos={t.archivos || []} onFoto={onFoto} />
+        {/* Las fotos y los archivos de este punto. Si se le pide aprobar solo
+            algunos, esos van abajo, con los botones, y acá queda lo demás. */}
+        <FotosYArchivos archivos={(t.archivos || []).filter(x => !(t.aprobar?.archivos || []).some(y => y.id === x.id))} onFoto={onFoto} />
         {/* Y si hay que aprobarlo, acá: debajo de lo que hay que mirar. */}
-        <Aprobacion punto={t} onContestar={onContestar} enviando={enviando} />
+        <Aprobacion punto={t} onContestar={onContestar} enviando={enviando} onFoto={onFoto} />
       </div>
     </div>
   );

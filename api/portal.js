@@ -5,7 +5,7 @@ import { quienesDanElVisto } from "./_aviso-visto.js";
 import { claseDe, seSeparan } from "./_clasesDePartida.js";
 import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
-import { listaDelCliente, loDelCliente, respuestaDelCliente, correoDeLaRespuesta, archivosAprobados, decisionesDelCliente } from "./_listaDelCliente.js";
+import { listaDelCliente, loDelCliente, respuestaDelCliente, correoDeLaRespuesta, archivosAprobados, decisionesDelCliente, archivosDelPedido } from "./_listaDelCliente.js";
 import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
@@ -1279,6 +1279,13 @@ async function armarInforme(lead) {
     + `&select=id,titulo,respuesta,respuesta_at,respuesta_nota,archivos&order=respuesta_at.desc`));
   if (!Array.isArray(decididas)) decididas = [];
 
+  // LOS PEDIDOS QUE SIGUEN ABIERTOS, con qué archivos piden (migración 191):
+  // si un pedido es de una cotización nueva, los botones van con esa y no con
+  // todo lo que ya tenía el punto. Sin esa columna, cada pedido es del punto entero.
+  let abiertos = await json(await rest(
+    `aprobaciones_cliente?lead_id=eq.${lead.id}&respuesta=is.null&retirada_at=is.null&select=task_id,pide_archivos&order=pedida_at`));
+  if (!Array.isArray(abiertos)) abiertos = [];
+
   const enlaces = await firmar([
     ...fotosObs.map(f => f.storage_path),
     ...avance.map(f => f.storage_path),
@@ -1288,7 +1295,7 @@ async function armarInforme(lead) {
     ...decididas.flatMap(d => (Array.isArray(d.archivos) ? d.archivos : []).map(a => a?.storage_path)),
   ].filter(Boolean));
 
-  const delCliente = loDelCliente({ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces, notas });
+  const delCliente = loDelCliente({ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces, notas, pedidos: abiertos });
   const lista = delCliente.lista;
 
   const conUrl = x => ({ ...x, url: enlaces[x.storage_path] || null, storage_path: undefined });
@@ -1354,12 +1361,16 @@ async function alRegistro(req, lead, tarea, r) {
     `proyecto_archivos?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&visible_cliente=eq.true`
     + `&select=id,nombre,tamano,storage_path,created_at&order=created_at`));
   const ip = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || null;
-  const dicho = { respuesta: r.campos.cliente_respuesta, respuesta_at: r.campos.cliente_respuesta_at,
-    respuesta_nota: r.campos.cliente_respuesta_nota, respuesta_ip: ip, archivos: archivosAprobados(suyos) };
-  const abiertos = await json(await rest(
-    `aprobaciones_cliente?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&respuesta=is.null&retirada_at=is.null`
-    + `&select=id&order=pedida_at.desc&limit=1`));
+  // El pedido abierto, con qué archivos pedía (migración 191); sin esa columna, sin eso.
+  const elAbierto = `aprobaciones_cliente?lead_id=eq.${lead.id}&task_id=eq.${tarea.id}&respuesta=is.null&retirada_at=is.null`;
+  let abiertos = await json(await rest(`${elAbierto}&select=id,pide_archivos&order=pedida_at.desc&limit=1`));
+  if (!Array.isArray(abiertos)) abiertos = await json(await rest(`${elAbierto}&select=id&order=pedida_at.desc&limit=1`));
   if (!Array.isArray(abiertos)) return;   // sin la 187 no hay registro
+  // LO QUE APROBÓ ES LO QUE SE LE PIDIÓ: si el pedido era de una cotización
+  // nueva, queda esa, y no los archivos que el punto ya tenía de antes.
+  const dicho = { respuesta: r.campos.cliente_respuesta, respuesta_at: r.campos.cliente_respuesta_at,
+    respuesta_nota: r.campos.cliente_respuesta_nota, respuesta_ip: ip,
+    archivos: archivosAprobados(archivosDelPedido(suyos, abiertos[0]?.pide_archivos).archivos) };
   if (abiertos[0]) {
     await rest(`aprobaciones_cliente?id=eq.${abiertos[0].id}&respuesta=is.null`, { method: "PATCH", body: JSON.stringify(dicho) });
   } else {

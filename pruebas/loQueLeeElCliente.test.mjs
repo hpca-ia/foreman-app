@@ -108,7 +108,7 @@ test("el enlace del cliente pide solo las anotaciones marcadas, de los puntos qu
   assert.doesNotMatch(portal, /tarea_comentarios\?[^`]*autor/);
   // Si la 185 no está corrida no hay ninguna, y el enlace abre igual.
   assert.match(portal, /if \(!Array\.isArray\(notas\)\) notas = \[\];/);
-  assert.match(portal, /loDelCliente\(\{ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces, notas \}\)/);
+  assert.match(portal, /loDelCliente\(\{ tareas: marcadas, catalogo, lead, archivos: paraEl, enlaces, notas, pedidos: abiertos \}\)/);
   // La pantalla las dibuja todas, con su fecha; y abre contra la versión de antes.
   const pantalla = codigoDe("../src/portal/PortalCliente.jsx");
   assert.match(pantalla, /<Actualizaciones punto=\{t\} \/>/);

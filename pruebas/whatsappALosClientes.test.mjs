@@ -176,7 +176,7 @@ test("en el registro queda por dónde se le avisó, y si el WhatsApp llegó", ()
 test("mientras no esté configurado, la ventana queda como estaba; configurado, le escribe sola", () => {
   const ventana = codigoDe("../src/modules/leads/PedirAprobacion.jsx");
   // Se pregunta al abrir, junto con la gente y el enlace.
-  assert.match(ventana, /enlaceDelClienteDe\(lead\.id\), whatsappDeForeman\(\)\]\);/);
+  assert.match(ventana, /enlaceDelClienteDe\(lead\.id\), whatsappDeForeman\(\),/);
   assert.match(ventana, /setWa\(numero\.configurado\);/);
   // Por WhatsApp solo si el número de FOREMAN ya manda.
   assert.match(ventana, /const whatsapps = wa \? todos\.filter\(p => claves\.has\(p\.clave\) && p\.whatsapp\)\.map\(p => \(\{ nombre: p\.nombre, telefono: p\.whatsapp \}\)\) : \[\];/);

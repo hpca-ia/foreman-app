@@ -154,6 +154,26 @@ export function archivosAprobados(filas = []) {
 }
 
 /**
+ * LOS ARCHIVOS DE UN PEDIDO (migración 191). Hernán, 19/11/2026: «se sube la
+ * cotización, se debe poder pedir que se apruebe específicamente esa
+ * cotización, no lo anterior que ya estaba». El pedido puede decir cuáles
+ * archivos del punto son (`pide_archivos`, sus id). Si no lo dice —o los que
+ * decía ya no están: se borraron o se le ocultaron—, es todo el punto.
+ *
+ * La misma regla está en src/modules/leads/aprobaciones.js (archivosDelPedido).
+ *
+ * @param filas  las de `proyecto_archivos` del punto que el cliente ve
+ * @param pide   los id que pide el pedido, o nada
+ * @returns { archivos, soloAlgunos }
+ */
+export function archivosDelPedido(filas = [], pide = null) {
+  const todos = Array.isArray(filas) ? filas : [];
+  const ids = new Set((Array.isArray(pide) ? pide : []).map(Number).filter(n => Number.isFinite(n) && n > 0));
+  const suyos = ids.size ? todos.filter(a => ids.has(Number(a?.id))) : [];
+  return suyos.length && suyos.length < todos.length ? { archivos: suyos, soloAlgunos: true } : { archivos: todos, soloAlgunos: false };
+}
+
+/**
  * Lo que el cliente ya decidió, para leerlo en su enlace: cada pedido que
  * contestó, lo más nuevo arriba, con lo que dijo y los archivos que aprobó.
  * Los pedidos sin contestar no son decisiones: esos están en «Para aprobar».
@@ -260,6 +280,9 @@ const paraVer = (a, enlaces) => ({
  * @param archivos  las filas de `proyecto_archivos` marcadas para el cliente
  * @param enlaces   { storage_path: enlace temporal }
  * @param notas     las anotaciones de los puntos marcadas para el cliente
+ * @param pedidos   los pedidos de aprobación que siguen abiertos
+ *                  ([{ task_id, pide_archivos }]): si uno es de algunos
+ *                  archivos, el punto lleva en `aprobar.archivos` cuáles
  * @returns { lista, etapas, novedades, archivos }
  *   lista     · los puntos, cada uno con `etapa`, sus `actualizaciones` y sus `archivos`
  *   etapas    · [{ id, nombre, listas, total, actual }] en el orden del
@@ -268,7 +291,8 @@ const paraVer = (a, enlaces) => ({
  *               que se le mostró y los puntos que quedaron listos
  *   archivos  · los del proyecto en general, lo más nuevo arriba
  */
-export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {}, notas = [], hoy = hoyDeAca() } = {}) {
+export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos = [], enlaces = {}, notas = [], hoy = hoyDeAca(), pedidos = [] } = {}) {
+  const pideDe = new Map((Array.isArray(pedidos) ? pedidos : []).filter(p => p && p.task_id != null).map(p => [p.task_id, p.pide_archivos]));
   const filas = Array.isArray(tareas) ? tareas : [];
   const anotado = Array.isArray(notas) ? notas : [];
   const filaDe = new Map(filas.map(t => [t?.id, t]));
@@ -279,9 +303,13 @@ export function loDelCliente({ tareas = [], catalogo = [], lead = null, archivos
 
   const lista = listaDelCliente(filas, anotado, hoy).map(t => {
     const etapaId = etapaDe.get(t.id) || null;
+    const suyos = todos.filter(a => a.task_id === t.id);
+    // Lo que tiene que aprobar, si no es todo: esos archivos van con los botones.
+    const deEste = t.aprobar?.estado === "pendiente" ? archivosDelPedido(suyos, pideDe.get(t.id)) : { soloAlgunos: false };
     return {
       ...t, etapa_id: etapaId && nombreDe(etapaId) ? etapaId : null, etapa: etapaId ? nombreDe(etapaId) : null,
-      archivos: todos.filter(a => a.task_id === t.id).map(a => paraVer(a, enlaces)),
+      archivos: suyos.map(a => paraVer(a, enlaces)),
+      ...(deEste.soloAlgunos ? { aprobar: { ...t.aprobar, archivos: deEste.archivos.map(a => paraVer(a, enlaces)) } } : {}),
     };
   });
 

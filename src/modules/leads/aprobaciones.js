@@ -109,13 +109,65 @@ export function aQuienAvisar(personas = [], usuarios = []) {
     .sort((a, b) => Number(b.esCliente) - Number(a.esCliente) || a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
 }
 
-/** La fila con que un pedido entra al registro. Con su fecha límite, si se le puso. */
-export function filaDelPedido({ item, descripcion = "", quien = null, hasta = null } = {}) {
+/** Los id de archivos de un pedido, limpios: números, sin repetir. [] si no dice cuáles. */
+export const idsDeArchivos = lista => [...new Set((Array.isArray(lista) ? lista : []).map(Number).filter(n => Number.isFinite(n) && n > 0))];
+
+/**
+ * La fila con que un pedido entra al registro. Con su fecha límite, si se le
+ * puso, y con QUÉ ARCHIVOS se le piden aprobar (migración 191), si no son
+ * todos los del punto.
+ * @param archivos  los id de los archivos que se piden; nada es «todo el punto»
+ */
+export function filaDelPedido({ item, descripcion = "", quien = null, hasta = null, archivos = null } = {}) {
+  const pide = idsDeArchivos(archivos);
   return {
     lead_id: item.lead_id, task_id: item.id, titulo: texto(item.texto), descripcion: texto(descripcion) || null,
     pedida_por: quien?.id ?? null, pedida_nombre: quien?.name || null,
     ...(soloDia(hasta) ? { vence_el: soloDia(hasta) } : {}),
+    ...(pide.length ? { pide_archivos: pide } : {}),
   };
+}
+
+/**
+ * De los archivos de un punto, los de un pedido. Si el pedido no dice cuáles
+ * —o los que decía ya no están: se borraron o se le ocultaron—, son todos.
+ * @returns { archivos, soloAlgunos }
+ */
+export function archivosDelPedido(archivos = [], pide = null) {
+  const todos = Array.isArray(archivos) ? archivos : [];
+  const ids = new Set(idsDeArchivos(pide));
+  const suyos = ids.size ? todos.filter(a => ids.has(Number(a?.id))) : [];
+  return suyos.length && suyos.length < todos.length ? { archivos: suyos, soloAlgunos: true } : { archivos: todos, soloAlgunos: false };
+}
+
+/**
+ * QUÉ SE LE PIDE APROBAR, al abrir la ventana de un punto que ya tiene
+ * historia. Hernán, 19/11/2026: «el anterior ya se aprobó... se sube la
+ * cotización, se debe poder pedir que se apruebe específicamente esa».
+ *
+ * Mira el registro del punto: qué archivos ya aprobó —y cuándo— y cuáles son
+ * nuevos. Salen tildados los nuevos; si no hay historia, o no hay nada nuevo,
+ * todos. `abierto` son los del pedido que sigue esperando, para avisarle de
+ * nuevo diciendo lo mismo.
+ *
+ * @param archivos  los que el cliente ve en el punto
+ * @param filas     las de `aprobaciones_cliente` de ese punto
+ * @returns { aprobados: { [id]: fecha }, tildados: [id], abierto: [id] | null }
+ */
+export function queSePide(archivos = [], filas = []) {
+  const suyos = (Array.isArray(archivos) ? archivos : []).filter(a => a && a.id != null);
+  const aprobados = {};
+  let abierto = null;
+  for (const f of Array.isArray(filas) ? filas : []) {
+    if (f?.respuesta === "aprobado") {
+      for (const a of Array.isArray(f.archivos) ? f.archivos : []) {
+        if (a?.id != null && String(aprobados[a.id] || "") < String(f.respuesta_at || "")) aprobados[a.id] = f.respuesta_at || "";
+      }
+    }
+    if (f && !f.respuesta && !f.retirada_at) abierto = idsDeArchivos(f.pide_archivos).length ? idsDeArchivos(f.pide_archivos) : null;
+  }
+  const nuevos = suyos.filter(a => !(a.id in aprobados)).map(a => Number(a.id));
+  return { aprobados, tildados: nuevos.length ? nuevos : suyos.map(a => Number(a.id)), abierto };
 }
 
 /**
@@ -203,8 +255,9 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = h
     const estado = ["aprobado", "observado"].includes(f.respuesta) ? f.respuesta : f.retirada_at ? "retirado" : "pendiente";
     const copiados = Array.isArray(f.archivos) ? f.archivos : [];
     // Contestado: lo que tenía al contestar. Esperando: lo que tiene hoy.
+    // Y si el pedido es de algunos archivos (migración 191), esos.
     const archivos = estado === "pendiente"
-      ? (archivosDeAhora[f.task_id] || []).map(a => ({ id: a.id, nombre: texto(a.nombre) || "Archivo", storage_path: a.storage_path, subido_at: a.created_at || null }))
+      ? archivosDelPedido(archivosDeAhora[f.task_id] || [], f.pide_archivos).archivos.map(a => ({ id: a.id, nombre: texto(a.nombre) || "Archivo", storage_path: a.storage_path, subido_at: a.created_at || null }))
       : copiados.map(a => ({ id: a?.id ?? null, nombre: texto(a?.nombre) || "Archivo", storage_path: a?.storage_path || null, subido_at: a?.subido_at || null }));
     return {
       id: f.id, numero: i + 1, task_id: f.task_id ?? null, titulo: texto(f.titulo), descripcion: texto(f.descripcion),
@@ -212,6 +265,8 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = h
       avisos: (Array.isArray(f.avisos) ? f.avisos : []).map(unAviso),
       respuesta_at: estado === "retirado" ? f.retirada_at : f.respuesta_at || null,
       nota: texto(f.respuesta_nota), archivos,
+      // Se le pidió aprobar esos archivos y no todo el punto.
+      soloAlgunos: estado === "pendiente" ? archivosDelPedido(archivosDeAhora[f.task_id] || [], f.pide_archivos).soloAlgunos : idsDeArchivos(f.pide_archivos).length > 0,
       vigente: f.task_id == null || ultimoDe.get(f.task_id) === f.id,
       // El plazo que se le dio en ESE pedido, y si se le pasó sin contestar.
       vence_el: soloDia(f.vence_el) || null,

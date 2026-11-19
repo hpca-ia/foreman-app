@@ -29,6 +29,7 @@ export const SIN_171 = "Falta correr la migración 171 en Supabase.";
 export const SIN_185 = "Para que el cliente lea las anotaciones falta correr la migración 185 en Supabase.";
 export const SIN_186 = "Para pedirle la aprobación al cliente falta correr la migración 186 en Supabase.";
 export const SIN_187 = "Para llevar el registro de aprobaciones falta correr la migración 187 en Supabase.";
+export const SIN_191 = "Para pedirle que apruebe un archivo en particular falta correr la migración 191 en Supabase.";
 export const SIN_188 = "Para ponerle fecha límite a una aprobación falta correr la migración 188 en Supabase.";
 
 /**
@@ -120,7 +121,7 @@ export async function cargarTareas(leadId) {
  * @param hasta        hasta qué día tiene para aprobar (AAAA-MM-DD), o nada
  * @returns null o el error
  */
-export async function pedirAprobacion(item, pedir, quien, { descripcion = "", hasta = null } = {}) {
+export async function pedirAprobacion(item, pedir, quien, { descripcion = "", hasta = null, archivos = null } = {}) {
   const plazo = pedir ? String(hasta || "").slice(0, 10) || null : null;
   const campos = pedir
     ? { cliente_aprueba: true, cliente_respuesta: null, cliente_respuesta_at: null, cliente_respuesta_nota: null }
@@ -135,11 +136,19 @@ export async function pedirAprobacion(item, pedir, quien, { descripcion = "", ha
   await supabase.from("aprobaciones_cliente")
     .update({ retirada_at: new Date().toISOString(), retirada_nombre: quien?.name || null })
     .eq("task_id", item.id).is("respuesta", null).is("retirada_at", null);
+  let sinArchivos = false;
   // La hora del pedido se dice acá: de ella sale el orden y el número de cada
   // pedido, y no puede depender de que la base la ponga sola.
   if (pedir) {
     const fila = { ...filaDelPedido({ item, descripcion, quien, hasta: sinPlazo ? null : plazo }), pedida_at: new Date().toISOString() };
-    const { error: eFila } = await supabase.from("aprobaciones_cliente").insert(fila);
+    // QUÉ ARCHIVOS SE PIDEN (migración 191), si no son todos los del punto.
+    const { pide_archivos } = filaDelPedido({ item, archivos });
+    let { error: eFila } = await supabase.from("aprobaciones_cliente").insert(pide_archivos ? { ...fila, pide_archivos } : fila);
+    // Sin la 191 el pedido entra igual, por todo el punto, y se dice.
+    if (eFila && pide_archivos && falta(eFila) && /pide_archivos/.test(eFila.message || "")) {
+      sinArchivos = true;
+      ({ error: eFila } = await supabase.from("aprobaciones_cliente").insert(fila));
+    }
     // Si lo que falta es solo la columna del plazo, la fila entra sin él.
     if (eFila && fila.vence_el && falta(eFila)) { const { vence_el, ...sinEl } = fila; await supabase.from("aprobaciones_cliente").insert(sinEl); }
   }
@@ -149,7 +158,18 @@ export async function pedirAprobacion(item, pedir, quien, { descripcion = "", ha
       : `Dejó de pedirle al cliente que apruebe "${item.texto}"`,
     quien, extra: { task_id: item.id },
   });
+  if (sinArchivos) return `Quedó pedido, pero por todos los archivos del punto: ${SIN_191}`;
   return plazo && sinPlazo ? `Quedó pedido, pero sin fecha límite: ${SIN_188}` : null;
+}
+
+/**
+ * El registro de UN punto: qué se le pidió antes y qué contestó. De acá sale
+ * qué archivos ya aprobó y cuáles son nuevos. Sin la 187, vacío.
+ * @returns las filas de `aprobaciones_cliente` de ese punto, en orden
+ */
+export async function pedidosDelPunto(taskId) {
+  const { data, error } = await supabase.from("aprobaciones_cliente").select("*").eq("task_id", taskId).order("pedida_at");
+  return error ? [] : data || [];
 }
 
 /**
