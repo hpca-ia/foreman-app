@@ -17,9 +17,12 @@
 //   · Lo que sale de una orden de cambio no se toca: eso es lo que se cobra
 //     de la orden, no lo que se ganó comprando.
 //   · Solo las órdenes que cuentan: aprobadas, no anuladas, no reemplazadas.
+//   · Un beneficio contra VARIOS rubros no se toca: se midió el total contra
+//     la suma, no una cantidad de un rubro, y no hay cantidad que achicar.
 
 import { ordenCuenta } from "./cuentaOrdenCambio.js";
 import { codigoDeOrden } from "./presupuestoParaGastar.js";
+import { sonVarios } from "./variosRubros.js";
 
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
@@ -66,7 +69,7 @@ export function beneficiosSobreLoQueQueda(beneficios = [], { rubros = [], ordene
     const r = rubroDe.get(id);
     if (!r || !(n(r.cantidad) > 0)) continue;
     const queda = Math.max(0, c4(n(r.cantidad) - q.cantidad));
-    const suyos = (beneficios || []).filter(b => String(b.obra_rubro_id) === id && !deOrden(b) && n(b.cantidad) > 0);
+    const suyos = (beneficios || []).filter(b => String(b.obra_rubro_id) === id && !deOrden(b) && !sonVarios(b) && n(b.cantidad) > 0);
     const total = suyos.reduce((t, b) => t + n(b.cantidad), 0);
     if (total > queda + 0.0001) factor[id] = { f: total > 0 ? queda / total : 0, queda, ...q, unidad: r.unidad || "" };
   }
@@ -74,7 +77,7 @@ export function beneficiosSobreLoQueQueda(beneficios = [], { rubros = [], ordene
   return (beneficios || []).map(b => {
     const k = String(b.obra_rubro_id);
     const a = factor[k];
-    if (!a || deOrden(b) || !(n(b.cantidad) > 0)) return b;
+    if (!a || deOrden(b) || sonVarios(b) || !(n(b.cantidad) > 0)) return b;
     return {
       ...b,
       cantidad: c4(n(b.cantidad) * a.f),

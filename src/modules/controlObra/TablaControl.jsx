@@ -257,7 +257,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
   // lado del renglón alcanza; el detalle está en Beneficios.
   // Solo lo ya comprado: un beneficio previsto sale de una proforma y todavía
   // puede no pasar.
-  const beneficioDe = netoPorRubro(beneficios);
+  const beneficioDe = netoPorRubro(beneficios, rubros);
   // Lo que cada rubro recibió por la puerta de la caja chica.
   const deCajaDe = cajaChicaPorRubro(facturas, asignaciones);
   // Lo pagado de cada factura, para poder decir en cada renglón qué parte

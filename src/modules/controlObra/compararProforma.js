@@ -1,4 +1,5 @@
 import { baseSinIva } from "./contratoDeLaObra.js";
+import { rubrosDe, grupoDe } from "./variosRubros.js";
 // Lo que cotizan hoy contra lo que se presupuestó.
 //
 // Entre que se arma el presupuesto y que se compra pasan meses, y el precio no
@@ -33,8 +34,33 @@ export function compararContraPresupuesto(items = [], rubros = []) {
   const algunoConCosto = rubros.some(r => n(r.costo_unitario) > 0);
 
   const lineas = items.map(it => {
-    const r = it.rubro_id != null ? porId.get(Number(it.rubro_id)) : null;
     const cotizado = centavos(it.monto);
+    // CONTRA VARIOS RUBROS: EL TOTAL CONTRA LA SUMA (variosRubros.js). Una
+    // compra que sirve a más de un rubro se mide contra lo que suman, sin
+    // IVA. Ni precio unitario ni cantidad: pueden tener unidades distintas.
+    const grupo = rubrosDe(it).length > 1 ? grupoDe(rubrosDe(it), rubros) : null;
+    if (grupo && grupo.rubros.length > 1) {
+      const presupuestado = grupo.presupuestado;
+      const diferencia = centavos(presupuestado - cotizado);
+      // El costo cargado, solo si lo tienen todos: sumar los que hay contra
+      // el total de la cotización compararía una parte contra el todo.
+      const todosConCosto = grupo.rubros.every(x => n(x.costo_unitario) > 0);
+      const costoCargado = todosConCosto ? centavos(grupo.rubros.reduce((t, x) => t + n(x.costo_unitario) * n(x.cantidad), 0)) : null;
+      const vsCosto = costoCargado == null ? null : centavos(costoCargado - cotizado);
+      return {
+        ...it,
+        rubro: grupo.rubros[0], rubrosDelGrupo: grupo.rubros, varios: true,
+        cotizado, presupuestado, costoCargado, puCosto: null, vsCosto,
+        pctCosto: costoCargado ? Math.round((vsCosto / costoCargado) * 1000) / 10 : null,
+        delRubro: presupuestado, cantidadRubro: null, unidadRubro: "", puRubro: null,
+        puProforma: n(it.cantidad) ? Math.round((cotizado / n(it.cantidad)) * 10000) / 10000 : null,
+        porUnitario: false, diferencia,
+        pct: presupuestado ? Math.round((diferencia / presupuestado) * 1000) / 10 : null,
+      };
+    }
+    // Un solo rubro: el de la lista si es lo único que quedó de ella, o el de siempre.
+    const unico = grupo?.rubros[0]?.id ?? it.rubro_id ?? rubrosDe(it)[0] ?? null;
+    const r = unico != null ? porId.get(Number(unico)) : null;
     // CONTRA EL RUBRO SIN IVA, porque la proforma ya se lee sin IVA.
     //
     // Los rubros base del control están cargados CON el IVA adentro —en Diners
@@ -122,6 +148,9 @@ export function compararContraPresupuesto(items = [], rubros = []) {
     // Cuántos se compararon por precio unitario porque las cantidades no son
     // las mismas. Hay que decirlo: es otra cuenta, aunque dé un número igual.
     porUnitario: lineas.filter(l => l.porUnitario).length,
+    // Cuántos van contra varios rubros a la vez: ahí se comparó el total
+    // contra la suma, que también es otra cuenta.
+    conVarios: lineas.filter(l => l.varios).length,
     // ── LO QUE FALTA SABER ────────────────────────────────────────────────
     //
     // Cuántos de los renglones emparejados tienen un costo cargado contra el

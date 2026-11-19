@@ -209,7 +209,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     const { data: pg } = await supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").eq("obra_id", obra.id);
     setPagos(pg || []);
     const { data: ben } = await supabase.from("obra_beneficios")
-      .select("id,obra_rubro_id,descripcion,cantidad,unidad,presupuestado,real,estado,origen,orden_cambio_id").eq("obra_id", obra.id);
+      .select("*").eq("obra_id", obra.id);
     setBeneficios(ben || []);
     // Las órdenes y lo que quitan: lo ya aprobado deja beneficio sobre la
     // cantidad que SIGUE aprobada, y para eso hay que saber cuánto le sacó

@@ -52,6 +52,8 @@ export function cuentaAMano(f = {}, rubros = []) {
     unidad: f.unidad || null,
     monto: n(f.real),
     rubro_id: f.obra_rubro_id ? Number(f.obra_rubro_id) : null,
+    // Contra varios rubros: el total contra la suma (variosRubros.js).
+    ...(Array.isArray(f.rubros) && f.rubros.length > 1 ? { rubros: f.rubros } : {}),
   }], rubros).lineas[0];
   const escrito = n(f.presupuestado) > 0;
   const presupuestado = escrito ? c2(f.presupuestado) : l.presupuestado;
@@ -63,12 +65,43 @@ export function cuentaAMano(f = {}, rubros = []) {
   };
 }
 
+/**
+ * EL PRECIO REAL, CORREGIDO A MANO.
+ *
+ * Hernán, 18/11/2026: «sería importante poder ingresar precios o gastos
+ * manualmente para tener una idea hasta que vaya todo a control de obra y
+ * tener ya el total de beneficio real... o pérdida». Y cómo: «un solo precio
+ * real» por comparación —el precio final al que se compró, que se corrige
+ * cuando cambia—.
+ *
+ * Una cotización dice lo que va a costar; lo que costó se sabe después, y casi
+ * nunca es el mismo número. El precio real se escribe sobre el beneficio ya
+ * guardado, sin abrir el formulario, y lo que decía la cotización no se
+ * pierde: queda en `cotizado` la primera vez que se le escribe encima.
+ *
+ * @param b        el beneficio, como está guardado
+ * @param escrito  lo que se tipeó
+ * @returns lo que hay que guardar —{ real } y, la primera vez, { cotizado }—,
+ *          o null si no cambió nada o no es un precio
+ */
+export function cambioDePrecio(b, escrito) {
+  const texto = String(escrito ?? "").trim().replace(",", ".");
+  if (texto === "" || !Number.isFinite(Number(texto)) || Number(texto) < 0) return null;
+  const nuevo = c2(texto);
+  if (Math.abs(nuevo - n(b?.real)) < 0.005) return null;
+  return { real: nuevo, ...(b?.cotizado == null && n(b?.real) > 0 ? { cotizado: c2(b.real) } : {}) };
+}
+
 /** De dónde salió el número, dicho donde se lo ve. */
 export function explicar(c, fmt = String) {
   if (c.presupuestado == null) {
     return "Sin rubro no hay contra qué comparar: elegí uno en el presupuesto o escribí lo presupuestado a mano.";
   }
   if (c.escrito) return `Contra lo que escribiste a mano: $${fmt(c.presupuestado)}.`;
+  if (c.varios) {
+    return `Contra la suma de los ${c.rubrosDelGrupo.length} rubros: $${fmt(c.presupuestado)} sin IVA. `
+      + "Se compara el total de la cotización contra esa suma; no el precio unitario, porque son rubros distintos.";
+  }
   if (c.porUnitario) {
     return `El rubro son ${fmt(c.cantidadRubro)} ${c.unidadRubro} a $${fmt(c.puRubro)}; `
       + `se compara el precio unitario: $${fmt(c.puRubro)} × ${fmt(c.cantidad)} = $${fmt(c.presupuestado)}.`;

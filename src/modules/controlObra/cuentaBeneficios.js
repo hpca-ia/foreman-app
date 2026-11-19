@@ -1,4 +1,5 @@
 import { baseSinIva } from "./contratoDeLaObra.js";
+import { rubrosDe, grupoDe } from "./variosRubros.js";
 
 // Las cuentas de los beneficios de la obra.
 //
@@ -43,12 +44,22 @@ export function totales(beneficios = []) {
 /** ¿Todavía es una promesa? Lo que vino de una proforma lo es hasta que se compra. */
 export const esPrevisto = b => String(b?.estado || "confirmado") === "previsto";
 
-/** Lo que de verdad dejó cada rubro: solo lo ya comprado. */
-export function netoPorRubro(beneficios = []) {
+/**
+ * Lo que de verdad dejó cada rubro: solo lo ya comprado.
+ *
+ * Un beneficio contra varios rubros se reparte entre ellos según lo que pesa
+ * cada uno en la suma; para eso hacen falta los `rubros`. Sin ellos va entero
+ * al primero, que es lo que se hacía.
+ */
+export function netoPorRubro(beneficios = [], rubros = []) {
   const mapa = {};
   beneficios.forEach(b => {
     if (!b.obra_rubro_id || esPrevisto(b)) return;
-    mapa[b.obra_rubro_id] = c2((mapa[b.obra_rubro_id] || 0) + n(b.presupuestado) - n(b.real));
+    const neto = n(b.presupuestado) - n(b.real);
+    const ids = rubrosDe(b);
+    const { pesos, rubros: suyos } = ids.length > 1 ? grupoDe(ids, rubros) : { pesos: {}, rubros: [] };
+    if (suyos.length > 1) suyos.forEach(r => { mapa[r.id] = c2((mapa[r.id] || 0) + neto * pesos[r.id]); });
+    else mapa[b.obra_rubro_id] = c2((mapa[b.obra_rubro_id] || 0) + neto);
   });
   return mapa;
 }

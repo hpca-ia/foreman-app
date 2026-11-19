@@ -8,7 +8,8 @@ import { compararContraPresupuesto } from "./compararProforma";
 import { derivar, cuentaAMano, explicar } from "./beneficioAMano.js";
 import { LECTURA, textoDeNova } from "../../lib/modelos";
 import { beneficiosDe, guardarVarios, guardarBeneficio, borrarBeneficio, totalesPorOrigen, esDeOrden, hojaComoTexto, esPrevisto, guardarProforma, enlacesDeProformas, seguidosDe, seguirRubro, dejarDeSeguir } from "./beneficios";
-import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
+import { resultadoDeLaObra, notaDeControl } from "./resultadoDeLaObra.js";
+import { rubrosDe, conmutar, paraGuardar, comoSeLlaman } from "./variosRubros.js";
 import { ordenesMudas, contraQueSeMide, porProveedor } from "./cuentaBeneficios.js";
 import { beneficiosSobreLoQueQueda, notaDelAjuste } from "./beneficiosConOrdenes.js";
 import { eficienciaDeRubros, porQueNoSabe, comoSeDice } from "./eficienciaDeRubros.js";
@@ -22,6 +23,7 @@ import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
 // El presupuesto completo al costado, el mismo de Diferencias: cantidad,
 // unitario y total de cada rubro a la vista mientras se elige contra cuál va.
 import Presupuesto from "./PanelPresupuesto";
+import PrecioReal from "./PrecioReal";
 
 // Lo que cotizan hoy contra lo que se presupuestó.
 //
@@ -36,6 +38,20 @@ import Presupuesto from "./PanelPresupuesto";
 // precio no salta, porque nadie busca malas noticias.
 
 const n = v => Number(v) || 0;
+
+// Los rubros del formulario de carga a mano: la lista, y el primero donde lo
+// busca todo lo demás. Con más de uno no hay cantidad ni precio unitario que
+// comparar —son unidades distintas—, así que se vacían.
+//
+// Y LO PRESUPUESTADO SE VUELVE A CALCULAR. Al corregir un beneficio guardado
+// el casillero trae lo que se guardó, y lo escrito ahí manda: sacándole un
+// rubro seguiría comparando contra la suma vieja. Cambiar los rubros lo vacía
+// —vuelve a valer la cuenta de los rubros—; quien quiera otro número lo
+// escribe después.
+const conSusRubros = (a, ids) => ({
+  ...a, rubros: ids, obra_rubro_id: ids[0] ? String(ids[0]) : "", presupuestado: "",
+  ...(ids.length > 1 ? { cantidad: "", unidad: "", unitario: "" } : {}),
+});
 
 export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, currentUser, modalidad = null }) {
   const [items, setItems] = useState([]);
@@ -117,28 +133,30 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   // SOBRE LO QUE QUEDA. Si una orden aprobada le quitó cantidad a un rubro, su
   // beneficio de compra se cuenta sobre la cantidad que sigue. `guardados` es
   // lo cargado y es lo que se corrige; `contados` es lo que se suma.
-  const contados = useMemo(() => beneficiosSobreLoQueQueda(guardados, { rubros, ordenes, lineasDeOrdenes }),
+  const sobreLoQueQueda = useMemo(() => beneficiosSobreLoQueQueda(guardados, { rubros, ordenes, lineasDeOrdenes }),
     [guardados, rubros, ordenes, lineasDeOrdenes]);
-  const porOrigen = totalesPorOrigen(contados);
-  const t = porOrigen.obra;
   // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
   // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
   const comoSeCobra = modalidad || modalidadDe(obra);
   const deltas = useMemo(() => (Object.keys(ejecutado).length
     ? liquidacionDeLaObra({ obra: { ...obra, modalidad: comoSeCobra }, rubros, ordenes, lineasDeOrdenes, ejecutado }).deltas
     : {}), [ejecutado, obra, comoSeCobra, rubros, ordenes, lineasDeOrdenes]);
-  const res = resultadoDeLaObra({ beneficios: contados, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes, deltas, modalidad: comoSeCobra });
+  const res = resultadoDeLaObra({ beneficios: sobreLoQueQueda, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes, deltas, modalidad: comoSeCobra });
+  // MANDA CONTROL DE OBRA: donde Control ya decidió cómo le fue al rubro, lo
+  // cargado a mano deja de sumar (resultadoDeLaObra.js). `contados` es eso.
+  const contados = res.contados;
+  const porOrigen = totalesPorOrigen(contados);
+  const t = porOrigen.obra;
   // UN RUBRO SE SIGUE UNA SOLA VEZ, PERO PUEDE TENER VARIOS INGRESOS. Son dos
   // cosas distintas: el seguimiento mide sus facturas; un ingreso es una
   // compra o una proforma cargada contra él, y puede haber tres. En el
   // presupuesto se dice qué hay ya sobre cada rubro.
-  const ingresosDe = id => guardados.filter(b => String(b.obra_rubro_id) === String(id)).length;
+  const ingresosDe = id => guardados.filter(b => rubrosDe(b).includes(Number(id))).length;
   const marcasAMano = {};
-  guardados.forEach(b => {
-    if (!b.obra_rubro_id) return;
-    const k = String(b.obra_rubro_id), cuantos = ingresosDe(k);
+  guardados.forEach(b => rubrosDe(b).forEach(id => {
+    const k = String(id), cuantos = ingresosDe(k);
     marcasAMano[k] = { texto: `${cuantos} ${cuantos === 1 ? "ingreso" : "ingresos"}`, bloquea: false };
-  });
+  }));
   seguidos.forEach(sg => { marcasAMano[String(sg.obra_rubro_id)] = { ...(marcasAMano[String(sg.obra_rubro_id)] || {}),
     texto: [marcasAMano[String(sg.obra_rubro_id)]?.texto, "en seguimiento"].filter(Boolean).join(" · "), bloquea: false }; });
   const marcasParaSeguir = Object.fromEntries(seguidos.map(sg => [String(sg.obra_rubro_id), { texto: "ya se sigue", bloquea: true }]));
@@ -353,7 +371,7 @@ Rubros de la obra: ${lista}`;
     }
 
     const res = await guardarVarios(van.map(l => ({
-      obra_id: obra.id, obra_rubro_id: l.rubro_id ?? null,
+      obra_id: obra.id, ...paraGuardar(rubrosDe(l)),
       descripcion: l.descripcion, cantidad: n(l.cantidad) || null, unidad: l.unidad || null,
       presupuestado: n(l.presupuestado), real: n(l.cotizado),
       proveedor: proveedor || null, origen: "proforma",
@@ -380,7 +398,10 @@ Rubros de la obra: ${lista}`;
     // presupuesto ya dice. Lo escrito, si hay, manda: sirve para el detalle
     // —la marca, qué se negoció— que el rubro no tiene.
     const rubro = vivos.find(x => String(x.id) === String(f.obra_rubro_id));
-    const descripcion = String(f.descripcion || "").trim() || (rubro ? rubro.descripcion : "");
+    // Contra varios rubros, si no se escribió qué es, se llama como ellos.
+    const susRubros = rubrosDe(f);
+    const descripcion = String(f.descripcion || "").trim()
+      || (susRubros.length > 1 ? comoSeLlaman(susRubros, vivos, { tope: 3 }) : rubro ? rubro.descripcion : "");
     if (!descripcion) { setError("Elegí el rubro en el presupuesto, o escribí qué se compró."); return; }
     setOcupado(true); setError("");
     // LA MISMA CUENTA QUE DIFERENCIAS. La cantidad medida en obra casi nunca
@@ -395,9 +416,11 @@ Rubros de la obra: ${lista}`;
     if (f.archivo) papel = await guardarProforma(obra.id, f.archivo);
     const guardado = await guardarBeneficio({
       id: f.id,
-      obra_id: obra.id, obra_rubro_id: f.obra_rubro_id ? Number(f.obra_rubro_id) : null,
+      obra_id: obra.id, ...paraGuardar(susRubros),
       descripcion,
-      cantidad: n(f.cantidad) || null, unidad: String(f.unidad || "").trim() || null,
+      // Contra varios rubros no hay una cantidad: son unidades distintas.
+      cantidad: susRubros.length > 1 ? null : n(f.cantidad) || null,
+      unidad: susRubros.length > 1 ? null : String(f.unidad || "").trim() || null,
       presupuestado: c.presupuestado ?? 0,
       real: n(f.real), proveedor: f.proveedor || null,
       // La marca [dif:N] es de la máquina —ata la fila a su análisis— y se
@@ -442,6 +465,7 @@ Rubros de la obra: ${lista}`;
     const nota = String(b.nota || "");
     setAMano({
       id: b.id, descripcion: b.descripcion || "", obra_rubro_id: b.obra_rubro_id ? String(b.obra_rubro_id) : "",
+      rubros: rubrosDe(b),
       cantidad: cantidad ? String(b.cantidad) : "", unidad: b.unidad || "",
       unitario: cantidad ? String(Math.round((n(b.real) / cantidad) * 10000) / 10000) : "",
       real: b.real == null ? "" : String(b.real), presupuestado: b.presupuestado == null ? "" : String(b.presupuestado),
@@ -690,17 +714,49 @@ Rubros de la obra: ${lista}`;
                       el rubro son {l.cantidadRubro} {l.unidadRubro} · se compara el precio unitario
                     </span>
                   )}
+                  {l.varios && (
+                    <span className="contra-la-suma" style={{ display: "block", fontSize: 9.5, color: colors.warning }}>
+                      contra la suma de {l.rubrosDelGrupo.length} rubros · se compara el total
+                    </span>
+                  )}
                 </span>
-                <select value={l.rubro_id ?? ""}
-                  onChange={e => setItems(xs => xs.map((x, j) => j === i
-                    ? { ...x, rubro_id: e.target.value ? Number(e.target.value) : null } : x))}
-                  style={{ ...inputStyle, padding: "4px 6px", fontSize: 11,
-                    color: l.rubro_id ? colors.ink : colors.warning }}>
-                  <option value="">¿contra qué rubro?</option>
-                  {vivos.map(x => (
-                    <option key={x.id} value={x.id}>{x.numero} · {x.descripcion.slice(0, 44)}</option>
-                  ))}
-                </select>
+                {/* CONTRA UNO O CONTRA VARIOS: el primero en el desplegable de
+                    siempre; los que se suman, debajo, cada uno con su ×. */}
+                <div className="rubros-del-renglon" style={{ minWidth: 0, display: "grid", gap: 3 }}>
+                  <select value={l.rubro_id ?? ""}
+                    onChange={e => setItems(xs => xs.map((x, j) => j === i
+                      ? { ...x, ...paraGuardar([e.target.value ? Number(e.target.value) : null, ...rubrosDe(x).slice(1)], "rubro_id") } : x))}
+                    style={{ ...inputStyle, padding: "4px 6px", fontSize: 11,
+                      color: l.rubro_id ? colors.ink : colors.warning }}>
+                    <option value="">¿contra qué rubro?</option>
+                    {vivos.map(x => (
+                      <option key={x.id} value={x.id}>{x.numero} · {x.descripcion.slice(0, 44)}</option>
+                    ))}
+                  </select>
+                  {rubrosDe(l).slice(1).map(id => {
+                    const otro = vivos.find(x => Number(x.id) === id);
+                    return (
+                      <span key={id} className="otro-rubro" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: colors.inkSoft, minWidth: 0 }}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          + {otro ? `${otro.numero} · ${otro.descripcion}` : "un rubro que ya no está"}
+                        </span>
+                        <button title="Sacar este rubro" aria-label="Sacar este rubro"
+                          onClick={() => setItems(xs => xs.map((x, j) => j === i ? { ...x, ...paraGuardar(rubrosDe(x).filter(k => k !== id), "rubro_id") } : x))}
+                          style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 0 }}><X size={11} /></button>
+                      </span>
+                    );
+                  })}
+                  {l.rubro_id != null && (
+                    <select className="sumar-rubro" value="" aria-label="Sumar otro rubro a este renglón"
+                      onChange={e => { const id = Number(e.target.value); if (id) setItems(xs => xs.map((x, j) => j === i ? { ...x, ...paraGuardar([...rubrosDe(x), id], "rubro_id") } : x)); }}
+                      style={{ ...inputStyle, padding: "2px 6px", fontSize: 10.5, color: colors.brand, borderStyle: "dashed" }}>
+                      <option value="">+ sumar otro rubro</option>
+                      {vivos.filter(x => !rubrosDe(l).includes(Number(x.id))).map(x => (
+                        <option key={x.id} value={x.id}>{x.numero} · {x.descripcion.slice(0, 44)}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <span style={{ textAlign: "right", color: colors.muted }}>
                   {l.presupuestado == null ? "—" : `$${fmt(l.presupuestado)}`}
                   {l.porUnitario && (
@@ -809,7 +865,7 @@ Rubros de la obra: ${lista}`;
           {/* De qué está hecho, cuando no es solo una cosa: lo ganado
               comprando, lo perdido en rubros pasados, lo que dejaron los
               rubros seguidos ya terminados. */}
-          {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0 || res.aprobados.total !== 0) && (
+          {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0 || res.aprobados.total !== 0 || res.segunControl.total !== 0) && (
             <Tarjeta label={`COMPRANDO MEJOR · ${res.cuantosConPapel}`} valor={res.conPapel}
               color={res.conPapel >= 0 ? colors.success : colors.danger} />
           )}
@@ -819,6 +875,11 @@ Rubros de la obra: ${lista}`;
           )}
           {res.ganadoEnSeguidos !== 0 && (
             <Tarjeta label="RUBROS SEGUIDOS, TERMINADOS" valor={res.ganadoEnSeguidos} color={colors.success} />
+          )}
+          {/* MANDA CONTROL: lo que dejaron, según sus facturas, los rubros
+              con un beneficio cargado que ya terminaron a favor. */}
+          {res.segunControl.total !== 0 && (
+            <Tarjeta label={`SEGÚN CONTROL DE OBRA · ${res.segunControl.filas.length}`} valor={res.segunControl.total} color={colors.success} />
           )}
           {res.aprobados.filas.length > 0 && (
             <Tarjeta label={`YA APROBADO, CON SU COSTO · ${res.aprobados.cuantos}`} valor={res.aprobados.total}
@@ -845,12 +906,13 @@ Rubros de la obra: ${lista}`;
             Cuatro tarjetas con cuatro números no dicen cuáles suman y cuáles
             no: el que mira tiene que hacer la cuenta para saber si lo ya
             aprobado está adentro del resultado. Se escribe la cuenta. */}
-        {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0 || res.aprobados.total !== 0) && (
-          <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.6, marginBottom: 10 }}>
+        {(res.perdidasTotal !== 0 || res.ganadoEnSeguidos !== 0 || res.aprobados.total !== 0 || res.segunControl.total !== 0) && (
+          <div className="la-cuenta-del-resultado" style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.6, marginBottom: 10 }}>
             <strong style={{ color: colors.ink }}>El resultado es la suma de:</strong>{" "}
             comprando mejor <strong>${fmt(res.conPapel)}</strong>
             {res.aprobados.total !== 0 && <> · ya aprobado, con su costo <strong>{res.aprobados.total < 0 ? "−" : "+"}${fmt(Math.abs(res.aprobados.total))}</strong></>}
             {res.ganadoEnSeguidos !== 0 && <> · rubros seguidos y terminados <strong>+${fmt(res.ganadoEnSeguidos)}</strong></>}
+            {res.segunControl.total !== 0 && <> · según Control de obra, rubros terminados <strong>+${fmt(res.segunControl.total)}</strong></>}
             {res.perdidasTotal !== 0 && <> · rubros pasados <strong style={{ color: colors.danger }}>−${fmt(Math.abs(res.perdidasTotal))}</strong></>}
             {" "}= <strong style={{ color: res.neto >= 0 ? colors.success : colors.danger }}>
               {res.neto < 0 ? "−" : ""}${fmt(Math.abs(res.neto))}</strong>.
@@ -1207,24 +1269,38 @@ Rubros de la obra: ${lista}`;
                 no dejaba ver ni la cantidad ni el precio, y había que saber
                 el nombre exacto: el panel del costado es el mismo de
                 Diferencias, con número, descripción, cantidad × unitario. */}
+            {/* CONTRA UNO O CONTRA VARIOS (Hernán, 18/11/2026: «la podría
+                comparar con un rubro del presupuesto o varios rubros; al
+                momento solo me deja comparar con uno»). Cada rubro elegido
+                queda a la vista con su × para sacarlo; con más de uno se
+                compara el total de la cotización contra lo que suman. */}
             {(() => {
-              const rub = vivos.find(x => String(x.id) === String(aMano.obra_rubro_id));
+              const suyos = rubrosDe(aMano).map(id => vivos.find(x => Number(x.id) === id)).filter(Boolean);
               return (
-                <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                <div className="contra-que-rubros" style={{ gridColumn: "1 / -1", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap",
                   fontSize: 11.5, color: colors.inkSoft }}>
-                  {rub ? (
-                    <span style={{ color: colors.ink }}>
-                      <strong>{rub.numero}</strong> · {rub.descripcion}
-                      <span style={{ color: colors.muted }}> · {fmt(rub.cantidad)} {rub.unidad || ""}</span>
+                  {suyos.map(rub => (
+                    <span key={rub.id} className="rubro-elegido" style={{ color: colors.ink, display: "inline-flex", alignItems: "center", gap: 5,
+                      ...(suyos.length > 1 ? { background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "2px 4px 2px 9px" } : {}) }}>
+                      <span>
+                        <strong>{rub.numero}</strong> · {suyos.length > 1 ? String(rub.descripcion || "").slice(0, 38) : rub.descripcion}
+                        <span style={{ color: colors.muted }}> · {fmt(rub.cantidad)} {rub.unidad || ""}</span>
+                      </span>
+                      {suyos.length > 1 && (
+                        <button className="sacar-rubro" title="Sacar este rubro de la comparación" aria-label={`Sacar el rubro ${rub.numero}`}
+                          onClick={() => setAMano(a => conSusRubros(a, conmutar(rubrosDe(a), rub.id)))}
+                          style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 2 }}><X size={11} /></button>
+                      )}
                     </span>
-                  ) : <span style={{ color: colors.muted }}>¿contra qué rubro del presupuesto?</span>}
-                  <button onClick={() => setVerPresupuesto(v => !v)}
+                  ))}
+                  {!suyos.length && <span style={{ color: colors.muted }}>¿contra qué rubro del presupuesto? Puede ser uno o varios.</span>}
+                  <button className="elegir-rubros" onClick={() => setVerPresupuesto(v => !v)}
                     style={{ background: "none", border: `1px solid ${colors.brand}`, color: colors.brand, borderRadius: 14,
                       padding: "2px 10px", fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
-                    {verPresupuesto ? "ocultar el presupuesto" : rub ? "cambiar de rubro" : "elegir en el presupuesto"}
+                    {verPresupuesto ? "ocultar el presupuesto" : suyos.length ? "+ sumar otro rubro" : "elegir en el presupuesto"}
                   </button>
-                  {rub && (
-                    <button onClick={() => setAMano(a => ({ ...a, obra_rubro_id: "" }))}
+                  {suyos.length > 0 && (
+                    <button onClick={() => setAMano(a => conSusRubros(a, []))}
                       style={{ background: "none", border: "none", color: colors.muted, fontSize: 11, cursor: "pointer", fontFamily: colors.font }}>
                       sin rubro
                     </button>
@@ -1245,20 +1321,27 @@ Rubros de la obra: ${lista}`;
                 cantidad, unidad y precio unitario, y el total sale solo —o
                 el total, y sale el unitario. Con dos de las tres alcanza. */}
             <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <input type="number" step="0.01" value={aMano.cantidad ?? ""} placeholder="Cantidad"
-                onChange={e => setAMano(a => derivar({ ...a, cantidad: e.target.value }, "cantidad"))}
-                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 110 }} />
-              <input value={aMano.unidad ?? ""} placeholder="Unidad"
-                onChange={e => setAMano(a => ({ ...a, unidad: e.target.value }))}
-                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 80 }} />
-              <span style={{ color: colors.muted, fontSize: 12 }}>×</span>
-              <input type="number" step="0.0001" value={aMano.unitario ?? ""} placeholder="Precio unitario"
-                onChange={e => setAMano(a => derivar({ ...a, unitario: e.target.value }, "unitario"))}
-                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 130 }} />
-              <span style={{ color: colors.muted, fontSize: 12 }}>=</span>
-              <input type="number" step="0.01" value={aMano.real ?? ""} placeholder="Total que costó"
-                onChange={e => setAMano(a => derivar({ ...a, real: e.target.value }, "real"))}
-                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 140, fontWeight: 600 }} />
+              {/* Contra varios rubros no hay cantidad ni precio unitario que
+                  comparar —son unidades distintas—: va el total, solo. */}
+              {rubrosDe(aMano).length <= 1 && (
+                <>
+                  <input type="number" step="0.01" value={aMano.cantidad ?? ""} placeholder="Cantidad"
+                    onChange={e => setAMano(a => derivar({ ...a, cantidad: e.target.value }, "cantidad"))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 110 }} />
+                  <input value={aMano.unidad ?? ""} placeholder="Unidad"
+                    onChange={e => setAMano(a => ({ ...a, unidad: e.target.value }))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 80 }} />
+                  <span style={{ color: colors.muted, fontSize: 12 }}>×</span>
+                  <input type="number" step="0.0001" value={aMano.unitario ?? ""} placeholder="Precio unitario"
+                    onChange={e => setAMano(a => derivar({ ...a, unitario: e.target.value }, "unitario"))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: 130 }} />
+                  <span style={{ color: colors.muted, fontSize: 12 }}>=</span>
+                </>
+              )}
+              <input className="total-de-la-compra" type="number" step="0.01" value={aMano.real ?? ""}
+                placeholder={rubrosDe(aMano).length > 1 ? "Total de la cotización, sin IVA" : "Total que costó"}
+                onChange={e => setAMano(a => (rubrosDe(a).length > 1 ? { ...a, real: e.target.value } : derivar({ ...a, real: e.target.value }, "real")))}
+                style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: rubrosDe(aMano).length > 1 ? 220 : 140, fontWeight: 600 }} />
             </div>
             {/* CONTRA QUÉ, Y CUÁNTO DA, mientras se escribe. El número de la
                 derecha sale de la misma cuenta que Diferencias: por precio
@@ -1324,16 +1407,29 @@ Rubros de la obra: ${lista}`;
           </div>
           </div>
           {verPresupuesto && (
-            <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro} marcas={marcasAMano}
-              eligiendo={{ descripcion: aMano.descripcion || "este beneficio" }}
+            <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
+              marcas={{ ...marcasAMano, ...Object.fromEntries(rubrosDe(aMano).map(id => [String(id),
+                { texto: "elegido · tocá para sacarlo", bloquea: false }])) }}
+              eligiendo={{ descripcion: aMano.descripcion || "este beneficio",
+                ...(rubrosDe(aMano).length ? { texto: "Tocá otro rubro para sumarlo a la comparación, o uno ya elegido para sacarlo" } : {}) }}
               onCerrar={() => setVerPresupuesto(false)}
               onElegir={rb => {
-                // La unidad es la del rubro. La cantidad se propone la del
-                // presupuesto y se corrige con la medida en obra.
-                setAMano(a => derivar({ ...a, obra_rubro_id: String(rb.id),
-                  unidad: a.unidad || rb.unidad || "",
-                  cantidad: a.cantidad || (n(rb.cantidad) ? String(rb.cantidad) : "") }, "cantidad"));
-                setVerPresupuesto(false);
+                const yaHabia = rubrosDe(aMano).length;
+                setAMano(a => {
+                  const ids = conmutar(rubrosDe(a), rb.id);
+                  // UNO SOLO, como siempre: la unidad es la del rubro y la
+                  // cantidad se propone la del presupuesto, para corregirla
+                  // con la medida en obra.
+                  if (ids.length === 1) {
+                    const unico = vivos.find(x => Number(x.id) === ids[0]) || rb;
+                    return derivar({ ...conSusRubros(a, ids), unidad: a.unidad || unico.unidad || "",
+                      cantidad: a.cantidad || (n(unico.cantidad) ? String(unico.cantidad) : "") }, "cantidad");
+                  }
+                  return conSusRubros(a, ids);
+                });
+                // El primero se elige y se sigue; para sumar más, el
+                // presupuesto queda abierto.
+                if (!yaHabia) setVerPresupuesto(false);
               }} />
           )}
           </div>
@@ -1384,7 +1480,8 @@ Rubros de la obra: ${lista}`;
                 )}
                 {g.filas.map(b => {
                   const dif = Math.round((n(b.presupuestado) - n(b.real)) * 100) / 100;
-                  const rub = vivos.find(x => String(x.id) === String(b.obra_rubro_id));
+                  const susNumeros = rubrosDe(b).map(id => vivos.find(x => Number(x.id) === id)?.numero).filter(x => x != null);
+                  const rub = susNumeros.length ? { numero: susNumeros.join(" + ") } : null;
                   return (
                     <div key={b.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 12px", fontSize: 11.5,
                       borderBottom: `1px solid ${colors.neutralSoft}` }}>
@@ -1417,14 +1514,24 @@ Rubros de la obra: ${lista}`;
             {contados.map(b => {
               const dif = Math.round((n(b.presupuestado) - n(b.real)) * 100) / 100;
               const ajuste = notaDelAjuste(b);
-              const rub = vivos.find(x => String(x.id) === String(b.obra_rubro_id));
+              // Contra qué rubros va: uno, o varios («44 PISO…, 29 TUMBADO… y 1 más»).
+              const susRubros = rubrosDe(b);
+              const nombres = comoSeLlaman(susRubros, vivos, { tope: 2, largo: 40 });
+              // MANDA CONTROL: lo que Control lleva o ya decidió de sus rubros.
+              const deControl = notaDeControl(b, v => `$${fmt(v)}`);
+              const loCargado = b._control?.original || null;
+              // El precio real se corrige ahí mismo, salvo que la fila ya
+              // venga ajustada (por una orden o por Control): eso se ve, no
+              // se escribe encima.
+              const seEscribe = !esDeOrden(b) && !b._porOrden && !b._control?.manda;
               return (
-                <div key={b.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px",
+                <div key={b.id} className="beneficio-guardado" data-id={b.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px",
                   borderTop: `1px solid ${colors.neutralSoft}` }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, color: colors.ink }}>{b.descripcion}</div>
                     <div style={{ fontSize: 10.5, color: colors.muted }}>
-                      {b.fecha}{rub ? ` · ${rub.numero} ${rub.descripcion.slice(0, 40)}` : " · sin rubro"}
+                      {b.fecha}{nombres ? ` · ${nombres}` : " · sin rubro"}
+                      {susRubros.length > 1 ? ` · contra la suma de ${susRubros.length} rubros` : ""}
                       {n(b.cantidad) ? ` · ${fmt(b.cantidad)} ${b.unidad || ""} a $${fmt(n(b.real) / n(b.cantidad))}` : ""}
                       {b.proveedor ? ` · ${b.proveedor}` : ""}
                       {b.origen === "manual" ? " · a mano" : ""}
@@ -1436,15 +1543,35 @@ Rubros de la obra: ${lista}`;
                       {b.nota ? ` · ${String(b.nota).replace(/\s*·?\s*\[dif:\d+\]/g, "").trim()}` : ""}
                     </div>
                     {ajuste && <div className="ajuste-por-orden" style={{ fontSize: 10.5, color: colors.warning, marginTop: 1 }}>{ajuste}</div>}
+                    {deControl && (
+                      <div className="lo-de-control" data-manda={b._control.manda || "no"}
+                        style={{ fontSize: 10.5, color: b._control.manda ? colors.warning : colors.muted, marginTop: 1, lineHeight: 1.4 }}>{deControl}</div>
+                    )}
+                    {n(b.cotizado) > 0 && Math.abs(n(b.cotizado) - n(loCargado ? loCargado.real : b.real)) > 0.005 && !b._porOrden && (
+                      <div className="lo-cotizado" style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
+                        La cotización decía ${fmt(b.cotizado)}; el precio real se cargó a mano.
+                      </div>
+                    )}
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0, fontSize: 11, color: colors.muted }}>
-                    {esDeOrden(b) ? "cobrado " : ""}${fmt(b.presupuestado)} → {esDeOrden(b) ? "costó " : ""}${fmt(b.real)}
+                  <div style={{ textAlign: "right", flexShrink: 0, fontSize: 11, color: colors.muted, display: "flex", alignItems: "center", gap: 4 }}>
+                    {esDeOrden(b) ? "cobrado " : ""}${fmt(loCargado ? loCargado.presupuestado : b.presupuestado)} → {esDeOrden(b) ? "costó " : ""}
+                    {seEscribe
+                      ? <PrecioReal beneficio={b} onGuardado={async dijo => { await cargar(); setAviso(dijo); }} onError={setError} />
+                      : <>${fmt(loCargado ? loCargado.real : b.real)}</>}
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700,
-                    opacity: esPrevisto(b) ? 0.55 : 1,
-                    color: dif >= 0 ? colors.success : colors.danger }}>
-                    {dif >= 0 ? "+" : "−"}${fmt(Math.abs(dif))}
-                  </div>
+                  {/* Cuando ya manda Control entero, acá no hay un número de
+                      quien cargó: un «+$0,00» se leería como que no dejó nada. */}
+                  {b._control?.manda === "todo" ? (
+                    <div className="cuenta-control" style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 10.5, fontWeight: 600, color: colors.warning, lineHeight: 1.3 }}>
+                      lo cuenta<br />Control
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700,
+                      opacity: esPrevisto(b) ? 0.55 : 1,
+                      color: dif >= 0 ? colors.success : colors.danger }}>
+                      {dif >= 0 ? "+" : "−"}${fmt(Math.abs(dif))}
+                    </div>
+                  )}
                   {/* EL PAPEL CON EL QUE SE HIZO LA CUENTA, a un clic del
                       número que sostiene. Tres meses después, cuando el
                       proveedor factura otra cosa, es lo único que queda. */}
@@ -1456,12 +1583,12 @@ Rubros de la obra: ${lista}`;
                     </a>
                   )}
                   {esPrevisto(b) && (
-                    <button onClick={async () => {
+                    <button className="confirmar-beneficio" onClick={async () => {
                       const r2 = await guardarBeneficio({ id: b.id, estado: "confirmado", confirmado_at: new Date().toISOString() });
                       if (r2.error) { setError(r2.error); return; }
                       await cargar();
                       setAviso("Confirmado: ya suma a los números de la obra.");
-                    }} title="Ya se compró a ese precio: pasa a contar en la obra"
+                    }} title="Ya se compró a ese precio: pasa a contar en la obra. Si costó otra cosa, corregí antes el precio real, al lado."
                       style={{ background: colors.successSoft, border: "none", borderRadius: 7, padding: "3px 8px",
                         color: colors.success, fontSize: 10.5, fontWeight: 700, cursor: "pointer",
                         fontFamily: colors.font, flexShrink: 0 }}>

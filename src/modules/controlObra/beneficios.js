@@ -20,6 +20,11 @@ const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 export const SIN_114 = "Falta correr la migración 114 para guardar los beneficios de la obra.";
+export const SIN_190 = "Para comparar contra varios rubros falta correr la migración 190 en Supabase.";
+// Las dos columnas de la 190: los rubros, cuando son varios, y lo que decía la cotización.
+const faltaLa190 = e => /\b(rubros|cotizado)\b/.test(e?.message || "") && falta(e);
+const sinLoDeLa190 = ({ rubros, cotizado, ...resto }) => resto;
+const vaContraVarios = f => Array.isArray(f?.rubros) && f.rubros.length > 1;
 
 export async function beneficiosDe(obraId) {
   const { data, error } = await supabase.from("obra_beneficios")
@@ -33,14 +38,27 @@ export async function guardarBeneficio(fila) {
   const q = id
     ? supabase.from("obra_beneficios").update(campos).eq("id", id)
     : supabase.from("obra_beneficios").insert(campos);
-  const { data, error } = await q.select().single();
+  let { data, error } = await q.select().single();
+  // SIN LA 190 SE GUARDA COMO ANTES —un rubro, un precio—. Lo único que no se
+  // puede es contra varios: guardarlo contra el primero sería mentir la cuenta.
+  if (error && faltaLa190(error)) {
+    if (vaContraVarios(campos)) return { error: SIN_190 };
+    const viejos = sinLoDeLa190(campos);
+    ({ data, error } = await (id
+      ? supabase.from("obra_beneficios").update(viejos).eq("id", id)
+      : supabase.from("obra_beneficios").insert(viejos)).select().single());
+  }
   if (error) return { error: falta(error) ? SIN_114 : error.message };
   return { beneficio: data };
 }
 
 export async function guardarVarios(filas = []) {
   if (!filas.length) return { guardados: 0 };
-  const { data, error } = await supabase.from("obra_beneficios").insert(filas).select();
+  let { data, error } = await supabase.from("obra_beneficios").insert(filas).select();
+  if (error && faltaLa190(error)) {
+    if (filas.some(vaContraVarios)) return { error: SIN_190, guardados: 0 };
+    ({ data, error } = await supabase.from("obra_beneficios").insert(filas.map(sinLoDeLa190)).select());
+  }
   if (error) return { error: falta(error) ? SIN_114 : error.message, guardados: 0 };
   return { guardados: (data || []).length, beneficios: data || [] };
 }

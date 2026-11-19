@@ -90,6 +90,9 @@ test("el control, la tarjeta del resultado y Beneficios usan lo ajustado; correg
   assert.match(vista, /beneficios=\{beneficiosVivos\}/);
   const panel = readFileSync(new URL("../src/modules/controlObra/PanelBeneficios.jsx", import.meta.url), "utf8");
   assert.match(panel, /totalesPorOrigen\(contados\)/);
-  assert.match(panel, /resultadoDeLaObra\(\{ beneficios: contados,/);
+  // (Desde el 18/11/2026 lo ajustado por las órdenes entra al resultado, y de
+  // ahí sale lo que cuenta, con lo que Control de obra ya decidió sacado.)
+  assert.match(panel, /resultadoDeLaObra\(\{ beneficios: sobreLoQueQueda,/);
+  assert.match(panel, /const contados = res\.contados;/);
   assert.match(panel, /editarBeneficio\(guardados\.find\(x => x\.id === b\.id\) \|\| b\)/);
 });

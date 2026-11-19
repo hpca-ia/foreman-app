@@ -4,6 +4,7 @@ import { totales } from "./cuentaBeneficios.js";
 import { precioDelContrato } from "./clasesDePartida.js";
 import { ordenCuenta } from "./cuentaOrdenCambio.js";
 import { codigoDe } from "./nombreOrden.js";
+import { rubrosDe, grupoDe } from "./variosRubros.js";
 // EL RESULTADO DE LA OBRA, no solo los beneficios.
 //
 // Tres cosas lo hacen, y van juntas en un número y separadas abajo:
@@ -71,6 +72,102 @@ export function perdidasEnRubros(rubros = [], porRubro = {}) {
   return { filas, total: c2(filas.reduce((t, f) => t + f.resultado, 0)) };
 }
 
+// ── MANDA CONTROL DE OBRA ──────────────────────────────────────────────────
+//
+// Hernán, 18/11/2026: «sería importante poder ingresar precios o gastos
+// manualmente para tener una idea hasta que vaya todo a control de obra y
+// tener ya el total de beneficio real... o pérdida». Y cuando esos gastos ya
+// están en Control, lo que definió: «manda Control de obra» —lo cargado a mano
+// es un estimado y deja de sumar, para no contar el mismo gasto dos veces—.
+//
+// Un beneficio dice «esto se presupuestó en tanto y se compró en tanto», con
+// el precio que alguien escribió. Control dice lo que el rubro gastó de
+// verdad, factura por factura. Mientras Control no tenga todo, el beneficio es
+// la mejor idea que hay y cuenta. Cuando Control ya puede decir cómo le fue al
+// rubro, cuenta lo de Control y el beneficio deja de sumar.
+//
+// ¿CUÁNDO PUEDE DECIRLO CONTROL? Con la regla que ya tenía cada rubro:
+//   · PASADO: gastó más de lo que tenía. Eso ya pasó; no hay estimado que lo
+//     arregle. La pérdida cuenta en los rubros pasados.
+//   · TERMINADO (avance al 100%) con gasto: lo que dejó es lo presupuestado
+//     menos lo gastado, a favor o en contra.
+// Un rubro a medio gastar no decide nada —lo que parece ahorro puede ser lo
+// que falta comprar—: ahí sigue contando lo cargado a mano, y se dice cuánto
+// lleva Control.
+//
+// CONTRA VARIOS RUBROS, el beneficio se reparte entre ellos según lo que pesa
+// cada uno en la suma: la parte de un rubro que Control ya decidió deja de
+// sumar, y la de los que siguen abiertos sigue.
+//
+// Lo de una orden de cambio no entra acá: eso es lo cobrado contra su
+// cotización, no una compra contra un rubro.
+
+const deOrden = b => b?.origen === "orden_cambio" || !!b?.orden_cambio_id;
+/** ¿Control ya puede decir cómo le fue a este rubro? */
+export const decididoPorControl = s => !!s && (s.estado === "pasado" || (s.estado === "terminado" && s.gastado > 0));
+
+/**
+ * Los beneficios, con lo que Control ya decidió sacado de la cuenta.
+ *
+ * @returns { beneficios, ganado }. `beneficios` son las mismas filas; a las
+ *   que tocó Control se les baja `presupuestado` y `real` a la parte que sigue
+ *   contando y llevan `_control`: { manda: "todo" | "parte" | null, enControl,
+ *   rubros: [{ id, numero, descripcion, estado, gastado, presupuestado,
+ *   resultado, decidido }], original: { presupuestado, real } }. `ganado` es
+ *   lo que dejaron, según Control, los rubros con beneficio ya terminados a
+ *   favor: { filas, total }.
+ */
+export function beneficiosConControl(beneficios = [], { rubros = [], porRubro = {} } = {}) {
+  const porId = new Map((rubros || []).map(r => [Number(r.id), r]));
+  const dicho = new Map();
+  const queDice = id => {
+    if (!dicho.has(id)) { const r = porId.get(id); dicho.set(id, r && seMide(r) ? seguimientoDeRubro(r, porRubro) : null); }
+    return dicho.get(id);
+  };
+  const terminados = new Map();
+  const filas = (beneficios || []).map(b => {
+    // Ya pasó por acá: no se le saca dos veces.
+    if (!b || b._control || deOrden(b)) return b;
+    const ids = rubrosDe(b);
+    if (!ids.length) return b;
+    const { pesos } = grupoDe(ids, rubros);
+    const partes = ids.map(id => ({ id, s: queDice(id), peso: pesos[id] ?? 0 })).filter(p => p.s);
+    if (!partes.length) return b;
+    const enControl = c2(partes.reduce((t, p) => t + p.s.gastado, 0));
+    const decididas = partes.filter(p => decididoPorControl(p.s));
+    const info = {
+      enControl,
+      rubros: partes.map(p => ({ id: p.id, numero: p.s.numero, descripcion: p.s.descripcion, estado: p.s.estado,
+        gastado: p.s.gastado, presupuestado: p.s.presupuestado, resultado: p.s.resultado, decidido: decididoPorControl(p.s) })),
+    };
+    if (!decididas.length) return enControl > 0 ? { ...b, _control: { ...info, manda: null } } : b;
+    decididas.filter(p => p.s.estado === "terminado" && p.s.resultado > 0).forEach(p => terminados.set(p.id, p.s));
+    const todo = decididas.length === partes.length;
+    // Lo que sigue contando: la parte de los rubros que Control no decidió.
+    const queda = todo ? 0 : Math.max(0, 1 - decididas.reduce((t, p) => t + p.peso, 0));
+    return {
+      ...b,
+      presupuestado: c2(n(b.presupuestado) * queda), real: c2(n(b.real) * queda),
+      _control: { ...info, manda: todo ? "todo" : "parte", original: { presupuestado: n(b.presupuestado), real: n(b.real) } },
+    };
+  });
+  const ganados = [...terminados.values()];
+  return { beneficios: filas, ganado: { filas: ganados, total: c2(ganados.reduce((t, s) => t + s.resultado, 0)) } };
+}
+
+/** Cómo se dice debajo de un beneficio lo que Control lleva o ya decidió. */
+export function notaDeControl(b, plata = v => `$${n(v).toFixed(2)}`) {
+  const k = b?._control;
+  if (!k) return "";
+  const firmado = v => `${v >= 0 ? "+" : "−"}${plata(Math.abs(v))}`;
+  if (!k.manda) return `En Control de obra ${k.rubros.length > 1 ? "esos rubros llevan" : "el rubro lleva"} ${plata(k.enControl)} gastados: sigue contando lo cargado a mano hasta que esté todo.`;
+  const decididos = k.rubros.filter(x => x.decidido)
+    .map(x => `${x.numero} ${x.estado === "pasado" ? "se pasó" : "terminó"}: gastó ${plata(x.gastado)} de ${plata(x.presupuestado)}, ${firmado(x.resultado)}`);
+  const cargado = c2(k.original.presupuestado - k.original.real);
+  return `Manda Control de obra${k.manda === "parte" ? " en una parte" : ""} · ${decididos.join(" · ")}`
+    + ` · lo cargado a mano era ${firmado(cargado)}${k.manda === "parte" ? ": cuenta solo la parte de los rubros que siguen abiertos" : " y ya no suma"}`;
+}
+
 /**
  * @param beneficios  los guardados de la obra (con papel, a mano, de órdenes)
  * @param rubros      los del control
@@ -120,7 +217,11 @@ export function reduccionesAprobadas(ordenes = [], lineasDeOrdenes = {}) {
  * listan aparte, marcadas, para que alguien lo corrija, y no entran al total.
  */
 export function beneficioDeLoAprobado({ rubros = [], beneficios = [], reducciones = {}, deltas = {}, modalidad = "rubros" } = {}) {
-  const aMano = new Set(beneficios.filter(b => b?.obra_rubro_id && b.origen === "manual").map(b => String(b.obra_rubro_id)));
+  // Todos los rubros de cada beneficio a mano, que ahora puede ir contra
+  // varios. Y si Control ya lo sacó entero de la cuenta, ese rubro vuelve a
+  // contar por acá: su margen no puede quedar sin contar por los dos lados.
+  const aMano = new Set(beneficios.filter(b => b?.origen === "manual" && b._control?.manda !== "todo")
+    .flatMap(b => rubrosDe(b)).map(String));
   const filas = rubros.filter(vivo)
     .filter(r => r.origen !== "orden_cambio" && conCosto(r) && !aMano.has(String(r.id)))
     .map(r => {
@@ -196,7 +297,9 @@ export function ordenesPorAprobar({ ordenes = [], lineasDeOrdenes = {}, rubros =
 }
 
 export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {}, deltas = {}, modalidad = "rubros" } = {}) {
-  const t = totales(beneficios);
+  // MANDA CONTROL: lo cargado a mano deja de sumar donde Control ya decidió.
+  const conControl = beneficiosConControl(beneficios, { rubros, porRubro });
+  const t = totales(conControl.beneficios);
   const perdidas = perdidasEnRubros(rubros, porRubro);
   const porId = new Map(rubros.map(r => [String(r.id), r]));
   const seguimiento = seguidos.map(s => {
@@ -208,7 +311,12 @@ export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [],
   const ganadoEnSeguidos = c2(seguimiento
     .filter(f => f.terminado && f.gastado > 0 && f.resultado > 0)
     .reduce((s, f) => s + f.resultado, 0));
-  const aprobados = beneficioDeLoAprobado({ rubros, beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes), deltas, modalidad });
+  // Lo que dejaron, según Control, los rubros con un beneficio cargado que ya
+  // terminaron a favor. Los que además se siguen ya están contados arriba.
+  const yaSeguidos = new Set(seguimiento.map(f => String(f.id)));
+  const filasSegunControl = conControl.ganado.filas.filter(f => !yaSeguidos.has(String(f.id)));
+  const ganadoSegunControl = c2(filasSegunControl.reduce((s, f) => s + f.resultado, 0));
+  const aprobados = beneficioDeLoAprobado({ rubros, beneficios: conControl.beneficios, reducciones: reduccionesAprobadas(ordenes, lineasDeOrdenes), deltas, modalidad });
   return {
     conPapel: t.neto, cuantosConPapel: t.cuantos,
     previsto: t.previsto, cuantosPrevistos: t.cuantosPrevistos,
@@ -224,6 +332,10 @@ export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [],
     // después el rubro gasta más que su costo, esa pérdida entra por los
     // pasados, y la suma de las dos es lo que de verdad dejó —precio menos lo
     // gastado—.
-    neto: c2(t.neto + perdidas.total + ganadoEnSeguidos + aprobados.total),
+    neto: c2(t.neto + perdidas.total + ganadoEnSeguidos + ganadoSegunControl + aprobados.total),
+    // MANDA CONTROL: los beneficios como cuentan —con lo que Control ya
+    // decidió sacado—, y lo que esos rubros dejaron según Control.
+    contados: conControl.beneficios,
+    segunControl: { filas: filasSegunControl, total: ganadoSegunControl },
   };
 }
