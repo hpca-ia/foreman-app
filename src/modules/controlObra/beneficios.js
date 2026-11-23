@@ -1,6 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
-export { eficienciaDeLaDiferencia } from "./cuentaBeneficios.js";
+export { eficienciaDeLaDiferencia, eficienciaContraVarios } from "./cuentaBeneficios.js";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son justo lo que no puede estar mal.
 export { totales, esPrevisto, netoPorRubro, esDeOrden, totalesPorOrigen } from "./cuentaBeneficios.js";

@@ -47,7 +47,9 @@ export function agruparPorRubro(lineas = []) {
   const salida = [];
   const porRubro = new Map();
   for (const l of lineas) {
-    if (!l.rubro) { salida.push(l); continue; }
+    // El renglón que va contra VARIOS rubros no se agrupa con nadie: ya es un
+    // grupo, y se mide entero contra lo que suman (ver `contraVarios`, abajo).
+    if (!l.rubro || l.varios) { salida.push(l); continue; }
     const k = String(l.rubro.id);
     if (!porRubro.has(k)) porRubro.set(k, []);
     porRubro.get(k).push(l);
@@ -158,9 +160,50 @@ export function loQueNoEstaPresupuestado(comparacion) {
   const cambiaCantidad = l => n(l.cantidadRubro) > 0
     && (n(l.cantidad) > n(l.cantidadRubro) * 1.001
       || (n(l.cantidad) > 0 && n(l.cantidad) < n(l.cantidadRubro) * 0.999));
-  const otroPrecio = lineas.filter(l => {
+  // ── UN RENGLÓN DEL PAPEL CONTRA VARIOS RUBROS ────────────────────────────
+  //
+  // Hernán, 18/11/2026, de este módulo: «solo me permite escoger uno y a veces
+  // la compra de material afecta a más de un rubro». Y cómo se compara, que lo
+  // definió él: «total contra la suma» —el monto del renglón contra la suma
+  // de esos rubros—, como diferencia de precio, a favor o en contra. No se
+  // compara cantidad: los rubros de un grupo pueden tener unidades distintas.
+  //
+  // Sale UNA diferencia de precio para el grupo, con todos sus rubros. Contra
+  // el costo cargado si lo tienen todos; si no, contra el precio que vio el
+  // cliente, igual que con un rubro solo.
+  const contraVarios = lineas.filter(l => l.varios).map(l => {
+    const contraPrecio = l.costoCargado == null;
+    const vara = contraPrecio ? n(l.presupuestado) : n(l.costoCargado);
+    const dif = c2(n(l.cotizado) - vara);
+    if (Math.abs(dif) <= Math.max(0.01, Math.abs(vara) * 0.001)) return null;
+    const nombres = l.rubrosDelGrupo.map(r => `${r.numero ?? ""} ${String(r.descripcion || "").slice(0, 44)}`.trim());
+    return {
+      descripcion: `${nombres.join(" + ")} — ${dif > 0 ? "cuesta más" : "cuesta menos"} que lo que suman`.slice(0, 400),
+      unidad: "glb",
+      cantidad: 1,
+      costo: Math.abs(dif),
+      costoUnitario: Math.abs(dif),
+      precioUnitario: null,
+      contraPrecio,
+      por: `va contra ${l.rubrosDelGrupo.length} rubros que ${contraPrecio ? "el cliente vio en" : "costaban"} $${c2(vara)} entre todos, `
+        + `sin IVA, y el papel lo cotiza en $${c2(l.cotizado)} · se compara el total contra la suma, no la cantidad`,
+      textoPapel: l.descripcion || null,
+      unidadPapel: l.unidad || null,
+      cantidadPapel: n(l.cantidad) || null,
+      montoPapel: c2(l.cotizado ?? l.monto) || null,
+      rubro_id: l.rubro.id,
+      rubros: l.rubrosDelGrupo.map(r => r.id),
+      rubro_codigo: l.rubrosDelGrupo.map(r => String(r.numero ?? r.codigo ?? "")).filter(Boolean).join("+"),
+      deOrden: l.rubrosDelGrupo.map(deDonde).find(Boolean) || null,
+      hallazgo: dif > 0 ? "subio_precio" : "bajo_precio",
+      sube: dif > 0,
+      varios: true,
+    };
+  }).filter(Boolean);
+
+  const deUnRubro = lineas.filter(l => {
     const vara = varaDe(l);
-    if (!l.rubro || vara == null || l.puProforma == null) return false;
+    if (!l.rubro || l.varios || vara == null || l.puProforma == null) return false;
     if (cambiaCantidad(l)) return false;
     return Math.abs(l.puProforma - vara) > Math.max(0.01, Math.abs(vara) * 0.001);
   }).map(l => {
@@ -210,13 +253,15 @@ export function loQueNoEstaPresupuestado(comparacion) {
       sube: dif > 0,
     };
   });
+  // Las diferencias de precio: las de un rubro, y las de un renglón contra varios.
+  const otroPrecio = [...deUnRubro, ...contraVarios];
 
   // Y LO QUE NO SE PUEDE JUZGAR, DICHO. Un rubro sin costo cargado no tiene
   // contra qué comparar el precio: esta propuesta es su primera referencia.
   const sinCostoConocido = lineas.filter(l => l.rubro && l.puCosto == null && l.puProforma != null).length;
 
   // Más cantidad de la que se presupuestó, del mismo rubro.
-  const demas = lineas.filter(l => l.rubro && n(l.cantidad) > n(l.cantidadRubro) * 1.001).map(l => {
+  const demas = lineas.filter(l => l.rubro && !l.varios && n(l.cantidad) > n(l.cantidadRubro) * 1.001).map(l => {
     const extra = c2(n(l.cantidad) - n(l.cantidadRubro));
     return {
       descripcion: `${l.rubro.descripcion || l.descripcion} — ${extra} ${l.unidadRubro || l.unidad || "u"} de más`.slice(0, 400),
@@ -258,7 +303,7 @@ export function loQueNoEstaPresupuestado(comparacion) {
   // Decirlo importa tanto como lo otro: una obra que solo informa los
   // adicionales y se queda callada con las reducciones es una obra a la que el
   // cliente deja de creerle los adicionales.
-  const menos = lineas.filter(l => l.rubro && n(l.cantidad) > 0 && n(l.cantidad) < n(l.cantidadRubro) * 0.999).map(l => {
+  const menos = lineas.filter(l => l.rubro && !l.varios && n(l.cantidad) > 0 && n(l.cantidad) < n(l.cantidadRubro) * 0.999).map(l => {
     const falta = c2(n(l.cantidadRubro) - n(l.cantidad));
     return {
       descripcion: `${l.rubro.descripcion || l.descripcion} — ${falta} ${l.unidadRubro || l.unidad || "u"} de menos`.slice(0, 400),

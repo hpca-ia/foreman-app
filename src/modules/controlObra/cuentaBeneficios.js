@@ -221,6 +221,36 @@ export function eficienciaDeLaDiferencia(linea, rubro, analisis, contra = "costo
 }
 
 /**
+ * Una diferencia que salió de un renglón del papel CONTRA VARIOS RUBROS,
+ * vuelta fila de Beneficios.
+ *
+ * Hernán, 18/11/2026: «a veces la compra de material afecta a más de un
+ * rubro». Lo presupuestado es lo que suman esos rubros, sin IVA; lo real, lo
+ * que cotiza el papel por todo. La fila lleva todos sus rubros: es un solo
+ * beneficio para el grupo, que es como él definió que se compara.
+ *
+ * @returns la fila, o null si la línea no va contra varios rubros o no se
+ *          sabe lo que cotiza el papel
+ */
+export function eficienciaContraVarios(linea, rubros = [], analisis = null) {
+  const g = grupoDe(rubrosDe(linea), rubros);
+  if (g.rubros.length < 2 || linea?.monto_papel == null) return null;
+  return {
+    obra_rubro_id: g.rubros[0].id,
+    rubros: g.rubros.map(r => r.id),
+    descripcion: String(linea.texto_papel || linea.descripcion || "").slice(0, 200),
+    // Sin cantidad: son rubros con unidades distintas.
+    cantidad: null,
+    unidad: null,
+    presupuestado: g.presupuestado,
+    real: c2(linea.monto_papel),
+    proveedor: analisis?.proveedor || null,
+    nota: `Contra la suma de ${g.rubros.length} rubros (${g.rubros.map(r => r.numero ?? "").filter(x => x !== "").join(", ")})`
+      + (analisis?.titulo ? ` · ${analisis.titulo}` : ""),
+  };
+}
+
+/**
  * Los beneficios agrupados por proveedor, con lo que se negoció con cada uno.
  *
  * Es la memoria de la obra: a quién se le sacó qué —el flete, el descuento por

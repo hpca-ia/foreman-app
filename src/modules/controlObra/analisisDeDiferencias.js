@@ -100,10 +100,21 @@ export async function guardarAnalisis({ obraId, titulo, proveedor, archivo, item
     unidad_papel: l.unidadPapel || null,
     cantidad_papel: l.cantidadPapel ?? null,
     monto_papel: l.montoPapel ?? null,
+    // Los rubros, cuando la diferencia salió de un renglón que va contra
+    // varios (migración 190). Con uno solo no viaja: manda `obra_rubro_id`.
+    ...(Array.isArray(l.rubros) && l.rubros.length > 1 ? { rubros: l.rubros } : {}),
     orden: i,
   }));
   if (filas.length) {
     let { error: e2 } = await supabase.from("obra_analisis_lineas").insert(filas);
+    // Sin la 190 no hay dónde guardar los varios rubros de una diferencia, y
+    // guardarla contra el primero sería mentir contra qué se midió: se dice.
+    if (e2 && /\brubros\b/.test(e2.message) && falta(e2) && filas.some(f => f.rubros)) {
+      // Y no queda un análisis sin sus diferencias: se saca lo recién guardado.
+      await supabase.from("obra_analisis").delete().eq("id", data.id);
+      if (ruta) await supabase.storage.from(BUCKET).remove([ruta]);
+      return { error: "Para guardar una diferencia contra varios rubros falta correr la migración 190 en Supabase." };
+    }
     // Sin la 155 el análisis entra igual, sin el texto del papel: vale más
     // guardarlo que frenarlo por una columna nueva.
     if (e2 && /texto_papel|unidad_papel|cantidad_papel|monto_papel|column|schema cache/i.test(e2.message)) {
@@ -183,7 +194,13 @@ export async function reEmparejar(lineaId, rubroId, recalculado = null) {
     campos.cantidad = recalculado.cantidad;
     campos.monto = recalculado.monto;
   }
-  const { error } = await supabase.from("obra_analisis_lineas").update(campos).eq("id", lineaId);
+  // Señalarle UN rubro a una diferencia que iba contra varios la deja contra
+  // ese solo: la lista de antes se vacía. Sin la 190 esa columna no existe y
+  // no hay nada que vaciar.
+  let { error } = await supabase.from("obra_analisis_lineas").update({ ...campos, rubros: null }).eq("id", lineaId);
+  if (error && /\brubros\b/.test(error.message) && falta(error)) {
+    ({ error } = await supabase.from("obra_analisis_lineas").update(campos).eq("id", lineaId));
+  }
   return error ? error.message : null;
 }
 

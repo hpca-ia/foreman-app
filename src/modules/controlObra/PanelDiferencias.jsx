@@ -15,7 +15,9 @@ import {
   queNoSePaga,
   recalcularContra, ponerPrecio, marcarEnOrden, queSaleDe,
 } from "./analisisDeDiferencias";
-import { sincronizarEficiencias, eficienciaDeLaDiferencia, cargarCostosDeRubros } from "./beneficios";
+import { sincronizarEficiencias, eficienciaDeLaDiferencia, eficienciaContraVarios, cargarCostosDeRubros } from "./beneficios";
+// Un renglón del papel puede ir contra varios rubros: el total contra la suma.
+import { rubrosDe, paraGuardar, grupoDe, comoSeLlaman } from "./variosRubros.js";
 import { globalMultiplicado, unidadesDistintas, precioNoSeParece, mismoRubroQueOtro } from "./desconfiarDeNova.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
 // NOVA redacta la orden —justificación, soportes, una especificación por
@@ -219,7 +221,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // se escribieran al cambiar una decisión, un análisis que se lee y se
     // cierra dejaría su descuento sin llegar nunca a Beneficios.
     pasarLasEficiencias(r.lineas || [], a);
-    const rs = (r.lineas || []).map(l => l.obra_rubro_id).filter(Boolean);
+    // (Una diferencia contra varios rubros no le da su costo a ninguno: no cuenta acá.)
+    const rs = (r.lineas || []).filter(l => rubrosDe(l).length <= 1).map(l => l.obra_rubro_id).filter(Boolean);
     setSinCosto(rs.filter(id => {
       const rub = vivos.find(x => x.id === id);
       return rub && (rub.costo_unitario === null || rub.costo_unitario === undefined || rub.costo_unitario === "");
@@ -333,7 +336,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         totales: r.totales,
         lineas: [...h.todo, ...h.menos].map(x => ({
           descripcion: x.descripcion, unidad: x.unidad, cantidad: x.cantidad,
-          monto: x.costo, obra_rubro_id: x.rubro_id || null, hallazgo: x.hallazgo,
+          monto: x.costo, obra_rubro_id: x.rubro_id || null, rubros: x.rubros || null, hallazgo: x.hallazgo,
           textoPapel: x.textoPapel, unidadPapel: x.unidadPapel, cantidadPapel: x.cantidadPapel,
           montoPapel: x.montoPapel,
         })),
@@ -379,6 +382,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
   async function cargarLosCostos() {
     const candidatos = lineas.filter(l => {
       if (!l.obra_rubro_id || !Number(l.cantidad)) return false;
+      // Una diferencia contra varios rubros no le da su costo a ninguno: el
+      // papel cotiza el grupo entero, no cuánto es de cada rubro.
+      if (rubrosDe(l).length > 1) return false;
       const rub = vivos.find(x => x.id === l.obra_rubro_id);
       return rub && (rub.costo_unitario === null || rub.costo_unitario === undefined || rub.costo_unitario === "");
     });
@@ -436,9 +442,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
     // a ser una diferencia de cantidad, que es lo que va a la orden de cambio.
     const re = recalcularContra(linea, rubro, rubro && Number(rubro.cantidad)
       ? baseSinIva(rubro) / Number(rubro.cantidad) : 0);
+    // Señalarle un rubro la deja contra ese solo, aunque viniera contra varios.
     const campos = re
-      ? { obra_rubro_id: rubro?.id || null, hallazgo: re.hallazgo, cantidad: re.cantidad, monto: re.monto }
-      : { obra_rubro_id: rubro?.id || null };
+      ? { obra_rubro_id: rubro?.id || null, rubros: null, hallazgo: re.hallazgo, cantidad: re.cantidad, monto: re.monto }
+      : { obra_rubro_id: rubro?.id || null, rubros: null };
     const frescas = lineas.map(x => (x.id === linea.id ? { ...x, ...campos } : x));
     setLineas(frescas);
     setEligiendo(null);
@@ -565,6 +572,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       // precio y el costo Beneficios ya lo cuenta desde el rubro. Contra el
       // precio aprobado cuando no lo tiene.
       ...frescas.filter(x => x.obra_rubro_id && x.hallazgo !== "nuevo" && x.decision !== "nuestro").map(x => {
+        // CONTRA VARIOS RUBROS: lo que cotiza el papel contra lo que suman.
+        // Si queda a favor, es un beneficio del grupo, con todos sus rubros.
+        if (rubrosDe(x).length > 1) {
+          const v = eficienciaContraVarios(x, vivos, an);
+          return v && v.presupuestado - v.real > 0.005 ? v : null;
+        }
         const r = vivos.find(v => v.id === x.obra_rubro_id);
         const b = r ? beneficioDeLoContratado(x, r) : null;
         if (!b || !(b.aFavor > 0.005)) return null;
@@ -587,8 +600,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
         .map(x => ((x.hallazgo === "bajo_precio" || x.hallazgo === "subio_precio") && x.monto_papel != null
           ? { ...x, monto: x.monto_papel } : x))
-        .map(x => eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio"))
-        .filter(x => x.presupuestado > 0),
+        .map(x => (rubrosDe(x).length > 1
+          ? eficienciaContraVarios(x, vivos, an)
+          : eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio")))
+        .filter(x => x && x.presupuestado > 0),
     ];
     const r = await sincronizarEficiencias(an.obra_id, an.id, filas);
     if (r.error) { setError(r.error); return; }
@@ -845,13 +860,23 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
               </span>
             )}
           </div>
+          {/* SI NO SE PUDO COMPARAR O GUARDAR, SE DICE ACÁ. Esta pantalla no
+              mostraba el error: «Aceptar y comparar» fallaba y no pasaba nada. */}
+          {error && <div className="no-se-pudo-comparar" role="alert" style={{ fontSize: 12, color: colors.danger, marginBottom: 8 }}>{error}</div>}
 
           {items.map((x, i) => {
             const r = vivos.find(v => Number(v.id) === Number(x.rubro_id));
-            const raro = r && (unidadesDistintas(x, r) || globalMultiplicado(x, r)
+            // CONTRA VARIOS RUBROS (Hernán, 18/11/2026: «solo me permite
+            // escoger uno y a veces la compra de material afecta a más de un
+            // rubro»). El renglón se mide entero contra lo que suman: ahí no
+            // hay unidad ni precio unitario de un rubro contra los que dudar.
+            const grupo = rubrosDe(x).length > 1 ? grupoDe(rubrosDe(x), vivos) : null;
+            const sonVarios = !!grupo && grupo.rubros.length > 1;
+            const raro = r && !sonVarios && (unidadesDistintas(x, r) || globalMultiplicado(x, r)
               || !!precioNoSeParece(x, r) || !!mismoRubroQueOtro(x, items));
+            const contraLaSuma = sonVarios ? Math.round((Number(x.monto) - grupo.presupuestado) * 100) / 100 : 0;
             return (
-              <div key={i} style={{ ...caja, marginBottom: 6, padding: "8px 10px",
+              <div key={i} className="renglon-del-papel" style={{ ...caja, marginBottom: 6, padding: "8px 10px",
                 borderLeft: `3px solid ${raro ? colors.danger : x.visto ? colors.success
                   : r ? colors.border : colors.neutralSoft}` }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -879,11 +904,34 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             decir "es ese rubro": es decidir si la orden va a ser
                             de más o de menos, y eso tiene que verse antes de
                             aceptar, no tres pantallas después. */}
+                        {/* LOS OTROS RUBROS DEL RENGLÓN, cada uno con su × para sacarlo. */}
+                        {sonVarios && grupo.rubros.slice(1).map(otro => (
+                          <div key={otro.id} className="otro-rubro-del-renglon">
+                            <span style={{ color: colors.muted }}>y el rubro </span>
+                            <strong>{otro.numero ?? ""} {String(otro.descripcion || "").slice(0, 70)}</strong>
+                            <span style={{ color: colors.muted }}> · {fmt(otro.cantidad)} {otro.unidad || ""} × ${fmt(unitario(otro))} </span>
+                            <button title="Sacar este rubro del renglón" aria-label={`Sacar el rubro ${otro.numero ?? ""}`}
+                              onClick={() => cambiar(i, paraGuardar(rubrosDe(x).filter(k => k !== Number(otro.id)), "rubro_id"))}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: colors.danger, fontFamily: colors.font,
+                                fontSize: 11, padding: "0 3px", textDecoration: "underline" }}>sacar</button>
+                          </div>
+                        ))}
+                        {sonVarios ? (
+                          // Contra varios: el total del papel contra lo que suman.
+                          <div className="contra-la-suma" style={{ fontWeight: 600, color: colors.ink, marginTop: 1 }}>
+                            Los {grupo.rubros.length} rubros suman ${fmt(grupo.presupuestado)} sin IVA · el papel ${fmt(x.monto)} →{" "}
+                            {Math.abs(contraLaSuma) <= 0.01 ? "lo mismo: no sale ninguna diferencia"
+                              : contraLaSuma > 0 ? `cuesta $${fmt(contraLaSuma)} más que lo que suman`
+                                : `cuesta $${fmt(-contraLaSuma)} menos que lo que suman: queda a favor`}
+                            <span style={{ fontWeight: 400, color: colors.muted }}> · se compara el total, no la cantidad</span>
+                          </div>
+                        ) : (
                         <div style={{ fontWeight: 600, color: colors.ink, marginTop: 1 }}>
                           {fmt(r.cantidad)} contratadas · {fmt(x.cantidad)} en el papel →{" "}
                           {queSaleDe({ cantidad_papel: x.cantidad, monto_papel: x.monto }, r,
                             Number(r.cantidad) ? baseSinIva(r) / Number(r.cantidad) : 0)}
                         </div>
+                        )}
                         {raro && <div style={{ fontWeight: 700 }}>
                           {unidadesDistintas(x, r)
                             ? `El papel lo cobra por ${x.unidad} y el rubro está contratado por ${r.unidad}.`
@@ -909,7 +957,7 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                       </button>
                     )}
                     {r && (
-                      <button onClick={() => cambiar(i, { rubro_id: null, visto: false })}
+                      <button onClick={() => cambiar(i, { rubro_id: null, rubros: null, visto: false })}
                         style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
                           fontSize: 11, color: colors.danger, textDecoration: "underline" }}>
                         quitar
@@ -917,10 +965,21 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                     )}
                     <button onClick={() => { setVerPresupuesto(true); setEligiendo({ indice: i, descripcion: x.descripcion }); }}
                       style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
-                        fontSize: 11, color: eligiendo?.indice === i ? colors.brand : colors.muted,
-                        fontWeight: eligiendo?.indice === i ? 700 : 400, textDecoration: "underline" }}>
-                      {eligiendo?.indice === i ? "elegí el rubro →" : r ? "otro rubro" : "buscarle rubro"}
+                        fontSize: 11, color: eligiendo?.indice === i && !eligiendo?.sumar ? colors.brand : colors.muted,
+                        fontWeight: eligiendo?.indice === i && !eligiendo?.sumar ? 700 : 400, textDecoration: "underline" }}>
+                      {eligiendo?.indice === i && !eligiendo?.sumar ? "elegí el rubro →" : r ? "otro rubro" : "buscarle rubro"}
                     </button>
+                    {/* SUMARLE OTRO RUBRO: la compra sirve a más de uno. */}
+                    {r && (
+                      <button className="sumar-otro-rubro"
+                        onClick={() => { setVerPresupuesto(true); setEligiendo({ indice: i, descripcion: x.descripcion, sumar: true,
+                          texto: `Elegí el rubro que se suma a «${String(x.descripcion || "").slice(0, 40)}»: se compara el total contra lo que sumen` }); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontFamily: colors.font,
+                          fontSize: 11, color: eligiendo?.indice === i && eligiendo?.sumar ? colors.brand : colors.muted,
+                          fontWeight: eligiendo?.indice === i && eligiendo?.sumar ? 700 : 400, textDecoration: "underline" }}>
+                        {eligiendo?.indice === i && eligiendo?.sumar ? "elegí el que se suma →" : "+ sumar otro rubro"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -930,7 +989,16 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
         {verPresupuesto && (
           <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro}
             eligiendo={eligiendo} onCerrar={() => { setVerPresupuesto(false); setEligiendo(null); }}
-            onElegir={rb => { cambiar(eligiendo.indice, { rubro_id: rb.id, visto: true }); setEligiendo(null); }} />
+            marcas={eligiendo?.sumar ? Object.fromEntries(rubrosDe(items[eligiendo.indice] || {}).map(id => [String(id),
+              { texto: "ya está en este renglón", bloquea: true }])) : {}}
+            onElegir={rb => {
+              // «Otro rubro» lo cambia por ese solo; «+ sumar otro rubro» lo agrega a los que ya tiene.
+              const suyo = items[eligiendo.indice] || {};
+              cambiar(eligiendo.indice, eligiendo.sumar
+                ? { ...paraGuardar([...rubrosDe(suyo), rb.id], "rubro_id"), visto: true }
+                : { rubro_id: rb.id, rubros: null, visto: true });
+              setEligiendo(null);
+            }} />
         )}
       </div>
     );
@@ -1386,6 +1454,10 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
 
               {suyas.map(l => {
                 const rubro = vivos.find(r => r.id === l.obra_rubro_id);
+                // La diferencia que salió de un renglón contra VARIOS rubros:
+                // se midió el total del papel contra lo que suman.
+                const grupo = rubrosDe(l).length > 1 ? grupoDe(rubrosDe(l), vivos) : null;
+                const deVarios = !!grupo && grupo.rubros.length > 1;
                 const deOrden = rubro?.origen === "orden_cambio";
                 // EL CONTRATO SE MUESTRA SIN IVA, porque el costo de la
                 // propuesta viene sin IVA. El rubro del control lo tiene
@@ -1417,9 +1489,11 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 // presupuesto se armó con la cotización vieja de este mismo
                 // proveedor, el texto idéntico es la firma de un acierto.
                 const papel = { unidad: l.unidad_papel, cantidad: l.cantidad_papel, monto: l.monto_papel };
-                const dudaDePrecio = rubro && !!l.texto_papel ? precioNoSeParece(papel, rubro) : null;
-                const dudaDeRubro = rubro ? mismoRubroQueOtro(l, suyas) : null;
-                const dudoso = rubro && !!l.texto_papel
+                // Contra varios rubros no se duda de la unidad ni del precio de
+                // uno: el papel no cotiza ese rubro, cotiza el grupo.
+                const dudaDePrecio = rubro && !deVarios && !!l.texto_papel ? precioNoSeParece(papel, rubro) : null;
+                const dudaDeRubro = rubro && !deVarios ? mismoRubroQueOtro(l, suyas) : null;
+                const dudoso = rubro && !deVarios && !!l.texto_papel
                   && (unidadesDistintas({ unidad: l.unidad_papel }, rubro)
                     || globalMultiplicado({ cantidad: l.cantidad_papel }, rubro)
                     || !!dudaDePrecio || !!dudaDeRubro);
@@ -1469,7 +1543,12 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             )}
                           </div>
                         )}
-                        {rubro ? (
+                        {deVarios ? (
+                          <div className="contra-varios-rubros" style={{ fontSize: 10.5, color: colors.muted, marginTop: 1, marginBottom: 3 }}>
+                            contra la suma de {grupo.rubros.length} rubros:{" "}
+                            <strong style={{ color: colors.inkSoft }}>{comoSeLlaman(rubrosDe(l), vivos, { tope: 4, largo: 44 })}</strong>
+                          </div>
+                        ) : rubro ? (
                           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 1, marginBottom: 3 }}>
                             contra <strong style={{ color: colors.inkSoft }}>{rubro.numero || ""}{" "}
                             {String(rubro.descripcion || "").slice(0, 50)}</strong>
@@ -1493,11 +1572,15 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             comparables y no lo eran. Ahora el contrato y el
                             papel se comparan enteros, y la diferencia tiene su
                             propia fila al pie, que es lo que se decide. */}
-                        {rubro && (
+                        {deVarios && (
+                          <Cuenta que="contratado" cantidad={null} unitario={null} total={grupo.presupuestado}
+                            base={`lo que suman los ${grupo.rubros.length} rubros, sin IVA`} />
+                        )}
+                        {rubro && !deVarios && (
                           <Cuenta que="contratado" cantidad={rubro.cantidad} unidad={rubro.unidad}
                             unitario={puRubro} total={base} base="precio al cliente, sin IVA" />
                         )}
-                        {rubro && Number(rubro.costo_unitario) > 0 && (
+                        {rubro && !deVarios && Number(rubro.costo_unitario) > 0 && (
                           <Cuenta que="costo cargado" cantidad={rubro.cantidad} unidad={rubro.unidad}
                             unitario={rubro.costo_unitario}
                             total={Number(rubro.costo_unitario) * Number(rubro.cantidad)} base="nuestro costo" />
@@ -1519,7 +1602,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                           total={l.monto} fuerte
                           color={l.hallazgo === "bajo_precio" ? colors.success
                             : l.hallazgo === "subio_precio" ? colors.danger : colors.ink}
-                          base={l.hallazgo === "subio_precio" || l.hallazgo === "bajo_precio"
+                          base={deVarios ? "el total del papel contra lo que suman los rubros"
+                            : l.hallazgo === "subio_precio" || l.hallazgo === "bajo_precio"
                             ? "de precio, sobre la cantidad que los dos tienen"
                             : l.hallazgo === "mas_cantidad"
                               ? `a costo · al cliente se le cobra al precio del contrato${puRubro != null
