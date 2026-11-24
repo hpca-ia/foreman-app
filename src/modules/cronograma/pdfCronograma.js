@@ -1,5 +1,6 @@
 import { cargarPDF } from "../../lib/exportar";
 import { rutaDeCadena, ordenDeTrazado } from "./rutasDeCadenas.js";
+import { aclarado, hechoDe, tramoQueFalta } from "./avanceEnBarra.js";
 import { pieDePdf } from "../../lib/piePdf";
 import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
@@ -64,10 +65,21 @@ export const diasPorHoja = hoja =>
  * @param hoja   a4 | a3 | a2 | a1. Cambia cuánto tiempo entra por hoja, no el
  *   tamaño de la letra ni el de las barras: una obra larga se lee igual, en
  *   menos hojas.
+ * @param corte  hasta qué día se midió el avance. Con él sale la columna de
+ *   cuánto lleva cada actividad; sin él, el cronograma es solo el plan.
+ * @param conCadenas  las flechas de qué espera a qué. Se pueden dejar afuera:
+ *   en una obra con muchas dependencias tapan las barras.
  */
-export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [], cal, hoyISO, diasDeContrato = 0, resumen = "" }, hoja = "a4") {
+export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [], cal, hoyISO, diasDeContrato = 0, resumen = "", corte = null, conCadenas = true }, hoja = "a4") {
   // Si alguna fila trae su línea base, se dibuja debajo y se explica al pie.
   const conBase = filas.some(f => f.base);
+  // Con fecha de corte se dice cuánto lleva cada una, como en la pantalla.
+  const conAvance = !!corte;
+  // Dónde va cada columna de la izquierda. Con el avance las dos fechas se
+  // arriman: entran las tres en el mismo ancho, y el calendario no pierde días.
+  const X_EMPIEZA = conAvance ? 50.5 : 51;
+  const X_TERMINA = conAvance ? 62.5 : 69;
+  const X_AVANCE = 84.5;
   const { jsPDF } = await cargarPDF();
   const doc = new jsPDF({ unit: "mm", format: HOJAS[hoja] ? hoja : "a4", orientation: "landscape" });
   const ANCHO = doc.internal.pageSize.getWidth();
@@ -182,8 +194,9 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
     doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...GRIS);
     doc.text("ACTIVIDAD", M + 1, yDia);
     doc.text("DÍAS", M + 48, yDia, { align: "right" });
-    doc.text("EMPIEZA", M + 51, yDia);
-    doc.text("TERMINA", M + 69, yDia);
+    doc.text("EMPIEZA", M + X_EMPIEZA, yDia);
+    doc.text("TERMINA", M + X_TERMINA, yDia);
+    if (conAvance) doc.text("AVANCE", M + X_AVANCE, yDia, { align: "right" });
     doc.setDrawColor(...TINTA); doc.setLineWidth(0.4);
     doc.line(M, ARRIBA - 3, ANCHO - M, ARRIBA - 3);
   };
@@ -213,7 +226,9 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
    * la anterior— rodean por abajo en vez de cruzar la barra de punta a punta.
    */
   const dibujarCadenas = (donde, cajas, numeroDe) => {
-    if (!dependencias.length) return;
+    // Sin ellas tampoco van las marcas «de 4.5» / «a 10.6»: son la otra punta
+    // de una flecha, y sueltas no dicen nada.
+    if (!conCadenas || !dependencias.length) return;
     const F = 1.1, P = 0.9;   // largo y medio ancho de la punta
     // POR DÓNDE VA CADA UNA lo decide rutasDeCadenas: cada bajada busca una
     // columna que no cruce barras ni pise otra flecha, las cortas primero.
@@ -279,7 +294,7 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
           doc.text(et, M + 1.5, y + FILA - 1.7);
           if (f.inicio && f.fin) {
             doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
-            doc.text(`${corta(f.inicio)} a ${corta(f.fin)}`, M + 51, y + FILA - 1.7);
+            doc.text(`${corta(f.inicio)} a ${corta(f.fin)}`, M + X_EMPIEZA, y + FILA - 1.7);
           }
           y += FILA;
           return;
@@ -307,8 +322,19 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
         doc.text(texto, M + 1.5 + sangria, y + FILA - 1.7);
         doc.setTextColor(...GRIS); doc.setFontSize(6.3);
         doc.text(f.hito ? "—" : String(f.duracion), M + 48, y + FILA - 1.7, { align: "right" });
-        if (f.inicio) doc.text(corta(f.inicio), M + 51, y + FILA - 1.7);
-        if (f.fin) doc.text(corta(f.fin), M + 69, y + FILA - 1.7);
+        if (f.inicio) doc.text(corta(f.inicio), M + X_EMPIEZA, y + FILA - 1.7);
+        if (f.fin) doc.text(corta(f.fin), M + X_TERMINA, y + FILA - 1.7);
+        // CUÁNTO LLEVA, escrito. La barra lo muestra, pero en papel nadie mide
+        // una barra: se lee el número. En negrita lo que está en ejecución,
+        // que es lo que se busca en una reunión de obra.
+        if (conAvance) {
+          const hecho = hechoDe(f);
+          const enCurso = hecho > 0 && hecho < 100;
+          doc.setFont("helvetica", enCurso ? "bold" : "normal");
+          doc.setTextColor(...(enCurso ? TINTA : GRIS));
+          doc.text(`${hecho} %`, M + X_AVANCE, y + FILA - 1.7, { align: "right" });
+          doc.setFont("helvetica", "normal");
+        }
 
         // La barra, recortada a lo que entra en esta hoja.
         if (f.inicio && f.fin) {
@@ -341,12 +367,23 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
               // Con línea base la barra se achica un poco: abajo va la raya
               // de lo que se firmó, y tienen que leerse como dos cosas.
               const alto = FILA - (f.base ? 3.6 : 2.6);
-              doc.setFillColor(...(f.externo ? [148, 145, 140] : f.critica ? ROJO : TINTA));
+              const color = f.externo ? [148, 145, 140] : f.critica ? ROJO : TINTA;
+              doc.setFillColor(...color);
               doc.roundedRect(x, y + 1.3, ancho, alto, 0.6, 0.6, "F");
-              // Lo ejecutado, en una franja más oscura adentro.
-              if (f.avance > 0 && f.avance < 100) {
-                doc.setFillColor(255, 255, 255);
-                doc.rect(x + ancho * (f.avance / 100), y + 2.2, ancho * (1 - f.avance / 100), alto - 1.8, "F");
+              // LO QUE LE FALTA, ACLARADO Y A TODO EL ALTO, como en la pantalla.
+              //
+              // Antes era una franja blanca ADENTRO de la barra, con un alto
+              // fijo restado al de la barra. Con línea base la barra mide 2 mm
+              // y a la franja le quedaban 0,2: una raya que no se ve, y las
+              // actividades en ejecución salían iguales a las demás.
+              const falta = tramoQueFalta({ xBarra: M + IZQ + (d1 - desdeDia) * MM_DIA, anchoTotal: (d2 - d1 + 1) * MM_DIA,
+                avance: f.avance, xVisible: x, anchoVisible: ancho });
+              if (falta) {
+                doc.setFillColor(...aclarado(color));
+                doc.rect(falta.desde, y + 1.3, falta.ancho, alto, "F");
+                // El borde, para que se vea hasta dónde llega la barra entera.
+                doc.setDrawColor(...color); doc.setLineWidth(0.2);
+                doc.roundedRect(x, y + 1.3, ancho, alto, 0.6, 0.6, "S");
               }
             }
           }
@@ -372,8 +409,12 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
       // La leyenda va en el medio del pie; qué es, de qué proyecto y cuándo
       // se emitió lo pone pieDePdf al final, cuando ya se sabe cuántas hojas hay.
       doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
-      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Flecha ámbar: la que traba  ·  Barra clara: lo que falta ejecutar"
-        + (conBase ? "  ·  Raya gris: línea base" : ""),
+      // Solo lo que esta hoja dibuja: una leyenda que explica flechas que no
+      // están manda a buscarlas.
+      doc.text(["Rojo: ruta crítica", "Gris: la ejecuta un externo", "Rombo ámbar: hito",
+        conCadenas && dependencias.length ? "Flecha ámbar: la que traba" : "",
+        "Tramo claro de una barra: lo que le falta ejecutar",
+        conBase ? "Raya gris: línea base" : ""].filter(Boolean).join("  ·  "),
         ANCHO / 2, ALTO - 5, { align: "center" });
     }
   }

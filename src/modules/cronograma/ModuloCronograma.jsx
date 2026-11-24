@@ -119,6 +119,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   const [verMemoria, setVerMemoria] = useState(false);
   // El elegidor de tamaño de hoja del PDF.
   const [pdf, setPdf] = useState(false);
+  // Las flechas de qué espera a qué, en el PDF. Van por defecto; quien las
+  // saca una vez no tiene que volver a sacarlas en cada impresión.
+  const [pdfConCadenas, setPdfConCadenas] = useState(() => {
+    try { return localStorage.getItem("foreman_pdf_crono_sin_flechas") !== "1"; } catch { return true; }
+  });
+  const ponerCadenasEnPdf = quiere => {
+    try { localStorage.setItem("foreman_pdf_crono_sin_flechas", quiere ? "0" : "1"); } catch {}
+    setPdfConCadenas(quiere);
+  };
   // LAS ETAPAS DE LA OBRA: demoliciones, obra gris, instalaciones, acabados.
   // No mandan sobre las fechas —eso lo dicen las dependencias— sino sobre cómo
   // se lee el cronograma, que con cuarenta barras es la mitad del problema.
@@ -3047,6 +3056,25 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
             <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, flex: 1 }}>¿En qué hoja lo imprimís?</div>
             <Button variant="secondary" size="sm" onClick={() => setPdf(false)}>Cerrar</Button>
           </div>
+          {/* CON O SIN LAS FLECHAS. En una obra con muchas dependencias las
+              flechas se cruzan y tapan las barras, que es lo que se vino a
+              imprimir. Se elige acá, antes del tamaño, porque tocar un tamaño
+              ya baja el PDF. */}
+          {dependencias.length > 0 && (
+            <label className="pdf-con-cadenas" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 10,
+              fontSize: 12, color: colors.ink, cursor: "pointer", lineHeight: 1.4 }}>
+              <input type="checkbox" checked={pdfConCadenas} disabled={pensando}
+                onChange={e => ponerCadenasEnPdf(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                Con las flechas de qué espera a qué
+                <span style={{ display: "block", fontSize: 10.5, color: colors.muted }}>
+                  {pdfConCadenas
+                    ? "Sacales el visto si tapan las barras: sale el cronograma limpio, con sus fechas."
+                    : "Sale sin flechas: solo las barras, sus fechas y su avance."}
+                </span>
+              </span>
+            </label>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
             {Object.entries(HOJAS).map(([id, h]) => {
               const dias = diasPorHoja(id);
@@ -3061,7 +3089,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
                   try {
                     await pdfCronograma({
                       nombre: lead.nombre, plan, filas: filasParaPdf(), dependencias, cal, hoyISO, diasDeContrato,
-                      resumen: resumenParaPdf(),
+                      resumen: resumenParaPdf(), corte: corteISO, conCadenas: pdfConCadenas,
                     }, id);
                     setPdf(false);
                   } catch (e) {
