@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
-export { eficienciaDeLaDiferencia, eficienciaContraVarios } from "./cuentaBeneficios.js";
+import { conciliarEficiencias } from "./cuentaBeneficios.js";
+export { eficienciaDeLaDiferencia, eficienciaContraVarios, loQuePagamosNosotros, deDondeSaleLoNuestro } from "./cuentaBeneficios.js";
 // Las cuentas viven aparte: son lo único de este archivo que se puede probar
 // sin un navegador, y son justo lo que no puede estar mal.
 export { totales, esPrevisto, netoPorRubro, esDeOrden, totalesPorOrigen } from "./cuentaBeneficios.js";
@@ -170,17 +171,28 @@ const marcaDe = analisisId => `[dif:${analisisId}]`;
 /**
  * Deja en Beneficios exactamente las eficiencias que hoy tiene el análisis.
  *
- * Borra y vuelve a escribir las de este análisis en vez de agregar: así
+ * Saca las que el análisis ya no sostiene y agrega las que faltan: así
  * cambiar una decisión —o deshacerla— no deja un beneficio fantasma sumando
  * para siempre. Volver a correrlo dos veces da el mismo resultado.
+ *
+ * LA QUE SALDRÍA IGUAL NO SE TOCA. Antes se borraban todas y se escribían de
+ * nuevo como previstas, y abrir un análisis le sacaba el «Confirmar» a lo que
+ * ya estaba confirmado en Beneficios. Qué es «igual» lo dice
+ * conciliarEficiencias, en cuentaBeneficios.js.
  */
 export async function sincronizarEficiencias(obraId, analisisId, filas = []) {
   const marca = marcaDe(analisisId);
-  const { error: e1 } = await supabase.from("obra_beneficios")
-    .delete().eq("obra_id", obraId).like("nota", `%${marca}%`);
-  if (e1) return { error: falta(e1) ? SIN_114 : e1.message };
-  if (!filas.length) return { guardados: 0 };
-  return guardarVarios(filas.map(f => ({ ...f, obra_id: obraId, origen: "proforma", estado: "previsto",
+  const { data: viejas, error: e0 } = await supabase.from("obra_beneficios")
+    .select("*").eq("obra_id", obraId).like("nota", `%${marca}%`);
+  if (e0) return { error: falta(e0) ? SIN_114 : e0.message };
+  const { sobran, nuevas } = conciliarEficiencias(viejas || [], filas);
+  if (sobran.length) {
+    const { error: e1 } = await supabase.from("obra_beneficios")
+      .delete().in("id", sobran.map(v => v.id));
+    if (e1) return { error: falta(e1) ? SIN_114 : e1.message };
+  }
+  if (!nuevas.length) return { guardados: 0 };
+  return guardarVarios(nuevas.map(f => ({ ...f, obra_id: obraId, origen: "proforma", estado: "previsto",
     nota: `${f.nota ? `${f.nota} · ` : ""}${marca}` })));
 }
 

@@ -4,6 +4,8 @@ import { mostrarPdf } from "../../lib/abrirPdf";
 import { logoParaPDF } from "../../lib/logos";
 import { logoEmpresa } from "../../lib/marca";
 import { respaldoDeLoQueNoSePaga } from "./cuentaDiferencias.js";
+import { baseSinIva } from "./contratoDeLaObra.js";
+import { rubrosDe, grupoDe } from "./variosRubros.js";
 
 // EL ANÁLISIS DE DIFERENCIAS, EN PAPEL.
 //
@@ -101,19 +103,28 @@ export async function pdfDiferencias({ analisis, lineas = [], rubros = [], obra,
         "CONTRA QUÉ RUBRO DEL CONTRATO", "CONTRATADO", "P. UNIT", "COSTO CARG.", "LO QUE SE ANOTÓ", "DECISIÓN"]],
       body: suyas.map(l => {
         const r = porRubro.get(Number(l.obra_rubro_id));
-        const pu = r && n(r.cantidad) ? n(r.total_base) / n(r.cantidad) : null;
+        // CONTRA VARIOS RUBROS, LA HOJA LOS NOMBRA A TODOS. El renglón se midió
+        // entero contra lo que suman; con el primero solo, el papel que se
+        // discute en la reunión decía que se había comparado contra un rubro,
+        // con una cantidad y un precio que no son contra los que se midió.
+        const grupo = rubrosDe(l).length > 1 ? grupoDe(rubrosDe(l), rubros) : null;
+        const deVarios = !!grupo && grupo.rubros.length > 1;
+        const nombre = x => `${x.numero || ""} ${x.descripcion || ""}`.trim()
+          + (x.origen === "orden_cambio" ? "  (vino de una orden de cambio)" : "");
+        // SIN IVA, como en la pantalla: el total del rubro lo lleva adentro, y
+        // al lado va el costo de la propuesta, que no lo tiene.
+        const pu = r && n(r.cantidad) ? baseSinIva(r) / n(r.cantidad) : null;
         const cu = n(l.cantidad) ? n(l.monto) / n(l.cantidad) : null;
         return [
           l.descripcion,
           plata(l.cantidad), l.unidad || "",
           cu == null ? "" : `$${plata(cu)}`,
           `$${plata(l.monto)}`,
-          r ? `${r.numero || ""} ${r.descripcion || ""}`.trim()
-            + (r.origen === "orden_cambio" ? "  (vino de una orden de cambio)" : "")
-            : "— no hay rubro que lo cubra —",
-          r ? `${plata(r.cantidad)} ${r.unidad || ""}`.trim() : "",
-          pu == null ? "" : `$${plata(pu)}`,
-          r && n(r.costo_unitario) > 0 ? `$${plata(r.costo_unitario)}` : "",
+          deVarios ? `${grupo.rubros.map(nombre).join("\n")}\n(el total del papel contra lo que suman los ${grupo.rubros.length})`
+            : r ? nombre(r) : "— no hay rubro que lo cubra —",
+          deVarios ? `suman $${plata(grupo.presupuestado)}` : r ? `${plata(r.cantidad)} ${r.unidad || ""}`.trim() : "",
+          deVarios || pu == null ? "" : `$${plata(pu)}`,
+          !deVarios && r && n(r.costo_unitario) > 0 ? `$${plata(r.costo_unitario)}` : "",
           // Lo anotado viaja al papel: es lo que se lee en la reunión, y sin
           // esto la hoja impresa pierde justo la parte que alguien pensó. Va
           // ENTERO: la nota es la razón de la decisión, y cortada en la letra

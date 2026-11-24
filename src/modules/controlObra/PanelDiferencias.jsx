@@ -15,7 +15,7 @@ import {
   queNoSePaga,
   recalcularContra, ponerPrecio, marcarEnOrden, queSaleDe,
 } from "./analisisDeDiferencias";
-import { sincronizarEficiencias, eficienciaDeLaDiferencia, eficienciaContraVarios, cargarCostosDeRubros } from "./beneficios";
+import { sincronizarEficiencias, eficienciaContraVarios, loQuePagamosNosotros, deDondeSaleLoNuestro, cargarCostosDeRubros } from "./beneficios";
 // Un renglón del papel puede ir contra varios rubros: el total contra la suma.
 import { rubrosDe, paraGuardar, grupoDe, comoSeLlaman } from "./variosRubros.js";
 import { globalMultiplicado, unidadesDistintas, precioNoSeParece, mismoRubroQueOtro } from "./desconfiarDeNova.js";
@@ -597,12 +597,9 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
       // monto guardado es cuánto cambió el precio, no lo que cuesta el renglón:
       // el alquiler de $115,56 pagado con un rubro vendido en $1.008 entraba
       // como "$1.008 que cuestan $892,44", la cuenta al revés.
+      // La misma cuenta que dice la tarjeta al lado de la decisión.
       ...frescas.filter(x => x.decision === "nuestro" && x.obra_rubro_id)
-        .map(x => ((x.hallazgo === "bajo_precio" || x.hallazgo === "subio_precio") && x.monto_papel != null
-          ? { ...x, monto: x.monto_papel } : x))
-        .map(x => (rubrosDe(x).length > 1
-          ? eficienciaContraVarios(x, vivos, an)
-          : eficienciaDeLaDiferencia(x, vivos.find(r => r.id === x.obra_rubro_id), an, "precio")))
+        .map(x => loQuePagamosNosotros(x, vivos, an))
         .filter(x => x && x.presupuestado > 0),
     ];
     const r = await sincronizarEficiencias(an.obra_id, an.id, filas);
@@ -1458,7 +1455,8 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                 // se midió el total del papel contra lo que suman.
                 const grupo = rubrosDe(l).length > 1 ? grupoDe(rubrosDe(l), vivos) : null;
                 const deVarios = !!grupo && grupo.rubros.length > 1;
-                const deOrden = rubro?.origen === "orden_cambio";
+                // Contra varios, alcanza con que uno haya venido de una orden.
+                const deOrden = (deVarios ? grupo.rubros : rubro ? [rubro] : []).some(r => r.origen === "orden_cambio");
                 // EL CONTRATO SE MUESTRA SIN IVA, porque el costo de la
                 // propuesta viene sin IVA. El rubro del control lo tiene
                 // adentro —$16,70 son $14,52 más IVA— y puestos los dos
@@ -1802,18 +1800,33 @@ export default function PanelDiferencias({ obra, rubros = [], currentUser, onCam
                             una decisión a medias: sale de un rubro del
                             contrato, y lo que ese rubro tenga de más entre su
                             precio y lo que costó queda a favor del proyecto. */}
-                        {l.decision === "nuestro" && (
-                          <div style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.5,
-                            color: rubro ? colors.success : colors.warning }}>
-                            {rubro && puRubro != null
-                              ? <>Se hace con la plata del rubro {rubro.numero || ""}, que se vendió en
-                                ${fmt(puRubro * Number(l.cantidad))} y cuesta ${fmt(l.monto)}: quedan
-                                {" "}<strong>${fmt(puRubro * Number(l.cantidad) - Number(l.monto))}</strong> a
-                                favor del proyecto, y ya están en Beneficios. El cliente no aprueba nada.</>
-                              : "Falta señalar de qué rubro del contrato sale: sin eso no se sabe contra qué "
-                                + "medirlo y no entra a Beneficios."}
-                          </div>
-                        )}
+                        {/* LA MISMA CUENTA QUE LLEGA A BENEFICIOS. La frase se
+                            armaba acá con el monto de la diferencia, que en una
+                            de precio es cuánto cambió y no cuánto cuesta: el
+                            tablero de $115,56 pagado con un rubro vendido en
+                            $1.008 decía «cuesta $892,44: quedan $115,56», al
+                            revés de lo que Beneficios tenía guardado. Y contra
+                            varios rubros nombraba solo al primero. */}
+                        {l.decision === "nuestro" && (() => {
+                          const sale = deDondeSaleLoNuestro(l, vivos);
+                          return (
+                            <div className="lo-pagamos-nosotros" style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.5,
+                              color: !sale ? colors.warning : sale.queda < 0 ? colors.danger : colors.success }}>
+                              {!sale
+                                ? "Falta señalar de qué rubro del contrato sale: sin eso no se sabe contra qué "
+                                  + "medirlo y no entra a Beneficios."
+                                : sale.queda < 0
+                                  ? <>Se hace con la plata {sale.deDonde}, que se {sale.varios ? "vendieron" : "vendió"} en
+                                    {" "}${fmt(sale.vendido)} y cuesta ${fmt(sale.cuesta)}: son
+                                    {" "}<strong>${fmt(-sale.queda)}</strong> más de lo que se vendió, que salen del
+                                    margen del proyecto y ya están en Beneficios, en contra. El cliente no aprueba nada.</>
+                                  : <>Se hace con la plata {sale.deDonde}, que se {sale.varios ? "vendieron" : "vendió"} en
+                                    {" "}${fmt(sale.vendido)} y cuesta ${fmt(sale.cuesta)}: quedan
+                                    {" "}<strong>${fmt(sale.queda)}</strong> a favor del proyecto, y ya están en
+                                    Beneficios. El cliente no aprueba nada.</>}
+                            </div>
+                          );
+                        })()}
                         {l.orden_cambio_id && (
                           <div style={{ fontSize: 10.5, color: colors.success, marginTop: 2, fontWeight: 600 }}>
                             Ya salió en una orden de cambio: no vuelve a entrar en la próxima.

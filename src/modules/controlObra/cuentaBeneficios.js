@@ -251,6 +251,97 @@ export function eficienciaContraVarios(linea, rubros = [], analisis = null) {
 }
 
 /**
+ * QUÉ CAMBIA EN BENEFICIOS AL VOLVER A PASAR UN ANÁLISIS DE DIFERENCIAS.
+ *
+ * Las filas de un análisis se borraban todas y se escribían de nuevo, como
+ * previstas, cada vez que el análisis se abría o se le cambiaba una decisión.
+ * Con eso, lo que alguien había hecho sobre esas filas en Beneficios se perdía
+ * con solo abrir el análisis: el «Confirmar» de cuando llegó la factura, el
+ * precio real corregido a mano, la fecha. El 24/11/2026 pasó con el
+ * Aeropuerto: el descuento de $1.049,41 y los $892,44 del tablero, que estaban
+ * confirmados, volvieron a previstos por abrir la proforma para leerla.
+ *
+ * La fila que hoy saldría igual SE QUEDA COMO ESTÁ, con lo que tenga encima.
+ * Es la misma cuando va contra los mismos rubros, dice lo mismo, se midió
+ * contra el mismo presupuestado y el papel cotiza lo mismo —lo que decía la
+ * cotización, si después se le corrigió el precio real a mano—. Solo se borra
+ * la que el análisis ya no sostiene y solo entra la que no estaba.
+ *
+ * @param viejas  las filas que ese análisis ya tiene en Beneficios
+ * @param filas   las que hoy le corresponden
+ * @returns { quedan, sobran, nuevas }
+ */
+export function conciliarEficiencias(viejas = [], filas = []) {
+  const igual = (a, b) => Math.abs(n(a) - n(b)) <= 0.005;
+  const dice = x => String(x?.descripcion || "").trim();
+  const contra = x => rubrosDe(x).join(",");
+  const laMisma = (v, f) => contra(v) === contra(f) && dice(v) === dice(f)
+    && igual(v.presupuestado, f.presupuestado) && igual(v.cotizado ?? v.real, f.real);
+  const sobran = [...(viejas || [])];
+  const quedan = [], nuevas = [];
+  (filas || []).forEach(f => {
+    const i = sobran.findIndex(v => laMisma(v, f));
+    if (i >= 0) quedan.push(sobran.splice(i, 1)[0]); else nuevas.push(f);
+  });
+  return { quedan, sobran, nuevas };
+}
+
+/**
+ * LO QUE SE DECIDIÓ «LO PAGAMOS NOSOTROS», vuelto fila de Beneficios: de qué
+ * rubro —o de qué rubros— sale la plata, en cuánto se vendieron y cuánto
+ * cuesta.
+ *
+ * Es UNA sola cuenta para los dos lugares que la dicen: la fila que llega a
+ * Beneficios y la frase que se lee en la tarjeta de Diferencias. Estaban
+ * hechas por separado y se contradecían: el tablero del Aeropuerto, cotizado
+ * en $115,56 y pagado con un rubro vendido en $1.008, quedó en Beneficios como
+ * $892,44 a favor —que es lo correcto— y en la tarjeta decía «cuesta $892,44:
+ * quedan $115,56».
+ *
+ * LO QUE CUESTA ES LO QUE COBRA EL PAPEL. En una diferencia de precio el monto
+ * guardado es cuánto cambió el precio, no lo que cuesta el renglón.
+ *
+ * @returns la fila, o null si no hay contra qué rubro medirla
+ */
+export function loQuePagamosNosotros(linea, rubros = [], analisis = null) {
+  if (!linea?.obra_rubro_id) return null;
+  if (rubrosDe(linea).length > 1) return eficienciaContraVarios(linea, rubros, analisis);
+  const dePrecio = linea.hallazgo === "bajo_precio" || linea.hallazgo === "subio_precio";
+  const conSuCosto = dePrecio && linea.monto_papel != null ? { ...linea, monto: linea.monto_papel } : linea;
+  const rubro = (rubros || []).find(r => Number(r.id) === Number(linea.obra_rubro_id));
+  return eficienciaDeLaDiferencia(conSuCosto, rubro, analisis, "precio");
+}
+
+/**
+ * Esa misma cuenta, como se dice en la tarjeta: de qué rubro —o de qué
+ * rubros— sale la plata, en cuánto se vendieron, cuánto cuesta y qué queda.
+ *
+ * Lo que queda puede ser en contra: un papel que cuesta más que lo que suman
+ * los rubros con los que se paga no deja nada a favor, se come el margen, y
+ * decir «quedan −$500 a favor» sería decirlo al revés.
+ *
+ * @returns { deDonde, varios, vendido, cuesta, queda }, o null si no hay un
+ *          rubro con precio contra el que medirlo
+ */
+export function deDondeSaleLoNuestro(linea, rubros = []) {
+  const fila = loQuePagamosNosotros(linea, rubros);
+  if (!fila || !(fila.presupuestado > 0)) return null;
+  const suyos = grupoDe(rubrosDe(linea), rubros).rubros;
+  // Un rubro sin cantidad no tiene precio unitario contra el que medir.
+  if (!suyos.length || (suyos.length === 1 && !n(suyos[0].cantidad))) return null;
+  const numeros = suyos.map(r => String(r.numero ?? "").trim()).filter(Boolean);
+  const dichos = numeros.length > 1
+    ? `${numeros.slice(0, -1).join(", ")} y ${numeros[numeros.length - 1]}` : numeros[0] || "";
+  return {
+    varios: suyos.length > 1,
+    deDonde: `${suyos.length > 1 ? "de los rubros" : "del rubro"} ${dichos}`.trim(),
+    vendido: fila.presupuestado,
+    cuesta: fila.real,
+    queda: c2(fila.presupuestado - fila.real),
+  };
+}
+
+/**
  * Los beneficios agrupados por proveedor, con lo que se negoció con cada uno.
  *
  * Es la memoria de la obra: a quién se le sacó qué —el flete, el descuento por
