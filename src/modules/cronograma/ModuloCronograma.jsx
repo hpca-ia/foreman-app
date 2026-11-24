@@ -201,7 +201,13 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     // Mismo cuidado con la 091 —fecha de terminación y días de trabajo—: se
     // piden, y si no están se sigue con lo que haya en vez de dejar la
     // pantalla vacía. Tres escalones, del más completo al mínimo.
-    const base = "id,nombre,tunel,resultado,obra_id,crono_inicio,es_lead";
+    //
+    // Los días que no se trabaja van en el mínimo: `crono_feriados` nació en
+    // la 076, la misma que `crono_inicio`, así que donde está una está la
+    // otra. No se pedía, y el calendario de la pantalla se armaba siempre sin
+    // feriados aunque el proyecto los tuviera cargados: con el 24 y el 25 de
+    // diciembre puestos, la entrega seguía cayendo el 24.
+    const base = "id,nombre,tunel,resultado,obra_id,crono_inicio,crono_feriados,es_lead";
     (async () => {
       let { data, error } = await supabase.from("leads")
         .select(`${base},crono_meses,crono_fin,crono_laborables`).order("nombre");
