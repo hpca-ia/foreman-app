@@ -3474,9 +3474,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
         </div>
       )}
 
+      {/* PARTIR SE ABRE ENCIMA DE LA PANTALLA, no arriba de la tabla.
+          Se dibujaba en su lugar de la página, antes del Gantt: con cincuenta
+          filas, apretar la tijera en una de abajo abría el panel dos pantallas
+          más arriba y lo que se veía era un botón que no hacía nada. Y en
+          pantalla completa quedaba tapado del todo. */}
       {partiendo && (
-        <PartirEnEtapas actividad={partiendo} onCancelar={() => setPartiendo(null)}
-          onPartir={etapas => partir(partiendo, etapas)} />
+        <div onMouseDown={e => { if (e.target === e.currentTarget) setPartiendo(null); }}
+          style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,24,24,.38)",
+            display: "flex", alignItems: "flex-start", justifyContent: "center",
+            padding: "8vh 16px 16px", overflowY: "auto" }}>
+          <div style={{ width: "min(700px, 100%)" }}>
+            <PartirEnEtapas actividad={partiendo} onCancelar={() => setPartiendo(null)}
+              onPartir={etapas => partir(partiendo, etapas)} />
+          </div>
+        </div>
       )}
 
       <>
