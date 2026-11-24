@@ -75,6 +75,63 @@ export function pedidosYaFacturados({ solicitudes = [], facturas = [], adjuntos 
 }
 
 /**
+ * EL PEDIDO DE ESTE DOCUMENTO, ANTES DE GUARDARLO.
+ *
+ * Hernán, 24/11/2026, con seis pedidos del Aeropuerto en Alertas —$4.798,79
+ * contados como comprometidos y como gastados—: «no se deben duplicar. ¿Cómo
+ * evitamos la duplicación y la alerta?». Los seis eran pedidos aprobados en
+ * Compras cuya factura se cargó después en el control dejando «¿Es de un
+ * pedido de compra?» en «No». Lo que eligió: que se enganche solo.
+ *
+ * Es LA MISMA REGLA DE LA ALERTA, corrida al cargar el documento en vez de
+ * después: lo que acá no se engancha ni se pregunta, la alerta tampoco lo
+ * avisa, y al revés.
+ *
+ *   · un solo pedido con el mismo proveedor y el mismo monto → es ese: queda
+ *     elegido, y quien carga puede decir que no;
+ *   · varios así, o uno al que solo le coincide el monto, o un pedido ya
+ *     pagado del mismo proveedor por otro monto —el anticipo— → se pregunta
+ *     antes de guardar;
+ *   · nada de eso → es un documento suelto.
+ *
+ * @param doc          lo que se está cargando: { total, razon_social, clase }
+ * @param solicitudes  los pedidos de la obra que todavía no tienen documento
+ * @param adjuntos     las cotizaciones de esos pedidos
+ * @returns { seguro, posibles }  `seguro`: el pedido, o null. `posibles`:
+ *   [{ pedido, monto, seguro, mismoMonto, mismoProveedor }], primero los seguros
+ */
+export function pedidoDelDocumento(doc = {}, { solicitudes = [], adjuntos = [] } = {}) {
+  if (!(n(doc?.total) > 0) || doc.clase === "nota_credito" || doc.clase === "proforma") return { seguro: null, posibles: [] };
+  // Todavía no está guardado: no tiene id, y ningún pedido lo tiene enganchado.
+  const suyo = { ...doc, id: "el-que-se-carga", total: n(doc.total) };
+  const posibles = pedidosYaFacturados({ solicitudes, facturas: [suyo], adjuntos, pagos: [] })
+    .map(x => ({ pedido: x.pedido, monto: x.monto, seguro: x.seguro,
+      mismoMonto: x.candidatas[0].mismoMonto, mismoProveedor: x.candidatas[0].mismoProveedor }));
+  const seguros = posibles.filter(x => x.seguro);
+  return { seguro: seguros.length === 1 ? seguros[0].pedido : null, posibles };
+}
+
+/**
+ * Qué se hace con el pedido al guardar el documento.
+ *
+ * Lo que eligió quien carga manda siempre —un pedido, o «es un documento
+ * suelto»—. Si no eligió nada: el seguro se engancha solo, y si hay con qué
+ * dudar no se guarda hasta que conteste. Una pregunta que se puede saltear es
+ * la alerta de después.
+ *
+ * @param sugerencia  lo que devolvió `pedidoDelDocumento`
+ * @param elegido     undefined si no tocó nada; "" si dijo que es suelto; o el id del pedido
+ * @returns { pedidoId, solo, falta }  `solo`: lo eligió FOREMAN. `falta`: hay que contestar antes
+ */
+export function queHacerConElPedido(sugerencia, elegido) {
+  if (elegido !== undefined && elegido !== null) {
+    return { pedidoId: elegido === "" ? null : elegido, solo: false, falta: false };
+  }
+  if (sugerencia?.seguro) return { pedidoId: sugerencia.seguro.id, solo: true, falta: false };
+  return { pedidoId: null, solo: false, falta: (sugerencia?.posibles || []).length > 0 };
+}
+
+/**
  * Las facturas con más asignado que su total.
  *
  * Una nota de crédito es negativa: se compara en valor absoluto, que es como

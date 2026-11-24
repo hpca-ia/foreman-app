@@ -12,6 +12,10 @@ import { esAdmin, puedeControlObra, rolInfo } from "../lib/roles";
 import { buscarDuplicados, hashArchivo } from "./controlObra/duplicados";
 import { valesDisponibles } from "./controlObra/cuentasProveedor";
 import AlertaDuplicado from "./controlObra/AlertaDuplicado";
+// De qué pedido de Compras es el gasto: la misma regla y el mismo recuadro que la factura del control.
+import PedidoDelDocumento from "./controlObra/PedidoDelDocumento";
+import { pedidoDelDocumento, queHacerConElPedido } from "./controlObra/contadoDosVeces.js";
+import { pedidosParaEnganchar, engancharYPonerAlDia } from "./compras/compras";
 import ReporteCaja from "./cajaChica/ReporteCaja";
 import SelectorActividad from "./cajaChica/SelectorActividad";
 import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
@@ -73,6 +77,13 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   const [novaError, setNovaError] = useState("");
   const [dupsGasto, setDupsGasto] = useState({exactos:[],posibles:[]});
   const [dupJustificacion, setDupJustificacion] = useState("");
+  // DE QUÉ PEDIDO DE COMPRAS ES EL GASTO (Hernán, 24/11/2026: «no se deben
+  // duplicar»). Lo que se pidió en Compras y se terminó pagando con la caja
+  // entraba al control como gasto y el pedido seguía comprometido: caja chica
+  // no tenía cómo engancharlos. Los pedidos sin documento de la obra de la
+  // caja, con sus cotizaciones, y lo que contestó quien carga.
+  const [pedidosObra, setPedidosObra] = useState({ pedidos: [], adjuntos: [] });
+  const [pedidoElegido, setPedidoElegido] = useState(undefined);
   const [archivoHash, setArchivoHash] = useState(null);
   const [pesoOriginal, setPesoOriginal] = useState("");
   const [anticipoForm, setAnticipoForm] = useState({ monto:"", descripcion:"", fecha:new Date().toISOString().split("T")[0] });
@@ -368,6 +379,26 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     })();
     return () => { vivo = false; };
   }, [subVista, cajaActiva?.obra_id, rucGasto, nombreGasto]);
+
+  // Los pedidos de Compras sin documento de la obra de esta caja. Se piden al
+  // abrir el formulario de un gasto NUEVO: corregir uno no vuelve a preguntar.
+  const corrigiendoId = gastoEditando?.id ?? null;
+  const obraDeLaCaja = cajaActiva?.obra_id ?? null;
+  const leadDeLaCaja = cajaActiva?.lead_id ?? undefined;
+  useEffect(() => {
+    let vivo = true;
+    setPedidoElegido(undefined);
+    if (subVista !== "gasto" || !obraDeLaCaja || corrigiendoId) { setPedidosObra({ pedidos: [], adjuntos: [] }); return; }
+    pedidosParaEnganchar(obraDeLaCaja, leadDeLaCaja)
+      .then(r => { if (vivo) setPedidosObra(r); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [subVista, obraDeLaCaja, leadDeLaCaja, corrigiendoId]);
+  // Lo que se está cargando, como lo ve la regla. Una devolución no es la
+  // compra de ningún pedido.
+  const docDelGasto = {
+    total: gastoForm.tipo === "nota_credito" || Number(gastoForm.monto) < 0 ? 0 : Number(gastoForm.monto) || 0,
+    razon_social: gastoForm.proveedor, clase: claseDeGasto(gastoForm.tipo),
+  };
 
   async function recalcularSaldos(cajaId) {
     const [{ data: ants }, { data: gs }] = await Promise.all([
@@ -669,6 +700,16 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       setNovaError("Esta factura ya está cargada en la obra. Explica por qué no es un duplicado para poder guardarla.");
       return false;
     }
+    // DE QUÉ PEDIDO DE COMPRAS ES. Con uno solo del mismo proveedor y el mismo
+    // monto, es ese. Si hay con qué dudar, no se guarda hasta que alguien
+    // conteste: una pregunta que se puede saltear es la alerta de después.
+    const delPedido = gastoEditando ? { pedidoId: null, falta: false }
+      : queHacerConElPedido(pedidoDelDocumento(docDelGasto,
+        { solicitudes: pedidosObra.pedidos, adjuntos: pedidosObra.adjuntos }), pedidoElegido);
+    if (delPedido.falta) {
+      setNovaError("Hay un pedido de Compras que puede ser el de este gasto. Elegilo abajo, o marcá que es un documento suelto.");
+      return false;
+    }
     // LO REPARTIDO ENTRE RUBROS NO PUEDE SUMAR MÁS QUE EL GASTO. Un gasto de
     // $89,85 con $60 a un rubro y $60 a otro entraba al control con $120
     // asignados. Se mira acá, antes de subir la foto y de escribir nada.
@@ -723,6 +764,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     // repartoDelGasto.js: un solo rubro se lleva el documento entero.
     const conRubros = repartoDelGasto(elegidos, gastoForm.monto);
     let errorDeRubro = null;
+    let errorDePedido = null;
     // LO QUE SE CARGA AL RUBRO TIENE EL SIGNO DEL DOCUMENTO, SIEMPRE.
     //
     // Se guardaba tal como estaba escrito en el renglón. Si el documento era
@@ -925,6 +967,17 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
             const {error:eRubro} = await supabase.from("obra_asignaciones").insert(filas);
             if (eRubro) errorDeRubro = eRubro.message;
           }
+          // ENGANCHAR EL PEDIDO, igual que «Es esta» en Alertas: deja de
+          // contar como comprometido, pasa a «comprada» y se le avisa a quien
+          // lo pidió. Va después de los rubros: si quien cargó no eligió
+          // ninguno, el gasto toma el del pedido.
+          if (delPedido.pedidoId != null && !devuelve) {
+            const pedido = pedidosObra.pedidos.find(p => String(p.id) === String(delPedido.pedidoId));
+            const r = pedido ? await engancharYPonerAlDia(pedido, { id:facturaObra.id, obra_id:cajaActiva.obra_id, total:monto,
+              numero_factura:gastoForm.numero_factura||null, razon_social:gastoForm.proveedor||null,
+              clase:claseDeGasto(gastoForm.tipo) }, currentUser) : null;
+            if (r?.error) errorDePedido = typeof r.error === "string" ? r.error : (r.error.message || "error");
+          }
         }
         else if (errObra) setNovaError("El gasto se guardó, pero no entró al control de la obra: " + errObra.message);
       }
@@ -934,6 +987,11 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       // gasto que tenía las dos cosas.
       await fetchGastos(cajaActiva.id);
       if (errorDeRubro) window.alert("El gasto entró al control, pero el rubro no se pudo guardar: " + errorDeRubro);
+      if (errorDePedido) window.alert("El gasto entró al control, pero no se pudo enganchar al pedido de Compras: " + errorDePedido
+        + "\n\nQueda para engancharlo desde Alertas, en Control de Obra.");
+      // El pedido que se enganchó ya no está entre los que esperan documento.
+      setPedidoElegido(undefined);
+      if (cajaActiva.obra_id) pedidosParaEnganchar(cajaActiva.obra_id, cajaActiva.lead_id ?? undefined).then(setPedidosObra).catch(() => {});
       // Sumando de a uno sobre el saldo anterior, cualquier gasto que después
       // se borre queda adentro para siempre: la caja decía $1.325,40 sobre
       // gastos que sumaban $1.225,43. Se vuelve a sumar lo que hay.
@@ -1187,6 +1245,12 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
           </div>
 
           <AlertaDuplicado exactos={dupsGasto.exactos} posibles={dupsGasto.posibles} justificacion={dupJustificacion} setJustificacion={setDupJustificacion}/>
+          {/* ¿ES DE UN PEDIDO DE COMPRAS? Solo aparece cuando hay un pedido de
+              la obra que se le parece: casi ningún gasto de caja lo es. */}
+          {!gastoEditando && (
+            <PedidoDelDocumento que="este gasto" pedidos={pedidosObra.pedidos} adjuntos={pedidosObra.adjuntos}
+              doc={docDelGasto} elegido={pedidoElegido} onElegir={v => setPedidoElegido(v)} />
+          )}
           <div style={{display:"grid",gap:12}}>
             <div><label style={{fontSize:11,color:"var(--ink-soft)",fontWeight:500,display:"block",marginBottom:4}}>Descripción *</label>
               <input value={gastoForm.descripcion} onChange={e=>setGastoForm(p=>({...p,descripcion:e.target.value}))} placeholder="¿Qué se compró?" style={iS}/></div>

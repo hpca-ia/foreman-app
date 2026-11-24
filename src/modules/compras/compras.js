@@ -975,8 +975,9 @@ export async function proformasPorRubro(leadId) {
  */
 export async function comprasSinFacturar(obraId, leadId) {
   const vivas = ["aprobada", "comprada", "recibida"];
-  const campos = "id,descripcion,estado,monto,monto_estimado,proveedor,obra_id,lead_id,obra_rubro_id,obra_actividad_id";
-  const base = () => supabase.from("compras_solicitudes").select(campos)
+  // El pedido entero: para reconocer su factura hace falta si ya figura
+  // pagado y cuál proforma se eligió, y para engancharlo, su tarea y quién lo pidió.
+  const base = () => supabase.from("compras_solicitudes").select("*")
     .is("factura_id", null).in("estado", vivas);
   // LAS DOS, Y DESPUÉS SE UNEN. Pedir las del proyecto solo cuando la obra no
   // tiene ninguna propia esconde las que se pidieron antes de que la obra
@@ -987,6 +988,32 @@ export async function comprasSinFacturar(obraId, leadId) {
     leadId ? base().eq("lead_id", leadId) : Promise.resolve({ data: [] }),
   ]);
   return solicitudesDeLaObra([...(a.data || []), ...(b.data || [])], { id: obraId, lead_id: leadId });
+}
+
+/**
+ * Esos mismos pedidos, CON SUS COTIZACIONES: lo que hace falta para reconocer,
+ * al cargar un documento, de qué pedido es (`pedidoDelDocumento`). El monto de
+ * un pedido casi nunca está en el pedido: está en la proforma que se eligió, y
+ * el proveedor también.
+ *
+ * Lo usan las dos puertas por donde entra un documento a una obra: la factura
+ * del control y el gasto de caja chica. Caja chica sabe la obra y no siempre
+ * el proyecto: si no viene, se busca.
+ *
+ * @returns { pedidos, adjuntos }
+ */
+export async function pedidosParaEnganchar(obraId, leadId) {
+  if (!obraId) return { pedidos: [], adjuntos: [] };
+  let lead = leadId;
+  if (lead === undefined) {
+    const { data } = await supabase.from("obras").select("lead_id").eq("id", obraId).maybeSingle();
+    lead = data?.lead_id ?? null;
+  }
+  const pedidos = await comprasSinFacturar(obraId, lead);
+  if (!pedidos.length) return { pedidos: [], adjuntos: [] };
+  const { data: adjuntos } = await supabase.from("compras_adjuntos")
+    .select("id,solicitud_id,monto,proveedor,tipo").in("solicitud_id", pedidos.map(p => p.id));
+  return { pedidos, adjuntos: adjuntos || [] };
 }
 
 /**
