@@ -34,11 +34,34 @@ import { rubrosDe, grupoDe } from "./variosRubros.js";
 const n = v => Number(v) || 0;
 const c2 = v => Math.round(n(v) * 100) / 100;
 
+// MANDA LA CANTIDAD DE LA LIQUIDACIÓN (Hernán, 24/11/2026).
+//
+// «Este rubro sale como pérdida, pero voy a instalar más de lo presupuestado,
+// como está en el presupuesto de liquidación, que tiene órdenes de cambio y
+// cantidades actualizadas... ¿esas cantidades deberían mandar?». El piso
+// laminado del Aeropuerto: contratado por 6,25 m² —$309,38—, con 28 m²
+// ejecutados cargados en la liquidación —se cobran $1.386,01— y $602,70
+// gastados. Medido contra los 6,25 salía perdido en $293,32, mientras la
+// liquidación decía que se iban a cobrar $1.386.
+//
+// En una obra POR RUBROS se cobra lo ejecutado: el rubro que ya tiene su
+// cantidad ejecutada cargada se mide contra lo que la liquidación cobra por
+// él, y su costo presupuestado, si lo tiene, es el de esa cantidad. Sin
+// cantidad ejecutada cargada todavía no se midió, y sigue contra lo
+// contratado. Llave en mano no cambia: ahí se cobra lo contratado, se ejecute
+// lo que se ejecute.
+//
+// `medido` es el renglón de ese rubro en la liquidación (liquidacion.js):
+// { medida, ejecutada, cobra }. Quien llama no lo pasa en llave en mano.
+
 /** Un rubro del presupuesto medido contra sus facturas. */
-export function seguimientoDeRubro(r, porRubro = {}) {
+export function seguimientoDeRubro(r, porRubro = {}, medido = null) {
   const gastado = sinIvaDelGasto(r, porRubro?.[r.id]?.acumulado);
-  const cobrado = baseSinIva(r);
-  const costo = conCosto(r) ? c2(n(r.costo_unitario) * n(r.cantidad)) : null;
+  const contratado = baseSinIva(r);
+  const porLiquidacion = !!medido?.medida;
+  const ejecutada = porLiquidacion ? n(medido.ejecutada) : null;
+  const cobrado = porLiquidacion ? c2(medido.cobra) : contratado;
+  const costo = conCosto(r) ? c2(n(r.costo_unitario) * (porLiquidacion ? ejecutada : n(r.cantidad))) : null;
   const contra = costo != null ? "costo" : "cobrado";
   const presupuestado = costo ?? cobrado;
   const resultado = c2(presupuestado - gastado);
@@ -59,6 +82,9 @@ export function seguimientoDeRubro(r, porRubro = {}) {
     id: r.id, numero: String(r.numero ?? r.codigo ?? ""), descripcion: r.descripcion || "",
     unidad: r.unidad || "", cantidad: n(r.cantidad),
     cobrado, costo, gastado, avance, terminado, contra, presupuestado, resultado, estado,
+    // Contra qué cantidad se midió: la ejecutada de la liquidación, si la
+    // tiene. `contratado` es lo que se cobraba por lo firmado, para decirlo al lado.
+    porLiquidacion, ejecutada, contratado,
     // Cuenta en el resultado si ya pasó: una pérdida ya pasó; un ahorro,
     // recién cuando el rubro terminó. Antes es lo que falta comprar.
     cuenta: pasado || (terminado && gastado > 0),
@@ -66,8 +92,8 @@ export function seguimientoDeRubro(r, porRubro = {}) {
 }
 
 /** Los rubros que ya gastaron más de su presupuesto, se sigan o no. */
-export function perdidasEnRubros(rubros = [], porRubro = {}) {
-  const filas = rubros.filter(seMide).map(r => seguimientoDeRubro(r, porRubro))
+export function perdidasEnRubros(rubros = [], porRubro = {}, medidos = {}) {
+  const filas = rubros.filter(seMide).map(r => seguimientoDeRubro(r, porRubro, medidos?.[String(r.id)]))
     .filter(f => f.estado === "pasado").sort((a, b) => a.resultado - b.resultado);
   return { filas, total: c2(filas.reduce((t, f) => t + f.resultado, 0)) };
 }
@@ -117,13 +143,21 @@ export const decididoPorControl = s => !!s && (s.estado === "pasado" || (s.estad
  *   lo que dejaron, según Control, los rubros con beneficio ya terminados a
  *   favor: { filas, total }.
  */
-export function beneficiosConControl(beneficios = [], { rubros = [], porRubro = {} } = {}) {
+export function beneficiosConControl(beneficios = [], { rubros = [], porRubro = {}, medidos = {}, seguidos = [] } = {}) {
   const porId = new Map((rubros || []).map(r => [Number(r.id), r]));
   const dicho = new Map();
   const queDice = id => {
-    if (!dicho.has(id)) { const r = porId.get(id); dicho.set(id, r && seMide(r) ? seguimientoDeRubro(r, porRubro) : null); }
+    if (!dicho.has(id)) { const r = porId.get(id); dicho.set(id, r && seMide(r) ? seguimientoDeRubro(r, porRubro, medidos?.[String(id)]) : null); }
     return dicho.get(id);
   };
+  // EL RUBRO QUE SE SIGUE YA LO CUENTA CONTROL. Desde el 24/11/2026 un rubro en
+  // seguimiento suma siempre —lo presupuestado menos lo gastado—, así que un
+  // beneficio cargado a mano contra ese mismo rubro dejaría la misma plata
+  // contada dos veces. Manda Control, como con el pasado y el terminado.
+  // (Que el seguimiento le gane a lo cargado a mano es lectura mía de «manda
+  // Control de obra»; hoy ningún rubro seguido tiene un beneficio cargado.)
+  const enSeguimiento = new Set((seguidos || []).map(s => Number(s?.obra_rubro_id ?? s)));
+  const decidido = p => decididoPorControl(p.s) || enSeguimiento.has(Number(p.id));
   const terminados = new Map();
   const filas = (beneficios || []).map(b => {
     // Ya pasó por acá: no se le saca dos veces.
@@ -134,11 +168,12 @@ export function beneficiosConControl(beneficios = [], { rubros = [], porRubro = 
     const partes = ids.map(id => ({ id, s: queDice(id), peso: pesos[id] ?? 0 })).filter(p => p.s);
     if (!partes.length) return b;
     const enControl = c2(partes.reduce((t, p) => t + p.s.gastado, 0));
-    const decididas = partes.filter(p => decididoPorControl(p.s));
+    const decididas = partes.filter(decidido);
     const info = {
       enControl,
       rubros: partes.map(p => ({ id: p.id, numero: p.s.numero, descripcion: p.s.descripcion, estado: p.s.estado,
-        gastado: p.s.gastado, presupuestado: p.s.presupuestado, resultado: p.s.resultado, decidido: decididoPorControl(p.s) })),
+        gastado: p.s.gastado, presupuestado: p.s.presupuestado, resultado: p.s.resultado, decidido: decidido(p),
+        seguido: enSeguimiento.has(Number(p.id)) })),
     };
     if (!decididas.length) return enControl > 0 ? { ...b, _control: { ...info, manda: null } } : b;
     decididas.filter(p => p.s.estado === "terminado" && p.s.resultado > 0).forEach(p => terminados.set(p.id, p.s));
@@ -162,7 +197,10 @@ export function notaDeControl(b, plata = v => `$${n(v).toFixed(2)}`) {
   const firmado = v => `${v >= 0 ? "+" : "−"}${plata(Math.abs(v))}`;
   if (!k.manda) return `En Control de obra ${k.rubros.length > 1 ? "esos rubros llevan" : "el rubro lleva"} ${plata(k.enControl)} gastados: sigue contando lo cargado a mano hasta que esté todo.`;
   const decididos = k.rubros.filter(x => x.decidido)
-    .map(x => `${x.numero} ${x.estado === "pasado" ? "se pasó" : "terminó"}: gastó ${plata(x.gastado)} de ${plata(x.presupuestado)}, ${firmado(x.resultado)}`);
+    .map(x => (x.estado === "pasado" || x.estado === "terminado"
+      ? `${x.numero} ${x.estado === "pasado" ? "se pasó" : "terminó"}: gastó ${plata(x.gastado)} de ${plata(x.presupuestado)}, ${firmado(x.resultado)}`
+      // En seguimiento y todavía abierto: lo cuenta el seguimiento, con lo gastado hasta hoy.
+      : `${x.numero} está en seguimiento: lleva gastados ${plata(x.gastado)} de ${plata(x.presupuestado)}, ${firmado(x.resultado)} por ahora`));
   const cargado = c2(k.original.presupuestado - k.original.real);
   return `Manda Control de obra${k.manda === "parte" ? " en una parte" : ""} · ${decididos.join(" · ")}`
     + ` · lo cargado a mano era ${firmado(cargado)}${k.manda === "parte" ? ": cuenta solo la parte de los rubros que siguen abiertos" : " y ya no suma"}`;
@@ -296,20 +334,37 @@ export function ordenesPorAprobar({ ordenes = [], lineasDeOrdenes = {}, rubros =
   return { filas, total: c2(filas.reduce((t, x) => t + x.beneficio, 0)) };
 }
 
-export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {}, deltas = {}, modalidad = "rubros" } = {}) {
-  // MANDA CONTROL: lo cargado a mano deja de sumar donde Control ya decidió.
-  const conControl = beneficiosConControl(beneficios, { rubros, porRubro });
+/**
+ * @param medidos  los renglones de la liquidación, por rubro (`porFila` de
+ *                 liquidacion.js): de ahí sale la cantidad ejecutada que manda
+ */
+export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {}, deltas = {}, medidos = {}, modalidad = "rubros" } = {}) {
+  // MANDA LA LIQUIDACIÓN, en una obra por rubros: llave en mano cobra lo
+  // contratado, y ahí lo ejecutado no cambia contra qué se mide un rubro.
+  const deLaLiquidacion = modalidad === "llave_en_mano" ? {} : (medidos || {});
+  // MANDA CONTROL: lo cargado a mano deja de sumar donde Control ya decidió,
+  // y en los rubros que se siguen.
+  const conControl = beneficiosConControl(beneficios, { rubros, porRubro, medidos: deLaLiquidacion, seguidos });
   const t = totales(conControl.beneficios);
-  const perdidas = perdidasEnRubros(rubros, porRubro);
+  const perdidas = perdidasEnRubros(rubros, porRubro, deLaLiquidacion);
   const porId = new Map(rubros.map(r => [String(r.id), r]));
+  // LOS RUBROS EN SEGUIMIENTO SUMAN SIEMPRE (Hernán, 24/11/2026: «los rubros
+  // en seguimiento deberían sumar al total de beneficios... creo que no están
+  // sumando»). No sumaban: contaban recién al terminar —avance al 100%— y
+  // ningún rubro del Aeropuerto tenía avance anotado. Lo que eligió: que sumen
+  // siempre, lo presupuestado menos lo gastado hasta hoy. Mientras el rubro
+  // esté abierto, ese número baja con cada factura que le entra.
   const seguimiento = seguidos.map(s => {
     const r = porId.get(String(s.obra_rubro_id));
-    return r ? { seguido: s, ...seguimientoDeRubro(r, porRubro) } : null;
+    if (!r) return null;
+    const f = seguimientoDeRubro(r, porRubro, deLaLiquidacion[String(r.id)]);
+    // El renglón en negativo de una orden no se mide nunca, se siga o no.
+    return { seguido: s, ...f, cuenta: seMide(r) };
   }).filter(Boolean);
-  // Lo que dejaron los seguidos ya terminados, en positivo: lo negativo ya
-  // está en las pérdidas, que son de todos los rubros, y no se cuenta dos veces.
+  // Lo que van dejando los seguidos. El que se pasó no está acá: ya está en
+  // las pérdidas, que son de todos los rubros, y no se cuenta dos veces.
   const ganadoEnSeguidos = c2(seguimiento
-    .filter(f => f.terminado && f.gastado > 0 && f.resultado > 0)
+    .filter(f => f.cuenta && f.estado !== "pasado")
     .reduce((s, f) => s + f.resultado, 0));
   // Lo que dejaron, según Control, los rubros con un beneficio cargado que ya
   // terminaron a favor. Los que además se siguen ya están contados arriba.

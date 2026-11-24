@@ -42,7 +42,12 @@ test("se mide contra el costo si está cargado; si no, contra lo que se cobra", 
   assert.equal(picado.estado, "pasado");
 });
 
-test("el resultado: lo ganado comprando, menos las pérdidas, más lo que dejaron los seguidos terminados", () => {
+// LOS RUBROS EN SEGUIMIENTO SUMAN SIEMPRE. Hernán, 24/11/2026: «los rubros en
+// seguimiento deberían sumar al total de beneficios... creo que no están
+// sumando». Contaban recién al terminar —avance al 100%—, y ningún rubro del
+// Aeropuerto tenía avance anotado: sus cinco seguidos sumaban cero. Eligió que
+// sumen siempre lo presupuestado menos lo gastado hasta hoy.
+test("el resultado: lo ganado comprando, menos las pérdidas, más lo que van dejando los rubros en seguimiento", () => {
   const r = resultadoDeLaObra({
     beneficios: [{ presupuestado: 720, real: 450 }, { presupuestado: 14300.02, real: 9500 }],
     rubros, porRubro,
@@ -50,29 +55,34 @@ test("el resultado: lo ganado comprando, menos las pérdidas, más lo que dejaro
   });
   assert.equal(r.conPapel, 5070.02);
   assert.equal(r.perdidasTotal, -139.44);
-  assert.equal(r.ganadoEnSeguidos, 34.78);
+  // La pintura terminada dejó $34,78 contra su costo; las mamparas, sin
+  // empezar, tienen entero su costo presupuestado de $150 por gastar.
+  assert.equal(r.ganadoEnSeguidos, 184.78);
   // LO YA APROBADO SUMA. La pintura se cobra $1.000 y tiene $600 de costo: esos
   // $400 ya son beneficio. Con los $34,78 que además se ahorró comprando, el
   // rubro dejó $434,78: lo que se cobra menos lo que se gastó. Las mamparas,
   // con $150 de costo contra $6.000 de precio, no se cuentan: costo dudoso.
   assert.equal(r.aprobados.total, 400);
   assert.equal(r.aprobados.dudosos, 1);
-  assert.equal(r.neto, 5365.36);
+  assert.equal(r.neto, 5515.36);
   assert.deepEqual(r.seguimiento.map(f => f.id), [7, 1325]);   // el 999 ya no existe
   assert.equal(r.seguimiento[1].estado, "sin_empezar");
+  assert.ok(r.seguimiento.every(f => f.cuenta));
 });
 
-test("un seguido en curso se muestra pero no cuenta hasta terminar", () => {
+test("un seguido en curso suma lo que va quedando, sin esperar a que termine", () => {
   const r = resultadoDeLaObra({
     rubros: [{ ...rubros[2], avance_pct: 50 }], porRubro,
     seguidos: [{ id: 1, obra_rubro_id: 7 }],
   });
   assert.equal(r.seguimiento[0].estado, "en_curso");
-  assert.equal(r.seguimiento[0].cuenta, false);
-  assert.equal(r.ganadoEnSeguidos, 0);
-  // Lo que no cuenta hasta terminar es lo que se gana o se pierde COMPRANDO.
-  // El margen de lo ya aprobado —$1.000 que se cobran, $600 de costo— sí.
-  assert.equal(r.neto, 400);
+  assert.equal(r.seguimiento[0].cuenta, true);
+  assert.equal(r.ganadoEnSeguidos, 34.78);
+  // Con el margen de lo ya aprobado —$1.000 que se cobran, $600 de costo—, el
+  // rubro lleva $434,78: lo que se cobra menos lo gastado hasta hoy.
+  assert.equal(r.neto, 434.78);
+  // El mismo rubro SIN seguir no suma hasta terminar: seguirlo es lo que lo hace contar.
+  assert.equal(resultadoDeLaObra({ rubros: [{ ...rubros[2], avance_pct: 50 }], porRubro }).neto, 400);
 });
 
 test("un seguido que se pasó cuenta una sola vez, en las pérdidas", () => {

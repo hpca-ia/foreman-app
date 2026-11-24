@@ -158,9 +158,14 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const [ejecutado, setEjecutado] = useState({});
   const [ordenesEnteras, setOrdenesEnteras] = useState(null);
   const [modalidad, setModalidad] = useState(modalidadDe(obra));
-  const deltasDeLoEjecutado = useMemo(() => (Object.keys(ejecutado).length && ordenesEnteras
-    ? liquidacionDeLaObra({ obra: { ...obra, modalidad }, rubros, ordenes: ordenesEnteras.ordenes, lineasDeOrdenes: ordenesEnteras.lineas, ejecutado }).deltas
-    : {}), [ejecutado, ordenesEnteras, obra, modalidad, rubros]);
+  // La liquidación entera: `deltas` mueve el beneficio de lo aprobado y
+  // `porFila` dice contra qué cantidad se mide cada rubro —manda la ejecutada—.
+  const liqDeLoEjecutado = useMemo(() => (Object.keys(ejecutado).length && ordenesEnteras
+    ? liquidacionDeLaObra({ obra: { ...obra, modalidad }, rubros, ordenes: ordenesEnteras.ordenes, lineasDeOrdenes: ordenesEnteras.lineas, ejecutado })
+    : null), [ejecutado, ordenesEnteras, obra, modalidad, rubros]);
+  // Los rubros que se siguen en Beneficios: suman siempre al resultado, y la
+  // tarjeta de esta pantalla tiene que decir lo mismo que esa pestaña.
+  const [seguidos, setSeguidos] = useState([]);
   const alCambiarLoEjecutado = useCallback(async mapa => {
     setEjecutado(mapa);
     if (Object.keys(mapa).length) { const oc = await cargarOrdenes(obra.id); setOrdenesEnteras({ ordenes: oc.ordenes || [], lineas: oc.lineas || {} }); }
@@ -211,6 +216,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     const { data: ben } = await supabase.from("obra_beneficios")
       .select("*").eq("obra_id", obra.id);
     setBeneficios(ben || []);
+    // Sin la migración 167 no hay seguimiento: la consulta vuelve vacía y no suma nada.
+    const { data: seg } = await supabase.from("obra_beneficios_seguimiento")
+      .select("id,obra_rubro_id").eq("obra_id", obra.id);
+    setSeguidos(seg || []);
     // Las órdenes y lo que quitan: lo ya aprobado deja beneficio sobre la
     // cantidad que SIGUE aprobada, y para eso hay que saber cuánto le sacó
     // cada orden aprobada a cada rubro.
@@ -432,10 +441,12 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           // rubros pasados adentro: un beneficio de $5.000 en una obra que ya
           // va perdiendo en tres rubros no es un beneficio. Lo previsto sale
           // de una proforma y todavía puede no pasar: no entra.
-          const res = resultadoDeLaObra({ beneficios: beneficiosVivos, rubros, porRubro,
+          // Y lo que van dejando los rubros en seguimiento, que suman siempre
+          // (Hernán, 24/11/2026): el mismo número que la pestaña Beneficios.
+          const res = resultadoDeLaObra({ beneficios: beneficiosVivos, rubros, porRubro, seguidos,
             ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas,
-            deltas: deltasDeLoEjecutado, modalidad });
-          if (!res.cuantosConPapel && !res.perdidas.length && !res.aprobados.cuantos) return null;
+            deltas: liqDeLoEjecutado?.deltas || {}, medidos: liqDeLoEjecutado?.porFila || {}, modalidad });
+          if (!res.cuantosConPapel && !res.perdidas.length && !res.aprobados.cuantos && !res.ganadoEnSeguidos) return null;
           return <Tarjeta label={res.neto >= 0 ? "Beneficio" : "Pérdida"} valor={Math.abs(res.neto)}
             color={res.neto >= 0 ? colors.success : colors.danger} />;
         })()}
@@ -641,7 +652,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           )}
 
           {tab === "beneficios" && (
-            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} porRubro={porRubro} currentUser={currentUser} modalidad={modalidad} /></SiSeRompe>
+            <SiSeRompe que="Beneficios"><PanelBeneficios obra={obra} rubros={rubros} porRubro={porRubro} currentUser={currentUser} modalidad={modalidad}
+              onSeguidos={setSeguidos} /></SiSeRompe>
           )}
           {tab === "diferencias" && (
             <SiSeRompe que="Diferencias"><PanelDiferencias obra={obra} rubros={rubros} currentUser={currentUser} onCambio={cargar} modalidad={modalidad} /></SiSeRompe>

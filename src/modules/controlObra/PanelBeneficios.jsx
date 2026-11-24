@@ -53,7 +53,7 @@ const conSusRubros = (a, ids) => ({
   ...(ids.length > 1 ? { cantidad: "", unidad: "", unitario: "" } : {}),
 });
 
-export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, currentUser, modalidad = null }) {
+export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, currentUser, modalidad = null, onSeguidos = null }) {
   const [items, setItems] = useState([]);
   const [proveedor, setProveedor] = useState("");
   const [ordenes, setOrdenes] = useState([]);
@@ -119,7 +119,10 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
     if (r.error) { setError(r.error); return; }
     setGuardados(r.beneficios);
     setEnlaces(await enlacesDeProformas(r.beneficios));
-    setSeguidos((await seguidosDe(obra.id)).seguidos || []);
+    const sg = (await seguidosDe(obra.id)).seguidos || [];
+    setSeguidos(sg);
+    // La tarjeta de arriba, en la obra, suma lo mismo: se le avisa qué se sigue.
+    onSeguidos?.(sg);
     // Y las órdenes, para poder decir cuáles NO están sumando y por qué: una
     // orden aprobada que no llega acá se va en silencio y la utilidad de la
     // obra queda más baja de lo que es.
@@ -127,7 +130,7 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
     setOrdenes(oc.ordenes || []);
     setLineasDeOrdenes(oc.lineas || {});
     setEjecutado((await cargarEjecutado(obra.id)).ejecutado || {});
-  }, [obra?.id]);
+  }, [obra?.id, onSeguidos]);
   useEffect(() => { cargar(); }, [cargar]);
 
   // SOBRE LO QUE QUEDA. Si una orden aprobada le quitó cantidad a un rubro, su
@@ -138,10 +141,15 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
   // EL RESULTADO, no solo los beneficios: lo ganado comprando, menos lo que
   // ya se perdió en los rubros pasados, más lo que dejaron los seguidos.
   const comoSeCobra = modalidad || modalidadDe(obra);
-  const deltas = useMemo(() => (Object.keys(ejecutado).length
-    ? liquidacionDeLaObra({ obra: { ...obra, modalidad: comoSeCobra }, rubros, ordenes, lineasDeOrdenes, ejecutado }).deltas
-    : {}), [ejecutado, obra, comoSeCobra, rubros, ordenes, lineasDeOrdenes]);
-  const res = resultadoDeLaObra({ beneficios: sobreLoQueQueda, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes, deltas, modalidad: comoSeCobra });
+  // LA LIQUIDACIÓN, si ya hay algo medido: de ahí sale cuánto mueve lo
+  // ejecutado el beneficio de lo aprobado (`deltas`) y contra qué cantidad se
+  // mide cada rubro (`porFila`: manda la ejecutada, no la contratada).
+  const liq = useMemo(() => (Object.keys(ejecutado).length
+    ? liquidacionDeLaObra({ obra: { ...obra, modalidad: comoSeCobra }, rubros, ordenes, lineasDeOrdenes, ejecutado })
+    : null), [ejecutado, obra, comoSeCobra, rubros, ordenes, lineasDeOrdenes]);
+  const deltas = liq?.deltas || {};
+  const res = resultadoDeLaObra({ beneficios: sobreLoQueQueda, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes,
+    deltas, medidos: liq?.porFila || {}, modalidad: comoSeCobra });
   // MANDA CONTROL DE OBRA: donde Control ya decidió cómo le fue al rubro, lo
   // cargado a mano deja de sumar (resultadoDeLaObra.js). `contados` es eso.
   const contados = res.contados;
@@ -449,13 +457,17 @@ Rubros de la obra: ${lista}`;
     const r = await seguirRubro({ obra_id: obra.id, obra_rubro_id: rb.id,
       creado_por: currentUser?.id ?? null, creado_nombre: currentUser?.name || null });
     if (r.error) { setError(r.error); return; }
-    setSeguidos(xs => [...xs.filter(x => String(x.obra_rubro_id) !== String(rb.id)), r.seguido]);
+    const ahora = [...seguidos.filter(x => String(x.obra_rubro_id) !== String(rb.id)), r.seguido];
+    setSeguidos(ahora);
+    onSeguidos?.(ahora);
   }
 
   async function quitarSeguido(sg) {
     const err = await dejarDeSeguir(sg.id);
     if (err) { setError(err); return; }
-    setSeguidos(xs => xs.filter(x => x.id !== sg.id));
+    const ahora = seguidos.filter(x => x.id !== sg.id);
+    setSeguidos(ahora);
+    onSeguidos?.(ahora);
   }
 
   // CORREGIR UNO GUARDADO: se abre en el mismo formulario de la carga a mano,
@@ -535,14 +547,24 @@ Rubros de la obra: ${lista}`;
             <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: dice[1], background: dice[2], borderRadius: 9, padding: "1px 6px" }}>{dice[0]}</span>
           </div>
           <div style={{ fontSize: 10.5, color: colors.muted }}>
-            se cobra ${fmt(f.cobrado)} sin IVA · {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}
+            se cobra ${fmt(f.cobrado)} sin IVA
+            {/* MANDA LA CANTIDAD DE LA LIQUIDACIÓN, y se dice: el número de al
+                lado ya no es el del contrato, y sin esto no se sabe por qué. */}
+            {f.porLiquidacion && (
+              <span className="por-lo-ejecutado" style={{ color: colors.inkSoft }}>
+                {" "}por {fmt(f.ejecutada)} {f.unidad} ejecutados en la liquidación (contratado: {fmt(f.cantidad)} {f.unidad}, ${fmt(f.contratado)})
+              </span>
+            )}
+            {" "}· {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}
             {" "}· gastado ${fmt(f.gastado)} en facturas, sin IVA · avance {f.avance}%
             {ingresosDe(f.id) ? ` · además ${ingresosDe(f.id)} ${ingresosDe(f.id) === 1 ? "ingreso cargado" : "ingresos cargados"} contra este rubro` : ""}
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0, fontSize: 10.5, color: colors.muted }}>
           contra {f.contra === "costo" ? "su costo" : "lo que se cobra"}
-          {!f.cuenta && f.estado !== "sin_empezar" ? <div>no cuenta hasta terminar</div> : null}
+          {/* El que se sigue suma siempre; mientras esté abierto, se dice que
+              el número todavía se mueve con cada factura. */}
+          {f.seguido && f.cuenta && f.estado !== "pasado" && !f.terminado ? <div>suma lo que va quedando</div> : null}
         </div>
         <div style={{ textAlign: "right", flexShrink: 0, minWidth: 86, fontSize: 12.5, fontWeight: 700, opacity: f.cuenta ? 1 : 0.55,
           color: f.resultado >= 0 ? colors.success : colors.danger }}>
@@ -874,7 +896,8 @@ Rubros de la obra: ${lista}`;
               icono={<TrendingDown size={11} color={colors.danger} />} />
           )}
           {res.ganadoEnSeguidos !== 0 && (
-            <Tarjeta label="RUBROS SEGUIDOS, TERMINADOS" valor={res.ganadoEnSeguidos} color={colors.success} />
+            <Tarjeta label={`RUBROS EN SEGUIMIENTO · ${res.seguimiento.filter(f => f.cuenta && f.estado !== "pasado").length}`}
+              valor={res.ganadoEnSeguidos} color={colors.success} />
           )}
           {/* MANDA CONTROL: lo que dejaron, según sus facturas, los rubros
               con un beneficio cargado que ya terminaron a favor. */}
@@ -911,7 +934,7 @@ Rubros de la obra: ${lista}`;
             <strong style={{ color: colors.ink }}>El resultado es la suma de:</strong>{" "}
             comprando mejor <strong>${fmt(res.conPapel)}</strong>
             {res.aprobados.total !== 0 && <> · ya aprobado, con su costo <strong>{res.aprobados.total < 0 ? "−" : "+"}${fmt(Math.abs(res.aprobados.total))}</strong></>}
-            {res.ganadoEnSeguidos !== 0 && <> · rubros seguidos y terminados <strong>+${fmt(res.ganadoEnSeguidos)}</strong></>}
+            {res.ganadoEnSeguidos !== 0 && <> · rubros en seguimiento, lo presupuestado menos lo gastado hasta hoy <strong>+${fmt(res.ganadoEnSeguidos)}</strong></>}
             {res.segunControl.total !== 0 && <> · según Control de obra, rubros terminados <strong>+${fmt(res.segunControl.total)}</strong></>}
             {res.perdidasTotal !== 0 && <> · rubros pasados <strong style={{ color: colors.danger }}>−${fmt(Math.abs(res.perdidasTotal))}</strong></>}
             {" "}= <strong style={{ color: res.neto >= 0 ? colors.success : colors.danger }}>
@@ -1012,8 +1035,9 @@ Rubros de la obra: ${lista}`;
             <div style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5 }}>
                 Elegí en el presupuesto el rubro que querés seguir. Se compara lo que lleva gastado en facturas contra
-                su costo cargado, o contra lo que se cobra si no tiene costo. Cuenta en el resultado cuando el rubro
-                termina, o desde ya si se pasó.
+                su costo cargado, o contra lo que se cobra si no tiene costo. Suma al resultado desde que se lo
+                sigue: lo presupuestado menos lo gastado hasta hoy, así que baja con cada factura que le entra. Si se
+                pasa, resta.
               </div>
               <Presupuesto rubros={vivos} busca={buscaRubro} onBusca={setBuscaRubro} marcas={marcasParaSeguir}
                 eligiendo={{ descripcion: "el seguimiento" }}
