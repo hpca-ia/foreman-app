@@ -1096,8 +1096,15 @@ export default function TablaGantt({
                             hace perder una mañana: adelantar la que no era. */}
                         {deps.length > 0 && a.inicio && (
                           <div style={{ fontSize: 11, color: colors.muted, marginTop: 4, lineHeight: 1.45 }}>
-                            Arranca el <span style={{ color: colors.ink, fontWeight: 700 }}>{dia(a.inicio)}</span>
-                            {mandaLaFija
+                            {a.real ? "Arrancó el " : "Arranca el "}
+                            <span style={{ color: colors.ink, fontWeight: 700 }}>{dia(a.inicio)}</span>
+                            {/* Lo que ya empezó no arranca "por" nada de lo de
+                                arriba: arrancó cuando arrancó. Decir que es la
+                                más tardía de unas fechas que son posteriores a
+                                ella era una frase falsa. */}
+                            {a.real
+                              ? <>: es su fecha real, y lo que espera ya no la mueve. Estas dependencias vuelven a contar solo si su avance vuelve a cero.</>
+                              : mandaLaFija
                               ? <> porque se lo pediste con la fecha fija: ninguna de las que espera la detiene más allá de eso.</>
                               : porDeps
                                 ? <> porque es la más tardía de las fechas de arriba. Adelantar cualquier otra no la mueve.</>
