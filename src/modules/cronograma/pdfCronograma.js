@@ -65,7 +65,9 @@ export const diasPorHoja = hoja =>
  *   tamaño de la letra ni el de las barras: una obra larga se lee igual, en
  *   menos hojas.
  */
-export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [], cal, hoyISO, diasDeContrato = 0 }, hoja = "a4") {
+export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [], cal, hoyISO, diasDeContrato = 0, resumen = "" }, hoja = "a4") {
+  // Si alguna fila trae su línea base, se dibuja debajo y se explica al pie.
+  const conBase = filas.some(f => f.base);
   const { jsPDF } = await cargarPDF();
   const doc = new jsPDF({ unit: "mm", format: HOJAS[hoja] ? hoja : "a4", orientation: "landscape" });
   const ANCHO = doc.internal.pageSize.getWidth();
@@ -122,6 +124,15 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
       hojasAncho > 1 ? `tiempo ${hojaAncho + 1} de ${hojasAncho}` : "",
     ].filter(Boolean).join("  ·  ");
     if (segunda) doc.text(segunda, M + 26, y + 12.6);
+    // El avance al corte y contra la línea base: el renglón que se lee primero
+    // en una reunión, y el que justifica un pedido de ampliación de plazo.
+    if (resumen) {
+      doc.setFont("helvetica", "bold"); doc.setTextColor(...TINTA);
+      // Arriba a la derecha, en el renglón del título: más abajo se metería
+      // en la banda de los meses, que es lo que ya pasó una vez con el resumen.
+      doc.setFontSize(8);
+      doc.text(resumen, ANCHO - M, y + 5, { align: "right" });
+    }
 
     // ── La escala: una banda de mes arriba, los días abajo ──
     const yMes = ARRIBA - 12, yDia = ARRIBA - 5.5;
@@ -327,14 +338,30 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
               // Gris lo que ejecuta un externo: cuando una de ésas se atrasa
               // la responsabilidad es de otro, y mezclada con las propias el
               // cronograma se lee como si todo fuera de la obra.
+              // Con línea base la barra se achica un poco: abajo va la raya
+              // de lo que se firmó, y tienen que leerse como dos cosas.
+              const alto = FILA - (f.base ? 3.6 : 2.6);
               doc.setFillColor(...(f.externo ? [148, 145, 140] : f.critica ? ROJO : TINTA));
-              doc.roundedRect(x, y + 1.3, ancho, FILA - 2.6, 0.6, 0.6, "F");
+              doc.roundedRect(x, y + 1.3, ancho, alto, 0.6, 0.6, "F");
               // Lo ejecutado, en una franja más oscura adentro.
-              if (f.avance > 0) {
+              if (f.avance > 0 && f.avance < 100) {
                 doc.setFillColor(255, 255, 255);
-                doc.rect(x + ancho * (f.avance / 100), y + 2.4, ancho * (1 - f.avance / 100), FILA - 4.8, "F");
+                doc.rect(x + ancho * (f.avance / 100), y + 2.2, ancho * (1 - f.avance / 100), alto - 1.8, "F");
               }
             }
+          }
+        }
+        // LA LÍNEA BASE: una raya gris bajo la barra, en las fechas firmadas.
+        // Va aparte de la barra porque puede caer en otra hoja que ella.
+        if (f.base?.inicio && f.base?.fin) {
+          const b1 = Math.round((fechaDe(f.base.inicio) - inicio) / DIA_MS);
+          const b2 = Math.round((fechaDe(f.base.fin) - inicio) / DIA_MS);
+          const desde = Math.max(b1, desdeDia);
+          const hasta = Math.min(b2, desdeDia + diasHoja - 1);
+          if (hasta >= desde) {
+            doc.setFillColor(150, 147, 142);
+            doc.rect(M + IZQ + (desde - desdeDia) * MM_DIA, y + FILA - 1.9,
+              Math.max((hasta - desde + 1) * MM_DIA, 1.2), 0.8, "F");
           }
         }
         y += FILA;
@@ -345,7 +372,8 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
       // La leyenda va en el medio del pie; qué es, de qué proyecto y cuándo
       // se emitió lo pone pieDePdf al final, cuando ya se sabe cuántas hojas hay.
       doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...GRIS);
-      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Flecha ámbar: la que traba  ·  Barra clara: lo que falta ejecutar",
+      doc.text("Rojo: ruta crítica  ·  Gris: la ejecuta un externo  ·  Rombo ámbar: hito  ·  Flecha ámbar: la que traba  ·  Barra clara: lo que falta ejecutar"
+        + (conBase ? "  ·  Raya gris: línea base" : ""),
         ANCHO / 2, ALTO - 5, { align: "center" });
     }
   }

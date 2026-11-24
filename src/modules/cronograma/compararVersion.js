@@ -25,6 +25,12 @@ export function fotoDe(actividades = [], dependencias = []) {
       obra_actividad_id: a.obra_actividad_id ?? null,
       etapa: a.etapa || null, peso_pct: a.peso_pct ?? null,
       critica: !!a.critica,
+      // Lo ejecutado al momento de la foto. Un corte de avance guardado es
+      // esto: sin el porcentaje, la foto dice dónde estaban las barras y no
+      // cuánto se había hecho, que es lo que se quiere mirar semana a semana.
+      avance_pct: Number(a.avance_pct) || 0,
+      inicio_real: a.inicio_real ? dia(a.inicio_real) : null,
+      fin_real: a.fin_real ? dia(a.fin_real) : null,
     })),
     dependencias: dependencias.map(d => ({
       actividad_id: d.actividad_id, depende_de_id: d.depende_de_id,

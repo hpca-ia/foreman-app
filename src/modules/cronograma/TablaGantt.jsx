@@ -4,7 +4,8 @@ import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import Numero from "../../components/ui/Numero";
-import { ETAPAS, cualTraba, cuandoDejanEmpezar } from "./cpm";
+import { ETAPAS, cualTraba, cuandoDejanEmpezar, avanceDe } from "./cpm";
+import { duracionParaTerminar } from "./corteDeAvance";
 import { fmt } from "../controlObra/calculos";
 import { apunteDe, apunteEnUnaLinea } from "./apuntes";
 import { porFases, tramoDe } from "./agruparPorFase";
@@ -106,6 +107,7 @@ export default function TablaGantt({
   onCambiar, onCambiarDep, onDesunir, onUnir, onQuitar, onPartir, onMoverRubro, onMoverEtapa,
   rubros = [], sinSenalar, onSenalar, platas = null, memoria = [],
   fases = [], onFase, onZoomReal, herramientas = null,
+  corte = null, reanuda = null, baseDe = null, onAvance, atras = null,
 }) {
   const [abierta, setAbierta] = useState(null);
   const [plegados, setPlegados] = useState(() => new Set());
@@ -132,8 +134,15 @@ export default function TablaGantt({
   // para quien la elija, y aun así cada fila dice de qué día a qué día va.
   const [compacta, setCompacta] = useState(() => { try { return localStorage.getItem("foreman_gantt_compacta") === "1"; } catch { return false; } });
   const alternarCompacta = () => setCompacta(c => { try { localStorage.setItem("foreman_gantt_compacta", c ? "0" : "1"); } catch {} return !c; });
-  const COLS = compacta ? "minmax(230px,1fr) 54px 68px" : "minmax(230px,1fr) 54px 112px 112px 52px 68px";
-  const IZQ = compacta ? 230 + 54 + 68 + 2 * 7 + 12 : 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12;
+  // EL AVANCE VA EN LA FILA, al lado de las fechas. Es lo que se carga cada
+  // semana, barra por barra: adentro de la ficha serían cincuenta fichas que
+  // abrir y cerrar. Solo aparece cuando hay una fecha de corte —sin ella un
+  // porcentaje no dice a qué día—, y es la SEXTA celda a propósito: la tabla
+  // compacta esconde la 3.ª, 4.ª y 5.ª, y el avance tiene que quedar.
+  const conAvance = !!corte && !sinFecha;
+  const AV = conAvance ? " 50px" : "";
+  const COLS = compacta ? `minmax(230px,1fr) 54px${AV} 68px` : `minmax(230px,1fr) 54px 112px 112px 52px${AV} 68px`;
+  const IZQ = (compacta ? 230 + 54 + 68 + 2 * 7 + 12 : 230 + 54 + 112 + 112 + 52 + 68 + 5 * 7 + 12) + (conAvance ? 57 : 0);
   const diasTotales = Math.max(1, cal.entre(plan.inicio, plan.fin));
   // PANTALLA COMPLETA. Dentro de la página, el cronograma vive entre el menú y
   // los márgenes de la app: a las barras les quedaba una porción chica de la
@@ -149,7 +158,7 @@ export default function TablaGantt({
     : zoom;
   const anchoLienzo = zoom === "ajustar" ? Math.max(120, Math.floor(diasTotales * zoomReal)) : Math.max(320, Math.round(diasTotales * zoomReal));
   useEffect(() => { onZoomReal?.(zoomReal); }, [zoomReal]); // eslint-disable-line
-  const posicion = f => (f ? (cal.entre(plan.inicio, f) - 1) / diasTotales : 0);
+  const posicion = f => (f ? Math.max(0, (cal.entre(plan.inicio, f) - 1) / diasTotales) : 0);
   const largo = a => (a.inicio && a.fin ? Math.max(cal.entre(a.inicio, a.fin), 1) / diasTotales : 0);
   const dentro = hoyISO >= plan.inicio && hoyISO <= plan.fin;
 
@@ -273,7 +282,8 @@ export default function TablaGantt({
   // nota perdería el foco a la primera tecla, y los inputs se vaciarían solos.
   // Es el mismo defecto que hacía que no se pudieran escribir los números, por
   // otro camino.
-  const ui = { COLS, IZQ, anchoLienzo, posicion, largo, dentro, hoyISO, dia, verRubros, setVerRubros };
+  const ui = { COLS, IZQ, anchoLienzo, posicion, largo, dentro, hoyISO, dia, verRubros, setVerRubros,
+    baseDe, corte: conAvance ? corte : null, diasTotales, cal };
 
   // ── LAS CADENAS, DIBUJADAS ────────────────────────────────────────────────
   //
@@ -480,6 +490,8 @@ export default function TablaGantt({
           <span>EMPIEZA</span>
           <span>TERMINA</span>
           <span style={{ textAlign: "center" }}>COLCHÓN</span>
+          {conAvance && <span title={`Cuánto llevaba hecho cada actividad al cierre del ${dia(corte)}`}
+            style={{ textAlign: "center" }}>AVANCE</span>}
           {/* VER LAS CADENAS O NO VERLAS. Con cuarenta barras encadenadas el
               dibujo se vuelve una maraña, y a veces uno viene a mirar las
               fechas y nada más. */}
@@ -600,6 +612,7 @@ export default function TablaGantt({
                   {/* El colchón de un rubro no es un número: cada etapa tiene
                       el suyo y sumarlos no querría decir nada. */}
                   <span />
+                  {conAvance && <span />}
                   <span />
                 </Fijo>
                 {/* La barra del rubro de punta a punta: lo que se importa en
@@ -838,29 +851,70 @@ export default function TablaGantt({
                             : a.inicio_fijo
                               ? "No arranca antes de este día. Vaciá el campo para que lo calcule el cronograma."
                               : "Lo calcula el cronograma por sus dependencias. Si escribís una fecha, no arranca antes de ese día."}
-                          onChange={e => onCambiar(a, { inicio_fijo: e.target.value || null })}
+                          {...(a.real ? { title: "Cuándo empezó de verdad. Corregila si no fue ese día." } : {})}
+                          onChange={e => {
+                            // Lo que ya arrancó tiene una fecha real, y es ésa
+                            // la que se corrige: un "no antes de" ya no le dice
+                            // nada a un trabajo que está caminando.
+                            if (a.real) { if (e.target.value) onCambiar(a, { inicio_real: e.target.value }); return; }
+                            onCambiar(a, { inicio_fijo: e.target.value || null });
+                          }}
                           style={{ ...inputStyle, padding: "3px 5px", fontSize: 11, height: 25,
-                            color: a.inicio_fijo ? colors.brand : colors.inkSoft,
-                            fontWeight: a.inicio_fijo ? 600 : 400 }} />
+                            color: a.real ? colors.ink : a.inicio_fijo ? colors.brand : colors.inkSoft,
+                            fontWeight: a.real || a.inicio_fijo ? 600 : 400 }} />
                       ) : <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.inicio)}</span>}
                       {editable && !sinFecha ? (
                         <input type="date" value={a.fin || ""}
-                          title="Escribí hasta cuándo va y la duración se calcula sola, contando solo días de trabajo."
+                          title={a.real === "terminada" ? "Cuándo terminó de verdad. Corregila si no fue ese día."
+                            : a.real === "en_curso" ? "Cuándo va a terminar, por lo que le falta desde el corte. Si escribís otra fecha, se ajustan los días."
+                            : "Escribí hasta cuándo va y la duración se calcula sola, contando solo días de trabajo."}
                           onChange={e => {
                             const hasta = e.target.value;
                             if (!hasta || !a.inicio) return;
+                            if (a.real === "terminada") {
+                              onCambiar(a, { fin_real: hasta < a.inicio ? a.inicio : hasta });
+                              return;
+                            }
+                            if (a.real === "en_curso" && reanuda) {
+                              const dur = duracionParaTerminar(a, hasta, reanuda, cal);
+                              if (dur !== a.duracion) onCambiar(a, { duracion: dur });
+                              return;
+                            }
                             // Los días hábiles entre su arranque y esa fecha.
                             // Si la ponen antes del arranque queda en uno: una
                             // actividad de cero días no existe.
                             const d = hasta < a.inicio ? 1 : Math.max(1, cal.entre(a.inicio, hasta));
                             if (d !== a.duracion) onCambiar(a, { duracion: d });
                           }}
-                          style={{ ...inputStyle, padding: "3px 5px", fontSize: 11, height: 25, color: colors.inkSoft }} />
+                          style={{ ...inputStyle, padding: "3px 5px", fontSize: 11, height: 25,
+                            color: a.real === "terminada" ? colors.ink : colors.inkSoft,
+                            fontWeight: a.real === "terminada" ? 600 : 400 }} />
                       ) : <span style={{ color: colors.inkSoft, fontSize: 11.5 }}>{dia(a.fin)}</span>}
                       <span style={{ textAlign: "center", fontSize: 11.5, fontWeight: a.critica ? 700 : 400,
                         color: a.critica ? colors.danger : colors.muted }}>
-                        {a.enCiclo ? "—" : a.critica ? "0" : `${a.holgura}d`}
+                        {a.enCiclo ? "—" : a.real === "terminada" ? "✓" : a.critica ? "0" : `${a.holgura}d`}
                       </span>
+                      {conAvance && (a.es_hito ? (
+                        /* Un hito pasó o no pasó: no se hace por partes. */
+                        <button disabled={!editable || !onAvance}
+                          onClick={() => onAvance(a, avanceDe(a) >= 100 ? 0 : 100)}
+                          title={avanceDe(a) >= 100 ? "Ya ocurrió. Tocá para desmarcarlo." : "Tocá cuando haya ocurrido."}
+                          style={{ background: "none", border: "none", cursor: editable ? "pointer" : "default",
+                            fontFamily: colors.font, fontSize: 12, fontWeight: 700, padding: 0,
+                            color: avanceDe(a) >= 100 ? colors.success : colors.border }}>
+                          {avanceDe(a) >= 100 ? "✓" : "○"}
+                        </button>
+                      ) : (
+                        <Numero value={avanceDe(a)} min={0} max={100} disabled={!editable || !onAvance}
+                          onCommit={v => { if (Number(v) !== avanceDe(a)) onAvance(a, v); }}
+                          title={`Cuánto llevaba hecho al cierre del ${dia(corte)}, de 0 a 100. Enter para guardar.`
+                            + (baseDe?.get(a.id) ? `\nLínea base: ${dia(baseDe.get(a.id).inicio)} → ${dia(baseDe.get(a.id).fin)}` : "")}
+                          style={{ padding: "4px 4px", fontSize: 11.5, textAlign: "center",
+                            fontWeight: avanceDe(a) > 0 ? 700 : 400,
+                            color: atras?.has(a.id) ? colors.danger
+                              : avanceDe(a) >= 100 ? colors.success : avanceDe(a) > 0 ? colors.brand : colors.muted,
+                            borderColor: atras?.has(a.id) ? colors.danger : undefined }} />
+                      ))}
                     {editable ? (
                       <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
                       {/* PARTIR, A LA VISTA.
@@ -1425,7 +1479,24 @@ const Barra = ({ ui, a, tenue, marca }) => {
   if (!a.inicio) return null;
   // Sobre la barra, el nombre primero: en la zona de barras no hay otra forma
   // de saber de qué trabajo es la que uno está mirando.
-  const cuando = `${a.nombre}\n${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}${a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`}`;
+  const base = !tenue && ui.baseDe ? ui.baseDe.get(a.id) : null;
+  const hecho = avanceDe(a);
+  const cuando = `${a.nombre}\n${ui.dia(a.inicio)} → ${ui.dia(a.fin)}${a.externo ? ` · la hace ${a.externo}` : ""}`
+    + (a.real === "terminada" ? " · terminada" : a.critica ? " · ruta crítica" : ` · ${a.holgura} días de colchón`)
+    + (ui.corte && hecho > 0 && hecho < 100 ? ` · ${hecho} % hecho` : "")
+    + (base ? `\nLínea base: ${ui.dia(base.inicio)} → ${ui.dia(base.fin)}` : "");
+
+  // LA LÍNEA BASE, DEBAJO DE CADA BARRA.
+  //
+  // Una raya gris fina con las fechas que se firmaron. La barra de arriba es
+  // dónde está ese trabajo hoy; la de abajo, dónde se dijo que iba a estar. La
+  // distancia entre las dos es el atraso, y se ve sin leer una sola fecha.
+  const sombra = base && base.inicio && base.fin ? (
+    <div title={`Línea base: ${ui.dia(base.inicio)} → ${ui.dia(base.fin)}`}
+      style={{ position: "absolute", bottom: 0, height: 4, borderRadius: 2, background: colors.muted, opacity: 0.55,
+        left: `${ui.posicion(base.inicio) * 100}%`,
+        width: `${Math.max((Math.max(ui.cal.entre(base.inicio, base.fin), 1) / ui.diasTotales) * 100, 0.6)}%` }} />
+  ) : null;
 
   // UN HITO ES UN ROMBO ÁMBAR, NO UNA BARRA DE UN DÍA.
   //
@@ -1439,25 +1510,39 @@ const Barra = ({ ui, a, tenue, marca }) => {
   // nadie le sirve que se tapen entre sí.
   if (a.es_hito) {
     return (
+      <>
+      {base && base.inicio && (
+        <div title={`Línea base: ${ui.dia(base.inicio)}`}
+          style={{ position: "absolute", top: "50%", left: `${ui.posicion(base.inicio) * 100}%`,
+            width: 7, height: 7, marginTop: -3.5, marginLeft: 2, transform: "rotate(45deg)",
+            border: `1.5px solid ${colors.muted}`, boxSizing: "border-box", opacity: 0.7 }} />
+      )}
       <div title={`◆ ${cuando}`} data-barra={marca ? a.id : undefined}
         style={{ position: "absolute", top: "50%", left: `${ui.posicion(a.inicio) * 100}%`,
           width: 11, height: 11, marginTop: -5.5, transform: "rotate(45deg)",
           background: colors.hito, borderRadius: 2,
           border: a.critica ? `1.5px solid ${colors.danger}` : "none",
           opacity: tenue ? 0.3 : 1 }} />
+      </>
     );
   }
 
   return (
+    <>
+    {sombra}
     <div title={cuando} data-barra={marca ? a.id : undefined}
-      style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : 0,
+      style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : sombra ? 6 : 0,
         left: `${ui.posicion(a.inicio) * 100}%`, width: `${Math.max(ui.largo(a) * 100, 0.6)}%`,
         background: colorDe(a), borderRadius: 4,
         opacity: tenue ? 0.3 : 1, display: "flex", alignItems: "center", overflow: "hidden" }}>
-      {!tenue && a.avance_pct > 0 && (
-        <div style={{ width: `${Math.min(100, a.avance_pct)}%`, height: "100%", background: "rgba(255,255,255,.45)" }} />
+      {/* LO HECHO, EN FIRME; LO QUE FALTA, ACLARADO. Estaba al revés —se
+          aclaraba la parte hecha— y al revés que el PDF, así que la misma
+          barra decía una cosa en pantalla y otra impresa. */}
+      {!tenue && hecho > 0 && hecho < 100 && (
+        <div style={{ marginLeft: `${hecho}%`, width: `${100 - hecho}%`, height: "100%", background: "rgba(255,255,255,.55)" }} />
       )}
     </div>
+    </>
   );
 };
 

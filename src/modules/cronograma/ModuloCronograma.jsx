@@ -17,6 +17,7 @@ import { fasesDe, crearFase, renombrarFase, borrarFase, moverFase, asignarFase, 
 import { ordenesPendientes, lineasDe, marcarAplicada } from "./ordenesEnCronograma";
 import { guardarVersion, versionesDe, fotoDeVersion, borrarVersion } from "./versiones";
 import { comparar } from "./compararVersion";
+import { corteDeAvance, camposDeAvance, planSinCorte, corteSugerido, emparejar } from "./corteDeAvance";
 import { sinCiclos } from "./sinCiclos";
 import { bajarProject } from "./exportarProject";
 import { pdfCronograma, HOJAS, diasPorHoja } from "./pdfCronograma";
@@ -158,6 +159,33 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     if (lead?.id) versionesDe(lead).then(v => { if (vivo) setVersiones(v); }).catch(() => {});
     return () => { vivo = false; };
   }, [lead?.id]);
+  // LA LÍNEA BASE, SIEMPRE A MANO. Antes se leía solo al apretar "Comparar";
+  // ahora se dibuja debajo de cada barra y contra ella se mide el avance, así
+  // que se trae apenas se sabe cuál es.
+  const [fotoBase, setFotoBase] = useState(null);
+  const baseId = versiones.find(v => v.es_linea_base)?.id || null;
+  useEffect(() => {
+    let vivo = true;
+    setFotoBase(null);
+    if (baseId) fotoDeVersion(baseId).then(f => { if (vivo) setFotoBase(f); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [baseId]);
+  // Hasta qué día se midió el avance. Se pide aparte: va en una columna nueva
+  // (la 192), y pedirla junto con el resto dejaría la lista de proyectos vacía
+  // en una base donde todavía no corrió.
+  const [sin192, setSin192] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    if (!lead?.id || esDePresupuesto(lead) || lead.crono_corte !== undefined) return undefined;
+    const id = lead.id;
+    supabase.from("leads").select("crono_corte").eq("id", id).maybeSingle().then(({ data, error: e }) => {
+      if (!vivo) return;
+      if (e) { setSin192(/crono_corte|column|schema cache/i.test(e.message)); return; }
+      setSin192(false);
+      setLead(l => (l && l.id === id && !esDePresupuesto(l) ? { ...l, crono_corte: data?.crono_corte || null } : l));
+    });
+    return () => { vivo = false; };
+  }, [lead?.id]); // eslint-disable-line
   // El menú de lo que se hace de vez en cuando: bajarlo para Project,
   // reordenarlo, borrarlo. Afuera queda lo que uno viene a hacer.
   const [menu, setMenu] = useState(false);
@@ -548,11 +576,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   // —"del día 12 al 30"— y no en fechas que serían inventadas. Por dentro se
   // calcula desde hoy, que es lo mismo corrido; afuera solo se ven días.
   const sinFecha = esDePresupuesto(lead) && !lead.crono_inicio;
+  // Con fecha de corte el cronograma deja de ser solo el plan: lo ejecutado
+  // manda. Un presupuesto no tiene obra, así que no tiene avance que medir.
+  const corteISO = !esDePresupuesto(lead) && lead.crono_corte ? String(lead.crono_corte).slice(0, 10) : null;
   const plan = calcular({
     actividades: actividades.map(a => ({ ...a, duracion: a.duracion })),
     dependencias,
     inicio: lead.crono_inicio || hoy(),
     cal,
+    corte: corteISO,
   });
 
   const porId = new Map(plan.actividades.map(a => [a.id, a]));
@@ -598,6 +630,15 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
   // tiene, y del porcentaje del capítulo cuando no. Una sola cuenta, para que
   // el Gantt, el valorado y la foto de referencia digan lo mismo.
   const platas = plataDelPlan(actividades, rubros);
+
+  // EL AVANCE, contra lo que se firmó. Tres números que se dicen juntos en una
+  // reunión: cuánto va, cuánto debía ir, y cuándo termina ahora.
+  const avance = corteISO && todas.length
+    ? corteDeAvance({ actividades: todas, foto: fotoBase, corte: corteISO, cal,
+        montoDe: a => platas.porActividad.get(a.id) || 0 })
+    : null;
+  const contraBase = fotoBase && todas.length ? comparar(fotoBase, todas, dependencias) : null;
+  const baseDe = fotoBase ? emparejar(fotoBase, todas) : null;
 
   // LA FECHA MANDA cuando está; si no, se deriva de los meses, para que el
   // campo nunca se vea vacío habiendo plazo.
@@ -692,6 +733,29 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     if (!data?.length) { setError("La base no dejó agregar la actividad y no dijo por qué."); return; }
     if (nombre == null) setNueva({ nombre: "", duracion: nueva.duracion });
     await cargar();
+  }
+
+  /** Fijar —o quitar— el día hasta el que se midió el avance. */
+  async function ponerCorte(fecha) {
+    const { data, error: e } = await supabase.from("leads")
+      .update({ crono_corte: fecha || null }).eq("id", lead.id).select("id");
+    if (e) {
+      const falta = /crono_corte|column|schema cache/i.test(e.message);
+      if (falta) setSin192(true);
+      setError(falta ? "Falta correr la migración 192 para medir el avance." : e.message);
+      return;
+    }
+    if (!data?.length) { setError("No se pudo guardar la fecha de corte: la base no dejó tocar el proyecto."); return; }
+    setError("");
+    setLead(l => ({ ...l, crono_corte: fecha || null }));
+  }
+
+  /** Un porcentaje escrito en la fila: se guarda con las fechas reales que trae. */
+  async function cargarAvance(a, pct) {
+    if (!corteISO) return;
+    const pensado = planSinCorte({ actividades, dependencias, inicio: lead.crono_inicio || hoy(), cal });
+    const guardada = actividades.find(x => x.id === a.id) || a;
+    await cambiar(a, camposDeAvance(guardada, pct, corteISO, pensado.get(a.id)));
   }
 
   async function cambiar(a, campos) {
@@ -1342,6 +1406,21 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
    * El PDF tiene que decir lo mismo que el Gantt. Si las armara por su cuenta,
    * a la tercera versión dirían cosas distintas y nadie sabría cuál creer.
    */
+  /** El avance y el corrimiento contra la línea base, en un renglón. */
+  function resumenParaPdf() {
+    const partes = [];
+    if (avance) {
+      partes.push(`Avance al ${dia(corteISO)}: ${porc(avance.real)} %`
+        + (avance.esperado != null ? ` (debía ir ${porc(avance.esperado)} %)` : ""));
+    }
+    if (contraBase?.corrimientoObra != null) {
+      const d = contraBase.corrimientoObra;
+      partes.push(d === 0 ? "termina el mismo día que la línea base"
+        : `termina ${Math.abs(d)} días ${d > 0 ? "después" : "antes"} de la línea base (${dia(contraBase.finAntes)})`);
+    }
+    return partes.join("  ·  ");
+  }
+
   function filasParaPdf() {
     const porAg = new Map();
     todas.forEach(a => {
@@ -1375,7 +1454,8 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
           numero: fases.length ? `${fase ? nEtapa : "—"}.${n}` : String(n),
           nombre: a.nombre, duracion: a.duracion, inicio: a.inicio, fin: a.fin,
           critica: a.critica, hito: a.es_hito, externo: a.externo || null,
-          avance: Number(a.avance_pct) || 0, sangria: g.hijas.length > 1 });
+          avance: Number(a.avance_pct) || 0, sangria: g.hijas.length > 1,
+          base: baseDe?.get(a.id) || null });
       }));
     });
     return filas;
@@ -1811,6 +1891,127 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
           </div>
         )}
       </div>
+
+      {/* EL AVANCE DE LA OBRA.
+          Arriba de todo porque es lo que se viene a hacer cada semana: fijar
+          hasta qué día se midió, cargar el porcentaje de cada barra en su
+          fila, y leer acá los tres números que se dicen en la reunión —cuánto
+          va, cuánto debía ir, cuándo termina ahora—. */}
+      {todas.length > 0 && !sinFecha && !esDePresupuesto(lead) && (corteISO || editable) && (
+        <div style={{ background: colors.surface, border: `1px solid ${corteISO ? colors.brand : colors.border}`,
+          borderRadius: colors.radiusMd, padding: "10px 12px", marginBottom: 12 }}>
+          {!corteISO ? (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <Button variant="outline" size="sm" disabled={pensando || sin192}
+                onClick={() => ponerCorte(corteSugerido(hoyISO, cal))}>
+                <CalendarClock size={13} /> Medir el avance
+              </Button>
+              <span style={{ fontSize: 11, color: colors.muted, flex: 1, minWidth: 220, lineHeight: 1.45 }}>
+                {sin192
+                  ? "Falta correr la migración 192 para poder medir el avance."
+                  : <>Fijás hasta qué día mediste y cargás en cada fila cuánto lleva hecho. El cronograma se
+                    reacomoda con lo que de verdad pasó{fotoBase ? " y se compara contra la línea base" : ""}.</>}
+              </span>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div>
+                  <label style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, display: "block", marginBottom: 3 }}>
+                    AVANCE MEDIDO AL CIERRE DEL
+                  </label>
+                  <input type="date" value={corteISO} disabled={!editable} max={hoyISO}
+                    title="Hasta qué día se midió. Lo que falta de cada actividad se cuenta desde el día de trabajo siguiente."
+                    onChange={e => { if (e.target.value) ponerCorte(e.target.value); }}
+                    style={{ ...inputStyle, width: 152, padding: "6px 9px", fontSize: 12 }} />
+                </div>
+                <Cifra titulo="VA" valor={`${porc(avance.real)} %`} color={colors.ink}
+                  nota={avance.pesaPor === "plata" ? "pesado por plata" : "pesado por días de trabajo"} />
+                {avance.esperado != null ? (
+                  <Cifra titulo="DEBÍA IR" valor={`${porc(avance.esperado)} %`} color={colors.inkSoft}
+                    nota={avance.real >= avance.esperado - 0.5 ? "va al día con la línea base"
+                      : `${porc(avance.esperado - avance.real)} puntos atrás`}
+                    colorNota={avance.real >= avance.esperado - 0.5 ? colors.success : colors.danger} />
+                ) : (
+                  <Cifra titulo="DEBÍA IR" valor="—" color={colors.muted}
+                    nota="sin línea base no hay contra qué medir" />
+                )}
+                <Cifra titulo="TERMINA" valor={dia(plan.fin)} color={colors.ink}
+                  nota={!contraBase || contraBase.corrimientoObra == null ? `${avance.terminadas} de ${todas.length} terminadas`
+                    : contraBase.corrimientoObra === 0 ? "el mismo día que la línea base"
+                    : contraBase.corrimientoObra > 0
+                      ? `${contraBase.corrimientoObra} días después de la línea base (${dia(contraBase.finAntes)})`
+                      : `${Math.abs(contraBase.corrimientoObra)} días antes que la línea base (${dia(contraBase.finAntes)})`}
+                  colorNota={contraBase?.corrimientoObra > 0 ? colors.danger : contraBase ? colors.success : colors.muted} />
+                {editable && (
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                    <Button variant="outline" size="sm" disabled={pensando} onClick={async () => {
+                      setPensando(true); setError("");
+                      const r = await guardarVersion({
+                        lead, obra: { id: lead.obra_id }, actividades: todas, dependencias, plan,
+                        motivo: `Corte de avance al ${dia(corteISO)}: va ${porc(avance.real)} %`
+                          + (avance.esperado != null ? `, debía ${porc(avance.esperado)} %` : ""),
+                        lineaBase: false, quien: currentUser,
+                      });
+                      setPensando(false);
+                      if (r.error) { setError(r.error); return; }
+                      setAviso(`Corte al ${dia(corteISO)} guardado entre las versiones.`);
+                      setVersiones(await versionesDe(lead));
+                    }}>Guardar este corte</Button>
+                    <button onClick={() => {
+                      if (window.confirm("¿Dejar de medir el avance?\n\nEl cronograma vuelve a mostrarse como plan. "
+                        + "Los porcentajes y las fechas reales ya cargados NO se borran: vuelven al poner otra vez una fecha de corte.")) ponerCorte(null);
+                    }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font,
+                      fontSize: 10.5, color: colors.muted, textDecoration: "underline" }}>dejar de medir</button>
+                  </div>
+                )}
+              </div>
+
+              {/* Las dos barras, una sobre otra: lo que va y lo que debía ir. */}
+              <div style={{ position: "relative", height: 8, background: colors.neutralSoft, borderRadius: 4, marginTop: 10 }}>
+                <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, borderRadius: 4,
+                  width: `${Math.min(100, avance.real)}%`, background: colors.brand }} />
+                {avance.esperado != null && (
+                  <div title={`Debía ir ${porc(avance.esperado)} %`}
+                    style={{ position: "absolute", top: -3, bottom: -3, width: 2, background: colors.ink,
+                      left: `${Math.min(100, avance.esperado)}%` }} />
+                )}
+              </div>
+
+              {avance.atrasadas.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.danger, letterSpacing: 0.3, marginBottom: 3 }}>
+                    VAN ATRÁS DE LA LÍNEA BASE — {avance.atrasadas.length}
+                  </div>
+                  {avance.atrasadas.slice(0, 8).map(l => (
+                    <div key={l.id} style={{ display: "flex", gap: 9, fontSize: 11.5, padding: "2px 0" }}>
+                      {l.critica && <span title="Ruta crítica" style={{ color: colors.danger }}>●</span>}
+                      <span style={{ flex: 1, minWidth: 0, color: colors.ink, overflow: "hidden",
+                        textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nombre}</span>
+                      <span style={{ color: colors.muted }}>
+                        {l.estado === "sin_arrancar" ? `debía arrancar el ${dia(l.base.inicio)}` : `lleva ${l.avance} %`}
+                      </span>
+                      <span style={{ color: colors.danger, fontWeight: 700, minWidth: 92, textAlign: "right" }}>
+                        debía {porc(l.esperado)} %
+                      </span>
+                    </div>
+                  ))}
+                  {avance.atrasadas.length > 8 && (
+                    <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
+                      y {avance.atrasadas.length - 8} más: tienen el avance en rojo en su fila.
+                    </div>
+                  )}
+                </div>
+              )}
+              {!fotoBase && (
+                <div style={{ fontSize: 11, color: colors.muted, marginTop: 8 }}>
+                  Esta obra no tiene línea base guardada: se ve cuánto va, pero no contra qué.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* EL PLAZO DEL PROYECTO, con nombre y en un recuadro.
           Estaban como dos campos sueltos al costado del título, sin etiqueta,
@@ -2854,6 +3055,7 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
                   try {
                     await pdfCronograma({
                       nombre: lead.nombre, plan, filas: filasParaPdf(), dependencias, cal, hoyISO, diasDeContrato,
+                      resumen: resumenParaPdf(),
                     }, id);
                     setPdf(false);
                   } catch (e) {
@@ -3560,6 +3762,9 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
           rubros={rubros} sinSenalar={sinSenalar} onSenalar={senalarRubro}
           platas={platas} memoria={memoria}
           fases={fases} onFase={ponerEnEtapa}
+          corte={sinFecha ? null : corteISO} reanuda={plan.reanuda} baseDe={baseDe}
+          onAvance={editable ? cargarAvance : null}
+          atras={avance ? new Set(avance.atrasadas.map(l => l.id)) : null}
           onZoomReal={setZoomVisto} herramientas={controlesZoom} />
       </>
 
@@ -3612,6 +3817,18 @@ export default function ModuloCronograma({ currentUser, puede, nivelProyecto, en
     </div>
   );
 }
+
+// Los porcentajes se escriben con coma, como en una planilla.
+const porc = v => (Math.round(Number(v) * 10) / 10).toLocaleString("es-EC", { maximumFractionDigits: 1 });
+
+// Un número grande con su título arriba y lo que quiere decir abajo.
+const Cifra = ({ titulo, valor, nota, color, colorNota }) => (
+  <div style={{ minWidth: 0 }}>
+    <div style={{ fontSize: 9.5, fontWeight: 700, color: colors.muted, letterSpacing: 0.3, marginBottom: 2 }}>{titulo}</div>
+    <div style={{ fontSize: 18, fontWeight: 700, color, lineHeight: 1.15 }}>{valor}</div>
+    {nota && <div style={{ fontSize: 10.5, color: colorNota || colors.muted, marginTop: 1 }}>{nota}</div>}
+  </div>
+);
 
 const Volver = ({ onClick }) => (
   <button onClick={onClick} style={{ background: "none", border: "none", color: colors.inkSoft, fontSize: 12.5,

@@ -115,13 +115,34 @@ export function calendario({ laborables = [1, 2, 3, 4, 5, 6], feriados = [] } = 
  *
  * @param actividades  [{ id, nombre, duracion, inicio_fijo?, monto?, avance_pct? }]
  * @param dependencias [{ actividad_id, depende_de_id, tipo = "FC", retardo = 0 }]
- * @param opciones     { inicio, cal }
+ * @param opciones     { inicio, cal, corte }
  *
  * Devuelve cada actividad con sus cuatro fechas, su holgura y si es crítica,
  * más el fin de la obra y la lista de ciclos si alguien armó un círculo.
+ *
+ * CON UNA FECHA DE CORTE, LO QUE PASÓ MANDA SOBRE LO QUE SE PLANEÓ.
+ *
+ * Sin corte, el cronograma es un plan: todo sale de las duraciones y de quién
+ * espera a quién, y una barra que debía arrancar hace tres semanas y no
+ * arrancó sigue dibujada hace tres semanas. Eso es lo que hace que un
+ * cronograma deje de creerse en obra.
+ *
+ * `corte` es el día hasta el que se midió el avance, al cierre. Con él:
+ *   · lo terminado queda en las fechas en que de verdad ocurrió;
+ *   · lo empezado conserva su arranque real, y lo que le FALTA —sus días por
+ *     la parte que no está hecha— se cuenta desde el día hábil siguiente al
+ *     corte;
+ *   · lo que no empezó no puede arrancar antes de ese día, además de esperar
+ *     a lo que tenga adelante.
+ * El fin que sale de ahí es el fin PROYECTADO, y es el que se compara contra
+ * la línea base.
  */
-export function calcular({ actividades = [], dependencias = [], inicio, cal = calendario() } = {}) {
+export function calcular({ actividades = [], dependencias = [], inicio, cal = calendario(), corte = null } = {}) {
   const arranque = cal.siguienteHabil(inicio || new Date());
+  const cierre = corte ? aFecha(corte) : null;
+  // El primer día en que todavía se puede trabajar lo que falta.
+  const reanuda = cierre ? cal.siguienteHabil(new Date(cierre.getTime() + DIA)) : null;
+  const estado = new Map();
   const porId = new Map(actividades.map(a => [a.id, { ...a, duracion: Math.max(1, Math.round(a.duracion || 1)) }]));
 
   // De quién depende cada una, y a quién traba.
@@ -172,6 +193,35 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
       if (!candidato) return;
       if (candidato > desde) desde = candidato;
     });
+    if (cierre) {
+      const hecho = avanceDe(a);
+      const terminada = hecho >= 100 || !!a.fin_real;
+      if (terminada) {
+        // Las fechas reales cuando están. Si falta alguna, lo más honesto que
+        // se puede decir es que no pasó después del corte.
+        const f = a.fin_real ? aFecha(a.fin_real) : null;
+        const tope = f || cierre;
+        const i = a.inicio_real ? aFecha(a.inicio_real)
+          : desde <= tope ? desde : retroceder(cal, tope, a.duracion);
+        let ff = f || cal.sumar(i, a.duracion);
+        if (!f && ff > cierre) ff = cierre;
+        if (ff < i) ff = i;
+        estado.set(id, "terminada");
+        ini.set(id, i); fin.set(id, ff);
+        return;
+      }
+      if (hecho > 0 || a.inicio_real) {
+        // Ya arrancó: lo que tenga adelante no la puede correr. Lo que queda
+        // es su parte sin hacer, redondeada para arriba —medio día que falta
+        // es un día de obra—.
+        const i = a.inicio_real ? aFecha(a.inicio_real) : (desde <= cierre ? desde : cierre);
+        const restante = Math.max(1, Math.ceil(a.duracion * (1 - hecho / 100) - 1e-9));
+        estado.set(id, "en_curso");
+        ini.set(id, i); fin.set(id, cal.sumar(reanuda, restante));
+        return;
+      }
+      if (reanuda > desde) desde = reanuda;
+    }
     ini.set(id, desde);
     fin.set(id, cal.sumar(desde, a.duracion));
   });
@@ -218,21 +268,29 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
       if (candidato < hasta) hasta = candidato;
       void siguiente;
     });
+    // Lo que ya pasó no tiene "lo más tarde": pasó cuando pasó.
+    if (estado.get(id) === "terminada") { finT.set(id, fin.get(id)); iniT.set(id, ini.get(id)); return; }
     finT.set(id, hasta);
-    iniT.set(id, retroceder(cal, hasta, a.duracion));
+    iniT.set(id, estado.get(id) === "en_curso" ? ini.get(id) : retroceder(cal, hasta, a.duracion));
   });
 
   const resultado = actividades.map(a => {
     const roto = enCiclo.includes(a.id);
-    const holgura = roto ? null : cal.entre(ini.get(a.id), iniT.get(a.id)) - 1;
+    const real = estado.get(a.id) || null;
+    // El colchón de lo que está en curso se mide por el final —el arranque ya
+    // ocurrió—, y lo terminado no tiene: no puede atrasar nada.
+    const holgura = roto || real === "terminada" ? null
+      : real === "en_curso" ? cal.entre(fin.get(a.id), finT.get(a.id)) - 1
+      : cal.entre(ini.get(a.id), iniT.get(a.id)) - 1;
     return {
       ...a,
+      real,
       inicio: roto ? null : claveFecha(ini.get(a.id)),
       fin: roto ? null : claveFecha(fin.get(a.id)),
       inicio_tarde: roto ? null : claveFecha(iniT.get(a.id)),
       fin_tarde: roto ? null : claveFecha(finT.get(a.id)),
       holgura,
-      critica: !roto && holgura <= 0,
+      critica: !roto && real !== "terminada" && holgura <= 0,
       enCiclo: roto,
     };
   });
@@ -249,8 +307,13 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
     previos: cal.entre(primero, arranque) - 1,
     ciclos: enCiclo,
     ruta: resultado.filter(a => a.critica).map(a => a.id),
+    corte: cierre ? claveFecha(cierre) : null,
+    reanuda: reanuda ? claveFecha(reanuda) : null,
   };
 }
+
+/** El avance de una actividad, entre 0 y 100 aunque en la base diga otra cosa. */
+export const avanceDe = a => Math.max(0, Math.min(100, Number(a?.avance_pct) || 0));
 
 /**
  * Correr una fecha tantos días hábiles, para adelante o para atrás.
