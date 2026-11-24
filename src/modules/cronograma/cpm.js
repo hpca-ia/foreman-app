@@ -254,10 +254,26 @@ export function calcular({ actividades = [], dependencias = [], inicio, cal = ca
       const siguiente = porId.get(d.actividad_id);
       const iniS = iniT.get(d.actividad_id), finS = finT.get(d.actividad_id);
       if (!iniS) return;
+      // LA QUE SIGUE YA ARRANCÓ SIN ESPERAR A ÉSTA.
+      //
+      // En obra pasa todo el tiempo: la tubería empieza a recorrerse con las
+      // paredes al 80 %. La pasada de arriba ya lo respeta —«lo que tenga
+      // adelante no la puede correr»—, y ésta tiene que decir lo mismo: medir
+      // contra el arranque de la otra, que ya ocurrió, le pedía a ésta haber
+      // terminado en el pasado, y toda actividad en curso con la siguiente
+      // empezada salía en ruta crítica teniendo días de sobra.
+      //   · La que sigue ya terminó: ésta no le puede correr nada.
+      //   · La que sigue está en curso: el arranque ya no se discute. Lo que le
+      //     falta a ésta tiene que estar para cuando la otra deba terminar; si
+      //     solo ataba los arranques, ya no la ata.
+      const laOtra = estado.get(d.actividad_id);
+      if (laOtra === "terminada") return;
+      if (laOtra === "en_curso" && d.tipo === "CC") return;
       // El espejo exacto de la pasada de arriba. Cada una devuelve lo más
       // tarde que ESTA puede terminar sin mover a la que sigue.
       let candidato;
-      if (d.tipo === "CC") candidato = cal.sumar(desplazar(cal, iniS, -d.retardo), a.duracion);
+      if (laOtra === "en_curso" && d.tipo !== "FF") candidato = finS;
+      else if (d.tipo === "CC") candidato = cal.sumar(desplazar(cal, iniS, -d.retardo), a.duracion);
       else if (d.tipo === "FF") candidato = desplazar(cal, finS, -d.retardo);
       // Fin→Comienzo: esta tiene que TERMINAR el día hábil anterior al que
       // arranca la que sigue, no el mismo. Retroceder uno solo la dejaba

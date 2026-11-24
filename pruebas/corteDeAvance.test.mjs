@@ -69,6 +69,77 @@ test("una barra empezada que va lenta empuja a la que sigue y al fin de la obra"
   assert.equal(p.de(2).critica, true, "es la que está corriendo la entrega");
 });
 
+// Hernán, 23/11/2026, revisando el cronograma del Aeropuerto: «Paso de Tubería
+// Eléctrica» y «Estructurado de paredes», las dos en curso, salían en ruta
+// crítica con siete días de colchón en todo lo que les sigue. La que venía
+// detrás ya había arrancado, y el cálculo les pedía haber terminado antes de
+// ese arranque, que ya pasó.
+test("una barra en curso no sale en ruta crítica porque la que sigue ya arrancó", () => {
+  // Derrocamiento al 80 % y la mampostería ya empezada, al 25 %, el sábado 14.
+  const p = plan({
+    1: { avance_pct: 80, inicio_real: "2026-03-02" },     // le quedan 2 días → mar 17
+    2: { avance_pct: 25, inicio_real: "2026-03-09" },     // le quedan 9 → mié 25
+  }, "2026-03-14");
+  assert.equal(p.de(1).fin, "2026-03-17");
+  assert.equal(p.de(2).fin, "2026-03-25");
+  assert.equal(p.fin, "2026-04-01");
+  // La mampostería y la pintura llevan la entrega; el derrocamiento, no: lo
+  // que le falta tiene que estar para cuando la mampostería deba terminar.
+  assert.equal(p.de(2).critica, true);
+  assert.equal(p.de(3).critica, true);
+  assert.equal(p.de(1).fin_tarde, "2026-03-25");
+  assert.equal(p.de(1).holgura, 7);
+  assert.equal(p.de(1).critica, false);
+  assert.deepEqual(p.ruta, [2, 3]);
+});
+
+test("si a la barra en curso le falta más de lo que le queda a la que sigue, sí se marca", () => {
+  // Derrocamiento al 10 %: termina el sáb 21. Mampostería al 90 %: el mar 17.
+  const p = plan({
+    1: { avance_pct: 10, inicio_real: "2026-03-02" },
+    2: { avance_pct: 90, inicio_real: "2026-03-09" },
+  }, "2026-03-14");
+  assert.equal(p.de(1).fin, "2026-03-21");
+  assert.equal(p.de(2).fin, "2026-03-17");
+  assert.equal(p.de(1).critica, true, "va a terminar después de cuando la mampostería debe terminar");
+});
+
+test("la que sigue ya terminó: a la barra en curso no le queda nada que correr", () => {
+  const p = plan({
+    1: { avance_pct: 80, inicio_real: "2026-03-02" },                             // → mar 17
+    2: { avance_pct: 100, inicio_real: "2026-03-05", fin_real: "2026-03-14" },
+  }, "2026-03-14");
+  assert.equal(p.de(3).inicio, "2026-03-16");
+  assert.equal(p.fin, "2026-03-21");
+  // Tiene hasta el fin de la obra: su única siguiente ya está hecha.
+  assert.equal(p.de(1).fin_tarde, "2026-03-21");
+  assert.equal(p.de(1).holgura, 4);
+  assert.equal(p.de(1).critica, false);
+});
+
+test("«a la vez que empieza»: empezada la otra, ya no ata a la que le faltaba arrancar con ella", () => {
+  // La pintura arranca junto con la mampostería (CC). La mampostería sigue en
+  // curso y la pintura ya empezó: ese lazo era de los arranques, y ya ocurrieron.
+  const juntas = [{ actividad_id: 2, depende_de_id: 1 }, { actividad_id: 3, depende_de_id: 2, tipo: "CC" }];
+  const r = calcular({ actividades: acts({
+    1: { avance_pct: 100, inicio_real: "2026-03-02", fin_real: "2026-03-07" },
+    2: { avance_pct: 50, inicio_real: "2026-03-09" },     // le quedan 6 → sáb 21
+    3: { avance_pct: 50, inicio_real: "2026-03-10" },     // le quedan 3 → mié 18
+  }), dependencias: juntas, inicio, cal, corte: "2026-03-14" });
+  const de = id => r.actividades.find(a => a.id === id);
+  assert.equal(r.fin, "2026-03-21");
+  assert.equal(de(2).critica, true, "es la última en terminar");
+  assert.equal(de(3).holgura, 3);
+  assert.equal(de(3).critica, false);
+});
+
+test("sin corte, y con la que sigue sin empezar, la ruta crítica es la de siempre", () => {
+  assert.deepEqual(plan().ruta, [1, 2, 3]);
+  // Con corte y nada empezado detrás, igual: la que va lenta lleva la entrega.
+  const p = plan({ 1: { avance_pct: 50, inicio_real: "2026-03-02" } }, "2026-03-07");
+  assert.deepEqual(p.ruta, [1, 2, 3]);
+});
+
 test("lo que debía ir sale de la línea base, no del plan de hoy", () => {
   assert.equal(debiaIr("2026-03-09", "2026-03-21", "2026-03-14", cal), 0.5);
   assert.equal(debiaIr("2026-03-09", "2026-03-21", "2026-03-07", cal), 0, "todavía no le tocaba");
