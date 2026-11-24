@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { totalesPresupuesto } from "./presupuestos/honorarios";
+import { planDeLlenado } from "./presupuestos/llenarBase";
 
 // La cotización de un proveedor, antes de meterla al presupuesto: a qué
 // capítulo va, con cuánta utilidad, y si sus precios quedan en la base de
 // rubros. Eso último se elige: una cotización de prueba, o de un proveedor que
 // no se quiere tener de referencia, no tiene por qué contar.
+//
+// Si el presupuesto ya tiene rubros, hay dos caminos: llenar esos rubros con
+// los precios del proveedor (NOVA dice cuál es cuál, y acá se corrige) o
+// agregar la cotización como capítulo aparte.
 //
 // Y antes de aplicarla, el total: lo que NOVA leyó contra lo que dice la
 // cotización. Si no cuadra, falta un rubro o se leyó mal un precio, y eso hay
@@ -29,7 +34,7 @@ function conDosPrecios(result) {
   return { rubros, dos: porRubro || pct != null, pctGeneral: pct };
 }
 
-export default function CotizacionPanel({ result, clientes, capitulosActivos, presupuesto, onCancelar, onImportar, fmt }) {
+export default function CotizacionPanel({ result, clientes, capitulosActivos, presupuesto, base = [], onCancelar, onImportar, fmt }) {
   // "" = capítulo nuevo con el nombre de abajo; si no, uno que ya existe.
   const [destino, setDestino] = useState("");
   const [capNuevo, setCapNuevo] = useState(result.proveedor || "COTIZACIÓN PROVEEDOR");
@@ -44,6 +49,10 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
   const [clienteNombre, setClienteNombre] = useState("");
   const [fecha, setFecha] = useState(new Date().getFullYear().toString());
   const [revisado, setRevisado] = useState(false);
+  // "llenar": cada precio a su rubro del presupuesto. "capitulo": todo aparte.
+  const [modo, setModo] = useState(() => (lectura.rubros.some(r => r.base_id != null) ? "llenar" : "capitulo"));
+  const llenar = modo === "llenar" && base.length > 0;
+  const [agregarSueltos, setAgregarSueltos] = useState(false);
 
   const final = r => r.precio_unitario_final ?? n(r.precio_unitario) * (1 + n(r.utilidad_pct) / 100);
 
@@ -105,18 +114,29 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
   }
   const falta = chequeo.cuadra === false && !revisado;
 
+  // ── Llenar el presupuesto ──
+  const plan = planDeLlenado(rubros.map(r => ({ ...r, precio: final(r) })), base);
+  const cambioDe = new Map(plan.cambios.map(c => [c.id, c]));
+  const baseDe = new Map(base.map(b => [b.id, b]));
+  const repetido = id => plan.repetidos.includes(id);
+  const totalSueltos = r2(plan.sueltos.reduce((s, r) => s + n(r.cantidad || 1) * final(r), 0));
+  const entra = llenar ? r2(plan.entra + (agregarSueltos ? totalSueltos : 0)) : conUtilidad;
+  const haceFaltaCapitulo = !llenar || (agregarSueltos && plan.sueltos.length > 0);
+
   // ── Cómo queda el presupuesto ──
   const totalCon = sub => totalesPresupuesto(sub, presupuesto || {}).total;
   const subAntes = n(presupuesto?.subtotal);
-  const subDespues = r2(subAntes + conUtilidad);
+  const subDespues = r2(subAntes + entra);
 
   const faltaProveedor = guardarBD && !proveedor.trim();
   const sinCapitulo = !capNombre;
   const bloqueo = lectura.dos && !precioElegido ? "Elige qué precio tomar: PVP o con descuento"
     : faltaProveedor ? "Escribe quién cotiza para guardarlo en la base"
-    : sinCapitulo ? "Ponle nombre al capítulo"
+    : haceFaltaCapitulo && sinCapitulo ? "Ponle nombre al capítulo"
     : falta ? "Revisa la diferencia del total para continuar"
-    : !rubros.length ? "No quedan rubros para importar" : null;
+    : !rubros.length ? "No quedan rubros para importar"
+    : llenar && plan.repetidos.length ? "Dos renglones apuntan al mismo rubro del presupuesto: deja uno"
+    : llenar && !plan.cambios.length && !(agregarSueltos && plan.sueltos.length) ? "Ningún renglón tiene su rubro del presupuesto: elígelos en la tabla" : null;
 
   const iS = { background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--ink)", padding: "5px 8px", fontSize: 12, fontFamily: "var(--font)", outline: "none" };
   const numS = { ...iS, textAlign: "right", padding: "3px 6px", boxSizing: "border-box", width: "100%" };
@@ -144,15 +164,43 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
         </div>
       )}
 
+      {base.length > 0 && (
+        <div style={{ background: "#fff", border: "1.5px solid var(--border)", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>¿Qué hago con esta cotización?</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+            {[["llenar", "Llenar el presupuesto", `NOVA reconoció ${rubros.filter(r => r.base_id != null).length} de ${rubros.length} en tus rubros: el precio va a cada uno`],
+              ["capitulo", "Agregar como capítulo", "Los rubros de la cotización entran aparte, tal como vienen"]].map(([id, label, ayuda]) => (
+              <button key={id} onClick={() => setModo(id)}
+                style={{ textAlign: "left", cursor: "pointer", fontFamily: "var(--font)", borderRadius: 8, padding: "8px 10px",
+                  border: `1.5px solid ${modo === id ? "var(--ink)" : "var(--border)"}`, background: modo === id ? "var(--neutral-soft)" : "#fff" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{label}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{ayuda}</div>
+              </button>
+            ))}
+          </div>
+          {llenar && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
+              Se escribe solo el precio. La descripción y la cantidad de tu presupuesto no se tocan; la cantidad cotizada entra únicamente donde el rubro no tiene ninguna.
+            </div>
+          )}
+          {llenar && plan.sueltos.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, cursor: "pointer", fontSize: 12, color: "var(--ink)" }}>
+              <input type="checkbox" checked={agregarSueltos} onChange={e => setAgregarSueltos(e.target.checked)} />
+              {plan.sueltos.length === 1 ? "Hay 1 renglón que no está" : `Hay ${plan.sueltos.length} renglones que no están`} en tu presupuesto (${fmt(totalSueltos)}): agregar{plan.sueltos.length === 1 ? "lo" : "los"} en un capítulo
+            </label>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginBottom: 12 }}>
-        <div>
-          <label style={{ fontSize: 11, color: "var(--ink-soft)", display: "block", marginBottom: 3 }}>A qué capítulo va</label>
+        {haceFaltaCapitulo && <div>
+          <label style={{ fontSize: 11, color: "var(--ink-soft)", display: "block", marginBottom: 3 }}>{llenar ? "A qué capítulo van los que no están" : "A qué capítulo va"}</label>
           <select value={destino} onChange={e => setDestino(e.target.value)} style={{ ...iS, width: "100%", boxSizing: "border-box", marginBottom: destino ? 0 : 6 }}>
             <option value="">Capítulo nuevo…</option>
             {capitulosActivos.map(c => <option key={c.nombre} value={c.nombre}>{c.orden}. {c.nombre}</option>)}
           </select>
           {!destino && <input value={capNuevo} onChange={e => setCapNuevo(e.target.value)} placeholder="Nombre del capítulo nuevo" style={{ ...iS, width: "100%", boxSizing: "border-box" }} />}
-        </div>
+        </div>}
         <div>
           <label style={{ fontSize: 11, color: "var(--ink-soft)", display: "block", marginBottom: 3 }}>Utilidad global a todos los rubros (%)</label>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -164,28 +212,40 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
 
       {/* Rubros, corregibles: NOVA a veces lee mal un número */}
       <div className="pres-tabla" style={{ maxHeight: 260, overflowY: "auto", marginBottom: 12, border: "1px solid var(--success-border)", borderRadius: 8, background: "#fff" }}>
-        <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
-          <colgroup><col /><col style={{ width: 56 }} /><col style={{ width: 72 }} /><col style={{ width: 88 }} /><col style={{ width: 60 }} /><col style={{ width: 88 }} /><col style={{ width: 96 }} /><col style={{ width: 28 }} /></colgroup>
+        <table style={{ width: "100%", minWidth: llenar ? 980 : 720, borderCollapse: "collapse", fontSize: 11, tableLayout: "fixed" }}>
+          <colgroup><col />{llenar && <col style={{ width: 280 }} />}<col style={{ width: 56 }} /><col style={{ width: 72 }} /><col style={{ width: 88 }} /><col style={{ width: 60 }} /><col style={{ width: 88 }} /><col style={{ width: 96 }} /><col style={{ width: 28 }} /></colgroup>
           <thead><tr style={{ background: "var(--success-soft)" }}>
-            {[["Descripción", "left"], ["Unidad", "left"], ["Cant", "right"], ["P.Original", "right"], ["Util%", "right"], ["P.Final", "right"], ["Total", "right"], ["", ""]].map(([h, al]) => (
+            {[[llenar ? "En la cotización" : "Descripción", "left"], ...(llenar ? [["Rubro del presupuesto", "left"]] : []), ["Unidad", "left"], ["Cant", "right"], ["P.Original", "right"], ["Util%", "right"], ["P.Final", "right"], ["Total", "right"], ["", ""]].map(([h, al]) => (
               <th key={h || "x"} style={{ padding: "5px 8px", textAlign: al || "left", color: "var(--success)", fontWeight: 600, borderBottom: "1px solid var(--success-border)", whiteSpace: "nowrap" }}>{h}</th>
             ))}
           </tr></thead>
           <tbody>
-            {rubros.map((r, i) => (
+            {rubros.map((r, i) => { const b = llenar && r.base_id != null ? baseDe.get(r.base_id) : null; const c = b && !repetido(b.id) ? cambioDe.get(b.id) : null; return (
               <tr key={i} style={{ borderBottom: "1px solid var(--success-soft)" }}>
                 <td style={{ padding: "4px 8px", color: "var(--ink)", overflowWrap: "anywhere" }}>{r.descripcion}</td>
+                {llenar && (
+                  <td style={{ padding: "4px 6px" }}>
+                    <select value={r.base_id ?? ""} onChange={e => cambiar(i, "base_id", base.find(x => String(x.id) === e.target.value)?.id ?? null)}
+                      style={{ ...iS, width: "100%", boxSizing: "border-box", padding: "3px 4px", fontSize: 11, borderColor: b && repetido(b.id) ? "var(--danger-border)" : !b ? "var(--warning-border)" : undefined }}>
+                      <option value="">— No está en el presupuesto —</option>
+                      {base.map(x => <option key={x.id} value={x.id}>{x.numero} {x.descripcion}</option>)}
+                    </select>
+                    {b && repetido(b.id) && <div style={{ fontSize: 10, color: "var(--danger)", marginTop: 2 }}>Otro renglón apunta a este mismo rubro</div>}
+                    {c && n(r.cantidad) > 0 && b.cantidad > 0 && n(r.cantidad) !== b.cantidad && <div style={{ fontSize: 10, color: "var(--warning)", marginTop: 2 }}>Tu presupuesto dice {b.cantidad} {b.unidad}; cotizó {n(r.cantidad)}. Queda {b.cantidad}.</div>}
+                    {c && c.precioAntes > 0 && <div style={{ fontSize: 10, color: "var(--warning)", marginTop: 2 }}>Ya tenía precio: ${fmt(c.precioAntes)}. Se reemplaza.</div>}
+                  </td>
+                )}
                 <td style={{ padding: "4px 8px", color: "var(--ink-soft)" }}>{r.unidad}</td>
                 <td style={{ padding: "4px 6px" }}><input type="number" className="num-limpio" value={r.cantidad ?? 1} onChange={e => cambiar(i, "cantidad", e.target.value)} style={numS} /></td>
                 <td style={{ padding: "4px 6px" }}><input type="number" className="num-limpio" value={r.precio_unitario ?? 0} onChange={e => cambiar(i, "precio_unitario", e.target.value)} style={numS} /></td>
                 <td style={{ padding: "4px 6px" }}><input type="number" className="num-limpio" value={r.utilidad_pct || 0} onChange={e => cambiar(i, "utilidad_pct", e.target.value)} style={numS} /></td>
                 <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--success)", textAlign: "right", whiteSpace: "nowrap" }}>${fmt(final(r))}</td>
-                <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--ink)", textAlign: "right", whiteSpace: "nowrap" }}>${fmt(n(r.cantidad || 1) * final(r))}</td>
+                <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--ink)", textAlign: "right", whiteSpace: "nowrap" }}>${fmt(c ? c.total : n(r.cantidad || 1) * final(r))}</td>
                 <td style={{ padding: "4px 2px", textAlign: "center" }}>
                   <button onClick={() => quitar(i)} title="Quitar este rubro" style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", fontSize: 13, padding: 0 }}>✕</button>
                 </td>
               </tr>
-            ))}
+            ); })}
           </tbody>
         </table>
       </div>
@@ -215,7 +275,7 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
           </div>
         )}
         <div style={{ borderTop: "1px solid var(--neutral-soft)", marginTop: 8, paddingTop: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><span>Lo que entra al presupuesto{conUtilidad !== leido ? " (con tu utilidad)" : ""}</span><strong style={{ color: "var(--success)" }}>${fmt(conUtilidad)}</strong></div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><span>{llenar ? `Lo que entra al presupuesto: ${plan.cambios.length} ${plan.cambios.length === 1 ? "rubro lleno" : "rubros llenos"}, con tus cantidades${agregarSueltos && plan.sueltos.length ? `, y ${plan.sueltos.length} en capítulo` : ""}` : `Lo que entra al presupuesto${conUtilidad !== leido ? " (con tu utilidad)" : ""}`}</span><strong style={{ color: "var(--success)" }}>${fmt(entra)}</strong></div>
           {presupuesto && (
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 2 }}>
               <span>El total del presupuesto pasa de</span>
@@ -254,9 +314,9 @@ export default function CotizacionPanel({ result, clientes, capitulosActivos, pr
 
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={onCancelar} style={{ flex: 1, background: "#fff", border: "1px solid var(--border)", borderRadius: 8, padding: 10, color: "var(--ink-soft)", fontSize: 12, cursor: "pointer" }}>Cancelar</button>
-        <button onClick={() => onImportar(rubros, capNombre, utilidadGlobal, guardarBD, proveedor.trim(), clienteNombre, fecha)} disabled={!!bloqueo}
+        <button onClick={() => onImportar(rubros, capNombre, utilidadGlobal, guardarBD, proveedor.trim(), clienteNombre, fecha, llenar ? { cambios: plan.cambios, sueltos: agregarSueltos ? plan.sueltos : [] } : null)} disabled={!!bloqueo}
           style={{ flex: 2, background: bloqueo ? "var(--neutral-soft)" : "var(--success)", border: "none", borderRadius: 8, padding: 10, color: bloqueo ? "var(--muted)" : "#fff", fontSize: 13, fontWeight: 600, cursor: bloqueo ? "default" : "pointer" }}>
-          {bloqueo || `✓ Aplicar ${rubros.length} rubros ${destino ? `a ${destino}` : "al presupuesto"} · $${fmt(conUtilidad)}`}
+          {bloqueo || (llenar ? `✓ Llenar ${plan.cambios.length} ${plan.cambios.length === 1 ? "rubro" : "rubros"} del presupuesto · $${fmt(entra)}` : `✓ Aplicar ${rubros.length} rubros ${destino ? `a ${destino}` : "al presupuesto"} · $${fmt(conUtilidad)}`)}
         </button>
       </div>
     </div>

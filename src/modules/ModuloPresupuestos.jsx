@@ -16,6 +16,7 @@ import { reconocerExcel, recordarFormato } from "../lib/leerExcelPresupuesto";
 import { interpretarPresupuesto, interpretarVariasHojas, ivaMetidoEnTotales } from "./controlObra/leerPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
+import { rubrosDeLaBase, pedidoDeEmparejar, emparejar } from "./presupuestos/llenarBase";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
 import PreciosDeRubro from "./presupuestos/PreciosDeRubro";
@@ -1052,13 +1053,18 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     // Muchas proformas traen dos precios por rubro (P.V.P. y con descuento) o
     // un descuento general al final: NOVA trae los dos y quien importa elige.
     const prompt = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: {"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00,"precio_pvp":null,"precio_descuento":null}],"subtotal":null,"iva":null,"total":null,"descuento_pct":null,"descuento_monto":null}. Si cada rubro trae DOS precios unitarios (por ejemplo P.V.P. o precio de lista, y precio con descuento o precio neto), pon ambos en precio_pvp y precio_descuento, y en precio_unitario el con descuento; si hay un solo precio, deja precio_pvp y precio_descuento en null. Si al final hay un descuento general, pon su porcentaje en descuento_pct y su monto en descuento_monto. En subtotal, iva y total pon los valores TAL COMO ESTAN ESCRITOS en el documento (subtotal sin IVA, el IVA, y el total a pagar), o null si no aparecen. No los calcules.';
+    // Si el presupuesto ya tiene rubros, NOVA dice además a cuál corresponde
+    // cada renglón de la cotización: así el precio puede ir a su rubro en vez
+    // de a un capítulo aparte.
+    const base = presupuestoActivo ? rubrosDeLaBase({ capitulos: capitulosActivos, items: itemsRef.current }) : [];
+    const pedido = prompt + pedidoDeEmparejar(base);
     try {
       const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});
       let msgContent;
       if (file.type.startsWith("image/")) {
-        msgContent=[{type:"image",source:{type:"base64",media_type:file.type,data:base64}},{type:"text",text:prompt}];
+        msgContent=[{type:"image",source:{type:"base64",media_type:file.type,data:base64}},{type:"text",text:pedido}];
       } else if (file.type==="application/pdf") {
-        msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}];
+        msgContent=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:pedido}];
       } else if (file.name.match(/\.(xlsx|xls|csv)$/i)) {
         const XLSX = await import("xlsx");
         const arrayBuffer = await file.arrayBuffer();
@@ -1068,10 +1074,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           const sheet = workbook.Sheets[sheetName];
           csvText += XLSX.utils.sheet_to_csv(sheet);
         }
-        msgContent=[{type:"text",text:"Excel:\n\n"+csvText.slice(0,15000)+"\n\n"+prompt}];
+        msgContent=[{type:"text",text:"Excel:\n\n"+csvText.slice(0,15000)+"\n\n"+pedido}];
       } else {
         const text=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file);});
-        msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+prompt}];
+        msgContent=[{type:"text",text:"Archivo:\n\n"+text.slice(0,8000)+"\n\n"+pedido}];
       }
       const res=await fetch("/api/nova",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:CONTRATO,max_tokens:8000,messages:[{role:"user",content:msgContent}]})});
@@ -1106,11 +1112,70 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         }
       } else {
         // Filter valid rubros
-        parsed.rubros = parsed.rubros.filter(r=>r.descripcion&&r.descripcion.trim());
+        parsed.rubros = emparejar(parsed.rubros.filter(r=>r.descripcion&&r.descripcion.trim()), base);
         setCotizacionResult(parsed);
       }
     } catch(err) { setCotizacionResult({error:"Error: "+err.message}); }
     setUploadingCotizacion(false); e.target.value="";
+  }
+
+  /**
+   * Aplicar la cotización revisada. Dos caminos, que se eligen en el panel:
+   *  - `llenado` vacío: todos los rubros a un capítulo, como siempre.
+   *  - `llenado`: cada precio a su rubro del presupuesto (`cambios`), y solo
+   *    los `sueltos` que se pidió agregar van al capítulo.
+   */
+  async function aplicarCotizacion(rubros, capNombre, utilidad, guardarBD, proveedor, clienteNombre, fecha, llenado) {
+    const rubrosValidos=rubros.filter(r=>r.descripcion&&r.descripcion.trim());
+    const alCapitulo = llenado ? llenado.sueltos : rubrosValidos;
+    let lista = itemsRef.current;
+    if (llenado?.cambios.length) {
+      const resp = await Promise.all(llenado.cambios.map(c => supabase.from("presupuesto_items").update({
+        precio_unitario: c.precio_unitario, total: c.total,
+        ...(c.ponerCantidad ? { cantidad: c.cantidad } : {}), ...(c.ponerUnidad ? { unidad: c.unidad } : {}),
+      }).eq("id", c.id)));
+      const fallo = resp.find(r => r.error);
+      if (fallo) { setCotizacionResult(p => ({ ...p, error: "No se pudo escribir en el presupuesto: " + fallo.error.message })); fetchItems(presupuestoActivo.id); return; }
+      const porId = new Map(llenado.cambios.map(c => [c.id, c]));
+      lista = itemsRef.current.map(i => {
+        const c = porId.get(i.id);
+        return c ? { ...i, precio_unitario: c.precio_unitario, total: c.total, cantidad: c.cantidad, unidad: c.unidad } : i;
+      });
+    }
+    if (alCapitulo.length) {
+      const capN = capNombre||"COTIZACIÓN PROVEEDOR";
+      // Al capítulo que ya existe, a continuación de sus rubros; si es
+      // nuevo, después del último. Antes el orden salía de contar los
+      // capítulos y un capítulo nuevo podía caer en el rango de otro.
+      const existente = capitulosActivos.find(c=>c.nombre===capN);
+      const capOrden = existente ? existente.orden : Math.max(0,...capitulosActivos.map(c=>c.orden))+1;
+      const yaEnCap = lista.filter(i=>i.capitulo===capN).length;
+      if (!existente) {
+        const conNuevo=[...capitulosActivos,{nombre:capN,orden:capOrden}];
+        setCapitulosActivos(conNuevo);
+        guardarCapitulos(conNuevo);
+      }
+      const {data}=await supabase.from("presupuesto_items").insert(alCapitulo.map((r,idx)=>({
+        presupuesto_id:presupuestoActivo.id,
+        capitulo:capN,
+        descripcion:r.descripcion,
+        unidad:r.unidad||"",
+        cantidad:r.cantidad||1,
+        precio_unitario:centavos(r.precio_unitario_final||r.precio_unitario),
+        total:centavos((Number(r.cantidad)||1)*centavos(r.precio_unitario_final||r.precio_unitario)),
+        orden:capOrden*1000+yaEnCap+idx
+      }))).select();
+      if (data) lista=[...lista,...data];
+    }
+    itemsRef.current = lista; setItems(lista); recalcTotales(lista);
+    // A la base solo si se marcó: hay cotizaciones de prueba, o de un
+    // proveedor que no se quiere tener de referencia. Lo que cotiza un
+    // proveedor es costo para HCA: la utilidad se suma en el presupuesto.
+    if (guardarBD) {
+      alimentarBase(rubrosValidos, { tipo: "proveedor", proveedor, cliente: clienteNombre, proyecto: presupuestoActivo?.nombre || proveedor, fecha, fuente: "cotizacion", utilidad: { estado: "costo" } })
+        .then(r => { if (r.rubrosNuevos || r.capitulosNuevos) fetchCapitulosDB(); });
+    }
+    setCotizacionResult(null);
   }
 
   async function importarCotizacion() {
@@ -1499,47 +1564,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
           clientes={clientes}
           capitulosActivos={capitulosActivos}
           onCancelar={()=>setCotizacionResult(null)}
-          onImportar={(rubros, capNombre, utilidad, guardarBD, proveedor, clienteNombre, fecha)=>{
-            // Import to presupuesto
-            const capN = capNombre||"COTIZACIÓN PROVEEDOR";
-            // Al capítulo que ya existe, a continuación de sus rubros; si es
-            // nuevo, después del último. Antes el orden salía de contar los
-            // capítulos y un capítulo nuevo podía caer en el rango de otro.
-            const existente = capitulosActivos.find(c=>c.nombre===capN);
-            const capOrden = existente ? existente.orden : Math.max(0,...capitulosActivos.map(c=>c.orden))+1;
-            const yaEnCap = items.filter(i=>i.capitulo===capN).length;
-            if (!existente) {
-              const conNuevo=[...capitulosActivos,{nombre:capN,orden:capOrden}];
-              setCapitulosActivos(conNuevo);
-              guardarCapitulos(conNuevo);
-            }
-            const newItems=[];
-            const rubrosValidos=rubros.filter(r=>r.descripcion&&r.descripcion.trim());
-            supabase.from("presupuesto_items").insert(rubrosValidos.map((r,idx)=>({
-              presupuesto_id:presupuestoActivo.id,
-              capitulo:capN,
-              descripcion:r.descripcion,
-              unidad:r.unidad||"",
-              cantidad:r.cantidad||1,
-              precio_unitario:centavos(r.precio_unitario_final||r.precio_unitario),
-              total:centavos((Number(r.cantidad)||1)*centavos(r.precio_unitario_final||r.precio_unitario)),
-              orden:capOrden*1000+yaEnCap+idx
-            }))).select().then(({data})=>{
-              if(data){
-                const all=[...items,...data];
-                setItems(all);
-                recalcTotales(all);
-              }
-            });
-            // A la base solo si se marcó: hay cotizaciones de prueba, o de un
-            // proveedor que no se quiere tener de referencia. Lo que cotiza un
-            // proveedor es costo para HCA: la utilidad se suma en el presupuesto.
-            if (guardarBD) {
-              alimentarBase(rubrosValidos, { tipo: "proveedor", proveedor, cliente: clienteNombre, proyecto: presupuestoActivo?.nombre || proveedor, fecha, fuente: "cotizacion", utilidad: { estado: "costo" } })
-                .then(r => { if (r.rubrosNuevos || r.capitulosNuevos) fetchCapitulosDB(); });
-            }
-            setCotizacionResult(null);
-          }}
+          base={rubrosDeLaBase({ capitulos: capitulosActivos, items })}
+          onImportar={aplicarCotizacion}
           fmt={fmt}
         />
       )}
