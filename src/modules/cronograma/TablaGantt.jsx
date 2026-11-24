@@ -1537,8 +1537,12 @@ const Barra = ({ ui, a, tenue, marca }) => {
   return (
     <>
     {sombra}
+    {/* TODAS DEL MISMO ALTO cuando hay línea base. El lugar de la raya se
+        dejaba solo en la que la tenía, y una actividad agregada después de
+        firmar —sin línea base— salía más gruesa que las demás, como si fuera
+        otra cosa. Que no tenga raya ya dice que es nueva. */}
     <div title={cuando} data-barra={marca ? a.id : undefined}
-      style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : sombra ? 6 : 0,
+      style={{ position: "absolute", top: tenue ? 5 : 0, bottom: tenue ? 5 : ui.baseDe ? 6 : 0,
         left: `${ui.posicion(a.inicio) * 100}%`, width: `${Math.max(ui.largo(a) * 100, 0.6)}%`,
         background: colorDe(a), borderRadius: 4,
         opacity: tenue ? 0.3 : 1, display: "flex", alignItems: "center", overflow: "hidden" }}>

@@ -366,7 +366,10 @@ export async function pdfCronograma({ nombre, plan, filas = [], dependencias = [
               // cronograma se lee como si todo fuera de la obra.
               // Con línea base la barra se achica un poco: abajo va la raya
               // de lo que se firmó, y tienen que leerse como dos cosas.
-              const alto = FILA - (f.base ? 3.6 : 2.6);
+              // TODAS DEL MISMO ALTO. Se achicaba solo la que tenía su raya, y
+              // una actividad agregada después de firmar —sin línea base— salía
+              // más gruesa que las demás, como si fuera otra cosa.
+              const alto = FILA - (conBase ? 3.6 : 2.6);
               const color = f.externo ? [148, 145, 140] : f.critica ? ROJO : TINTA;
               doc.setFillColor(...color);
               doc.roundedRect(x, y + 1.3, ancho, alto, 0.6, 0.6, "F");

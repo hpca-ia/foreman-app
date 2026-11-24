@@ -75,6 +75,18 @@ test("el PDF: tramo claro a todo el alto, columna de avance con el corte, y flec
   assert.match(c, /conCadenas && dependencias\.length \? "Flecha ámbar: la que traba" : "",/);
 });
 
+// Hernán, 24/11/2026, al ver la muestra: «empareja». La actividad sin línea
+// base —agregada después de firmar— salía más gruesa que las demás, en el PDF
+// y en la pantalla, donde ya había preguntado por qué había barras más gruesas.
+test("con línea base todas las barras miden lo mismo, tengan o no su raya", () => {
+  const pdf = codigoDe("../src/modules/cronograma/pdfCronograma.js");
+  assert.match(pdf, /const alto = FILA - \(conBase \? 3\.6 : 2\.6\);/);
+  assert.doesNotMatch(pdf, /FILA - \(f\.base \? 3\.6 : 2\.6\)/);
+  const gantt = codigoDe("../src/modules/cronograma/TablaGantt.jsx");
+  assert.match(gantt, /bottom: tenue \? 5 : ui\.baseDe \? 6 : 0,/);
+  assert.doesNotMatch(gantt, /bottom: tenue \? 5 : sombra \? 6 : 0,/);
+});
+
 test("la pantalla: se elige antes del tamaño, se recuerda, y el PDF recibe el corte", () => {
   const p = codigoDe("../src/modules/cronograma/ModuloCronograma.jsx");
   assert.match(p, /localStorage\.getItem\("foreman_pdf_crono_sin_flechas"\) !== "1"/);
