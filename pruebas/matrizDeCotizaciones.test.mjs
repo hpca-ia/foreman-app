@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   matrizDeCotizaciones, repartir, elegir, planDeAplicar, elegidosPorCotizacion, elegidosDe, totalDelRenglon, renglonesDe,
-  filasParaUbicar, alCapitulo, marcaDelRubro, SIN_CAPITULO,
+  filasParaUbicar, alCapitulo, marcaDelRubro, paraSacarLaFila, SIN_CAPITULO,
 } from "../src/modules/presupuestos/matrizDeCotizaciones.js";
 
 const VIDRIO = "HERRERÍA, ALUMINIO, VIDRIO";
@@ -298,4 +298,91 @@ test("la migración 197 solo agrega la marca del rubro: no cambia ninguno", () =
   assert.match(sql, /alter table public\.presupuesto_items\s+add column if not exists comparativa_fila text;/);
   assert.match(sql, /create index if not exists presupuesto_items_de_la_comparativa/);
   assert.doesNotMatch(sql, /\b(drop|truncate)\b|\bdelete\s+from\b|\bupdate\s+public\./i);
+});
+
+// ── COMPARAR EN LAS MISMAS CONDICIONES ─────────────────────────────────────
+//
+// Hernán, 26/11/2026, con la tercera oferta de ventanas cargada —EASYHOME,
+// que además cotizó cabinas de baño y claraboyas—: «en ese caso me gustaría
+// tener la opción de borrar rubros para comparar mismas condiciones».
+
+// Como llegó de verdad: una suma por toda la ventanería, y dos cosas que nadie más cotizó.
+const EASYHOME = { id: 9, proveedor: "EASYHOME", archivo_id: 79, renglones: [
+  linea("Ventanería: puertas y ventanas con sistema perfil cámara europea", "glb", 1, 10400, { capitulo: VIDRIO, filas: LAS_DE_DEKORANDO }),
+  linea("Cabinas de baño", "glb", 1, 3310, { capitulo: VIDRIO }),
+  linea("Claraboyas", "glb", 1, 3260, { capitulo: VIDRIO }),
+] };
+const sinLoDeMas = { ...EASYHOME, renglones: EASYHOME.renglones.map((r, k) => (k > 0 ? { ...r, fuera: true } : r)) };
+
+test("«BORRAR RUBROS PARA COMPARAR MISMAS CONDICIONES»: lo que una cotizó de más se saca, y las tres se comparan sobre lo mismo", () => {
+  // TAL COMO LLEGA: EASYHOME suma más porque cotizó más cosas, a las otras «les faltan» dos filas, y no hay menor.
+  const antes = armar([DEKORANDO, WINDOW_UBICADA, EASYHOME]);
+  const g = antes.grupos[0];
+  assert.deepEqual([g.filas.length, g.sub[1], g.sub[2], g.sub[9], g.menor], [6,
+    { total: 11522, cubre: 4, faltan: 2, estimado: false }, { total: 11900, cubre: 4, faltan: 2, estimado: false }, { total: 16970, cubre: 6, faltan: 0, estimado: false }, null]);
+  // SE SACAN LAS CABINAS Y LAS CLARABOYAS. Ahora son las mismas cuatro filas para las tres, y el menor es EASYHOME.
+  const m = armar([DEKORANDO, WINDOW_UBICADA, sinLoDeMas]);
+  const h = m.grupos[0];
+  assert.deepEqual([h.filas.length, h.sub[1].total, h.sub[2].total, h.sub[9], h.menor], [4, 11522, 11900, { total: 10400, cubre: 4, faltan: 0, estimado: false }, "9"]);
+  // NO SE BORRA: su papel sigue sumando lo mismo, y lo que se sacó queda a la vista, con cuánto era.
+  const e = m.empresas.find(x => x.id === 9);
+  assert.deepEqual([e.cotizado, e.comparado, e.fuera, e.renglones.length], [16970, 10400, { cuantos: 2, total: 6570 }, 3]);
+  assert.deepEqual(h.fuera, [
+    { cotId: 9, proveedor: "EASYHOME", renglon: 1, capitulo: VIDRIO, descripcion: "Cabinas de baño", unidad: "glb", cantidad: 1, total: 3310 },
+    { cotId: 9, proveedor: "EASYHOME", renglon: 2, capitulo: VIDRIO, descripcion: "Claraboyas", unidad: "glb", cantidad: 1, total: 3260 },
+  ]);
+  assert.deepEqual(antes.grupos[0].fuera, []);
+  assert.deepEqual(antes.empresas.find(x => x.id === 9).fuera, { cuantos: 0, total: 0 });
+  // Lo que se sacó no se puede elegir, ni entra al presupuesto aunque se elija a esa empresa para el capítulo.
+  assert.equal(m.celdaDe("c9-1", 9), null);
+  const plan = planDeAplicar({ matriz: m, elegidos: elegir(m, {}, 9, { capitulo: VIDRIO }), items: ITEMS });
+  assert.deepEqual(plan.entran.map(x => [x.descripcion.slice(0, 11), x.costo]), [["Ventanería:", 10400]]);
+  // Se vuelve a poner, y vuelve a contar.
+  assert.equal(armar([DEKORANDO, WINDOW_UBICADA, { ...sinLoDeMas, renglones: sinLoDeMas.renglones.map(r => ({ ...r, fuera: false })) }]).grupos[0].sub[9].total, 16970);
+  // Si TODO lo de un capítulo se sacó, el capítulo sigue ahí para poder devolverlo.
+  const todoFuera = { id: 5, proveedor: "Sola", renglones: [linea("Cocina", "glb", 1, 9000, { capitulo: "CARPINTERIA", fuera: true })] };
+  assert.deepEqual(armar([todoFuera]).grupos.map(x => [x.capitulo, x.filas.length, x.fuera.length]), [["CARPINTERIA", 0, 1]]);
+});
+
+test("qué hay que marcar para sacar una fila: el renglón de cada empresa que la cotizó; y si una la cotizó dentro de una suma, no se puede", () => {
+  const m = armar([DEKORANDO, ALUVID, EASYHOME]);
+  // Los mosquiteros, que solo cotizó Aluvid: su renglón 3.
+  assert.deepEqual(paraSacarLaFila(m, "c3-3"), { renglones: [{ cotId: 3, renglon: 3 }] });
+  // Las cabinas de EASYHOME.
+  assert.deepEqual(paraSacarLaFila(m, "c9-1"), { renglones: [{ cotId: 9, renglon: 1 }] });
+  // La V1 la detallaron dos, pero EASYHOME la tiene adentro de su suma: sacársela a las otras dejaría la comparación peor.
+  assert.deepEqual(paraSacarLaFila(m, "c1-0"), { porQue: "EASYHOME lo cotizó dentro de una sola suma: no se sabe cuánto de esa suma es por esto." });
+  // Sin la suma en el medio, una fila que cotizaron dos se saca para las dos.
+  assert.deepEqual(paraSacarLaFila(armar([DEKORANDO, ALUVID]), "c1-0"), { renglones: [{ cotId: 1, renglon: 0 }, { cotId: 3, renglon: 0 }] });
+  assert.deepEqual(paraSacarLaFila(m, "no-existe"), { porQue: "Esa fila ya no está." });
+});
+
+// Hernán, 26/11/2026, con las tres de ventanas y la de la parrilla en una sola
+// tabla: «la matriz está confusa... FOGA es otro capítulo, igual está arriba
+// junto a las otras... esto puede confundir... es decir cada capítulo tiene su
+// matriz». Y un rato antes, con cuatro subidas y ninguna elegida: «¿de dónde
+// envío una de las cotizaciones al presupuesto???».
+test("LA PANTALLA: cada capítulo tiene su matriz, con las empresas de ESE capítulo; se elige desde su total y se pasa debajo de las matrices", () => {
+  const jsx = readFileSync(new URL("../src/modules/presupuestos/MatrizCotizaciones.jsx", import.meta.url), "utf8");
+  const pantalla = jsx.slice(jsx.indexOf('  return (\n    <div className="matriz-cotizaciones"'));
+  // Una tabla por capítulo, y sus columnas son las empresas que cotizaron ahí.
+  assert.match(jsx, /const empresasDe = g => empresas\.filter\(e => g\.sub\[e\.id\] \|\| g\.fuera\.some\(/);
+  assert.match(pantalla, /matriz\.grupos\.map\(g => \{[\s\S]{0,300}const suyas = empresasDe\(g\);[\s\S]{0,400}className="matriz-del-capitulo" data-capitulo=\{g\.capitulo\}[\s\S]{0,300}<table className="la-matriz"/);
+  assert.match(pantalla, /\{suyas\.map\(e => cabezaDeEmpresa\(e, g\)\)\}/);
+  assert.equal(/\bempresas\.map\(/.test(pantalla), false, "ninguna tabla recorre todas las empresas del presupuesto");
+  // Arriba de cada matriz, el total de la oferta en ese capítulo: es el botón que la elige, y dice «elegir».
+  assert.match(jsx, /className="subtotal-de-capitulo" onClick=\{\(\) => tocar\(e\.id, \{ capitulo: g\.capitulo \}\)\}[\s\S]{0,700}className="total-de-la-oferta"[\s\S]{0,1200}className="elegir-esta"/);
+  // Lo elegido y pasarlo van después de las matrices, y antes de compartir con el cliente.
+  const orden = ["matriz.grupos.map(g =>", 'className="lo-elegido"', 'className="lo-que-entra"', "<CompartirConElCliente"].map(x => pantalla.indexOf(x));
+  assert.ok(orden.every(i => i > 0), "falta alguno de los bloques");
+  assert.deepEqual([...orden].sort((a, b) => a - b), orden);
+  assert.match(pantalla, /className="como-se-pasa"[^\n]*Para mandar una cotización al presupuesto/);
+  // Lo de una empresa —sus renglones, qué cambió— se abre debajo de la matriz donde se tocó.
+  assert.match(pantalla, /\{enRevision && dondeSeAbre\(enRevision\.id\) === g\.capitulo && panelDeRenglones\}/);
+  assert.match(pantalla, /\{dondeSeAbre\(verCambios\) === g\.capitulo && panelDeCambios\}/);
+  // Sacar de la comparación y volver a poner, desde la fila y desde los renglones de la empresa.
+  for (const clase of ["sacar-fila", "no-se-puede-sacar", "fila-fuera", "volver-a-poner"]) assert.ok(pantalla.includes(`"${clase}"`), clase);
+  // Y en la cabeza de la empresa, cuánto es toda su cotización cuando lo que se compara es menos.
+  assert.match(jsx, /className="fuera-de-la-oferta"[\s\S]{0,200}toda su cotización \$\{plata\(e\.cotizado\)\}/);
+  assert.match(jsx, /className=\{r\.fuera \? "poner-renglon" : "sacar-renglon"\}/);
 });

@@ -144,7 +144,7 @@ test("el presupuesto: el botón abre la matriz, y lo elegido entra a su capítul
   // «ARRIBA SE PUEDE VER TOTAL DE LA OFERTA Y SI SE DESPLIEGA SE VE EL ITEMIZADO».
   assert.match(m, /className="total-de-la-oferta"/);
   assert.match(m, /className="desplegar-capitulo" aria-expanded=\{abierto\}/);
-  assert.match(m, /\.\.\.\(abierto \? g\.filas\.map\(f => \(/);
+  assert.match(m, /\{abierto && \(\s+<tbody>\s+\{g\.filas\.map\(f => \(/);
   // «SE DEBEN PODER VER»: el papel original de cada empresa, y sus condiciones.
   assert.match(m, /className="ver-el-papel"[^>]*onClick=\{\(\) => abrirOriginal\(papel\)\}/);
   assert.match(m, /className="condiciones-de-la-oferta"/);

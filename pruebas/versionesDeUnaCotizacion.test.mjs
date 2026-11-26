@@ -149,7 +149,7 @@ test("la pantalla: cada empresa tiene su «versión nueva», la anterior no se b
   assert.deepEqual(nueva.match(/\.delete\(\)\.eq\("id", [a-z.]+\)/g), ['.delete().eq("id", data.id)']);
 
   const pantalla = readFileSync(new URL("../src/modules/presupuestos/MatrizCotizaciones.jsx", import.meta.url), "utf8");
-  for (const clase of ["nueva-version", "subir-version", "contra-la-anterior", "que-cambio", "que-version", "columna-del-presupuesto", "que-falta-pasar"]) {
+  for (const clase of ["nueva-version", "subir-version", "contra-la-anterior", "que-cambio", "que-version", "presupuesto-del-capitulo", "que-falta-pasar"]) {
     assert.match(pantalla, new RegExp(`className="${clase}"`), clase);
   }
   // Hereda de la anterior COMO LA VE LA MATRIZ: con su capítulo y sus filas ya resueltos.
@@ -161,4 +161,16 @@ test("la pantalla: cada empresa tiene su «versión nueva», la anterior no se b
   // Mientras se compara, el botón viejo de «Subir cotización» —el que la mete directo al presupuesto— no se muestra.
   const modulo = readFileSync(new URL("../src/modules/ModuloPresupuestos.jsx", import.meta.url), "utf8");
   assert.match(modulo, /\{!bloqueado&&puedeEditar&&!comparando&&<button onClick=\{\(\)=>document\.getElementById\("cotiz-input"\)\.click\(\)\}/);
+});
+
+test("lo que se había sacado de la comparación sigue afuera en la versión nueva: es la misma decisión sobre el mismo renglón", () => {
+  const EASY = { id: 9, proveedor: "EASYHOME", version: 1, reemplaza_a: null, reemplazada_at: null, renglones: [
+    linea("Ventanería completa", "glb", 1, 10400, { filas: SUS_FILAS }), linea("Cabinas de baño", "glb", 1, 3310, { fuera: true }), linea("Claraboyas", "glb", 1, 3260, { fuera: true })] };
+  const nuevos = heredarFilas([
+    linea("Ventanería completa", "glb", 1, 9900, { capitulo: "", filas: [] }), linea("CABINAS DE BAÑO", "glb", 1, 3100, { capitulo: "", filas: [] }), linea("Lucernario", "glb", 1, 900, { filas: [] }),
+  ], comoLaVe(EASY, [DEKORANDO, EASY]));
+  assert.deepEqual(nuevos.map(r => [r.descripcion, r.filas, !!r.fuera]), [["Ventanería completa", SUS_FILAS, false], ["CABINAS DE BAÑO", [], true], ["Lucernario", [], false]]);
+  // En la matriz: la suma rebajada se compara, las cabinas siguen afuera, y lo nuevo entra en su propia fila.
+  const m = armar([DEKORANDO, reemplazada(EASY), { ...EASY, id: 10, version: 2, reemplaza_a: 9, renglones: nuevos }]);
+  assert.deepEqual([m.grupos[0].sub[10].total, m.grupos[0].fuera.map(x => x.descripcion), m.grupos[0].filas.length], [10800, ["CABINAS DE BAÑO"], 5]);
 });

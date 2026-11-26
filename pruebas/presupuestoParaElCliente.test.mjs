@@ -317,3 +317,18 @@ test("las pantallas: se comparte desde la matriz, el cliente lo ve en su solapa,
   const registro = codigoDe("../src/modules/leads/AprobacionesDelProyecto.jsx");
   assert.match(registro, /\{p\.presupuesto_compartido_id != null \? \(\s+<LoQueVioElCliente compartidoId=\{p\.presupuesto_compartido_id\} \/>/);
 });
+
+// Hernán, 26/11/2026, con una empresa que además de las ventanas cotizó
+// cabinas de baño y claraboyas: «me gustaría tener la opción de borrar rubros
+// para comparar mismas condiciones».
+test("LO QUE SE SACÓ DE LA COMPARACIÓN NO LE LLEGA AL CLIENTE: ve las ofertas sobre lo mismo", () => {
+  const conCabinas = { ...ALUVID, renglones: [...ALUVID.renglones, linea("Cabinas de baño", 1, 3310, { fuera: true })] };
+  const sin = foto({ modo: "costo" }), con = foto({ modo: "costo", cotizaciones: [DEKORANDO, conCabinas] });
+  assert.deepEqual(con.empresas, sin.empresas);
+  assert.deepEqual(con.capitulos, sin.capitulos);
+  assert.equal(JSON.stringify(con).includes("Cabinas"), false);
+  // Si no se saca, sí la ve: una fila más, y el total de esa empresa con ella.
+  const adentro = foto({ modo: "costo", cotizaciones: [DEKORANDO, { ...conCabinas, renglones: conCabinas.renglones.map(r => ({ ...r, fuera: false })) }] });
+  assert.equal(adentro.empresas[1].total, 5500);
+  assert.equal(adentro.capitulos[1].comparativa.filas.length, 3);
+});

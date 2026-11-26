@@ -51,6 +51,14 @@
 // NADIE GANA POR HABER COTIZADO MENOS COSAS. El menor de un capítulo se marca
 // solo entre las empresas que cubren todas sus filas.
 //
+// Y PARA COMPARAR EN LAS MISMAS CONDICIONES, LO QUE UNA COTIZÓ DE MÁS SE SACA.
+// Hernán, 26/11/2026, con tres ofertas de ventanas y una que además traía
+// cabinas de baño y claraboyas: «en ese caso me gustaría tener la opción de
+// borrar rubros para comparar mismas condiciones». Un renglón se saca de la
+// comparación (`fuera`): no pone fila, no suma al total de su empresa, no
+// cuenta para el menor y no se puede elegir. No se borra de lo leído: queda a
+// la vista, aparte, y se vuelve a poner.
+//
 // Sin base ni pantalla: se puede probar (pruebas/matrizDeCotizaciones.test.mjs).
 
 import { estructura } from "./estructura.js";
@@ -116,12 +124,13 @@ export function renglonesDe(cot, capituloDeItem = null) {
   const usadas = new Set();
   const dichos = (cot?.renglones || []).map((r, k) => {
     const dichas = (Array.isArray(r?.filas) ? r.filas : []).map(texto).filter(Boolean);
-    let filas = (dichas.length ? dichas : [filaPropia(cot, k)]).filter(f => !usadas.has(f) && usadas.add(f));
-    if (!filas.length) { filas = [filaPropia(cot, k)]; usadas.add(filas[0]); }
+    // El renglón que se sacó de la comparación no ocupa ninguna fila.
+    let filas = r?.fuera ? [] : (dichas.length ? dichas : [filaPropia(cot, k)]).filter(f => !usadas.has(f) && usadas.add(f));
+    if (!filas.length && !r?.fuera) { filas = [filaPropia(cot, k)]; usadas.add(filas[0]); }
     const deAntes = capituloDeItem ? (Array.isArray(r?.items) ? r.items : []).map(id => capituloDeItem(id)).find(Boolean) : null;
     const capitulo = texto(r?.capitulo) || texto(deAntes);
-    return queda === 1 ? { ...r, k, filas, capitulo }
-      : { ...r, k, filas, capitulo, precio_unitario: r6(unitarioDe(r) * queda), total: r2(totalDelRenglon(r) * queda) };
+    return queda === 1 ? { ...r, k, filas, capitulo, fuera: !!r?.fuera }
+      : { ...r, k, filas, capitulo, fuera: !!r?.fuera, precio_unitario: r6(unitarioDe(r) * queda), total: r2(totalDelRenglon(r) * queda) };
   });
   // El capítulo de la mayoría del papel, para los renglones que no dicen cuál.
   const cuenta = new Map();
@@ -200,7 +209,7 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
   };
 
   // 1. Un renglón, una fila.
-  for (const c of empresas) for (const r of c.renglones) if (r.filas.length === 1) r.vivas = ponerRubro(c, r, r.filas[0]);
+  for (const c of empresas) for (const r of c.renglones) { r.vivas = []; if (r.filas.length === 1) r.vivas = ponerRubro(c, r, r.filas[0]); }
   // 2. Un renglón que cubre varias: las que siguen existiendo. Si no quedó
   //    ninguna —se quitó la cotización que las había puesto—, abre la suya.
   for (const c of empresas) {
@@ -224,7 +233,12 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
   }
   const celdaDe = (clave, cotId) => celdas.get(de(clave, cotId)) || null;
   // El capítulo de un renglón es el de su fila: una fila vive en un solo capítulo.
-  for (const c of empresas) for (const r of c.renglones) r.capitulo = filas.get(r.vivas[0])?.capitulo ?? r.capitulo;
+  for (const c of empresas) for (const r of c.renglones) if (r.vivas.length) r.capitulo = filas.get(r.vivas[0])?.capitulo ?? r.capitulo;
+  // LO QUE SE SACÓ DE LA COMPARACIÓN, por capítulo: a la vista, para volver a ponerlo.
+  const sacados = empresas.flatMap(c => c.renglones.filter(r => r.fuera).map(r => ({
+    cotId: c.id, proveedor: c.proveedor || "", renglon: r.k, capitulo: r.capitulo, descripcion: texto(r.descripcion), unidad: texto(r.unidad),
+    cantidad: n(r.cantidad) || 1, total: totalDelRenglon(r),
+  })));
 
   // LO QUE EL PRESUPUESTO TIENE HOY DE CADA FILA: el rubro que salió de ella, si ya pasó.
   const delPresupuesto = new Map();
@@ -246,7 +260,7 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
   const numeroDe = new Map(delPre.map(c => [c.nombre, c]));
   const orden = [...[...capitulos].sort((a, b) => n(a.orden) - n(b.orden)).map(c => c.nombre), ...delPre.map(c => c.nombre)];
   const lugar = nombre => { const k = orden.indexOf(nombre); return nombre === SIN_CAPITULO ? Infinity : k < 0 ? orden.length : k; };
-  const nombres = [...new Set([...filas.values()].map(f => f.capitulo))].sort((a, b) => lugar(a) - lugar(b) || String(a).localeCompare(String(b)));
+  const nombres = [...new Set([...[...filas.values()].map(f => f.capitulo), ...sacados.map(x => x.capitulo)])].sort((a, b) => lugar(a) - lugar(b) || String(a).localeCompare(String(b)));
   const grupos = nombres.map(nombre => {
     const suyas = [...filas.values()].filter(f => f.capitulo === nombre).map(f => {
       const conPrecio = Object.entries(f.celdas).filter(([, x]) => x.tipo === "rubro" && x.total > 0);
@@ -270,6 +284,7 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
     const enElPre = numeroDe.get(nombre);
     return {
       numero: enElPre?.numero || "", capitulo: nombre, filas: suyas, sub, menor: menores.length === 1 ? menores[0] : null,
+      fuera: sacados.filter(x => x.capitulo === nombre),
       // Lo que ese capítulo suma hoy en el presupuesto, y con cuántos rubros.
       referencia: { total: enElPre ? r2(enElPre.subtotal) : 0, rubros: enElPre ? enElPre.rubros.length : 0 },
     };
@@ -280,7 +295,9 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
     version: n(c.version) || 1, reemplaza_a: c.reemplaza_a ?? null,
     renglones: c.renglones,
     capitulos: [...new Set(c.renglones.map(r => r.capitulo))].sort((a, b) => lugar(a) - lugar(b)),
-    sinCapitulo: c.renglones.filter(r => r.capitulo === SIN_CAPITULO).length,
+    sinCapitulo: c.renglones.filter(r => r.capitulo === SIN_CAPITULO && !r.fuera).length,
+    // Lo que se le sacó de la comparación: cuántos renglones, y cuánto suman.
+    fuera: { cuantos: c.renglones.filter(r => r.fuera).length, total: r2(c.renglones.filter(r => r.fuera).reduce((t, r) => t + totalDelRenglon(r), 0)) },
     descuento: c.descuento, descuentoOfrecido: c.descuentoOfrecido,
     cotizado: r2(c.renglones.reduce((t, r) => t + totalDelRenglon(r), 0)),
     comparado: r2(grupos.reduce((t, g) => t + n(g.sub[c.id]?.total), 0)),
@@ -442,6 +459,29 @@ export function elegidosDe(cotizaciones = []) {
   return out;
 }
 
+// ── COMPARAR EN LAS MISMAS CONDICIONES ─────────────────────────────────────
+
+/**
+ * Los renglones que hay que marcar `fuera` para sacar una fila de la
+ * comparación: el de cada empresa que la cotizó con su propio precio.
+ *
+ * Si alguna la cotizó DENTRO DE UNA SUMA, la fila no se puede sacar: esa
+ * empresa no dijo cuánto de su suma es por eso, y descontárselo a las otras
+ * dejaría la comparación peor que antes. Se devuelve por qué.
+ *
+ * @returns { renglones: [{ cotId, renglon }] } o { porQue }
+ */
+export function paraSacarLaFila(matriz, clave) {
+  const fila = (matriz?.grupos || []).flatMap(g => g.filas).find(f => f.clave === String(clave));
+  if (!fila) return { porQue: "Esa fila ya no está." };
+  const enSuma = Object.entries(fila.celdas).filter(([, x]) => x.tipo === "paquete");
+  if (enSuma.length) {
+    const quien = matriz.empresas.find(e => String(e.id) === String(enSuma[0][0]))?.proveedor || "Una empresa";
+    return { porQue: `${quien} lo cotizó dentro de una sola suma: no se sabe cuánto de esa suma es por esto.` };
+  }
+  return { renglones: Object.entries(fila.celdas).map(([cotId, x]) => ({ cotId: matriz.empresas.find(e => String(e.id) === String(cotId))?.id ?? cotId, renglon: x.renglon })) };
+}
+
 // ── PONER UNA COTIZACIÓN EN SU LUGAR ───────────────────────────────────────
 
 /** Toda la cotización a un capítulo: es lo de casi siempre. @returns sus renglones */
@@ -507,7 +547,8 @@ export function heredarFilas(nuevos = [], anteriores = []) {
   const tomar = filas => (filas || []).map(String).filter(f => !usadas.has(f) && usadas.add(f));
   const heredados = (nuevos || []).map(r => {
     const previo = deAntes.get(mismoTexto(r.descripcion));
-    return previo ? { ...r, capitulo: texto(previo.capitulo), filas: tomar(previo.vivas || previo.filas) } : null;
+    // Lo que se había sacado de la comparación sigue afuera: es la misma decisión sobre el mismo renglón.
+    return previo ? { ...r, capitulo: texto(previo.capitulo), filas: tomar(previo.vivas?.length ? previo.vivas : previo.filas), ...(previo.fuera ? { fuera: true } : {}) } : null;
   });
   return (nuevos || []).map((r, i) => heredados[i] || { ...r, filas: tomar(r.filas) });
 }
