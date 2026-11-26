@@ -1,39 +1,54 @@
-// COMPARAR LAS COTIZACIONES DE VARIAS EMPRESAS Y ELEGIR CUÁL ENTRA.
+// COMPARAR LAS COTIZACIONES DE VARIAS EMPRESAS, CAPÍTULO POR CAPÍTULO, Y
+// ELEGIR CUÁL ALIMENTA EL PRESUPUESTO.
 //
 // Hernán, 26/11/2026: «Al armar presupuestos se cotiza de distintas empresas y
-// vienen distintos presupuestos... ¿cómo se puede comparar los distintos
-// presupuestos recibidos y posterior a eso escoger la mejor opción para que
-// ingrese al presupuesto? Una especie de matriz». «Y no solo por rubros,
-// porque cada empresa puede cotizar de manera distinta o nombrar distinto. Se
-// puede poner en tipo matriz los rubros y los totales».
+// vienen distintos presupuestos... ¿cómo se puede comparar y posterior a eso
+// escoger la mejor opción para que ingrese al presupuesto? Una especie de
+// matriz». Y con las primeras cotizaciones de verdad cargadas: «Son varias
+// cotizaciones... pueden ser dos o tres de cocinas o puertas o vidrios... una
+// de ellas iría al presupuesto. La comparativa se la categoriza por capítulos
+// del presupuesto. Una vez escogida una, los rubros de la proforma
+// alimentarían el capítulo». «Arriba se puede ver total de la oferta y si se
+// despliega se ve el itemizado de las ofertas». «¿En dónde se guardan las
+// ofertas leídas? Se deben poder ver por si hay condiciones o cualquier otra
+// info adicional».
 //
-// Acá se suben las cotizaciones SIN que entren al presupuesto. NOVA las lee y
-// propone qué rubros cubre cada renglón; eso se corrige en «revisar
-// renglones». La matriz pone los rubros en filas, lo que el presupuesto tiene
-// hoy al lado, y una columna por empresa; se elige por capítulo o por rubro, y
-// recién al confirmar el costo elegido pasa al presupuesto. La cuenta vive en
+// CÓMO SE LEE LA PANTALLA:
+//
+//   · Una columna por empresa. En cada capítulo, ARRIBA EL TOTAL de lo que
+//     cotizó cada una ahí; al desplegarlo, EL ITEMIZADO: una fila por cada
+//     cosa cotizada, con lo de cada empresa al lado. Las filas no son los
+//     rubros del presupuesto: son lo que las empresas cotizaron.
+//
+//   · La empresa que mandó una sola suma se compara por su total; su parte en
+//     cada fila es una estimación y se marca. «Con las actualizaciones se
+//     irán emparejando los rubros»: cuando mande el detalle, sube como
+//     versión nueva y cae en las mismas filas.
+//
+//   · De cada empresa se abre EL PAPEL ORIGINAL, y se leen sus condiciones.
+//
+//   · Se elige por capítulo —tocando su total— o fila por fila. Recién al
+//     confirmar, los rubros de la proforma elegida entran al capítulo del
+//     presupuesto. Ahí mismo se ve qué entra, qué cambia y qué se quita, y se
+//     tilda cuáles de los rubros que el capítulo ya tenía reemplaza.
+//
+// NO ES EL PRESUPUESTO FINAL: es de donde se alimenta. Y SE VUELVE: cada
+// empresa puede mandar una versión nueva, que reemplaza a la anterior —que
+// queda guardada—, y se vuelve a escoger. La cuenta vive en
 // matrizDeCotizaciones.js.
 //
-// NO ES EL PRESUPUESTO FINAL: es de donde se alimenta. Y SE VUELVE: «estos
-// presupuestos van a tener actualizaciones... quiero poder actualizar y volver
-// a escoger por si cambiamos de especificación, cantidad o negociación». Cada
-// empresa puede mandar una versión nueva: reemplaza a la anterior, que queda
-// guardada; lo que ya se corrigió y se eligió se conserva, y la matriz dice
-// qué cambió y qué de lo elegido hay que volver a pasar.
-//
 // SE GUARDA SOLO: lo que se elige y lo que se corrige queda guardado al
-// tocarlo, con el estado al lado. Lo único que pide confirmación es pasar los
-// precios al presupuesto, y se confirma acá mismo, viendo qué cambia.
+// tocarlo, con el estado al lado. Lo único que pide confirmación es pasar al
+// presupuesto, y se confirma acá mismo, sin ventanas del navegador.
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { ArrowLeft, Upload, Check, ListChecks, X } from "lucide-react";
+import { ArrowLeft, Upload, Check, ListChecks, X, FileText } from "lucide-react";
 import { colors } from "../../theme/colors";
-import { guardarOriginal } from "../../lib/archivosPresupuesto";
-import { rubrosDeLaBase } from "./llenarBase";
+import { guardarOriginal, listarOriginales, abrirOriginal } from "../../lib/archivosPresupuesto";
 import {
-  matrizDeCotizaciones, elegir, planDeAplicar, elegidosPorCotizacion, elegidosDe, totalDelRenglon,
-  anterioresDe, versionesDe, heredarRubros, elegidosAlActualizar, cambiosDeVersion, pasadosSinElegir,
+  matrizDeCotizaciones, elegir, planDeAplicar, elegidosPorCotizacion, elegidosDe, totalDelRenglon, filasParaUbicar, alCapitulo, SIN_CAPITULO,
+  anterioresDe, versionesDe, heredarFilas, elegidosAlActualizar, cambiosDeVersion,
 } from "./matrizDeCotizaciones.js";
-import { cuadreDeLaLectura } from "./emparejarCotizacion.js";
+import { cuadreDeLaLectura, capitulosParaUbicar } from "./emparejarCotizacion.js";
 import {
   cotizacionesDe, guardarCotizacion, guardarNuevaVersion, actualizarCotizacion, borrarCotizacion, leerCotizacionDeArchivo, SIN_195,
 } from "./cotizacionesDelPresupuesto";
@@ -41,42 +56,49 @@ import CompartirConElCliente from "./CompartirConElCliente";
 
 const n = v => Number(v) || 0;
 const plata = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const cant = v => n(v).toLocaleString("es-EC", { maximumFractionDigits: 2 });
 const pct = v => `${v > 0 ? "+" : "−"}${Math.abs(v).toLocaleString("es-EC", { maximumFractionDigits: 1 })} %`;
 const dia = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
-const DE_DONDE = {
-  presupuesto: "en proporción a lo que esos rubros valen hoy en el presupuesto",
-  otras: "en proporción a lo que cotizaron las otras empresas renglón por renglón",
-  iguales: "a partes iguales, porque no hay con qué medir la proporción: revisalo",
-};
-// El rubro que hoy vale 1 × su parte de un paquete repartido: lo que tiene es un total, no un unitario.
-const soloSuParte = f => f.cantidad === 0 && n(f.item.cantidad) > 0 && f.referencia.total > 0;
 const QUE_PASO = { subio: "subió", bajo: "bajó", nuevo: "ahora lo cotiza", ya_no: "ya no lo cotiza", cantidad: "mismo precio, otra cantidad" };
+const DE_DONDE = {
+  otras: "repartida en proporción a lo que detallaron las otras empresas",
+  iguales: "repartida a partes iguales, porque no hay con qué medir la proporción",
+};
 
-const th = { padding: "8px 9px", textAlign: "right", verticalAlign: "top", borderBottom: `1.5px solid ${colors.border}`, fontSize: 11.5, minWidth: 150 };
+const th = { padding: "8px 9px", textAlign: "right", verticalAlign: "top", borderBottom: `1.5px solid ${colors.border}`, fontSize: 11.5, minWidth: 158 };
 const td = { padding: "6px 9px", textAlign: "right", verticalAlign: "top", borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12 };
 const chico = { fontSize: 10.5, color: colors.muted, lineHeight: 1.4 };
 const pastilla = (color, fondo) => ({ fontSize: 9.5, fontWeight: 700, color, background: fondo, borderRadius: 9, padding: "1px 6px", marginLeft: 5, whiteSpace: "nowrap" });
 const enlace = { background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 10.5, color: colors.brand, textDecoration: "underline" };
+const selector = { maxWidth: "100%", fontFamily: colors.font, fontSize: 11, color: colors.ink, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "2px 4px", background: "#fff" };
 
 export default function MatrizCotizaciones({ presupuesto, capitulos = [], items = [], currentUser, puedeEditar = true, onCerrar, onAplicar, onArchivo }) {
   const [cots, setCots] = useState([]);              // todas: las vigentes y las versiones anteriores
-  const [elegidos, setElegidos] = useState({});
+  const [elegidos, setElegidos] = useState({});      // { fila → cotización }
+  const [originales, setOriginales] = useState([]);  // los papeles guardados del presupuesto
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [leyendo, setLeyendo] = useState("");
   const [estado, setEstado] = useState("");          // "guardando" | "guardado"
+  const [abiertos, setAbiertos] = useState(new Set());      // los capítulos con el itemizado a la vista
   const [revisando, setRevisando] = useState(null);  // la cotización cuyos renglones se miran
   const [versionVista, setVersionVista] = useState(null);   // y cuál de sus versiones
   const [verCambios, setVerCambios] = useState(null);
-  const [verTodo, setVerTodo] = useState(false);
   const [previa, setPrevia] = useState(false);
+  const [reemplaza, setReemplaza] = useState(new Set());    // los rubros que el capítulo ya tenía y la cotización reemplaza
+  const [enlaces, setEnlaces] = useState({});               // { renglón → rubro que ya está, con el que se empareja }
   const [aplicando, setAplicando] = useState(false);
   const [quitando, setQuitando] = useState(null);
   const archivoRef = useRef(null);
   const versionRef = useRef(null);
   const deQuienEsLaVersion = useRef(null);
 
+  const cargarPapeles = useCallback(async () => {
+    if (!presupuesto?.id) return;
+    const r = await listarOriginales(presupuesto.id).catch(() => null);
+    setOriginales(r?.archivos || []);
+  }, [presupuesto?.id]);
   const cargar = useCallback(async () => {
     if (!presupuesto?.id) return;
     const r = await cotizacionesDe(presupuesto.id);
@@ -84,16 +106,20 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
     if (r.error) { setError(r.error); return; }
     setCots(r.cotizaciones);
     setElegidos(elegidosDe(r.cotizaciones));
-  }, [presupuesto?.id]);
+    cargarPapeles();
+  }, [presupuesto?.id, cargarPapeles]);
   useEffect(() => { cargar(); }, [cargar]);
 
   const matriz = useMemo(() => matrizDeCotizaciones({ capitulos, items, cotizaciones: cots }), [capitulos, items, cots]);
   // La versión anterior de cada empresa, con su propia matriz: de ahí sale qué cambió.
   const matrizDeAntes = useMemo(() => matrizDeCotizaciones({ capitulos, items, cotizaciones: anterioresDe(cots) }), [capitulos, items, cots]);
-  // Lo elegido que sigue teniendo de dónde salir: si se corrigió un renglón, puede haber dejado de tenerlo.
-  const vigentes = useMemo(() => Object.fromEntries(Object.entries(elegidos).filter(([id, c]) => matriz.celdaDe(id, c))), [elegidos, matriz]);
-  const plan = useMemo(() => planDeAplicar({ matriz, elegidos: vigentes, items }), [matriz, vigentes, items]);
-  const numeroDe = useMemo(() => new Map(matriz.grupos.flatMap(g => g.filas.map(f => [f.id, f.numero]))), [matriz]);
+  // Lo elegido que sigue teniendo de dónde salir, y que ya tiene capítulo: sin capítulo no hay a dónde pasarlo.
+  const vigentes = useMemo(() => {
+    const sinLugar = new Set((matriz.grupos.find(g => g.capitulo === SIN_CAPITULO)?.filas || []).map(f => f.clave));
+    return Object.fromEntries(Object.entries(elegidos).filter(([clave, c]) => matriz.celdaDe(clave, c) && !sinLugar.has(clave)));
+  }, [elegidos, matriz]);
+  const plan = useMemo(() => planDeAplicar({ matriz, elegidos: vigentes, items, enlaces }), [matriz, vigentes, items, enlaces]);
+  const nombresDeCapitulos = useMemo(() => capitulosParaUbicar(capitulos).map(c => c.nombre), [capitulos]);
 
   // SE GUARDA SOLO, con el estado al lado.
   const guardar = async (id, campos) => {
@@ -121,17 +147,18 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
   async function leerPapel(file) {
     setLeyendo(file.name);
     const g = await guardarOriginal(presupuesto.id, file, "cotizacion", currentUser);
-    if (g.archivo) onArchivo?.();
-    const leida = await leerCotizacionDeArchivo(file, rubrosDeLaBase({ capitulos, items }));
+    if (g.archivo) { onArchivo?.(); cargarPapeles(); }
+    // A qué capítulo va, y en qué fila de lo que ya cotizaron las otras cae cada renglón.
+    const leida = await leerCotizacionDeArchivo(file, { capitulos: capitulosParaUbicar(capitulos), filas: filasParaUbicar(matriz) });
     if (leida.error) { setError(`${file.name}: ${leida.error}`); return null; }
     return { leida, archivoId: g.archivo?.id ?? null };
   }
-  const queSeLeyo = (nombre, leida) => {
-    const sinRubro = leida.renglones.filter(x => !x.items.length).length;
-    const cuadre = cuadreDeLaLectura(leida);
-    return `${nombre}: ${leida.renglones.length} renglones leídos`
-      + (sinRubro ? `, ${sinRubro} sin rubro del presupuesto` : "")
-      + (cuadre.cuadra === false ? `. OJO: suman $${plata(cuadre.suma)} y su papel dice $${plata(cuadre.escrito)}: puede faltar un renglón` : "");
+  const queSeLeyo = (nombre, renglones, totales) => {
+    const cuadre = cuadreDeLaLectura({ renglones, totales });
+    const caps = [...new Set(renglones.map(r => r.capitulo).filter(Boolean))];
+    return `${nombre}: ${renglones.length} ${renglones.length === 1 ? "renglón leído" : "renglones leídos"}, $${plata(renglones.reduce((t, r) => t + totalDelRenglon(r), 0))}`
+      + (caps.length ? ` · va a ${caps.map(c => `«${c}»`).join(" y ")}` : " · NOVA no supo a qué capítulo va: decíselo en «renglones»")
+      + (cuadre.cuadra === false ? `. OJO: su papel dice $${plata(cuadre.escrito)}: puede faltar un renglón` : "");
   };
 
   async function subir(e) {
@@ -148,15 +175,15 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
       });
       if (r.error) { setError(r.error); break; }
       setCots(cs => [...cs, r.cotizacion]);
-      setAviso(queSeLeyo(r.cotizacion.proveedor, p.leida) + ". Revisá a qué rubro va cada uno antes de comparar.");
+      setAviso(queSeLeyo(r.cotizacion.proveedor, p.leida.renglones, p.leida.totales) + ".");
     }
     setLeyendo("");
   }
 
   // UNA VERSIÓN NUEVA DE LA MISMA EMPRESA. Reemplaza a la anterior, que queda
-  // guardada. Los renglones que se llaman igual van a los mismos rubros que
-  // ya se habían revisado, y lo que estaba elegido y sigue cotizado sigue
-  // elegido —con el precio nuevo, que hay que volver a pasar—.
+  // guardada. Los renglones que se llaman igual quedan en su capítulo y en sus
+  // filas, y lo que estaba elegido y sigue cotizado sigue elegido —con el
+  // precio nuevo, que hay que volver a pasar—.
   async function subirVersion(e) {
     const file = (e.target.files || [])[0];
     e.target.value = "";
@@ -165,7 +192,11 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
     setError(""); setAviso("");
     const p = await leerPapel(file);
     if (!p) { setLeyendo(""); return; }
-    const renglones = heredarRubros(p.leida.renglones, anterior.renglones || []);
+    const comoEstaba = matriz.empresas.find(x => x.id === anterior.id)?.renglones || [];
+    let renglones = heredarFilas(p.leida.renglones, comoEstaba);
+    // Lo que NOVA no supo ubicar va al capítulo donde ya estaba la empresa.
+    const suCapitulo = comoEstaba.map(r => r.capitulo).find(Boolean) || "";
+    renglones = renglones.map(r => (r.capitulo ? r : { ...r, capitulo: suCapitulo }));
     const totales = { ...(p.leida.totales || {}), ...(anterior.totales?.sin_descuento ? { sin_descuento: true } : {}) };
     const siguen = elegidosAlActualizar({
       capitulos, items, otras: cots.filter(c => !c.reemplazada_at && c.id !== anterior.id),
@@ -179,18 +210,19 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
     if (revisando === anterior.id) { setRevisando(r.cotizacion.id); setVersionVista(null); }
     setVerCambios(r.cotizacion.id);
     const soltados = (anterior.elegidos || []).length - siguen.length;
-    setAviso(queSeLeyo(`${anterior.proveedor}, versión ${r.cotizacion.version}`, { ...p.leida, renglones })
+    setAviso(queSeLeyo(`${anterior.proveedor}, versión ${r.cotizacion.version}`, renglones, totales)
       + ". La versión anterior quedó guardada."
-      + (siguen.length ? ` Lo que tenía elegido y sigue cotizando sigue elegido (${siguen.length} ${siguen.length === 1 ? "rubro" : "rubros"}): abajo dice cuáles cambiaron de precio y hay que volver a pasar.` : "")
-      + (soltados > 0 ? ` ${soltados} ${soltados === 1 ? "rubro elegido ya no está" : "rubros elegidos ya no están"} en esta versión y ${soltados === 1 ? "quedó" : "quedaron"} sin elegir.` : ""));
+      + (siguen.length ? ` Lo que tenía elegido y sigue cotizando sigue elegido (${siguen.length} ${siguen.length === 1 ? "fila" : "filas"}): abajo dice qué hay que volver a pasar.` : "")
+      + (soltados > 0 ? ` ${soltados} ${soltados === 1 ? "fila elegida ya no está" : "filas elegidas ya no están"} en esta versión y ${soltados === 1 ? "quedó" : "quedaron"} sin elegir.` : ""));
   }
 
   const cambiar = async (cot, campos) => {
     setCots(cs => cs.map(c => (c.id === cot.id ? { ...c, ...campos } : c)));
     await guardar(cot.id, campos);
   };
-  // A qué rubros va un renglón: lo que NOVA propuso se corrige acá.
-  const asignar = (cot, k, ids) => cambiar(cot, { renglones: (cot.renglones || []).map((r, i) => (i === k ? { ...r, items: ids } : r)) });
+  // DÓNDE VA: toda la cotización a un capítulo, o un renglón a otro; y en qué fila cae un renglón.
+  const todoAlCapitulo = (cot, capitulo) => cambiar(cot, { renglones: alCapitulo(cot.renglones, capitulo) });
+  const enRenglon = (cot, k, campos) => cambiar(cot, { renglones: (cot.renglones || []).map((r, i) => (i === k ? { ...r, ...campos } : r)) });
 
   // Antes de abrir el archivo: sin la migración 195 no hay dónde guardar la versión, y NOVA leería para nada.
   function pedirVersion(cot) {
@@ -220,33 +252,49 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
     if (anterior) setAviso(`Se quitó la versión ${cot.version} de ${cot.proveedor}: volvió a quedar vigente la versión ${anterior.version || 1}.`);
   }
 
+  // LOS RUBROS QUE EL CAPÍTULO YA TENÍA —los que no vinieron de la comparativa—
+  // en los capítulos que reciben algo. Quedan todos, salvo los que se tilden.
+  const capitulosQueReciben = useMemo(() => [...new Set(plan.rubros.map(x => x.capitulo))], [plan]);
+  const loQueYaTenia = useMemo(() => capitulosQueReciben.map(nombre => ({
+    capitulo: nombre,
+    rubros: (items || []).filter(i => (i.capitulo || "") === nombre && !String(i.comparativa_fila || "").trim()).sort((a, b) => n(a.orden) - n(b.orden)),
+  })).filter(c => c.rubros.length), [capitulosQueReciben, items]);
+  // El rubro que se empareja con un renglón no se puede tildar para quitar, y al revés.
+  const emparejados = new Set(plan.rubros.filter(x => x.emparejado && x.id != null).map(x => String(x.id)));
+  const quitarTambien = [...reemplaza].filter(id => !emparejados.has(String(id)) && loQueYaTenia.some(c => c.rubros.some(i => i.id === id)));
+  const emparejar = (marca, itemId) => setEnlaces(v => { const a = { ...v }; if (itemId) a[marca] = itemId; else delete a[marca]; return a; });
+  const cuantoCambia = plan.porPasar + quitarTambien.length;
+
   async function aplicar() {
-    const van = plan.porPasar;
-    if (!van.length || !onAplicar) return;
+    if (!cuantoCambia || !onAplicar) return;
     setAplicando(true); setError("");
-    const err = await onAplicar(van);
+    const err = await onAplicar({ entran: plan.entran, cambian: plan.cambian, quitan: [...plan.quitan.map(q => q.id), ...quitarTambien], sueltan: plan.sueltan.map(q => q.id) });
     if (err) { setAplicando(false); setError(err); return; }
     const ahora = new Date().toISOString();
-    for (const id of new Set(van.map(c => c.cotizacion_id))) await actualizarCotizacion(id, { aplicada_at: ahora });
-    setCots(cs => cs.map(c => (van.some(x => x.cotizacion_id === c.id) ? { ...c, aplicada_at: ahora } : c)));
-    setAplicando(false); setPrevia(false);
-    const costo = van.reduce((t, c) => t + c.costo, 0);
-    setAviso(`Listo: ${van.length} ${van.length === 1 ? "rubro quedó" : "rubros quedaron"} con el costo elegido, $${plata(costo)} en total. `
-      + "La utilidad de cada rubro se conservó. Las cotizaciones no elegidas siguen guardadas acá, y podés volver a elegir cuando cambie algo.");
+    const deQuien = new Set([...plan.entran, ...plan.cambian].map(x => x.cotizacion_id));
+    for (const id of deQuien) await actualizarCotizacion(id, { aplicada_at: ahora });
+    setCots(cs => cs.map(c => (deQuien.has(c.id) ? { ...c, aplicada_at: ahora } : c)));
+    setAplicando(false); setPrevia(false); setReemplaza(new Set()); setEnlaces({});
+    setAviso(`Listo: el presupuesto quedó con ${plan.rubros.length} ${plan.rubros.length === 1 ? "rubro" : "rubros"} de las cotizaciones elegidas, $${plata(plan.costo)} de costo`
+      + (plan.quitan.length + quitarTambien.length ? `, y se quitaron ${plan.quitan.length + quitarTambien.length}` : "")
+      + ". Las cotizaciones no elegidas siguen guardadas acá, y podés volver a elegir cuando cambie algo.");
   }
 
   const caja = { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "11px 13px", marginBottom: 10 };
   const empresas = matriz.empresas;
-  const gruposConAlgo = matriz.grupos.filter(g => g.cotizados.length);
-  const gruposVistos = verTodo ? matriz.grupos : gruposConAlgo;
-  const elegidaEn = (itemId, cotId) => String(vigentes[itemId]) === String(cotId);
+  const elegidaEn = (clave, cotId) => String(vigentes[clave]) === String(cotId);
+  // El papel de una cotización, si sigue guardado: uno que ya se soltó del depósito no tiene qué abrir.
+  const papelDe = cot => originales.find(a => cot?.archivo_id != null && String(a.id) === String(cot.archivo_id) && !a.soltado_at) || null;
   const enRevision = revisando != null ? cots.find(c => c.id === revisando) : null;
   const susVersiones = enRevision ? versionesDe(enRevision, cots) : [];
   const laVista = susVersiones.find(c => c.id === versionVista) || enRevision;
   const soloLectura = !puedeEditar || (laVista && enRevision && laVista.id !== enRevision.id);
-  const costoPorPasar = plan.porPasar.reduce((t, c) => t + c.costo, 0);
-  // Lo que ya había pasado y, al volver a escoger, quedó sin nadie elegido.
-  const sueltos = pasadosSinElegir({ elegidos: vigentes, items, cotizaciones: cots });
+  // Los renglones de la que se mira, como los ve la matriz (con su capítulo y sus filas resueltos).
+  const renglonesVistos = laVista && enRevision && laVista.id === enRevision.id
+    ? (empresas.find(x => x.id === enRevision.id)?.renglones || [])
+    : (laVista ? matrizDeCotizaciones({ capitulos, items, cotizaciones: [{ ...laVista, reemplazada_at: null, reemplaza_a: null }] }).empresas[0]?.renglones || [] : []);
+  const abrir = nombre => setAbiertos(v => { const a = new Set(v); if (a.has(nombre)) a.delete(nombre); else a.add(nombre); return a; });
+  const tildar = id => setReemplaza(v => { const a = new Set(v); if (a.has(id)) a.delete(id); else a.add(id); return a; });
 
   return (
     <div className="matriz-cotizaciones" style={{ fontFamily: colors.font }}>
@@ -260,10 +308,9 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         </span>
       </div>
       <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55, marginBottom: 10, maxWidth: 900 }}>
-        Subí la cotización de cada empresa: quedan guardadas acá y <strong>no entran al presupuesto</strong> hasta que elijas.
-        Los totales van sobre las cantidades de tu presupuesto, para que todas se comparen sobre lo mismo. Tocá el subtotal
-        de un capítulo para dárselo entero a una empresa, o un rubro para elegirlo solo. Cuando una empresa mande otra
-        cotización, subila como <strong>versión nueva</strong>: la anterior queda guardada y podés volver a elegir.
+        Subí las cotizaciones de cada empresa: quedan guardadas acá y <strong>no entran al presupuesto</strong> hasta que elijas.
+        Cada una va al capítulo de lo que cotiza. Arriba ves el total de cada oferta; desplegá el capítulo para ver el itemizado,
+        fila por fila. Tocá el total de una empresa para elegirla en ese capítulo: al pasarla, sus rubros entran al capítulo del presupuesto.
       </div>
 
       {puedeEditar && (
@@ -292,15 +339,16 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
           <table className="la-matriz" style={{ borderCollapse: "collapse", width: "100%", color: colors.ink }}>
             <thead>
               <tr>
-                <th style={{ ...th, textAlign: "left", minWidth: 240, color: colors.muted, fontWeight: 600 }}>Rubros del presupuesto</th>
-                <th className="columna-del-presupuesto" style={{ ...th, minWidth: 112, color: colors.inkSoft }}>
+                <th style={{ ...th, textAlign: "left", minWidth: 240, color: colors.muted, fontWeight: 600 }}>Lo que se cotizó, por capítulo</th>
+                <th className="columna-del-presupuesto" style={{ ...th, minWidth: 118, color: colors.inkSoft }}>
                   Tu presupuesto hoy
-                  <div style={{ ...chico, fontWeight: 400 }}>el costo que tiene cada rubro, o su precio de referencia</div>
+                  <div style={{ ...chico, fontWeight: 400 }}>lo que tiene el capítulo, y lo que ya pasó de cada fila</div>
                 </th>
                 {empresas.map(e => {
                   const cot = cots.find(c => c.id === e.id);
                   const cuadre = cuadreDeLaLectura(cot);
                   const cambio = e.reemplaza_a != null ? cambiosDeVersion({ matriz, anterior: matrizDeAntes, cotId: e.id, anteriorId: e.reemplaza_a }) : null;
+                  const papel = papelDe(cot);
                   return (
                     <th key={e.id} className="columna-de-empresa" style={th}>
                       {puedeEditar ? (
@@ -309,11 +357,14 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                           onKeyDown={ev => { if (ev.key === "Enter") ev.target.blur(); }}
                           style={{ width: "100%", textAlign: "right", border: "none", background: "transparent", fontFamily: colors.font, fontSize: 12.5, fontWeight: 700, color: colors.ink, outline: "none", padding: 0 }} />
                       ) : <div style={{ fontSize: 12.5, fontWeight: 700 }}>{e.proveedor}</div>}
+                      {/* EL TOTAL DE LA OFERTA, arriba. */}
+                      <div className="total-de-la-oferta" style={{ fontSize: 14, fontWeight: 700, color: colors.ink, marginTop: 1 }}>${plata(e.cotizado)}</div>
                       <div style={{ ...chico, fontWeight: 400 }}>
                         {e.version > 1 && <span className="version" style={{ color: colors.inkSoft, fontWeight: 600 }}>versión {e.version} · </span>}
-                        su papel suma ${plata(e.cotizado)}
-                        {cuadre.cuadra === false && <span style={{ color: colors.warning }}> · dice ${plata(cuadre.escrito)}: revisá si falta un renglón</span>}
+                        {e.renglones.length} {e.renglones.length === 1 ? "renglón: mandó una sola suma" : "renglones"}
+                        {cuadre.cuadra === false && <span style={{ color: colors.warning }}> · su papel dice ${plata(cuadre.escrito)}: revisá si falta un renglón</span>}
                       </div>
+                      {e.sinCapitulo > 0 && <div className="sin-capitulo" style={{ ...chico, fontWeight: 600, color: colors.warning }}>falta decir a qué capítulo va: en «renglones»</div>}
                       {cambio && (
                         <div className="contra-la-anterior" style={{ ...chico, fontWeight: 400, color: cambio.diferencia > 0 ? colors.danger : cambio.diferencia < 0 ? colors.success : colors.muted }}>
                           antes ${plata(cambio.antes)} → ahora ${plata(cambio.ahora)}
@@ -322,10 +373,6 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                             {verCambios === e.id ? "cerrar" : `qué cambió (${cambio.filas.length})`}</button></>}
                         </div>
                       )}
-                      <div style={{ ...chico, fontWeight: 400 }}>
-                        {e.renglones.length} {e.renglones.length === 1 ? "renglón" : "renglones"}
-                        {e.sueltos.length > 0 && <span style={{ color: colors.warning }}> · {e.sueltos.length} sin rubro (${plata(e.sinRubro)})</span>}
-                      </div>
                       {e.descuentoOfrecido > 0 && (
                         <div style={{ ...chico, fontWeight: 400 }}>
                           {e.descuento > 0 ? `con su ${plata(e.descuento)} % de descuento ya restado` : `ofrece ${plata(e.descuentoOfrecido)} % de descuento, sin restar`}
@@ -333,10 +380,12 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                             {e.descuento > 0 ? "no restarlo" : "restarlo"}</button></>}
                         </div>
                       )}
-                      {cot?.aplicada_at && <div style={{ ...chico, fontWeight: 400, color: colors.success }}>pasó precios al presupuesto el {dia(cot.aplicada_at)}</div>}
+                      {cot?.aplicada_at && <div style={{ ...chico, fontWeight: 400, color: colors.success }}>pasó al presupuesto el {dia(cot.aplicada_at)}</div>}
                       <div style={{ marginTop: 3, display: "flex", gap: 9, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        {/* EL PAPEL, TAL COMO LLEGÓ: por las condiciones y lo que NOVA no copia. */}
+                        {papel && <button className="ver-el-papel" style={enlace} title="Abrir la cotización tal como llegó" onClick={() => abrirOriginal(papel)}>ver el papel</button>}
                         <button className="revisar-renglones" style={enlace} onClick={() => { setRevisando(revisando === e.id ? null : e.id); setVersionVista(null); }}>
-                          {revisando === e.id ? "cerrar renglones" : "revisar renglones"}
+                          {revisando === e.id ? "cerrar renglones" : "renglones y condiciones"}
                         </button>
                         {puedeEditar && (
                           <button className="nueva-version" style={enlace} disabled={!!leyendo} title="Esta empresa mandó otra cotización: reemplaza a esta, que queda guardada"
@@ -356,92 +405,85 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
               </tr>
             </thead>
             <tbody>
-              {gruposVistos.map(g => {
-                const filas = verTodo ? g.filas : g.filas.filter(f => Object.keys(f.celdas).length);
-                const sinCotizar = g.filas.length - g.cotizados.length;
+              {matriz.grupos.map(g => {
+                const sinLugar = g.capitulo === SIN_CAPITULO;
+                const abierto = abiertos.has(g.capitulo);
                 return [
-                  <tr key={`c${g.numero}`} className="fila-de-capitulo" style={{ background: colors.bg }}>
+                  <tr key={`c${g.capitulo}`} className="fila-de-capitulo" data-capitulo={g.capitulo} style={{ background: colors.bg }}>
                     <td style={{ ...td, textAlign: "left", fontWeight: 700 }}>
-                      {g.numero} · {g.capitulo}
+                      <button className="desplegar-capitulo" aria-expanded={abierto} onClick={() => abrir(g.capitulo)}
+                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 12, fontWeight: 700, color: sinLugar ? colors.warning : colors.ink, textAlign: "left" }}>
+                        <span style={{ color: colors.muted, marginRight: 5 }}>{abierto ? "▾" : "▸"}</span>
+                        {sinLugar ? "Sin capítulo todavía" : `${g.numero ? `${g.numero} · ` : ""}${g.capitulo}`}
+                      </button>
                       <div style={{ ...chico, fontWeight: 400 }}>
-                        {g.cotizados.length} de {g.filas.length} rubros con cotización
-                        {!verTodo && sinCotizar > 0 ? ` · ${sinCotizar} que nadie cotizó no se muestran` : ""}
+                        {sinLugar ? "decí a qué capítulo va, en «renglones y condiciones» de la empresa"
+                          : `${g.filas.length} ${g.filas.length === 1 ? "fila cotizada" : "filas cotizadas"} · ${abierto ? "tocá para cerrar el itemizado" : "tocá para ver el itemizado"}`}
                       </div>
                     </td>
                     <td className="presupuesto-del-capitulo" style={{ ...td, color: colors.inkSoft, fontWeight: 600 }}>
-                      {g.referencia > 0 ? `$${plata(g.referencia)}` : "—"}
-                      {g.cotizados.length > 0 && <div style={{ ...chico, fontWeight: 400 }}>{g.referencia > 0 ? "en lo cotizado" : "sin cantidades todavía"}</div>}
+                      {sinLugar ? "—" : `$${plata(g.referencia.total)}`}
+                      {!sinLugar && <div style={{ ...chico, fontWeight: 400 }}>{g.referencia.rubros} {g.referencia.rubros === 1 ? "rubro" : "rubros"} en el capítulo</div>}
                     </td>
                     {empresas.map(e => {
                       const s = g.sub[e.id];
-                      if (!s) return <td key={e.id} style={{ ...td, color: colors.muted }}>{g.cotizados.length ? "no cotizó" : "—"}</td>;
-                      const todos = g.filas.filter(f => f.celdas[e.id]).every(f => elegidaEn(f.id, e.id));
+                      if (!s) return <td key={e.id} style={{ ...td, color: colors.muted }}>—</td>;
+                      const suyas = g.filas.filter(f => f.celdas[e.id]);
+                      const todas = suyas.every(f => elegidaEn(f.clave, e.id));
                       return (
                         <td key={e.id} style={{ ...td, padding: 3 }}>
-                          <button className="subtotal-de-capitulo" onClick={() => tocar(e.id, { capitulo: g.capitulo })} disabled={!puedeEditar}
-                            title={todos ? "Soltar este capítulo" : `Darle a ${e.proveedor} todo lo que cotizó en ${g.capitulo}`}
-                            style={{ width: "100%", textAlign: "right", fontFamily: colors.font, cursor: puedeEditar ? "pointer" : "default", borderRadius: 7, padding: "4px 6px",
-                              border: `1.5px solid ${todos ? colors.brand : "transparent"}`, background: todos ? colors.brandSoft : "transparent", color: colors.ink }}>
-                            <span style={{ fontSize: 12.5, fontWeight: 700 }}>{s.estimado ? "≈ " : ""}${plata(s.total)}</span>
+                          <button className="subtotal-de-capitulo" onClick={() => tocar(e.id, { capitulo: g.capitulo })} disabled={!puedeEditar || sinLugar}
+                            title={sinLugar ? "Primero decí a qué capítulo va" : todas ? "Soltar a esta empresa en este capítulo" : `Elegir a ${e.proveedor} para ${g.capitulo}`}
+                            style={{ width: "100%", textAlign: "right", fontFamily: colors.font, cursor: puedeEditar && !sinLugar ? "pointer" : "default", borderRadius: 7, padding: "4px 6px",
+                              border: `1.5px solid ${todas ? colors.brand : "transparent"}`, background: todas ? colors.brandSoft : "transparent", color: colors.ink }}>
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{s.estimado ? "≈ " : ""}${plata(s.total)}</span>
                             {g.menor === String(e.id) && <span className="menor" style={pastilla(colors.success, colors.successSoft)}>MENOR</span>}
-                            {todos && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
-                            {s.faltan > 0 && <div style={{ ...chico, color: colors.warning }}>le {s.faltan === 1 ? "falta 1 rubro" : `faltan ${s.faltan} rubros`} que otra sí cotizó</div>}
-                            {s.estimado && <div style={chico}>estimado: comparte un paquete con otro capítulo</div>}
+                            {todas && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
+                            {todas && <div style={{ ...chico, color: colors.brand, fontWeight: 600 }}>elegida para el capítulo</div>}
+                            {s.faltan > 0 && <div style={{ ...chico, color: colors.warning }}>no cotizó {s.faltan === 1 ? "1 fila" : `${s.faltan} filas`} que otra sí</div>}
+                            {s.estimado && <div style={chico}>estimado: su suma también cubre otro capítulo</div>}
                           </button>
                         </td>
                       );
                     })}
                   </tr>,
-                  ...filas.map(f => (
-                    <tr key={f.id} className="fila-de-rubro">
-                      <td style={{ ...td, textAlign: "left" }}>
-                        <span style={{ color: colors.muted }}>{f.numero}</span> {f.item.descripcion}
-                        <div style={chico}>
-                          {f.cantidad > 0 ? `${plata(f.cantidad)} ${f.item.unidad || ""}`
-                            : n(f.item.cantidad) > 0 ? "sin cantidad propia: vale 1, por el paquete repartido" : "sin cantidad en el presupuesto"}
-                        </div>
+                  ...(abierto ? g.filas.map(f => (
+                    <tr key={f.clave} className="fila-cotizada" data-fila={f.clave}>
+                      <td style={{ ...td, textAlign: "left", paddingLeft: 24 }}>
+                        {f.descripcion}
+                        <div style={chico}>{cant(f.cantidad)} {f.unidad}</div>
                       </td>
-                      <td className="presupuesto-del-rubro" style={{ ...td, color: colors.inkSoft }}>
-                        {soloSuParte(f) ? `≈ $${plata(f.referencia.total)}` : f.referencia.unitario > 0 ? `$${plata(f.referencia.unitario)}` : "—"}
-                        <div style={chico}>
-                          {[soloSuParte(f) ? "su parte de un paquete" : f.referencia.total > 0 ? `$${plata(f.referencia.total)}` : "",
-                            f.referencia.repartido && !soloSuParte(f) ? "repartido de un paquete" : "",
-                            f.referencia.deQuien ? `de ${f.referencia.deQuien}` : ""].filter(Boolean).join(" · ")}
-                        </div>
+                      <td className="presupuesto-de-la-fila" style={{ ...td, color: colors.inkSoft }}>
+                        {!f.referencia ? <span style={{ color: colors.muted }}>—</span>
+                          : f.referencia.paquete ? <span style={chico}>en la suma de {f.referencia.deQuien}</span>
+                            : <>${plata(f.referencia.total)}<div style={chico}>de {f.referencia.deQuien}</div></>}
                       </td>
                       {empresas.map(e => {
                         const x = f.celdas[e.id];
-                        if (!x) return <td key={e.id} style={{ ...td, color: Object.keys(f.celdas).length ? colors.warning : colors.muted, fontSize: 11 }}>{Object.keys(f.celdas).length ? "no cotizó" : "—"}</td>;
-                        const elegida = elegidaEn(f.id, e.id);
-                        const antes = e.reemplaza_a != null ? matrizDeAntes.celdaDe(f.id, e.reemplaza_a) : null;
+                        const otros = Object.keys(f.celdas).length > 0;
+                        if (!x) return <td key={e.id} style={{ ...td, color: otros && g.sub[e.id] ? colors.warning : colors.muted, fontSize: 11 }}>{g.sub[e.id] ? "no cotizó" : "—"}</td>;
+                        const elegida = elegidaEn(f.clave, e.id);
+                        const antes = e.reemplaza_a != null ? matrizDeAntes.celdaDe(f.clave, e.reemplaza_a) : null;
                         const eraOtro = antes && x.tipo === "rubro" && antes.tipo === "rubro" && Math.abs(antes.unitario - x.unitario) > 0.00005;
-                        // Contra lo que el presupuesto tiene hoy: unitario contra unitario; y si lo de
-                        // hoy es la parte de un paquete, que no tiene unitario, total contra total.
-                        const contraElTuyo = x.tipo !== "rubro" || f.referencia.deQuien === e.proveedor ? null
-                          : soloSuParte(f) ? (x.total / f.referencia.total - 1) * 100
-                            : f.referencia.unitario > 0 ? (x.unitario / f.referencia.unitario - 1) * 100 : null;
                         return (
                           <td key={e.id} style={{ ...td, padding: 3 }}>
-                            <button className="celda-de-rubro" onClick={() => tocar(e.id, { itemId: f.id })} disabled={!puedeEditar}
-                              title={x.tipo === "paquete" ? `Es parte del paquete «${x.descripcion}»: se elige o se suelta entero` : elegida ? "Soltar este rubro" : `Elegir a ${e.proveedor} para este rubro`}
-                              style={{ width: "100%", textAlign: "right", fontFamily: colors.font, cursor: puedeEditar ? "pointer" : "default", borderRadius: 7, padding: "4px 6px",
+                            <button className="celda-cotizada" onClick={() => tocar(e.id, { fila: f.clave })} disabled={!puedeEditar || sinLugar}
+                              title={x.tipo === "paquete" ? `Es parte de su suma «${x.descripcion}»: se elige o se suelta entera` : elegida ? "Soltar esta fila" : `Elegir a ${e.proveedor} para esta fila`}
+                              style={{ width: "100%", textAlign: "right", fontFamily: colors.font, cursor: puedeEditar && !sinLugar ? "pointer" : "default", borderRadius: 7, padding: "4px 6px",
                                 border: `1.5px solid ${elegida ? colors.brand : "transparent"}`, background: elegida ? colors.brandSoft : "transparent", color: colors.ink }}>
                               {x.tipo === "rubro" ? (
                                 <>
-                                  <span style={{ fontSize: 12, fontWeight: 600 }}>${plata(x.unitario)}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 600 }}>${plata(x.total)}</span>
                                   {f.menor === String(e.id) && <span className="menor" style={pastilla(colors.success, colors.successSoft)}>MENOR</span>}
                                   {elegida && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
-                                  <div style={chico}>
-                                    ${plata(x.total)}{x.otraCantidad ? ` · cotizó ${plata(x.cantidadCotizada)}` : x.sinCantidadTuya ? ` · sobre sus ${plata(x.cantidad)}` : ""}
-                                    {contraElTuyo != null && Math.abs(contraElTuyo) >= 0.05 ? ` · ${pct(contraElTuyo)} contra el tuyo` : ""}
-                                  </div>
+                                  <div style={chico}>{cant(x.cantidad)} {x.unidad} × ${plata(x.unitario)}{x.otraCantidad ? " · otra cantidad" : ""}</div>
                                   {eraOtro && <div className="antes" style={{ ...chico, color: x.unitario > antes.unitario ? colors.danger : colors.success }}>antes ${plata(antes.unitario)}</div>}
                                 </>
                               ) : (
                                 <>
                                   <span style={{ fontSize: 12, fontWeight: 600, color: colors.inkSoft }}>≈ ${plata(x.parte)}</span>
                                   {elegida && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
-                                  <div className="del-paquete" style={chico}>del paquete «{String(x.descripcion).slice(0, 34)}», ${plata(x.totalDelPaquete)}</div>
+                                  <div className="de-su-suma" style={chico}>de su suma, ${plata(x.totalDelPaquete)}</div>
                                 </>
                               )}
                             </button>
@@ -449,21 +491,16 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                         );
                       })}
                     </tr>
-                  )),
+                  )) : []),
                 ];
               })}
               <tr className="fila-de-total" style={{ background: colors.bg }}>
-                <td style={{ ...td, textAlign: "left", fontWeight: 700, borderBottom: "none" }}>
-                  Total sobre este presupuesto
-                  <div style={{ ...chico, fontWeight: 400 }}>lo de cada empresa que calza con algún rubro</div>
-                </td>
-                <td style={{ ...td, borderBottom: "none", color: colors.inkSoft, fontWeight: 600 }}>
-                  {(() => { const t = matriz.grupos.reduce((s, g) => s + g.referencia, 0); return t > 0 ? `$${plata(t)}` : "—"; })()}
-                </td>
+                <td style={{ ...td, textAlign: "left", fontWeight: 700, borderBottom: "none" }}>Total de lo cotizado</td>
+                <td style={{ ...td, borderBottom: "none" }} />
                 {empresas.map(e => (
                   <td key={e.id} style={{ ...td, borderBottom: "none" }}>
                     <span style={{ fontSize: 13, fontWeight: 700 }}>${plata(e.comparado)}</span>
-                    <div style={chico}>cubre {e.cubre} {e.cubre === 1 ? "rubro" : "rubros"}</div>
+                    <div style={chico}>{e.cubre} {e.cubre === 1 ? "fila" : "filas"} en {e.capitulos.filter(Boolean).length} {e.capitulos.filter(Boolean).length === 1 ? "capítulo" : "capítulos"}</div>
                   </td>
                 ))}
               </tr>
@@ -472,14 +509,7 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         </div>
       )}
 
-      {empresas.length > 0 && matriz.grupos.length > gruposConAlgo.length && (
-        <button style={{ ...enlace, fontSize: 11, marginBottom: 10 }} onClick={() => setVerTodo(v => !v)}>
-          {verTodo ? "ver solo lo que tiene alguna cotización" : `ver también los ${matriz.grupos.length - gruposConAlgo.length} capítulos y los rubros que nadie cotizó`}
-        </button>
-      )}
-
-      {/* QUÉ CAMBIÓ CON LA VERSIÓN NUEVA, rubro por rubro. Es lo que se mira
-          después de negociar: qué bajó, qué subió, y qué dejó de cotizar. */}
+      {/* QUÉ CAMBIÓ CON LA VERSIÓN NUEVA, fila por fila. */}
       {verCambios != null && (() => {
         const e = empresas.find(x => x.id === verCambios);
         if (!e || e.reemplaza_a == null) return null;
@@ -490,19 +520,15 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
               <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>Qué cambió en la versión {e.version} de {e.proveedor}</div>
               <button onClick={() => setVerCambios(null)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}><X size={14} /></button>
             </div>
-            {!cambio.filas.length && <div style={{ fontSize: 12, color: colors.inkSoft }}>Los mismos precios que la versión anterior en todo lo que calza con el presupuesto.</div>}
+            {!cambio.filas.length && <div style={{ fontSize: 12, color: colors.inkSoft }}>Los mismos precios que la versión anterior.</div>}
             {cambio.filas.map(c => (
-              <div key={c.id} className="cambio-de-version" style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "4px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>
-                <div style={{ flex: 1, minWidth: 240 }}><span style={{ color: colors.muted }}>{c.numero}</span> {c.descripcion}</div>
+              <div key={c.clave} className="cambio-de-version" style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "4px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>
+                <div style={{ flex: 1, minWidth: 240 }}>{c.descripcion}</div>
                 <div style={{ color: c.que === "subio" || c.que === "ya_no" ? colors.danger : c.que === "cantidad" ? colors.warning : colors.success, fontWeight: 600 }}>{QUE_PASO[c.que]}</div>
                 <div style={{ minWidth: 190, textAlign: "right", color: colors.inkSoft }}>
                   {c.antes != null ? `$${plata(c.antes)}` : "—"} → {c.ahora != null ? `$${plata(c.ahora)}` : "—"}
                   {c.antes > 0 && c.ahora != null && c.que !== "cantidad" ? ` (${pct((c.ahora / c.antes - 1) * 100)})` : ""}
-                  {c.cantidadAhora != null && (
-                    <div className="otra-cantidad" style={{ ...chico, color: colors.warning }}>
-                      ahora cotiza {plata(c.cantidadAhora)}, antes {plata(c.cantidadAntes)}: la cantidad de tu presupuesto no cambia sola
-                    </div>
-                  )}
+                  {c.cantidadAhora != null && <div className="otra-cantidad" style={{ ...chico, color: colors.warning }}>ahora cotiza {cant(c.cantidadAhora)}, antes {cant(c.cantidadAntes)}</div>}
                 </div>
               </div>
             ))}
@@ -510,65 +536,84 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         );
       })()}
 
-      {/* LOS RENGLONES DE UNA EMPRESA, con sus palabras, y a qué rubros va
-          cada uno. De esto cuelga toda la comparación: lo propone NOVA y se
-          corrige acá. Un renglón puede ir a varios rubros: es un paquete. Las
-          versiones anteriores se pueden mirar, y no se tocan. */}
+      {/* LO QUE MANDÓ UNA EMPRESA: su papel, sus condiciones y sus renglones,
+          con sus palabras; y dónde va cada uno. Lo propone NOVA y se corrige
+          acá. Las versiones anteriores se pueden mirar, y no se tocan. */}
       {enRevision && laVista && (
         <div className="renglones-de-la-empresa" style={caja}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
             <ListChecks size={14} color={colors.brand} />
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>Lo que cotizó {enRevision.proveedor}, renglón por renglón</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>Lo que mandó {enRevision.proveedor}</div>
             {susVersiones.length > 1 && (
-              <select className="que-version" value={laVista.id} onChange={ev => setVersionVista(Number(ev.target.value))}
-                style={{ fontFamily: colors.font, fontSize: 11, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "2px 4px", background: "#fff", color: colors.ink }}>
+              <select className="que-version" value={laVista.id} onChange={ev => setVersionVista(Number(ev.target.value))} style={selector}>
                 {susVersiones.map((v, i) => (
                   <option key={v.id} value={v.id}>versión {v.version || 1}{i === 0 ? " · la vigente" : ""} · {dia(v.created_at)}</option>
                 ))}
               </select>
             )}
+            {papelDe(laVista) && (
+              <button className="ver-el-papel" onClick={() => abrirOriginal(papelDe(laVista))}
+                style={{ ...enlace, fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }}><FileText size={12} /> abrir el papel original</button>
+            )}
             <button onClick={() => setRevisando(null)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: colors.muted, display: "flex" }}><X size={14} /></button>
           </div>
-          <div style={{ ...chico, marginBottom: 8, fontSize: 11 }}>
-            {laVista.id !== enRevision.id
-              ? "Esta es una versión anterior: queda guardada para consulta y no se compara ni se edita."
-              : "A la derecha, los rubros de tu presupuesto que cubre cada renglón. Si un renglón es un paquete, sumale todos los rubros que cubre: su total se compara contra lo que suman."}
+          {/* LAS CONDICIONES, como las copió NOVA. Lo que valga de verdad es el papel. */}
+          <div className="condiciones-de-la-oferta" style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 8, background: colors.bg, borderRadius: 7, padding: "7px 10px", whiteSpace: "pre-line" }}>
+            <strong style={{ color: colors.ink }}>Condiciones: </strong>
+            {laVista.totales?.condiciones || "NOVA no encontró condiciones escritas. Abrí el papel original para ver validez, forma de pago, plazo y lo que no incluye."}
           </div>
-          {(laVista.renglones || []).map((r, k) => {
-            const tomados = new Set((laVista.renglones || []).flatMap((x, i) => (i === k ? [] : (x.items || []).map(Number))));
-            const suyos = (r.items || []).map(Number).filter(id => numeroDe.has(id));
+          {laVista.id !== enRevision.id ? (
+            <div style={{ ...chico, marginBottom: 8, fontSize: 11 }}>Esta es una versión anterior: queda guardada para consulta y no se compara ni se edita.</div>
+          ) : !soloLectura && (
+            <div className="todo-al-capitulo" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8, fontSize: 12, color: colors.ink }}>
+              Toda la cotización va al capítulo
+              <select className="capitulo-de-la-cotizacion" style={selector}
+                value={renglonesVistos.length && renglonesVistos.every(r => r.capitulo === renglonesVistos[0].capitulo) ? renglonesVistos[0].capitulo : "__varios"}
+                onChange={ev => ev.target.value !== "__varios" && todoAlCapitulo(enRevision, ev.target.value)}>
+                <option value="">elegí el capítulo…</option>
+                {nombresDeCapitulos.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="__varios" disabled>en varios capítulos</option>
+              </select>
+              <span style={chico}>si un renglón es de otro capítulo, se cambia en ese renglón</span>
+            </div>
+          )}
+          {renglonesVistos.map(r => {
+            const grupo = matriz.grupos.find(g => g.capitulo === r.capitulo);
+            const propia = r.vivas?.length === 1 && Object.keys(grupo?.filas.find(f => f.clave === r.vivas[0])?.celdas || {}).length <= 1;
+            // Las filas de su capítulo que pusieron otras empresas, y que esta todavía no ocupa.
+            const libres = (grupo?.filas || []).filter(f => !f.celdas[enRevision.id] && Object.keys(f.celdas).length > 0);
+            const suyas = (r.vivas || []).map(clave => grupo?.filas.find(f => f.clave === clave)).filter(Boolean);
             return (
-              <div key={k} className="renglon-de-la-cotizacion" style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap", padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
+              <div key={r.k} className="renglon-de-la-cotizacion" style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap", padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
                 <div style={{ flex: 1, minWidth: 230, fontSize: 12, color: colors.ink }}>
                   {r.descripcion}
-                  <div style={chico}>{plata(r.cantidad)} {r.unidad || ""} × ${plata(r.precio_unitario)} = ${plata(totalDelRenglon(r))}</div>
+                  <div style={chico}>{cant(r.cantidad)} {r.unidad || ""} × ${plata(r.precio_unitario)} = ${plata(totalDelRenglon(r))}</div>
                 </div>
-                <div style={{ flex: 1, minWidth: 260, fontSize: 11.5 }}>
-                  {!suyos.length && <div style={{ color: colors.warning, fontSize: 11 }}>sin rubro del presupuesto: no entra en la comparación</div>}
-                  {suyos.length > 1 && <div style={{ color: colors.inkSoft, fontSize: 10.5 }}>paquete: cubre {suyos.length} rubros</div>}
-                  {suyos.map(id => {
-                    const it = items.find(i => Number(i.id) === id);
-                    return (
-                      <div key={id} className="rubro-del-renglon" style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
-                        <span style={{ color: colors.muted }}>{numeroDe.get(id)}</span>
-                        <span style={{ flex: 1 }}>{String(it?.descripcion || "").slice(0, 70)}</span>
-                        {!soloLectura && <button style={{ ...enlace, color: colors.muted }} onClick={() => asignar(enRevision, k, suyos.filter(x => x !== id))}>quitar</button>}
-                      </div>
-                    );
-                  })}
-                  {!soloLectura && (
-                    <select className="sumar-rubro" value="" onChange={ev => ev.target.value && asignar(enRevision, k, [...suyos, Number(ev.target.value)])}
-                      style={{ marginTop: 3, maxWidth: "100%", fontFamily: colors.font, fontSize: 11, color: colors.brand, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "2px 4px", background: "#fff" }}>
-                      <option value="">{suyos.length ? "+ sumar otro rubro (es un paquete)…" : "elegir su rubro…"}</option>
-                      {matriz.grupos.map(g => (
-                        <optgroup key={g.numero} label={`${g.numero} · ${g.capitulo}`}>
-                          {g.filas.filter(f => !tomados.has(f.id) && !suyos.includes(f.id)).map(f => (
-                            <option key={f.id} value={f.id}>{f.numero} {String(f.item.descripcion || "").slice(0, 80)}</option>
-                          ))}
-                        </optgroup>
-                      ))}
+                <div style={{ flex: 1, minWidth: 260, fontSize: 11.5, display: "grid", gap: 3 }}>
+                  {soloLectura ? <div style={{ color: colors.inkSoft }}>{r.capitulo || "sin capítulo"}</div> : (
+                    <select className="capitulo-del-renglon" style={selector} value={r.capitulo} onChange={ev => enRenglon(enRevision, r.k, { capitulo: ev.target.value, filas: [] })}>
+                      <option value="">sin capítulo…</option>
+                      {nombresDeCapitulos.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   )}
+                  {/* EN QUÉ FILA CAE: la suya, la misma que otra empresa, o varias si es una suma. */}
+                  {suyas.length > 1 && <div className="es-una-suma" style={{ color: colors.inkSoft, fontSize: 10.5 }}>es una suma: cubre {suyas.length} filas de lo que detallaron las otras</div>}
+                  {!propia && suyas.length === 1 && <div style={{ color: colors.inkSoft, fontSize: 10.5 }}>en la misma fila que: {String(suyas[0].descripcion).slice(0, 70)}</div>}
+                  {propia && <div style={{ color: colors.muted, fontSize: 10.5 }}>en su propia fila: nadie más lo cotizó así</div>}
+                  {!soloLectura && r.capitulo && libres.length > 0 && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <select className="misma-fila-que" style={{ ...selector, color: colors.brand }} value=""
+                        onChange={ev => ev.target.value && enRenglon(enRevision, r.k, { filas: propia ? [ev.target.value] : [...(r.vivas || []), ev.target.value] })}>
+                        <option value="">{propia ? "es lo mismo que…" : "+ también cubre…"}</option>
+                        {libres.map(f => <option key={f.clave} value={f.clave}>{String(f.descripcion).slice(0, 80)}</option>)}
+                      </select>
+                      <button className="cubre-todo" style={enlace} title="Es una sola suma de todo lo que las otras detallaron en este capítulo"
+                        onClick={() => enRenglon(enRevision, r.k, { filas: [...(propia ? [] : (r.vivas || [])), ...libres.map(f => f.clave)] })}>
+                        es la suma de todo lo que detallaron las otras ({libres.length})
+                      </button>
+                    </div>
+                  )}
+                  {!soloLectura && !propia && <button className="a-su-propia-fila" style={{ ...enlace, color: colors.muted, textAlign: "left" }} onClick={() => enRenglon(enRevision, r.k, { filas: [] })}>ponerlo en su propia fila</button>}
                 </div>
               </div>
             );
@@ -576,31 +621,25 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         </div>
       )}
 
-      {/* LO ELEGIDO, Y PASARLO AL PRESUPUESTO. Es lo único que se confirma:
-          cambia precios, y se ve acá mismo qué cambia antes de aceptar. Lo que
-          ya está en el presupuesto tal cual no se vuelve a pasar; lo que
-          cambió —una versión nueva, otra cantidad, otra empresa— sí. */}
+      {/* LO ELEGIDO, Y PASARLO AL PRESUPUESTO. Es lo único que se confirma. */}
       {empresas.length > 0 && (
         <div className="lo-elegido" style={{ ...caja, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 240, fontSize: 12.5, color: colors.ink }}>
-            {plan.cambios.length
-              ? <>Elegido: <strong>{plan.cambios.length} {plan.cambios.length === 1 ? "rubro" : "rubros"}</strong> · ${plata(plan.costo)} de costo
-                {plan.repartidos > 0 && <span style={{ color: colors.inkSoft }}> · {plan.repartidos} repartidos de un paquete</span>}
-                <div className="que-falta-pasar" style={{ fontSize: 11.5, color: plan.porPasar.length ? colors.warning : colors.success, marginTop: 2 }}>
-                  {plan.porPasar.length === 0 ? "Todo lo elegido ya está así en el presupuesto."
-                    : plan.porPasar.length === plan.cambios.length ? "Todavía no pasó al presupuesto."
-                      : `${plan.cambios.length - plan.porPasar.length} ya ${plan.cambios.length - plan.porPasar.length === 1 ? "está" : "están"} así en el presupuesto · ${plan.porPasar.length === 1 ? "falta pasar 1, que es nuevo o cambió" : `faltan pasar ${plan.porPasar.length}, que son nuevos o cambiaron`}.`}
+            {plan.rubros.length
+              ? <>Elegido: <strong>{plan.rubros.length} {plan.rubros.length === 1 ? "rubro" : "rubros"}</strong> de {[...new Set(plan.rubros.map(x => x.proveedor))].join(" y ")} · ${plata(plan.costo)} de costo
+                <div className="que-falta-pasar" style={{ fontSize: 11.5, color: plan.porPasar ? colors.warning : colors.success, marginTop: 2 }}>
+                  {plan.porPasar === 0 ? "Todo lo elegido ya está así en el presupuesto."
+                    : [plan.entran.length ? `${plan.entran.length} ${plan.entran.length === 1 ? "entra" : "entran"} al presupuesto` : "",
+                      plan.cambian.length ? `${plan.cambian.length} ${plan.cambian.length === 1 ? "cambia" : "cambian"}` : "",
+                      plan.quitan.length ? `${plan.quitan.length} ${plan.quitan.length === 1 ? "se quita" : "se quitan"}` : "",
+                      plan.sueltan.length ? `${plan.sueltan.length} ${plan.sueltan.length === 1 ? "queda sin cotización" : "quedan sin cotización"}` : "",
+                      plan.yaEstan ? `${plan.yaEstan} ya ${plan.yaEstan === 1 ? "está" : "están"}` : ""].filter(Boolean).join(" · ") + "."}
                 </div></>
-              : <span style={{ color: colors.muted }}>Todavía no elegiste nada: tocá un subtotal o un rubro en la matriz.</span>}
-            {sueltos.length > 0 && (
-              <div className="pasados-sin-elegir" style={{ fontSize: 11.5, color: colors.warning, marginTop: 4, lineHeight: 1.45 }}>
-                {sueltos.length === 1 ? "1 rubro sigue" : `${sueltos.length} rubros siguen`} en el presupuesto con el costo de una cotización que acá ya no está elegida
-                {" "}(${plata(sueltos.reduce((t, s) => t + s.costo, 0))}): {sueltos.slice(0, 6).map(s => `${numeroDe.get(s.id) || ""} de ${s.proveedor}`).join(", ")}{sueltos.length > 6 ? "…" : ""}.
-                {" "}Elegí quién los hace, o corregí su costo en el presupuesto: no se borra solo.
-              </div>
-            )}
+              : plan.quitan.length
+                ? <span className="que-falta-pasar" style={{ color: colors.warning }}>No hay nada elegido, y el presupuesto todavía tiene {plan.quitan.length} {plan.quitan.length === 1 ? "rubro que salió" : "rubros que salieron"} de esta comparativa.</span>
+                : <span style={{ color: colors.muted }}>Todavía no elegiste nada: tocá el total de una empresa en un capítulo.</span>}
           </div>
-          {puedeEditar && plan.porPasar.length > 0 && !previa && (
+          {puedeEditar && plan.porPasar > 0 && !previa && (
             <button className="ver-lo-que-entra" onClick={() => setPrevia(true)}
               style={{ background: colors.brand, border: "none", borderRadius: 8, padding: "7px 12px", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font }}>
               Pasar lo elegido al presupuesto…
@@ -609,33 +648,100 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         </div>
       )}
 
-      {previa && plan.porPasar.length > 0 && (
+      {previa && plan.porPasar > 0 && (
         <div className="lo-que-entra" style={{ ...caja, borderLeft: `3px solid ${colors.brand}` }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>Esto es lo que cambia en el presupuesto</div>
           <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginBottom: 8 }}>
-            Entra el <strong>costo</strong> de cada rubro; su utilidad se conserva y el precio al cliente se recalcula con ella. La descripción y la
-            cantidad de tus rubros no se tocan{plan.porPasar.some(c => c.ponerCantidad) ? ", salvo en los que no tenían cantidad: abajo dice con cuál queda cada uno" : ""}.
-            {plan.porPasar.some(c => c.repartido) && <> Los <strong>repartidos</strong> no son un unitario que cotizó la empresa: son su parte del paquete, y quedan marcados así.</>}
+            Los rubros de la proforma elegida entran a su capítulo, con las palabras, la cantidad y el precio de la empresa como <strong>costo</strong>.
+            La utilidad se la ponés después en el presupuesto, como a cualquier rubro.
           </div>
-          {plan.porPasar.map(c => (
-            <div key={c.id} className="cambio-del-presupuesto" style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "5px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>
-              <div style={{ flex: 1, minWidth: 240 }}>
-                <span style={{ color: colors.muted }}>{numeroDe.get(c.id)}</span> {c.descripcion}
-                <div style={chico}>
-                  {c.proveedor}{c.repartido ? ` · repartido ${DE_DONDE[c.pesoDe]}` : ""}
-                  {c.ponerCantidad ? (c.repartido ? " · no tenía cantidad: queda en 1, con su parte como precio" : " · toma la cantidad de la cotización") : ""}
-                </div>
+          {capitulosQueReciben.map(nombre => {
+            const suyos = plan.rubros.filter(x => x.capitulo === nombre && !x.yaEsta);
+            if (!suyos.length) return null;
+            return (
+              <div key={nombre} className="entra-al-capitulo" data-capitulo={nombre} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: colors.ink }}>{nombre} · ${plata(suyos.reduce((t, x) => t + x.costo, 0))}</div>
+                {suyos.map(x => (
+                  <div key={x.marca} className="rubro-que-entra" data-que={x.id == null ? "entra" : "cambia"} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "4px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>
+                    <div style={{ flex: 1, minWidth: 240 }}>
+                      {x.descripcion}
+                      <div style={chico}>
+                        {x.proveedor}{x.repartido ? " · es su suma de varias filas: entra como un solo rubro" : ""}
+                        {x.id == null ? " · rubro nuevo" : x.emparejado && !x.proveedorAntes ? " · se empareja con ese rubro, que conserva sus palabras"
+                          : ` · ya estaba${x.proveedorAntes && x.proveedorAntes !== x.proveedor ? `, de ${x.proveedorAntes}` : ""}: se actualiza`}
+                      </div>
+                      {/* O SE EMPAREJA CON UN RUBRO QUE YA ESTÁ, en vez de entrar como nuevo. */}
+                      {(x.id == null || enlaces[x.marca] != null) && (loQueYaTenia.find(c => c.capitulo === nombre)?.rubros.length > 0) && (
+                        <select className="emparejar-con-rubro" style={{ ...selector, marginTop: 2, color: colors.brand }} value={enlaces[x.marca] != null ? String(enlaces[x.marca]) : ""}
+                          onChange={ev => emparejar(x.marca, ev.target.value ? (loQueYaTenia.find(c => c.capitulo === nombre).rubros.find(i => String(i.id) === ev.target.value)?.id ?? null) : null)}>
+                          <option value="">entra como rubro nuevo</option>
+                          {loQueYaTenia.find(c => c.capitulo === nombre).rubros
+                            .filter(i => String(enlaces[x.marca]) === String(i.id) || (!emparejados.has(String(i.id)) && !reemplaza.has(i.id)))
+                            .map(i => <option key={i.id} value={i.id}>es este rubro: {String(i.descripcion).slice(0, 70)}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <div style={{ textAlign: "right", color: colors.inkSoft }}>{cant(x.cantidad)} {x.unidad} × ${plata(x.precio_base)}</div>
+                    <div style={{ textAlign: "right", minWidth: 96, fontWeight: 700 }}>${plata(x.costo)}
+                      {x.costoAntes != null && <div style={{ ...chico, fontWeight: 400 }}>antes ${plata(x.costoAntes)}</div>}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ textAlign: "right", color: colors.inkSoft }}>{plata(c.cantidad)} × ${plata(c.precio_base)}</div>
-              <div style={{ textAlign: "right", minWidth: 96, fontWeight: 700 }}>${plata(c.costo)}
-                <div style={{ ...chico, fontWeight: 400 }}>{c.costoAntes > 0 ? `antes $${plata(c.costoAntes)}` : "sin costo antes"}</div>
+            );
+          })}
+          {plan.quitan.length > 0 && (
+            <div className="se-quitan" style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: colors.danger }}>Se quitan del presupuesto: salieron de esta comparativa y ya no están elegidos</div>
+              {plan.quitan.map(q => (
+                <div key={q.id} className="rubro-que-se-quita" style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "3px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>
+                  <div style={{ flex: 1 }}>{q.descripcion}<div style={chico}>{q.capitulo}{q.proveedor ? ` · de ${q.proveedor}` : ""}</div></div>
+                  <div style={{ color: colors.inkSoft }}>${plata(q.total)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {plan.sueltan.length > 0 && (
+            <div className="se-desenganchan" style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: colors.warning }}>Quedan en el presupuesto, ya sin cotización elegida</div>
+              {plan.sueltan.map(q => (
+                <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "3px 0", borderTop: `1px solid ${colors.neutralSoft}`, fontSize: 12 }}>
+                  <div style={{ flex: 1 }}>{q.descripcion}<div style={chico}>{q.capitulo}{q.proveedor ? ` · tenía el costo de ${q.proveedor}: revisalo` : ""}</div></div>
+                  <div style={{ color: colors.inkSoft }}>${plata(q.total)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* LO QUE EL CAPÍTULO YA TENÍA. Queda todo, salvo lo que se tilde:
+              qué reemplaza la cotización lo sabe quien arma el presupuesto. */}
+          {loQueYaTenia.map(c => (
+            <div key={c.capitulo} className="lo-que-ya-tenia" data-capitulo={c.capitulo} style={{ marginBottom: 8, background: colors.bg, borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: colors.ink }}>
+                «{c.capitulo}» ya tenía {c.rubros.length} {c.rubros.length === 1 ? "rubro" : "rubros"}: ¿cuáles reemplaza esta cotización?
+              </div>
+              <div style={{ ...chico, fontSize: 11, marginBottom: 4 }}>
+                Los que tildes se quitan del presupuesto. Los demás quedan como están.{" "}
+                <button className="tildar-todos" style={enlace} onClick={() => setReemplaza(v => new Set([...v, ...c.rubros.map(i => i.id)]))}>tildar todos</button>
+                {" · "}
+                <button style={enlace} onClick={() => setReemplaza(v => new Set([...v].filter(id => !c.rubros.some(i => i.id === id))))}>ninguno</button>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                {c.rubros.map(i => (
+                  <label key={i.id} className="rubro-que-ya-estaba" style={{ display: "flex", gap: 7, alignItems: "baseline", fontSize: 11.5, color: colors.ink, padding: "2px 0", cursor: "pointer" }}>
+                    <input type="checkbox" disabled={emparejados.has(String(i.id))} checked={reemplaza.has(i.id) && !emparejados.has(String(i.id))} onChange={() => tildar(i.id)} />
+                    <span style={{ flex: 1 }}>{i.descripcion}{emparejados.has(String(i.id)) ? <span style={{ color: colors.brand }}> · emparejado: queda, con el costo de la cotización</span> : null}</span>
+                    <span style={{ color: colors.inkSoft, whiteSpace: "nowrap" }}>${plata(i.total)}</span>
+                  </label>
+                ))}
               </div>
             </div>
           ))}
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
             <button className="confirmar-pasar" onClick={aplicar} disabled={aplicando}
               style={{ background: colors.brand, border: "none", borderRadius: 8, padding: "7px 12px", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: colors.font, opacity: aplicando ? 0.6 : 1 }}>
-              {aplicando ? "Pasando…" : `Confirmar: pasar ${plan.porPasar.length} ${plan.porPasar.length === 1 ? "rubro" : "rubros"}, $${plata(costoPorPasar)}`}
+              {aplicando ? "Pasando…" : `Confirmar: ${[plan.entran.length ? `entran ${plan.entran.length}` : "", plan.cambian.length ? `cambian ${plan.cambian.length}` : "",
+                plan.quitan.length + quitarTambien.length ? `se quitan ${plan.quitan.length + quitarTambien.length}` : "",
+                plan.sueltan.length ? `se desenganchan ${plan.sueltan.length}` : ""].filter(Boolean).join(", ")}`}
             </button>
             <button onClick={() => setPrevia(false)} disabled={aplicando} style={{ ...enlace, fontSize: 12, color: colors.muted }}>todavía no</button>
           </div>

@@ -14,16 +14,20 @@ import { colors } from "../theme/colors";
 // pie, «Lo apruebo» o «Tengo una observación», una vez —igual que un punto del
 // checklist—.
 //
+// IGUAL QUE EN LA OFICINA: «arriba se puede ver total de la oferta y si se
+// despliega se ve el itemizado». En cada capítulo donde se pidió precio va el
+// total de cada empresa, con la elegida marcada; al desplegar, fila por fila
+// lo que cotizó cada una, y los rubros del presupuesto de ese capítulo.
+//
 // DIBUJA UNA FOTO, NO CALCULA. Lo que llega ya trae los precios que se decidió
 // mostrarle y los totales hechos (presupuestoParaElCliente.js). Este archivo
-// no conoce el costo ni la utilidad: muestra lo que hay.
+// no sabe con qué criterio se compartió: muestra lo que hay.
 //
 // PENSADO PARA EL TELÉFONO: nada de una tabla ancha con una columna por
-// empresa. Capítulo por capítulo, lo de cada empresa en un renglón, y los
-// rubros se abren al tocar.
+// empresa. Lo de cada empresa va en un renglón.
 //
 // La misma pieza se usa en la matriz de cotizaciones para «ver cómo lo va a
-// ver» antes de compartir, con `soloVer`.
+// ver» antes de compartir, y en el registro de aprobaciones, con `soloVer`.
 
 const n = v => Number(v) || 0;
 const plata = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -74,72 +78,95 @@ function Respuesta({ p, onContestar, enviando }) {
   );
 }
 
-function Rubro({ r, empresas }) {
+/** Una fila de la comparativa: lo que se cotizó, y lo de cada empresa en un renglón. */
+function FilaCotizada({ f, empresas }) {
   const nombreDe = id => empresas.find(e => e.id === id)?.proveedor || "";
   return (
-    <div className="rubro-del-presupuesto" style={{ padding: "7px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-        <div style={{ flex: 1, fontSize: 12.5, color: colors.ink, lineHeight: 1.4, overflowWrap: "anywhere" }}>
-          <span style={{ color: colors.muted }}>{r.numero}</span> {r.descripcion}
-        </div>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, whiteSpace: "nowrap" }}>{r.noCotiza ? "No cotiza" : `$${plata(r.total)}`}</div>
-      </div>
-      {!r.noCotiza && (
-        <div style={chico}>
-          {r.cantidad > 0 ? `${cant(r.cantidad)} ${r.unidad || ""} × $${plata(r.unitario)}` : "Sin cantidad todavía"}
-          {r.deQuien ? ` · ${r.repartido ? "su parte de lo que cotizó" : "precio de"} ${r.deQuien}` : ""}
-        </div>
-      )}
-      {r.ofertas.length > 0 && (
-        <div className="ofertas-del-rubro" style={{ marginTop: 4, display: "grid", gap: 2 }}>
-          {r.ofertas.map(o => (
-            <div key={o.id} className="oferta" data-elegida={r.elegida === o.id ? "si" : "no"}
-              style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12, color: r.elegida === o.id ? colors.ink : colors.inkSoft,
-                background: r.elegida === o.id ? colors.successSoft : colors.bg, borderRadius: 6, padding: "3px 7px" }}>
-              <div style={{ flex: 1, overflowWrap: "anywhere" }}>
-                {nombreDe(o.id)}
-                {r.elegida === o.id && <span style={elegidaEs}>✓ ELEGIDA</span>}
-                {o.paquete && <div style={{ ...chico, fontSize: 11 }}>cotizó junto «{o.paquete}»: esta es la parte que le toca a este rubro</div>}
-              </div>
-              <div style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-                {o.unitario != null && <span style={{ color: colors.muted }}>{cant(o.cantidad)} × ${plata(o.unitario)} = </span>}
-                <strong>{o.estimado ? "≈ " : ""}${plata(o.total)}</strong>
-              </div>
+    <div className="fila-de-la-comparativa" style={{ padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
+      <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.4, overflowWrap: "anywhere" }}>{f.descripcion}</div>
+      <div style={chico}>{cant(f.cantidad)} {f.unidad}</div>
+      <div style={{ marginTop: 3, display: "grid", gap: 2 }}>
+        {f.ofertas.map(o => (
+          <div key={o.id} className="oferta" data-elegida={f.elegida === o.id ? "si" : "no"}
+            style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12, color: f.elegida === o.id ? colors.ink : colors.inkSoft,
+              background: f.elegida === o.id ? colors.successSoft : colors.bg, borderRadius: 6, padding: "3px 7px" }}>
+            <div style={{ flex: 1, overflowWrap: "anywhere" }}>
+              {nombreDe(o.id)}
+              {f.elegida === o.id && <span style={elegidaEs}>✓ ELEGIDA</span>}
+              {o.estimado && <div style={{ ...chico, fontSize: 11 }}>cotizó una sola suma: esta es la parte que le toca a esta fila</div>}
             </div>
-          ))}
-        </div>
-      )}
+            <div style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+              {o.unitario != null && <span style={{ color: colors.muted }}>{cant(o.cantidad)} × ${plata(o.unitario)} = </span>}
+              <strong>{o.estimado ? "≈ " : ""}${plata(o.total)}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function Capitulo({ c, empresas, abiertoAlEmpezar }) {
-  const [abierto, setAbierto] = useState(abiertoAlEmpezar);
+function Capitulo({ c, empresas }) {
+  const [abierto, setAbierto] = useState(false);
   const nombreDe = id => empresas.find(e => e.id === id)?.proveedor || "";
+  const cuadro = c.comparativa;
   return (
-    <div className="capitulo-del-presupuesto" style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: "10px 12px", marginBottom: 8 }}>
+    <div className="capitulo-del-presupuesto" data-con-comparativa={cuadro ? "si" : "no"}
+      style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: "10px 12px", marginBottom: 8 }}>
       <button className="abrir-capitulo" onClick={() => setAbierto(v => !v)} aria-expanded={abierto}
         style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, textAlign: "left" }}>
         <span style={{ color: colors.muted, fontSize: 12 }}>{abierto ? "▾" : "▸"}</span>
         <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: colors.ink, lineHeight: 1.3, overflowWrap: "anywhere" }}>{c.numero} · {c.nombre}</span>
         <span style={{ fontSize: 13.5, fontWeight: 700, color: colors.ink, whiteSpace: "nowrap" }}>${plata(c.total)}</span>
       </button>
-      {c.empresas.length > 0 && (
-        <div className="empresas-del-capitulo" style={{ marginTop: 6, display: "grid", gap: 2 }}>
-          {c.empresas.map(e => (
-            <div key={e.id} className="empresa-en-el-capitulo" style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12.5, color: colors.inkSoft }}>
+      {/* ARRIBA, EL TOTAL DE CADA OFERTA. */}
+      {cuadro && (
+        <div className="ofertas-del-capitulo" style={{ marginTop: 6, display: "grid", gap: 2 }}>
+          {cuadro.empresas.map(e => (
+            <div key={e.id} className="oferta-del-capitulo" style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12.5, color: colors.inkSoft }}>
               <div style={{ flex: 1, overflowWrap: "anywhere" }}>
                 {nombreDe(e.id)}
-                {e.elegidos > 0 && <span style={elegidaEs}>✓ ELEGIDA{e.elegidos < c.rubros.filter(r => r.ofertas.length).length ? ` EN ${e.elegidos}` : ""}</span>}
-                {e.faltan > 0 && <span style={{ ...chico, marginLeft: 6 }}>no cotizó {e.faltan === 1 ? "1 rubro" : `${e.faltan} rubros`}</span>}
+                {e.elegidas > 0 && <span style={elegidaEs}>✓ ELEGIDA{e.elegidas < cuadro.filas.length ? ` EN ${e.elegidas}` : ""}</span>}
+                {e.faltan > 0 && <span style={{ ...chico, marginLeft: 6 }}>no cotizó {e.faltan === 1 ? "1 cosa" : `${e.faltan} cosas`}</span>}
               </div>
               <div style={{ whiteSpace: "nowrap", fontWeight: 600, color: colors.ink }}>{e.estimado ? "≈ " : ""}${plata(e.total)}</div>
             </div>
           ))}
         </div>
       )}
-      {!abierto && <div style={{ ...chico, marginTop: 4 }}>{c.rubros.length} {c.rubros.length === 1 ? "rubro" : "rubros"} · tocá para verlos</div>}
-      {abierto && <div style={{ marginTop: 8 }}>{c.rubros.map(r => <Rubro key={r.numero} r={r} empresas={empresas} />)}</div>}
+      {!abierto && (
+        <div style={{ ...chico, marginTop: 4 }}>
+          {cuadro ? "tocá para ver el detalle de cada oferta" : `${c.rubros.length} ${c.rubros.length === 1 ? "rubro" : "rubros"} · tocá para verlos`}
+        </div>
+      )}
+      {/* AL DESPLEGAR: el itemizado de las ofertas, y los rubros del presupuesto de este capítulo. */}
+      {abierto && cuadro && (
+        <div className="itemizado-de-las-ofertas" style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.inkSoft }}>Lo que cotizó cada una</div>
+          {cuadro.filas.map((f, i) => <FilaCotizada key={i} f={f} empresas={empresas} />)}
+        </div>
+      )}
+      {abierto && (
+        <div className="rubros-del-capitulo" style={{ marginTop: 8 }}>
+          {cuadro && <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.inkSoft }}>Como queda en el presupuesto</div>}
+          {c.rubros.map(r => (
+            <div key={r.numero} className="rubro-del-presupuesto" style={{ padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <div style={{ flex: 1, fontSize: 12.5, color: colors.ink, lineHeight: 1.4, overflowWrap: "anywhere" }}>
+                  <span style={{ color: colors.muted }}>{r.numero}</span> {r.descripcion}
+                </div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink, whiteSpace: "nowrap" }}>{r.noCotiza ? "No cotiza" : `$${plata(r.total)}`}</div>
+              </div>
+              {!r.noCotiza && (
+                <div style={chico}>
+                  {r.cantidad > 0 ? `${cant(r.cantidad)} ${r.unidad || ""} × $${plata(r.unitario)}` : "Sin cantidad todavía"}
+                  {r.deQuien ? ` · de ${r.deQuien}` : ""}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -152,7 +179,8 @@ export default function PresupuestoCompartido({ p, onContestar, enviando = false
   const f = p?.foto;
   if (!f) return null;
   const t = f.totales || {};
-  const conEmpresas = f.conComparativa && f.empresas.length > 0;
+  const empresas = f.empresas || [];
+  const conEmpresas = f.conComparativa && empresas.length > 0;
   return (
     <div className="presupuesto-compartido" data-estado={p.estado} style={{ fontFamily: colors.font }}>
       <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 11, padding: 12, marginBottom: 8 }}>
@@ -174,11 +202,11 @@ export default function PresupuestoCompartido({ p, onContestar, enviando = false
           <div className="empresas-que-cotizaron" style={{ marginTop: 12 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink }}>Las empresas que cotizaron</div>
             <div style={{ ...chico, marginBottom: 5 }}>
-              Pedimos precio a {f.empresas.length === 1 ? "una empresa" : `${f.empresas.length} empresas`}. En cada parte marcamos con ✓ a la que elegimos; lo demás queda a la vista para que compares.
+              Pedimos precio a {empresas.length === 1 ? "una empresa" : `${empresas.length} empresas`}. En cada capítulo marcamos con ✓ a la que elegimos; lo demás queda a la vista para que compares.
             </div>
-            {f.empresas.map(e => (
+            {empresas.map(e => (
               <div key={e.id} className="empresa-que-cotizo" style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12.5, color: colors.inkSoft, padding: "2px 0" }}>
-                <div style={{ flex: 1, overflowWrap: "anywhere" }}>{e.proveedor}<span style={{ ...chico, marginLeft: 6 }}>cotizó {e.cubre} {e.cubre === 1 ? "rubro" : "rubros"}</span></div>
+                <div style={{ flex: 1, overflowWrap: "anywhere" }}>{e.proveedor}</div>
                 <div style={{ whiteSpace: "nowrap", fontWeight: 600, color: colors.ink }}>${plata(e.total)}</div>
               </div>
             ))}
@@ -187,8 +215,9 @@ export default function PresupuestoCompartido({ p, onContestar, enviando = false
         {!soloVer && <Respuesta p={p} onContestar={onContestar} enviando={enviando} />}
       </div>
 
-      {f.capitulos.map(c => (
-        <Capitulo key={c.numero} c={c} empresas={f.empresas} abiertoAlEmpezar={conEmpresas ? c.empresas.length > 0 : f.capitulos.length <= 3} />
+      {/* Primero los capítulos donde se pidió precio: es lo que viene a mirar. */}
+      {[...f.capitulos.filter(c => c.comparativa), ...f.capitulos.filter(c => !c.comparativa)].map(c => (
+        <Capitulo key={`${c.numero}-${c.nombre}`} c={c} empresas={empresas} />
       ))}
     </div>
   );

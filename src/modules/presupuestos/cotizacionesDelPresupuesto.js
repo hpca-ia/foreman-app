@@ -1,13 +1,14 @@
 import { supabase } from "../../lib/supabase";
 import { CONTRATO, textoDeNova } from "../../lib/modelos";
-import { PEDIDO_DE_LECTURA, pedidoDeEmparejarPaquetes, jsonDeLaRespuesta, cotizacionDeLaLectura } from "./emparejarCotizacion.js";
+import { PEDIDO_DE_LECTURA, pedidoDeUbicar, jsonDeLaRespuesta, cotizacionDeLaLectura } from "./emparejarCotizacion.js";
 
 // LAS COTIZACIONES DE UN PRESUPUESTO, GUARDADAS PARA COMPARARLAS.
 //
 // Cada cotización que se sube a la matriz queda acá sin entrar al presupuesto
-// (migración 194): lo que cotizó la empresa con sus palabras, qué rubros del
-// presupuesto cubre cada renglón y cuáles se le adjudicaron. La cuenta está en
-// matrizDeCotizaciones.js; acá solo se lee el papel y se guarda.
+// (migración 194): lo que cotizó la empresa con sus palabras, a qué capítulo
+// va cada renglón, en qué fila de la comparación cae y cuáles se le
+// adjudicaron. La cuenta está en matrizDeCotizaciones.js; acá solo se lee el
+// papel y se guarda.
 
 const falta = e => /relation|column|does not exist|schema cache/i.test(e?.message || "");
 export const SIN_194 = "Para comparar cotizaciones falta correr la migración 194 en Supabase.";
@@ -38,6 +39,7 @@ export async function actualizarCotizacion(id, campos) {
 }
 
 export const SIN_195 = "Para subir una versión nueva de una cotización falta correr la migración 195 en Supabase.";
+export const SIN_197 = "Para pasar lo elegido al presupuesto falta correr la migración 197 en Supabase.";
 
 /**
  * UNA VERSIÓN NUEVA DE LA MISMA EMPRESA (Hernán, 26/11/2026: «quiero poder
@@ -92,14 +94,15 @@ async function comoMensaje(file, pedido) {
 }
 
 /**
- * NOVA lee la cotización y dice qué rubros del presupuesto cubre cada renglón.
+ * NOVA lee la cotización y dice a qué capítulo va cada renglón y en qué fila
+ * de la comparación cae, contra lo que ya cotizaron otras empresas.
  *
- * @param base  la de rubrosDeLaBase(): los rubros del presupuesto, numerados
+ * @param donde  { capitulos: capitulosParaUbicar(), filas: filasParaUbicar() }
  * @returns { proveedor, renglones, totales } o { error }
  */
-export async function leerCotizacionDeArchivo(file, base = []) {
+export async function leerCotizacionDeArchivo(file, donde = {}) {
   try {
-    const content = await comoMensaje(file, PEDIDO_DE_LECTURA + pedidoDeEmparejarPaquetes(base));
+    const content = await comoMensaje(file, PEDIDO_DE_LECTURA + pedidoDeUbicar(donde));
     const res = await fetch("/api/nova", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: CONTRATO, max_tokens: 16000, messages: [{ role: "user", content }] }),
@@ -110,7 +113,7 @@ export async function leerCotizacionDeArchivo(file, base = []) {
     if (data.error) return { error: "NOVA no pudo leerla: " + (data.error?.message || JSON.stringify(data.error)) };
     const leido = jsonDeLaRespuesta(textoDeNova(data));
     if (!leido?.rubros?.length) return { error: "NOVA no encontró rubros en ese archivo. Probá con una imagen más clara o con el PDF original." };
-    const cot = cotizacionDeLaLectura(leido, base);
+    const cot = cotizacionDeLaLectura(leido, donde);
     if (!cot.renglones.length) return { error: "NOVA no encontró rubros en ese archivo." };
     return cot;
   } catch (e) {

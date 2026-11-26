@@ -1,43 +1,73 @@
 // LO QUE NOVA LEE DE UNA COTIZACIÓN, PARA LA MATRIZ DE COMPARACIÓN.
 //
-// Es la misma lectura de siempre —los rubros de la cotización, con sus
-// palabras, y el pie de su papel—, con una diferencia en el emparejamiento:
-// acá un renglón de la cotización puede cubrir VARIOS rubros del presupuesto.
-// Hernán, 26/11/2026: «cada empresa puede cotizar de manera distinta o nombrar
-// distinto». Una cotiza el tumbado y las paredes por separado; otra manda un
-// solo renglón, «drywall: tumbado y paredes». Los dos se tienen que poder
-// poner contra los mismos rubros.
+// Es la lectura de siempre —los rubros de la cotización, con sus palabras, y
+// el pie de su papel— más tres cosas que la matriz necesita:
 //
-// NOVA propone; quien arma el presupuesto lo corrige en la pantalla antes de
-// comparar. Sin base ni pantalla: se puede probar.
+//   · A QUÉ CAPÍTULO DEL PRESUPUESTO VA. Hernán, 26/11/2026: «la comparativa
+//     se la categoriza por capítulos del presupuesto». Casi siempre todo el
+//     papel es de uno solo —las ventanas, la cocina, las puertas—.
+//
+//   · EN QUÉ FILA DE LA COMPARACIÓN CAE CADA RENGLÓN, contra lo que ya
+//     cotizaron OTRAS EMPRESAS —no contra los rubros del presupuesto, que era
+//     lo que no calzaba: de 28 ventanas de Dekorando emparejó una—. La V1 de
+//     una con la V1 de la otra. Y un renglón puede cubrir varias filas: la
+//     empresa que manda «solo una sumatoria» contra la que itemizó.
+//
+//   · LAS CONDICIONES: validez, forma de pago, plazo, lo que no incluye. «Se
+//     deben poder ver por si hay condiciones o cualquier otra info adicional».
+//     El papel original queda guardado y se abre desde la matriz; esto es para
+//     tenerlas a la vista sin abrirlo.
+//
+// NOVA propone; quien arma el presupuesto lo corrige en la pantalla. «Con las
+// actualizaciones se irán emparejando los rubros»: una cotización que llega
+// como una suma se compara por su total, y cuando llega itemizada se ubica.
+//
+// Sin base ni pantalla: se puede probar.
 
 const n = v => Number(v) || 0;
 const r2 = v => Math.round(n(v) * 100) / 100;
+const texto = v => String(v ?? "").trim();
 
 export const PEDIDO_DE_LECTURA = 'Extrae todos los rubros. Responde UNICAMENTE con JSON valido, sin texto adicional, sin markdown: '
-  + '{"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00,"total":0.00,"base":[]}],'
-  + '"subtotal":null,"iva":null,"total":null,"descuento_pct":null,"descuento_monto":null}. '
+  + '{"proveedor":"nombre o vacio","rubros":[{"descripcion":"texto","unidad":"m2 o u o glb etc","cantidad":1,"precio_unitario":0.00,"total":0.00,"capitulo":null,"filas":[]}],'
+  + '"subtotal":null,"iva":null,"total":null,"descuento_pct":null,"descuento_monto":null,"condiciones":""}. '
   + 'En cada rubro, "total" es el total de ese renglon TAL COMO ESTA ESCRITO en el documento, o null si no aparece. '
   + 'Si un rubro trae dos precios unitarios (precio de lista y precio con descuento), usa el precio con descuento. '
   + 'Si al final hay un descuento general, pon su porcentaje en descuento_pct y su monto en descuento_monto, y NO lo restes de los rubros. '
-  + 'En subtotal, iva y total pon los valores TAL COMO ESTAN ESCRITOS (subtotal sin IVA, el IVA, y el total a pagar), o null si no aparecen. No los calcules.';
+  + 'En subtotal, iva y total pon los valores TAL COMO ESTAN ESCRITOS (subtotal sin IVA, el IVA, y el total a pagar), o null si no aparecen. No los calcules. '
+  + 'En "condiciones" copia, en pocas lineas, lo que el documento diga de: validez de la oferta, forma de pago y anticipo, plazo de entrega, garantia, y lo que NO incluye. Si no dice nada de eso, "".';
 
-/** Lo que se agrega al pedido para que NOVA diga qué rubros del presupuesto cubre cada renglón. */
-export function pedidoDeEmparejarPaquetes(base = []) {
-  if (!base.length) return ' En "base" pon siempre [].';
-  const renglones = base.map(b => `${b.n} | ${b.capitulo} | ${b.descripcion} | ${b.unidad} | ${b.cantidad}`).join("\n");
-  return ' ADEMAS: este presupuesto ya tiene los rubros de la BASE que va abajo (numero | capitulo | descripcion | unidad | cantidad). '
-    + 'En cada rubro de la cotizacion, "base" es la lista de numeros de los rubros de la BASE que ese renglon cubre. '
-    + 'Casi siempre es uno solo, el mismo trabajo aunque este abreviado o redactado distinto: [12]. '
-    + 'Si el renglon de la cotizacion es un paquete o un global que cubre VARIOS rubros de la BASE '
-    + '(por ejemplo "drywall: tumbado y paredes" cuando la BASE tiene el tumbado y las paredes por separado), pon todos: [12,13,14]. '
-    + 'Si no corresponde a ninguno, []. Si dudas, []: no fuerces. No repitas un numero de la BASE en dos renglones. '
-    + 'La "descripcion" sigue siendo la que esta escrita en la cotizacion.\n\nBASE:\n' + renglones;
+/**
+ * Lo que se agrega al pedido para que NOVA diga a qué capítulo va cada renglón
+ * y en qué fila de la comparación cae.
+ *
+ * @param capitulos  los del presupuesto, en su orden: [{ n, nombre }]
+ * @param filas      lo que ya cotizaron otras empresas (filasParaUbicar): [{ n, capitulo, descripcion, unidad, cantidad }]
+ */
+export function pedidoDeUbicar({ capitulos = [], filas = [] } = {}) {
+  const deCapitulos = !capitulos.length ? ' En "capitulo" pon siempre null.'
+    : ' ADEMAS: esta cotizacion es para un presupuesto que tiene los CAPITULOS de abajo (numero | nombre). '
+      + 'En cada rubro, "capitulo" es el numero del capitulo al que pertenece ese trabajo. '
+      + 'Casi siempre toda la cotizacion es del mismo capitulo. Si no sabes cual es, null.\n\nCAPITULOS:\n'
+      + capitulos.map(c => `${c.n} | ${c.nombre}`).join("\n") + "\n\n";
+  const deFilas = !filas.length ? ' En "filas" pon siempre [].'
+    : ' Y OTRAS EMPRESAS YA COTIZARON las FILAS de abajo (numero | capitulo | descripcion | unidad | cantidad). '
+      + 'En cada rubro de ESTA cotizacion, "filas" es la lista de numeros de las FILAS que son el mismo trabajo. '
+      + 'Casi siempre es una sola, aunque este redactada distinto o abreviada: [3]. '
+      + 'Si el rubro es una SUMA GLOBAL de varias FILAS (por ejemplo "ventaneria completa" cuando las FILAS detallan ventana por ventana), pon todas: [1,2,3]. '
+      + 'Si es algo que ninguna FILA tiene, []. Si dudas, []: no fuerces. No repitas un numero de FILA en dos rubros. '
+      + 'La "descripcion" sigue siendo la que esta escrita en esta cotizacion.\n\nFILAS:\n'
+      + filas.map(f => `${f.n} | ${f.capitulo} | ${f.descripcion} | ${f.unidad} | ${f.cantidad}`).join("\n");
+  return deCapitulos + deFilas;
 }
 
+/** Los capítulos del presupuesto, numerados como se le mandan a NOVA. */
+export const capitulosParaUbicar = (capitulos = []) =>
+  [...(capitulos || [])].sort((a, b) => n(a.orden) - n(b.orden)).map(c => texto(c.nombre)).filter(Boolean).map((nombre, i) => ({ n: i + 1, nombre }));
+
 /** El JSON de la respuesta, aunque venga envuelto en texto o en un bloque de código. */
-export function jsonDeLaRespuesta(texto) {
-  const limpio = String(texto || "").replace(/```json|```/g, "").trim();
+export function jsonDeLaRespuesta(textoLeido) {
+  const limpio = String(textoLeido || "").replace(/```json|```/g, "").trim();
   try { return JSON.parse(limpio); } catch { /* se busca adentro */ }
   const desde = limpio.indexOf("{"), hasta = limpio.lastIndexOf("}");
   if (desde >= 0 && hasta > desde) { try { return JSON.parse(limpio.slice(desde, hasta + 1)); } catch { /* no era */ } }
@@ -45,37 +75,42 @@ export function jsonDeLaRespuesta(texto) {
 }
 
 /**
- * Lo leído, como se guarda: cada renglón con los ids de los rubros del
- * presupuesto que cubre. Un número que no existe se descarta, y uno que ya
- * tomó un renglón anterior no se repite: ese se corrige a mano.
+ * Lo leído, como se guarda: cada renglón con su capítulo (el nombre) y las
+ * filas de la comparación en las que cae (sus claves). Un número que no
+ * existe se descarta; una fila que ya tomó un renglón anterior no se repite.
+ * El renglón sin fila abre la suya en la matriz.
  *
- * @param base  la de rubrosDeLaBase(): [{ n, id, … }]
+ * @param capitulos  capitulosParaUbicar(): [{ n, nombre }]
+ * @param filas      filasParaUbicar(): [{ n, clave, … }]
  * @returns { proveedor, renglones, totales }
  */
-export function cotizacionDeLaLectura(leido, base = []) {
-  const porN = new Map(base.map(b => [Number(b.n), Number(b.id)]));
-  const usados = new Set();
+export function cotizacionDeLaLectura(leido, { capitulos = [], filas = [] } = {}) {
+  const capDe = new Map(capitulos.map(c => [Number(c.n), c.nombre]));
+  const filaDe = new Map(filas.map(f => [Number(f.n), String(f.clave)]));
+  const usadas = new Set();
   const renglones = (leido?.rubros || [])
-    .filter(r => String(r?.descripcion || "").trim())
+    .filter(r => texto(r?.descripcion))
     .map(r => {
-      const dichos = Array.isArray(r.base) ? r.base : (r.base == null || r.base === "" ? [] : [r.base]);
-      const items = dichos.map(x => porN.get(Number(x))).filter(id => id != null && !usados.has(id) && usados.add(id));
+      const dichas = Array.isArray(r.filas) ? r.filas : (r.filas == null || r.filas === "" ? [] : [r.filas]);
+      const suyas = dichas.map(x => filaDe.get(Number(x))).filter(f => f != null && !usadas.has(f) && usadas.add(f));
       const cantidad = n(r.cantidad) || 1;
       const escrito = n(r.total);
       // Un renglón con su total y sin unitario: el unitario sale del total.
       const precio_unitario = n(r.precio_unitario) > 0 ? n(r.precio_unitario) : escrito > 0 ? escrito / cantidad : 0;
       return {
-        descripcion: String(r.descripcion).trim(), unidad: String(r.unidad || "").trim(),
-        cantidad, precio_unitario, total: escrito > 0 ? r2(escrito) : r2(cantidad * precio_unitario), items,
+        descripcion: texto(r.descripcion), unidad: texto(r.unidad),
+        cantidad, precio_unitario, total: escrito > 0 ? r2(escrito) : r2(cantidad * precio_unitario),
+        capitulo: capDe.get(Number(r.capitulo)) || "", filas: suyas,
       };
     });
   const num = v => (v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
   return {
-    proveedor: String(leido?.proveedor || "").trim(),
+    proveedor: texto(leido?.proveedor),
     renglones,
     totales: {
       subtotal: num(leido?.subtotal), iva: num(leido?.iva), total: num(leido?.total),
       descuento_pct: num(leido?.descuento_pct), descuento_monto: num(leido?.descuento_monto),
+      condiciones: texto(leido?.condiciones).slice(0, 2000) || null,
     },
   };
 }

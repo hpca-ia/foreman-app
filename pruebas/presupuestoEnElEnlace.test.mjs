@@ -16,15 +16,19 @@ const { default: portal } = await import("../api/portal.js");
 
 const LLAVE = "k3Jd8sQw1ZpL0aXv7NcR5tYb2UeHg9Mi";
 const OTRA_LLAVE = "Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp";
+const VIDRIO = "HERRERÍA, ALUMINIO, VIDRIO";
+// El presupuesto ya con lo elegido pasado y su utilidad puesta: la ventana a 1.800 + 10 %, la pintura a 5 + 20 %.
 const ITEMS = [
-  { id: 101, capitulo: "GYPSUM", orden: 1, descripcion: "Tumbado gypsum", unidad: "m2", cantidad: 100, precio_unitario: 22, precio_base: 0, utilidad_pct: 10, total: 2200 },
-  { id: 201, capitulo: "PINTURA", orden: 2, descripcion: "Pintura de caucho", unidad: "m2", cantidad: 200, precio_unitario: 6, precio_base: 0, utilidad_pct: 20, total: 1200 },
+  { id: 101, capitulo: VIDRIO, orden: 1000, descripcion: "V1 Ventana abatible", unidad: "u", cantidad: 1, precio_base: 1800, utilidad_pct: 10, precio_unitario: 1980, total: 1980, comparativa_fila: "c1-0", cotizacion_proveedor: "Empresa A" },
+  { id: 201, capitulo: "PINTURA", orden: 2000, descripcion: "Pintura de caucho", unidad: "m2", cantidad: 200, precio_base: 5, utilidad_pct: 20, precio_unitario: 6, total: 1200, comparativa_fila: "c1-1", cotizacion_proveedor: "Empresa A" },
 ];
-const A = { id: 1, proveedor: "Empresa A", renglones: [{ descripcion: "Cielo raso", unidad: "m2", cantidad: 100, precio_unitario: 18, items: [101] }, { descripcion: "Pintura", unidad: "m2", cantidad: 200, precio_unitario: 5, items: [201] }] };
-const C = { id: 3, proveedor: "Empresa C", renglones: [{ descripcion: "Tumbado", unidad: "m2", cantidad: 100, precio_unitario: 19.5, items: [101] }] };
+const A = { id: 1, proveedor: "Empresa A", renglones: [
+  { descripcion: "V1 Ventana abatible", unidad: "u", cantidad: 1, precio_unitario: 1800, capitulo: VIDRIO },
+  { descripcion: "Pintura de caucho", unidad: "m2", cantidad: 200, precio_unitario: 5, capitulo: "PINTURA" }] };
+const C = { id: 3, proveedor: "Empresa C", renglones: [{ descripcion: "Ventana V1", unidad: "u", cantidad: 1, precio_unitario: 1950, capitulo: VIDRIO, filas: ["c1-0"] }] };
 const foto = modo => fotoParaElCliente({
-  presupuesto: { id: 33, nombre: "Casa Granja", iva_pct: 15 }, capitulos: [{ nombre: "GYPSUM", orden: 1 }, { nombre: "PINTURA", orden: 2 }],
-  items: ITEMS, cotizaciones: [A, C], elegidos: { 101: 1, 201: 1 }, modo,
+  presupuesto: { id: 33, nombre: "Casa Granja", iva_pct: 15 }, capitulos: [{ nombre: VIDRIO, orden: 1 }, { nombre: "PINTURA", orden: 2 }],
+  items: ITEMS, cotizaciones: [A, C], elegidos: { "c1-0": 1, "c1-1": 1 }, modo,
 });
 
 let tablas, escrituras, correos, sinTabla;
@@ -112,12 +116,14 @@ test("LO QUE VE: el presupuesto de SU proyecto, la última foto, con los precios
   assert.deepEqual(ve.map(p => [p.id, p.titulo, p.estado, p.compartido_el]), [[10, "Presupuesto: Casa Granja", "pendiente", "2026-11-27"]]);
   const f = ve[0].foto;
   assert.deepEqual(f.empresas.map(e => e.proveedor), ["Empresa A", "Empresa C"]);
-  // Se compartió CON UTILIDAD: 18 + 10 % = 19,80. El costo —18, 19,50, 5— no está en lo que recibe.
-  assert.deepEqual(f.capitulos[0].rubros[0].ofertas.map(o => [o.id, o.unitario]), [[1, 19.8], [3, 21.45]]);
-  assert.deepEqual([f.capitulos[0].rubros[0].unitario, f.capitulos[0].rubros[0].elegida, f.capitulos[1].rubros[0].unitario], [19.8, 1, 6]);
+  // Se compartió CON UTILIDAD: la ventana a 1.800 + 10 % = 1.980. El costo —1.800, 1.950, 5— no está en lo que recibe.
+  assert.deepEqual(f.capitulos[0].comparativa.filas[0].ofertas.map(o => [o.id, o.unitario]), [[1, 1980], [3, 2145]]);
+  assert.deepEqual([f.capitulos[0].rubros[0].unitario, f.capitulos[0].comparativa.filas[0].elegida, f.capitulos[1].rubros[0].unitario], [1980, 1, 6]);
+  // Arriba, el total de cada oferta en el capítulo.
+  assert.deepEqual(f.capitulos[0].comparativa.empresas.map(e => [e.id, e.total, e.elegidas]), [[1, 1980, 1], [3, 2145, 0]]);
   const numeros = new Set();
   JSON.stringify(r.cuerpo.presupuestos, (k, v) => { if (typeof v === "number") numeros.add(v); return v; });
-  for (const costo of [18, 19.5, 5, 1800, 1950, 1000]) assert.equal(numeros.has(costo), false, `el costo ${costo} no viaja`);
+  for (const costo of [1800, 1950, 5, 1000, 2800]) assert.equal(numeros.has(costo), false, `el costo ${costo} no viaja`);
   // Ni con qué criterio se le compartió, ni campos de adentro.
   assert.doesNotMatch(JSON.stringify(r.cuerpo.presupuestos), /"modo"|utilidad|costo|precio_base|pedida_por|lead_id/);
   assert.deepEqual([f.totales.subtotal, f.totales.iva, f.totales.total], [3180, 477, 3657]);

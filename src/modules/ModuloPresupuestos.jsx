@@ -310,30 +310,70 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     setItems(nuevos); recalcTotales(nuevos); setEligiendoPrecio(null);
   }
 
-  // LO ELEGIDO EN LA MATRIZ DE COTIZACIONES ENTRA AL PRESUPUESTO (Hernán,
-  // 26/11/2026). Entra el costo de cada rubro —la utilidad se conserva y el
-  // precio al cliente se recalcula, que ya viene hecho en el plan— y queda
-  // escrito de qué papel salió, con las columnas de la migración 138. La
-  // cantidad solo se escribe donde el presupuesto no tenía ninguna.
+  // LO ELEGIDO EN LA MATRIZ DE COTIZACIONES ALIMENTA EL PRESUPUESTO (Hernán,
+  // 26/11/2026: «una vez escogida una, los rubros de la proforma alimentarían
+  // el capítulo del presupuesto... o se empareja con los rubros»). Qué entra,
+  // qué cambia y qué se quita lo decide planDeAplicar(); acá solo se escribe.
+  //
+  //   entran   renglones de la proforma que entran como rubros nuevos, al final de su capítulo
+  //   cambian  rubros que ya estaban: se actualizan (otra versión, otra empresa, o se emparejan)
+  //   quitan   ids de rubros que se quitan (salieron de la comparativa y ya no están elegidos,
+  //            o los que se tildaron como reemplazados)
+  //   sueltan  ids de rubros emparejados que dejan de estar elegidos: quedan, sin la marca
+  //
+  // Cada rubro queda marcado con la fila de la comparativa de la que salió
+  // (migración 197) y con de qué papel (migración 138).
   // @returns el error, o null si entró todo.
-  async function aplicarElegidos(cambios) {
-    if (!presupuestoActivo || !cambios?.length) return null;
+  async function aplicarElegidos({ entran = [], cambian = [], quitan = [], sueltan = [] } = {}) {
+    if (!presupuestoActivo) return null;
     const ahora = new Date().toISOString();
-    const res = await Promise.all(cambios.map(c => supabase.from("presupuesto_items").update({
-      precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total,
-      ...(c.ponerCantidad ? { cantidad: c.cantidad } : {}),
-      cotizacion_archivo_id: c.cotizacion_archivo_id, cotizacion_proveedor: c.cotizacion_proveedor,
+    const sin197 = e => (/comparativa_fila/.test(e?.message || "") ? "Para pasar lo elegido al presupuesto falta correr la migración 197 en Supabase." : null);
+    const delPapel = c => ({
+      comparativa_fila: c.comparativa_fila, cotizacion_archivo_id: c.cotizacion_archivo_id, cotizacion_proveedor: c.cotizacion_proveedor,
       cotizacion_renglon: c.cotizacion_renglon, cotizacion_cantidad: c.cotizacion_cantidad, cotizacion_at: ahora,
-    }).eq("id", c.id)));
-    const fallo = res.find(r => r.error);
-    if (fallo) { fetchItems(presupuestoActivo.id); return "No se pudieron escribir todos los precios en el presupuesto: " + fallo.error.message; }
-    const porId = new Map(cambios.map(c => [Number(c.id), c]));
-    const lista = itemsRef.current.map(i => {
-      const c = porId.get(Number(i.id));
-      return c ? { ...i, precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total, cantidad: c.cantidad,
-        cotizacion_archivo_id: c.cotizacion_archivo_id, cotizacion_proveedor: c.cotizacion_proveedor,
-        cotizacion_renglon: c.cotizacion_renglon, cotizacion_cantidad: c.cotizacion_cantidad, cotizacion_at: ahora } : i;
     });
+    const valores = c => ({ descripcion: c.descripcion, unidad: c.unidad, cantidad: c.cantidad, precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total });
+    const fallo = e => { fetchItems(presupuestoActivo.id); return sin197(e) || "No se pudo escribir todo en el presupuesto: " + e.message; };
+    let lista = itemsRef.current;
+
+    // 1. Lo que ya estaba y cambia.
+    const res = await Promise.all(cambian.map(c => supabase.from("presupuesto_items").update({ ...valores(c), ...delPapel(c) }).eq("id", c.id)));
+    const mal = res.find(r => r.error);
+    if (mal) return fallo(mal.error);
+    const porId = new Map(cambian.map(c => [String(c.id), c]));
+    lista = lista.map(i => { const c = porId.get(String(i.id)); return c ? { ...i, ...valores(c), ...delPapel(c) } : i; });
+
+    // 2. Lo que entra, al final de su capítulo: después del último rubro que tenga.
+    for (const capN of [...new Set(entran.map(c => c.capitulo))]) {
+      const suyos = entran.filter(c => c.capitulo === capN);
+      const existente = capitulosActivos.find(c => c.nombre === capN);
+      const capOrden = existente ? existente.orden : Math.max(0, ...capitulosActivos.map(c => c.orden)) + 1;
+      if (!existente) { const conNuevo = [...capitulosActivos, { nombre: capN, orden: capOrden }]; setCapitulosActivos(conNuevo); guardarCapitulos(conNuevo); }
+      const ultimo = Math.max(capOrden * 1000 - 1, ...lista.filter(i => i.capitulo === capN).map(i => Number(i.orden) || 0));
+      const { data, error } = await supabase.from("presupuesto_items").insert(suyos.map((c, k) => ({
+        presupuesto_id: presupuestoActivo.id, capitulo: capN, orden: ultimo + 1 + k, utilidad_pct: 0, ...valores(c), ...delPapel(c),
+      }))).select();
+      if (error) return fallo(error);
+      lista = [...lista, ...(data || [])];
+    }
+
+    // 3. Lo que se quita.
+    if (quitan.length) {
+      const { error } = await supabase.from("presupuesto_items").delete().in("id", quitan);
+      if (error) return fallo(error);
+      const fuera = new Set(quitan.map(String));
+      lista = lista.filter(i => !fuera.has(String(i.id)));
+    }
+
+    // 4. Lo emparejado que deja de estar elegido: el rubro queda, sin la marca.
+    if (sueltan.length) {
+      const { error } = await supabase.from("presupuesto_items").update({ comparativa_fila: null }).in("id", sueltan);
+      if (error) return fallo(error);
+      const sueltos = new Set(sueltan.map(String));
+      lista = lista.map(i => (sueltos.has(String(i.id)) ? { ...i, comparativa_fila: null } : i));
+    }
+
+    lista = [...lista].sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0));
     itemsRef.current = lista; setItems(lista); recalcTotales(lista);
     return null;
   }

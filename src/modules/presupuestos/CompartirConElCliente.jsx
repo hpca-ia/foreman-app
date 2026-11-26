@@ -23,7 +23,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Share2, X } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { supabase } from "../../lib/supabase";
-import { fotoParaElCliente, mismaFoto, estadoDeLoCompartido, MODOS } from "./presupuestoParaElCliente.js";
+import { fotoParaElCliente, mismaFoto, estadoDeLoCompartido, elegidosSinUtilidad, MODOS } from "./presupuestoParaElCliente.js";
 import { compartidosDe, compartirConElCliente, dejarDeCompartir, avisarDelPresupuesto } from "./compartidosDelPresupuesto";
 import { enlaceDelClienteDe } from "../leads/proyecto";
 import { involucradosDe } from "../leads/involucrados";
@@ -89,6 +89,9 @@ export default function CompartirConElCliente({ presupuesto, capitulos = [], ite
   const cambio = useMemo(() => !!actual && !mismaFoto(actual.foto, fotoParaElCliente({
     presupuesto, capitulos, items, cotizaciones, elegidos, modo: actual.modo, conComparativa: actual.con_comparativa !== false,
   })), [actual, presupuesto, capitulos, items, cotizaciones, elegidos]);
+  // CON UTILIDAD, lo que no tiene utilidad puesta se vería al costo: se avisa antes de compartir.
+  const sinUtilidad = useMemo(() => (modo === "utilidad" ? elegidosSinUtilidad({ capitulos, items, cotizaciones, elegidos }) : 0),
+    [modo, capitulos, items, cotizaciones, elegidos]);
   const otraForma = !!actual && !!modo && (actual.modo !== modo || (actual.con_comparativa !== false) !== conComparativa);
 
   async function compartir() {
@@ -183,6 +186,12 @@ export default function CompartirConElCliente({ presupuesto, capitulos = [], ite
                   </label>
                 ))}
               </div>
+              {sinUtilidad > 0 && (
+                <div className="sin-utilidad" style={{ fontSize: 11.5, color: colors.warning, lineHeight: 1.45 }}>
+                  {sinUtilidad === 1 ? "1 de los rubros elegidos todavía no tiene" : `${sinUtilidad} de los rubros elegidos todavía no tienen`} utilidad puesta: compartido así,
+                  el cliente {sinUtilidad === 1 ? "lo" : "los"} vería al costo. Pasá lo elegido al presupuesto y ponele la utilidad antes de compartir.
+                </div>
+              )}
               <label className="con-la-comparativa" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: colors.ink, cursor: "pointer" }}>
                 <input type="checkbox" checked={conComparativa} onChange={ev => { setConComparativa(ev.target.checked); setConfirmando(null); }} />
                 Con lo que cotizó cada empresa

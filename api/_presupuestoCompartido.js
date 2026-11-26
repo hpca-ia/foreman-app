@@ -30,26 +30,33 @@ const diaDeAca = f => {
 const lista = v => (Array.isArray(v) ? v : []);
 const RESPUESTAS = ["aprobado", "observado"];
 
-/** La foto, como sale por el enlace: copiada campo por campo. Null si no es una foto. */
+/**
+ * La foto, como sale por el enlace: copiada campo por campo. Null si no es una foto.
+ *
+ * Capítulo por capítulo: los rubros del presupuesto con lo elegido, y —si se
+ * compartió— la comparativa: el total de cada oferta y su itemizado.
+ */
 export function fotoParaMandar(f) {
   if (!f || !Array.isArray(f.capitulos)) return null;
   const t = f.totales || {};
   return {
     conComparativa: !!f.conComparativa,
     presupuesto: { nombre: limpio(f.presupuesto?.nombre) },
-    empresas: lista(f.empresas).map(e => ({ id: e?.id ?? null, proveedor: limpio(e?.proveedor), version: num(e?.version) || 1, total: num(e?.total), cubre: num(e?.cubre) })),
+    empresas: lista(f.empresas).map(e => ({ id: e?.id ?? null, proveedor: limpio(e?.proveedor), version: num(e?.version) || 1, total: num(e?.total) })),
     capitulos: f.capitulos.map(c => ({
       numero: limpio(c?.numero), nombre: limpio(c?.nombre), total: num(c?.total),
-      empresas: lista(c?.empresas).map(e => ({ id: e?.id ?? null, total: num(e?.total), cubre: num(e?.cubre), faltan: num(e?.faltan), estimado: !!e?.estimado, elegidos: num(e?.elegidos) })),
       rubros: lista(c?.rubros).map(r => ({
         numero: limpio(r?.numero), descripcion: limpio(r?.descripcion), unidad: limpio(r?.unidad),
         cantidad: num(r?.cantidad), unitario: num(r?.unitario), total: num(r?.total), noCotiza: !!r?.noCotiza,
-        elegida: r?.elegida ?? null, deQuien: limpio(r?.deQuien) || null, repartido: !!r?.repartido,
-        ofertas: lista(r?.ofertas).map(o => ({
-          id: o?.id ?? null, unitario: numONada(o?.unitario), cantidad: numONada(o?.cantidad), total: num(o?.total),
-          paquete: limpio(o?.paquete) || null, estimado: !!o?.estimado,
-        })),
+        deQuien: limpio(r?.deQuien) || null,
       })),
+      comparativa: c?.comparativa && Array.isArray(c.comparativa.filas) ? {
+        empresas: lista(c.comparativa.empresas).map(e => ({ id: e?.id ?? null, total: num(e?.total), faltan: num(e?.faltan), estimado: !!e?.estimado, elegidas: num(e?.elegidas) })),
+        filas: c.comparativa.filas.map(x => ({
+          descripcion: limpio(x?.descripcion), unidad: limpio(x?.unidad), cantidad: num(x?.cantidad), elegida: x?.elegida ?? null,
+          ofertas: lista(x?.ofertas).map(o => ({ id: o?.id ?? null, cantidad: numONada(o?.cantidad), unitario: numONada(o?.unitario), total: num(o?.total), estimado: !!o?.estimado })),
+        })),
+      } : null,
     })),
     totales: {
       subtotal: num(t.subtotal), honorarios: lista(t.honorarios).map(h => ({ nombre: limpio(h?.nombre), monto: num(h?.monto) })),

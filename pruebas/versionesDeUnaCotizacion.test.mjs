@@ -4,257 +4,129 @@
 // Hernán, 26/11/2026: «estos presupuestos van a tener actualizaciones... quiero
 // poder actualizar y volver a escoger por si cambiamos de especificación,
 // cantidad o negociación. Entonces puede ir al presupuesto pero se puede
-// regresar a ver nuevas versiones».
+// regresar a ver nuevas versiones». Y, con una empresa que mandó una sola
+// suma: «con las actualizaciones se irán emparejando los rubros».
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  matrizDeCotizaciones, elegir, planDeAplicar, elegidosDe, cantidadPropia, pasadosSinElegir,
-  anterioresDe, versionesDe, heredarRubros, elegidosAlActualizar, cambiosDeVersion,
+  matrizDeCotizaciones, elegir, planDeAplicar, elegidosDe,
+  anterioresDe, versionesDe, heredarFilas, elegidosAlActualizar, cambiosDeVersion,
 } from "../src/modules/presupuestos/matrizDeCotizaciones.js";
 
-const CAPITULOS = [{ nombre: "GYPSUM", orden: 1 }, { nombre: "PINTURA", orden: 2 }];
-const rubro = (id, capitulo, orden, descripcion, unidad, cantidad, precio_unitario, mas = {}) =>
-  ({ id, capitulo, orden, descripcion, unidad, cantidad, precio_unitario, precio_base: 0, utilidad_pct: 0, total: 0, ...mas });
-const ITEMS = [
-  rubro(101, "GYPSUM", 1000, "Tumbado gypsum plano regular", "m2", 125.3, 22.41),
-  rubro(102, "GYPSUM", 1001, "Pared una cara de gypsum", "m2", 63.82, 21.14),
-  rubro(103, "GYPSUM", 1002, "Pared doble cara de gypsum", "m2", 15, 37.54),
-  rubro(201, "PINTURA", 2000, "Pintura de caucho en paredes", "m2", 210, 6),
-];
-const linea = (descripcion, unidad, cantidad, precio_unitario, items) => ({ descripcion, unidad, cantidad, precio_unitario, items });
-const A = { id: 1, proveedor: "Empresa A", archivo_id: 71, version: 1, reemplaza_a: null, reemplazada_at: null, renglones: [
-  linea("Cielo raso gypsum", "m2", 125.3, 18, [101]), linea("Tabique 1 cara", "m2", 63.82, 16, [102]),
-  linea("Tabique 2 caras", "m2", 15, 28, [103]), linea("Pintura látex", "m2", 200, 5.95, [201]),
+const VIDRIO = "HERRERÍA, ALUMINIO, VIDRIO";
+const CAPITULOS = [{ nombre: VIDRIO, orden: 1 }];
+const ITEMS = [{ id: 601, capitulo: VIDRIO, orden: 1000, descripcion: "Pasamanos de escalera", unidad: "ml", cantidad: 0, precio_unitario: 120, precio_base: 0, utilidad_pct: 0, total: 0 }];
+const linea = (descripcion, unidad, cantidad, precio_unitario, mas = {}) => ({ descripcion, unidad, cantidad, precio_unitario, capitulo: VIDRIO, ...mas });
+const DEKORANDO = { id: 1, proveedor: "Dekorando", archivo_id: 71, version: 1, reemplaza_a: null, reemplazada_at: null, renglones: [
+  linea("V1 Dormitorio de servicio - Ventana abatible", "u", 1, 929), linea("V3 Máquinas - Mampara 2 cuerpos", "u", 1, 1266),
+  linea("V9 Family room - Mampara 3 cuerpos", "u", 1, 2761), linea("V16 Sala - Mampara 6 cuerpos", "u", 2, 3283),
 ] };
-const B = { id: 2, proveedor: "Empresa B", archivo_id: 72, version: 1, reemplaza_a: null, reemplazada_at: null,
-  renglones: [linea("Drywall: tumbado y paredes", "glb", 1, 3450, [101, 102, 103])] };
-const C = { id: 3, proveedor: "Empresa C", archivo_id: 73, version: 1, reemplaza_a: null, reemplazada_at: null, renglones: [
-  linea("Tumbado", "m2", 125.3, 19.5, [101]), linea("Pared simple", "m2", 63.82, 17, [102]),
-  linea("Pintura de caucho", "m2", 210, 5.62, [201]),
-] };
-// La empresa A negoció: bajó el tumbado, subió un tabique, dejó de cotizar el otro, y la pintura ahora por 210 m2.
-const A2 = { id: 4, proveedor: "Empresa A", archivo_id: 81, version: 2, reemplaza_a: 1, reemplazada_at: null, renglones: [
-  linea("Cielo raso gypsum", "m2", 125.3, 17, [101]), linea("Tabique 1 cara", "m2", 63.82, 16.5, [102]),
-  linea("Pintura látex", "m2", 210, 5.95, [201]),
-] };
+const SUS_FILAS = ["c1-0", "c1-1", "c1-2", "c1-3"];
+// La que mandó una sola suma, puesta a cubrir lo que detalló Dekorando.
+const WINDOW = { id: 2, proveedor: "Window World", archivo_id: 72, version: 1, reemplaza_a: null, reemplazada_at: null,
+  renglones: [linea("Sistema corredizo europeo minimal", "glb", 1, 11900, { filas: SUS_FILAS })] };
 const reemplazada = c => ({ ...c, reemplazada_at: "2026-11-27T15:00:00.000Z" });
 const armar = (cotizaciones, items = ITEMS) => matrizDeCotizaciones({ capitulos: CAPITULOS, items, cotizaciones });
-/** El presupuesto después de pasarle estos cambios, como lo escribe ModuloPresupuestos. */
-const conLoPasado = (items, cambios) => items.map(i => {
-  const c = cambios.find(x => x.id === i.id);
-  return c ? { ...i, precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total, cantidad: c.cantidad,
-    cotizacion_proveedor: c.cotizacion_proveedor, cotizacion_cantidad: c.cotizacion_cantidad } : i;
+const comoLaVe = (cot, todas = [cot]) => armar(todas).empresas.find(e => e.id === cot.id).renglones;
+// Dekorando negoció: bajó la V1, subió la V3, ya no cotiza la V9, y la V16 ahora es una sola en vez de dos. Y agrega mosquiteros.
+const LEIDA = [
+  linea("V1 DORMITORIO DE SERVICIO – ventana abatible.", "u", 1, 900, { capitulo: "", filas: [] }),
+  linea("V3 Máquinas - Mampara 2 cuerpos", "u", 1, 1300, { capitulo: "", filas: [] }),
+  linea("V16 Sala - Mampara 6 cuerpos", "u", 1, 3283, { capitulo: "", filas: [] }),
+  linea("Mosquiteros", "glb", 1, 250, { capitulo: VIDRIO, filas: [] }),
+];
+const D2 = { id: 4, proveedor: "Dekorando", archivo_id: 81, version: 2, reemplaza_a: 1, reemplazada_at: null, renglones: heredarFilas(LEIDA, comoLaVe(DEKORANDO)) };
+
+test("LO QUE YA SE UBICÓ NO SE VUELVE A UBICAR: el renglón que se llama igual queda en su capítulo y en su fila", () => {
+  // La V1 viene escrita con otra letra y otra puntuación: es la misma.
+  assert.deepEqual(D2.renglones.map(r => [r.capitulo, r.filas, r.precio_unitario]),
+    [[VIDRIO, ["c1-0"], 900], [VIDRIO, ["c1-1"], 1300], [VIDRIO, ["c1-3"], 3283], [VIDRIO, [], 250]]);
+  // Sin versión anterior, queda lo que propuso NOVA.
+  assert.deepEqual(heredarFilas(LEIDA, []).map(r => [r.capitulo, r.filas]), [["", []], ["", []], ["", []], [VIDRIO, []]]);
+  // «SE IRÁN EMPAREJANDO»: la que había mandado una suma manda ahora el detalle, y NOVA lo ubica en las filas de la otra.
+  const detallada = heredarFilas([linea("Ventana V1", "u", 1, 950, { filas: ["c1-0"] }), linea("Mampara V3", "u", 1, 1290, { filas: ["c1-1"] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW]));
+  assert.deepEqual(detallada.map(r => r.filas), [["c1-0"], ["c1-1"]]);
+  // Y la suma que se llama igual sigue cubriendo las mismas filas.
+  assert.deepEqual(heredarFilas([linea("Sistema corredizo europeo minimal", "glb", 1, 11500, { filas: [] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW]))[0].filas, SUS_FILAS);
 });
 
-test("LO QUE PIDIÓ: la versión nueva reemplaza a la anterior en la matriz, y la anterior queda guardada", () => {
-  const todas = [reemplazada(A), B, C, A2];
+test("LO QUE PIDIÓ: la versión nueva reemplaza a la anterior en su misma columna, y la anterior queda guardada", () => {
+  const todas = [reemplazada(DEKORANDO), WINDOW, D2];
   const m = armar(todas);
-  // En la matriz se compara lo último que mandó cada una: una columna por empresa, no dos de la misma.
-  // Y la empresa se queda en su columna: la versión nueva va donde estaba la primera, no al final.
-  assert.deepEqual(m.empresas.map(e => [e.id, e.proveedor, e.version, e.reemplaza_a]),
-    [[4, "Empresa A", 2, 1], [2, "Empresa B", 1, null], [3, "Empresa C", 1, null]]);
-  const B3 = { ...B, id: 8, version: 3, reemplaza_a: 7 }, B2v = { ...reemplazada(B), id: 7, version: 2, reemplaza_a: 2 };
-  assert.deepEqual(armar([reemplazada(A), reemplazada(B), C, A2, B2v, B3]).empresas.map(e => e.id), [4, 8, 3]);
-  assert.equal(m.grupos[0].filas[0].celdas[4].unitario, 17);
-  assert.equal(m.celdaDe(101, 1), null);
+  assert.deepEqual(m.empresas.map(e => [e.id, e.proveedor, e.version, e.reemplaza_a]), [[4, "Dekorando", 2, 1], [2, "Window World", 1, null]]);
+  // Sigue en sus filas: la V1 nueva está donde estaba la V1.
+  assert.deepEqual([m.celdaDe("c1-0", 4).unitario, m.celdaDe("c1-0", 1)], [900, null]);
   // La anterior sigue ahí: se arma su propia matriz para decir qué cambió, y se puede volver a mirar.
   assert.deepEqual(anterioresDe(todas).map(c => [c.id, c.reemplazada_at]), [[1, null]]);
-  assert.deepEqual(versionesDe(A2, todas).map(c => c.id), [4, 1]);
-  assert.deepEqual(versionesDe(B, todas).map(c => c.id), [2]);
+  assert.deepEqual(versionesDe(D2, todas).map(c => c.id), [4, 1]);
+  assert.deepEqual(versionesDe(WINDOW, todas).map(c => c.id), [2]);
   // Una cotización de antes de la migración 195, sin esas columnas, es la versión 1 y está vigente.
-  const vieja = { id: 9, proveedor: "Vieja", renglones: [linea("Tumbado", "m2", 1, 20, [101])] };
-  assert.deepEqual(armar([vieja]).empresas.map(e => [e.version, e.reemplaza_a]), [[1, null]]);
+  assert.deepEqual(armar([{ id: 9, proveedor: "Vieja", renglones: [linea("x", "u", 1, 20)] }]).empresas.map(e => [e.version, e.reemplaza_a]), [[1, null]]);
+  // Con dos versiones seguidas, cada empresa sigue en su lugar.
+  const W2 = { ...reemplazada(WINDOW), id: 7, version: 2, reemplaza_a: 2 }, W3 = { ...WINDOW, id: 8, version: 3, reemplaza_a: 7 };
+  assert.deepEqual(armar([reemplazada(DEKORANDO), reemplazada(WINDOW), D2, W2, W3]).empresas.map(e => e.id), [4, 8]);
 });
 
-test("QUÉ CAMBIÓ de una versión a la otra: lo que bajó, lo que subió, lo que dejó de cotizar, y la cantidad", () => {
-  const todas = [reemplazada(A), B, C, A2];
+test("QUÉ CAMBIÓ de una versión a la otra: lo que bajó, lo que subió, lo que dejó de cotizar, lo nuevo y la cantidad", () => {
+  const todas = [reemplazada(DEKORANDO), D2];
   const cambio = cambiosDeVersion({ matriz: armar(todas), anterior: armar(anterioresDe(todas)), cotId: 4, anteriorId: 1 });
   assert.deepEqual(cambio.filas, [
-    { id: 101, numero: "1.1", descripcion: "Tumbado gypsum plano regular", antes: 18, ahora: 17, que: "bajo" },
-    { id: 102, numero: "1.2", descripcion: "Pared una cara de gypsum", antes: 16, ahora: 16.5, que: "subio" },
-    { id: 103, numero: "1.3", descripcion: "Pared doble cara de gypsum", antes: 28, ahora: null, que: "ya_no" },
-    // El mismo precio, pero ahora cotiza 210 y antes 200: se dice, porque la cantidad del presupuesto no cambia sola.
-    { id: 201, numero: "2.1", descripcion: "Pintura de caucho en paredes", antes: 5.95, ahora: 5.95, que: "cantidad", cantidadAntes: 200, cantidadAhora: 210 },
+    { clave: "c1-0", capitulo: VIDRIO, descripcion: "V1 DORMITORIO DE SERVICIO – ventana abatible.", antes: 929, ahora: 900, que: "bajo" },
+    { clave: "c1-1", capitulo: VIDRIO, descripcion: "V3 Máquinas - Mampara 2 cuerpos", antes: 1266, ahora: 1300, que: "subio" },
+    // El mismo precio, pero ahora cotiza 1 y antes 2.
+    { clave: "c1-3", capitulo: VIDRIO, descripcion: "V16 Sala - Mampara 6 cuerpos", antes: 3283, ahora: 3283, que: "cantidad", cantidadAntes: 2, cantidadAhora: 1 },
+    { clave: "c4-3", capitulo: VIDRIO, descripcion: "Mosquiteros", antes: null, ahora: 250, que: "nuevo" },
+    { clave: "c1-2", capitulo: VIDRIO, descripcion: "V9 Family room - Mampara 3 cuerpos", antes: 2761, ahora: null, que: "ya_no" },
   ]);
-  // Sobre las cantidades del presupuesto: 2.255,40 + 1.021,12 + 420 + 1.249,50 antes; 2.130,10 + 1.053,03 + 1.249,50 ahora.
-  assert.deepEqual([cambio.antes, cambio.ahora, cambio.diferencia], [4946.02, 4432.63, -513.39]);
-  // Y lo que antes no cotizaba y ahora sí.
-  const C2 = { ...C, id: 5, version: 2, reemplaza_a: 3, renglones: [...C.renglones, linea("Pared doble", "m2", 15, 30, [103])] };
-  const conC2 = [A, B, reemplazada(C), C2];
-  const deC = cambiosDeVersion({ matriz: armar(conC2), anterior: armar(anterioresDe(conC2)), cotId: 5, anteriorId: 3 });
-  assert.deepEqual(deC.filas, [{ id: 103, numero: "1.3", descripcion: "Pared doble cara de gypsum", antes: null, ahora: 30, que: "nuevo" }]);
-  assert.equal(deC.diferencia, 450);
+  // 929 + 1.266 + 2.761 + 6.566 antes; 900 + 1.300 + 3.283 + 250 ahora.
+  assert.deepEqual([cambio.antes, cambio.ahora, cambio.diferencia], [11522, 5733, -5789]);
   // La misma cotización subida de nuevo: nada cambió.
-  const igual = [reemplazada(A), { ...A, id: 6, version: 2, reemplaza_a: 1 }];
-  assert.deepEqual(cambiosDeVersion({ matriz: armar(igual), anterior: armar(anterioresDe(igual)), cotId: 6, anteriorId: 1 }),
-    { filas: [], antes: 4946.02, ahora: 4946.02, diferencia: 0 });
-});
-
-test("LO QUE YA SE CORRIGIÓ NO SE VUELVE A CORREGIR: el renglón que se llama igual va a los mismos rubros que se le habían puesto", () => {
-  // NOVA lee la versión nueva y vuelve a proponer: se equivoca en dos, y a uno nuevo le da un rubro que ya es de otro renglón.
-  const leidos = [
-    linea("CIELO RASO GYPSUM.", "m2", 125.3, 17, [102]),      // se llama igual, con otra letra: va al 101, como se había corregido
-    linea("Tabique 1 cara", "m2", 63.82, 16.5, []),            // NOVA no le encontró rubro: hereda el 102
-    linea("Tabique 2 caras tipo RH", "m2", 15, 31, [103]),     // cambió la especificación: no se llama igual, vale lo de NOVA
-    linea("Masillado y lijado", "m2", 200, 2, [101]),          // nuevo, y NOVA le dio un rubro que ya tomó otro renglón
-    linea("Pintura látex", "m2", 210, 5.95, [201]),
-  ];
-  assert.deepEqual(heredarRubros(leidos, A.renglones).map(r => r.items), [[101], [102], [103], [], [201]]);
-  // Lo demás del renglón es lo de la versión nueva.
-  assert.deepEqual(heredarRubros(leidos, A.renglones).map(r => r.precio_unitario), [17, 16.5, 31, 2, 5.95]);
-  // Sin versión anterior, queda lo que propuso NOVA, sin repetir un rubro.
-  assert.deepEqual(heredarRubros(leidos, []).map(r => r.items), [[102], [], [103], [101], [201]]);
-  // Un paquete corregido a mano se hereda entero.
-  assert.deepEqual(heredarRubros([linea("Drywall: tumbado y paredes", "glb", 1, 3300, [101])], B.renglones)[0].items, [101, 102, 103]);
+  const igual = [reemplazada(DEKORANDO), { ...DEKORANDO, id: 6, version: 2, reemplaza_a: 1, renglones: heredarFilas(DEKORANDO.renglones, comoLaVe(DEKORANDO)) }];
+  assert.deepEqual(cambiosDeVersion({ matriz: armar(igual), anterior: armar(anterioresDe(igual)), cotId: 6, anteriorId: 1 }), { filas: [], antes: 11522, ahora: 11522, diferencia: 0 });
 });
 
 test("NO HAY QUE ELEGIR DE NUEVO: lo que tenía adjudicado y sigue cotizando sigue elegido; lo que ya no cotiza se suelta", () => {
   const base = { capitulos: CAPITULOS, items: ITEMS };
-  // A tenía el tumbado, el tabique doble y la pintura. En la versión nueva ya no cotiza el tabique doble.
-  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [B, C], nueva: A2, elegidosAntes: [101, 103, 201] }), [101, 201]);
-  // Un paquete sigue elegido solo si sigue entero: B ahora cotiza el tumbado y una pared, sin la doble.
-  const B2 = { renglones: [linea("Drywall: tumbado y pared simple", "glb", 1, 3000, [101, 102])] };
-  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [A, C], nueva: B2, elegidosAntes: [101, 102, 103] }), [101, 102]);
-  // Y si de su paquete un rubro ya es de otra empresa, el paquete no vuelve partido: no vuelve.
-  const conElTumbado = { ...C, elegidos: [101] };
-  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [A, conElTumbado], nueva: B, elegidosAntes: [101, 102, 103] }), []);
+  // Dekorando tenía las cuatro. En la versión nueva ya no cotiza la V9.
+  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [WINDOW], nueva: { renglones: D2.renglones }, elegidosAntes: SUS_FILAS }), ["c1-0", "c1-1", "c1-3"]);
+  // Window World tenía su suma elegida —las cuatro filas—. Con Dekorando en la versión 2 la V9 ya no existe: la suma sigue, sobre las tres que quedan.
+  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [D2], nueva: WINDOW, elegidosAntes: SUS_FILAS }), ["c1-0", "c1-1", "c1-3"]);
+  // Y si una de sus filas ya es de otra empresa, la suma no vuelve partida: no vuelve.
+  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [{ ...DEKORANDO, elegidos: ["c1-0"] }], nueva: WINDOW, elegidosAntes: SUS_FILAS }), []);
 });
 
 test("VOLVER A LA VERSIÓN ANTERIOR: vuelve con lo que tenía elegido, menos lo que mientras tanto se le dio a otra empresa", () => {
-  // Con la versión 2 de A se le dio la pintura a C. Se quita la versión 2: vuelve la 1, que guardaba el tumbado y la pintura.
-  const A1 = { ...reemplazada(A), elegidos: [101, 201] };
-  const otras = [B, { ...C, elegidos: [201] }];
-  assert.deepEqual(elegidosAlActualizar({ capitulos: CAPITULOS, items: ITEMS, otras, nueva: A1, elegidosAntes: A1.elegidos }), [101]);
+  const ALUVID = { id: 3, proveedor: "Aluvid", renglones: [linea("Ventana V1", "u", 1, 880, { filas: ["c1-0"] })], elegidos: ["c1-0"] };
+  const D1 = { ...reemplazada(DEKORANDO), elegidos: ["c1-0", "c1-1"] };
+  assert.deepEqual(elegidosAlActualizar({ capitulos: CAPITULOS, items: ITEMS, otras: [ALUVID], nueva: D1, elegidosAntes: D1.elegidos }), ["c1-1"]);
   // Lo de una versión ya reemplazada de otra empresa no cuenta como tomado.
-  const cVieja = { ...reemplazada(C), elegidos: [101] };
-  assert.deepEqual(elegidosAlActualizar({ capitulos: CAPITULOS, items: ITEMS, otras: [B, cVieja], nueva: A1, elegidosAntes: A1.elegidos }), [101, 201]);
+  assert.deepEqual(elegidosAlActualizar({ capitulos: CAPITULOS, items: ITEMS, otras: [reemplazada(ALUVID)], nueva: D1, elegidosAntes: D1.elegidos }), ["c1-0", "c1-1"]);
+  // Lo elegido se lee solo de las versiones vigentes.
+  assert.deepEqual(elegidosDe([{ ...D1 }, { ...D2, elegidos: ["c1-3"] }, ALUVID]), { "c1-3": 4, "c1-0": 3 });
 });
 
-test("lo elegido se lee solo de las versiones vigentes", () => {
-  const todas = [{ ...reemplazada(A), elegidos: [101, 103] }, { ...B, elegidos: [] }, { ...C, elegidos: [102] }, { ...A2, elegidos: [101, 201] }];
-  assert.deepEqual(elegidosDe(todas), { 101: 4, 102: 3, 201: 4 });
-});
-
-test("«PUEDE IR AL PRESUPUESTO PERO SE PUEDE REGRESAR»: lo que ya pasó no se vuelve a pasar, y lo que cambió con la versión nueva, sí", () => {
-  // Con la versión 1 se eligió a A para el tumbado y la pintura, y pasó al presupuesto.
-  const m1 = armar([A, B, C]);
-  const plan1 = planDeAplicar({ matriz: m1, elegidos: { 101: 1, 201: 1 }, items: ITEMS });
-  assert.deepEqual(plan1.porPasar.map(c => c.id), [101, 201]);
-  const pasado = conLoPasado(ITEMS, plan1.porPasar);
-  // Se vuelve a la matriz: ya está todo así, no hay nada que pasar.
-  const otraVez = planDeAplicar({ matriz: armar([A, B, C], pasado), elegidos: { 101: 1, 201: 1 }, items: pasado });
-  assert.deepEqual([otraVez.cambios.length, otraVez.porPasar.length], [2, 0]);
-  // Llega la versión 2: bajó el tumbado, la pintura quedó igual. Lo elegido sigue elegido, y falta pasar solo el tumbado.
-  const m2 = armar([reemplazada(A), B, C, A2], pasado);
-  const plan2 = planDeAplicar({ matriz: m2, elegidos: { 101: 4, 201: 4 }, items: pasado });
-  assert.deepEqual(plan2.porPasar.map(c => [c.id, c.precio_base, c.costo, c.costoAntes]), [[101, 17, 2130.1, 2255.4]]);
-  // Pasa, y queda al día.
-  const pasado2 = conLoPasado(pasado, plan2.porPasar);
-  assert.equal(planDeAplicar({ matriz: armar([reemplazada(A), B, C, A2], pasado2), elegidos: { 101: 4, 201: 4 }, items: pasado2 }).porPasar.length, 0);
-  // Se vuelve a escoger: la pintura ahora para C. Es otra empresa y otro precio: hay que pasarla.
-  const m3 = armar([reemplazada(A), B, C, A2], pasado2);
-  const reelegido = elegir(m3, { 101: 4, 201: 4 }, 3, { itemId: 201 });
-  assert.deepEqual(reelegido, { 101: 4, 201: 3 });
-  assert.deepEqual(planDeAplicar({ matriz: m3, elegidos: reelegido, items: pasado2 }).porPasar.map(c => [c.id, c.proveedor, c.precio_base]),
-    [[201, "Empresa C", 5.62]]);
-  // Cambiar la cantidad del rubro en el presupuesto no obliga a pasar de nuevo: el unitario de la empresa es el mismo.
-  const conOtraCantidad = pasado2.map(i => (i.id === 201 ? { ...i, cantidad: 250 } : i));
-  assert.equal(planDeAplicar({ matriz: armar([reemplazada(A), B, C, A2], conOtraCantidad), elegidos: { 101: 4, 201: 4 }, items: conOtraCantidad }).porPasar.length, 0);
-});
-
-test("un paquete que ya pasó repartido tampoco se vuelve a pasar; y si la empresa lo rebaja, se reparte de nuevo y cierra al centavo", () => {
-  const m1 = armar([A, B, C]);
-  const plan1 = planDeAplicar({ matriz: m1, elegidos: { 101: 2, 102: 2, 103: 2 }, items: ITEMS });
-  assert.deepEqual(plan1.porPasar.map(c => c.costo), [2052.34, 986.09, 411.57]);
-  const pasado = conLoPasado(ITEMS, plan1.porPasar);
-  // Con los rubros ya valiendo su parte, la proporción es la misma y no queda nada por pasar.
-  const otraVez = planDeAplicar({ matriz: armar([A, B, C], pasado), elegidos: { 101: 2, 102: 2, 103: 2 }, items: pasado });
-  assert.deepEqual(otraVez.cambios.map(c => c.costo), [2052.34, 986.09, 411.57]);
-  assert.equal(otraVez.porPasar.length, 0);
-  // B rebaja el paquete a 3.300: los tres rubros cambian, y sus partes vuelven a sumar el paquete.
-  const B2 = { id: 7, proveedor: "Empresa B", archivo_id: 82, version: 2, reemplaza_a: 2, reemplazada_at: null,
-    renglones: [linea("Drywall: tumbado y paredes", "glb", 1, 3300, [101, 102, 103])] };
-  const plan2 = planDeAplicar({ matriz: armar([A, reemplazada(B), C, B2], pasado), elegidos: { 101: 7, 102: 7, 103: 7 }, items: pasado });
-  assert.equal(plan2.porPasar.length, 3);
-  assert.equal(Math.round(plan2.porPasar.reduce((t, c) => t + c.costo, 0) * 100) / 100, 3300);
-  plan2.porPasar.forEach(c => assert.ok(c.costo < c.costoAntes, `${c.descripcion} baja`));
-});
-
-test("con el presupuesto sin cantidades —la Residencia Banderas—, lo que pasó toma la cantidad de la cotización y queda al día", () => {
-  const sinCantidades = ITEMS.map(i => ({ ...i, cantidad: 0 }));
-  const m = armar([A, B, C], sinCantidades);
-  const plan = planDeAplicar({ matriz: m, elegidos: { 101: 2, 102: 2, 103: 2, 201: 1 }, items: sinCantidades });
-  assert.equal(plan.porPasar.length, 4);
-  const pasado = conLoPasado(sinCantidades, plan.porPasar);
-  assert.deepEqual(pasado.map(i => i.cantidad), [1, 1, 1, 200]);
-  const otraVez = planDeAplicar({ matriz: armar([A, B, C], pasado), elegidos: { 101: 2, 102: 2, 103: 2, 201: 1 }, items: pasado });
-  assert.equal(otraVez.porPasar.length, 0);
-  assert.equal(otraVez.costo, plan.costo);
-});
-
-test("EL 1 QUE PUSO EL REPARTO NO ES UNA CANTIDAD DEL PRESUPUESTO: al volver, las otras empresas se siguen comparando sobre lo que cotizaron", () => {
-  // Residencia Banderas: sin cantidades. Pasa el paquete de B: los tres rubros quedan en 1, con su parte como precio.
-  const sinCantidades = ITEMS.map(i => ({ ...i, cantidad: 0, precio_unitario: 0 }));
-  const plan = planDeAplicar({ matriz: armar([A, B, C], sinCantidades), elegidos: { 101: 2, 102: 2, 103: 2 }, items: sinCantidades });
-  const pasado = sinCantidades.map(i => {
-    const c = plan.porPasar.find(x => x.id === i.id);
-    return c ? { ...i, cantidad: c.cantidad, precio_base: c.precio_base, precio_unitario: c.precio_unitario,
-      cotizacion_proveedor: c.cotizacion_proveedor, cotizacion_renglon: c.cotizacion_renglon, cotizacion_cantidad: c.cotizacion_cantidad } : i;
-  });
-  assert.deepEqual(pasado.slice(0, 3).map(i => [i.cantidad, i.cotizacion_cantidad, / · repartido entre 3 rubros$/.test(i.cotizacion_renglon)]),
-    [[1, null, true], [1, null, true], [1, null, true]]);
-  assert.deepEqual(pasado.slice(0, 3).map(cantidadPropia), [0, 0, 0]);
-  // De vuelta en la matriz, A sigue valiendo 125,30 m2 × 18 en el tumbado —no 1 × 18—.
-  const m = armar([A, B, C], pasado);
-  const tumbado = m.grupos[0].filas[0];
-  assert.deepEqual([tumbado.cantidad, tumbado.celdas[1].cantidad, tumbado.celdas[1].total, tumbado.celdas[1].sinCantidadTuya], [0, 125.3, 2255.4, true]);
-  // Lo que el presupuesto tiene hoy en ese rubro sí es su parte del paquete, y dice de quién.
-  assert.deepEqual(tumbado.referencia, { unitario: plan.porPasar[0].costo, total: plan.porPasar[0].costo, deQuien: "Empresa B", repartido: true });
-  // El paquete ya está así: no hay que pasarlo de nuevo.
-  assert.equal(planDeAplicar({ matriz: m, elegidos: { 101: 2, 102: 2, 103: 2 }, items: pasado }).porPasar.length, 0);
-  // Se vuelve a escoger: el tumbado para A. Entra con la cantidad que A cotizó, no con el 1 del reparto.
-  const reelegido = elegir(m, { 101: 2, 102: 2, 103: 2 }, 1, { itemId: 101 });
-  assert.deepEqual(reelegido, { 101: 1 });                    // y el paquete de B, partido, se suelta entero
-  const plan2 = planDeAplicar({ matriz: m, elegidos: reelegido, items: pasado });
-  assert.deepEqual(plan2.porPasar.map(c => [c.id, c.cantidad, c.precio_base, c.costo, c.ponerCantidad]), [[101, 125.3, 18, 2255.4, true]]);
-  // Una cantidad de verdad —aunque sea 1— o un 1 que no vino de un reparto, cuenta.
-  assert.equal(cantidadPropia({ cantidad: 1, cotizacion_renglon: "Tumbado", cotizacion_cantidad: 1 }), 1);
-  assert.equal(cantidadPropia({ cantidad: 1 }), 1);
-  assert.equal(cantidadPropia({ cantidad: 63.82, cotizacion_renglon: "Drywall · repartido entre 3 rubros", cotizacion_cantidad: null }), 63.82);
-});
-
-test("LO QUE YA PASÓ Y QUEDÓ SIN ELEGIR SE DICE: el presupuesto se queda con ese costo, y no se borra solo", () => {
-  const cotizaciones = [A, B, C];
-  // Pasó el paquete de B. Después el tumbado se le dio a A, y el paquete de B se soltó entero.
-  const pasado = ITEMS.map(i => (i.capitulo === "GYPSUM"
-    ? { ...i, precio_base: i.id === 101 ? 18 : 10, cotizacion_proveedor: i.id === 101 ? "Empresa A" : "Empresa B", cotizacion_archivo_id: i.id === 101 ? 71 : 72 } : i));
-  assert.deepEqual(pasadosSinElegir({ elegidos: { 101: 1 }, items: pasado, cotizaciones }), [
-    { id: 102, descripcion: "Pared una cara de gypsum", proveedor: "Empresa B", costo: 638.2 },
-    { id: 103, descripcion: "Pared doble cara de gypsum", proveedor: "Empresa B", costo: 150 },
-  ]);
-  // Con todo elegido, o sin nada pasado, no hay nada que decir.
-  assert.deepEqual(pasadosSinElegir({ elegidos: { 101: 1, 102: 2, 103: 2 }, items: pasado, cotizaciones }), []);
-  assert.deepEqual(pasadosSinElegir({ elegidos: {}, items: ITEMS, cotizaciones }), []);
-  // Un presupuesto copiado de otro trae los costos del original: no son de esta comparación.
-  const copiado = ITEMS.map(i => ({ ...i, precio_base: 9, cotizacion_proveedor: "Otra Constructora", cotizacion_archivo_id: 5 }));
-  assert.deepEqual(pasadosSinElegir({ elegidos: {}, items: copiado, cotizaciones }), []);
-  // Y el de una versión anterior de la misma empresa sí es de acá.
-  const deLaVersion1 = ITEMS.map(i => (i.id === 201 ? { ...i, precio_base: 5.95, cotizacion_proveedor: "Empresa A", cotizacion_archivo_id: 71 } : i));
-  assert.deepEqual(pasadosSinElegir({ elegidos: {}, items: deLaVersion1, cotizaciones: [reemplazada(A), A2] }).map(s => [s.id, s.costo]), [[201, 1249.5]]);
-});
-
-test("LA COLUMNA DEL PRESUPUESTO: al lado de cada empresa, lo que el rubro tiene hoy, y de quién es ese costo", () => {
-  const m = armar([A, B, C]);
-  // Sin costo todavía: su precio de referencia.
-  assert.deepEqual(m.grupos[0].filas[0].referencia, { unitario: 22.41, total: 2807.97, deQuien: null, repartido: false });
-  // Lo que el presupuesto suma en lo que alguien cotizó, capítulo por capítulo.
-  assert.deepEqual(m.grupos.map(g => g.referencia), [4720.22, 1260]);
-  // Con un costo que ya pasó de una cotización: ese costo, y de qué empresa.
-  const pasado = ITEMS.map(i => (i.id === 101 ? { ...i, precio_base: 18, cotizacion_proveedor: "Empresa A" } : i));
-  assert.deepEqual(armar([A, B, C], pasado).grupos[0].filas[0].referencia, { unitario: 18, total: 2255.4, deQuien: "Empresa A", repartido: false });
-  // Un rubro que nadie cotizó no entra en la suma del capítulo: se compara lo mismo contra lo mismo.
-  assert.equal(armar([C]).grupos[0].referencia, 4157.12);
+test("«PUEDE IR AL PRESUPUESTO PERO SE PUEDE REGRESAR»: con la versión nueva cambia el rubro que ya estaba, entra lo nuevo y se quita lo que dejó de cotizar", () => {
+  // Con la versión 1 se eligió a Dekorando para el capítulo, y pasó al presupuesto.
+  const m1 = armar([DEKORANDO, WINDOW]);
+  const plan1 = planDeAplicar({ matriz: m1, elegidos: elegir(m1, {}, 1, { capitulo: VIDRIO }), items: ITEMS });
+  assert.equal(plan1.entran.length, 4);
+  const pasado = [...ITEMS, ...plan1.entran.map((c, k) => ({ id: 900 + k, capitulo: c.capitulo, orden: 2000 + k, utilidad_pct: 0, descripcion: c.descripcion, unidad: c.unidad, cantidad: c.cantidad,
+    precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total, comparativa_fila: c.comparativa_fila, cotizacion_proveedor: c.cotizacion_proveedor }))];
+  // Llega la versión 2. Lo que seguía elegido sigue elegido.
+  const todas = [reemplazada(DEKORANDO), WINDOW, D2];
+  const siguen = elegidosAlActualizar({ capitulos: CAPITULOS, items: pasado, otras: [WINDOW], nueva: { renglones: D2.renglones }, elegidosAntes: SUS_FILAS });
+  const m2 = armar(todas, pasado);
+  const plan2 = planDeAplicar({ matriz: m2, elegidos: Object.fromEntries(siguen.map(f => [f, 4])), items: pasado });
+  // La V1, la V3 y la V16 son los mismos rubros, con el precio y la cantidad nuevos.
+  assert.deepEqual(plan2.cambian.map(x => [x.id, x.precio_base, x.cantidad, x.costo, x.costoAntes]), [[900, 900, 1, 900, 929], [901, 1300, 1, 1300, 1266], [903, 3283, 1, 3283, 6566]]);
+  // La V9, que ya no cotiza, se quita del presupuesto. Los mosquiteros son nuevos, pero nadie los eligió todavía: no entran solos.
+  assert.deepEqual([plan2.quitan.map(q => [q.id, q.descripcion.slice(0, 2)]), plan2.entran.length, plan2.yaEstan], [[[902, "V9"]], 0, 0]);
+  // Lo que el presupuesto ya tenía por su cuenta —el pasamanos— no aparece en ningún lado del plan.
+  assert.equal([...plan2.cambian, ...plan2.quitan, ...plan2.sueltan].some(x => x.id === 601), false);
+  // Se elige el capítulo entero con la versión nueva: ahora sí entran los mosquiteros.
+  const plan3 = planDeAplicar({ matriz: m2, elegidos: elegir(m2, {}, 4, { capitulo: VIDRIO }), items: pasado });
+  assert.deepEqual(plan3.entran.map(x => [x.descripcion, x.comparativa_fila]), [["Mosquiteros", "c4-3"]]);
 });
 
 test("la migración 195 solo agrega las columnas de versión: no borra nada ni toca ningún presupuesto", () => {
@@ -268,7 +140,7 @@ test("la migración 195 solo agrega las columnas de versión: no borra nada ni t
   assert.doesNotMatch(sinComentarios, /presupuesto_items|public\.presupuestos\b/);
 });
 
-test("la pantalla: cada empresa tiene su «versión nueva», la anterior no se borra, y solo pasa lo que falta pasar", () => {
+test("la pantalla: cada empresa tiene su «versión nueva», la anterior no se borra, y la heredada queda en sus filas", () => {
   const guardar = readFileSync(new URL("../src/modules/presupuestos/cotizacionesDelPresupuesto.js", import.meta.url), "utf8");
   const nueva = guardar.slice(guardar.indexOf("export async function guardarNuevaVersion"), guardar.indexOf("export async function borrarCotizacion"));
   assert.match(nueva, /version: \(Number\(anterior\.version\) \|\| 1\) \+ 1, reemplaza_a: anterior\.id/);
@@ -280,14 +152,12 @@ test("la pantalla: cada empresa tiene su «versión nueva», la anterior no se b
   for (const clase of ["nueva-version", "subir-version", "contra-la-anterior", "que-cambio", "que-version", "columna-del-presupuesto", "que-falta-pasar"]) {
     assert.match(pantalla, new RegExp(`className="${clase}"`), clase);
   }
-  assert.match(pantalla, /heredarRubros\(p\.leida\.renglones, anterior\.renglones/);
-  assert.match(pantalla, /const van = plan\.porPasar;/);
-  assert.match(pantalla, /onAplicar\(van\)/);
+  // Hereda de la anterior COMO LA VE LA MATRIZ: con su capítulo y sus filas ya resueltos.
+  assert.match(pantalla, /const comoEstaba = matriz\.empresas\.find\(x => x\.id === anterior\.id\)\?\.renglones \|\| \[\];\s+let renglones = heredarFilas\(p\.leida\.renglones, comoEstaba\);/);
   // Sin la migración 195 se avisa antes de abrir el archivo, no después de que NOVA lo leyó.
   assert.match(pantalla, /!\("reemplazada_at" in cot\)\) \{ setError\(SIN_195\); return; \}/);
   // Nada de confirmaciones del navegador: se confirma en la pantalla.
   assert.doesNotMatch(pantalla, /window\.confirm|\bconfirm\(/);
-
   // Mientras se compara, el botón viejo de «Subir cotización» —el que la mete directo al presupuesto— no se muestra.
   const modulo = readFileSync(new URL("../src/modules/ModuloPresupuestos.jsx", import.meta.url), "utf8");
   assert.match(modulo, /\{!bloqueado&&puedeEditar&&!comparando&&<button onClick=\{\(\)=>document\.getElementById\("cotiz-input"\)\.click\(\)\}/);
