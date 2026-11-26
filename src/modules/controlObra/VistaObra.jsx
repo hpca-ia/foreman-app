@@ -24,6 +24,7 @@ import { resultadoDeLaObra } from "./resultadoDeLaObra.js";
 import { cargarEjecutado } from "./ejecutado.js";
 import { cargarOrdenes } from "./ordenesDeCambio";
 import { liquidacionDeLaObra, modalidadDe } from "./liquidacion.js";
+import { medidosPorRubro } from "./medidosDelControl.js";
 import { cuadreConElPresupuesto, comoSeDice as comoSeDiceElCuadre } from "./cuadreConElPresupuesto.js";
 import PanelFacturas from "./PanelFacturas";
 import PanelPlanillas from "./PanelPlanillas";
@@ -163,6 +164,10 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const liqDeLoEjecutado = useMemo(() => (Object.keys(ejecutado).length && ordenesEnteras
     ? liquidacionDeLaObra({ obra: { ...obra, modalidad }, rubros, ordenes: ordenesEnteras.ordenes, lineasDeOrdenes: ordenesEnteras.lineas, ejecutado })
     : null), [ejecutado, ordenesEnteras, obra, modalidad, rubros]);
+  // Lo que esa liquidación dice de cada rubro del control, los de las órdenes incluidos.
+  const medidosDeLoEjecutado = useMemo(() => (liqDeLoEjecutado && ordenesEnteras
+    ? medidosPorRubro({ liq: liqDeLoEjecutado, rubros, ordenes: ordenesEnteras.ordenes, lineasDeOrdenes: ordenesEnteras.lineas })
+    : {}), [liqDeLoEjecutado, ordenesEnteras, rubros]);
   // Los rubros que se siguen en Beneficios: suman siempre al resultado, y la
   // tarjeta de esta pantalla tiene que decir lo mismo que esa pestaña.
   const [seguidos, setSeguidos] = useState([]);
@@ -445,7 +450,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           // (Hernán, 24/11/2026): el mismo número que la pestaña Beneficios.
           const res = resultadoDeLaObra({ beneficios: beneficiosVivos, rubros, porRubro, seguidos,
             ordenes: ordenesDeCambio.ordenes, lineasDeOrdenes: ordenesDeCambio.lineas,
-            deltas: liqDeLoEjecutado?.deltas || {}, medidos: liqDeLoEjecutado?.porFila || {}, modalidad });
+            deltas: liqDeLoEjecutado?.deltas || {}, medidos: medidosDeLoEjecutado, modalidad });
           if (!res.cuantosConPapel && !res.perdidas.length && !res.aprobados.cuantos && !res.ganadoEnSeguidos) return null;
           return <Tarjeta label={res.neto >= 0 ? "Beneficio" : "Pérdida"} valor={Math.abs(res.neto)}
             color={res.neto >= 0 ? colors.success : colors.danger} />;

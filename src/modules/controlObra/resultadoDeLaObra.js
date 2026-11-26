@@ -51,8 +51,10 @@ const c2 = v => Math.round(n(v) * 100) / 100;
 // contratado. Llave en mano no cambia: ahí se cobra lo contratado, se ejecute
 // lo que se ejecute.
 //
-// `medido` es el renglón de ese rubro en la liquidación (liquidacion.js):
-// { medida, ejecutada, cobra }. Quien llama no lo pasa en llave en mano.
+// `medido` es lo que la liquidación dice de ese rubro del control
+// (medidosPorRubro, en medidosDelControl.js): { medida, ejecutada, cobra }.
+// Vale para los rubros del contrato y para los que entraron por una orden de
+// cambio. Quien llama no lo pasa en llave en mano.
 
 /** Un rubro del presupuesto medido contra sus facturas. */
 export function seguimientoDeRubro(r, porRubro = {}, medido = null) {
@@ -85,6 +87,10 @@ export function seguimientoDeRubro(r, porRubro = {}, medido = null) {
     // Contra qué cantidad se midió: la ejecutada de la liquidación, si la
     // tiene. `contratado` es lo que se cobraba por lo firmado, para decirlo al lado.
     porLiquidacion, ejecutada, contratado,
+    // Un rubro que entró por una orden de cambio: lo suyo es «lo aprobado», no
+    // «lo contratado». Y lo que las órdenes le sumaron a un rubro del contrato
+    // y ya está contado en los rubros de esas órdenes (medidosDelControl.js).
+    deOrden: r.origen === "orden_cambio", enOrdenes: porLiquidacion ? n(medido.enOrdenes) : 0,
     // Cuenta en el resultado si ya pasó: una pérdida ya pasó; un ahorro,
     // recién cuando el rubro terminó. Antes es lo que falta comprar.
     cuenta: pasado || (terminado && gastado > 0),
@@ -335,8 +341,8 @@ export function ordenesPorAprobar({ ordenes = [], lineasDeOrdenes = {}, rubros =
 }
 
 /**
- * @param medidos  los renglones de la liquidación, por rubro (`porFila` de
- *                 liquidacion.js): de ahí sale la cantidad ejecutada que manda
+ * @param medidos  lo que la liquidación dice de cada rubro del control
+ *                 (medidosPorRubro): de ahí sale la cantidad ejecutada que manda
  */
 export function resultadoDeLaObra({ beneficios = [], rubros = [], seguidos = [], porRubro = {}, ordenes = [], lineasDeOrdenes = {}, deltas = {}, medidos = {}, modalidad = "rubros" } = {}) {
   // MANDA LA LIQUIDACIÓN, en una obra por rubros: llave en mano cobra lo

@@ -140,10 +140,12 @@ test("el rubro que se sigue no se cuenta dos veces: lo cargado a mano contra ese
 test("la pantalla: Beneficios y la tarjeta de la obra miden con la liquidación y suman los seguidos", () => {
   const panel = codigoDe("../src/modules/controlObra/PanelBeneficios.jsx");
   assert.match(panel, /const liq = useMemo\(\(\) => \(Object\.keys\(ejecutado\)\.length\s+\? liquidacionDeLaObra\(/);
-  assert.match(panel, /deltas, medidos: liq\?\.porFila \|\| \{\}, modalidad: comoSeCobra \}\);/);
+  // Desde el 26/11 pasa por el puente que también mide los rubros de las órdenes (medidosDelControl.js).
+  assert.match(panel, /deltas, medidos, modalidad: comoSeCobra \}\);/);
   // Se dice contra qué cantidad se midió, y por qué el número ya no es el del contrato.
   assert.match(panel, /\{f\.porLiquidacion && \(\s+<span className="por-lo-ejecutado"/);
-  assert.match(panel, /por \{fmt\(f\.ejecutada\)\} \{f\.unidad\} ejecutados en la liquidación \(contratado: \{fmt\(f\.cantidad\)\} \{f\.unidad\}, \$\{fmt\(f\.contratado\)\}\)/);
+  assert.match(panel, /por \{fmt\(f\.ejecutada\)\} \{f\.unidad\} ejecutados en la liquidación/);
+  assert.match(panel, /: "contratado"\}: \{fmt\(f\.cantidad\)\} \{f\.unidad\}, \$\{fmt\(f\.contratado\)\}\)/);
   // Ya no dice que espera a terminar.
   assert.doesNotMatch(panel, /no cuenta hasta terminar/);
   assert.doesNotMatch(panel, /RUBROS SEGUIDOS, TERMINADOS/);
@@ -151,6 +153,6 @@ test("la pantalla: Beneficios y la tarjeta de la obra miden con la liquidación 
   const obra = codigoDe("../src/modules/controlObra/VistaObra.jsx");
   assert.match(obra, /supabase\.from\("obra_beneficios_seguimiento"\)\s+\.select\("id,obra_rubro_id"\)\.eq\("obra_id", obra\.id\);/);
   assert.match(obra, /resultadoDeLaObra\(\{ beneficios: beneficiosVivos, rubros, porRubro, seguidos,/);
-  assert.match(obra, /deltas: liqDeLoEjecutado\?\.deltas \|\| \{\}, medidos: liqDeLoEjecutado\?\.porFila \|\| \{\}, modalidad \}\);/);
+  assert.match(obra, /deltas: liqDeLoEjecutado\?\.deltas \|\| \{\}, medidos: medidosDeLoEjecutado, modalidad \}\);/);
   assert.match(obra, /onSeguidos=\{setSeguidos\}/);
 });

@@ -17,6 +17,7 @@ import { sincronizarBeneficios } from "./cotizacionesOrden";
 import { cargarOrdenes } from "./ordenesDeCambio";
 import { cargarEjecutado } from "./ejecutado.js";
 import { liquidacionDeLaObra, modalidadDe } from "./liquidacion.js";
+import { medidosPorRubro } from "./medidosDelControl.js";
 import { FORMATO, partirHoja, renglonesDeHoja, PROMPT_RUBROS, asignacionDeTexto, leerSinCortes } from "./leerProforma.js";
 import { reconocerExcel } from "../../lib/leerExcelPresupuesto";
 import { comprimirImagen, noEntraElArchivo } from "../../lib/imagenes";
@@ -148,8 +149,12 @@ export default function PanelBeneficios({ obra, rubros = [], porRubro = {}, curr
     ? liquidacionDeLaObra({ obra: { ...obra, modalidad: comoSeCobra }, rubros, ordenes, lineasDeOrdenes, ejecutado })
     : null), [ejecutado, obra, comoSeCobra, rubros, ordenes, lineasDeOrdenes]);
   const deltas = liq?.deltas || {};
+  // Lo que la liquidación dice de cada rubro del control: los del contrato y,
+  // por la partida de la que salieron, los de las órdenes de cambio.
+  const medidos = useMemo(() => (liq ? medidosPorRubro({ liq, rubros, ordenes, lineasDeOrdenes }) : {}),
+    [liq, rubros, ordenes, lineasDeOrdenes]);
   const res = resultadoDeLaObra({ beneficios: sobreLoQueQueda, rubros, seguidos, porRubro, ordenes, lineasDeOrdenes,
-    deltas, medidos: liq?.porFila || {}, modalidad: comoSeCobra });
+    deltas, medidos, modalidad: comoSeCobra });
   // MANDA CONTROL DE OBRA: donde Control ya decidió cómo le fue al rubro, lo
   // cargado a mano deja de sumar (resultadoDeLaObra.js). `contados` es eso.
   const contados = res.contados;
@@ -552,7 +557,11 @@ Rubros de la obra: ${lista}`;
                 lado ya no es el del contrato, y sin esto no se sabe por qué. */}
             {f.porLiquidacion && (
               <span className="por-lo-ejecutado" style={{ color: colors.inkSoft }}>
-                {" "}por {fmt(f.ejecutada)} {f.unidad} ejecutados en la liquidación (contratado: {fmt(f.cantidad)} {f.unidad}, ${fmt(f.contratado)})
+                {" "}por {fmt(f.ejecutada)} {f.unidad} ejecutados en la liquidación
+                {/* El renglón de la liquidación junta el rubro con lo que sus
+                    órdenes le sumaron; eso ya se mide en los rubros de esas órdenes. */}
+                {f.enOrdenes > 0 ? `, sin los ${fmt(f.enOrdenes)} que le sumaron sus órdenes y se miden en el rubro de cada una` : ""}
+                {" "}({f.deOrden ? "aprobado en la orden" : "contratado"}: {fmt(f.cantidad)} {f.unidad}, ${fmt(f.contratado)})
               </span>
             )}
             {" "}· {f.costo != null ? `costo presupuestado $${fmt(f.costo)}` : "sin costo cargado: se mide contra lo que se cobra"}

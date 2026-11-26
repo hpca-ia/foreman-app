@@ -229,6 +229,15 @@ export function presupuestoActualizado({
         fila[columna].cantidad = c4(fila[columna].cantidad + cantidad);
         fila[columna].total = c2(fila[columna].total + total);
         if (!fila[columna].ordenes.includes(codigo)) fila[columna].ordenes.push(codigo);
+        // LO QUE LAS ÓRDENES APROBADAS LE SUMARON, APARTE. Acá el rubro y su
+        // «de más» van en un solo renglón; en el control lo de más es un rubro
+        // propio, en el capítulo de su orden. Quien mida el rubro del control
+        // contra este renglón tiene que poder descontar esa parte, o la misma
+        // cantidad queda presupuestada dos veces (medidosDelControl.js).
+        if (columna === "aprobado" && cantidad > 0) {
+          const s = fila.sumadoPorOrdenes || { cantidad: 0, total: 0 };
+          fila.sumadoPorOrdenes = { cantidad: c4(s.cantidad + cantidad), total: c2(s.total + total) };
+        }
         return;
       }
       bloqueDe(enBloque, columna).filas.push({

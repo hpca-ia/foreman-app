@@ -97,6 +97,9 @@ export function liquidacion({ matriz, ejecutado = {}, modalidad = "rubros", cost
     const loQueHace = !deltaCantidad ? 0 : costo == null ? null
       : porRubros ? c2((n(f.precio) - costo) * deltaCantidad) : c2(-costo * deltaCantidad);
     porFila[clave] = { vigente, medida, ejecutada, deltaCantidad, deltaCobro, cobra: c2(vigente.total + deltaCobro), efecto: loQueHace };
+    // Lo que las órdenes aprobadas le sumaron a este rubro del contrato: en el
+    // control vive en los rubros de esas órdenes, no en el del contrato.
+    if (f.sumadoPorOrdenes) porFila[clave].sumado = f.sumadoPorOrdenes;
     movido += deltaCobro;
     if (medida && deltaCantidad) {
       deltas[clave] = deltaCantidad;
