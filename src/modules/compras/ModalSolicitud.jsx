@@ -1289,10 +1289,11 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               await cargarPapeles(sol.id);
               // SUBIR LA COTIZACIÓN NUEVA ES MANDARLA (Hernán, 26/11/2026:
               // «residente envió otra cotización nueva, pero esta sigue como
-              // devuelta»). Si el pedido estaba devuelto y la sube quien lo
-              // pidió, vuelve solo a esperar el visto: no depende de acordarse
-              // de «Reenviar».
-              if (vuelveSolaAlSubir({ solicitud: sol, usuarioId: currentUser?.id })) {
+              // devuelta»; «si tienen una nueva cotización, ¿no debería estar
+              // en mi decisión otra vez?»). Si el pedido estaba devuelto,
+              // vuelve solo a esperar el visto, la suba quien la suba: no
+              // depende de acordarse de «Reenviar».
+              if (vuelveSolaAlSubir({ solicitud: sol })) {
                 const paraQuien = gerenteDelProyecto();
                 // Pedir el visto arma el PDF y manda el correo: mientras tanto se dice qué está pasando.
                 setVolvio("La cotización se subió. Volviendo a pedir el visto…");
@@ -1300,6 +1301,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                   quien: currentUser, comentario: NOTA_AL_VOLVER_SOLA, paraQuien,
                   titulo: tituloDelPaso("Aprobar compra", sol),
                   siguientes: { ok: personaDeCompras(), no: sol.solicitante_id },
+                  // Si la sube quien da el visto, no se manda un correo a sí mismo.
+                  sinCorreo: String(paraQuien) === String(currentUser?.id),
                 }) : { error: "no hay a quién pedirle el visto" };
                 if (m.error) { setVolvio(""); setAvisoPapel(`La cotización se subió, pero el pedido sigue devuelto (${m.error}). Tocá «Reenviar».`); return; }
                 setViva(v => ({ ...v, ...m.campos }));

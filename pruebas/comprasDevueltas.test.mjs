@@ -10,7 +10,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  numeroDeCompra, tituloDelPaso, numeroBuscado, ultimaDevolucion, cotizacionesDesdeQueSeDevolvio, vuelveSolaAlSubir, puedeReactivar,
+  numeroDeCompra, tituloDelPaso, numeroBuscado, ultimaDevolucion, cotizacionesDesdeQueSeDevolvio, vuelveSolaAlSubir, puedeReactivar, leTocaReactivarla,
 } from "../src/modules/compras/devueltas.js";
 
 const codigoDe = ruta => readFileSync(new URL(ruta, import.meta.url), "utf8");
@@ -32,15 +32,28 @@ test("LO QUE PASÓ: la devolvió a las 11:34, la residente subió otra cotizaci�
   assert.deepEqual(ultimaDevolucion(HISTORIAL_37), { cuando: "2026-11-26T16:34:37.973Z", quien: "Hernan Cueva", comentario: "No esta bien cotizado" });
   // La cotización que llegó después: la 74. La 71 es la que se había devuelto.
   assert.deepEqual(cotizacionesDesdeQueSeDevolvio({ solicitud: N37, historial: HISTORIAL_37, adjuntos: ADJUNTOS_37 }).map(a => a.id), [74]);
-  // AHORA: quien la pidió sube la cotización nueva, y vuelve sola a esperar el visto.
-  assert.equal(vuelveSolaAlSubir({ solicitud: N37, usuarioId: LIZETH }), true);
-  // Si la sube otra persona —compras, quien aprueba—, no: no está contestando por ella.
-  assert.equal(vuelveSolaAlSubir({ solicitud: N37, usuarioId: JOHANNA }), false);
-  assert.equal(vuelveSolaAlSubir({ solicitud: N37, usuarioId: HERNAN }), false);
+  // AHORA: a una devuelta le llega una cotización nueva, y vuelve sola a esperar el visto.
+  assert.equal(vuelveSolaAlSubir({ solicitud: N37 }), true);
   // Y solo una devuelta: subir una cotización a un borrador o a una que espera el visto no mueve nada.
   for (const estado of ["borrador", "pendiente_aprobacion", "aprobada", "comprada", "recibida"]) {
-    assert.equal(vuelveSolaAlSubir({ solicitud: { ...N37, estado }, usuarioId: LIZETH }), false, estado);
+    assert.equal(vuelveSolaAlSubir({ solicitud: { ...N37, estado } }), false, estado);
   }
+});
+
+test("«SI TIENEN UNA NUEVA COTIZACIÓN, ¿NO DEBERÍA ESTAR EN MI DECISIÓN OTRA VEZ?»: la suba quien la suba vuelve al visto, y la que quedó a mitad le toca a quien la reactiva", () => {
+  // La regla no mira quién la sube: residente, compras o quien aprueba. Lo que dice es que la devuelta ya tiene con qué decidir.
+  assert.equal(vuelveSolaAlSubir.length, 0);
+  assert.doesNotMatch(codigoDe("../src/modules/compras/devueltas.js").split("export const vuelveSolaAlSubir")[1].split(";")[0], /solicitante_id|usuarioId/);
+  // LA N° 37 DE VERDAD: la cotización se subió a las 13:03 y la regla se publicó a las 16:22. Quedó devuelta, con la cotización nueva.
+  // Le toca a quien la puede reactivar —un administrador—, y le aparece en «Me toca a mí».
+  assert.equal(leTocaReactivarla({ solicitud: N37, conNueva: true, esAdmin: true }), true);
+  // A quien no es administrador no: no puede reactivarla. Y sin cotización nueva sigue siendo de quien la pidió.
+  assert.equal(leTocaReactivarla({ solicitud: N37, conNueva: true, esAdmin: false }), false);
+  assert.equal(leTocaReactivarla({ solicitud: N37, conNueva: false, esAdmin: true }), false);
+  assert.equal(leTocaReactivarla({ solicitud: { ...N37, estado: "pendiente_aprobacion" }, conNueva: true, esAdmin: true }), false);
+  const lista = codigoDe("../src/modules/compras/ModuloCompras.jsx");
+  assert.match(lista, /const meToca = s => \{\s+\/\/[^\n]+\n\s+if \(leTocaReactivarla\(\{ solicitud: s, conNueva: conNueva\.has\(s\.id\), esAdmin: esAdmin\(currentUser\?\.role\) \}\)\) return true;/);
+  assert.match(lista, /tiene una cotización nueva\{esAdmin\(currentUser\?\.role\) \? ": abrila y reactivala para darle el visto" : ""\}/);
 });
 
 test("un comentario no es una devolución, y si se devolvió dos veces cuenta la última", () => {
@@ -104,7 +117,9 @@ test("la pantalla de la solicitud: el número, «Solo comentar» al lado de Apro
 
   // SUBIR LA COTIZACIÓN NUEVA ES MANDARLA: después de subirla, si vuelve sola, va a esperar el visto.
   const alSubir = p.slice(p.indexOf("SUBIR LA COTIZACIÓN NUEVA ES MANDARLA"), p.indexOf("LAS QUE ESPERAN: elegidas antes"));
-  assert.match(alSubir, /if \(vuelveSolaAlSubir\(\{ solicitud: sol, usuarioId: currentUser\?\.id \}\)\) \{/);
+  assert.match(alSubir, /if \(vuelveSolaAlSubir\(\{ solicitud: sol \}\)\) \{/);
+  // Si la sube quien da el visto, no se manda el correo a sí mismo.
+  assert.match(alSubir, /sinCorreo: String\(paraQuien\) === String\(currentUser\?\.id\),/);
   assert.match(alSubir, /await moverA\(sol, "pendiente_aprobacion", \{\s+quien: currentUser, comentario: NOTA_AL_VOLVER_SOLA, paraQuien,/);
   // La ventana sigue abierta: toma el estado y la tarea nuevos, para que el paso siguiente no cierre la tarea vieja.
   assert.match(alSubir, /setViva\(v => \(\{ \.\.\.v, \.\.\.m\.campos \}\)\);/);
@@ -127,5 +142,5 @@ test("la pantalla de la solicitud: el número, «Solo comentar» al lado de Apro
   // El buscador guarda { texto, min, max }: el número se lee del texto.
   assert.match(lista, /const elNumero = numeroBuscado\(busca\?\.texto\);/);
   assert.match(lista, /const porNumero = elNumero == null \? \[\] : porEstado\.filter\(s => Number\(s\.id\) === elNumero\);/);
-  assert.match(lista, /\{conNueva\.has\(s\.id\) && <div className="con-cotizacion-nueva"/);
+  assert.match(lista, /\{conNueva\.has\(s\.id\) && \(\s+<div className="con-cotizacion-nueva"/);
 });

@@ -70,13 +70,28 @@ export function cotizacionesDesdeQueSeDevolvio({ solicitud, historial = [], adju
 }
 
 /**
- * SUBIR LA COTIZACIÓN NUEVA ES MANDARLA. Si la compra está devuelta y quien
- * sube la cotización es quien la pidió, vuelve sola a esperar el visto: es la
- * respuesta a lo que se le pidió corregir. Si la sube otra persona —compras,
- * quien aprueba—, no: esa persona no está contestando por ella.
+ * SUBIR LA COTIZACIÓN NUEVA ES MANDARLA. Si la compra está devuelta y le
+ * llega una cotización, vuelve sola a esperar el visto: es la respuesta a lo
+ * que se pidió corregir.
+ *
+ * LA SUBA QUIEN LA SUBA. La primera versión de esta regla la limitaba a quien
+ * había pedido la compra. Hernán, el mismo 26/11/2026, mirando la N° 37
+ * todavía «Devuelta» con su cotización nueva: «si tienen una nueva
+ * cotización, ¿no debería estar en mi decisión otra vez?». Una devuelta con
+ * cotización nueva está esperando a quien da el visto, no a quien la pidió.
  */
-export const vuelveSolaAlSubir = ({ solicitud, usuarioId } = {}) =>
-  solicitud?.estado === "requiere_info" && solicitud.solicitante_id != null && String(solicitud.solicitante_id) === String(usuarioId);
+export const vuelveSolaAlSubir = ({ solicitud } = {}) => solicitud?.estado === "requiere_info";
+
+/**
+ * LA DEVUELTA QUE YA TIENE SU COTIZACIÓN NUEVA Y NO VOLVIÓ —se subió antes de
+ * que existiera la regla de arriba, o algo falló al volver— LE TOCA A QUIEN
+ * LA PUEDE REACTIVAR, no a quien la pidió: tiene que aparecerle entre lo que
+ * espera por él, que es donde la busca.
+ *
+ * @param conNueva  si tiene una cotización posterior a su devolución
+ */
+export const leTocaReactivarla = ({ solicitud, conNueva = false, esAdmin = false } = {}) =>
+  !!conNueva && puedeReactivar({ solicitud, esAdmin });
 
 /**
  * QUIÉN PUEDE REACTIVAR UNA DEVUELTA —volver a ponerla a esperar el visto sin

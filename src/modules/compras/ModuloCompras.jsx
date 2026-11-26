@@ -4,7 +4,8 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { ESTADOS, ABIERTAS, cargarSolicitudes, veLaCompra, devueltasConCotizacionNueva } from "./compras";
-import { numeroDeCompra, numeroBuscado } from "./devueltas.js";
+import { numeroDeCompra, numeroBuscado, leTocaReactivarla } from "./devueltas.js";
+import { esAdmin } from "../../lib/roles";
 import ModalSolicitud from "./ModalSolicitud";
 import BuscadorDeGastos from "../../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../../lib/filtrarGastos";
@@ -127,6 +128,8 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // tiene dueño no puede quedar esperando a nadie.
   const comproYo = (leToca ? leToca("compras.gestionar") : gestionaCompras) || !hayQuienCompre;
   const meToca = s => {
+    // La devuelta que ya tiene su cotización nueva espera a quien la puede reactivar.
+    if (leTocaReactivarla({ solicitud: s, conNueva: conNueva.has(s.id), esAdmin: esAdmin(currentUser?.role) })) return true;
     if (s.estado === "pendiente_aprobacion") return apruebo;
     if (s.estado === "aprobada") return comproYo;
     if (s.estado === "borrador" || s.estado === "requiere_info" || s.estado === "comprada") {
@@ -304,9 +307,14 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                   {/* Pagado no es un paso del flujo sino una marca al costado:
                       se paga antes, durante o después de recibir. */}
                   {s.pagado_at && <span style={{ color: colors.success, marginLeft: 5 }}>· PAGADO</span>}
-                  {e.quien && !s.pagado_at && <span style={{ color: colors.muted, fontWeight: 400 }}> · {e.quien}</span>}
+                  {/* A quién espera. La devuelta que ya tiene su cotización nueva espera a quien da el visto, no a quien la pidió. */}
+                  {e.quien && !s.pagado_at && <span style={{ color: colors.muted, fontWeight: 400 }}> · {conNueva.has(s.id) ? "quien da el visto" : e.quien}</span>}
                   {/* Devuelta, pero ya llegó la cotización que se pidió y nadie la reenvió. */}
-                  {conNueva.has(s.id) && <div className="con-cotizacion-nueva" style={{ color: colors.warning, fontWeight: 600, fontSize: 10.5 }}>tiene una cotización nueva</div>}
+                  {conNueva.has(s.id) && (
+                    <div className="con-cotizacion-nueva" style={{ color: colors.warning, fontWeight: 600, fontSize: 10.5 }}>
+                      tiene una cotización nueva{esAdmin(currentUser?.role) ? ": abrila y reactivala para darle el visto" : ""}
+                    </div>
+                  )}
                 </div>
                 {/* EL MONTO, SIEMPRE QUE HAYA UNO.
                     Antes solo salía `monto`, que es el de la proforma elegida,
