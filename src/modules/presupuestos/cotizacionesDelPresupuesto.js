@@ -37,6 +37,34 @@ export async function actualizarCotizacion(id, campos) {
   return error ? (falta(error) ? SIN_194 : error.message) : null;
 }
 
+export const SIN_195 = "Para subir una versión nueva de una cotización falta correr la migración 195 en Supabase.";
+
+/**
+ * UNA VERSIÓN NUEVA DE LA MISMA EMPRESA (Hernán, 26/11/2026: «quiero poder
+ * actualizar y volver a escoger»). La nueva queda como la vigente, con el
+ * nombre que ya tenía la empresa y lo que seguía elegido; la anterior se
+ * guarda, marcada como reemplazada, y no se borra.
+ *
+ * @returns { cotizacion, anterior } o { error }
+ */
+export async function guardarNuevaVersion({ anterior, archivoId = null, renglones = [], totales = null, elegidos = [], quien = null }) {
+  const { data, error } = await supabase.from("presupuesto_cotizaciones").insert({
+    presupuesto_id: anterior.presupuesto_id, proveedor: anterior.proveedor || "", archivo_id: archivoId,
+    renglones, totales, elegidos, version: (Number(anterior.version) || 1) + 1, reemplaza_a: anterior.id,
+    creado_por: quien?.id ?? null, creado_nombre: quien?.name || null,
+  }).select().single();
+  if (error) return { error: falta(error) ? SIN_195 : error.message };
+  const ahora = new Date().toISOString();
+  const { error: e2 } = await supabase.from("presupuesto_cotizaciones")
+    .update({ reemplazada_at: ahora, updated_at: ahora }).eq("id", anterior.id);
+  if (e2) {
+    // Sin poder marcar la anterior quedarían las dos como vigentes: se saca la nueva y se dice.
+    await supabase.from("presupuesto_cotizaciones").delete().eq("id", data.id);
+    return { error: falta(e2) ? SIN_195 : e2.message };
+  }
+  return { cotizacion: data, anterior: { ...anterior, reemplazada_at: ahora } };
+}
+
 export async function borrarCotizacion(id) {
   const { error } = await supabase.from("presupuesto_cotizaciones").delete().eq("id", id);
   return error ? error.message : null;

@@ -89,6 +89,24 @@ export function renglonesDe(cot, idsVivos = null) {
   });
 }
 
+/**
+ * LA CANTIDAD PROPIA DEL PRESUPUESTO EN UN RUBRO.
+ *
+ * Un paquete repartido sobre rubros que no tenían cantidad los deja en 1, con
+ * su parte como precio: así la plata del paquete queda en el presupuesto. Ese
+ * 1 lo puso el reparto, no quien arma el presupuesto. Si contara como
+ * cantidad, al volver a la matriz las otras empresas —las que cotizaron por
+ * m2— se compararían sobre 1 m2, y elegir a una de ellas dejaría el rubro en
+ * una unidad. Para comparar y para volver a elegir, ese rubro sigue sin
+ * cantidad propia.
+ */
+const DEL_REPARTO = / · repartido entre \d+ rubros$/;
+export function cantidadPropia(item) {
+  const puestaPorElReparto = igual(item?.cantidad, 1) && item?.cotizacion_cantidad == null
+    && DEL_REPARTO.test(item?.cotizacion_renglon || "");
+  return puestaPorElReparto ? 0 : n(item?.cantidad);
+}
+
 /** Reparte `total` según `pesos`, en centavos y sin que sobre ni falte ninguno. */
 export function repartir(total, pesos = []) {
   const centavos = Math.round(n(total) * 100);
@@ -108,9 +126,9 @@ export function repartir(total, pesos = []) {
  * @param cotizaciones  [{ id, proveedor, renglones: [{ descripcion, unidad,
  *                      cantidad, precio_unitario, total, items: [id…] }] }]
  * @returns {
- *   empresas: [{ id, proveedor, cotizado, comparado, cubre, sueltos, renglones }],
- *   grupos:   [{ numero, capitulo, filas: [{ id, numero, item, celdas, menor }],
- *                sub: { [cotId]: { total, cubre, faltan, estimado } }, cotizados, menor }],
+ *   empresas: [{ id, proveedor, version, reemplaza_a, cotizado, comparado, cubre, sueltos, renglones }],
+ *   grupos:   [{ numero, capitulo, filas: [{ id, numero, item, cantidad, celdas, referencia, menor }],
+ *                sub: { [cotId]: { total, cubre, faltan, estimado } }, cotizados, referencia, menor }],
  *   celdaDe:  (itemId, cotId) => celda | null,
  * }
  * Una celda es { tipo: "rubro", unitario, cantidad, total, … } o
@@ -121,7 +139,22 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
   const vivos = new Set(porId.keys());
   const celdas = new Map();   // `${itemId}|${cotId}` → celda
   const clave = (itemId, cotId) => `${Number(itemId)}|${cotId}`;
-  const empresas = (cotizaciones || []).map(c => ({
+  // LA VERSIÓN VIGENTE DE CADA EMPRESA. Una cotización que ya fue reemplazada
+  // por una más nueva queda guardada, pero no se compara: se compara lo último
+  // que mandó cada una. Y CADA EMPRESA SE QUEDA EN SU COLUMNA: la versión
+  // nueva va en el lugar de la primera que mandó, no al final.
+  const todas = cotizaciones || [];
+  const cotPorId = new Map(todas.map(c => [String(c.id), c]));
+  const lugarDe = c => {
+    const vistas = new Set();
+    let primera = c;
+    while (primera.reemplaza_a != null && cotPorId.has(String(primera.reemplaza_a)) && !vistas.has(primera)) {
+      vistas.add(primera); primera = cotPorId.get(String(primera.reemplaza_a));
+    }
+    return todas.indexOf(primera);
+  };
+  const enSuLugar = todas.filter(c => !c.reemplazada_at).map(c => [c, lugarDe(c)]).sort((a, b) => a[1] - b[1]).map(([c]) => c);
+  const empresas = enSuLugar.map(c => ({
     ...c, renglones: renglonesDe(c, vivos),
     // El descuento general que ya está restado en todo lo de esta empresa, y el que ofrece su papel.
     descuento: descuentoDe(c),
@@ -134,7 +167,7 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
       if (r.items.length !== 1) continue;
       const item = porId.get(r.items[0]);
       const unitario = unitarioDe(r);
-      const tuya = n(item.cantidad);
+      const tuya = cantidadPropia(item);
       const cantidad = tuya > 0 ? tuya : n(r.cantidad) || 1;
       celdas.set(clave(item.id, c.id), {
         tipo: "rubro", renglon: r.k, descripcion: r.descripcion || "", unidad: r.unidad || "",
@@ -177,7 +210,15 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
       const conPrecio = Object.entries(suyas).filter(([, x]) => x.tipo === "rubro" && x.unitario > 0);
       const minimo = conPrecio.length > 1 ? Math.min(...conPrecio.map(([, x]) => x.unitario)) : null;
       const menores = minimo == null ? [] : conPrecio.filter(([, x]) => igual(x.unitario, minimo)).map(([id]) => id);
-      return { id: Number(item.id), numero: r.numero || "", item, celdas: suyas, menor: menores.length === 1 ? menores[0] : null };
+      // LO QUE EL PRESUPUESTO TIENE HOY EN ESE RUBRO: su costo si ya tiene uno,
+      // o el precio de referencia con el que se armó. Es la columna contra la
+      // que se lee a cada empresa —«presupuesto contra posibles contrataciones»—.
+      const unitarioHoy = n(item.precio_base) > 0 ? n(item.precio_base) : n(item.precio_unitario);
+      const referencia = { unitario: unitarioHoy, total: r2(n(item.cantidad) * unitarioHoy), deQuien: item.cotizacion_proveedor || null,
+        // Si ese costo es la parte de un paquete repartido, no es un unitario que alguien cotizó.
+        repartido: n(item.precio_base) > 0 && DEL_REPARTO.test(item.cotizacion_renglon || "") };
+      return { id: Number(item.id), numero: r.numero || "", item, cantidad: cantidadPropia(item), celdas: suyas, referencia,
+        menor: menores.length === 1 ? menores[0] : null };
     });
     // Lo que alguna empresa cotizó en este capítulo: contra eso se mide a cada una.
     const cotizados = filas.filter(f => Object.keys(f.celdas).length).map(f => f.id);
@@ -197,7 +238,9 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
     const completas = Object.entries(sub).filter(([, s]) => s.faltan === 0 && s.total > 0);
     const minimo = completas.length > 1 ? Math.min(...completas.map(([, s]) => s.total)) : null;
     const menores = minimo == null ? [] : completas.filter(([, s]) => igual(s.total, minimo)).map(([id]) => id);
-    return { numero: cap.numero, capitulo: cap.nombre, filas, sub, cotizados, menor: menores.length === 1 ? menores[0] : null };
+    // Lo que el presupuesto suma hoy en los rubros que alguien cotizó: es contra lo que se lee el subtotal de cada empresa.
+    const referencia = r2(filas.filter(f => cotizados.includes(f.id)).reduce((s, f) => s + f.referencia.total, 0));
+    return { numero: cap.numero, capitulo: cap.nombre, filas, sub, cotizados, referencia, menor: menores.length === 1 ? menores[0] : null };
   });
 
   // 4. Cada empresa: lo que dice su papel, lo que suma sobre este presupuesto y lo que no calzó.
@@ -205,6 +248,7 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
     const sueltos = c.renglones.filter(r => !r.items.length);
     return {
       id: c.id, proveedor: c.proveedor || "", archivo_id: c.archivo_id ?? null, totales: c.totales || null,
+      version: n(c.version) || 1, reemplaza_a: c.reemplaza_a ?? null,
       renglones: c.renglones, sueltos,
       descuento: c.descuento, descuentoOfrecido: c.descuentoOfrecido,
       cotizado: r2(c.renglones.reduce((t, r) => t + totalDelRenglon(r), 0)),
@@ -276,7 +320,7 @@ export function planDeAplicar({ matriz, elegidos = {}, items = [] } = {}) {
     const celda = matriz.celdaDe(itemId, cotId);
     const e = empresa.get(String(cotId));
     if (!item || !celda || !e) continue;
-    const tuya = n(item.cantidad);
+    const tuya = cantidadPropia(item);
     const repartido = celda.tipo === "paquete";
     const cantidad = tuya > 0 ? tuya : repartido ? 1 : celda.cantidad;
     const costo = repartido ? celda.parte : r2(cantidad * celda.unitario);
@@ -285,16 +329,22 @@ export function planDeAplicar({ matriz, elegidos = {}, items = [] } = {}) {
     const precio_base = repartido ? r6(costo / cantidad) : celda.unitario;
     const pct = n(item.utilidad_pct);
     const precio_unitario = r2(precio_base * (1 + pct / 100));
+    // ¿YA ESTÁ ASÍ EN EL PRESUPUESTO? Lo elegido puede haber pasado antes. Si
+    // después llegó una versión nueva de la cotización, o cambió la cantidad
+    // del rubro, deja de coincidir, y hay que pasarlo de nuevo.
+    const yaEsta = String(item.cotizacion_proveedor || "") === String(e.proveedor || "")
+      && Math.abs(n(item.precio_base) - precio_base) < 0.0000005 && (tuya > 0 || igual(item.cantidad, cantidad));
     cambios.push({
       id: Number(item.id), descripcion: item.descripcion || "", proveedor: e.proveedor, cotizacion_id: e.id,
-      precio_base, precio_unitario, cantidad, total: r2(cantidad * precio_unitario), costo,
+      precio_base, precio_unitario, cantidad, total: r2(cantidad * precio_unitario), costo, yaEsta,
       ponerCantidad: !(tuya > 0), repartido,
       pesoDe: repartido ? celda.pesoDe : null,
-      costoAntes: r2(tuya * (n(item.precio_base) > 0 ? n(item.precio_base) : n(item.precio_unitario))),
-      // De qué papel salió el precio, como lo pide la migración 138.
+      costoAntes: r2(n(item.cantidad) * (n(item.precio_base) > 0 ? n(item.precio_base) : n(item.precio_unitario))),
+      // De qué papel salió el precio, como lo pide la migración 138. El final
+      // «· repartido entre N rubros» es la marca del reparto: no se recorta.
       cotizacion_archivo_id: e.archivo_id ?? null, cotizacion_proveedor: e.proveedor || null,
       cotizacion_renglon: repartido
-        ? `${celda.descripcion} · repartido entre ${celda.items.length} rubros`.slice(0, 400)
+        ? `${String(celda.descripcion || "").slice(0, 360)} · repartido entre ${celda.items.length} rubros`
         : String(celda.descripcion || "").slice(0, 400),
       cotizacion_cantidad: repartido ? null : (celda.cantidadCotizada || null),
     });
@@ -304,7 +354,29 @@ export function planDeAplicar({ matriz, elegidos = {}, items = [] } = {}) {
     costo: r2(cambios.reduce((t, c) => t + c.costo, 0)),
     repartidos: cambios.filter(c => c.repartido).length,
     sinCantidad: cambios.filter(c => c.ponerCantidad).length,
+    // Lo que falta pasar: lo elegido que el presupuesto todavía no tiene así.
+    porPasar: cambios.filter(c => !c.yaEsta),
   };
+}
+
+/**
+ * LO QUE YA PASÓ AL PRESUPUESTO Y HOY NO ESTÁ ELEGIDO. Volver a escoger puede
+ * soltar un rubro —o un paquete entero, si uno de sus rubros se le da a otra
+ * empresa— que ya había pasado: el presupuesto se queda con ese costo, y nadie
+ * lo eligió. No se borra solo —es un precio del presupuesto—: se dice.
+ *
+ * Solo lo que salió de una cotización de ESTA comparación, en cualquiera de
+ * sus versiones: un presupuesto copiado de otro trae los costos del original,
+ * y esos no son de acá.
+ *
+ * @returns [{ id, descripcion, proveedor, costo }]
+ */
+export function pasadosSinElegir({ elegidos = {}, items = [], cotizaciones = [] } = {}) {
+  const papeles = new Set((cotizaciones || []).map(c => c.archivo_id).filter(a => a != null).map(String));
+  const nombres = new Set((cotizaciones || []).map(c => String(c.proveedor || "")).filter(Boolean));
+  const deAca = i => (i.cotizacion_archivo_id != null && papeles.has(String(i.cotizacion_archivo_id))) || nombres.has(String(i.cotizacion_proveedor));
+  return (items || []).filter(i => i.cotizacion_proveedor && n(i.precio_base) > 0 && elegidos[Number(i.id)] == null && deAca(i))
+    .map(i => ({ id: Number(i.id), descripcion: i.descripcion || "", proveedor: i.cotizacion_proveedor, costo: r2(n(i.cantidad) * n(i.precio_base)) }));
 }
 
 /** Lo elegido, como se guarda: en cada cotización, los rubros que se le adjudicaron. */
@@ -317,6 +389,113 @@ export function elegidosPorCotizacion(elegidos = {}) {
 /** Y al revés, al leerlas: { rubro → cotización }. */
 export function elegidosDe(cotizaciones = []) {
   const out = {};
-  for (const c of cotizaciones || []) for (const id of (Array.isArray(c.elegidos) ? c.elegidos : [])) out[Number(id)] = c.id;
+  for (const c of (cotizaciones || []).filter(x => !x.reemplazada_at)) for (const id of (Array.isArray(c.elegidos) ? c.elegidos : [])) out[Number(id)] = c.id;
   return out;
+}
+
+// ── VERSIONES ──────────────────────────────────────────────────────────────
+//
+// Hernán, 26/11/2026: «estos presupuestos van a tener actualizaciones...
+// quiero poder actualizar y volver a escoger por si cambiamos de
+// especificación, cantidad o negociación. Entonces puede ir al presupuesto
+// pero se puede regresar a ver nuevas versiones».
+//
+// Una empresa manda su cotización de nuevo —negoció, cambió una
+// especificación, corrigió una cantidad—. La nueva REEMPLAZA a la anterior en
+// la matriz y la anterior queda guardada: se puede volver a mirar, y sirve
+// para decir qué cambió. Lo que ya se había corregido y elegido no se pierde.
+
+/** La versión anterior de cada cotización vigente, lista para armarle su propia matriz. */
+export function anterioresDe(cotizaciones = []) {
+  const porId = new Map((cotizaciones || []).map(c => [String(c.id), c]));
+  return (cotizaciones || []).filter(c => !c.reemplazada_at && c.reemplaza_a != null)
+    .map(c => porId.get(String(c.reemplaza_a))).filter(Boolean)
+    .map(c => ({ ...c, reemplazada_at: null }));
+}
+
+/** Todas las versiones de una empresa, de la más nueva a la más vieja. */
+export function versionesDe(cot, cotizaciones = []) {
+  const porId = new Map((cotizaciones || []).map(c => [String(c.id), c]));
+  const cadena = [];
+  for (let c = cot; c && !cadena.includes(c); c = c.reemplaza_a != null ? porId.get(String(c.reemplaza_a)) : null) cadena.push(c);
+  return cadena;
+}
+
+const mismoTexto = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * LO QUE YA SE CORRIGIÓ A MANO NO SE VUELVE A CORREGIR. En la versión nueva,
+ * el renglón que se llama igual que uno de la anterior va a los mismos rubros
+ * que aquel —que es lo que alguien revisó—; al resto le queda lo que propuso
+ * NOVA, sin repetir un rubro que ya tomó otro renglón.
+ */
+export function heredarRubros(nuevos = [], anteriores = []) {
+  const deAntes = new Map();
+  (anteriores || []).forEach(r => {
+    const k = mismoTexto(r.descripcion);
+    if (k && !deAntes.has(k) && (r.items || []).length) deAntes.set(k, r.items.map(Number));
+  });
+  const usados = new Set();
+  const tomar = ids => ids.filter(id => !usados.has(id) && usados.add(id));
+  const heredados = (nuevos || []).map(r => {
+    const previos = deAntes.get(mismoTexto(r.descripcion));
+    return previos ? { ...r, items: tomar(previos) } : null;
+  });
+  return (nuevos || []).map((r, i) => heredados[i] || { ...r, items: tomar((r.items || []).map(Number)) });
+}
+
+/**
+ * Lo que la versión anterior tenía adjudicado y la nueva sigue cotizando: eso
+ * sigue elegido, para no tener que elegir de nuevo. Un paquete solo si siguen
+ * elegidos todos sus rubros. Lo que mientras tanto se le dio a otra empresa
+ * es de la otra: pasa al volver a una versión anterior, que trae guardado lo
+ * que tenía elegido entonces.
+ *
+ * @param otras  las demás cotizaciones vigentes del presupuesto
+ * @param nueva  la versión que queda vigente, todavía sin guardar: { renglones, totales }
+ * @returns [id de rubro, …]
+ */
+export function elegidosAlActualizar({ capitulos = [], items = [], otras = [], nueva = {}, elegidosAntes = [] } = {}) {
+  const ID = "la-version-nueva";
+  const vigentes = (otras || []).filter(c => !c.reemplazada_at);
+  const matriz = matrizDeCotizaciones({ capitulos, items, cotizaciones: [...vigentes, { ...nueva, id: ID, reemplazada_at: null }] });
+  const deOtra = new Set(vigentes.flatMap(c => (Array.isArray(c.elegidos) ? c.elegidos : []).map(Number)));
+  const siguen = {};
+  (elegidosAntes || []).forEach(id => { if (!deOtra.has(Number(id)) && matriz.celdaDe(id, ID)) siguen[Number(id)] = ID; });
+  return Object.keys(sinPaquetesRotos(matriz, siguen)).map(Number);
+}
+
+/**
+ * QUÉ CAMBIÓ de una versión a la siguiente, rubro por rubro: lo que subió, lo
+ * que bajó, lo que ahora cotiza y antes no, y lo que dejó de cotizar. Y la
+ * CANTIDAD: si la empresa ahora cotiza otra, se dice —aunque el precio sea el
+ * mismo—, porque la cantidad del presupuesto no la cambia la cotización: la
+ * cambia quien arma el presupuesto, y tiene que enterarse.
+ *
+ * @param matriz    la de hoy
+ * @param anterior  la matriz armada con anterioresDe()
+ * @returns { filas: [{ id, numero, descripcion, antes, ahora, que, cantidadAntes, cantidadAhora }], antes, ahora, diferencia }
+ */
+export function cambiosDeVersion({ matriz, anterior, cotId, anteriorId } = {}) {
+  const filas = [];
+  const cotizada = x => (x?.tipo === "rubro" && n(x.cantidadCotizada) > 0 ? n(x.cantidadCotizada) : null);
+  for (const g of matriz?.grupos || []) {
+    for (const f of g.filas) {
+      const ahora = matriz.celdaDe(f.id, cotId), antes = anterior?.celdaDe(f.id, anteriorId) || null;
+      if (!ahora && !antes) continue;
+      const va = ahora ? (ahora.tipo === "rubro" ? ahora.unitario : ahora.parte) : null;
+      const vb = antes ? (antes.tipo === "rubro" ? antes.unitario : antes.parte) : null;
+      const ca = cotizada(ahora), cb = cotizada(antes);
+      const otraCantidad = ca != null && cb != null && !igual(ca, cb);
+      const precio = !antes ? "nuevo" : !ahora ? "ya_no" : igual(va, vb) ? "igual" : va > vb ? "subio" : "bajo";
+      const que = precio === "igual" && otraCantidad ? "cantidad" : precio;
+      if (que !== "igual") {
+        filas.push({ id: f.id, numero: f.numero, descripcion: f.item.descripcion || "", antes: vb, ahora: va, que,
+          ...(otraCantidad ? { cantidadAntes: cb, cantidadAhora: ca } : {}) });
+      }
+    }
+  }
+  const total = (m, id) => n(m?.empresas.find(e => String(e.id) === String(id))?.comparado);
+  const antes = total(anterior, anteriorId), ahora = total(matriz, cotId);
+  return { filas, antes, ahora, diferencia: r2(ahora - antes) };
 }

@@ -109,5 +109,5 @@ test("el presupuesto: el botón abre la matriz, y lo elegido entra como costo, c
   assert.doesNotMatch(m, /window\.confirm|window\.alert/);
   assert.match(m, /className="confirmar-pasar" onClick=\{aplicar\}/);
   // Lo elegido se guarda solo, en cada cotización.
-  assert.match(m, /if \(a !== b\) await guardar\(c\.id, \{ elegidos: ahora\[c\.id\] \|\| \[\] \}\);/);
+  assert.match(m, /if \(a !== b\) \{\s+setCots\([^\n]+\n\s+await guardar\(c\.id, \{ elegidos: ahora\[c\.id\] \|\| \[\] \}\);/);
 });

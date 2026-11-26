@@ -1567,7 +1567,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
               title="Subir las cotizaciones de varias empresas, verlas en una matriz y elegir cuál entra al presupuesto"
               style={{background:comparando?"var(--brand)":"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:comparando?"#fff":"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
               {comparando?"← Volver al presupuesto":"Comparar cotizaciones"}</button>}
-            {!bloqueado&&puedeEditar&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
+            {!bloqueado&&puedeEditar&&!comparando&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
             {puedeEditar&&<button onClick={()=>setPasarABase(true)} disabled={items.length===0}
               title={presupuestoActivo?.en_base_at?`Pasado a la base el ${new Date(presupuestoActivo.en_base_at).toLocaleDateString("es-EC")}`:"Cuando lo des por bueno: sus precios entran a la base de rubros"}
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
