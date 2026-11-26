@@ -16,6 +16,8 @@ import { reconocerExcel, recordarFormato } from "../lib/leerExcelPresupuesto";
 import { interpretarPresupuesto, interpretarVariasHojas, ivaMetidoEnTotales } from "./controlObra/leerPresupuesto";
 import { RESPUESTAS_VACIAS, faltanRespuestas, unidadParaBase } from "../lib/preguntasNova";
 import CotizacionPanel from "./CotizacionPanel";
+// La matriz para comparar las cotizaciones de varias empresas antes de que entren.
+import MatrizCotizaciones from "./presupuestos/MatrizCotizaciones";
 import { rubrosDeLaBase, pedidoDeEmparejar, emparejar } from "./presupuestos/llenarBase";
 import ExportarPresupuesto from "./presupuestos/ExportarPresupuesto";
 import ImportarObra from "./controlObra/ImportarObra";
@@ -108,6 +110,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
   const pidCargado = useRef(null);
   const [showAddCap, setShowAddCap] = useState(false);
   const [showAdminBD, setShowAdminBD] = useState(false);
+  // Comparando cotizaciones: la matriz ocupa el lugar del presupuesto.
+  const [comparando, setComparando] = useState(false);
   const [form, setForm] = useState({ nombre:"", cliente_id:"", cliente_nombre:"", lead_id:"", honorarios_pct:0, iva_pct:12, notas:"" });
   // Los proyectos, para que el presupuesto cuelgue de uno y se vea desde ahí.
   const [proyectos, setProyectos] = useState([]);
@@ -304,6 +308,34 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
     const fallo = res.find(r => r.error);
     if (fallo) { alert("No se pudieron actualizar todos los precios: " + fallo.error.message); return; }
     setItems(nuevos); recalcTotales(nuevos); setEligiendoPrecio(null);
+  }
+
+  // LO ELEGIDO EN LA MATRIZ DE COTIZACIONES ENTRA AL PRESUPUESTO (Hernán,
+  // 26/11/2026). Entra el costo de cada rubro —la utilidad se conserva y el
+  // precio al cliente se recalcula, que ya viene hecho en el plan— y queda
+  // escrito de qué papel salió, con las columnas de la migración 138. La
+  // cantidad solo se escribe donde el presupuesto no tenía ninguna.
+  // @returns el error, o null si entró todo.
+  async function aplicarElegidos(cambios) {
+    if (!presupuestoActivo || !cambios?.length) return null;
+    const ahora = new Date().toISOString();
+    const res = await Promise.all(cambios.map(c => supabase.from("presupuesto_items").update({
+      precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total,
+      ...(c.ponerCantidad ? { cantidad: c.cantidad } : {}),
+      cotizacion_archivo_id: c.cotizacion_archivo_id, cotizacion_proveedor: c.cotizacion_proveedor,
+      cotizacion_renglon: c.cotizacion_renglon, cotizacion_cantidad: c.cotizacion_cantidad, cotizacion_at: ahora,
+    }).eq("id", c.id)));
+    const fallo = res.find(r => r.error);
+    if (fallo) { fetchItems(presupuestoActivo.id); return "No se pudieron escribir todos los precios en el presupuesto: " + fallo.error.message; }
+    const porId = new Map(cambios.map(c => [Number(c.id), c]));
+    const lista = itemsRef.current.map(i => {
+      const c = porId.get(Number(i.id));
+      return c ? { ...i, precio_base: c.precio_base, precio_unitario: c.precio_unitario, total: c.total, cantidad: c.cantidad,
+        cotizacion_archivo_id: c.cotizacion_archivo_id, cotizacion_proveedor: c.cotizacion_proveedor,
+        cotizacion_renglon: c.cotizacion_renglon, cotizacion_cantidad: c.cotizacion_cantidad, cotizacion_at: ahora } : i;
+    });
+    itemsRef.current = lista; setItems(lista); recalcTotales(lista);
+    return null;
   }
 
   // La base de rubros se lee entera una vez y se busca en memoria: son unos
@@ -1531,6 +1563,10 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             {puedeEditar&&<button onClick={()=>duplicarPresupuesto(presupuestoActivo, siguienteVersion(presupuestoActivo.nombre))} disabled={duplicando===presupuestoActivo?.id}
               title="Copia este presupuesto para volver a trabajarlo. El original queda tal cual."
               style={{background:"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>{duplicando===presupuestoActivo?.id?"Copiando…":"Nueva versión"}</button>}
+            {presupuestoActivo&&items.length>0&&<button className="comparar-cotizaciones" onClick={()=>setComparando(v=>!v)}
+              title="Subir las cotizaciones de varias empresas, verlas en una matriz y elegir cuál entra al presupuesto"
+              style={{background:comparando?"var(--brand)":"#fff",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:comparando?"#fff":"var(--ink-soft)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              {comparando?"← Volver al presupuesto":"Comparar cotizaciones"}</button>}
             {!bloqueado&&puedeEditar&&<button onClick={()=>document.getElementById("cotiz-input").click()} style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:8,padding:"7px 12px",color:"var(--brand)",fontSize:12,fontWeight:600,cursor:"pointer"}}>🤖 Subir cotización</button>}
             {puedeEditar&&<button onClick={()=>setPasarABase(true)} disabled={items.length===0}
               title={presupuestoActivo?.en_base_at?`Pasado a la base el ${new Date(presupuestoActivo.en_base_at).toLocaleDateString("es-EC")}`:"Cuando lo des por bueno: sus precios entran a la base de rubros"}
@@ -1553,7 +1589,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
         onGuardado={e=>{setPresupuestoActivo(p=>({...p,exportacion:e}));setPresupuestos(ps=>ps.map(p=>p.id===presupuestoActivo.id?{...p,exportacion:e}:p));}}/>}
       <input id="cotiz-input" type="file" accept="image/*,.pdf,.xlsx,.xls" onChange={leerCotizacion} style={{display:"none"}}/>
 
-      {!showAdminBD&&<>
+      {comparando&&presupuestoActivo&&!showAdminBD&&(
+        <MatrizCotizaciones presupuesto={presupuestoActivo} capitulos={capitulosActivos} items={items} currentUser={currentUser}
+          puedeEditar={!bloqueado&&puedeEditar} onCerrar={()=>setComparando(false)} onAplicar={aplicarElegidos}
+          onArchivo={()=>setArchivosVersion(v=>v+1)}/>
+      )}
+      {!showAdminBD&&!(comparando&&presupuestoActivo)&&<>
       {/* COTIZACIÓN LEÍDA */}
       {uploadingCotizacion&&<div style={{background:"var(--brand-soft)",border:"1.5px solid var(--border)",borderRadius:10,padding:12,marginBottom:12,fontSize:13,color:"var(--brand)"}}>🤖 NOVA leyendo cotización...</div>}
       {cotizacionResult?.error&&<div style={{background:"var(--danger-soft)",border:"1.5px solid var(--danger-border)",borderRadius:10,padding:12,marginBottom:12,fontSize:12,color:"var(--danger)"}}>{cotizacionResult.error} <button onClick={()=>setCotizacionResult(null)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:14,marginLeft:8}}>×</button></div>}
@@ -2224,7 +2265,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 escribe a mano: queda fija hasta que se elige un precio de la
                                 base de rubros. Cambiar el precio final no la mueve. */}
                             <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
-                              <span style={{color:"var(--muted)",fontSize:11,whiteSpace:"nowrap"}}>
+                              <span style={{color:"var(--muted)",fontSize:11,whiteSpace:"nowrap"}}
+                                title={item.cotizacion_proveedor?`Costo de ${item.cotizacion_proveedor}${item.cotizacion_renglon?` · «${item.cotizacion_renglon}»`:""}`:undefined}>
                                 {Number(item.precio_base)>0||Number(item.precio_unitario)>0?`$${fmt(Number(item.precio_base)>0?item.precio_base:item.precio_unitario)}`:"—"}
                               </span>
                               <button onClick={()=>abrirPreciosDeRubro(item)} title="Elegir un precio de la base de rubros"
@@ -2232,6 +2274,15 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 <Database size={11}/>
                               </button>
                             </div>
+                            {/* DE QUIÉN ES ESTE COSTO, cuando salió de la matriz de
+                                cotizaciones. Y si es la parte de un paquete, se dice:
+                                ese unitario no lo cotizó nadie, es un reparto. */}
+                            {item.cotizacion_proveedor&&Number(item.precio_base)>0&&(
+                              <div className="de-quien-es-el-costo" style={{fontSize:9.5,color:"var(--muted)",textAlign:"right",lineHeight:1.3,marginTop:2,maxWidth:150,marginLeft:"auto",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}
+                                title={item.cotizacion_renglon||""}>
+                                {item.cotizacion_proveedor}{/ · repartido entre \d+ rubros$/.test(item.cotizacion_renglon||"")?" · repartido":""}
+                              </div>
+                            )}
                           </td>
                           <td style={{padding:"5px 8px"}}>
                             <input type="number" className="num-limpio" value={Math.round((Number(item.utilidad_pct)||0)*100)/100}
