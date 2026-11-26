@@ -7,6 +7,7 @@ import { rubrosDeLaOrden, codigoDe } from "./_rubrosDeLaOrden.js";
 import { paraTarea, tareaDelCompromiso } from "./_compromisos.js";
 import { listaDelCliente, loDelCliente, respuestaDelCliente, correoDeLaRespuesta, archivosAprobados, decisionesDelCliente, archivosDelPedido } from "./_listaDelCliente.js";
 import { paraElCliente as sinReaperturas } from "./_reaperturaDelLibro.js";
+import { presupuestosDelCliente, respuestaDelPresupuesto, correoDeLaRespuestaDelPresupuesto } from "./_presupuestoCompartido.js";
 
 // El portal del cliente. Única puerta, y no tiene login.
 //
@@ -1286,6 +1287,19 @@ async function armarInforme(lead) {
     `aprobaciones_cliente?lead_id=eq.${lead.id}&respuesta=is.null&retirada_at=is.null&select=task_id,pide_archivos&order=pedida_at`));
   if (!Array.isArray(abiertos)) abiertos = [];
 
+  // EL PRESUPUESTO Y LA COMPARATIVA QUE SE LE COMPARTIERON (migración 196):
+  // la foto que guardó la oficina, y el pedido del registro que le pide
+  // aprobarla. Solo los de este proyecto y solo lo que sigue compartido. Si
+  // la tabla todavía no está, no hay ninguno y el enlace abre igual.
+  let compartidos = await json(await rest(
+    `presupuesto_compartidos?lead_id=eq.${lead.id}&retirado_at=is.null`
+    + `&select=id,presupuesto_id,foto,created_at,retirado_at&order=created_at.desc`));
+  if (!Array.isArray(compartidos)) compartidos = [];
+  let pedidosDePresupuesto = compartidos.length ? await json(await rest(
+    `aprobaciones_cliente?lead_id=eq.${lead.id}&presupuesto_compartido_id=in.(${compartidos.map(c => Number(c.id)).join(",")})`
+    + `&select=id,presupuesto_compartido_id,titulo,respuesta,respuesta_at,respuesta_nota,retirada_at`)) : [];
+  if (!Array.isArray(pedidosDePresupuesto)) pedidosDePresupuesto = [];
+
   const enlaces = await firmar([
     ...fotosObs.map(f => f.storage_path),
     ...avance.map(f => f.storage_path),
@@ -1311,6 +1325,8 @@ async function armarInforme(lead) {
     archivos: delCliente.archivos,
     // Lo que ya aprobó o dejó con observaciones: su copia del registro.
     decisiones: decisionesDelCliente(decididas, enlaces),
+    // El presupuesto y su comparativa, como se le compartieron.
+    presupuestos: presupuestosDelCliente(compartidos, pedidosDePresupuesto),
     recorridas,
     observaciones: observaciones.map(o => ({
       ...o,
@@ -1469,6 +1485,57 @@ async function contestar(req, res, lead) {
     for (const paso of despues) {
       try { await paso(); } catch (e) {
         console.error("[portal] la respuesta del cliente quedó, pero algo de lo que sigue no se pudo hacer:", e.message);
+      }
+    }
+    return res.status(200).json({ ok: true });
+  }
+
+  // EL PRESUPUESTO QUE SE LE COMPARTIÓ (migración 196). Lo nombra por el id de
+  // su pedido, y se busca con ese id Y con el proyecto de la llave: el de otro
+  // proyecto no se encuentra. Lo que aprueba es la foto de ese pedido, que la
+  // oficina no cambia: si cambia algo, comparte de nuevo y este se retira.
+  if (que === "presupuesto") {
+    const filas = await json(await rest(
+      `aprobaciones_cliente?id=eq.${Number(id)}&lead_id=eq.${lead.id}&presupuesto_compartido_id=not.is.null`
+      + `&select=id,titulo,respuesta,retirada_at,pedida_por,presupuesto_compartido_id`));
+    const pedido = Array.isArray(filas) ? filas[0] : null;
+    const suyos = pedido ? await json(await rest(
+      `presupuesto_compartidos?id=eq.${Number(pedido.presupuesto_compartido_id)}&lead_id=eq.${lead.id}&select=id,retirado_at`)) : null;
+    const r = respuestaDelPresupuesto({ pedido, compartido: Array.isArray(suyos) ? suyos[0] : null, conforme: !!conforme, nota });
+    if (r.error) return res.status(r.codigo).json({ error: r.error });
+    // Se vuelve a filtrar al escribir: solo si sigue esperando. Dos toques seguidos no dejan dos respuestas.
+    const ip = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || null;
+    const escritas = await json(await rest(
+      `aprobaciones_cliente?id=eq.${pedido.id}&lead_id=eq.${lead.id}&respuesta=is.null&retirada_at=is.null`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ ...r.campos, respuesta_ip: ip }),
+      }));
+    if (!Array.isArray(escritas) || !escritas.length) return res.status(409).json({ error: "Este presupuesto ya tiene tu respuesta." });
+
+    // Queda en la historia del proyecto y se le avisa a quien lo compartió y a
+    // quien lleva el proyecto. Si algo de esto falla, la respuesta ya quedó.
+    const despues = [
+      () => rest("lead_movimientos", {
+        method: "POST",
+        body: JSON.stringify({ lead_id: lead.id, tipo: "nota", automatico: true, autor_nombre: "El cliente", detalle: r.bitacora }),
+      }),
+      async () => {
+        const ids = [...new Set([pedido.pedida_por, lead.responsable_id].map(Number).filter(Boolean))];
+        if (!ids.length) return;
+        const usuarios = await json(await rest(`usuarios?id=in.(${ids.join(",")})&activo=eq.true&select=id,email`));
+        const para = [...new Set((Array.isArray(usuarios) ? usuarios : []).map(u => String(u.email || "").trim()).filter(Boolean))];
+        if (!para.length) return;
+        const { asunto, cuerpo } = correoDeLaRespuestaDelPresupuesto({
+          proyecto: lead.nombre, titulo: pedido.titulo, aprobado: r.aprobado, nota: r.nota,
+          app: process.env.APP_URL || "https://foreman-app-ebon.vercel.app",
+        });
+        await enviarCorreo({ to: para, subject: asunto, html: plantilla({ titulo: lead.nombre, subtitulo: "Respuesta del cliente", cuerpo }) });
+      },
+    ];
+    for (const paso of despues) {
+      try { await paso(); } catch (e) {
+        console.error("[portal] la respuesta del cliente al presupuesto quedó, pero algo de lo que sigue no se pudo hacer:", e.message);
       }
     }
     return res.status(200).json({ ok: true });

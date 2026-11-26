@@ -37,6 +37,7 @@ import { cuadreDeLaLectura } from "./emparejarCotizacion.js";
 import {
   cotizacionesDe, guardarCotizacion, guardarNuevaVersion, actualizarCotizacion, borrarCotizacion, leerCotizacionDeArchivo, SIN_195,
 } from "./cotizacionesDelPresupuesto";
+import CompartirConElCliente from "./CompartirConElCliente";
 
 const n = v => Number(v) || 0;
 const plata = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -639,6 +640,13 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
             <button onClick={() => setPrevia(false)} disabled={aplicando} style={{ ...enlace, fontSize: 12, color: colors.muted }}>todavía no</button>
           </div>
         </div>
+      )}
+
+      {/* COMPARTIRLO CON EL DUEÑO DEL PROYECTO: ve el presupuesto con lo elegido
+          y la comparativa, y lo aprueba. Va acá porque es donde se elige. */}
+      {empresas.length > 0 && (
+        <CompartirConElCliente presupuesto={presupuesto} capitulos={capitulos} items={items} cotizaciones={cots} elegidos={vigentes}
+          currentUser={currentUser} puedeEditar={puedeEditar} />
       )}
     </div>
   );

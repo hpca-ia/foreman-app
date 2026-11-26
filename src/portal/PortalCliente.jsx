@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { colors } from "../theme/colors";
 import VisorFotos from "../components/VisorFotos";
+import PresupuestoCompartido from "./PresupuestoCompartido";
 
 // Lo que ve el cliente. Sin login, sin FOREMAN alrededor.
 //
@@ -83,13 +84,15 @@ export default function PortalCliente({ token }) {
     );
   }
 
-  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [], etapas = [], novedades = [], archivos = [], decisiones = [] } = info;
+  const { proyecto, recorridas, observaciones, avance, entregas, ordenes = [], lista = [], etapas = [], novedades = [], archivos = [], decisiones = [], presupuestos = [] } = info;
   const ocPendientes = ordenes.filter(o => o.cliente_respondio_at == null);
   // Los puntos del checklist que se le pidió aprobar: primero los que esperan.
   const puntosParaAprobar = lista.filter(t => t.aprobar)
     .sort((a, b) => (a.aprobar.estado === "pendiente" ? 0 : 1) - (b.aprobar.estado === "pendiente" ? 0 : 1));
   const puntosPendientes = puntosParaAprobar.filter(t => t.aprobar.estado === "pendiente");
-  const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length + puntosPendientes.length;
+  // El presupuesto y su comparativa, si se los compartieron: los que esperan su respuesta.
+  const presupuestosPendientes = presupuestos.filter(p => p.estado === "pendiente");
+  const porContestar = entregas.filter(e => e.estado === "enviado").length + ocPendientes.length + puntosPendientes.length + presupuestosPendientes.length;
   const contestarPunto = (t, conforme, nota) => contestar({ que: "punto", id: t.id, conforme, nota });
   const fotos = avance.filter(f => f.url).map(f => ({ ...f, titulo: f.titulo || dia(f.fecha) }));
 
@@ -101,6 +104,7 @@ export default function PortalCliente({ token }) {
     ...(lista.length ? [["lista", "Checklist", lista.length - listas]] : []),
     ...(enObra ? [["avance", "Avance", avance.length], ["recorridas", "Recorridas", observaciones.length]] : []),
     ...(archivos.length ? [["archivos", "Fotos y archivos", archivos.length]] : []),
+    ...(presupuestos.length ? [["presupuesto", "Presupuesto", presupuestosPendientes.length]] : []),
     ["aprobar", "Para aprobar", porContestar],
     // Lo que ya decidió: su copia del registro de aprobaciones.
     ...(decisiones.length ? [["decisiones", "Decisiones", decisiones.length]] : []),
@@ -154,6 +158,12 @@ export default function PortalCliente({ token }) {
           <FotosYArchivos archivos={archivos} grande onFoto={(fotos, indice) => setGaleria({ fotos, indice })} />
         </div>
       )}
+
+      {/* ── El presupuesto y lo que cotizó cada empresa ────────────── */}
+      {solapa === "presupuesto" && presupuestos.map(p => (
+        <PresupuestoCompartido key={p.id} p={p} enviando={enviando === p.id}
+          onContestar={(conforme, nota) => contestar({ que: "presupuesto", id: p.id, conforme, nota })} />
+      ))}
 
       {/* ── Lo que ya decidió ──────────────────────────────────────── */}
       {solapa === "decisiones" && (
@@ -243,9 +253,18 @@ export default function PortalCliente({ token }) {
 
       {/* ── Lo que esperamos que mire ──────────────────────────────── */}
       {solapa === "aprobar" && (
-        !entregas.length && !ordenes.length && !puntosParaAprobar.length
+        !entregas.length && !ordenes.length && !puntosParaAprobar.length && !presupuestosPendientes.length
           ? <Vacio>No hay nada esperando tu respuesta.</Vacio>
           : <>
+            {/* El presupuesto que espera su aprobación: se revisa en su solapa, que es donde está entero. */}
+            {presupuestosPendientes.map(p => (
+              <button key={`presupuesto-${p.id}`} className="presupuesto-para-aprobar" onClick={() => setSolapa("presupuesto")}
+                style={{ display: "block", width: "100%", textAlign: "left", background: "#fff", border: `1px solid ${colors.border}`, borderLeft: `3px solid ${colors.warning}`,
+                  borderRadius: 11, padding: 12, marginBottom: 8, cursor: "pointer", fontFamily: colors.font }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: colors.ink, lineHeight: 1.35, overflowWrap: "anywhere" }}>{p.titulo}</div>
+                <div style={{ fontSize: 12.5, color: colors.warning, fontWeight: 600, marginTop: 3 }}>Necesitamos tu aprobación · tocá para revisarlo</div>
+              </button>
+            ))}
             {/* Los puntos del checklist que hay que aprobar, cada uno con lo
                 que hay que mirar: su descripción, lo último y sus archivos. */}
             {puntosParaAprobar.map(t => (

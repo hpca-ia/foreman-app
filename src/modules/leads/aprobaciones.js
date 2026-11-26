@@ -268,6 +268,8 @@ export function registroDeAprobaciones(filas = [], archivosDeAhora = {}, hoy = h
       // Se le pidió aprobar esos archivos y no todo el punto.
       soloAlgunos: estado === "pendiente" ? archivosDelPedido(archivosDeAhora[f.task_id] || [], f.pide_archivos).soloAlgunos : idsDeArchivos(f.pide_archivos).length > 0,
       vigente: f.task_id == null || ultimoDe.get(f.task_id) === f.id,
+      // Si lo que se le pidió aprobar es un presupuesto compartido (migración 196): cuál. Lo que tenía a la vista es su foto.
+      ...(f.presupuesto_compartido_id != null ? { presupuesto_compartido_id: f.presupuesto_compartido_id } : {}),
       // El plazo que se le dio en ESE pedido, y si se le pasó sin contestar.
       vence_el: soloDia(f.vence_el) || null,
       vencida: estado === "pendiente" && !!soloDia(f.vence_el) && soloDia(f.vence_el) < hoy,
@@ -336,7 +338,8 @@ export function registroParaPdf(registro = [], { proyecto = "" } = {}) {
       filas: enOrden.map(p => [
         String(p.numero),
         p.titulo + (p.descripcion ? `\n${p.descripcion}` : ""),
-        p.archivos.length ? p.archivos.map(a => a.nombre).join("\n") : "Sin archivos",
+        p.presupuesto_compartido_id != null ? "El presupuesto y su comparativa, como se le compartieron"
+          : p.archivos.length ? p.archivos.map(a => a.nombre).join("\n") : "Sin archivos",
         [momento(p.pedida_at), p.pedida_nombre ? `por ${p.pedida_nombre}` : "",
           p.vence_el ? `Plazo: hasta el ${diaCorto(p.vence_el)} ${p.vence_el.slice(0, 4)}` : "",
           ...p.avisos.map(a => `${avisoDice(a)} · ${momento(a.cuando)}`)].filter(Boolean).join("\n"),

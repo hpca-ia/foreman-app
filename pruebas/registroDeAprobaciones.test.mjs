@@ -96,7 +96,7 @@ test("el aviso lo manda el servidor solo si hay dónde aprobar, y queda anotado 
   // Entra por la misma puerta de los avisos: no es una función más de Vercel.
   const puerta = codigoDe("../api/aviso.js");
   assert.match(puerta, /import pedido from "\.\/_aviso-pedido\.js";/);
-  assert.match(puerta, /visto, checklist, pedido, whatsapp \};/);
+  assert.match(puerta, /visto, checklist, pedido, whatsapp, presupuesto \};/);
 });
 
 test("pedir es avisar: el botón abre la ventana, que pide, manda el correo y deja el WhatsApp listo", () => {

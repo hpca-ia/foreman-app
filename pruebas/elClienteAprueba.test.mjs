@@ -168,7 +168,7 @@ test("el cliente contesta en el punto y en «Para aprobar», con los mismos boto
   assert.match(pantalla, /onClick=\{\(\) => \(abierto \? onContestar\?\.\(punto, false, nota\) : setAbierto\(true\)\)\}/);
   assert.match(pantalla, /const contestarPunto = \(t, conforme, nota\) => contestar\(\{ que: "punto", id: t\.id, conforme, nota \}\);/);
   // Cuenta en la solapa «Para aprobar», y ahí están.
-  assert.match(pantalla, /\+ ocPendientes\.length \+ puntosPendientes\.length;/);
+  assert.match(pantalla, /\+ ocPendientes\.length \+ puntosPendientes\.length \+ presupuestosPendientes\.length;/);
   assert.match(pantalla, /\{puntosParaAprobar\.map\(t => \(\s+<div key=\{`punto-\$\{t\.id\}`\} className="punto-para-aprobar"/);
   // Con la respuesta puesta ya no hay botones.
   assert.match(pantalla, /if \(a\.estado !== "pendiente"\) \{/);

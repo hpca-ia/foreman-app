@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { FileDown, FileText, ThumbsUp, Mail, Send, CalendarClock, MessageCircle } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { abrirArchivo } from "../../lib/archivos";
+import LoQueVioElCliente from "../presupuestos/LoQueVioElCliente";
 import { cargarAprobaciones, whatsappDeForeman } from "./proyecto";
 import { registroDeAprobaciones, resumenDelRegistro, estadoDelPedido, momento, registroParaPdf, plazoDe, ESTADOS_DE_WHATSAPP } from "./aprobaciones.js";
 import { etapasDelTipo, tipoDe, sePersigue } from "./pipeline";
@@ -204,7 +205,9 @@ export default function AprobacionesDelProyecto({ lead, catalogo = [], users = [
                   {p.soloAlgunos ? (p.estado === "pendiente" ? "LO QUE SE LE PIDIÓ APROBAR" : "LO QUE SE LE PIDIÓ APROBAR, COMO ESTABA AL CONTESTAR")
                     : p.estado === "pendiente" ? "LO QUE TIENE PARA MIRAR HOY" : "LO QUE TENÍA PARA MIRAR AL CONTESTAR"}
                 </div>
-                {p.archivos.length ? (
+                {p.presupuesto_compartido_id != null ? (
+                  <LoQueVioElCliente compartidoId={p.presupuesto_compartido_id} />
+                ) : p.archivos.length ? (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {p.archivos.map((a, i) => (
                       <button key={a.id ?? i} className="archivo-del-pedido" disabled={!a.storage_path} onClick={() => a.storage_path && abrirArchivo(a.storage_path, { nombre: a.nombre })}
