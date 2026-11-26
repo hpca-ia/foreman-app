@@ -3,7 +3,8 @@ import { Plus, ShoppingCart, AlertTriangle, FileText } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
-import { ESTADOS, ABIERTAS, cargarSolicitudes, veLaCompra } from "./compras";
+import { ESTADOS, ABIERTAS, cargarSolicitudes, veLaCompra, devueltasConCotizacionNueva } from "./compras";
+import { numeroDeCompra, numeroBuscado } from "./devueltas.js";
 import ModalSolicitud from "./ModalSolicitud";
 import BuscadorDeGastos from "../../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../../lib/filtrarGastos";
@@ -23,6 +24,8 @@ import { montoDeSolicitud } from "../controlObra/calculos";
 export default function ModuloCompras({ currentUser, puede, leToca = null, hayQuienCompre = true,
   users = [], asignados = new Set(), abrir = null, onAbierta }) {
   const [solicitudes, setSolicitudes] = useState([]);
+  // Las devueltas que ya tienen una cotización posterior a la devolución: no se ven igual que las que siguen esperando.
+  const [conNueva, setConNueva] = useState(new Set());
   const [proyectos, setProyectos] = useState([]);
   const [sinTablas, setSinTablas] = useState(false);
   const [cargando, setCargando] = useState(true);
@@ -61,6 +64,7 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
       supabase.from("leads").select("id,nombre,obra_id,resultado").order("nombre"),
     ]);
     setSolicitudes(s);
+    devueltasConCotizacionNueva(s).then(setConNueva, () => {});
     // Las proformas de esos pedidos. Una consulta más, y es la que hace que la
     // columna de montos deje de estar vacía: la plata de la mayoría de los
     // pedidos vive en un papel subido, no en el campo `monto`.
@@ -161,7 +165,13 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // El estado y el buscador se aplican encima, no en vez de: "aprobadas de
   // Disensa por más de 500" es una sola pregunta, no tres pantallas.
   const porEstado = estadoF ? base.filter(s => s.estado === estadoF) : base;
-  const listas = filtrarGastos(porEstado, busca, ["proveedor", "descripcion", "solicitante_nombre", "destino"]);
+  // POR SU NÚMERO (Hernán, 26/11/2026: «las compras deberían tener un número
+  // de ID para identificarlas»): escribir «37» o «N° 37» trae esa compra
+  // primero, y después lo que el buscador encuentre como siempre.
+  const porTexto = filtrarGastos(porEstado, busca, ["proveedor", "descripcion", "solicitante_nombre", "destino"]);
+  const elNumero = numeroBuscado(busca?.texto);
+  const porNumero = elNumero == null ? [] : porEstado.filter(s => Number(s.id) === elNumero);
+  const listas = porNumero.length ? [...porNumero, ...porTexto.filter(s => Number(s.id) !== elNumero)] : porTexto;
   const sumaListas = sumar(listas);
 
   const pendientesMias = abiertas.filter(meToca).length;
@@ -263,7 +273,8 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                     {s.descripcion}
                   </div>
                   <div style={{ fontSize: 11, color: colors.muted }}>
-                    {s.solicitante_nombre || "—"}{s.necesita_para ? ` · para el ${s.necesita_para}` : ""}
+                    <span className="numero-de-compra" style={{ fontWeight: 700, color: colors.inkSoft }}>{numeroDeCompra(s)}</span>
+                    {" · "}{s.solicitante_nombre || "—"}{s.necesita_para ? ` · para el ${s.necesita_para}` : ""}
                   </div>
                 </div>
                 {/* CONTRA QUÉ VA, dicho en la lista.
@@ -294,6 +305,8 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                       se paga antes, durante o después de recibir. */}
                   {s.pagado_at && <span style={{ color: colors.success, marginLeft: 5 }}>· PAGADO</span>}
                   {e.quien && !s.pagado_at && <span style={{ color: colors.muted, fontWeight: 400 }}> · {e.quien}</span>}
+                  {/* Devuelta, pero ya llegó la cotización que se pidió y nadie la reenvió. */}
+                  {conNueva.has(s.id) && <div className="con-cotizacion-nueva" style={{ color: colors.warning, fontWeight: 600, fontSize: 10.5 }}>tiene una cotización nueva</div>}
                 </div>
                 {/* EL MONTO, SIEMPRE QUE HAYA UNO.
                     Antes solo salía `monto`, que es el de la proforma elegida,

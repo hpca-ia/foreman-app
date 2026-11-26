@@ -781,7 +781,8 @@ async function decidirAprobacion(req, res, tarea) {
 
   const estado = aprueba ? "aprobada" : "requiere_info";
   const paraQuien = aprueba ? tarea.aprob_ok_para : (tarea.aprob_no_para || compra.solicitante_id);
-  const titulo = aprueba ? `Comprar: ${compra.descripcion}` : `Completar la solicitud: ${compra.descripcion}`;
+  // Con el número de la compra adelante, igual que en la pantalla (src/modules/compras/devueltas.js).
+  const titulo = aprueba ? `Comprar N° ${compra.id}: ${compra.descripcion}` : `Completar la solicitud N° ${compra.id}: ${compra.descripcion}`;
 
   let nueva = null;
   if (paraQuien) {

@@ -9,6 +9,7 @@ import { avisoDeSobra, asignacionesSinTitulo } from "../controlObra/repartoDeFac
 import { buscarDuplicados } from "../controlObra/duplicados";
 import { rubrosParaGastarDe } from "../controlObra/quitasDeOrdenes.js";
 import { enlacesFirmados } from "../../lib/enlacesFirmados";
+import { cotizacionesDesdeQueSeDevolvio } from "./devueltas.js";
 
 // El flujo de una compra, de punta a punta.
 //
@@ -320,7 +321,7 @@ export async function comentarSolicitud(solicitud, { quien, texto }) {
  * le llega el correo y entra a su resumen de la mañana, sin inventar un segundo
  * sistema de alertas que después nadie mira.
  */
-export async function moverA(solicitud, estado, { quien, comentario, paraQuien, titulo, extra = {}, siguientes = null }) {
+export async function moverA(solicitud, estado, { quien, comentario, paraQuien, titulo, extra = {}, siguientes = null, sinCorreo = false }) {
   const campos = { estado, ...extra };
   // La fecha del PRIMER pedido de visto: reenviar una devuelta no reinicia la
   // cuenta de cuánto tardó en aprobarse.
@@ -381,7 +382,12 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
   // entrar a una aplicación y acordarse de una contraseña, el material espera
   // dos días por un sí que ya estaba decidido. Ese correo lleva la solicitud
   // en PDF, las proformas adjuntas y dos botones.
-  if (tarea?.id && estado === "pendiente_aprobacion") {
+  // `sinCorreo`: quien la reactiva es quien tiene que dar el visto. La tarea
+  // le queda en su tablero; mandarse un correo a sí mismo pidiéndose el visto
+  // es ruido.
+  if (tarea?.id && estado === "pendiente_aprobacion" && sinCorreo) {
+    // nada: ya está mirándola
+  } else if (tarea?.id && estado === "pendiente_aprobacion") {
     await pedirElVistoPorCorreo(solicitud, tarea, siguientes);
   } else if (tarea?.id) {
     fetch("/api/aviso?de=tarea", {
@@ -389,7 +395,10 @@ export async function moverA(solicitud, estado, { quien, comentario, paraQuien, 
       body: JSON.stringify({ tareaId: tarea.id }),
     }).catch(() => {});
   }
-  return { ok: true };
+  // Lo que cambió en la solicitud vuelve a la pantalla: si la ventana sigue
+  // abierta —una devuelta que volvió sola al subir la cotización— tiene que
+  // saber su estado y su tarea nuevos, o el paso siguiente cierra la tarea vieja.
+  return { ok: true, campos };
 }
 
 /**
@@ -540,6 +549,27 @@ export async function elegirProforma(solicitud, proforma, quien, comentario) {
  * que le dejó a alguien. Un aviso de algo que ya no existe es peor que
  * ninguno: el que lo abre no entiende qué pasó.
  */
+/**
+ * De las compras devueltas, cuáles tienen una cotización que llegó después de
+ * la devolución (ver devueltas.js). Para la lista: una devuelta que ya tiene
+ * lo que se le pidió no puede verse igual que una que sigue esperando.
+ *
+ * @param solicitudes  las de la lista
+ * @returns Set con los id de las que tienen cotización nueva
+ */
+export async function devueltasConCotizacionNueva(solicitudes = []) {
+  const devueltas = (solicitudes || []).filter(s => s.estado === "requiere_info");
+  if (!devueltas.length) return new Set();
+  const ids = devueltas.map(s => s.id);
+  const [{ data: pasos }, { data: papeles }] = await Promise.all([
+    supabase.from("compras_historial").select("solicitud_id,estado_anterior,estado_nuevo,created_at").in("solicitud_id", ids).eq("estado_nuevo", "requiere_info"),
+    supabase.from("compras_adjuntos").select("solicitud_id,tipo,created_at").in("solicitud_id", ids).eq("tipo", "cotizacion"),
+  ]);
+  return new Set(devueltas.filter(s => cotizacionesDesdeQueSeDevolvio({
+    solicitud: s, historial: (pasos || []).filter(h => h.solicitud_id === s.id), adjuntos: (papeles || []).filter(a => a.solicitud_id === s.id),
+  }).length).map(s => s.id));
+}
+
 export async function borrarSolicitud(solicitud) {
   if (solicitud.factura_id) {
     return "Esta compra ya tiene su factura en el control de obra. Borrá la factura allá si hace falta; el pedido es el respaldo de ese gasto.";

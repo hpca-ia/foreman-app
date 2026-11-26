@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText, Paperclip, Banknote, Sparkles, MessageSquare } from "lucide-react";
+import { Check, X, Send, ShoppingCart, PackageCheck, Clock, Upload, FileText, Paperclip, Banknote, Sparkles, MessageSquare, RotateCcw } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
@@ -24,6 +24,9 @@ import VisorAdjuntos from "./VisorAdjuntos";
 import { CLASES_PEDIDO, vaABodega } from "./bodega";
 import CampoProveedor from "../../components/CampoProveedor";
 import { leerProforma, leerDocumentoDeCompra, proveedorCanonico } from "./leerProforma";
+import { numeroDeCompra, tituloDelPaso, ultimaDevolucion, cotizacionesDesdeQueSeDevolvio, vuelveSolaAlSubir, puedeReactivar,
+  NOTA_AL_REACTIVAR, NOTA_AL_VOLVER_SOLA } from "./devueltas.js";
+import { esAdmin } from "../../lib/roles";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -208,6 +211,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
   const [enlaces, setEnlaces] = useState({});
   const [subiendo, setSubiendo] = useState(false);
   const [avisoPapel, setAvisoPapel] = useState("");
+  // La devuelta que volvió sola a esperar el visto al subir la cotización nueva: se dice, en verde.
+  const [volvio, setVolvio] = useState("");
   // LAS COTIZACIONES QUE ESPERAN. Un archivo necesita un pedido del que
   // colgar, y el pedido necesita proyecto y descripción. Si se elige el
   // archivo antes de escribirlos, antes se mostraba un aviso y EL ARCHIVO SE
@@ -513,7 +518,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     if (sinSubir) return { error: `${sinSubir} El pedido quedó guardado y todavía no se mandó.` };
     return moverA(s, "pendiente_aprobacion", {
       quien: currentUser, comentario: comentario || null, paraQuien: quien,
-      titulo: `Aprobar compra: ${s.descripcion}`,
+      titulo: tituloDelPaso("Aprobar compra", s),
       // A QUIÉN LE TOCA DESPUÉS, resuelto acá. El que aprueba lo va a hacer
       // desde el correo, y el servidor no conoce al equipo: no sabe quién es
       // el asistente de compras ni el gerente del proyecto. Esa regla vive en
@@ -547,7 +552,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     if (err) return { error: err };
     return moverA(viva, "aprobada", {
       quien: currentUser, comentario: comentario || null, paraQuien: personaDeCompras(),
-      titulo: `Comprar: ${viva.descripcion}`,
+      titulo: tituloDelPaso("Comprar", viva),
     });
   });
 
@@ -555,7 +560,26 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     if (!comentario.trim()) return { error: "Para devolverla hay que decir qué falta." };
     return moverA(viva, "requiere_info", {
       quien: currentUser, comentario: comentario.trim(), paraQuien: viva.solicitante_id,
-      titulo: `Completar la solicitud: ${viva.descripcion}`,
+      titulo: tituloDelPaso("Completar la solicitud", viva),
+    });
+  });
+
+  /**
+   * REACTIVAR UNA DEVUELTA. Hernán, 26/11/2026: «Yo la devolví por error, los
+   * admins deben poder activarla de nuevo». Vuelve a esperar el visto sin que
+   * quien la pidió tenga que hacer nada: se cierra su tarea de «completar» y
+   * queda la de aprobar. Sirve igual para la que ya tiene la cotización nueva
+   * y nadie reenvió.
+   */
+  const reactivar = () => hacer(async () => {
+    const paraQuien = gerenteDelProyecto();
+    if (!paraQuien) return { error: "No hay a quién pedirle el visto: falta un gerente o el Director en el equipo." };
+    return moverA(viva, "pendiente_aprobacion", {
+      quien: currentUser, comentario: comentario.trim() || NOTA_AL_REACTIVAR, paraQuien,
+      titulo: tituloDelPaso("Aprobar compra", viva),
+      siguientes: { ok: personaDeCompras(), no: viva.solicitante_id },
+      // Si quien la reactiva es quien da el visto, no se manda un correo a sí mismo.
+      sinCorreo: String(paraQuien) === String(currentUser?.id),
     });
   });
 
@@ -590,8 +614,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       paraQuien: aQuienPidio ? viva.solicitante_id : (viva.aprobador_id || gerenteDelProyecto()),
       siguientes: { ok: personaDeCompras(), no: viva.solicitante_id },
       titulo: aQuienPidio
-        ? `Compras pregunta: ${viva.descripcion}`
-        : `Revisar el visto: ${viva.descripcion}`,
+        ? tituloDelPaso("Compras pregunta", viva)
+        : tituloDelPaso("Revisar el visto", viva),
     });
   });
 
@@ -628,7 +652,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     if (estado === "aprobada") {
       const r = await moverA(viva, "comprada", {
         quien: currentUser, comentario: comentario || null, paraQuien: viva.solicitante_id,
-        titulo: `Recibir: ${viva.descripcion}`,
+        titulo: tituloDelPaso("Recibir", viva),
         extra: { proveedor: compra.proveedor.trim(), monto: compra.clase === "anticipo" ? (viva.monto ?? null) : total },
       });
       if (r?.error) return r;
@@ -745,6 +769,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
    * días, así que una compra pagada puede estar en cualquier momento del
    * camino. Por eso no entra acá.
    */
+  // Los administradores pueden volver a poner una devuelta a esperar el visto.
+  const reactiva = editando && puedeReactivar({ solicitud: viva, esAdmin: esAdmin(currentUser?.role) }) && !esMia;
+
   const paso = !editando ? "pedido"
     : estado === "borrador" ? "pedido"
     : estado === "requiere_info" ? "pedido"
@@ -758,8 +785,18 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       return { mio: esMia, titulo: esMia ? "Terminá el pedido y mandalo a aprobar" : "Todavía es un borrador de quien lo pidió" };
     }
     if (estado === "requiere_info") {
-      return { mio: esMia, titulo: esMia ? "Te lo devolvieron: corregilo y volvé a mandarlo" : "Devuelto a quien lo pidió",
-        detalle: viva?.comentario_devolucion || null };
+      // POR QUÉ SE DEVOLVIÓ, dicho arriba y no solo en el historial; y si desde
+      // entonces llegó una cotización, que es lo que quien la devolvió no veía.
+      const d = ultimaDevolucion(historial);
+      const porQue = d?.comentario ? `${d.quien || "Quien da el visto"} dijo: «${d.comentario}».` : "";
+      const nuevas = cotizacionesDesdeQueSeDevolvio({ solicitud: viva, historial, adjuntos: proformas });
+      if (esMia) {
+        return { mio: true, titulo: "Te lo devolvieron: corregilo y volvé a mandarlo",
+          detalle: `${porQue} Al subir la cotización nueva vuelve solo a quien da el visto; si lo que cambia es otra cosa, corregilo y tocá «Reenviar».`.trim() };
+      }
+      return { mio: reactiva, titulo: nuevas.length ? "Devuelto, y ya tiene una cotización nueva" : "Devuelto a quien lo pidió",
+        detalle: [porQue, nuevas.length ? `Desde entonces ${nuevas.length === 1 ? "llegó una cotización" : `llegaron ${nuevas.length} cotizaciones`}, pero nadie lo reenvió.` : "",
+          reactiva ? "Podés reactivarlo abajo: vuelve a esperar el visto." : ""].filter(Boolean).join(" ") || null };
     }
     if (estado === "pendiente_aprobacion") {
       return { mio: apruebo && (!esMia || currentUser?.role === "owner"),
@@ -791,7 +828,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       <div style={{ flex: "1 1 420px", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>
-          {editando ? "Solicitud de compra" : "Pedir algo para la obra"}
+          {editando ? <>Solicitud de compra <span className="numero-de-compra" style={{ color: colors.muted, fontWeight: 600 }}>{numeroDeCompra(viva)}</span></> : "Pedir algo para la obra"}
         </div>
         {editando && (
           <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: e.color }}>
@@ -1250,6 +1287,26 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
               if (r.error || sinSubir) { setAvisoPapel(r.error || sinSubir); return; }
               if (r.aviso) setAvisoPapel(r.aviso);
               await cargarPapeles(sol.id);
+              // SUBIR LA COTIZACIÓN NUEVA ES MANDARLA (Hernán, 26/11/2026:
+              // «residente envió otra cotización nueva, pero esta sigue como
+              // devuelta»). Si el pedido estaba devuelto y la sube quien lo
+              // pidió, vuelve solo a esperar el visto: no depende de acordarse
+              // de «Reenviar».
+              if (vuelveSolaAlSubir({ solicitud: sol, usuarioId: currentUser?.id })) {
+                const paraQuien = gerenteDelProyecto();
+                // Pedir el visto arma el PDF y manda el correo: mientras tanto se dice qué está pasando.
+                setVolvio("La cotización se subió. Volviendo a pedir el visto…");
+                const m = paraQuien ? await moverA(sol, "pendiente_aprobacion", {
+                  quien: currentUser, comentario: NOTA_AL_VOLVER_SOLA, paraQuien,
+                  titulo: tituloDelPaso("Aprobar compra", sol),
+                  siguientes: { ok: personaDeCompras(), no: sol.solicitante_id },
+                }) : { error: "no hay a quién pedirle el visto" };
+                if (m.error) { setVolvio(""); setAvisoPapel(`La cotización se subió, pero el pedido sigue devuelto (${m.error}). Tocá «Reenviar».`); return; }
+                setViva(v => ({ ...v, ...m.campos }));
+                setVolvio("La cotización se subió y el pedido volvió a quien da el visto. No hace falta reenviarlo.");
+                historialDe(sol.id).then(setHistorial);
+                onCambio?.();
+              }
             }} />
           {/* LAS QUE ESPERAN: elegidas antes de que el pedido tuviera proyecto
               y descripción. Se ven, se pueden sacar, y dicen cuándo suben. */}
@@ -1274,6 +1331,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
             </div>
           )}
           {avisoPapel && <div style={{ fontSize: 11, color: colors.danger, marginTop: 4 }}>{avisoPapel}</div>}
+          {volvio && <div className="volvio-sola" style={{ fontSize: 11.5, color: colors.success, fontWeight: 600, marginTop: 4, lineHeight: 1.45 }}>{volvio}</div>}
 
           {puedeSubirPapeles && <label style={{ ...lbl, marginTop: 12, display: "block" }}>ANEXOS · el plano, la foto, la especificación</label>}
           {!puedeSubirPapeles ? null : verAnexos && viva ? (
@@ -1608,7 +1666,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <div>
             <label style={lbl}>COMENTARIO</label>
             <textarea value={comentario} onChange={ev => setComentario(ev.target.value)} rows={2}
-              placeholder={estado === "pendiente_aprobacion" ? "Si la devolvés, decí qué falta"
+              placeholder={estado === "pendiente_aprobacion" ? "Para comentar sin devolverla, o para decir qué falta si la devolvés"
                 : estado === "aprobada" && gestionaCompras ? "Para devolverla, escribí acá la consulta"
                 : "Opcional"}
               style={{ ...mini, resize: "vertical" }} />
@@ -1621,9 +1679,14 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
                 No mueve nada: la solicitud se queda donde está y en el tablero
                 de la misma persona. Lo que cambia es que los demás se enteran
                 hoy, y no cuando alguien abra la solicitud. */}
-            {comentario.trim() && (
-              <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 6, flexWrap: "wrap" }}>
-                <Button variant="outline" size="sm" disabled={ocupado} onClick={comentar}>
+            {/* SIEMPRE A LA VISTA (Hernán, 26/11/2026: «¿es posible solo
+                comentar algo de la compra y no necesariamente devolver?»).
+                Aparecía recién al escribir, y quien tenía el visto veía dos
+                botones —Aprobar y Devolver—: un comentario salió como una
+                devolución. */}
+            {(
+              <div className="comentar-sin-mover" style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 6, flexWrap: "wrap" }}>
+                <Button variant="outline" size="sm" disabled={ocupado || !comentario.trim()} onClick={comentar}>
                   <MessageSquare size={12} /> Comentar y avisar
                 </Button>
                 <span style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.4, flex: 1, minWidth: 180 }}>
@@ -1659,6 +1722,11 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
           <>
             <Button variant="primary" onClick={aprobar} disabled={ocupado}><Check size={13} /> Aprobar</Button>
             <Button variant="outline" onClick={devolver} disabled={ocupado}><X size={13} /> Devolver</Button>
+            {/* Ni aprobar ni devolver: decir algo y que siga donde está. */}
+            <Button className="solo-comentar" variant="outline" onClick={comentar} disabled={ocupado}
+              title="Queda en el historial y les llega a los de esta compra. No la aprueba ni la devuelve.">
+              <MessageSquare size={13} /> Solo comentar
+            </Button>
           </>
         )}
         {editando && estado === "pendiente_aprobacion" && apruebo && esMia && currentUser?.role !== "owner" && (
@@ -1680,6 +1748,15 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         {editando && estado === "pendiente_aprobacion" && gestionaCompras && !apruebo && (
           <Button variant="outline" onClick={devolver} disabled={ocupado}>
             <X size={13} /> Devolver a quien la pidió
+          </Button>
+        )}
+
+        {/* UNA DEVUELTA SE PUEDE REACTIVAR: se devolvió por error, o ya tiene
+            lo que se pidió y nadie la reenvió. Los administradores. */}
+        {reactiva && (
+          <Button className="reactivar-devuelta" variant="primary" onClick={reactivar} disabled={ocupado}
+            title="Vuelve a esperar el visto, sin que quien la pidió tenga que reenviarla">
+            <RotateCcw size={13} /> Reactivar: vuelve a esperar el visto
           </Button>
         )}
 
